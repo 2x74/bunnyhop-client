@@ -1,6 +1,7 @@
 #pragma once
 #include <nlohmann/json.hpp>
 #include "hud_scoreboard.hpp"
+#include "room_styles.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -34,6 +35,8 @@ struct RaceDisplay {
     double go_at = 0;
     double result_until = 0;
     bool recipient = false;
+    // The race's style is one this build only shows (room_styles.hpp): it can be declined, not accepted.
+    bool playable = true;
 };
 
 template <class Hud>
@@ -58,7 +61,10 @@ void draw_race(Hud &hud, int width, int height, float percent, const RaceDisplay
     hud.overlay_text(x, y + 27, race.board.view(), 13, gold, true);
     if (race.state == State::challenge) {
         const int left = int(std::clamp(std::ceil((race.deadline - now) / 1000), 0., 999.));
-        label.format(race.recipient ? "1 Accept   2 Decline | %ds" : "Challenge sent | %ds", left);
+        if (race.recipient && !race.playable)
+            label.format("Not in this version yet   2 Decline | %ds", left);
+        else
+            label.format(race.recipient ? "1 Accept   2 Decline | %ds" : "Challenge sent | %ds", left);
     } else if (race.state == State::over) {
         hud.overlay_text(x, y + 51, race.first_time.view(), 13, cream, true);
         hud.overlay_text(x, y + 77, race.second_time.view(), 13, cream, true);
@@ -117,7 +123,7 @@ public:
             step = Step::closed;
             return true;
         }
-        const size_t available = step == Step::player ? count : step == Step::track ? track_count : 8;
+        const size_t available = step == Step::player ? count : step == Step::track ? track_count : race_styles.size();
         if (pick == 9 && available > 8) {
             page = (page + 1) % ((available + 7) / 8);
             return true;
@@ -137,10 +143,8 @@ public:
                 step = Step::closed;
             }
         } else {
-            constexpr std::array<const char *, 8> styles = {
-                    "autohop", "legit", "wonly", "sideways", "hsw", "autostrafe", "scroll", "lowgrav"
-            };
-            command.format("/race #%u %s %u", opponent, styles[index], track);
+            const auto style = race_styles[index];
+            command.format("/race #%u %.*s %u", opponent, int(style.size()), style.data(), track);
             step = Step::closed;
         }
         return true;
@@ -167,18 +171,17 @@ void draw_race_picker(Hud &hud, int width, int height, float percent, const Race
     );
     const size_t count = picker.step == Step::player  ? picker.count
                          : picker.step == Step::track ? picker.track_count
-                                                      : 8;
-    constexpr std::array<std::string_view, 8> styles = {
-            "Autohop", "EZ Scroll", "W-only", "Sideways", "Half-sideways", "Auto-strafe", "Legit Scroll", "Low gravity"
-    };
+                                                      : race_styles.size();
     HudLabel<160> label;
     for (size_t i = picker.page * 8; i < std::min(count, picker.page * 8 + 8); ++i) {
         if (picker.step == Step::player)
             label.format("%zu. %.*s", i % 8 + 1, int(picker.names[i].view().size()), picker.names[i].view().data());
         else if (picker.step == Step::track)
             label.format(picker.tracks[i] ? "%zu. Bonus %u" : "%zu. Main track", i % 8 + 1, picker.tracks[i]);
-        else
-            label.format("%zu. %.*s", i + 1, int(styles[i].size()), styles[i].data());
+        else {
+            const auto name = wire_style_name(race_styles[i]);
+            label.format("%zu. %.*s", i % 8 + 1, int(name.size()), name.data());
+        }
         hud.overlay_text(x + 18, y + 62 + float(i % 8) * 30, label.view(), 14, {.94f, .91f, .86f, 1});
     }
     hud.overlay_text(x + 18, y + 337, count > 8 ? "9. Next page   0. Cancel" : "0. Cancel", 12, {.64f, .66f, .7f, 1});
@@ -200,11 +203,9 @@ class RoomModes {
         if (!r.is_object() || !r.contains("id") || !r["id"].is_string()
             || r["id"].get_ref<const std::string &>().size() > 128 || !r.contains("state") || !r["state"].is_string())
             return false;
-        static const std::set<std::string>
-                states = {"challenge", "countdown", "live", "settling", "over"},
-                styles = {"autohop", "legit", "wonly", "sideways", "hsw", "autostrafe", "scroll", "lowgrav"};
+        static const std::set<std::string> states = {"challenge", "countdown", "live", "settling", "over"};
         if (!states.contains(r["state"].get<std::string>()) || !r.contains("map") || !r["map"].is_string()
-            || !r.contains("style") || !r["style"].is_string() || !styles.contains(r["style"].get<std::string>())
+            || !r.contains("style") || !r["style"].is_string() || !wire_style(r["style"].get<std::string>())
             || !r.contains("track")
             || (!r["track"].is_number_unsigned() && !(r["track"].is_number_integer() && r["track"].get<int64_t>() >= 0))
             || r["track"].get<uint64_t>() > 64)
@@ -256,7 +257,9 @@ class RoomModes {
         action.restart = true;
         action.stop_spectating = spectating;
         action.track = race_->at("track").get<uint32_t>();
-        if (!action.track) action.style = race_->at("style").get<std::string>();
+        // A style this build can't play keeps your own; the room won't count that run for the race.
+        const auto style = race_->at("style").get<std::string>();
+        if (!action.track && wire_style_playable(style)) action.style = style;
         return action;
     }
 
@@ -323,7 +326,9 @@ class RoomModes {
                          : state == "settling"  ? State::settling
                                                 : State::over;
         display_.opponent.assign(opponent().at("name").get<std::string>());
-        display_.board.assign(race_->at("style").get<std::string>());
+        const auto style = race_->at("style").get<std::string>();
+        display_.board.assign(wire_style_name(style));
+        display_.playable = race_->at("track").get<unsigned>() || wire_style_playable(style);
         if (race_->at("track").get<unsigned>()) display_.board.format("Bonus %u", race_->at("track").get<unsigned>());
         display_.recipient = race_->at("you") == "b";
         display_.deadline = local("expiresAt", now);
@@ -357,7 +362,7 @@ public:
 
     bool challenge_key(std::string_view code, bool down, bool repeat) const {
         return down && !repeat && display_.state == RaceDisplay::State::challenge && display_.recipient
-               && (code == "Digit1" || code == "Digit2");
+               && ((code == "Digit1" && display_.playable) || code == "Digit2");
     }
 
     // Preserve the highest observed room generation when the host leaves a map.

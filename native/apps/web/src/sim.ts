@@ -1,9 +1,9 @@
 // Shared deterministic run step + replay re-simulation (browser playback, ghosts and the headless verifier).
 
-import { applyRestartPoint, EVENT_JUMPED, EVENT_TELEPORTED, type Core, type PlayerState, type Settings } from "./core";
-import { replayPhysics, replayStyle, replayTimerRules, type Checkpoint, type Replay } from "./replay";
+import { applyRestartPoint, EVENT_FLIGHT, EVENT_JUMPED, EVENT_TELEPORTED, type Core, type PlayerState, type Settings } from "./core";
+import { replayPhysics, replaySettings, replayStyle, replayTimerRules, type Checkpoint, type Replay } from "./replay";
 import { StyleFilter, strafeKeys, styleDef, styleStartReentryCap, type StyleDef } from "./styles";
-import { RunTimer, TIMER_RULES, TIMER_RULES_V1, TIMER_RULES_V2, type TickCmd, type TimerUpdate } from "./timer";
+import { blocksPrehops, RunTimer, TIMER_RULES, TIMER_RULES_V1, TIMER_RULES_V2, type TickCmd, type TimerUpdate } from "./timer";
 import type { Zone } from "./zones";
 import { pathSource, startObserving } from "./timing-trace";
 
@@ -26,10 +26,11 @@ export function quantize(forward: number, side: number, yaw: number, pitch: numb
 
 /**
  * Timer created with the canonical (f32) tick interval so browser and verifier compute identical times. `rules`: the
- * start-zone rules (timer.ts TIMER_RULES_*): the current ones for live play, the replay's own on re-simulation.
+ * start-zone rules (timer.ts TIMER_RULES_*): the current ones for live play, the replay's own on re-simulation. `map`: the
+ * map's name (rules 4 block start-zone prehops on some maps, timer.ts START_ZONE_NO_PREHOP_V4).
  */
-export function makeTimer(zones: readonly Zone[], settings: Settings, prespeedCap: number | null, style: StyleDef | null = null, rules = TIMER_RULES): RunTimer {
-  return new RunTimer(zones, Math.fround(settings.tickInterval), { prespeedCap, blockPrehops: style?.id === "scroll", strafeKeys: strafeKeys(style), rules, startReentryCap: style ? styleStartReentryCap(style.id) : null });
+export function makeTimer(zones: readonly Zone[], settings: Settings, prespeedCap: number | null, style: StyleDef | null = null, rules = TIMER_RULES, map = ""): RunTimer {
+  return new RunTimer(zones, Math.fround(settings.tickInterval), { prespeedCap, blockPrehops: blocksPrehops(style?.id, map, rules), strafeKeys: strafeKeys(style), rules, startReentryCap: style ? styleStartReentryCap(style.id) : null });
 }
 
 /** Apply start-zone prehop blocking before movement, shared by live play, recording and replay verification. */
@@ -42,12 +43,13 @@ export function beforeStep(core: Core, timer: RunTimer, cmd: TickCmd): void {
 
 /**
  * Everything that happens after core.step for one tick: timer/zone update and the prespeed clamp.
- * Returns the post-tick state (after any clamp), which is what checkpoints record.
+ * Returns the post-tick state (after any clamp), which is what checkpoints record. An Infinite flight tick (core
+ * EVENT_FLIGHT, physics v24) goes to the timer's flightTick instead: it never starts or finishes a run.
  */
 export function afterStep(core: Core, timer: RunTimer, cmd: TickCmd, events: number): { state: PlayerState; update: TimerUpdate } {
   let state = core.state();
   timer.pathSource = pathSource(core);
-  const update = timer.update(cmd, events, state);
+  const update = events & EVENT_FLIGHT ? timer.flightTick(state) : timer.update(cmd, events, state);
   if (update.clampVelocity) {
     setVelocity(core, update.clampVelocity);
     state = core.state();
@@ -140,6 +142,12 @@ export interface SimResult {
    * loads.
    */
   segments?: { checked: number; mismatchTick: number | null };
+  /**
+   * Infinite flights (core EVENT_FLIGHT, physics v24): ticks flown, separate flights, the last tick flown, and the first
+   * tick flown while a run was being timed (the timer ends the run there, so a finished run never has one). Absent
+   * without flights.
+   */
+  flight?: { ticks: number; flights: number; lastTick: number; inRunTick: number | null };
 }
 
 export const FRAME_STRIDE = 6;
@@ -186,6 +194,8 @@ export class SimRun {
   private seg = 0;
   private segChecked = 0;
   private segMismatch: number | null = null;
+  /** Infinite flights (SimResult.flight). */
+  private flight: { ticks: number; flights: number; lastTick: number; inRunTick: number | null } | null = null;
 
   constructor(
     private readonly core: Core,
@@ -194,14 +204,14 @@ export class SimRun {
     private readonly opts: SimOptions = {},
   ) {
     const h = replay.header;
-    core.setSettings(h.settings);
+    core.setSettings(replaySettings(h));
     core.reset();
     // Start-zone restart point recorded at tick 0 (see core.setPosition / replay header v3).
     if (h.spawn) applyRestartPoint(core, h.spawn);
-    this.timer = makeTimer(zones, h.settings, h.prespeedCap, styleDef(replayStyle(h)), replayTimerRules(h));
+    this.timer = makeTimer(zones, h.settings, h.prespeedCap, styleDef(replayStyle(h)), replayTimerRules(h), h.map);
     this.timer.reset();
     if (replayTimerRules(h) === TIMER_RULES_V1) {
-      this.retimer = makeTimer(zones, h.settings, h.prespeedCap, styleDef(replayStyle(h)), TIMER_RULES_V2);
+      this.retimer = makeTimer(zones, h.settings, h.prespeedCap, styleDef(replayStyle(h)), TIMER_RULES_V2, h.map);
       this.retimer.reset();
     }
     const n = (this.n = Math.min(opts.untilTick ?? h.totalTicks, h.totalTicks));
@@ -246,8 +256,16 @@ export class SimRun {
     const checkpoints = replay.checkpoints;
     const end = Math.min(this.n, this.i + max);
     for (let i = this.i; i < end; i++) {
+      const timed = timer.started;
       const r = replayStep(core, timer, filter, replay, i, this.state, this.retimer);
       const { raw, cmd, events } = r;
+      if (events & EVENT_FLIGHT) {
+        const f = (this.flight ??= { ticks: 0, flights: 0, lastTick: -1, inRunTick: null });
+        if (f.lastTick !== i) f.flights++; // (a flight that goes on from the last tick is the same flight)
+        f.ticks++;
+        f.lastTick = i + 1;
+        if (timed && f.inRunTick === null) f.inRunTick = i + 1;
+      }
       if (cmd !== raw && this.violations++ === 0) (this.firstViolationTick = i + 1), (this.firstViolation = raw);
       const state = (this.state = r.state);
       // The timer's start tick: rules 2 announce a run begun inside the zone (a jump) once the player leaves it.
@@ -307,6 +325,7 @@ export class SimRun {
       firstViolation: this.firstViolation,
       ...(this.retimer ? { retimed: { timer: this.retimer, ...this.retimed } } : {}),
       ...(this.replay.segments ? { segments: { checked: this.segChecked, mismatchTick: this.segMismatch } } : {}),
+      ...(this.flight ? { flight: { ...this.flight } } : {}),
     };
   }
 }

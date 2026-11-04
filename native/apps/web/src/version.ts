@@ -45,7 +45,7 @@
    two words, and VERSION stays below 0.1.0 while STAGE is alpha.
    ============================================================ */
 
-export const VERSION = "0.0.34";
+export const VERSION = "0.0.36";
 
 /** Release stage, printed after the number ("v0.0.4 alpha"). */
 export const STAGE = "alpha";
@@ -67,8 +67,8 @@ export interface ChangelogEntry {
 
 /** Notes for the next release, unpublished until promoted into CHANGELOG. */
 export const UPCOMING: ChangelogEntry = {
-  version: "0.0.35",
-  date: "2026-11-01",
+  version: "0.0.37",
+  date: "2026-11-04",
   kind: "minor",
   title: "Next update",
   notes: [],
@@ -76,6 +76,55 @@ export const UPCOMING: ChangelogEntry = {
 
 /** Newest first. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "0.0.36",
+    date: "2026-11-04",
+    kind: "minor",
+    title: "Infinite, Backwards, freecam and practice on servers",
+    notes: [
+      "Infinite (!inf) comes to the website: autohop on the ground, and in the air every jump press rises again and keeps your speed, as many times as you like. It's Luna's style from CS:S, already in the desktop client, and desktop client runs in it now count too. It has its own boards and ranking and counts a fifth towards your overall rank. On the website you can also fly through the start with noclip to build speed, then drop out and cross it for real: the run starts with the speed you built, up to 3510. The desktop client gets that in its next update.",
+      "New style: Backwards (!bw). In the air, face away from where you're going, or your movement keys don't count. It has its own boards and counts towards your overall rank like W-Only. Stylist now needs Backwards too; if you already have it, you keep it.",
+      "Freecam (!freecam or !fc, or bind it in Settings → Keys): fly the camera ahead to look at the map while your body coasts. The timer keeps running and the run still counts. Thanks to throwtop for the idea.",
+      "Practice mode, checkpoints and Segmented now work on servers. Players who are practising show \"practice\" instead of a time, and Settings → Ghosts & players → Show other players (or !hide) hides everyone else. You can save up to 1000 checkpoints now. Thanks to weedgotmefunky33 and GothQueen.",
+      "Spectating: Space switches between in-eye, chase and free look, and the bar at the bottom says how to stop watching. Watching desktop client players is smoother.",
+      "Servers: rock the vote opens two minutes into a map and offers Extend. In a map's last 15 minutes, type extend; if enough players agree, the map gets 15 more minutes. Your name colour stays the same when you reconnect.",
+      "Leaderboards show each run's points, and hovering a run shows its points right after you set it. Your profile's Top points shows the most each map can give, and Show more goes down to your top 100. Thanks to throwtop and a l e x.",
+      "The overall #1 holds the Number One title and can pick its colour in Edit card → Title.",
+      "On Discord, the #1's role shows in the colour they picked as a gradient, #2 and #3 get a gold gradient, and a new #1 gets a card in ┃levels. ┃world-records posts the standout world records by itself again, a few a day, each with a video of the run. Pick bunnyhop.lol in Linked Roles and your level, points, rank, WRs and hardest tier show on your Discord profile.",
+      "Gauntlets: the weekly winner's mark is now a gold calendar with your number of wins, with silver and bronze for second and third.",
+      "Hovering a run shows the player's vertical sensitivity too, for runs set from this version on. Thanks to gabe.",
+      "Clips never run out now, on every map, so maps you shoot to boost, like bhop_badges, don't stop for a reload. Thanks to throwtop.",
+      "Number keys: while a vote or menu is open, its numbers no longer also open the guns menu. The guns key, 0 or Esc close the guns menu. Thanks to Akee.",
+      "Turn binds turn smoothly at any frame rate, so a held turn no longer looks like tapping. Turn speed takes exact values such as 118.889.",
+      "!ssj 80 shows only jumps with 80% gain or more in chat (also in Settings → HUD → Jump stats). Thanks to Leo and Luna.",
+      "Settings → Keys has three slots per action, like the desktop client.",
+      "The Discord link is in the pause menu, and !discord posts it. Click the style under the map name to change it. JHUD is on the On screen picture.",
+      "If this page is too old to submit a run, the end card asks you to reload.",
+      "New maps: bhop_4tele, bhop_overthinker and bhop_treehouse4, with bonuses on bhop_overthinker and bhop_treehouse4. Thanks to Luna and Mason for the requests.",
+      "28 more maps: bhop_adrino_fix, bhop_airphase, bhop_appaisanagger, bhop_arbyzik, bhop_balaco, bhop_bhop, bhop_bhop5_css, bhop_cyphisonia, bhop_dyrka, bhop_easybhop_v1, bhop_easyhop_zbalor, bhop_enlightened2, bhop_ethereum_fix, bhop_fissile, bhop_fly_pizdec, bhop_guccigang, bhop_helios_ii, bhop_lust, bhop_mentor, bhop_monoton, bhop_monumentalism, bhop_neon_space2, bhop_q3, bhop_reddawn, bhop_relic, bhop_speedrun_artild, bhop_triome and bhop_xerxes. Their zones come from the srcwr zone collection and ddyfad's fork of it, credited on the Credits page.",
+      "bhop_weed_funhouse's boosters work now, and boost you as you jump off them, as the mapper intended. Thanks to Kahova, weedgotmefunky33 and nixi.",
+      "bhop_playboy_csgo's spiral stairs turn with their column, so the level can be climbed. bhop_dtt_trainning2's crates are solid and ride their doors, and bhop_4tele's boost pads fire on time. Thanks to throwtop.",
+      "bhop_hell and a few other maps no longer have solid barrels and props that CS:S removes.",
+      "bhop_futile: bhopping inside the start zone no longer keeps your speed, like on CS:S servers that block prehops. Leave the zone with one jump. Thanks to throwtop.",
+      "Removed two bhop_highfly times that went through walls that are solid in CS:S.",
+      "bhop_2_S4RO, bhop_alt_jestas, bhop_dust_temple and bhop_mourning show their real lighting now, and maps with a lot of textures load faster.",
+      "Tiers: bhop_askowo moves to T4, bhop_awtop2 to T2 and bhop_forgotten2 to T3.",
+      "Your existing runs don't change. The desktop client gets Backwards, freecam and these map fixes in its next update. Until then, its runs on bhop_playboy_csgo, bhop_dtt_trainning2, bhop_futile and bhop_4tele won't count.",
+    ],
+  },
+  {
+    version: "0.0.35",
+    date: "2026-11-02",
+    kind: "minor",
+    title: "New ranking points",
+    notes: [
+      "Points now count how many players you beat. A WR on a crowded map is worth far more than before: a WR on bhop_ambience went from 30 points to about 460, more than a typical T5 clear. Thanks to throwtop for the idea and the thread in general.",
+      "A WR pays 2× second place on boards with 30 or more players, and less on emptier boards. Being alone on a board pays for the clear only.",
+      "Hard clears are worth about what they were, and everyone's whole ranking was re-scored from their current records. Nobody's times or records changed.",
+      "Rank titles need more points now, since totals are bigger: Legend 3,500, Grandmaster 2,500, Master 1,750, Elite 1,000, Expert 500, Skilled 200, Hopper 70.",
+      "The full formula is in How points work on the Ranks page.",
+    ],
+  },
   {
     version: "0.0.34",
     date: "2026-11-01",

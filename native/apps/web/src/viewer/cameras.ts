@@ -4,7 +4,8 @@
 //   chase  OBS_MODE_CHASE / `thirdperson`: behind and above the player's eye, following their view yaw (smoothed),
 //          optional mouse orbit locked to the player. CS:S baseline: CHASE_CAM_DISTANCE 96 units, the hull trace
 //          (WALL_OFFSET 6) pulls the camera in when blocked and it eases back out (C_BasePlayer::CalcChaseCamView).
-//   free   OBS_MODE_ROAMING: noclip fly, WASD + mouse, Shift faster, Space/Ctrl (or E/Q) up/down.
+//   free   OBS_MODE_ROAMING: noclip fly on the player's movement binds + mouse, Shift faster, Alt slower, wheel speed
+//          (FreeCam; the live freecam, freecam.ts, and room free look use it too).
 //   flyby  "free path": a deterministic drone that trails the run beside and above the player, looking at them.
 // SpectatorCamera bundles eye / chase / free / flyby for any target state stream (live spectating reuses it);
 // CameraRig adds the replay-only
@@ -21,7 +22,7 @@ export type CamMode = "eye" | "chase" | "free" | "flyby" | "auto";
 export const CAM_MODES: { id: CamMode; label: string; key: string; title: string }[] = [
   { id: "eye", label: "In-eye", key: "1", title: "First person: the player's exact view" },
   { id: "chase", label: "Chase", key: "2", title: "Third person behind the player (drag to orbit, wheel to zoom, double-click to reset)" },
-  { id: "free", label: "Free", key: "3", title: "Free roam: click to fly (WASD + mouse, Shift fast, Space/Ctrl up/down)" },
+  { id: "free", label: "Free", key: "3", title: "Free roam: click to fly with your movement keys (Shift faster, Alt slower, wheel sets the speed)" },
   { id: "flyby", label: "Flyby", key: "4", title: "Cinematic drone following the run" },
   { id: "auto", label: "Auto", key: "5", title: "Auto-director: cuts between chase, in-eye, tripod and flyby shots" },
 ];
@@ -242,12 +243,41 @@ export class ChaseCam {
 
 // ---------------------------------------------------------------------------------------------
 
-/** OBS_MODE_ROAMING noclip camera. Interactive only: the viewer feeds mouse deltas and held keys. */
+/** What a free camera is asked to do this frame: -1..1 along the view, its right and world up, plus Shift / Alt. */
+export interface FreeIntent {
+  f: number;
+  r: number;
+  u: number;
+  fast: boolean;
+  slow: boolean;
+}
+
+/** Free camera speeds (u/s): the base (the wheel steps it), Shift, Alt. Shift is noclip's top speed (sv_noclipspeed 5). */
+export const FREE_SPEED = 500;
+export const FREE_FAST = 1600;
+export const FREE_SLOW = 120;
+/** The wheel steps the base speed by this factor, between these bounds. */
+export const FREE_STEP = 1.25;
+export const FREE_MIN = 100;
+export const FREE_MAX = 3200;
+/** The free camera stays inside the Source world (protocol.ts WORLD_LIMIT). */
+const FREE_LIMIT = 16303;
+
+/** The base speed after `steps` wheel notches (up = faster), clamped and rounded to whole units. */
+export function freeSpeedStep(speed: number, steps: number): number {
+  return Math.round(clamp(speed * Math.pow(FREE_STEP, steps), FREE_MIN, FREE_MAX));
+}
+
+/** OBS_MODE_ROAMING noclip camera. Interactive only: mouse deltas and held keys (or a FreeIntent) move it. */
 export class FreeCam {
   pos = [0, 0, 0];
   yaw = 0;
   pitch = 0;
+  /** The replay viewer's held key codes (update()); live freecam and room spectating pass a FreeIntent to move(). */
   readonly keys = new Set<string>();
+  /** update()'s base speed (the viewer's wheel steps it) and how it reads `keys` (the viewer: the player's binds). */
+  speed = FREE_SPEED;
+  intentOf: ((keys: ReadonlySet<string>) => FreeIntent) | null = null;
 
   set(pos: ArrayLike<number>, yaw: number, pitch: number): void {
     this.pos = [pos[0], pos[1], pos[2]];
@@ -255,26 +285,47 @@ export class FreeCam {
     this.pitch = pitch;
   }
 
+  /** Mouse counts at a fixed sensitivity (degrees per count). */
   look(dx: number, dy: number, sens = 0.12): void {
-    this.yaw = wrap180(this.yaw - dx * sens);
-    this.pitch = clamp(this.pitch + dy * sens, -89, 89);
+    this.lookDeg(dx * sens, dy * sens);
   }
 
-  update(camera: THREE.PerspectiveCamera, dt: number): void {
-    const k = (c: string) => (this.keys.has(c) ? 1 : 0);
-    const fast = k("ShiftLeft") || k("ShiftRight");
-    const slow = k("AltLeft");
-    const speed = (fast ? 1600 : slow ? 120 : 500) * dt;
+  /** Turns by degrees: + yaw turns right (counts to the right), + pitch looks down. Pitch stays within ±89. */
+  lookDeg(dYaw: number, dPitch: number): void {
+    this.yaw = wrap180(this.yaw - dYaw);
+    this.pitch = clamp(this.pitch + dPitch, -89, 89);
+  }
+
+  /** Flies along the view (pitch included) for dt seconds at `base` u/s (Shift FREE_FAST, Alt FREE_SLOW). No collision. */
+  move(i: FreeIntent, dt: number, base = FREE_SPEED): void {
+    const speed = (i.fast ? FREE_FAST : i.slow ? FREE_SLOW : base) * dt;
     const y = this.yaw * D2R;
     const p = this.pitch * D2R;
     const fwd = [Math.cos(p) * Math.cos(y), Math.cos(p) * Math.sin(y), -Math.sin(p)];
     const right = [Math.sin(y), -Math.cos(y), 0];
-    const f = k("KeyW") - k("KeyS");
-    const r = k("KeyD") - k("KeyA");
-    const u = k("Space") + k("KeyE") - k("ControlLeft") - k("KeyQ") - k("KeyC");
-    for (let i = 0; i < 3; i++) this.pos[i] += (fwd[i] * f + right[i] * r) * speed;
-    this.pos[2] += u * speed;
+    for (let k = 0; k < 3; k++) this.pos[k] = clamp(this.pos[k] + (fwd[k] * i.f + right[k] * i.r + (k === 2 ? i.u : 0)) * speed, -FREE_LIMIT, FREE_LIMIT);
+  }
+
+  /** Puts `camera` at the free camera's position and angles. */
+  place(camera: THREE.PerspectiveCamera): void {
     setEye(camera, this.pos, this.yaw, this.pitch);
+  }
+
+  /** The replay viewer's keys (`keys`, read by intentOf, else WASD, Space / E up, Ctrl / Q / C down, Shift, Alt); then places. */
+  update(camera: THREE.PerspectiveCamera, dt: number, base = this.speed): void {
+    const k = (c: string) => (this.keys.has(c) ? 1 : 0);
+    this.move(
+      this.intentOf ? this.intentOf(this.keys) : {
+        f: k("KeyW") - k("KeyS"),
+        r: k("KeyD") - k("KeyA"),
+        u: Math.max(-1, Math.min(1, k("Space") + k("KeyE") - k("ControlLeft") - k("KeyQ") - k("KeyC"))),
+        fast: !!(k("ShiftLeft") || k("ShiftRight")),
+        slow: !!k("AltLeft"),
+      },
+      dt,
+      base,
+    );
+    this.place(camera);
   }
 }
 

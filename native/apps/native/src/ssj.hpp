@@ -92,6 +92,12 @@ inline bool ssj_shows(SsjMode mode, unsigned n, unsigned interval = 6) {
     return n > 0 && interval > 0 && n % interval == 0;
 }
 
+/** Web ssjPassesGain: whether a report gets a chat line under the gain filter (!ssj N; 0 shows every jump). A jump
+ * without a gain number never passes a filter. */
+inline bool ssj_passes_gain(std::optional<float> gain, unsigned min_gain) {
+    return min_gain == 0 || (gain && double(*gain) >= double(min_gain));
+}
+
 namespace ssj_detail {
 inline constexpr float tick_interval = 0.01f;  // 100 tick; only the ratio of the distances is used
 inline constexpr float eps = 1e-10f;

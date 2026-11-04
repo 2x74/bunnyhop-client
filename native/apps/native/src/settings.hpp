@@ -20,7 +20,17 @@
 namespace native {
 using Json = nlohmann::json;
 inline const std::set<std::string> styles = {
-        "autohop", "legit", "scroll", "wonly", "sideways", "hsw", "lowgrav", "segmented", "autostrafe", "infinite"
+        "autohop",
+        "legit",
+        "scroll",
+        "wonly",
+        "sideways",
+        "hsw",
+        "lowgrav",
+        "segmented",
+        "autostrafe",
+        "infinite",
+        "backwards"
 };
 
 // EZ Scroll ("legit") and Legit Scroll ("scroll"): every hop is a timed press, so
@@ -206,6 +216,7 @@ inline Json default_settings() {
             {"hudStrafeTrainerShowPace", true},
             {"hudStrafeTrainerSound", false},
             {"hudSsjChat", false},
+            {"hudSsjMinGain", 0},
             {"hudSsjFieldsSpeed", true},
             {"hudSsjFieldsDiff", true},
             {"hudSsjFieldsGain", true},
@@ -270,6 +281,8 @@ inline Json default_settings() {
               {"spectatorNext", Json::array()},
               {"spectatorPrevious", Json::array()},
               {"spectatorMode", {"KeyN"}},
+              // A toggle most players never use shouldn't take a key off anyone: !freecam always works.
+              {"freecam", Json::array()},
               {"setStart", {"Digit4"}},
               {"clearStart", Json::array()},
               {"nextWeapon", Json::array()},
@@ -319,6 +332,7 @@ inline Json hud_capabilities() {
              "tagsThroughWalls",
              "jumpStats",
              "hudSsjChat",
+             "hudSsjMinGain",
              "jumpStatsMode",
              "jumpStatsInterval",
              "jumpStatsColors",
@@ -600,6 +614,8 @@ inline Json patch_settings(const Json &current, const Json &patch, bool switch_l
                 throw std::runtime_error("Strafe trainer smoothing must be a whole number 1–50");
             if (key == "jumpStatsInterval" && (n != std::floor(n) || n < 2 || n > 50))
                 throw std::runtime_error("Jump stats interval must be a whole number 2–50");
+            if (key == "hudSsjMinGain" && (n != std::floor(n) || n < 0 || n > 100))
+                throw std::runtime_error("Jump stats gain filter must be a whole number 0–100");
             if (key == "hudJhudSpeedColors" && (n != std::floor(n) || n < 1 || n > 16))
                 throw std::runtime_error("JHUD speed colours must be a whole number 1–16");
             if (key == "hudJhudCutoff" && (n != std::floor(n) || n < 0 || n > 30))

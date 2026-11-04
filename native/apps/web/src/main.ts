@@ -52,6 +52,7 @@ import { ReplayViewer } from "./viewer/viewer";
 import { watchFromUrl } from "./gauntlet/watch";
 import { preloadedViewerRequest, onViewerRequest, openReplayViewer, takePending, viewerTargetFromUrl, type ViewerRequest } from "./viewer/request";
 import { ThirdPerson } from "./viewer/thirdperson";
+import { Freecam, freecamSample, freecamUnavailable } from "./freecam";
 import { Viewmodel } from "./viewmodel/viewmodel";
 import { WeaponPresenter } from "./viewmodel/weapons";
 import { GunPresenter } from "./viewmodel/guns/presenter";
@@ -86,7 +87,7 @@ import { setSharedRenderer } from "./shared-gl";
 import { Practice } from "./practice-mode/controller";
 import { practiceMenuView } from "./practice-mode/menu-view";
 import { practiceUnavailable, thirdPersonBlocked } from "./practice-mode/rules";
-import { giveWeapon, initWeaponCommands, openGunPicker, registerWeaponChatCommands, weaponsAfterRestart, weaponsAfterTick, weaponsBeforeTick } from "./weapon-commands";
+import { giveWeapon, initWeaponCommands, isDigitCode, numberMenuOpen, openGunPicker, registerWeaponChatCommands, weaponsAfterRestart, weaponsAfterTick, weaponsBeforeTick } from "./weapon-commands";
 import { startPlaytime } from "./playtime";
 import { mapTime } from "./map-time";
 import { deviceIdSettled } from "./device";
@@ -514,6 +515,7 @@ if (import.meta.env.DEV) Object.assign(window, { bunnyhop: { input, core, camera
 
 /** R / B / M / style switches: reset onto `track` (default: current) at its start-zone restart point. */
 function restart(track?: number, at?: RestartPoint | null) {
+  setFreecam(false); // R / B / M, a style switch, spectating: back in your eyes, keys released
   liveCapture.stop(); // a core/world reset ends this independently reproducible segment
   if (liveCapture.status.stopping) liveCapture.fail("Restart during command application requires a new capture");
   const view = run!.resetCore(track, at ?? null);
@@ -535,6 +537,32 @@ function restart(track?: number, at?: RestartPoint | null) {
 // Live third person (CS:S `thirdperson`): camera only, never changes the commands fed to the sim.
 const thirdPerson = new ThirdPerson(scene, core);
 const playerShadow = new PlayerShadowProxy(scene, thirdPerson.shadowRoot);
+// Freecam (freecam.ts; !freecam, the unbound freecam bind): the camera flies, the body gets neutral input and the run
+// keeps counting. Not in the tutorial, the zone editor, the replay viewer or the input experiment.
+const freecam = new Freecam();
+const freecamContext = () => ({ tutorial: !!tutorial, editor: !!session.editor?.active, viewer: !!viewer?.active, experiment: inputExperiment });
+function setFreecam(on: boolean): void {
+  if (on === freecam.active) return;
+  if (on) {
+    const why = freecamUnavailable(freecamContext());
+    if (why) return void session.hud.toast(why, 2500);
+    freecam.begin(input, camera);
+  } else freecam.end();
+  thirdPerson.setBody(on);
+  document.body.classList.toggle("freecam", on);
+  if (!on) session.freecam = null;
+}
+/** !freecam or the bind: your own freecam, or the free look while spectating in a room. */
+function toggleFreecam(): void {
+  if (mp?.isSpectating) return mp.freeLook();
+  setFreecam(!freecam.active);
+}
+if (import.meta.env.DEV) Object.assign(window, { __freecam: { toggle: () => toggleFreecam(), state: () => ({ active: freecam.active, speed: freecam.speed, pos: [...freecam.cam.pos] }) } });
+/** The HUD line while it's on: speed and the way back (the bind's key, else the command). */
+function freecamLine(): string {
+  const code = prefs.get().binds.freecam?.[0];
+  return `Freecam · ${freecam.speed} u/s · ${code ? keyLabel(code) : "!freecam"} to go back`;
+}
 // First-person viewmodel (viewmodel/): bunny hands + carrot blade, CS:S knife style. Cosmetic only: mouse swings are
 // non-movement binds (input.ts gives movement binds priority) and never reach the commands fed to the sim.
 let viewmodel: Viewmodel | null = null;
@@ -543,7 +571,7 @@ let weapons: WeaponPresenter | null = null;
 // Gun models (viewmodel/guns/): the map-given guns' viewmodel, sounds, impacts and the bunny's gun, from the core's
 // weapon reports (research/WEAPONS.md). Presentation only.
 let guns: GunPresenter | null = null;
-// Practice mode (practice-mode/): noclip, checkpoints, +left / +right. Solo only, not on the tutorial.
+// Practice mode (practice-mode/): noclip, checkpoints, +left / +right. Solo and in rooms, not on the tutorial.
 let practice: Practice | null = null;
 /** The zone editor (Z) is a dev tool: the dev server, or ?debug=1 / the debug opt-in. Players have no key for it. */
 const zoneEditorAllowed = import.meta.env.DEV || debugHookOptIn();
@@ -694,6 +722,7 @@ viewer = new ReplayViewer({
   practiceFrom: (replay, tick) => practice?.fromReplay(replay, tick) ?? "Practice isn't available here.",
   onWorldUpdate: (sim, origins) => triggerOverlayFrame(origins, sim, uiHidden()),
   onOpen: () => {
+    setFreecam(false);
     stopMenuWork();
     paintVisible(false);
     measureVisible(false);
@@ -729,7 +758,7 @@ if (viewerStart) void replayViewer.open(viewerStart);
 // Solo play never loads it; the hooks below are all no-ops when mp is null.
 const serverId = params.get("server");
 // The game behind the chat commands (chat-game.ts): your keys for !help, practice mode, styles, !wr / !pb.
-const game = chatGame({ map: mapName, session, practice: practiceMode });
+const game = chatGame({ map: mapName, session, practice: practiceMode, freecam: () => toggleFreecam() });
 // ?spectate=<player id> (the friends list's Spectate, social/spectate.ts): watch them on arrival. Read once and dropped
 // from the address, so a reload or Leave server doesn't carry it.
 const spectateId = serverId ? params.get("spectate") : null;
@@ -779,7 +808,7 @@ let presenceRoomAt = -1e9;
 // The same seconds are this map's time played on this device (map-time.ts).
 startPlaytime(() => input.locked && !replayViewer.active && !(mp?.isSpectating ?? false), (s) => mapName !== TUTORIAL_MAP && mapTime.played(mapName, s));
 // Weapon commands (weapon-commands.ts): !usp / !glock / !knife / !gun / !guns in chat, their binds below.
-initWeaponCommands({ input: experimentWeapons.input, session, canGive: () => !replayViewer.active && !(mp?.isSpectating ?? false) && !practiceMode.noclipping });
+initWeaponCommands({ input: experimentWeapons.input, session, canGive: () => !replayViewer.active && !(mp?.isSpectating ?? false) && !practiceMode.noclipping && !session.flightOn && !session.flying && !freecam.active });
 registerWeaponChatCommands();
 initPaint(w.root, camera, () => !replayViewer.active && !(mp?.isSpectating ?? false), w.skyFaces);
 initMeasure(w.root, scene, camera, () => !replayViewer.active && !(mp?.isSpectating ?? false), w.skyFaces);
@@ -883,6 +912,8 @@ setGameInfo(() => {
   };
 });
 
+/** Bound actions that do nothing while freecam is on (main.ts onAction). */
+const FREECAM_BLOCKED = new Set<string>(["attack", "attack2", "inspect", "setStart", "clearStart", "thirdPerson", "practice", "noclip", "cpSave", "cpTeleport", "cpPrev", "cpNext", "giveUsp", "giveGlock", "gunMenu", "turnLeft", "turnRight", "turnFast"]);
 /** R / M / B. With Settings → Keys → Hold to restart on, they fire after a short hold (restart-guard.ts). */
 const restartAction = (a: GuardedAction) => {
   if (a === "restart") restart();
@@ -903,6 +934,9 @@ const leaveHold = new LeaveHold({
   },
   ask: (text) => session.hud.toast(text, CONFIRM_MS, "leave"),
 });
+// A numbered menu on screen (a room vote, !cp, the guns menu) owns the digit keys, as in CS:S: no bind fires with them,
+// and they don't move, turn or attack. The menus read the keys from their own listeners.
+input.ownsKey = (code) => isDigitCode(code) && numberMenuOpen();
 input.onAction = (a, code) => {
   if (replayViewer.active) return;
   // The chat bind (Settings -> Keys): the room's chat, or solo play's command chat. None on the tutorial map.
@@ -913,6 +947,10 @@ input.onAction = (a, code) => {
   if (a === "measurePoint") return requestMeasure();
   if (a === "clearMeasure") return clearMeasure();
   if (a === "mainMenu") return leaveHold.press(performance.now(), session.timer.started);
+  if (a === "freecam") return toggleFreecam();
+  // Freecam: the body takes no input, so nothing that would act through it (weapons, the carrot, practice tools, start
+  // points, third person). Restarts and style switches still work and end it.
+  if (freecam.active && (isWeaponAction(a) || FREECAM_BLOCKED.has(a))) return;
   if (isWeaponAction(a)) {
     // Weapon keys (1 / 2 / 3 / Q / G): a slot request in the next command. The zone editor keeps its digit keys, and
     // the tutorial map (no guns) its own keys: G is the strafe guide there.
@@ -1047,7 +1085,7 @@ function bindPolicy(): { turnBinds: boolean; nullBinds: boolean } {
  * allows it (practice: every style), else undefined (off). Never while flying in practice noclip (W flies there).
  */
 function wReleasePolicy(): WReleaseContext | undefined {
-  if (!prefs.get().wRelease || practiceMode.noclipping) return undefined;
+  if (!prefs.get().wRelease || practiceMode.noclipping || session.flightOn) return undefined;
   const inputStyle = session.timer.inStart ? session.styleFor(session.timer.track) : session.runStyle;
   if (!session.practicing && !wReleaseAllowed(inputStyle)) return undefined;
   const s = core.state();
@@ -1057,7 +1095,8 @@ function wReleasePolicy(): WReleaseContext | undefined {
 function tick(at?: number) {
   if (inputExperiment) throw new Error("Manual/debug ticks are unsupported while experimental input is enabled");
   weaponsBeforeTick(); // a gun kept over a restart goes into this command, like a typed !usp
-  const sample = input.sample({ ...bindPolicy(), wRelease: wReleasePolicy(), tickInterval: session.settings.tickInterval, at });
+  // Freecam: the body's command is neutral (no keys, buttons, turn binds or Release W; the view as the sim left it).
+  const sample = freecam.active ? freecamSample(input, { tickInterval: session.settings.tickInterval, at }) : input.sample({ ...bindPolicy(), wRelease: wReleasePolicy(), tickInterval: session.settings.tickInterval, at });
   applyTick(sample);
 }
 function applyTick(sample: UserCmd, diagnostic?: SampledInput, generatedGive = 0) {
@@ -1067,6 +1106,9 @@ function applyTick(sample: UserCmd, diagnostic?: SampledInput, generatedGive = 0
     prev = curr;
     curr = r.state;
     playerAudio.tick(session.settings.tickInterval, curr, r.events);
+    // Rooms: the others see you fly (with the practice tag; net/mp.ts sends it), not a frozen player.
+    const held = mp ? weaponReport(core) : null;
+    mp?.afterTick(curr, sample, r.events, held ? held.active : null, held?.silencer ?? false);
     lastCmd = { forward: sample.forwardmove, side: sample.sidemove };
     return;
   }
@@ -1210,20 +1252,28 @@ function frame(now: number) {
   }
   const alpha = inputExperiment ? 1 : accumulator / tickMs;
   const lerp = (a: number, b: number) => a + (b - a) * alpha;
+  // The camera's yaw: a held turn bind's last tick step eased over the frames (input.ts viewYaw; render only).
+  const viewYaw = input.viewYaw(alpha);
   const x = lerp(prev.position[0], curr.position[0]);
   const y = lerp(prev.position[1], curr.position[1]);
   const z = lerp(prev.position[2] + prev.viewOffsetZ, curr.position[2] + curr.viewOffsetZ);
   session.camera(camera);
-  if (!thirdPerson.frame(camera, prev, curr, alpha, input.yaw, input.pitch, lastCmd, frameDt, (curr.tick + alpha) * session.settings.tickInterval, graphicsPipeline.drawsShadowProxies())) {
+  if (!thirdPerson.frame(camera, prev, curr, alpha, viewYaw, input.pitch, lastCmd, frameDt, (curr.tick + alpha) * session.settings.tickInterval, graphicsPipeline.drawsShadowProxies())) {
     // Source (x, y, z) -> three (x, z, -y). Under a ceiling the eye stays below it, as in CS:S (clearEyeZ); flying in
     // practice noclip it has nothing to stay below.
     const top = lerp(prev.position[2] + hullTop(prev.crouched), curr.position[2] + hullTop(curr.crouched));
-    camera.position.set(x, practiceMode.noclipping ? z : clearEyeZ(eyeTrace, x, y, top, z), -y);
-    camera.rotation.y = ((input.yaw - 90) * Math.PI) / 180;
+    camera.position.set(x, practiceMode.noclipping || session.flying ? z : clearEyeZ(eyeTrace, x, y, top, z), -y);
+    camera.rotation.y = ((viewYaw - 90) * Math.PI) / 180;
     camera.rotation.x = (-input.pitch * Math.PI) / 180;
     camera.rotation.z = 0;
   }
-  playerShadow.update([x, y, lerp(prev.position[2], curr.position[2])], curr.crouched, !thirdPerson.active && !mp?.isSpectating);
+  // Freecam: the camera flies on from wherever the view above put it (your eyes, or the chase cam).
+  if (freecam.active) {
+    if (freecamUnavailable(freecamContext())) setFreecam(false);
+    else freecam.place(camera, frameDt, input.freeIntent());
+  }
+  session.freecam = freecam.active ? freecamLine() : null;
+  playerShadow.update([x, y, lerp(prev.position[2], curr.position[2])], curr.crouched, !thirdPerson.active && !freecam.active && !mp?.isSpectating);
   // Other players; takes the camera while spectating. Those behind the camera aren't posed unless the look draws
   // shadow passes (net/players.ts).
   mp?.frame(camera, frameDt, graphicsPipeline.drawsShadowProxies());
@@ -1239,38 +1289,39 @@ function frame(now: number) {
   triggerOverlayFrame(origins, core, uiHidden());
   arms.frame(frameDt, origins);
   // Sniper zoom (client FOV only), first person only.
-  const fov = verticalFov(thirdPerson.active ? p.fov : arms.fov(p.fov));
+  const fov = verticalFov(thirdPerson.active || freecam.active ? p.fov : arms.fov(p.fov));
   if (camera.fov !== fov) {
     camera.fov = fov;
     camera.updateProjectionMatrix();
   }
   // The arrival swoop (camera only; over as soon as play starts).
   if (arrival.active) {
-    if (input.locked || thirdPerson.active || mp?.isSpectating) arrival.stop();
-    else arrival.apply(camera, now, input.yaw, input.pitch);
+    if (input.locked || thirdPerson.active || freecam.active || mp?.isSpectating) arrival.stop();
+    else arrival.apply(camera, now, viewYaw, input.pitch);
   }
   session.frame(alpha, prev, curr, now);
   tutorial?.frame(camera, frameDt);
   // Viewmodel: animate always (swings stay in step), draw only in first person on your own player.
   // (Hidden with a gun out: no knife that shoots.)
-  vm.setVisible(p.viewmodel.show && !thirdPerson.active && !mp?.isSpectating && arms.knifeOut);
+  vm.setVisible(p.viewmodel.show && !thirdPerson.active && !freecam.active && !mp?.isSpectating && arms.knifeOut);
   const vmInput = {
     velocity: [lerp(prev.velocity[0], curr.velocity[0]), lerp(prev.velocity[1], curr.velocity[1]), lerp(prev.velocity[2], curr.velocity[2])],
     grounded: curr.grounded,
     viewOffsetZ: lerp(prev.viewOffsetZ, curr.viewOffsetZ),
     sidemove: lastCmd.side,
-    yaw: input.yaw,
+    yaw: viewYaw,
     pitch: input.pitch,
     landed: landVz,
   };
   vm.update(
     frameDt,
     vmInput,
-    { primary: arms.knifeOut && input.actionHeld("attack"), secondary: arms.knifeOut && input.actionHeld("attack2"), inspect: arms.knifeOut && input.actionHeld("inspect") },
+    // (Freecam: held clicks and F fly nothing, so no swings or inspects go into the replay's cosmetic trailer either.)
+    { primary: !freecam.active && arms.knifeOut && input.actionHeld("attack"), secondary: !freecam.active && arms.knifeOut && input.actionHeld("attack2"), inspect: !freecam.active && arms.knifeOut && input.actionHeld("inspect") },
   );
   landVz = 0;
   // The gun viewmodel rides the knife viewmodel's bob / sway (which keeps animating while hidden); hidden while scoped.
-  gunView.setVisible(p.viewmodel.show && !thirdPerson.active && !mp?.isSpectating && !arms.scoped);
+  gunView.setVisible(p.viewmodel.show && !thirdPerson.active && !freecam.active && !mp?.isSpectating && !arms.scoped);
   gunView.frame(frameDt, vm.feelMatrix, origins, vmInput);
   if (vm.inspects.holding !== inspectHeld) {
     inspectHeld = vm.inspects.holding;

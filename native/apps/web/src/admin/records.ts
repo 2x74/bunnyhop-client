@@ -7,6 +7,7 @@ import { DISCORD_MOCK_CSS, messageHtml, type PayloadLike } from "./discord-embed
 import { mapLine } from "./art";
 import { help } from "./core";
 import { TIERS, tierLabel } from "../tiers";
+import { STYLE_DEFS } from "../styles";
 
 type Child = Node | string | number | null | undefined | false | Child[];
 type View = (root: HTMLElement, params: URLSearchParams, rest: string[]) => Promise<void | (() => void)>;
@@ -47,6 +48,8 @@ interface Settings {
   records: boolean;
   minFinishers: number;
   minTier: number;
+  minFinishersAnyTier: number;
+  dailyCap: number;
   minImprovePct: number;
   minImproveSec: number;
   classicOnly: boolean;
@@ -63,16 +66,7 @@ interface Preview {
   configured: boolean;
 }
 
-const STYLES: [string, string][] = [
-  ["", "Any style"],
-  ["autohop", "Normal"],
-  ["legit", "EZ Scroll"],
-  ["scroll", "Legit Scroll"],
-  ["wonly", "W-Only"],
-  ["sideways", "Sideways"],
-  ["hsw", "Half-Sideways"],
-  ["autostrafe", "Auto-strafe"],
-];
+const STYLES: [string, string][] = [["", "Any style"], ...STYLE_DEFS.map((d): [string, string] => [d.id, d.name])];
 
 let cssAdded = false;
 function addCss(): void {
@@ -174,12 +168,14 @@ export function recordsView(d: RecordsDeps): View {
       check("records", "Post top 10s and server records"),
       numIn("minFinishers", "Min finishers"),
       numIn("minTier", "Min tier (0 = any)"),
+      numIn("minFinishersAnyTier", "or finishers on any tier (0 = off)"),
       numIn("minImprovePct", "Min improvement %", "0.01"),
       numIn("minImproveSec", "or min improvement s", "0.001"),
-      check("classicOnly", "Classic styles only (no Auto-strafe)"),
+      check("classicOnly", "Classic styles only (no Auto-strafe, Low Gravity, Segmented or Infinite)"),
       check("bonuses", "Include bonuses"),
       numIn("cooldownMin", "Map cooldown (min)"),
       numIn("coalesceSec", "Batch window (s)"),
+      numIn("dailyCap", "Posts per day (0 = no cap)"),
       h("button", { type: "submit", class: "primary" }, "Save"),
     );
     return h(

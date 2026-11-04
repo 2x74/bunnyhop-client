@@ -178,6 +178,16 @@ export interface RunPlay {
   frameCap?: { limit: number; vsync: boolean };
   turn?: { yawSpeed: number; angleSpeedKey: number };
   pollHz?: number;
+  /** The vertical mouse sensitivity in effect (the separate one when it's on, else the sensitivity), v0.0.36+. */
+  vsens?: number;
+  /** Mouse Y inverted (m_pitch < 0). */
+  invertY?: boolean;
+}
+
+/** RunPlay's vertical look: vsens always, invertY only when on. */
+export function pitchPlay(s: { sensitivity: number; m_pitch: number; verticalSensitivityEnabled?: boolean; verticalSensitivity?: number }): Pick<RunPlay, "vsens" | "invertY"> {
+  const v = s.verticalSensitivityEnabled ? (s.verticalSensitivity ?? s.sensitivity) : s.sensitivity;
+  return { ...(Number.isFinite(v) && v > 0 ? { vsens: v } : {}), ...(s.m_pitch < 0 ? { invertY: true } : {}) };
 }
 
 /**

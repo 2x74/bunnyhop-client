@@ -97,6 +97,8 @@ struct HudPreferences {
     unsigned ssj_interval = 6;
     unsigned trainer_smoothing = 8;
     bool ssj_chat = false;
+    // Chat lines only for jumps with at least this gain (%); 0 is every jump. The HUD element shows every jump.
+    unsigned ssj_min_gain = 0;
     bool first_jump_chat = false;
     bool long_jump = false;
     bool long_jump_chat = true;
@@ -167,6 +169,7 @@ struct HudPreferences {
         result.ssj_interval = settings.at("jumpStatsInterval");
         result.trainer_smoothing = settings.at("strafeTrainerSmoothing");
         result.ssj_chat = settings.at("hudSsjChat");
+        result.ssj_min_gain = settings.at("hudSsjMinGain");
         result.jhud = read_jhud_prefs(settings);
         result.first_jump_chat = settings.at("hudMovementFjtChat");
         result.long_jump = settings.at("hudMovementLj");
@@ -425,6 +428,12 @@ public:
 
     void reset() { *this = {}; }
 
+    // A flight tick (Infinite's noclip) is no part of a jump: the next jump starts a fresh chain and sync.
+    void skip_jump() {
+        jumps_.reset();
+        jump_sync = jumps_.sync();
+    }
+
     void tick_jump(const BhCmd &command, const BhState &state) {
         constexpr double minimum_gain = 3;
         if (const auto reading = jumps_.feed(command, state); reading && std::abs(reading->gain) >= minimum_gain) {
@@ -547,11 +556,24 @@ inline Json movement_stat_patch(const Json &settings, const Json &message) {
     return patch;
 }
 
+// !ssj on / off / N (ui/chat-service.ts ssjCommand): the chat line, and with a number the least gain it shows.
+inline Json ssj_chat_patch(const Json &message) {
+    if (!message.contains("on") || !message["on"].is_boolean())
+        throw std::runtime_error("Jump stats chat must be on or off");
+    Json patch = {{"hudSsjChat", message["on"]}};
+    if (message.contains("minGain")) patch["hudSsjMinGain"] = message["minGain"];
+    return patch;
+}
+
 struct HudExtras {
     HudLabel<96> pb;
     HudLabel<64> place;
     std::array<HudLabel<128>, 12> spectators;
     size_t spectator_count = 0;
+    // Freecam's status line, quiet in the practice slot (the run still counts, so not practice's colours).
+    HudLabel<96> freecam_line;
+    // Infinite's noclip while the core flies, quiet in the practice slot for the same reason.
+    HudLabel<32> flight_line;
     uint32_t ghost_buttons = 0;
     bool have_ghost = false;
     std::optional<double> personal_best;
@@ -770,8 +792,12 @@ void draw_movement_widgets(
         for (size_t i = 0; i < extras.spectator_count; ++i)
             hud.overlay_text(point[0], point[1] + 20 + float(i) * 18, extras.spectators[i].view(), 12, dim);
     }
-    if (!segmented.empty()) {
+    if (!extras.freecam_line.empty()) {
+        line("practice", extras.freecam_line.view(), width / 2, height / 2 + 28, true);
+    } else if (!segmented.empty()) {
         line("practice", segmented, width / 2, height / 2 + 28, true, cream);
+    } else if (!extras.flight_line.empty() && !practice) {
+        line("practice", extras.flight_line.view(), width / 2, height / 2 + 28, true);
     } else if (practice) {
         label.format("Practice | checkpoint %u", checkpoint);
         line("practice", label.view(), width / 2, height / 2 + 28, true);

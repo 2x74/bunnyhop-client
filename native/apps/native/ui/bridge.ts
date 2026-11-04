@@ -263,6 +263,7 @@ export const NATIVE_BIND_ACTIONS = [
   "spectatorNext",
   "spectatorPrevious",
   "spectatorMode",
+  "freecam",
   "paint",
   "paintOnce",
   "clearPaint",
@@ -282,6 +283,8 @@ export const DEFAULT_BINDS: Record<NativeBindAction, readonly string[]> = {
   spectatorNext: [],
   spectatorPrevious: [],
   spectatorMode: ["KeyN"],
+  // A toggle most players never use shouldn't take a key off anyone: !freecam always works.
+  freecam: [],
 };
 /** A settings change: native keys, and website keys the host has added (settings-keys.ts). */
 export type SettingsPatch = Partial<NativeSettings> & Record<string, unknown>;
@@ -656,6 +659,8 @@ declare global {
       joinRoom?: (id: string) => void;
       onRoomPose?: (value: unknown) => void;
       onRoomCommand?: (value: unknown) => void;
+      /** This attempt is practice (true) or a real run again (room_bridge.cpp publish_practice). */
+      onRoomPractice?: (value: unknown) => void;
       /** The watched replay's speed graph and markers (replay-host.ts), once per replay. */
       onReplayTimeline?: (value: unknown) => void;
       /** The host's answer to Practice from here (replay-practice.ts). */

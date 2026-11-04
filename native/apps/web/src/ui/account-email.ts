@@ -164,6 +164,7 @@ export async function handleAuthReturn(): Promise<string | null> {
   if (loginError) return LOGIN_ERROR[loginError] ?? "Discord sign-in didn't finish. Try again.";
   // (Community server rewards from the sign-in are celebrated by the profile load: ui/unlocks.ts communityNote.)
   if (login === "discord") return "Signed in with Discord.";
+  if (login === "discord-roles") return "Signed in with Discord. Your stats show on your Discord profile now.";
   if (!token || !api.available()) return null;
   try {
     const r = await api.emailVerify({ token });

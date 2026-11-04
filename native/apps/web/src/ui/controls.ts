@@ -155,6 +155,8 @@ export interface RangeOpts extends RowOpts {
   unit?: string;
   /** Typed values may go beyond the slider (e.g. sensitivity 15): [min, max] in stored units. */
   inputRange?: [number, number];
+  /** The number box's own step in stored units ("any": exact values, e.g. cl_yawspeed 118.889). Default: `step`. */
+  inputStep?: number | "any";
   /** The default (the notch on the track; double-click goes back to it). Read from the default prefs when not given. */
   def?: number;
 }
@@ -193,7 +195,7 @@ export function range(label: string, get: () => number, set: (v: number) => void
   const ticks = rangeTicks(o.min, o.max, o.step);
   if (ticks) (slider.style.setProperty("--tk", String(ticks.every)), slider.style.setProperty("--tk0", String(ticks.from)));
   if (Number.isFinite(def) && def >= o.min && def <= o.max) slider.style.setProperty("--d", String(frac(def)));
-  const num = h("input.num-input", { type: "number", min: String(lo * k), max: String(hi * k), step: String(o.step * k), "aria-label": `${label} value`, inputmode: "decimal" });
+  const num = h("input.num-input", { type: "number", min: String(lo * k), max: String(hi * k), step: o.inputStep === "any" ? "any" : String((o.inputStep ?? o.step) * k), "aria-label": `${label} value`, inputmode: "decimal" });
   const fmt = (v: number) => String(Number((v * k).toFixed(Math.max(dp, 3))));
   const bubble = h("span.range-bub", { "aria-hidden": "true" });
   const wrap = h("span.range-track", null, slider, h("span.range-bub-rail", { "aria-hidden": "true" }, bubble));

@@ -2,6 +2,7 @@
 #include "room_state.hpp"
 #include "room_modes.hpp"
 #include "discord_rpc.hpp"
+#include "room_pose.hpp"
 #include <chrono>
 #include <functional>
 #include <optional>
@@ -10,7 +11,6 @@
 namespace native {
 
 struct Options;
-struct Input;
 class MenuWebView;
 
 class RoomBridge {
@@ -33,6 +33,8 @@ public:
     void bind_presence(
             const Options &options, MenuWebView *menu, const bool &menu_ready, std::function<void(bool)> show_menu
     );
+    // Once a frame: tells the menu when this attempt turns into practice or back, so the room shows your practice tag.
+    void publish_practice(bool practicing);
     void update_presence(
             Clock::time_point now,
             const std::string &map_id,
@@ -42,29 +44,34 @@ public:
             bool menu_visible,
             bool tutorial_practice
     );
-    void publish_pose(
-            Clock::time_point now,
-            Clock::time_point started,
+    // Once per simulated tick (not during replay playback): samples your movement and keeps a batch when one is due.
+    // It only copies into fixed buffers; send_poses() writes and sends the batches once the frame's ticks are done.
+    void publish_tick(
             MenuWebView *menu,
             bool menu_ready,
-            BhContext *core,
             const std::string &map_id,
-            bool playback,
             bool spectator,
             const BhState &curr,
-            const Input &input,
+            const BhCmd &cmd,
             const BhRunState &run_state,
+            const BhWeaponReport &weapon,
             const std::string &active_style
     );
+    // Once a frame, after its ticks: hands the batches that came due to the room.
+    void send_poses(MenuWebView *menu, bool menu_ready, const std::string &map_id);
 
 private:
-    Clock::time_point room_time = Clock::now();
+    RoomPoseBatcher poses_;
+    RoomPoseOutbox pose_outbox_;
+    RoomPoseScript pose_script_;
+    uint64_t pose_generation_ = 0;
     Clock::time_point presence_time{};
     std::string presence_map;
     int64_t presence_started = 0;
     MenuWebView *menu_ = nullptr;
     const bool *menu_ready_ = nullptr;
     std::function<void(bool)> show_menu_;
+    bool practice_sent_ = false;
 
     void join(const std::string &id);
     nlohmann::json presence_activity(

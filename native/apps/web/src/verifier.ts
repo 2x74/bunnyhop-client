@@ -3,7 +3,7 @@
 // Never trusts the time stored in the replay: re-simulates the commands against authoritative zones.
 
 import { isPhysicsVersion, type Core, type PlayerState, type Settings } from "./core";
-import { replayPhysics, replayStyle, replayTimerRules, styleReplayProblem, type Replay } from "./replay";
+import { FLIGHT_PHYSICS_FROM, FLIGHT_RULES_FROM, firstFlightCommand, flightAllowed, replayPhysics, replayStyle, replayTimerRules, styleReplayProblem, type Replay } from "./replay";
 import { restartNamesAllowed, restartPointProblem } from "./restart";
 import { SimRun, type SimOptions, type SimResult } from "./sim";
 import { BONUS_STYLE, isSegmented, STYLE_DEFS, styleDef, stylePrespeedCap, styleSettings } from "./styles";
@@ -92,6 +92,8 @@ export interface VerifyResult {
   rules1?: { ticks: number; startTick: number; endTick: number; timeMs: number };
   /** Segmented runs: the checkpoint loads on the stitched path (replay.segments), each proven a saved state. Absent: none. */
   segmentLoads?: number;
+  /** Infinite flights before the run (sim.ts SimResult.flight): ticks flown, flights, the last tick flown. Absent: none. */
+  flight?: { ticks: number; flights: number; lastTick: number };
 }
 
 /** Result for a replay whose simulation stopped early (a desync): invalid, nothing timed. */
@@ -175,6 +177,11 @@ function beginVerify(core: Core, replay: Replay, zones: readonly Zone[], opts: V
   if (styleProblem) problems.push(styleProblem);
   // Checkpoint loads that rewind the run are Segmented's rule; any other style's run is one continuous attempt.
   if (replay.segments?.length && !isSegmented(style)) problems.push(`${replay.segments.length} segment load(s) in a ${def?.name ?? style} run: only Segmented runs load checkpoints`);
+  // Flights (input.ts IN_FLIGHT): only Infinite on physics v24 / rules 4 flies; anywhere else the bit is forged.
+  const flight = firstFlightCommand(replay.buttons);
+  if (flight >= 0 && !flightAllowed(h)) {
+    problems.push(`flight command at tick ${flight + 1} in a ${def?.name ?? style} run: only Infinite runs on physics v${FLIGHT_PHYSICS_FROM} and timer rules ${FLIGHT_RULES_FROM} or later fly`);
+  }
   const physics = replayPhysics(h);
   if (!isPhysicsVersion(physics)) {
     // Not simulable by this build (a newer client's replay, or a forged field): reject without simulating.
@@ -256,6 +263,9 @@ function concludeVerify(replay: Replay, problems: string[], sim: SimResult, simM
   if (finished && sim.track !== (h.track ?? 0)) problems.push(`claimed track ${h.track} != recomputed track ${sim.track}`);
   if (finished && sim.track > 0 && style !== BONUS_STYLE) problems.push(`bonus runs are ${styleDef(BONUS_STYLE)!.name} style only (replay style ${style})`);
   if (finished && sim.ticks !== sim.endTick) problems.push(`replay continues ${sim.ticks - sim.endTick} ticks past the finish`);
+  // A flight ends a timed run (timer.ts flightTick), so a finished run never has one; checked here as well.
+  const fl = sim.flight;
+  if (finished && fl && fl.lastTick >= sim.startTick) problems.push(`flight at tick ${fl.lastTick} inside the run (${sim.startTick}..${sim.endTick})`);
 
   // Rules 1 replays are ranked by the current start-zone rules: the same inputs and physics, timed from the last valid
   // ground start (a mid-air exit counts from its takeoff). A run with no such start doesn't count.
@@ -294,5 +304,6 @@ function concludeVerify(replay: Replay, problems: string[], sim: SimResult, simM
     simMs,
     ...(rules1 ? { rules1 } : {}),
     ...(replay.segments?.length ? { segmentLoads: replay.segments.length } : {}),
+    ...(fl ? { flight: { ticks: fl.ticks, flights: fl.flights, lastTick: fl.lastTick } } : {}),
   };
 }

@@ -19,6 +19,8 @@ mod usable;
 mod map_fixes;
 // Practice mode noclip (never called by `step`; see the module docs).
 mod practice;
+mod flight;
+pub use flight::{cap_horizontal, cap_speed, flight_move, EVENT_FLIGHT, EVENT_FLIGHT_LANDED, FLIGHT_EXIT_CAP, FLIGHT_TOP_SPEED, IN_FLIGHT};
 // DanZay's VScript objective gates, emulated natively on bhop_cooksassistant (physics v16).
 mod vscript;
 mod mechanics;
@@ -182,7 +184,7 @@ pub const PHYSICS_V16: u32 = 16;
 /// slope or a ledge no longer depends on where inside a tick the player meets it.
 pub const PHYSICS_V17: u32 = 17;
 /// The version new recordings use.
-pub const PHYSICS_LATEST: u32 = PHYSICS_V23;
+pub const PHYSICS_LATEST: u32 = PHYSICS_V24;
 /// v18: ladder surface properties, preserving historical replay behavior.
 pub const PHYSICS_V18: u32 = 18;
 /// v19: scoped map mechanics (template instances and explicit velocity scripts). No new movement fix bits.
@@ -204,6 +206,11 @@ pub const PHYSICS_V21: u32 = 21;
 pub const PHYSICS_V22: u32 = 22;
 /// v23: per-map changes only, see `game/map_fixes.rs`. Every map not listed there plays as on v22. No new fix bits.
 pub const PHYSICS_V23: u32 = 23;
+/// v24: v23 + an infinite clip on every map (`game/weapons.rs` `infinite_clip`) + Source's keyvalue vector parse for the player's `basevelocity` and `origin` (`UTIL_StringToVector`: atof
+/// per token, missing tokens 0), so bhop_weed_funhouse's `basevelocity boostAmountX boostAmountY 1550` boosters launch
+/// as on srcds; per-map changes in `game/map_fixes.rs` (`PARENTED_DOORS_V24`, `CS_DELETED_PROPS_V24`, `END_TOUCH_OUTPUTS_V24`: those two boosters fire on OnEndTouch, as their mapper meant);
+/// and Infinite flights (`IN_FLIGHT` commands fly in `game/flight.rs`, only with `air_jump`; speed capped at 3500, landing at 3510). No new fix bits.
+pub const PHYSICS_V24: u32 = 24;
 /// Diagnostic pseudo-versions (never valid in a replay, whose field is a u8): `PHYSICS_DIAG | fix bits` turns on only
 /// the listed fixes, to tell which fix changes a replay (tools: /tmp physics-v2 analysis). The fix bits are the low 31
 /// (`PHYSICS_DIAG_FIXES`); before v18 the base was 1 << 30 with 30 fix bits; before v17 the base was 1 << 26 with 26 fix bits, before v16 1 << 25 with 25, before v15
@@ -418,9 +425,35 @@ pub fn map_event_clock_v23_for(entities: &[Entity]) -> Option<&'static str> {
     map_fixes::event_clock_v23(map_fixes::entity_fingerprint(entities)).map(|m| m.map)
 }
 
+/// The map a parsed entity lump matches in `game/map_fixes.rs` `EVENT_CLOCK_V24` (tests, tools).
+pub fn map_event_clock_v24_for(entities: &[Entity]) -> Option<&'static str> {
+    map_fixes::event_clock_v24(map_fixes::entity_fingerprint(entities)).map(|m| m.map)
+}
+
 /// The fingerprints `EVENT_CLOCK_V23` pins, by map (tests: every entry matches its BSP).
 pub fn map_event_clock_v23_table() -> Vec<(&'static str, u32)> {
     map_fixes::EVENT_CLOCK_V23.iter().map(|m| (m.map, m.fingerprint)).collect()
+}
+
+/// Entity indices `game/map_fixes.rs` `CS_DELETED_PROPS_V24` removes on this build from physics v24 (tests, tools).
+pub fn map_cs_deleted_props_v24(entities: &[Entity]) -> Vec<usize> {
+    map_fixes::cs_deleted_props_v24(entities, map_fixes::entity_fingerprint(entities))
+}
+
+/// Entity indices whose OnStartTouch outputs fire on EndTouch on this build from physics v24 (`game/map_fixes.rs`
+/// `END_TOUCH_OUTPUTS_V24`; tests, tools).
+pub fn map_end_touch_outputs_v24(entities: &[Entity]) -> Vec<usize> {
+    map_fixes::end_touch_outputs_v24(entities, map_fixes::entity_fingerprint(entities))
+}
+
+/// The map a parsed entity lump matches in `game/map_fixes.rs` `PARENTED_PROPS_V24` (tests, tools, `physics::prop_sources`).
+pub fn map_parented_props_v24_for(entities: &[Entity]) -> Option<&'static str> {
+    map_fixes::parented_props_v24(entities).map(|m| m.map)
+}
+
+/// The map a parsed entity lump matches in `game/map_fixes.rs` `PARENTED_DOORS_V24` (tests, tools).
+pub fn map_parented_doors_v24_for(entities: &[Entity]) -> Option<&'static str> {
+    map_fixes::parented_doors_v24(entities).map(|m| m.map)
 }
 
 /// Every map in `game/map_fixes.rs` `PARENTED_DOORS_V21` (tests, tools).
@@ -463,7 +496,7 @@ pub fn physics_fixes(version: u32) -> Option<u32> {
         PHYSICS_V15 => Some(PHYSICS_FIX_V15),
         PHYSICS_V16 => Some(PHYSICS_FIX_V16),
         PHYSICS_V17 => Some(PHYSICS_FIX_V17),
-        PHYSICS_V18 | PHYSICS_V19 | PHYSICS_V20 | PHYSICS_V21 | PHYSICS_V22 | PHYSICS_V23 => Some(PHYSICS_FIX_ALL),
+        PHYSICS_V18 | PHYSICS_V19 | PHYSICS_V20 | PHYSICS_V21 | PHYSICS_V22 | PHYSICS_V23 | PHYSICS_V24 => Some(PHYSICS_FIX_ALL),
         v if v & !PHYSICS_DIAG_FIXES == PHYSICS_DIAG && v & PHYSICS_DIAG_FIXES & !PHYSICS_FIX_ALL == 0 => Some(v & PHYSICS_DIAG_FIXES),
         _ => None,
     }
@@ -1429,12 +1462,23 @@ pub struct Game {
     /// Exact reviewed entity build matched by map_fixes::PARENTED_DOORS_V21: from physics v21 its parented doors follow
     /// their parents (`door_follows_parent`). Fixed at load.
     map_parented_doors: bool,
+    /// v24: `map_fixes::PARENTED_DOORS_V24` (the same behaviour as `map_parented_doors`, from v24).
+    map_parented_doors_v24: bool,
     /// v23: this build's outputs run on EventQueueFix's clock (`map_fixes::EVENT_CLOCK_V23`).
     map_event_clock: bool,
+    /// v24: `map_fixes::EVENT_CLOCK_V24`.
+    map_event_clock_v24: bool,
     /// v23: the entity fingerprint, kept for `map_fixes::teleport_target_v23`.
     map_fingerprint: u32,
     /// Exact reviewed build in map_fixes::LOGIC_CASE_V23: from physics v23 its logic_case and target rewrites run.
     map_logic_case: bool,
+    /// v24: entity indices of the props CS:S deletes at spawn on this build (`map_fixes::CS_DELETED_PROPS_V24`).
+    cs_deleted_props: Vec<usize>,
+    /// v24: entity indices of the triggers whose OnStartTouch outputs fire on EndTouch (`map_fixes::END_TOUCH_OUTPUTS_V24`).
+    end_touch_outputs: Vec<usize>,
+    /// v24 (`map_fixes::PARENTED_PROPS_V24`): parented prop_dynamics with moving collision on this build; their collision is
+    /// attached at load and taken away at reset before v24.
+    parented_props: Vec<usize>,
 }
 
 /// Physics v4 world state the entity list doesn't hold; saved with the game state, cleared on reset.
@@ -1459,6 +1503,11 @@ struct Extra {
     /// Original template member for each runtime instance, after initial_ents.len().
     instance_sources: Vec<usize>,
     scripts19: scripts19::State,
+    /// Infinite flight (game/flight.rs, physics v24): the player is flying. False on every other style and version.
+    flying: bool,
+    /// Infinite flight: this tick's landing spot and crouch (`Game::flight_landing`), before the normal step. An output
+    /// of the tick only (None on every other tick), so it's not digested.
+    landing: Option<([f32; 3], bool)>,
 }
 
 impl Extra {
@@ -1501,6 +1550,10 @@ impl Extra {
             for i in &self.instance_sources { out.extend_from_slice(&(*i as u32).to_le_bytes()); }
         }
         self.scripts19.digest(&mut out);
+        // (Never set before physics v24 or outside Infinite: those digests are unchanged.)
+        if self.flying {
+            out.extend_from_slice(b"flying\0");
+        }
         out
     }
 }
@@ -1531,9 +1584,21 @@ impl Game {
         let script_triggers = vscript::script_triggers(&entities);
         let map_mechanics = map_fixes::mechanics_v19(&entities);
         let map_parented_doors = map_fixes::parented_doors_v21(&entities).is_some();
+        let map_parented_doors_v24 = map_fixes::parented_doors_v24(&entities).is_some();
         let map_fingerprint = map_fixes::entity_fingerprint(&entities);
         let map_event_clock = map_fixes::event_clock_v23(map_fingerprint).is_some();
+        let map_event_clock_v24 = map_fixes::event_clock_v24(map_fingerprint).is_some();
         let map_logic_case = map_fixes::logic_case_v23(&entities).is_some();
+        let cs_deleted_props = map_fixes::cs_deleted_props_v24(&entities, map_fingerprint);
+        let end_touch_outputs = map_fixes::end_touch_outputs_v24(&entities, map_fingerprint);
+        let parented_props: Vec<usize> = if map_fixes::parented_props_v24(&entities).is_some() {
+            entities.iter().enumerate()
+                .filter(|(_, e)| e.classname().to_ascii_lowercase().starts_with("prop_dynamic") && e.get("parentname").is_some_and(|p| !p.is_empty()))
+                .map(|(i, _)| i)
+                .collect()
+        } else {
+            Vec::new()
+        };
         let physics::MapPhysics { prop_sources, world, texinfo_surface, props, diagnostics, displacement_count } =
             physics::build_with_entities(bsp, content, &entities, prop_mesh)?;
         let models: &[Model] = match bsp.lump(playsrc_bsp::MODELS).map(|l| &l.records) {
@@ -1639,9 +1704,14 @@ impl Game {
             script_triggers,
             map_mechanics,
             map_parented_doors,
+            map_parented_doors_v24,
             map_event_clock,
+            map_event_clock_v24,
             map_fingerprint,
             map_logic_case,
+            cs_deleted_props,
+            end_touch_outputs,
+            parented_props,
         };
         game.link_hierarchy();
         game.link_templates();
@@ -1675,6 +1745,8 @@ impl Game {
         let spawn_changed = (self.map_mechanics.is_some() && (PHYSICS_V19..=PHYSICS_LATEST).contains(&self.settings.physics_version) != (PHYSICS_V19..=PHYSICS_LATEST).contains(&settings.physics_version))
             || ((self.map_parented_doors || map_fixes::v21_spawn_edits(self.map_mechanics) || self.initial_ents.iter().any(|e| kin::rot_door_spawn_angles(e).is_some()))
                 && (PHYSICS_V21..=PHYSICS_LATEST).contains(&self.settings.physics_version) != (PHYSICS_V21..=PHYSICS_LATEST).contains(&settings.physics_version))
+            || ((self.map_parented_doors_v24 || !self.end_touch_outputs.is_empty())
+                && (PHYSICS_V24..=PHYSICS_LATEST).contains(&self.settings.physics_version) != (PHYSICS_V24..=PHYSICS_LATEST).contains(&settings.physics_version))
             || (self.settings.physics_fixes() ^ settings.physics_fixes())
             & (PHYSICS_FIX_DOOR_START_OPEN | PHYSICS_FIX_TRAIN_SPAWN | PHYSICS_FIX_MAP_DOOR_TRAVEL)
             != 0;
@@ -1787,6 +1859,38 @@ impl Game {
                 }
                 if once {
                     self.ents[i].removed = true;
+                }
+            }
+        }
+        // v24: parented props with moving collision (map_fixes::PARENTED_PROPS_V24); older versions never had it.
+        if !(PHYSICS_V24..=PHYSICS_LATEST).contains(&self.settings.physics_version) {
+            for &i in &self.parented_props {
+                if let Some(e) = self.ents.get_mut(i) {
+                    e.prop = None;
+                }
+            }
+        }
+        // v24: props CS:S deletes at spawn (map_fixes::CS_DELETED_PROPS_V24). Their collision is built at load, before the
+        // version is known, so they are removed here: not solid, not drawn, no inputs. Older versions keep them.
+        if (PHYSICS_V24..=PHYSICS_LATEST).contains(&self.settings.physics_version) {
+            for &i in &self.cs_deleted_props {
+                if let Some(e) = self.ents.get_mut(i) {
+                    e.removed = true;
+                    e.solid = false;
+                    e.visible = false;
+                }
+            }
+        }
+        // v24: reviewed OnStartTouch outputs that the mapper meant as OnEndTouch (map_fixes::END_TOUCH_OUTPUTS_V24). The
+        // outputs are built at load, before the version is known, so the event is renamed here; older versions keep it.
+        if (PHYSICS_V24..=PHYSICS_LATEST).contains(&self.settings.physics_version) {
+            for &i in &self.end_touch_outputs {
+                let Some(e) = self.ents.get_mut(i) else { continue };
+                if e.outputs.iter().any(|o| &*o.event == "onstarttouch") {
+                    let end: std::sync::Arc<str> = "onendtouch".into();
+                    for o in std::sync::Arc::make_mut(&mut e.outputs).iter_mut().filter(|o| &*o.event == "onstarttouch") {
+                        o.event = end.clone();
+                    }
                 }
             }
         }
@@ -2023,6 +2127,13 @@ impl Game {
     }
 
     pub fn step(&mut self, cmd: Cmd) -> Result<(), String> {
+        // Infinite flights (physics v24, game/flight.rs): a flight tick replaces the rest; a landing steps on below.
+        self.extra.landing = None;
+        if (self.extra.flying || cmd.buttons & IN_FLIGHT != 0) && self.flight_step(cmd) {
+            return Ok(());
+        }
+        // The rest of the tick never sees the bit (an inert bit where flights aren't allowed, gone on a landing).
+        let cmd = Cmd { buttons: cmd.buttons & !IN_FLIGHT, ..cmd };
         self.timing_path = self.observe_timing.then(|| movement::accepted_path::AcceptedPath::unsupported("movement-not-executed"));
         self.jumpstats_valid = false;
         self.air_speed_gain = None;
@@ -2030,7 +2141,7 @@ impl Game {
         let before_events = self.state;
         // RNGFix telehop: no fix right after another map teleport (`g_bMapTeleportedSequentialTicks`).
         let map_teleported_last_tick = self.events & EVENT_MAP_TELEPORT != 0;
-        self.events = 0;
+        self.events = if self.extra.landing.is_some() { EVENT_FLIGHT_LANDED } else { 0 };
         self.attack = None;
         self.weapon_events = 0;
         self.view_angle_change = [0.0; 3];
@@ -2442,6 +2553,9 @@ impl Game {
             if self.map_event_clock && (PHYSICS_V23..=PHYSICS_LATEST).contains(&self.settings.physics_version) {
                 return 0;
             }
+            if self.map_event_clock_v24 && (PHYSICS_V24..=PHYSICS_LATEST).contains(&self.settings.physics_version) {
+                return 0;
+            }
             // TIME_TO_TICKS(sv_clockcorrection_msecs 60 ms), minus the command being run.
             (((0.06 / self.settings.tick_interval) + 0.5) as u32).saturating_sub(1)
         })
@@ -2686,14 +2800,14 @@ impl Game {
                     "basevelocity" => {
                         // CBaseEntity keyfield m_vecBaseVelocity without FL_BASEVELOCITY: the next
                         // PlayerMove turns it into a one-off velocity impulse (basevelocity boosters).
-                        let v: Vec<f32> = value.split_whitespace().filter_map(|s| s.parse().ok()).collect();
+                        let v = self.keyvalue_vector(value);
                         if v.len() == 3 && v.iter().all(|x| x.is_finite()) {
                             self.state.base_velocity = [v[0], v[1], v[2]];
                             self.state.base_velocity_applied = false;
                         }
                     }
                     "origin" => {
-                        let v: Vec<f32> = value.split_whitespace().filter_map(|s| s.parse().ok()).collect();
+                        let v = self.keyvalue_vector(value);
                         if v.len() == 3 && v.iter().all(|x| x.is_finite()) {
                             self.state.position = [v[0], v[1], v[2]];
                             self.state.ground = None;
@@ -2714,6 +2828,18 @@ impl Game {
             }
             "modifyspeed" => self.set_speed_scale(param),
             _ => {} // SetDamageFilter, SetFogController, ...: no gameplay effect here
+        }
+    }
+
+    /// A vector keyvalue on the player (`AddOutput basevelocity` / `origin`). From v24 it is Source's
+    /// `UTIL_StringToVector`: each of the 3 whitespace-separated tokens is read with atof (its longest numeric prefix, 0
+    /// if none) and missing tokens are 0, so `basevelocity boostAmountX boostAmountY 1550` is (0, 0, 1550) as on srcds.
+    /// Before v24 a value counts only if it is exactly 3 numbers; anything else was ignored.
+    fn keyvalue_vector(&self, value: &str) -> Vec<f32> {
+        if (PHYSICS_V24..=PHYSICS_LATEST).contains(&self.settings.physics_version) {
+            source_string_to_vector(value).to_vec()
+        } else {
+            value.split_whitespace().filter_map(|s| s.parse().ok()).collect()
         }
     }
 
@@ -4003,12 +4129,12 @@ impl Game {
         out
     }
 
-    /// Current transform of every moving entity prop (prop_door_rotating): (entity, origin, angles).
+    /// Current transform of every moving entity prop (prop_door_rotating; `PARENTED_PROPS_V24` children): (entity, origin, angles).
     pub fn moving_prop_transforms(&self) -> Vec<(usize, [f32; 3], [f32; 3])> {
         self.ents
             .iter()
             .enumerate()
-            .filter(|(_, e)| matches!(&e.data, Data::Kin(k) if matches!(k.kind, kin::KinKind::PropDoor(_))))
+            .filter(|(i, e)| matches!(&e.data, Data::Kin(k) if matches!(k.kind, kin::KinKind::PropDoor(_))) || self.parented_props.contains(i))
             .map(|(i, e)| (i, e.origin, e.angles))
             .collect()
     }
@@ -4028,14 +4154,15 @@ impl Game {
                 continue;
             }
             let Some(model) = e.get("model").filter(|m| m.to_ascii_lowercase().ends_with(".mdl")) else { continue };
-            if e.get("parentname").is_some_and(|p| !p.is_empty()) || e.int("rendermode") == 10 {
+            let parented_prop = self.parented_props.contains(&i);
+            if (e.get("parentname").is_some_and(|p| !p.is_empty()) && !parented_prop) || e.int("rendermode") == 10 {
                 continue;
             }
             if self.ents.get(i).is_some_and(|r| !r.visible) {
                 continue;
             }
             let (origin, angles) = poses.get(&(physics::ENTITY_PROP | i as u32)).copied().unwrap_or((e.origin(), e.angles()));
-            let moving = class == "prop_door_rotating";
+            let moving = class == "prop_door_rotating" || parented_prop;
             out.push((model.replace('\\', "/").to_ascii_lowercase(), origin, angles, e.int("skin") as i32, if moving { i as u32 + 1 } else { 0 }));
         }
         out
@@ -4647,5 +4774,82 @@ mod linear_door_spawn_tests {
             assert_eq!(m.offset,0.0);
             assert_eq!(m.phase,MoverPhase::Closed);
         }
+    }
+}
+
+/// C `atof`: the longest prefix of `s` (after leading whitespace) that reads as a decimal float, 0 if there is none.
+/// Hexadecimal and `inf` / `nan` spellings read as 0 here; no catalogue map uses them in a vector keyvalue.
+pub(crate) fn c_atof(s: &str) -> f32 {
+    let b = s.trim_start_matches(|c: char| c.is_ascii_whitespace()).as_bytes();
+    let mut i = 0;
+    if i < b.len() && (b[i] == b'+' || b[i] == b'-') { i += 1; }
+    let digits_start = i;
+    while i < b.len() && b[i].is_ascii_digit() { i += 1; }
+    let mut mantissa = i > digits_start;
+    if i < b.len() && b[i] == b'.' {
+        let f = i + 1;
+        let mut j = f;
+        while j < b.len() && b[j].is_ascii_digit() { j += 1; }
+        if mantissa || j > f { mantissa = true; i = j; }
+    }
+    if !mantissa { return 0.0; }
+    let mut end = i;
+    if i < b.len() && (b[i] == b'e' || b[i] == b'E') {
+        let mut j = i + 1;
+        if j < b.len() && (b[j] == b'+' || b[j] == b'-') { j += 1; }
+        let e = j;
+        while j < b.len() && b[j].is_ascii_digit() { j += 1; }
+        if j > e { end = j; }
+    }
+    // atof parses in double precision; the keyfield stores a float.
+    std::str::from_utf8(&b[..end]).ok().and_then(|t| t.parse::<f64>().ok()).unwrap_or(0.0) as f32
+}
+
+/// Source's `UTIL_StringToFloatArray(v, 3, s)` behind `UTIL_StringToVector`: a 128-byte copy of the string, then for
+/// each component atof at the current token, skip to the next whitespace-separated token; components past the end are 0.
+pub(crate) fn source_string_to_vector(s: &str) -> [f32; 3] {
+    let bytes = s.as_bytes();
+    let copy = &bytes[..bytes.len().min(127)];
+    let mut out = [0.0f32; 3];
+    let mut front = 0usize;
+    let mut p = 0usize;
+    for slot in out.iter_mut() {
+        *slot = c_atof(&String::from_utf8_lossy(&copy[front..]));
+        while p < copy.len() && copy[p] <= b' ' { p += 1; }
+        while p < copy.len() && copy[p] > b' ' { p += 1; }
+        if p >= copy.len() { break; }
+        p += 1;
+        front = p;
+    }
+    out
+}
+
+#[cfg(test)]
+mod source_vector_tests {
+    use super::{c_atof, source_string_to_vector};
+
+    #[test]
+    fn atof_reads_the_numeric_prefix() {
+        assert_eq!(c_atof("1550"), 1550.0);
+        assert_eq!(c_atof("  -12.5e1xyz"), -125.0);
+        assert_eq!(c_atof("boostAmountX"), 0.0);
+        assert_eq!(c_atof(".5"), 0.5);
+        assert_eq!(c_atof("5."), 5.0);
+        assert_eq!(c_atof("1e"), 1.0);
+        assert_eq!(c_atof("-"), 0.0);
+        assert_eq!(c_atof(""), 0.0);
+    }
+
+    #[test]
+    fn string_to_vector_matches_util_string_to_float_array() {
+        // bhop_weed_funhouse's boosters.
+        assert_eq!(source_string_to_vector("boostAmountX boostAmountY 1550"), [0.0, 0.0, 1550.0]);
+        // bhop_finalmap_strange_fixed2: two tokens, the third is 0.
+        assert_eq!(source_string_to_vector("600 0"), [600.0, 0.0, 0.0]);
+        assert_eq!(source_string_to_vector("1 2 3 4"), [1.0, 2.0, 3.0]);
+        assert_eq!(source_string_to_vector("  7"), [7.0, 0.0, 0.0]);
+        assert_eq!(source_string_to_vector(""), [0.0, 0.0, 0.0]);
+        // Tabs separate tokens like spaces (any byte <= ' ').
+        assert_eq!(source_string_to_vector("1\t2\t3"), [1.0, 2.0, 3.0]);
     }
 }

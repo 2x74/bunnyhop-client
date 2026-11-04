@@ -44,6 +44,8 @@ export const hasRawUpdate = (): boolean => HAS_RAW_UPDATE;
 const RAW_MAX_HZ = 2500;
 /** Raw updates silent this long while pointermove still carries motion: the raw stream stalled, pointermove takes over. */
 const RAW_STALL_MS = 250;
+/** Modifier keys the free camera reads whether or not they are bound (Input.freeIntent). */
+const MOD_CODES = new Set(["ShiftLeft", "ShiftRight", "AltLeft", "AltRight"]);
 /** A refused pointer lock request's reason: the DOMException's name. */
 const errName = (e: unknown): string => (e && typeof (e as { name?: unknown }).name === "string" ? (e as { name: string }).name : "error");
 
@@ -78,6 +80,8 @@ export const IN_DROP = 1 << 12;
 export const IN_RELOAD = 1 << 13;
 export const IN_SLOT_SHIFT = 14;
 export const IN_SLOT_MASK = 3 << IN_SLOT_SHIFT;
+/** Infinite flight (core.ts IN_FLIGHT): set by the session while Infinite's noclip is on, never by the input itself. */
+export { IN_FLIGHT } from "./core";
 /** Slot numbers: primary (sniper), secondary (pistol), knife. */
 export const SLOT_PRIMARY = 1;
 export const SLOT_PISTOL = 2;
@@ -187,6 +191,7 @@ export class Input {
       // A teleport or a pusher turn sets the view as of the last command; motion stamped after it still applies (counted
       // with the current k, as it was received: the next motion after a sensitivity change rebases, previewLook).
       this.yawBase = norm360(yaw);
+      this.lastTurn = 0;
       this.yawCount = this.ti.pendingX;
       this.yawEpoch++;
       this.yawKind = kind;
@@ -221,6 +226,7 @@ export class Input {
     return this.sampler?.enqueue(payload, eventTime, arrivalTime) ?? true;
   }
   private releaseCode(code: string, e: Event): void {
+    this.untilKeyup.delete(code);
     if (this.timedActive && this.heldCodes.has(code) && (this.codeBits.get(code) ?? 0) & TIMED_KEY_BITS) this.ti.addEdge(this.ti.stamp(e.timeStamp, performance.now()), code, false);
     this.heldCodes.delete(code);
     if (this.isBound(code)) this.queue({type:"key", code, down:false, bits:0}, e.timeStamp);
@@ -304,6 +310,23 @@ export class Input {
   get yaw(): number {
     return countedYaw(this.yawBase, this.yawCount, this.yawK);
   }
+  /**
+   * Degrees the turn binds added on the last command (0: it didn't turn). Render only: `viewYaw` spreads that step over
+   * the frames until the next tick. The commands, the replay and the simulated view never see it.
+   */
+  private lastTurn = 0;
+  /**
+   * The camera's yaw `alpha` (main.ts frame(): accumulator / tick) of the way from the last tick to the next. A held turn
+   * bind turns the view a fixed step per tick; drawn at `yaw` the camera would stand still between ticks and jump a whole
+   * step on the frame after one (at 240+ FPS most frames show no turn: it looks like tapping, or like a low frame rate).
+   * Here the last step is eased in like positions are (prev -> curr): up to one tick behind, never ahead of the command.
+   * Mouse motion is unaffected.
+   */
+  viewYaw(alpha: number): number {
+    if (!this.lastTurn || !this.locked) return this.yaw; // (paused: the accumulator is 0, show the full step)
+    const a = Math.min(1, Math.max(0, alpha));
+    return norm360(this.yaw - this.lastTurn * (1 - a));
+  }
   set yaw(v: number) {
     this.setYaw(v, YAW_SET_RAW);
   }
@@ -311,6 +334,7 @@ export class Input {
   setYaw(v: number, kind: number): void {
     if (this.sampler) throw new Error("Use rebasePhysicsView or restartSamplerView while sampler is enabled");
     this.ti.dropYaw(); // a set view: motion before it is gone, as the camera shows
+    this.lastTurn = 0;
     this.yawBase = norm360(v);
     this.yawCount = 0;
     this.yawK = this.settings.sensitivity * this.settings.m_yaw;
@@ -352,6 +376,24 @@ export class Input {
   onAction: ((a: BindAction, code: string) => void) | null = null;
   /** Any other key pressed while locked (zone editor digits, etc.). */
   onKey: ((code: string) => void) | null = null;
+  /**
+   * A key some on-screen UI owns right now (the numbered menus' digits): its press is ignored here, so no bind and no
+   * held movement, turn or attack comes from it. Its keyup still releases a key that was already held.
+   */
+  ownsKey: ((code: string) => boolean) | null = null;
+  /** Keys released by releaseAllUntilKeyup (or taken by ownsKey): their key repeats stay ignored until a keyup or a fresh press. */
+  private untilKeyup = new Set<string>();
+  /**
+   * Freecam (freecam.ts) and room spectating's free look: while set, mouse motion turns this camera instead of the view
+   * (degrees, at the player's sensitivity, m_yaw / m_pitch and vertical sensitivity). It never reaches the counted yaw,
+   * the pitch, the timed-input queue or the per-command motion stats, so commands are exactly those of a still mouse.
+   * Not with the input experiment's sampler (freecam.ts freecamUnavailable).
+   */
+  lookSink: ((dYawDeg: number, dPitchDeg: number) => void) | null = null;
+  /** The same for the wheel: notches (+1 up, -1 down) go here instead of wheel binds and their actions. */
+  wheelSink: ((steps: number) => void) | null = null;
+  /** Shift / Alt held, bound or not (the free camera's faster / slower). */
+  private mods = new Set<string>();
 
   private codeBits = new Map<string, number>();
   private codeAction = new Map<string, BindAction>();
@@ -418,6 +460,7 @@ export class Input {
         if (!this.pointerLocked) return;
         const delta = e.deltaY !== 0 ? e.deltaY : e.shiftKey ? e.deltaX : 0;
         if (delta === 0) return;
+        if (this.wheelSink) return this.wheelSink(delta < 0 ? 1 : -1);
         const dir = delta < 0 ? "MWheelUp" : "MWheelDown";
         const bits = (this.codeBits.get(dir) ?? 0) | (this.codeBits.get("MouseWheel") ?? 0);
         this.wheelBits |= bits;
@@ -437,9 +480,15 @@ export class Input {
     document.addEventListener("keydown", (e) => {
       noteInputEvent(e);
       // Typing into a text field (the chat, with the game still playing) never moves the player or fires binds.
-      if (this.locked && !isTextField(e.target)) this.press(e.code, e.repeat, e);
+      if (this.locked && !isTextField(e.target)) {
+        if (MOD_CODES.has(e.code)) {
+          this.mods.add(e.code);
+          if (this.lookSink && e.code.startsWith("Alt")) e.preventDefault(); // (Alt alone focuses the browser's menu)
+        }
+        this.press(e.code, e.repeat, e);
+      }
     });
-    document.addEventListener("keyup", (e) => (noteInputEvent(e), this.releaseCode(e.code, e)));
+    document.addEventListener("keyup", (e) => (noteInputEvent(e), this.mods.delete(e.code), this.releaseCode(e.code, e)));
   }
 
   /** Which event carries motion during this lock (diagnostics). */
@@ -487,6 +536,13 @@ export class Input {
     const reports = source !== 2 ? reportsOf(e) : null;
     const timed = this.timedActive;
     f.push(dx, dy, e.timeStamp, source !== 2 && (f.enabled || this.collectReports || timed) ? reports : null);
+    if (this.lookSink) {
+      // Freecam: the camera turns, the view and the input stats don't (R2).
+      const s = this.settings;
+      const pk = (s.verticalSensitivityEnabled ? (s.verticalSensitivity ?? s.sensitivity) : s.sensitivity) * s.m_pitch;
+      if (f.outX || f.outY) this.lookSink(f.outX * s.sensitivity * s.m_yaw, f.outY * pk);
+      return;
+    }
     this.eventsSince++;
     this.reportsSince += reports ? reports.length : 1;
     this.look(f.outX, f.outY);
@@ -610,6 +666,9 @@ export class Input {
   }
 
   private press(code: string, repeat: boolean, e: Event): void {
+    if (repeat && this.untilKeyup.has(code)) return;
+    if (!repeat) this.untilKeyup.delete(code);
+    if (this.ownsKey?.(code)) return void this.untilKeyup.add(code);
     if (this.codeBits.has(code)) {
       // A key not held yet: a press, or a key repeat of one a release-all forgot while it stayed down (blur / focus).
       // Frame-sampled input re-adds it on that repeat too (heldCodes below), so timed input gives it back the same way.
@@ -690,9 +749,27 @@ export class Input {
   }
 
   /** Releases every held key (e.g. when a chat field takes the keyboard mid-strafe). */
+  /**
+   * releaseAll, and the keys that were held stay released until the player lets go and presses them again: a key
+   * repeat doesn't bring them back (freecam on / off, spectator free look). releaseAll alone lets a repeat restore a
+   * key whose keyup was lost to a blur.
+   */
+  releaseAllUntilKeyup(): void {
+    const held = [...this.heldCodes];
+    this.releaseAll();
+    for (const c of held) this.untilKeyup.add(c);
+  }
+
+  /** `code` is bound to a movement key (forward / back / left / right / jump / duck...): it flies a free camera. */
+  isMovementCode(code: string): boolean {
+    return this.codeBits.has(code);
+  }
+
   releaseAll(): void {
     this.resetSampler(performance.now(), "release-all");
+    this.untilKeyup.clear();
     this.heldCodes.clear();
+    this.mods.clear();
     this.commitPending(); // the view the player sees is the view the next command has
     this.ti.releaseKeys();
     this.wRelease.reset();
@@ -770,6 +847,25 @@ export class Input {
     let b = this.wheelBits;
     for (const c of this.heldCodes) b |= this.codeBits.get(c) ?? 0;
     return b;
+  }
+
+  /**
+   * The free camera's intent from the held binds (freecam.ts): forward / back / left / right fly along the view, jump
+   * rises, duck sinks; Shift faster and Alt slower unless they are bound to one of those. Reads held keys only: nothing
+   * here goes into a command.
+   */
+  freeIntent(): { f: number; r: number; u: number; fast: boolean; slow: boolean } {
+    let b = 0;
+    for (const c of this.heldCodes) b |= this.codeBits.get(c) ?? 0;
+    const bit = (m: number) => (b & m ? 1 : 0);
+    const mod = (...codes: string[]) => codes.some((c) => this.mods.has(c) && !this.codeBits.has(c));
+    return {
+      f: bit(IN_FORWARD) - bit(IN_BACK),
+      r: bit(IN_MOVERIGHT) - bit(IN_MOVELEFT),
+      u: bit(IN_JUMP) - bit(IN_DUCK),
+      fast: mod("ShiftLeft", "ShiftRight"),
+      slow: mod("AltLeft", "AltRight"),
+    };
   }
 
   /**
@@ -866,13 +962,15 @@ export class Input {
     // Keep mouse counts intact: replay analysis can check the fixed turn separately from mouse movement. A spawn,
     // teleport, pusher, sensitivity or raw set in this tick retains its own reason (including unexplained raw sets).
     let turn = 0;
+    this.lastTurn = 0;
     if (o.turnBinds && o.tickInterval && this.locked) {
       const left = this.actionHeld("turnLeft"), right = this.actionHeld("turnRight");
       if (left !== right) turn = left ? IN_LEFT : IN_RIGHT;
       if (turn) {
         // Fast turn only goes on a command that turns (a lone IN_TURN_FAST is never recorded).
         if (this.actionHeld("turnFast")) turn |= IN_TURN_FAST;
-        this.yawBase = norm360(this.yawBase + turnDelta(turn, o.tickInterval, this.turnSpeed));
+        this.lastTurn = turnDelta(turn, o.tickInterval, this.turnSpeed);
+        this.yawBase = norm360(this.yawBase + this.lastTurn);
         this.yawKind = this.yawEpoch === this.sampledYawEpoch ? YAW_SET_TURN : this.yawKind | YAW_WITH_TURN;
         this.yawEpoch++;
       }

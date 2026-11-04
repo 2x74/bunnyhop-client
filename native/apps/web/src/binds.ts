@@ -75,6 +75,9 @@ export const DEFAULT_BINDS: Record<BindAction, string[]> = {
   // saved binds that use Y or U for something else keep it there (settings.ts migrateBinds adds only free keys).
   chat: ["KeyY", "KeyU"],
   thirdPerson: ["KeyT"],
+  // Freecam (freecam.ts; !freecam): unbound, so a stray key can't send the camera off mid-run. A toggle most players
+  // never use shouldn't take a key off anyone.
+  freecam: [],
   // Viewmodel (cosmetic; never sim inputs). Movement binds win if a key is bound to both (see Input.press).
   attack: ["Mouse1"],
   attack2: ["Mouse2"],

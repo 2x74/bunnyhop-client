@@ -51,7 +51,7 @@ import { openInbox, withInboxBadge } from "./inbox/state";
 import { versionButton } from "./ui/changelog";
 import { supportScreen } from "./ui/support";
 import { legalLinks } from "./ui/legal";
-import { supportLink } from "./ui/community";
+import { discordLink, supportLink } from "./ui/community";
 import { group } from "./ui/controls";
 import { hideUiSwitch, quickGrid } from "./ui/quick-toggles";
 import { hudEditorAvailable, openHudEditor } from "./hud/editor";
@@ -796,10 +796,12 @@ function pauseScreen(): HTMLElement {
       null,
       h("div.pause-top", null, wordmark("sm")),
       h("h2.pause-map", { title: map }, map),
-      h("p.pause-meta", null, S.tier !== undefined ? tierBadge(S.tier) : null, h("span", null, `${track ? trackName(track) + " · " : ""}${styleLabel(runStyle)}`), pb ? h("span.pause-pb", null, "PB ", h("b", null, formatTime(pb.time))) : null),
+      // The style under the map name opens the Style tab ("how do you change the mode?"): the name is the way in.
+      h("p.pause-meta", null, S.tier !== undefined ? tierBadge(S.tier) : null, a ? h("button.pause-style", { type: "button", title: "Change style", onclick: () => show("style") }, `${track ? trackName(track) + " · " : ""}${styleLabel(runStyle)}`) : h("span", null, `${track ? trackName(track) + " · " : ""}${styleLabel(runStyle)}`), pb ? h("span.pause-pb", null, "PB ", h("b", null, formatTime(pb.time))) : null),
     ),
     rail,
-    h("footer.pause-foot", null, accountChip({ quiet: true }), versionButton(), supportLink("pause-support"), legalLinks()),
+    // (Discord: players in rooms keep asking whether there is one; a quiet word next to Support, hidden without an invite.)
+    h("footer.pause-foot", null, accountChip({ quiet: true }), versionButton(), h("div.pause-links", null, supportLink("pause-support"), discordLink("pause-discord", "Discord", { icon: false })), legalLinks()),
   );
   const screen = h("section.pause", null, left, panel);
 

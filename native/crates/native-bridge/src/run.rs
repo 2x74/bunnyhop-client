@@ -8,6 +8,15 @@ use bunnyhop_core::game::{EVENT_JUMPED, EVENT_RESPAWNED, EVENT_TELEPORTED};
 
 /// Timer rules 2's slow-start escape (website timer.ts START_SLOW_SPEED): this slow on the ground always arms.
 const START_SLOW_SPEED: f64 = 50.0;
+/// Timer rules 4 (website timer.ts START_ZONE_NO_PREHOP_V4): maps whose start zones block prehops in every style.
+/// Part of the rules: adding a map here needs a new rules version, or that map's rules 4 runs would re-time.
+pub const START_ZONE_NO_PREHOP_V4: [&str; 1] = ["bhop_futile"];
+
+/// Whether start-zone prehops lose their speed for this style on this map under `rules` (website `blocksPrehops`).
+pub fn blocks_prehops(style: &str, map: &str, rules: u32) -> bool {
+    style == "scroll" || (rules >= 4 && START_ZONE_NO_PREHOP_V4.contains(&map))
+}
+
 /// Timer rules 3 (website timer.ts START_IMPULSE_MARGIN): this far over the prespeed cap came from the map, not the
 /// player, whose one tick of movement adds far less. A start-zone booster keeps its speed.
 const START_IMPULSE_MARGIN: f64 = 32.0;
@@ -60,7 +69,7 @@ impl Default for BhRunOptions {
         Self {
             prespeed_cap: 290.0,
             cap_enabled: 1,
-            rules: 3,
+            rules: 4,
             block_prehops: 0,
             strafe_keys: 0,
             start_reentry_cap: 0.0,
@@ -163,46 +172,79 @@ impl Timer {
             f64::from(self.ticks()) * self.interval
         };
     }
-    /// Infinite (the style that sets `start_reentry_cap`) is built around noclip, but a flight never starts the run:
-    /// the timer would otherwise run while flying to the end of the map. Flying through the start keeps the speed
-    /// it built, capped, so leaving noclip and crossing the start normally begins a run with it. Every other style
-    /// (and a running or finished run) just coasts, as before.
+    /// Infinite's flight tick (core `EVENT_FLIGHT`, physics v24), in place of `update_observed` (website timer.ts
+    /// flightTick). A flight never starts or finishes a run, or the timer would run while flying to the end of the map,
+    /// so a run in progress (or a pending rules 2 start) goes back to idle without a finish. The verifier rejects any
+    /// flight tick inside a counted run. Then `noclip_tick`.
+    pub fn flight_tick(&mut self, tick: u32, position: [f32; 3], velocity: [f32; 3]) -> Option<[f32; 3]> {
+        let restarted = self.state.status == 1;
+        if restarted || self.state.pending_start != 0 {
+            self.state.status = 0;
+            self.state.start_tick = 0;
+            self.state.end_tick = 0;
+            self.state.pending_start = 0;
+            self.armed = false;
+            self.clear_stats();
+        }
+        let clamp = self.noclip_tick(tick, position, velocity);
+        if restarted {
+            self.state.update_flags |= 4;
+        }
+        clamp
+    }
+    /// The timer part of a flight (website timer.ts noclipTick). Infinite (the style that sets `start_reentry_cap`)
+    /// arms an idle timer while the flight is in a start zone. Flying out of it leaves the timer idle and keeps the
+    /// speed the flight built, capped horizontally at the re-entry cap (vertical kept) so the start can't be re-entered
+    /// over and over to farm speed. Returns that capped velocity. The run then starts the usual way, by crossing the
+    /// start without flying. Every other style, and a running or finished run, just coasts.
     pub fn noclip_tick(&mut self, tick: u32, position: [f32; 3], velocity: [f32; 3]) -> Option<[f32; 3]> {
-        if self.state.status != 0 || self.options.start_reentry_cap <= 0.0 {
-            self.coast(tick);
+        self.coast(tick);
+        let cap = f64::from(self.options.start_reentry_cap);
+        if self.state.status != 0 || cap <= 0.0 {
             return None;
         }
-        let mut clamp = None;
-        self.state.last_tick = tick;
-        self.state.update_flags = 0;
         let start = self
             .touching(position, false, 0, Some(self.state.track))
             .or_else(|| self.touching(position, false, 0, None));
         if let Some(zone) = start {
             self.state.track = zone.track;
             self.state.pending_start = 0;
-            self.state.in_start = 1;
-            self.was_in_start = true;
+            self.set_in_start(true);
             self.armed = true;
-        } else if self.armed {
-            self.armed = false;
-            self.state.in_start = 0;
-            self.was_in_start = false;
-            // Flying out of the start does not start the run, or a flight would carry the timer to the end of
-            // the map. The speed is kept instead: leave noclip and cross the start normally to begin a run with
-            // whatever the flight built, bounded by the same cap the re-entry guard uses (horizontal only,
-            // vertical kept) so the start cannot be re-entered over and over to farm speed.
+            return None;
+        }
+        let mut clamp = None;
+        if self.armed {
             let [vx, vy, vz] = velocity.map(f64::from);
             let speed = (vx * vx + vy * vy).sqrt();
-            let cap = f64::from(self.options.start_reentry_cap);
             if speed > cap {
                 let f = cap / speed;
                 clamp = Some([(vx * f) as f32, (vy * f) as f32, vz as f32]);
                 self.state.update_flags |= 8;
             }
         }
-        self.state.seconds = f64::from(self.ticks()) * self.interval;
+        self.armed = false;
+        self.set_in_start(false);
         clamp
+    }
+    fn set_in_start(&mut self, in_start: bool) {
+        self.state.in_start = u32::from(in_start);
+        self.was_in_start = in_start;
+    }
+    /// The landing tick of a flight (core `Game::flight_landing`): a start the flight armed carries over the landing
+    /// only if the landing spot is still in that start zone (website timer.ts update). The landing can move the player
+    /// up to 100 units (FindPassableSpace), and that is not a crossing of the start: nothing starts until a later entry
+    /// into the start zone without flying, and an exit.
+    fn disarm_relocated_landing(&mut self, landing: Option<([f32; 3], bool)>) {
+        let Some((position, crouched)) = landing else { return };
+        if self.state.status != 0 || !self.armed {
+            return;
+        }
+        if self.touching(position, crouched, 0, Some(self.state.track)).is_none() {
+            self.armed = false;
+            self.set_in_start(false);
+            self.state.pending_start = 0;
+        }
     }
     fn touching(
         &self,
@@ -229,6 +271,8 @@ impl Timer {
         s.measured_jumps = 0;
         s.last_perfect_tick = -1;
         s.split_count = 0;
+        s.sync_percent = 0.0;
+        s.perf_percent = 0.0;
         self.last_side = 0;
         self.splits.clear();
         self.start_crossing = Crossing::boundary(0);
@@ -326,17 +370,33 @@ impl Timer {
     pub fn update(&mut self, cmd: BhCmd, s: BhState) -> Option<[f32; 3]> {
         self.update_observed(cmd, s, None)
     }
+    /// A flight's landing tick (`EVENT_FLIGHT_LANDED`) with the spot the core reported, for tests without a core.
+    #[cfg(test)]
+    pub fn update_landed(&mut self, cmd: BhCmd, s: BhState, landing: ([f32; 3], bool)) -> Option<[f32; 3]> {
+        self.update_landing(cmd, s, None, Some(landing))
+    }
     pub fn update_observed(
         &mut self,
         cmd: BhCmd,
         s: BhState,
         game: Option<&bunnyhop_core::Game>,
     ) -> Option<[f32; 3]> {
-        let from = self.prev_position;
+        self.update_landing(cmd, s, game, game.and_then(bunnyhop_core::Game::flight_landing))
+    }
+    fn update_landing(
+        &mut self,
+        cmd: BhCmd,
+        s: BhState,
+        game: Option<&bunnyhop_core::Game>,
+        landing: Option<([f32; 3], bool)>,
+    ) -> Option<[f32; 3]> {
+        // A flight's landing moved the player before this tick's step: the step's movement begins at the landing spot.
+        let from = landing.map(|(position, _)| position).or(self.prev_position);
         self.prev_position = Some(s.position);
         let events = s.events;
         self.state.last_tick = s.tick;
         self.state.update_flags = 0;
+        self.disarm_relocated_landing(landing);
         if s.on_ladder != 0 || events & (EVENT_JUMPED | EVENT_TELEPORTED | EVENT_RESPAWNED) != 0 {
             self.state.last_perfect_tick = -1;
         }
@@ -684,6 +744,16 @@ mod tests {
         assert_eq!(t.state.status, 0);
     }
     #[test]
+    fn rules4_blocks_prehops_on_listed_maps_in_every_style() {
+        assert!(blocks_prehops("scroll", "bhop_eazy", 1));
+        assert!(!blocks_prehops("autohop", "bhop_futile", 3));
+        for style in crate::styles::IDS {
+            assert!(blocks_prehops(style, "bhop_futile", 4), "{style}");
+        }
+        assert!(!blocks_prehops("autohop", "bhop_eazy", 4));
+        assert!(!blocks_prehops("autohop", "bhop_futile_v2", 4));
+    }
+    #[test]
     fn rules3_prespeed_cap_leaves_a_booster_alone() {
         let timer_with = |rules| {
             Timer::new(
@@ -855,3 +925,6 @@ mod tests {
         assert!(!z.contains([-16.0, 0.0, -62.0], true));
     }
 }
+#[cfg(test)]
+#[path = "run_flight_tests.rs"]
+mod flight_tests;

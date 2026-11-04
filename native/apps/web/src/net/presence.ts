@@ -30,6 +30,48 @@ export function onRoomPresence(l: (r: RoomPresence | null) => void): () => void 
   return () => listeners.delete(l);
 }
 
+// The room's announcement of a run goes first, then the WR / PB voice. The room plays the voice with its chat line
+// (net/mp.ts announce), and the submission poller (online.ts trackVerdict) could see the verdict first: for a run sent
+// from a room it waits for the room's line, up to ROOM_LINE_WAIT_MS (a room that doesn't announce it, or is slow).
+
+/** How long a room run's verdict voice waits for the room's line. */
+export const ROOM_LINE_WAIT_MS = 3000;
+const ROOM_LINES_KEPT = 64;
+const roomLines: string[] = [];
+const lineWaiters = new Map<string, Set<() => void>>();
+
+/** net/mp.ts: the room's chat line for run `runId` is on screen. */
+export function roomLineShown(runId: string): void {
+  if (!roomLines.includes(runId)) {
+    roomLines.push(runId);
+    if (roomLines.length > ROOM_LINES_KEPT) roomLines.shift();
+  }
+  const w = lineWaiters.get(runId);
+  lineWaiters.delete(runId);
+  for (const f of w ?? []) f();
+}
+
+/**
+ * Plays a verified run's voice (`play`) once the room has shown its line, or after `waitMs` without one. At once for a
+ * run sent outside a room (`room` null), or when this page has left the room since.
+ */
+export function voiceAfterRoomLine(runId: string, room: string | null, play: () => void, waitMs = ROOM_LINE_WAIT_MS): void {
+  if (!room || currentRoom() !== room || roomLines.includes(runId)) return play();
+  let done = false;
+  const go = () => {
+    if (done) return;
+    done = true;
+    clearTimeout(timer);
+    lineWaiters.get(runId)?.delete(go);
+    if (!lineWaiters.get(runId)?.size) lineWaiters.delete(runId);
+    play();
+  };
+  const timer = setTimeout(go, waitMs);
+  const set = lineWaiters.get(runId) ?? new Set();
+  set.add(go);
+  lineWaiters.set(runId, set);
+}
+
 /** A finished run's board, for the race tag. */
 export interface RunBoard {
   map: string;

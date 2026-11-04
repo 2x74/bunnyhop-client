@@ -25,7 +25,7 @@
 //! - Shots: one line trace from the eye along the view with `CS_MASK_SHOOT` (MASK_SOLID | DEBRIS), the weapon's range;
 //!   damage `damage * pellets * rangeModifier ^ (distance / 500)`. No spread, recoil or penetration (deterministic;
 //!   shotgun pellets follow the centre line). Cycle times, clip sizes and reload times from the CS:S weapon scripts;
-//!   reserve ammo is infinite. Pistols fire once per click (`m_iShotsFired`); the others repeat while held. An empty
+//!   reserve ammo is infinite (v24: the clip too, `infinite_clip`). Pistols fire once per click (`m_iShotsFired`); the others repeat while held. An empty
 //!   clip dry-fires while attack is held and reloads itself once both attack buttons are released
 //!   (`ReloadOrSwitchWeapons`). Shotguns load shell by shell; a shot interrupts that once a shell is in. The Glock and
 //!   the FAMAS toggle burst mode on +attack2 (3 rounds 0.1 s apart, the next burst 0.5 s later, also while held).
@@ -883,6 +883,11 @@ impl Game {
         }
     }
 
+    /// Physics v24: shots don't use up the clip (`fire_bullet`).
+    pub(super) fn infinite_clip(&self) -> bool {
+        (PHYSICS_V24..=PHYSICS_LATEST).contains(&self.settings.physics_version)
+    }
+
     /// CKnife::SwingOrStab.
     fn knife_attack(&mut self, cmd: Cmd) {
         let stab = cmd.buttons & IN_ATTACK2 != 0;
@@ -911,8 +916,13 @@ impl Game {
 
     /// CCSPlayer::FireBullet: one trace for the whole shot (no spread or penetration).
     fn fire_bullet(&mut self, cmd: Cmd, gun: &Gun, slot: u8) {
-        if let Some(h) = self.arms.slot_mut(slot) {
-            h.clip = h.clip.saturating_sub(1);
+        // v24: bhoptimer's `shavit_misc_weaponcommands 5`-style infinite clip: a shot never takes a round, so the clip stays
+        // full, no reload or dry fire ever starts and shoot-to-boost maps never wait. Before v24 the clip empties and reloads
+        // (`weaponcommands 2`, infinite reserve only).
+        if !self.infinite_clip() {
+            if let Some(h) = self.arms.slot_mut(slot) {
+                h.clip = h.clip.saturating_sub(1);
+            }
         }
         let (eye, forward) = self.eye_and_forward(cmd);
         let end = [eye[0] + forward[0] * gun.range, eye[1] + forward[1] * gun.range, eye[2] + forward[2] * gun.range];

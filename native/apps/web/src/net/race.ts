@@ -258,17 +258,23 @@ export class RaceUi {
     });
   }
 
-  /** Menu 3: the style (main track). */
-  private pickStyle(p: { slot: number; name: string }): void {
+  /** Menu 3: the style (main track), seven a page like the nominate menu: a numbered menu has keys 1-9 only. */
+  private pickStyle(p: { slot: number; name: string }, page = 0): void {
     const cur = this.o.selectedStyle();
-    // (Not Segmented: races are in rooms, where checkpoints don't work.)
+    // (Not Segmented: a race is decided by real time since GO, and checkpoint loads rewind the run's clock.)
     const styles = STYLE_DEFS.filter((d) => !d.segmented);
+    const per = 7;
+    const pages = Math.max(1, Math.ceil(styles.length / per));
+    const slice = styles.slice(page * per, page * per + per);
+    const items = slice.map((d) => ({ label: d.name, detail: d.id === cur ? "yours" : "", selected: d.id === cur }));
+    if (pages > 1) items.push({ label: "More…", detail: `${page + 1}/${pages}`, selected: false });
     this.o.menu.show("race", {
       title: `Race ${p.name}: style`,
-      items: styles.map((d) => ({ label: d.name, detail: d.id === cur ? "yours" : "", selected: d.id === cur })),
+      items,
       onPick: (i) => {
+        if (i >= slice.length) return this.pickStyle(p, (page + 1) % pages);
         this.o.menu.hide("race");
-        this.send(p.slot, styles[i].id, 0);
+        this.send(p.slot, slice[i].id, 0);
       },
     });
   }

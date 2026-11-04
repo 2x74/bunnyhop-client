@@ -292,7 +292,8 @@ export class RemotePlayers {
         const rt = remoteTime(p, now);
         const style = styleAt(p.meta?.style ?? -1) ?? p.info.style;
         const styleTag = style !== "autohop" ? `${styleDef(style)?.short ?? style} · ` : "";
-        const time = !rt ? "" : rt.status === TIMER_RUNNING || rt.status === TIMER_FINISHED ? styleTag + formatTime(rt.seconds) : rt.status === TIMER_START ? `${styleTag}start` : styleTag.replace(/ · $/, "");
+        // A practice attempt (roster `practice`, 0.0.36): its time isn't a run, so the tag says practice instead.
+        const time = p.info.practice ? `${styleTag}practice` : !rt ? "" : rt.status === TIMER_RUNNING || rt.status === TIMER_FINISHED ? styleTag + formatTime(rt.seconds) : rt.status === TIMER_START ? `${styleTag}start` : styleTag.replace(/ · $/, "");
         // Staff shield / Verified / Creator / Booster marks: from the room's roster, never from the client.
         tag.set(p.info.name, time, null, false, p.info);
       }

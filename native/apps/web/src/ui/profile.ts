@@ -38,9 +38,9 @@ import { prefs } from "./settings";
 import { mouseProfileEditor, mouseProfileStats } from "./mouse-profile";
 import { accountGeneration, profileFor, refreshMyProfile } from "./account-state";
 import { countryPicker } from "./country-picker";
-import { api, ApiError, ApiUnavailable, lastKnownMe, type PlayerGauntlets, type PointsRecord, type Profile, type RunCard } from "../api";
+import { api, ApiError, ApiUnavailable, lastKnownMe, type PlayerGauntlets, type PointsPage, type Profile, type RunCard } from "../api";
 import { COSMETICS, supporterItem, type CosmeticChoice } from "../progression";
-import { fmtPoints } from "../ranking";
+import { fmtPoints, rankGroupById } from "../ranking";
 import { styleLabel } from "../styles";
 import { formatTime } from "../timer";
 import { trackName } from "../zones";
@@ -144,7 +144,7 @@ function offlineLoadout(root: HTMLElement, tabs: HTMLElement, open: ProfileOpen)
  */
 interface EarlyReads {
   id: string;
-  points?: Promise<{ scope: string; records: PointsRecord[] }>;
+  points?: Promise<PointsPage>;
   gauntlets?: Promise<PlayerGauntlets>;
   stats?: Promise<PlayerStats>;
   runs?: Promise<{ total: number; runs: RunCard[] }>;
@@ -355,6 +355,10 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
         },
         onPreview: (patch) => {
           cardPreview = patch;
+          if (!cardRaf) cardRaf = requestAnimationFrame(drawCard);
+        },
+        onRankColor: (hex) => {
+          p.rank.group.color = hex ?? rankGroupById(p.rank.group.id).color;
           if (!cardRaf) cardRaf = requestAnimationFrame(drawCard);
         },
         done: () => setEditing(false),

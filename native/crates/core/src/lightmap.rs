@@ -95,8 +95,8 @@ fn encode(linear: f32, hdr: bool) -> u8 {
 }
 
 pub fn build(bsp: &Bsp, faces: &[Face], texinfo: &[TextureInfo]) -> Built {
-    // Faces index both lumps with the same offsets (VRAD lays them out identically); a differently sized HDR lump
-    // would not match them, so it is only used when the sizes agree or it's the only one.
+    // A differently sized HDR lump would not match the faces, so it is only used when the sizes agree or it's the
+    // only one.
     let ldr: &[LightSample] = crate::lump!(bsp, playsrc_bsp::LIGHTING, Lighting);
     let hdr_lump: &[LightSample] = crate::lump!(bsp, playsrc_bsp::LIGHTING_HDR, Lighting);
     let mut hdr = !hdr_lump.is_empty() && (ldr.is_empty() || hdr_lump.len() == ldr.len());
@@ -114,13 +114,21 @@ pub fn build(bsp: &Bsp, faces: &[Face], texinfo: &[TextureInfo]) -> Built {
         &[]
     };
 
+    // The HDR lump is indexed by the HDR face lump's offsets and styles (the engine draws HDR with LUMP_FACES_HDR).
+    // They usually equal the LDR faces', but an HDR-only compile (empty LDR lighting: bhop_2_S4RO, bhop_alt_jestas,
+    // bhop_dust_temple, bhop_mourning) leaves every LDR face at offset 0 with styles 0, which drew one face's luxels
+    // across the whole map. Geometry and luxel sizes are the same in both lumps.
+    let hdr_faces: &[Face] = crate::lump!(bsp, playsrc_bsp::FACES_HDR, Faces);
+    let light_faces = if hdr && hdr_faces.len() == faces.len() { hdr_faces } else { faces };
+
     // (face index, luxel width, luxel height, first sample)
     let mut items: Vec<(usize, u32, u32, usize)> = Vec::new();
-    for (fi, f) in faces.iter().enumerate() {
+    for (fi, (f, lf)) in faces.iter().zip(light_faces).enumerate() {
         let Some(ti) = texinfo.get(f.texture_info_index.max(0) as usize) else { continue };
-        if f.texture_info_index < 0 || ti.flags & SURF_NOLIGHT != 0 || f.light_offset < 0 || f.styles[0] == 255 {
+        if f.texture_info_index < 0 || ti.flags & SURF_NOLIGHT != 0 || lf.light_offset < 0 || lf.styles[0] == 255 {
             continue;
         }
+        let f = lf;
         let (w, h) = (f.lightmap_size[0] + 1, f.lightmap_size[1] + 1);
         if w <= 0 || h <= 0 || w > 1024 || h > 1024 {
             continue;

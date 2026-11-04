@@ -231,7 +231,8 @@ void test_practice_takeover() {
     const auto path = fixture.record("practice.bhr", true, true);
     const auto info = fixture.header(path);
     check(bh_replay_load(fixture.core.get(), native::data_location::utf8(path).c_str()), fixture.core.get());
-    for (int rejection = 0; rejection < 4; ++rejection) {
+    // A gauntlet, another style, changed zones. Rooms allow practice.
+    for (int rejection : {0, 2, 3}) {
         bool rejected = false;
         auto zones = fixture.zones;
         if (rejection == 3) {
@@ -239,13 +240,7 @@ void test_practice_takeover() {
         }
         try {
             native::ReplayTakeover::take(
-                    fixture.core.get(),
-                    info,
-                    zones,
-                    rejection == 2 ? "legit" : "autohop",
-                    rejection == 0,
-                    rejection == 1,
-                    10
+                    fixture.core.get(), info, zones, rejection == 2 ? "legit" : "autohop", rejection == 0, 10
             );
         } catch (const std::exception &) {
             rejected = true;
@@ -257,8 +252,7 @@ void test_practice_takeover() {
     }
     BhSnapshot expected{};
     check(bh_replay_seek(fixture.core.get(), 20, &expected), fixture.core.get());
-    const auto takeover =
-            native::ReplayTakeover::take(fixture.core.get(), info, fixture.zones, "autohop", false, false, 20);
+    const auto takeover = native::ReplayTakeover::take(fixture.core.get(), info, fixture.zones, "autohop", false, 20);
     assert(std::memcmp(&takeover.snapshot, &expected, sizeof(expected)) == 0);
     native::Practice practice;
     native::Input input;
@@ -283,8 +277,7 @@ void test_practice_takeover() {
     practice.restart();
     assert(!practice.active);
     check(bh_replay_load(fixture.core.get(), native::data_location::utf8(path).c_str()), fixture.core.get());
-    const auto spawn =
-            native::ReplayTakeover::take(fixture.core.get(), info, fixture.zones, "autohop", false, false, 0);
+    const auto spawn = native::ReplayTakeover::take(fixture.core.get(), info, fixture.zones, "autohop", false, 0);
     assert(spawn.snapshot.player.tick == 0 && spawn.view.yaw == 0);
 }
 
@@ -294,7 +287,7 @@ void test_practice_rejection_replies() {
     const auto original = fixture.header(path);
     check(bh_replay_load(fixture.core.get(), native::data_location::utf8(path).c_str()), fixture.core.get());
     const std::string older = "That replay is from an older version of the game, so it can only be watched.";
-    for (int reason = 0; reason < 7; ++reason) {
+    for (int reason = 0; reason < 6; ++reason) {
         auto info = original;
         const auto selected = reason == 1 ? "legit" : "autohop";
         const auto map = reason == 0 ? "other-map" : "fixture";
@@ -306,11 +299,8 @@ void test_practice_rejection_replies() {
         if (reason == 4) info["settings"]["gravity"] = 400;
         if (reason >= 2 && reason <= 4) expected = older;
         if (reason == 5) expected = "No practice during a gauntlet.";
-        if (reason == 6) expected = "Practice is for solo play, not servers.";
         try {
-            native::ReplayTakeover::take(
-                    fixture.core.get(), info, fixture.zones, selected, reason == 5, reason == 6, 10, map
-            );
+            native::ReplayTakeover::take(fixture.core.get(), info, fixture.zones, selected, reason == 5, 10, map);
             assert(false);
         } catch (const std::exception &failure) {
             assert(failure.what() == expected);
@@ -523,7 +513,7 @@ void test_bonus_takeover_uses_normal_style() {
     const auto session = native::ReplaySession::open(fixture.core.get(), path);
     assert(session.info.at("track") == 1);
     const auto takeover =
-            native::ReplayTakeover::take(fixture.core.get(), session.info, fixture.zones, "legit", false, false, 0);
+            native::ReplayTakeover::take(fixture.core.get(), session.info, fixture.zones, "legit", false, 0);
     assert(takeover.track == 1 && takeover.style == "autohop");
 }
 

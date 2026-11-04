@@ -11,7 +11,7 @@ import { keepRunOffer } from "./ui/keep-run";
 
 import * as THREE from "three";
 import { clientResultSettled, saveClientRun, type ClientRunSummary } from "./client-bridge";
-import { EVENT_JUMPED, EVENT_TELEPORTED, applyRestartPoint, restartPoint, withRestoredState, type Core, type PlayerState, type RestartPoint, type Settings } from "./core";
+import { EVENT_FLIGHT, EVENT_JUMPED, EVENT_TELEPORTED, IN_FLIGHT, applyRestartPoint, restartPoint, withRestoredState, type Core, type PlayerState, type RestartPoint, type Settings } from "./core";
 import { GhostManager } from "./ghost";
 import { formatDelta, Hud, type SubmissionView } from "./hud";
 import type { UserCmd, Input } from "./input";
@@ -25,7 +25,7 @@ import { decodeReplay, encodeReplay, ReplayRecorder, replayFileName, replayStyle
 import { isSegmented, nextStyle, StyleFilter, strafeKeys, styleDef, styleForTrack, styleLabel, stylePrespeedCap, styleSettings, styleStartReentryCap, type StyleDef, type StyleId } from "./styles";
 import { onStyleChange, setSelectedStyle } from "./ui/style-picker";
 import { afterStep, beforeStep, checkpointMatches, FRAME_STRIDE, frameFlags, makeTimer, quantize, simulate } from "./sim";
-import { EVENT_RESPAWNED, formatTime, RunTimer, type Split, type TickCmd } from "./timer";
+import { blocksPrehops, EVENT_RESPAWNED, formatTime, RunTimer, type Split, type TickCmd } from "./timer";
 import { ZoneEditor, ZoneView } from "./zone-editor";
 import { zoneWarningToast } from "./zone-warning";
 import { loadZones, nextTrack, parseZoneSet, touching, trackName, tracksOf, zonesEqual, type ZoneSet, zoneSetToJson } from "./zones";
@@ -42,7 +42,7 @@ import { checkStartPoint, clearPracticeSpawns, clearStartPoint, loadStartPoint, 
 import { getHeldLoadout, getOutfit, knownOutfitUnlocks } from "./player/cosmetics";
 import { cosmetic } from "./progression";
 import { withTimeout } from "./content/fetch";
-import { reportRun, RunWatch, SelfCheck, type RunPlay } from "./selfcheck";
+import { pitchPlay, reportRun, RunWatch, SelfCheck, type RunPlay } from "./selfcheck";
 import { RunClock } from "./run-clock";
 import { AttemptCounter, type AttemptClaim } from "./attempts";
 import { mapTime, type MapTimes } from "./map-time";
@@ -54,6 +54,7 @@ import { loadTimer, type TimerSnapshot } from "./practice-mode/checkpoints";
 import { SegmentLog, type SegmentMark } from "./practice-mode/segments";
 import { LiveSsj, ssjChat } from "./ssj";
 import { LiveMovementStats } from "./movement-stats";
+import { neutralCommand } from "./freecam";
 
 export interface SessionInit {
   core: Core;
@@ -151,6 +152,16 @@ export class RunSession {
   private prac = new PracticeAttempt();
   /** Noclip is on (practice-mode/controller.ts): the HUD's Practice line says so. */
   practiceNoclip = false;
+  /**
+   * Infinite's noclip is on (practice-mode/controller.ts): every command carries IN_FLIGHT and the core flies it
+   * (crates/core game/flight.rs). Recorded like any command, so the attempt stays a real run (timer.ts flightTick keeps
+   * the flight out of the timed part). Off on every reset.
+   */
+  flightOn = false;
+  /** The core flew the last tick (EVENT_FLIGHT). Can stay on a little after flightOn goes off: a landing inside a wall
+   * keeps flying until there's room. */
+  flying = false;
+  private flightStuckSaid = false;
   /** A practice attempt (a tool, not practice mode) back in a start zone says it's still practice, once (afterStep). */
   private practiceStartHint: "off" | "armed" | "said" = "off";
   /** The pause menu's Practice item (main.ts sets it where practice mode is available). */
@@ -175,6 +186,12 @@ export class RunSession {
   modeLock: string | null = null;
   /** Set from the actual multiplayer controller, independent of URL parameters. */
   multiplayer = false;
+  /**
+   * Freecam is on (main.ts, freecam.ts): the HUD line under the crosshair ("Freecam · 500 u/s · !freecam to go back"),
+   * and command() feeds the sim only neutral commands. The attempt's ranked state is untouched: a freecam stretch is a
+   * player letting go of everything.
+   */
+  freecam: string | null = null;
   private clientResult = 0;
   /**
    * The debug hook (window.__bunnyhop: scripted commands, zone overrides) was opted into outside the dev server: every
@@ -202,7 +219,7 @@ export class RunSession {
     this.runDef = styleDef(o.style);
     this.settings = styleSettings(o.style);
     this.styleFilter = new StyleFilter(this.runDef, this.settings.physics);
-    this.timer = makeTimer([], this.settings, stylePrespeedCap(o.style), this.runDef);
+    this.timer = makeTimer([], this.settings, stylePrespeedCap(o.style), this.runDef, undefined, o.map);
     o.scene.add(this.view.root);
   }
 
@@ -335,8 +352,8 @@ export class RunSession {
     let c: TickCmd;
     {
       // Standing in a start zone whose track runs in another style (a bonus while W-Only is selected, or back on the
-      // main track after a bonus): restart right here in that track's style.
-      if (this.timer.inStart && styleForTrack(this.selectedStyle, this.timer.track) !== this.runStyle) {
+      // main track after a bonus): restart right here in that track's style. Not while flying through one (Infinite).
+      if (this.timer.inStart && !this.flying && styleForTrack(this.selectedStyle, this.timer.track) !== this.runStyle) {
         const active = this.o.input.samplerState !== null;
         const restarted = this.switchTrackStyle(active ? sample.yaw : this.o.input.yaw);
         if (active && restarted) return sample; // applyTick discards it; do not run beforeStep on the new world.
@@ -344,7 +361,14 @@ export class RunSession {
       if (this.script.length) {
         c = this.script.shift()!;
         this.scripted = true;
-      } else c = quantize(sample.forwardmove, sample.sidemove, sample.yaw, sample.pitch, sample.buttons);
+      } else {
+        // Freecam: whatever the caller built, the body gets no keys or buttons (freecam.ts R1; main.ts already sends
+        // the neutral command, this keeps any other path from feeding keys).
+        if (this.freecam !== null) sample = neutralCommand(sample);
+        c = quantize(sample.forwardmove, sample.sidemove, sample.yaw, sample.pitch, sample.buttons);
+        // Infinite flight: the bit rides in the recorded command (before the style filter, which keeps it).
+        if (this.flightOn) c = { ...c, buttons: (c.buttons | IN_FLIGHT) >>> 0 };
+      }
       c = this.styleFilter.apply(c, this.o.core.state());
       beforeStep(this.o.core, this.timer, c);
     }
@@ -371,7 +395,7 @@ export class RunSession {
     this.runDef = styleDef(style);
     this.settings = styleSettings(style);
     this.styleFilter = new StyleFilter(this.runDef, this.settings.physics);
-    this.timer.options = { ...this.timer.options, prespeedCap: stylePrespeedCap(style), blockPrehops: style === "scroll", strafeKeys: strafeKeys(this.runDef), startReentryCap: styleStartReentryCap(style) };
+    this.timer.options = { ...this.timer.options, prespeedCap: stylePrespeedCap(style), blockPrehops: blocksPrehops(style, this.o.map, this.timer.rules), strafeKeys: strafeKeys(this.runDef), startReentryCap: styleStartReentryCap(style) };
   }
 
   /** HUD map line: "map · W-Only · 100 tick", or "map · Bonus 1 · Normal" on a bonus track. */
@@ -541,17 +565,20 @@ export class RunSession {
     const ssjAt = { inStart: t.inStart, time: t.status === "running" ? t.ticks() * t.tickInterval : null };
     const measured = t.measuredJumps, perfect = t.perfectJumps;
     const { state, update } = afterStep(this.o.core, this.timer, cmd, events);
+    this.afterFlight(events);
+    const flying = this.flying;
     if (update.started || update.restarted) announcerPolicy.resetAttempt();
     const measuredHop = t.measuredJumps > measured ? t.perfectJumps > perfect : null;
     const scroll = this.runStyle === "scroll" || this.runStyle === "legit";
-    const broken = this.unranked || state.onLadder || !!(events & (EVENT_TELEPORTED | EVENT_RESPAWNED)) || t.status !== "running";
+    const broken = this.unranked || flying || state.onLadder || !!(events & (EVENT_TELEPORTED | EVENT_RESPAWNED)) || t.status !== "running";
     const cue = announcerPolicy.tick(prefs.get().audio.announcer, Math.sqrt(state.velocity[0] ** 2 + state.velocity[1] ** 2), scroll ? measuredHop : null, state.grounded, t.tickInterval, broken);
     if (cue && !broken) announce(cue);
     if (scroll && measuredHop && !broken && prefs.get().audio.perfectTick) sfx("split", 0.12, 1.5);
     if (update.started) this.runMouse.feed(mouseFromPrefs(prefs.get()), false);
-    this.ssj.feed(cmd, state, events, ssjAt);
-    this.movementStats.feed(cmd, state, events, t, { map: this.o.map, style: this.runStyle, track: t.track, practice: this.unranked });
-    this.hud.tick(cmd, state, events, { settings: this.settings, style: this.runStyle }); // HUD: keys overlay / speed graph / jump stats see exactly the simulated command
+    this.ssj.feed(cmd, state, events, flying ? { inStart: false, time: null, noclip: true } : ssjAt);
+    if (flying) this.movementStats.reset(state);
+    else this.movementStats.feed(cmd, state, events, t, { map: this.o.map, style: this.runStyle, track: t.track, practice: this.unranked });
+    this.hud.tick(cmd, state, events, flying ? { settings: this.settings, style: this.runStyle, noclip: true } : { settings: this.settings, style: this.runStyle }); // HUD: keys overlay / speed graph / jump stats see exactly the simulated command
     if (!this.experimentalInput) {
       this.recorder.push(cmd.forward, cmd.side, cmd.yaw, cmd.pitch, cmd.buttons, u.look ?? null);
       if (u.nullBinds) this.recorder.nullBinds = true; // header.nullBinds: the anticheat expects instant key switches
@@ -577,7 +604,7 @@ export class RunSession {
       if (!atStart) this.practiceStartHint = "armed";
       else if (this.practiceStartHint === "armed") {
         this.practiceStartHint = "said";
-        this.hud.toast(practiceStartLine(restartKey()), 4000, "practice");
+        this.hud.toast(practiceStartLine(restartKey(), this.prac.tool), 4000, "practice");
       }
     }
     if (update.started) {
@@ -610,6 +637,17 @@ export class RunSession {
       void this.finish(state);
     }
     return state;
+  }
+
+  /** After a step: whether the core flew it (Infinite noclip), and one line when a landing is stuck in a wall. */
+  private afterFlight(events: number): void {
+    this.flying = (events & EVENT_FLIGHT) !== 0;
+    if (this.flying) this.prac.flew(); // (a start point set after a flight is a practice spawn)
+    if (!this.flying || this.flightOn) this.flightStuckSaid = false;
+    else if (!this.flightStuckSaid) {
+      this.flightStuckSaid = true;
+      this.hud.toast("You're inside a wall. Fly out of it to land.", 4000, "practice", "bad");
+    }
   }
 
   /**
@@ -723,6 +761,7 @@ export class RunSession {
     this.clientResult++;
     this.attempt++;
     this.lessonPractice = this.scripted = this.freeGun = false;
+    this.flightOn = this.flying = this.flightStuckSaid = false; // (the core reset ended any flight)
     // A fresh recording from a core reset: the only way back from a practice attempt (attempt.ts).
     if (this.prac.reset()) this.attempts.practiceExit(this.o.map);
     this.practiceStartHint = "off";
@@ -900,6 +939,7 @@ export class RunSession {
       ...(cap ? { frameCap: cap } : {}),
       ...(turned ? { turn: { yawSpeed: t.yawSpeed, angleSpeedKey: t.angleSpeedKey } } : {}),
       ...(pollHz ? { pollHz } : {}),
+      ...pitchPlay(this.o.input.settings),
     };
   }
 
@@ -965,7 +1005,7 @@ export class RunSession {
   practiceUse(tool: PracticeUse): void {
     const flipped = this.prac.use(tool);
     this.clock.stop();
-    if (flipped && this.o.map !== TUTORIAL_MAP) this.hud.toast(practiceFlipLine(this.timer.status === "running", restartKey()), 5000, "practice");
+    if (flipped && this.o.map !== TUTORIAL_MAP) this.hud.toast(practiceFlipLine(this.timer.status === "running", restartKey(), tool), 5000, "practice");
   }
 
   /**
@@ -1024,6 +1064,16 @@ export class RunSession {
     const n = this.recorder.length;
     if (this.segLog.length !== n || this.o.core.state().tick !== n) return null;
     return this.segLog.mark({ nullBinds: this.recorder.nullBinds, timedInput: this.recorder.timedInput, wRelease: this.recorder.wRelease, turnSpeed: this.recorder.turnSpeed });
+  }
+
+  /** About how much memory the Segmented paths of the kept checkpoints take (practice-mode/checkpoints.ts budget). */
+  get segmentBytes(): number {
+    return this.segLog.retainedBytes;
+  }
+
+  /** A checkpoint holding `m` is gone. */
+  segmentDrop(m: SegmentMark): void {
+    this.segLog.drop(m);
   }
 
   /** The checkpoint's Segmented path can still be rebuilt here (its history wasn't dropped). */
@@ -1094,8 +1144,12 @@ export class RunSession {
     // The Practice line under the crosshair and the yellow timer, whenever this attempt won't count (not on the
     // tutorial: its lessons are practice and its coach does the talking). Cheap when unchanged.
     const loads = this.segmentLoads;
-    if (this.segmenting) this.hud.setPractice(`Segmented${loads ? ` · ${loads} load${loads === 1 ? "" : "s"}` : ""}`, true);
-    else this.hud.setPractice(this.unranked && this.o.map !== TUTORIAL_MAP ? (this.practiceNoclip ? "Practice · noclip" : "Practice") : null, false, this.onPracticeSpawn ? practiceSpawnLine(clearStartKey()) : null);
+    // Freecam takes the line while it's on; a run that counts keeps a quiet line (no yellow timer).
+    if (this.freecam !== null) this.hud.setPractice(this.freecam, !(this.unranked && this.o.map !== TUTORIAL_MAP));
+    else if (this.segmenting) this.hud.setPractice(`Segmented${loads ? ` · ${loads} load${loads === 1 ? "" : "s"}` : ""}`, true);
+    // Infinite's noclip counts (the flight is recorded and simulated): a quiet line while flying.
+    else if (this.flying && !this.unranked) this.hud.setPractice("Noclip", true);
+    else this.hud.setPractice(this.unranked && this.o.map !== TUTORIAL_MAP ? (this.practiceNoclip || this.flying ? "Practice · noclip" : "Practice") : null, false, this.onPracticeSpawn ? practiceSpawnLine(clearStartKey()) : null);
     const pb = getPB(this.o.map, this.styleFor(t.track), t.track);
     const splitTotal = t.splitTotal();
     const lastSplit = t.splits[t.splits.length - 1];

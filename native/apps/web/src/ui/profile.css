@@ -67,7 +67,9 @@ body.potato .pc { transform: none; }
 .pc-stats > div { background: rgba(0, 0, 0, 0.28); border-radius: calc(10 * var(--u)); padding: calc(10 * var(--u)) calc(14 * var(--u)); min-width: 0; }
 .pc-stats small { font-size: calc(15 * var(--u)); color: var(--faint); font-weight: 550; }
 .pc-rank { display: flex; flex-direction: column; gap: calc(3 * var(--u)); }
-.pc-group { font-size: calc(30 * var(--u)); font-weight: 850; color: var(--rank); line-height: 1.05; letter-spacing: -0.02em; }
+.pc-group { font-size: calc(30 * var(--u)); font-weight: 850; color: var(--rank); line-height: 1.05; letter-spacing: -0.02em; white-space: nowrap; }
+/* Two-word and long titles (Number One with its crown, Grandmaster) on one line. */
+.pc-group.long { font-size: calc(24 * var(--u)); }
 .pc-rank-line { font-size: calc(16 * var(--u)); color: var(--text); }
 .pc-points { font-size: calc(15 * var(--u)); color: var(--dim); }
 .pc-bars { display: grid; grid-template-columns: repeat(7, 1fr); gap: calc(8 * var(--u)); margin-top: calc(6 * var(--u)); }
@@ -466,6 +468,7 @@ button.pf-count:focus-visible { outline: none; box-shadow: var(--ring); border-r
 
 /* Edit card → Badges: "Show booster badge" under the grid (ui/card-editor.ts boosterSwitch). */
 .ce-booster { display: flex; align-items: center; gap: 0.8rem; margin-top: 0.75rem; }
+.ce-booster.ce-rank-row { margin: 0.25rem 0 0.75rem; }
 .ce-booster .acct-toggle { color: var(--text); }
 
 /* Customise → Links (ui/card-editor.ts linksEditor). */
@@ -522,7 +525,10 @@ button.pf-count:focus-visible { outline: none; box-shadow: var(--ring); border-r
 /* Top points (ui/profile-points.ts): run rows with place and two numbers. */
 .pf-pts .pf-seg { margin-bottom: 0.5rem; }
 @container (max-width: 34rem) { .pf-run, .pf-run.mini { --cols: minmax(0, 1fr) 5rem 4.2rem auto; } }
-.pf-pts-row { --cols: minmax(0, 1fr) 4.2rem 4.2rem 4.2rem; }
+.pf-pts-row { --cols: minmax(0, 1fr) 4.2rem 4.2rem 4.2rem 4.2rem; }
 .pf-pts-row .pf-run-pts { display: block; }
+.pf-pts-row .pf-pts-max { color: var(--cream-3); }
+.pf-pts-more { display: block; margin: 0.5rem auto 0; font-size: var(--fs-sm); }
+.pf-pts-more[hidden] { display: none; }
 .pf-pts-row.pf-run-head, .pf-pts-row.pf-run-head:hover { position: static; background: none; }
 .pf-pts-row .pf-pts-counted { color: var(--cream); font-weight: 650; }

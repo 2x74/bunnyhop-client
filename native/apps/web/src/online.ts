@@ -9,7 +9,7 @@ import { forgetBoards } from "./shared-reads";
 import { announce, rankGroupImproved } from "./audio";
 import { celebrate } from "./ui/unlocks";
 import { RANK_GROUPS } from "./ranking";
-import { currentRace, currentRoom } from "./net/presence";
+import { currentRace, currentRoom, voiceAfterRoomLine } from "./net/presence";
 import { currentGauntlet, heldByGauntlet } from "./gauntlet/state";
 import type { SubmissionView } from "./hud";
 import { noteSubmittedRun } from "./feedback/state";
@@ -63,8 +63,9 @@ export async function submitAndTrack(
   const gauntlet = currentGauntlet(run);
   const stored = run ? await keepUntilUploaded(bytes, { ...run, gauntlet }) : null;
   let sub: Submission;
+  const room = currentRoom();
   try {
-    sub = await api.submitRun(bytes, { room: currentRoom(), race: currentRace(run), gauntlet, beats: run?.beats, mouse: run?.mouse });
+    sub = await api.submitRun(bytes, { room, race: currentRace(run), gauntlet, beats: run?.beats, mouse: run?.mouse });
   } catch {
     if (!stored) {
       onStatus({ status: "error", reason: "leaderboard offline" });
@@ -86,11 +87,14 @@ export async function submitAndTrack(
   onStatus(sub);
   noteSubmittedRun(sub.id); // the feedback form attaches it
   if (sub.status === "rejected" && !sub.id) return sub; // refused at upload (e.g. unranked map); card explains
-  return trackVerdict(sub, onStatus, notify);
+  return trackVerdict(sub, onStatus, notify, room);
 }
 
-/** Polls a submission until it has a verdict (or POLL_GIVE_UP_MS passes), reporting each status. */
-async function trackVerdict(sub: Submission, onStatus: (s: SubmissionView) => void, notify: (msg: string, ms?: number) => void): Promise<Submission> {
+/**
+ * Polls a submission until it has a verdict (or POLL_GIVE_UP_MS passes), reporting each status. `room`: the room it was
+ * sent from (its announcement goes before the voice).
+ */
+async function trackVerdict(sub: Submission, onStatus: (s: SubmissionView) => void, notify: (msg: string, ms?: number) => void, room: string | null = null): Promise<Submission> {
   const t0 = performance.now();
   for (let i = 0; sub.status === "queued" || sub.status === "verifying"; i++) {
     const elapsed = performance.now() - t0;
@@ -103,7 +107,8 @@ async function trackVerdict(sub: Submission, onStatus: (s: SubmissionView) => vo
       sub = await api.submission(sub.id);
       onStatus(sub);
       if (sub.status === "verified") {
-        if (sub.announcer) announce(sub.announcer, sub.id);
+        const { announcer, id } = sub;
+        if (announcer) voiceAfterRoomLine(id, room, () => announce(announcer, id));
         refreshMyProfile(); // level / rank / suggestions changed
         forgetBoards(); // and maybe a board's top rows
         // The WR banner, level-up and achievement celebrations (with their sounds) come from the end card (hud.ts);
@@ -286,6 +291,7 @@ function consumeLoginParams(): { msg: string; ok: boolean } | null {
   url.searchParams.delete("login_error");
   history.replaceState(null, "", url);
   if (err) console.warn("Discord sign-in:", err);
+  if (ok === "discord-roles") return { msg: "Discord linked. Your stats show on your Discord profile now.", ok: true };
   return ok ? { msg: "Discord linked. Your runs are saved to your account.", ok: true } : { msg: "Discord sign-in didn't finish.", ok: false };
 }
 

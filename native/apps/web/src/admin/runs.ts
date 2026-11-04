@@ -8,6 +8,7 @@ import { mapLine } from "./art";
 import { attemptText, type SessionAttempt } from "./cases";
 import { recentReasons, rememberReason } from "./dialogs";
 import { stamp } from "./ui";
+import { STYLE_DEFS } from "../styles";
 
 interface RunRow {
   id: string;
@@ -47,7 +48,7 @@ interface RunDiagnostics {
   visibility?: { hidden: number; hiddenMs: number; blurs: number };
 }
 
-const STYLE_WORD: Record<string, string> = { autohop: "Normal", legit: "EZ Scroll", scroll: "Legit Scroll", wonly: "W-Only", sideways: "Sideways", hsw: "Half-Sideways", autostrafe: "Auto-strafe" };
+const STYLE_WORD: Record<string, string> = Object.fromEntries(STYLE_DEFS.map((d) => [d.id, d.name]));
 export const styleWord = (s: string) => STYLE_WORD[s] ?? s;
 export const statusBadge = (s: string) => badge(s, s === "verified" ? "ok" : s === "rejected" || s === "error" ? "bad" : "");
 

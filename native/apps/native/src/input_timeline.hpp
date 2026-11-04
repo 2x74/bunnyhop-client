@@ -68,6 +68,10 @@ public:
 
     // Native clocks are mapped before delivery; only SDL stamps need the video-driver trust policy.
     void motion(Input &input, uint64_t stamp, uint64_t received, double x, double y, bool native_clock = false) {
+        if (camera_) {
+            camera_->motion(x, y);
+            return;
+        }
         if (!timed_) {
             input.accumulate(x, y);
             return;
@@ -90,7 +94,7 @@ public:
         uint64_t stamp,
         uint64_t received) {
         const bool changes = down != held_codes.contains(code);
-        if (timed_ && changes && !wheel && binds_.of(code)) {
+        if (timed_ && changes && !wheel && !camera_ && binds_.of(code)) {
             const uint64_t event_time = stamps_.time(EventStamps::kKeys, stamp, received);
             const int64_t at = queue_.stamp(int64_t(event_time), int64_t(received), queue_.edge_tail());
             queue_.add_edge(at, code, down);
@@ -138,7 +142,43 @@ public:
 
     // The movement buttons a tick holds: its own key state, or (legacy) the keys as last polled.
     uint32_t held(const std::set<std::string> &held_codes) const {
+        if (camera_) {
+            return 0;
+        }
         return timed_ ? binds_.held(queue_.keys) : binds_.held(held_codes);
+    }
+
+    // ---- free cameras (freecam, spectator free look) ----------------------------------------------------------
+
+    // While a free camera is on, mouse motion turns |camera| and the movement keys only fly it. Neither reaches the
+    // counted view, the timed queue or a tick, so every tick sees a player with the mouse still and nothing held.
+    void divert(Input *camera) { camera_ = camera; }
+
+    bool diverted() const { return camera_ != nullptr; }
+
+    // A free camera starts or stops. Every held key lets go and stays released until it is pressed again, so a key
+    // repeat can't walk the body after the camera comes back, or fly the camera after it leaves. Motion already made
+    // goes into the view first: the next command has the view the player saw.
+    void release_until_keyup(Input &input, std::set<std::string> &held_codes) {
+        commit_pending(input);
+        for (const auto &code : held_codes) {
+            until_keyup_.insert(code);
+        }
+        held_codes.clear();
+        input.held = 0;
+        input.pulse = 0;
+        input.null_presses.clear();
+        input.w_release.reset();
+        queue_.release_keys();
+    }
+
+    // Whether to drop this key event: a repeat of a key release_until_keyup let go, until its key-up or a fresh press.
+    bool released_until_keyup(const std::string &code, bool down, bool repeat) {
+        if (!down || !repeat) {
+            until_keyup_.erase(code);
+            return false;
+        }
+        return until_keyup_.contains(code);
     }
 
     // Motion still pending was made at the old sensitivity, so it goes into the view first.
@@ -167,6 +207,7 @@ public:
     // Held keys are cleared rather than resynced from SDL_GetKeyboardState: a key-up lost while the menu had focus or
     // while SDL restarted its raw-input thread is missing from SDL's state too, so a resync would invent a hold.
     void release(Input &input, std::set<std::string> &held_codes) {
+        until_keyup_.clear();
         held_codes.clear();
         input.clear();
         queue_.reset();
@@ -205,6 +246,8 @@ private:
     EventStamps stamps_;
     KeyPresses presses_;
     std::vector<std::string> held_scratch_;
+    std::set<std::string> until_keyup_;
+    Input *camera_ = nullptr;
 
     static void apply(Input &input, const TimedInput::Report &report) {
         input.motion_events += report.reports;

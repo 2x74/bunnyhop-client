@@ -31,6 +31,7 @@
 .mn-big { font-size: 2.5em; font-weight: 800; }
 .mn-txt.gain { color: var(--gain); }
 .mn-txt.dim { color: var(--cream-2); }
+.mn-txt.jhud { font-size: 0.85em; }
 .mn-bar { width: 100%; height: 45%; border-radius: 1px; background: linear-gradient(90deg, var(--gain) 72%, var(--ink-4) 0); }
 .mn-gauge { width: 100%; height: 55%; border-radius: 1px; box-shadow: inset 0 0 0 1px var(--cream-2); background: linear-gradient(90deg, transparent 46%, var(--amber) 46% 54%, transparent 54%); }
 .mn-keys { height: 24%; border-radius: 1px; background: repeating-linear-gradient(90deg, currentColor 0 calc(33.33% - 0.25cqw), transparent 0 33.33%); opacity: 0.85; }

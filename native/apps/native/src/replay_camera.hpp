@@ -300,7 +300,9 @@ public:
         look(want, pivot);
     }
 
-    void move(const Input &input, double dt, bool fast = false, bool slow = false) {
+    // Free roaming (OBS_MODE_ROAMING): |input| is the camera's own view and keys, never the player's counted view.
+    // Shift and Alt pick fixed speeds; |speed_ups| is the base the freecam wheel sets.
+    void move(const Input &input, double dt, bool fast = false, bool slow = false, double speed_ups = 500) {
         if (mode != "free" || !initialized) return;
         dt = std::clamp(dt, 0., .1);
         yaw = input.yaw();
@@ -311,7 +313,7 @@ public:
         const double f = int(bool(bits & forward)) - int(bool(bits & back)),
                      s = int(bool(bits & right)) - int(bool(bits & left)),
                      up = int(bool(bits & jump)) - int(bool(bits & duck));
-        const double v = (fast ? 1600 : slow ? 120 : 500) * dt;
+        const double v = (fast ? 1600 : slow ? 120 : speed_ups) * dt;
         position[0] += float((cp * cy * f + sy * s) * v);
         position[1] += float((cp * sy * f - cy * s) * v);
         position[2] += float((-sp * f + up) * v);

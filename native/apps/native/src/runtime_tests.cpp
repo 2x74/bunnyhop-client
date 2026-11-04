@@ -5,6 +5,7 @@
 #include "leave_hold.hpp"
 #include "map_jobs.hpp"
 #include "settings.hpp"
+#include "track_style_switch.hpp"
 #ifdef NDEBUG
 #undef NDEBUG
 #endif
@@ -85,9 +86,92 @@ void test_resource_loading() {
     assert(failed && alive == 0);
 }
 
+// The core still flies after the key went off (no room to land): the player hears it once per stuck landing.
+void test_infinite_flight_stuck_notice() {
+    native::Practice practice;
+    auto &flight = practice.infinite_flight;
+    assert(!flight.toggle(nullptr));
+    BhState flew{};
+    flew.events = native::event_flight;
+    const BhState walked{};
+    assert(flight.observe(nullptr, flew) == native::InfiniteFlight::stuck_notice);
+    assert(flight.flying() && flight.flew());
+    assert(!flight.observe(nullptr, flew));
+    assert(!flight.observe(nullptr, walked) && !flight.flying() && flight.flew());
+    assert(flight.observe(nullptr, flew) == native::InfiniteFlight::stuck_notice);
+    // Joining a room or a gauntlet clears practice, not the attempt: a start point set now is still a practice spawn.
+    practice.clear(nullptr);
+    assert(flight.flying() && flight.flew());
+    practice.restart();
+    assert(!flight.flying() && !flight.flew() && !flight.on());
+}
+
+// Landing in another track's start restarts there in that track's style (web session.ts switchTrackStyle).
+void test_track_style_switch() {
+    using Switch = native::TrackStyleSwitch;
+    const std::vector<BhZone> zones = {
+            {0, 1, 0, {100, -480, 0}, {140, -224, 300}},
+            {1, 1, 0, {280, -480, 0}, {320, -224, 300}},
+            {0, 0, 0, {540, -480, 0}, {580, -224, 300}},
+    };
+    BhRunState bonus{};
+    bonus.in_start = 1;
+    bonus.track = 1;
+    BhState player{};
+    player.position[0] = 150;
+    player.position[1] = -300;
+    player.position[2] = -5;
+    const auto change = Switch::due(bonus, player, zones, "infinite", "infinite", false, 90);
+    assert(change && change->track == 1 && change->toast == "Bonus 1, Normal");
+    assert(change->at && change->at->position == (std::array<float, 3>{139, -300, 1}) && change->at->yaw == 90);
+    assert(!change->at->practice);
+    // Still flying through it, already in Normal, or out of the start: nothing.
+    assert(!Switch::due(bonus, player, zones, "infinite", "infinite", true, 90));
+    assert(!Switch::due(bonus, player, zones, "infinite", "autohop", false, 90));
+    BhRunState left = bonus;
+    left.in_start = 0;
+    assert(!Switch::due(left, player, zones, "infinite", "infinite", false, 90));
+    // Back in the main start after a bonus: the selected style again.
+    BhRunState main = bonus;
+    main.track = 0;
+    player.position[0] = 560;
+    const auto back = Switch::due(main, player, zones, "infinite", "autohop", false, 0);
+    assert(back && back->track == 0 && back->toast == "Main track, Infinite");
+}
+
+// After a flight's landing tick (web flight-landing.ts landingBonusRestart): the timer armed in or running a bonus in
+// another style restarts that bonus at its own restart point. The timer states are the ones the bhop_eazy and
+// bhop_advi_wood_rg1 repros in flight_tests.rs pin.
+void test_landing_bonus_restart() {
+    using Switch = native::TrackStyleSwitch;
+    const auto timer = [](uint32_t track, bool in_start, uint32_t status, uint32_t pending = 0) {
+        BhRunState t{};
+        t.track = track;
+        t.in_start = in_start;
+        t.status = status;
+        t.pending_start = pending;
+        return t;
+    };
+    // Bonus 1 started on the landing tick (the edge repro and the overlap), armed in its start (the airborne one).
+    for (const auto &bonus : {timer(1, false, 1), timer(1, true, 0), timer(1, false, 0, 120)}) {
+        const auto change = Switch::landing_bonus(bonus, "infinite", "infinite");
+        assert(change && change->track == 1 && !change->at && change->toast == "Bonus 1, Normal");
+    }
+    const auto second = Switch::landing_bonus(timer(2, false, 1), "infinite", "infinite");
+    assert(second && second->track == 2 && second->toast == "Bonus 2, Normal");
+    assert(!Switch::landing_bonus(timer(0, true, 0), "infinite", "infinite"));   // the main start
+    assert(!Switch::landing_bonus(timer(0, false, 1), "infinite", "infinite"));  // a main run
+    assert(!Switch::landing_bonus(timer(1, false, 0), "infinite", "infinite"));  // idle outside every start
+    assert(!Switch::landing_bonus(timer(1, false, 2), "infinite", "infinite"));  // a finished bonus
+    assert(!Switch::landing_bonus(timer(1, true, 0), "autohop", "autohop"));     // already the bonus's style
+}
+
 int main() {
     test_resource_loading();
     test_practice_mode();
+    test_infinite_flight_stuck_notice();
+    test_track_style_switch();
+    test_landing_bonus_restart();
     native::Practice p;
     assert(p.key_allowed("save", true));
     assert(!p.key_allowed("tele", true));
@@ -123,8 +207,8 @@ int main() {
     assert(p.number() == 1);
     p.step(8);
     assert(p.number() == 2);
-    assert(native::practice_unavailable(true, false, true, false, false) == "Practice is for solo play, not servers.");
-    assert(native::practice_unavailable(true, false, false, false, true) == "No practice during a gauntlet.");
+    assert(native::practice_unavailable(true, false, false, false).empty());
+    assert(native::practice_unavailable(true, false, false, true) == "No practice during a gauntlet.");
     p = native::Practice{};
     assert(!p.active && !p.mode && !p.menu_open && p.checkpoints.empty());  // new map/replay
     const auto prefs = native::default_settings();

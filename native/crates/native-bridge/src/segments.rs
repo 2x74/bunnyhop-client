@@ -34,6 +34,18 @@ pub struct Mark {
     data: ReplayData,
     interval: u32,
 }
+impl Mark {
+    /// Heap the mark keeps alive. Its ranges and loads grow with every load on the path, so a long Segmented
+    /// session's marks count toward the checkpoint budget.
+    pub fn bytes(&self) -> usize {
+        let loadout = &self.data.packed_loadout;
+        std::mem::size_of::<Self>()
+            + self.ranges.capacity() * std::mem::size_of::<std::ops::Range<usize>>()
+            + self.data.segments.capacity() * std::mem::size_of::<Load>()
+            + self.data.header.to_string().len()
+            + loadout.as_ref().map_or(0, String::capacity)
+    }
+}
 impl History {
     pub fn begin(&mut self) {
         if self.full {

@@ -45,6 +45,9 @@ const QUICK: Quick[] = [
   element("sync", "Sync bar", "Strafe sync of the current jump.", "strafe sync meter"),
   element("fps", "FPS counter", "Frames per second.", "frames framerate"),
   element("chat", "Chat", "Multiplayer chat (rooms only).", "messages multiplayer"),
+  // JHUD (ssj/jhud.ts): gain, sync and JSS per jump. Players ask for them without knowing it exists; here it's a piece of
+  // the screen they can click on. Its full row is Settings → HUD → JHUD (and !jhud).
+  { ...element("jhud", "JHUD", "Speed, gain and sync of every jump near the crosshair.", "jhud jump hud gain sync jss"), mirror: true },
   {
     label: "Name tags",
     get: () => P().ghost.tag || P().tags.players,
@@ -106,7 +109,7 @@ export function hideUiKeeps(): HTMLElement {
 // ---------------------------------------------------------------------------------------------
 // The picture: a miniature of the game frame (hud/layout.ts placeStyle, the same numbers the F2 editor uses) with each
 // piece where it really sits. Lit = on, dim = off; click one to switch it; hover (or focus) names it in the line under
-// the frame. Twelve buttons, painted on a click; nothing runs otherwise.
+// the frame. Thirteen buttons, painted on a click; nothing runs otherwise.
 
 /** What a piece looks like in miniature: its box (in % of the frame's width / height at scale 1) and a tiny stand-in. */
 interface Piece {
@@ -136,6 +139,7 @@ function pieces(): Piece[] {
     { q: by("Strafe trainer"), el: "strafeTrainer", w: 12, h: 2.6, body: () => [span("mn-gauge")] },
     { q: by("FPS counter"), el: "fps", w: 4, h: 2.6, body: () => [span("mn-txt.dim", "240")] },
     { q: by("Chat"), el: "chat", w: 19, h: 12, body: () => [span("mn-line"), span("mn-line.short"), span("mn-line")] },
+    { q: by("JHUD"), el: "jhud", w: 7, h: 4.4, body: () => [span("mn-txt.jhud", "287"), span("mn-txt.gain", "84%")] },
     { q: by("Ghosts"), at: { left: 30, top: 50 }, w: 3.4, h: 13, body: () => [h("span.mn-bunny", { html: BUNNY_SVG })] },
     { q: by("Name tags"), at: { left: 30, top: 38 }, w: 9, h: 3.2, body: () => [span("mn-tag")] },
     { q: by("Viewmodel"), at: { left: 84, top: 78 }, w: 13, h: 34, body: () => [h("span.mn-carrot", { html: CARROT_SVG })] },

@@ -313,9 +313,9 @@ export interface ScoreRow extends PlayerMarks {
   rank: RankTag | null;
   role: StaffRole | null;
   style: string;
-  /** "0:12.345", "start", "—", "SPEC → name" */
+  /** "0:12.345", "start", "—", "practice", "SPEC → name" */
   status: string;
-  statusKind: "running" | "finished" | "idle" | "spec";
+  statusKind: "running" | "finished" | "idle" | "practice" | "spec";
   pb: number | null;
   ping: number | null;
   /** A private lobby's host (net/lobby.ts). */
@@ -447,8 +447,9 @@ export class SpecBar {
     parent.append(this.el);
   }
 
-  set(o: { name: string; color: string; waiting?: boolean } | null): void {
-    const key = o ? `${o.name}|${o.color}|${o.waiting ? 1 : 0}` : "";
+  /** `hint`: one quiet line under it (the camera, and the way out). */
+  set(o: { name: string; color: string; waiting?: boolean; hint?: string } | null): void {
+    const key = o ? `${o.name}|${o.color}|${o.waiting ? 1 : 0}|${o.hint ?? ""}` : "";
     if (key === this.shown) return;
     this.shown = key;
     if (!o) {
@@ -456,6 +457,6 @@ export class SpecBar {
       return;
     }
     this.el.hidden = false;
-    clear(this.el, "Watching ", h("b", { style: `color:${o.color}` }, o.name), o.waiting ? h("span.dim", null, ", waiting for them") : null);
+    clear(this.el, "Watching ", h("b", { style: `color:${o.color}` }, o.name), o.waiting ? h("span.dim", null, ", waiting for them") : null, o.hint ? h("div.spec-hint", null, o.hint) : null);
   }
 }

@@ -111,6 +111,12 @@ export interface PlayerState {
   airSpeedGain?: number;
   airBestGain?: number;
   categorizedGroundJump?: CategorizedGroundJump;
+  /**
+   * Physics v24, Infinite: this tick ended a flight (EVENT_FLIGHT_LANDED). Where the landing put the player (feet) and
+   * whether crouched, before the tick's normal step moved them (crates/core Game::flight_landing). The timer keeps a
+   * start the flight armed only if this spot is in the start zone (timer.ts update). Absent on every other tick.
+   */
+  flightLanding?: { position: [number, number, number]; crouched: boolean };
   position: [number, number, number];
   velocity: [number, number, number];
   viewOffsetZ: number;
@@ -256,6 +262,10 @@ export const PROP_TRANSFORM_KEY = 1 << 20;
  *   back on that tick unless it jumps, so no friction tick (EVENT_EDGEBUG). Autohop with jump held on the landing tick plays
  *   as v21, and a jump on the next tick (held or a new scroll press) is exactly v21's.
  * - v23: v22 + per-map changes only (map_fixes.rs). Every map not listed there plays as on v22.
+ * - v24: v23 + Source's UTIL_StringToVector for the player's AddOutput basevelocity / origin (atof per token, missing
+ *   tokens 0; before, anything but 3 clean numbers was ignored), PARENTED_DOORS_V24 (bhop_playboy_csgo) and
+ *   CS_DELETED_PROPS_V24 (bhop_hell and 6 more maps), END_TOUCH_OUTPUTS_V24 (bhop_weed_funhouse's boosters fire on
+ *   OnEndTouch), the infinite clip, and Infinite flights (IN_FLIGHT commands fly in the core, only in Infinite).
  */
 export const PHYSICS_V1 = 1;
 /** Weapon commands and the USP silencer (research/WEAPONS.md). */
@@ -281,7 +291,7 @@ export const PHYSICS_V16 = 16;
 /** RNGFix parity: uphill / downhill inclines, edge bugs, trigger jumping and telehops as on RNGFix servers. */
 export const PHYSICS_V17 = 17;
 /** The physics version new runs are played and recorded with. */
-export const PHYSICS_VERSION = 23;
+export const PHYSICS_VERSION = 24;
 /** Climbable surface properties used by bhop_synthetic_fix. */
 export const PHYSICS_V18 = 18;
 /** Scoped entity makers and known velocity-script equivalents. */
@@ -294,6 +304,8 @@ export const PHYSICS_V21 = 21;
 export const PHYSICS_V22 = 22;
 /** Per-map changes only (map_fixes.rs), shipped with timer rules 3. Replays retain their recorded physics and rules. */
 export const PHYSICS_V23 = 23;
+/** Infinite clip on every map (no reloads); Source's keyvalue vector parse for the player's basevelocity / origin (bhop_weed_funhouse's boosters launch, on leaving the pad as its mapper meant); bhop_playboy_csgo's spiral steps turn with their column; props CS:S deletes at spawn are gone (bhop_hell's barrels). Shipped with timer rules 4. */
+export const PHYSICS_V24 = 24;
 /** Versions this code knows (the wasm build must support them too, see Core.setSettings). */
 export const isPhysicsVersion = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= PHYSICS_V1 && (v as number) <= PHYSICS_VERSION;
 
@@ -308,7 +320,10 @@ export interface Settings {
   autohop: boolean;
   /** CS:S jump fatigue and grounded slowdown; absent in legacy recordings. */
   stamina?: boolean;
-  /** Infinite style: every fresh jump press in the air rises again, keeping the horizontal speed. */
+  /**
+   * Infinite style: every fresh jump press in the air rises again, keeping the horizontal speed (crates/core game.rs
+   * air_jump). Not in the replay format: decoded headers take it from the style (replay.ts replaySettings).
+   */
   airJump?: boolean;
   /** Physics version (PHYSICS_V1 .. PHYSICS_VERSION). */
   physics: number;
@@ -343,6 +358,23 @@ export const EVENT_ATTACK = 1 << 5;
 export const EVENT_WEAPON = 1 << 6;
 /** Physics v22: this tick took back the previous tick's edge landing: airborne, no friction tick, no jump. */
 export const EVENT_EDGEBUG = 1 << 8;
+/**
+ * Physics v24, Infinite: the player flew this tick (input.ts IN_FLIGHT; crates/core game/flight.rs). The state after it
+ * is the flight's; the timer reads it (timer.ts flightTick).
+ */
+export const EVENT_FLIGHT = 1 << 9;
+/** Physics v24, Infinite: this tick ended a flight; the landing spot is PlayerState.flightLanding (crates/core flight.rs). */
+export const EVENT_FLIGHT_LANDED = 1 << 10;
+/**
+ * Command bit (crates/core game/flight.rs IN_FLIGHT): this tick flies. Set on every command while Infinite's noclip is on
+ * (session.ts). Only Infinite replays on physics v24 / timer rules 4 may carry it (replay.ts flightAllowed,
+ * verifier.ts); elsewhere the core ignores it.
+ */
+export const IN_FLIGHT = 1 << 24;
+/** Infinite flight's top speed (crates/core FLIGHT_TOP_SPEED; practice-mode/noclip.ts INFINITE_NOCLIP_TOP_SPEED). */
+export const FLIGHT_TOP_SPEED = 3500;
+/** Horizontal speed a flight's landing keeps at most (crates/core FLIGHT_EXIT_CAP; the Infinite start re-entry cap). */
+export const FLIGHT_EXIT_CAP = 3510;
 
 interface Exports {
   memory: WebAssembly.Memory;
@@ -376,6 +408,7 @@ interface Exports {
   mesh_vertex_floats(): number;
   set_settings(...args: number[]): void;
   set_stamina?: (enabled: number) => void;
+  /** Infinite's midair jump (crates/core wasm.rs); absent before v0.0.36. */
   set_air_jump?: (enabled: number) => void;
   /** Physics version (crates/core/src/wasm.rs): 1 = accepted, 0 = unknown to this build. Absent: a v1-only build. */
   set_physics_version?: (version: number) => number;
@@ -727,8 +760,11 @@ export class Core {
     this.x.set_settings(s.tickInterval, s.airAccelerate, s.accelerate, s.friction, s.stopSpeed, s.gravity, s.maxSpeed, s.autohop ? 1 : 0);
     if (this.x.set_stamina) this.x.set_stamina(s.stamina ? 1 : 0);
     else if (s.stamina) throw new Error("wasm build lacks CS:S stamina; rebuild the movement core");
-    if (this.x.set_air_jump) this.x.set_air_jump(s.airJump ? 1 : 0);
-    else if (s.airJump) throw new Error("wasm build lacks the Infinite midair jump; rebuild the movement core");
+    // set_settings (the legacy ABI above) turns the air jump off, so only Infinite makes the extra call.
+    if (s.airJump) {
+      if (!this.x.set_air_jump) throw new Error("wasm build lacks the Infinite midair jump; rebuild the movement core");
+      this.x.set_air_jump(1);
+    }
     const physics = s.physics ?? PHYSICS_V1;
     if (this.x.set_physics_version) {
       if (this.x.set_physics_version(physics) !== 1) throw new Error(`this wasm build can't simulate physics v${physics}`);
@@ -770,6 +806,7 @@ export class Core {
       ...(s[31] === 1 ? { edgeLanding: true } : {}),
       airSpeedGain: len > 33 ? s[32] : NaN,
       airBestGain: len > 33 ? s[33] : NaN,
+      ...(len > 37 && s[34] === s[34] ? { flightLanding: { position: [s[34], s[35], s[36]] as [number, number, number], crouched: s[37] !== 0 } } : {}),
     };
   }
 

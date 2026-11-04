@@ -1,5 +1,6 @@
-import { test, expect } from "bun:test";
+import { afterAll, test, expect } from "bun:test";
 import { dispatchNativeChat } from "./chat-routing";
+import { state } from "./bridge";
 import { chatCommands, suggestChat, type ChatContext } from "../../web/src/chat-commands";
 function fixture(where: "room" | "solo" = "room") {
   const replies: string[] = [],
@@ -30,6 +31,7 @@ function fixture(where: "room" | "solo" = "room") {
             openNominateMenu: () => actions.push("nominate"),
             invite: () => {},
             race: (arg) => actions.push(["race", arg]),
+            report: (arg) => actions.push(["report", arg]),
           }
         : null,
   };
@@ -45,6 +47,15 @@ function fixture(where: "room" | "solo" = "room") {
       }),
   };
 }
+// Some commands registered by other files act on the host (!st switches the trainer setting and sends it): give them a
+// window to send through, and put the menu state back afterwards so later files see the defaults.
+const ownWindow = typeof globalThis.window === "undefined";
+if (ownWindow) Object.assign(globalThis, { window: new EventTarget() });
+const settingsBefore = JSON.parse(JSON.stringify(state.settings)) as typeof state.settings;
+afterAll(() => {
+  state.settings = settingsBefore;
+  if (ownWindow) Reflect.deleteProperty(globalThis, "window");
+});
 test("all built-in commands and aliases resolve without accidental ordinary chat broadcast", () => {
   for (const command of chatCommands())
     for (const name of [command.name, ...(command.aliases ?? [])]) {

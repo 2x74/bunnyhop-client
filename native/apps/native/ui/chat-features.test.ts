@@ -48,7 +48,8 @@ test("feature commands appear with the host's capability and go to the host", ()
 });
 
 test("!strafetrainer flips the native trainer setting", () => {
-  cleanups.push(registerStrafeTrainerCommand());
+  // The chat service registers it once per process, so a test file that built one may have done it already.
+  if (!findChatCommand("strafetrainer")) cleanups.push(registerStrafeTrainerCommand());
   runChatLine("!st", context);
   expect(sent.at(-1)).toEqual({ type: "settings", patch: { strafeTrainer: true } });
   runChatLine("!strafetrainer off", context);

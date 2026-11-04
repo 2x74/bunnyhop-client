@@ -266,6 +266,9 @@ select option { background: var(--panel-solid); color: var(--text); }
 .pause-map { margin: var(--sp-2) 0 0.2rem; font-size: var(--fs-xl); font-weight: 800; letter-spacing: -0.015em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pause-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.5rem; margin: 0; font-size: var(--fs-sm); color: var(--dim); }
 .pause-meta .badge { backdrop-filter: none; }
+/* The style name: a plain word that opens the Style tab (menu.ts), underlined on hover like a link. */
+.pause-meta .pause-style { padding: 0; border: 0; background: none; font: inherit; color: inherit; cursor: pointer; }
+.pause-meta .pause-style:hover, .pause-meta .pause-style:focus-visible { color: var(--text); text-decoration: underline; text-underline-offset: 0.2em; outline: none; }
 .pause-pb b { color: var(--accent); font-weight: 700; font-variant-numeric: tabular-nums; }
 .rail-list { display: flex; flex-direction: column; gap: 1px; flex: 1; min-height: 0; overflow: hidden auto; scrollbar-width: thin; }
 .rail-item { position: relative; display: flex; align-items: center; gap: 0.6rem; width: 100%; padding: 0.34rem 0.7rem; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text); text-align: left; font-size: var(--fs-md); font-weight: 620; cursor: pointer; transition: background var(--t-fast), color var(--t-fast), box-shadow var(--t-fast); }
@@ -559,7 +562,7 @@ input[type="color"] { width: 2.2rem; height: 1.6rem; border: 1px solid var(--lin
 .xh-tile.on { border-color: color-mix(in srgb, var(--accent) 70%, transparent); background: var(--accent-soft); color: var(--text); }
 .xh-tile:focus-visible { outline: none; box-shadow: var(--ring); }
 /* key binds */
-.bind-pair { display: grid; grid-template-columns: repeat(3, 7.2rem); gap: 0.35rem; }
+.bind-pair { display: grid; grid-template-columns: repeat(3, 6rem); gap: 0.35rem; }
 .bind { padding: 0.36rem 0.5rem; font-family: var(--mono); font-size: var(--fs-sm); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bind.empty { color: var(--faint); }
 .bind.fixed { grid-column: 1; cursor: default; opacity: 0.75; border-style: dashed; }
@@ -656,6 +659,8 @@ body.potato #load-lift > .loading.lift-go * { animation: none !important; }
 #hud > * { position: absolute; }
 #hud { --shadow-text: 0 1px 2px rgba(0, 0, 0, 0.85), 0 0 0.6em rgba(0, 0, 0, 0.35); }
 body.menu-open #crosshair, body.menu-open #hud-endcard { visibility: hidden; }
+/* Freecam (freecam.ts): the camera is away from your body, so no crosshair. */
+body.freecam #crosshair { visibility: hidden; }
 body:not(.in-game) #hud { display: none; }
 #hud-debug { top: 0.5rem; left: 50%; transform: translateX(-50%); padding: 0.1em 0.55em; border-radius: 999px; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #ffb547; background: rgba(12, 14, 19, 0.72); border: 1px solid rgba(255, 181, 71, 0.45); opacity: 0.85; }
 
@@ -1064,7 +1069,7 @@ body:not(.in-game) #ctrlw-hint, body:not(.menu-open) #ctrlw-hint, body:not([data
   body:has(> #ctrlw-hint) .pause-panel .pp-body { padding-bottom: 7.5rem; }
 }
 /* Keys: narrower bind buttons on narrow screens so action names ("Third person (practice)") aren't cut. */
-@media (max-width: 75rem) { .bind-pair { grid-template-columns: 6.2rem 6.2rem; } }
+@media (max-width: 75rem) { .bind-pair { grid-template-columns: repeat(3, 5.2rem); } }
 /* HUD settings "Share code" row: the code field shrinks before the label does. */
 .set-row:has(.share-row) { grid-template-columns: auto minmax(0, 1fr); }
 .set-row .share-row { min-width: 0; flex: 0 1 auto; }

@@ -8,6 +8,8 @@ import type { Core } from "../core";
 
 /** sv_noclipspeed: multiplies the command and sv_maxspeed. */
 export const NOCLIP_SPEED = 5;
+/** Infinite flies at this instead of the CS:S 1600 (MAX_SPEED * NOCLIP_SPEED), as on the native client (practice.rs). */
+export const INFINITE_NOCLIP_TOP_SPEED = 3500;
 /** sv_noclipaccelerate. */
 export const NOCLIP_ACCELERATE = 5;
 const MAX_SPEED = 320;
@@ -18,15 +20,15 @@ export const NOCLIP_DUCK_FACTOR = 0.25;
 const UP_MOVE = 450;
 /** Out of the world: the core kills the player past this (game.rs OUT_OF_WORLD = MAX_COORDINATE - 80). */
 const WORLD_LIMIT = 16384 - 80 - 1;
-/** Infinite flies at this instead of the CS:S 1600 (MAX_SPEED * NOCLIP_SPEED). */
-export const INFINITE_NOCLIP_TOP_SPEED = 3500;
 
 /**
- * sv_noclipspeed for a style. Only Infinite differs; every other style keeps the CS:S 5.
- * The CS:S plugin's 11.400651 is not reusable here: it assumed a server at sv_maxspeed 307.
+ * sv_noclipspeed for a style: the CS:S 5 everywhere but Infinite (styles.ts StyleDef.airJump), which flies at 3500 u/s.
+ * Not the CS:S plugin's 11.400651: it assumed a server at sv_maxspeed 307. Infinite's flight itself runs in the core
+ * (crates/core game/flight.rs flight_move, the same move in f32), recorded and re-simulated; this one is for the other
+ * styles' practice noclip and the tests that compare the two.
  */
-export function noclipSpeed(styleId: string): number {
-  return styleId === "infinite" ? INFINITE_NOCLIP_TOP_SPEED / MAX_SPEED : NOCLIP_SPEED;
+export function noclipSpeed(airJump: boolean): number {
+  return airJump ? INFINITE_NOCLIP_TOP_SPEED / MAX_SPEED : NOCLIP_SPEED;
 }
 
 export interface NoclipInput {
@@ -38,7 +40,7 @@ export interface NoclipInput {
   up: boolean;
   /** Duck held: slower. */
   slow: boolean;
-  /** sv_noclipspeed for the run's style (`noclipSpeed`). Absent: the CS:S default. */
+  /** sv_noclipspeed (noclipSpeed). Absent: the CS:S 5. */
   speed?: number;
 }
 
@@ -55,9 +57,9 @@ export function noclipMove(s: NoclipState, cmd: NoclipInput, dt: number): Noclip
   // AngleVectors: forward follows the pitch (look down to dive); right stays level.
   const forward = [cp * cy, cp * sy, -sp];
   const right = [sy, -cy, 0];
-  const svNoclipSpeed = cmd.speed ?? NOCLIP_SPEED;
-  const maxSpeed = MAX_SPEED * svNoclipSpeed;
-  const factor = cmd.slow ? svNoclipSpeed * NOCLIP_DUCK_FACTOR : svNoclipSpeed;
+  const svSpeed = cmd.speed ?? NOCLIP_SPEED;
+  const maxSpeed = MAX_SPEED * svSpeed;
+  const factor = cmd.slow ? svSpeed * NOCLIP_DUCK_FACTOR : svSpeed;
   const fmove = cmd.forwardmove * factor;
   const smove = cmd.sidemove * factor;
   const wish = [forward[0] * fmove + right[0] * smove, forward[1] * fmove + right[1] * smove, forward[2] * fmove + (cmd.up ? UP_MOVE * factor : 0)];

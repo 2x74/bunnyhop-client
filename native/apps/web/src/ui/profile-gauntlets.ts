@@ -1,5 +1,5 @@
 // The profile overview's Gauntlets block (ui/profile.ts): the player's gauntlet PBs (Gauntlet, Rank, Time, Date) and
-// one line with their weekly wins. Fetched on its own (GET /players/:id/gauntlets, started with the profile's read:
+// one line with their weekly podiums: the gold, silver and bronze marks, each engraved with its count. Fetched on its own (GET /players/:id/gauntlets, started with the profile's read:
 // `early`); nothing shows without a finish.
 
 import "./gauntlets.css";
@@ -9,6 +9,23 @@ import { watchPath } from "../gauntlet/watch";
 import { fullDate, relDate } from "./board-pager";
 import { h } from "./dom";
 import { navigate } from "./nav";
+import { SPECIAL_BADGES, weeklyMarkId, type WeeklyMedal } from "../creators";
+
+const MEDAL_OF: Record<number, WeeklyMedal> = { 1: "winner", 2: "second", 3: "third" };
+
+/** The weekly podium mark ids for these results (creators.ts weeklyMarkId), gold first; none without a podium. */
+export function podiumIds(results: readonly { rank: number }[]): string[] {
+  return ([1, 2, 3] as const).flatMap((rank) => {
+    const n = results.filter((r) => r.rank === rank).length;
+    return n ? [weeklyMarkId(MEDAL_OF[rank], n)] : [];
+  });
+}
+
+const podiumMarks = (results: readonly { rank: number }[]): HTMLElement[] =>
+  podiumIds(results).map((id) => {
+    const b = SPECIAL_BADGES[id];
+    return h("span.pfg-medal", { role: "img", "aria-label": b.name, title: b.name, html: `<svg viewBox="0 0 24 24" aria-hidden="true">${b.svg}</svg>` });
+  });
 
 export function profileGauntlets(id: string, early?: Promise<PlayerGauntlets>): HTMLElement {
   const box = h("section.pf-sec.pfg", { hidden: true });
@@ -23,7 +40,7 @@ export function profileGauntlets(id: string, early?: Promise<PlayerGauntlets>): 
         e.preventDefault();
         navigate({ screen: "gauntlet", slug });
       };
-      const wins = g.weeklyWins.filter((w) => w.rank === 1).length;
+      const medals = podiumMarks(g.weeklyWins);
       box.replaceChildren(
         h("h3", null, "Gauntlets"),
         h(
@@ -46,7 +63,7 @@ export function profileGauntlets(id: string, early?: Promise<PlayerGauntlets>): 
             ),
           ),
         ),
-        wins ? h("p.pfg-wins", null, `Weekly wins: ${wins}`) : "",
+        medals.length ? h("p.pfg-wins", null, "Weekly podiums", ...medals) : "",
       );
       box.hidden = false;
     },

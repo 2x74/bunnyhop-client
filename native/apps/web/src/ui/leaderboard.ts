@@ -15,7 +15,8 @@ import { trackName } from "../zones";
 import { fullDate, gapTime, pagedBoard, playerCell, relDate, type BoardPage, type BoardSource } from "./board-pager";
 import { adminLink } from "../staff-lens";
 import { dismissOutside } from "./dismiss";
-import { bindRunStats } from "./run-stats";
+import { bindRunStats, runPointsAttr } from "./run-stats";
+import { fmtPoints } from "../ranking";
 
 export interface BoardOptions {
   /** Timed tracks of the map (0 = main, N = bonus N); bonus tabs appear only when the map has bonuses. */
@@ -69,7 +70,7 @@ export function leaderboardPanel(map: string, style: string, opts: BoardOptions 
 
   const board = pagedBoard<LeaderboardEntry>({
     base: 1,
-    cols: 10,
+    cols: 11,
     label: `${map} leaderboard`,
     keys: opts.keys ?? "local",
     head: () =>
@@ -84,6 +85,7 @@ export function leaderboardPanel(map: string, style: string, opts: BoardOptions 
         h("th.num.rb-opt", { scope: "col" }, "Strafes"),
         h("th.num.rb-opt.lb-perf", { scope: "col", title: "Perfect hops: jumped on the first grounded tick. Only hops within 0.1 s of landing count." }, "Perf%"),
         h("th.num.rb-opt", { scope: "col" }, "Sync"),
+        h("th.num.rb-opt.lb-pts", { scope: "col" }, "Points"),
         h("th.rb-opt2", { scope: "col" }, "Date"),
         h("th.rb-opt3", { scope: "col" }, h("span.sr-only", null, "Watch or race")),
       ),
@@ -93,7 +95,7 @@ export function leaderboardPanel(map: string, style: string, opts: BoardOptions 
       const gap = c.first && e.runId !== c.first.runId ? h("span.rb-gap", { title: `${gapTime(e.time - c.first.time).slice(1)} behind the world record` }, gapTime(e.time - c.first.time)) : e.rank === 1 ? h("span.rb-wr", null, "WR") : null;
       return h(
         "tr",
-        { class: [e.rank <= 3 ? `top${e.rank}` : "", c.mine ? "me" : "", c.found ? "found" : ""].filter(Boolean).join(" ") || null, "data-run": e.runId, "data-run-title": name },
+        { class: [e.rank <= 3 ? `top${e.rank}` : "", c.mine ? "me" : "", c.found ? "found" : ""].filter(Boolean).join(" ") || null, "data-run": e.runId, "data-run-title": name, "data-run-points": runPointsAttr(e.points) },
         h("td.rb-rank", null, String(e.rank)),
         playerCell(e.player, () => navigate({ screen: "profile", id: e.player.id })),
         h("td.num.rb-strong", { title: [`${e.ticks.toLocaleString("en-US")} ticks`, physicsNote(e)].filter(Boolean).join(" · ") }, formatTime(e.time)),
@@ -102,6 +104,7 @@ export function leaderboardPanel(map: string, style: string, opts: BoardOptions 
         h("td.num.dim.rb-opt", null, e.strafes == null ? "—" : String(e.strafes)),
         h("td.num.dim.rb-opt.lb-perf", { title: e.perf == null ? "Not recorded for this run" : "Perfectly timed measured hops" }, e.perf == null ? "—" : `${e.perf.toFixed(1)}%`),
         h("td.num.dim.rb-opt", null, `${e.sync.toFixed(1)}%`),
+        h("td.num.dim.rb-opt.lb-pts", null, e.points ? fmtPoints(e.points) : ""),
         h("td.dim.rb-opt2", { title: fullDate(e.date) }, relDate(e.date)),
         h(
           "td.rb-acts.rb-opt3",
@@ -151,7 +154,11 @@ export function leaderboardPanel(map: string, style: string, opts: BoardOptions 
     const parts: HTMLElement[] = [];
     if (tracks.length > 1) parts.push(seg("Track", tracks.map((t) => [nameOf(t), t ? `${nameOf(t)} (Normal style only)` : "Main track", String(t), t === track, () => ((track = t), refresh())])));
     if (api.available()) parts.push(seg("Players", [["All", "Everyone", "all", !following, () => ((following = false), refresh())], ["Following", "Players you follow, and you", "following", following, () => ((following = true), refresh())]]));
-    if (track === 0) parts.push(seg("Style", STYLE_DEFS.map((d) => [d.name, d.rule, d.id, d.id === mainStyle, () => ((mainStyle = d.id), opts.onStyle?.(d.id), refresh())]), ".rb-styles"));
+    if (track === 0) {
+      const styles = seg("Style", STYLE_DEFS.map((d) => [d.name, d.rule, d.id, d.id === mainStyle, () => ((mainStyle = d.id), opts.onStyle?.(d.id), refresh())]), ".rb-styles");
+      styles.style.setProperty("--rb-half", String(Math.ceil(STYLE_DEFS.length / 2))); // boards.css: two even rows
+      parts.push(styles);
+    }
     else if (!opts.trackNames?.[track]) parts.push(h("span.rb-only", null, `${styleLabel(BONUS_STYLE)} only on bonus tracks`));
     // Keep keyboard focus on the switch that was just used (the buttons are rebuilt).
     const key = (document.activeElement as HTMLElement | null)?.closest(".rb-controls") ? (document.activeElement as HTMLElement).dataset.key : undefined;

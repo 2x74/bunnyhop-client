@@ -31,6 +31,7 @@ const LUMP_TEXINFO = 6;
 const LUMP_FACES = 7;
 const LUMP_LIGHTING = 8;
 const LUMP_LIGHTING_HDR = 53;
+const LUMP_FACES_HDR = 58;
 const FACE_SIZE = 56;
 const TEXINFO_SIZE = 72;
 
@@ -208,7 +209,9 @@ export function applyLightStyles(lm: Lightmap, bsp: Uint8Array): LightStyleResul
     const compressed = dv.getInt32(o + 12, true) !== 0 || (len >= 4 && ofs + 4 <= bsp.length && dv.getUint32(ofs, true) === 0x414d5a4c); // "LZMA"
     return { ofs, len: ofs >= 0 && ofs + len <= bsp.length ? len : 0, compressed };
   };
-  const faces = lump(LUMP_FACES);
+  // lightmap.rs: the HDR atlas uses the HDR face lump's offsets and styles when it has the same faces.
+  const ldrFaces = lump(LUMP_FACES), hdrFaces = lump(LUMP_FACES_HDR);
+  const faces = lm.hdr && hdrFaces.len > 0 && hdrFaces.len === ldrFaces.len ? hdrFaces : ldrFaces;
   const texinfo = lump(LUMP_TEXINFO);
   // The lump lightmap.rs built the atlas from.
   const lighting = lump(lm.hdr ? LUMP_LIGHTING_HDR : LUMP_LIGHTING);

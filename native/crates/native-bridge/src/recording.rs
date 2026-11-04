@@ -424,7 +424,8 @@ impl Map {
             return Err("recording style and stamina settings disagree".into());
         }
         if timer.options.strafe_keys != crate::styles::strafe_keys(style)
-            || (timer.options.block_prehops != 0) != (style == "scroll")
+            || (timer.options.block_prehops != 0)
+                != crate::run::blocks_prehops(style, &self.map_name, timer.options.rules)
             || timer.options.start_reentry_cap != crate::styles::start_reentry_cap(style)
         {
             return Err("recording style and native timer options disagree".into());

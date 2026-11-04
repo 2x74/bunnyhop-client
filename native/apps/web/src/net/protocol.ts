@@ -147,9 +147,21 @@ export const TIMER_START = 1;
 export const TIMER_RUNNING = 2;
 export const TIMER_FINISHED = 3;
 
+/**
+ * Clients that don't say how many wire styles they know (no `wire=` on the socket URL: native v0.6.5 / v0.7.0, web
+ * tabs before 0.0.36) are "legacy" to the room (0.0.36). Native's snapshot check (room-service.ts metaValid) refuses a
+ * block meta with style > 7 and drops the whole snapshot, and native v0.6.5's roster check refuses a style it doesn't
+ * know (Infinite) and drops the welcome. So for them the room leaves the meta off blocks whose style index is
+ * LEGACY_META_STYLES or more (the samples still go), and shows roster styles from LEGACY_ROSTER_STYLES on as Normal.
+ * Current clients send `wire=<WIRE_STYLES.length>` and get everything (a style past theirs gets the same treatment).
+ */
+export const LEGACY_META_STYLES = 8;
+export const LEGACY_ROSTER_STYLES = 9;
+
 /** Wire order of styles (frozen: never reorder, only append). */
-export const WIRE_STYLES: readonly StyleId[] = ["autohop", "legit", "wonly", "sideways", "hsw", "autostrafe", "scroll", "lowgrav", "segmented", "infinite"];
+export const WIRE_STYLES: readonly StyleId[] = ["autohop", "legit", "wonly", "sideways", "hsw", "autostrafe", "scroll", "lowgrav", "segmented", "infinite", "backwards"];
 export const styleIndex = (s: string): number => Math.max(0, WIRE_STYLES.indexOf(s as StyleId));
+
 export const styleAt = (i: number): StyleId | null => WIRE_STYLES[i] ?? null;
 
 export interface NetSample {
@@ -495,6 +507,12 @@ export interface RosterPlayer {
   special?: string[];
   /** Profile flag (countries.ts code; null = none), shown on the scoreboard. Absent from older servers. */
   country?: string | null;
+  /**
+   * Practising (0.0.36): the player's current attempt is practice (practice mode, a checkpoint teleport or noclip;
+   * practice-mode/attempt.ts), so it is never submitted. The others show a "practice" tag instead of a run time. The
+   * client says so with { t: "practice" }; patched live. Absent from older servers; older clients ignore it.
+   */
+  practice?: boolean;
 }
 
 export interface RoomInfo {
@@ -679,7 +697,13 @@ export type ClientMsg =
    * (0.0.30) The knife and finish held now (the knife pool's pick, player/cosmetics.ts): the room checks the pair is
    * the player's equipped one or in their saved pool and patches their roster loadout. Older servers drop it.
    */
-  | { t: "knife"; knife: string; finish: string };
+  | { t: "knife"; knife: string; finish: string }
+  /**
+   * (0.0.36) The attempt is practice (on) or a real run again (off): the room patches the roster's `practice` for the
+   * others. Cosmetic: the room never trusts it for records (only verified replays are announced). Sent on change (at
+   * most about twice a second) and after every welcome. Older servers drop it.
+   */
+  | { t: "practice"; on: boolean };
 
 /** Validates a client control frame. Returns null for anything malformed (the room drops it). */
 export function parseClientMsg(text: string): ClientMsg | null {
@@ -704,6 +728,8 @@ export function parseClientMsg(text: string): ClientMsg | null {
       return typeof o.map === "string" && o.map.length <= 64 ? { t: "nominate", map: o.map } : null;
     case "knife":
       return typeof o.knife === "string" && typeof o.finish === "string" && o.knife.length <= 48 && o.finish.length <= 48 ? { t: "knife", knife: o.knife, finish: o.finish } : null;
+    case "practice":
+      return typeof o.on === "boolean" ? { t: "practice", on: o.on } : null;
     case "spec":
       if (o.target === null) return { t: "spec", target: null };
       return Number.isInteger(o.target) && (o.target as number) >= 0 && (o.target as number) < 256 ? { t: "spec", target: o.target as number } : null;

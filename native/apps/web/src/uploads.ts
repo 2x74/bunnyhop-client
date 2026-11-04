@@ -78,6 +78,14 @@ export function failureOf(result: "network" | { id: string; code?: string }): Up
   return null;
 }
 
+/**
+ * Refusals that mean this tab's build is older than what the server accepts now (apps/api src/runs.ts: a client build
+ * no longer admitted, an old physics or timer-rules version, a superseded map build). A retry can't change them; a
+ * reload into the current build can, for the next run. The end card says so in one line (hud/result.ts).
+ */
+const OUTDATED_CODES: ReadonlySet<string> = new Set(["client_build_not_allowed", "bad_physics", "bad_timer_rules", "outdated_map_version"]);
+export const outdatedRefusal = (code: string | undefined): boolean => !!code && OUTDATED_CODES.has(code);
+
 /** The server can't take this run yet, and will: waiting for it uses up nothing. */
 export function holds(f: UploadFailure | null | undefined): boolean {
   return f === "guest_limit" || f === "rate_limited";

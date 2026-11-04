@@ -18,7 +18,7 @@ test("procedural BSP bytes are stable and cover the pinned non-flat suite", () =
     b = createFixtures();
   expect(a.map((f) => f.name)).toEqual(["incline", "edge", "thin-trigger", "telehop", "material-ladder"]);
   for (let i = 0; i < a.length; i++) {
-    expect(a[i].versions).toEqual(a[i].name === "material-ladder" ? [17, 18, 23] : [16, 17, 22, 23]);
+    expect(a[i].versions).toEqual(a[i].name === "material-ladder" ? [17, 18, 24] : [16, 17, 23, 24]);
     expect(hash(a[i].bsp)).toBe(fixtureHashes[a[i].name]);
     expect(a[i].bsp).toEqual(b[i].bsp);
   }

@@ -104,6 +104,8 @@ export interface ChatGame {
   setStyle(id: StyleId): void;
   /** !wr / !pb for the current map, track and style. */
   record(kind: "wr" | "pb", reply: (text: string) => void): void;
+  /** !freecam: toggles freecam (freecam.ts), or the free look while spectating in a room. */
+  freecam?(): void;
 }
 
 export interface ChatCommand {
@@ -278,7 +280,7 @@ const spectating = (ctx: ChatContext) => ctx.room?.spectating() ?? false;
 const NO_GAME = "Not available here.";
 
 /**
- * A practice command: practice answers (solo only; in rooms it says so, and the room's chat log keeps the attempt:
+ * A practice command: practice answers (solo and in rooms since 0.0.36; the room's chat log keeps the attempt:
  * research/HELP.md found the confusion there).
  */
 const practice =
@@ -306,11 +308,14 @@ export const STYLE_COMMANDS: Record<StyleId, readonly string[]> = {
   wonly: ["w", "wonly"],
   sideways: ["sw", "sideways"],
   hsw: ["hsw", "halfsideways"],
+  // Influx / shavit-style-backwards: "bw; backwards"; Swoobles: "backward".
+  backwards: ["bw", "backwards", "backward", "bwd"],
   lowgrav: ["lg", "lowgrav", "lowgravity"],
   // bhoptimer: "sr; seg; segment; segmented" (sr is also its !wr alias, so not here).
   segmented: ["seg", "segment", "segmented"],
-  autostrafe: ["auto", "as", "autostrafe"],
+  // Luna's CS:S plugin (2x74/infinite) and the native client: !inf.
   infinite: ["inf", "infinite"],
+  autostrafe: ["auto", "as", "autostrafe"],
 };
 
 /** The style a name means: an id, a name ("W-Only", "half sideways") or a style command ("hsw"). */
@@ -369,7 +374,7 @@ const BUILT_IN: ChatCommand[] = [
     name: "setstart",
     aliases: ["ss", "setspawn"],
     help: "save start point",
-    about: "stand still: restarts put you on that spot, facing the same way. In the start zone it's an ordinary start. Anywhere else (solo) restarts from it are practice, and the timer still starts from the start zone.",
+    about: "stand still: restarts put you on that spot, facing the same way. In the start zone it's an ordinary start. Anywhere else restarts from it are practice, and the timer still starts from the start zone.",
     group: "run",
     key: "setStart",
     where: "both",
@@ -390,7 +395,7 @@ const BUILT_IN: ChatCommand[] = [
       if (!spectating(ctx)) ctx.clearStartPoint();
     },
   },
-  // Practice (practice-mode/controller.ts command), bhoptimer's / KZ timers' names. Solo only: in rooms they say so. The
+  // Practice (practice-mode/controller.ts command), bhoptimer's / KZ timers' names. Solo and in rooms. The
   // tools work in any attempt; a teleport or noclip makes it practice (practice-mode/attempt.ts).
   {
     name: "practice",
@@ -450,11 +455,11 @@ const BUILT_IN: ChatCommand[] = [
   { name: "prevcp", aliases: ["prev"], help: "previous checkpoint", about: "back to the checkpoint before. The run becomes practice.", group: "practice", panelOnly: true, key: "cpPrev", where: "both", run: practice("prev") },
   { name: "nextcp", help: "next checkpoint", about: "forward to the next checkpoint. The run becomes practice.", group: "practice", panelOnly: true, key: "cpNext", where: "both", run: practice("next") },
   // No zone teleports: one line about what there is.
-  { name: "end", aliases: ["goend"], where: "both", hidden: true, run: (ctx) => ctx.reply("No teleport to the end. !noclip gets you anywhere (solo), and the run becomes practice.") },
+  { name: "end", aliases: ["goend"], where: "both", hidden: true, run: (ctx) => ctx.reply("No teleport to the end. !noclip gets you anywhere, and the run becomes practice.") },
   // Styles (styles.ts): !style lists them or switches by name; bhoptimer's shortcuts switch straight away.
   {
     name: "style",
-    aliases: ["styles"],
+    aliases: ["styles", "mode", "modes"],
     args: "[name]",
     help: "pick a style",
     about: "lists the styles, or switches to one (!style hsw). Switching restarts the run.",
@@ -485,6 +490,16 @@ const BUILT_IN: ChatCommand[] = [
   { name: "wr", help: "world record", about: "the world record on this map in your style.", group: "more", where: "both", run: (ctx) => (ctx.game ? ctx.game.record("wr", (t) => ctx.reply(t)) : ctx.reply(NO_GAME)) },
   { name: "pb", aliases: ["mytime"], help: "your best time", about: "your best time on this map in your style.", group: "more", where: "both", run: (ctx) => (ctx.game ? ctx.game.record("pb", (t) => ctx.reply(t)) : ctx.reply(NO_GAME)) },
   {
+    name: "freecam",
+    aliases: ["fc", "freelook"],
+    help: "freecam",
+    about: "fly the camera away from your body: your movement keys, Shift faster, Alt slower, the wheel sets the speed. Your body gets no input and the timer keeps running. Again to go back.",
+    group: "more",
+    key: "freecam",
+    where: "both",
+    run: (ctx) => (ctx.game?.freecam ? ctx.game.freecam() : ctx.reply("Freecam isn't available here.")),
+  },
+  {
     name: "help",
     aliases: ["commands", "cmds"],
     args: "[topic]",
@@ -498,6 +513,7 @@ const BUILT_IN: ChatCommand[] = [
   },
   // The room server's (apps/api/src/rooms/room.ts command / admin).
   { name: "rtv", aliases: ["rockthevote"], help: "vote to change map", about: "rock the vote: enough votes start a map vote.", group: "server", where: "room", server: true, bare: true },
+  { name: "extend", aliases: ["voteextend", "ve"], help: "vote to extend the map", about: "in a map's last minutes, enough votes add more time. Staff: !extend [minutes] extends at once.", group: "server", where: "room", server: true, bare: true },
   {
     name: "nominate",
     args: "<map>",
@@ -520,11 +536,11 @@ const BUILT_IN: ChatCommand[] = [
   { name: "currentmap", where: "room", server: true, bare: true },
   { name: "thetime", where: "room", server: true, bare: true, hidden: true },
   { name: "motd", where: "room", server: true, bare: true, hidden: true },
-  ...["kick", "ban", "unban", "mute", "unmute", "map", "mapvote", "extend"].map((name): ChatCommand => ({ name, where: "room", server: true, hidden: true })),
+  ...["kick", "ban", "unban", "mute", "unmute", "map", "mapvote"].map((name): ChatCommand => ({ name, where: "room", server: true, hidden: true })),
   // Rooms only, handled on the client.
   {
     name: "spec",
-    aliases: ["spectate"],
+    aliases: ["spectate", "observe", "obs"],
     args: "[player]",
     help: "spectate",
     about: "watch a player (no name: a menu). !r to play again.",

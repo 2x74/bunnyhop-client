@@ -10,6 +10,7 @@
 #include "weapon_menu.hpp"
 #include "native_chat.hpp"
 #include "capabilities.hpp"
+#include <memory>
 #include <cassert>
 #include <set>
 #include <iostream>
@@ -512,8 +513,55 @@ void test_room_tag_detail() {
     assert(detail.empty());
 }
 
+// Rooms from web 0.0.36 relay every wire style and a practice tag (room_styles.hpp).
+void test_room_wire_styles() {
+    // Heap-allocated: a room and a board are about 300 KB each, and Windows gives the main thread 1 MB of stack.
+    const auto room_owner = std::make_unique<native::RoomState>();
+    auto &room = *room_owner;
+    room.event(
+            {{"generation", 1},
+             {"id", "easy"},
+             {"event",
+              {{"t", "welcome"},
+               {"you", 0},
+               {"room", {{"name", "Easy"}}},
+               {"map", {{"name", "bhop_eazy"}}},
+               {"players",
+                native::Json::array(
+                        {{{"slot", 0}, {"name", "Me"}, {"style", "autohop"}},
+                         {{"slot", 1}, {"name", "Back"}, {"style", "backwards"}},
+                         {{"slot", 2}, {"name", "Inf"}, {"style", "infinite"}, {"practice", true}}}
+                )},
+               {"metas",
+                {{"1", {{"style", 10}, {"track", 0}, {"timer", 1}, {"timerTicks", 0}, {"ping", 20}}},
+                 {"2", {{"style", 9}, {"track", 0}, {"timer", 2}, {"timerTicks", 500}, {"ping", 20}}}}}}}}
+    );
+    native::HudLabel<48> detail;
+    room.tag_detail(1, 10, detail);
+    assert(detail.view() == "BW · start");
+    room.tag_detail(2, 10, detail);
+    assert(detail.view() == "INF · practice");
+    room.event(
+            {{"generation", 1},
+             {"id", "easy"},
+             {"event", {{"t", "player"}, {"slot", 2}, {"patch", {{"practice", false}}}}}}
+    );
+    room.tag_detail(2, 10, detail);
+    assert(detail.view().starts_with("INF · 00:0"));
+    const auto board_owner = std::make_unique<native::HudScoreboard>();
+    auto &board = *board_owner;
+    board.add({{"slot", 1}, {"name", "Back"}, {"style", "autohop"}}, {{"style", 10u}}, 0, 0);
+    assert(board.rows[0].style == "backwards");
+    board.add({{"slot", 2}, {"name", "Later"}, {"style", "zigzag"}}, {{"style", 11u}}, 0, 0);
+    assert(board.rows[1].style == "zigzag");
+    assert(native::score_style_label("backwards") == "Backwards");
+    assert(native::score_style_label("infinite") == "Infinite");
+    assert(native::score_style_label("zigzag") == "zigzag");
+}
+
 void test_tags_and_race_picker() {
     test_room_tag_detail();
+    test_room_wire_styles();
     native::RoomState room;
     std::array<native_render::Actor, 1> actors;
     actors[0].id = "1";
@@ -581,6 +629,20 @@ void test_tags_and_race_picker() {
     assert(picker.step == native::RacePicker::Step::style);
     assert(picker.key("Digit2", true, false));
     assert(picker.command.view() == "/race #3 legit 0");
+    // Ten styles (all but Segmented) take two pages: Backwards on the first, Infinite and Auto-strafe on the second.
+    const auto race_style = [&](const char *page_key, const char *pick) {
+        picker.open(board, zones);
+        picker.key("Digit1", true, false);
+        picker.key("Digit1", true, false);
+        if (page_key) picker.key(page_key, true, false);
+        picker.key(pick, true, false);
+        return std::string(picker.command.view());
+    };
+    assert(race_style(nullptr, "Digit7") == "/race #3 backwards 0");
+    assert(race_style("Digit9", "Digit1") == "/race #3 infinite 0");
+    assert(race_style("Digit9", "Digit2") == "/race #3 autostrafe 0");
+    assert(race_style("Digit9", "Digit3").empty());
+    assert(std::find(native::race_styles.begin(), native::race_styles.end(), "segmented") == native::race_styles.end());
 }
 
 void test_ghost_progress() {
@@ -947,6 +1009,32 @@ void test_jhud_chat_switch() {
     assert(settings.at("hudLayoutWeb").at("jhud").at("on") == false);
 }
 
+// !ssj 80: chat lines only for jumps with 80% gain or more, as the website's ssjPassesGain. !ssj 0 is every jump.
+void test_ssj_gain_filter() {
+    auto settings = native::default_settings();
+    assert(native::HudPreferences::from(settings).ssj_min_gain == 0);
+    settings = native::patch_settings(settings, native::ssj_chat_patch({{"on", true}, {"minGain", 80}}));
+    const auto prefs = native::HudPreferences::from(settings);
+    assert(prefs.ssj_chat && prefs.ssj_min_gain == 80);
+    settings = native::patch_settings(settings, native::ssj_chat_patch({{"on", false}}));
+    assert(!native::HudPreferences::from(settings).ssj_chat && settings.at("hudSsjMinGain") == 80);
+    for (const auto &bad :
+         {native::Json{{"on", true}, {"minGain", 101}},
+          native::Json{{"on", true}, {"minGain", 12.5}},
+          native::Json{{"minGain", 50}}}) {
+        bool refused = false;
+        try {
+            native::patch_settings(settings, native::ssj_chat_patch(bad));
+        } catch (const std::exception &) {
+            refused = true;
+        }
+        assert(refused);
+    }
+    assert(native::ssj_passes_gain(12.5f, 0) && native::ssj_passes_gain(std::nullopt, 0));
+    assert(native::ssj_passes_gain(80.f, 80) && !native::ssj_passes_gain(79.99f, 80));
+    assert(!native::ssj_passes_gain(std::nullopt, 80) && native::ssj_passes_gain(91.2f, 90));
+}
+
 void test_layout_codes() {
     const auto defaults = native::default_settings();
     assert(native::encode_hud_layout(defaults) == web_classic_code);
@@ -1012,6 +1100,7 @@ int main() {
     test_new_elements_in_old_layouts();
     test_presets_keep_personal_elements();
     test_jhud_chat_switch();
+    test_ssj_gain_filter();
     test_layouts_and_options();
     test_scoreboard_and_names();
     test_merged_menu_contracts();

@@ -2,6 +2,7 @@
 #include "bunnyhop_native.h"
 #include "input_timeline.hpp"
 #include "practice.hpp"
+#include "room_styles.hpp"
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <set>
@@ -41,23 +42,7 @@ inline nlohmann::json practice_from_replay_reply(bool ok, const std::string &rea
 }
 
 inline std::string replay_style_label(const std::string &style) {
-    constexpr std::pair<std::string_view, std::string_view> labels[] = {
-            {"autohop", "Normal"},
-            {"legit", "EZ Scroll"},
-            {"scroll", "Legit Scroll"},
-            {"wonly", "W-Only"},
-            {"sideways", "Sideways"},
-            {"hsw", "Half-Sideways"},
-            {"lowgrav", "Low Gravity"},
-            {"segmented", "Segmented"},
-            {"autostrafe", "Auto Strafe"},
-    };
-    for (const auto &[id, label] : labels) {
-        if (id == style) {
-            return std::string(label);
-        }
-    }
-    return style;
+    return std::string(wire_style_name(style));
 }
 
 inline std::string
@@ -105,14 +90,10 @@ struct ReplayTakeover {
          std::span<const BhZone> zones,
          const std::string &selected_style,
          bool gauntlet,
-         bool multiplayer,
          std::optional<uint32_t> tick = std::nullopt,
          const std::string &map = {}) {
         if (gauntlet) {
             throw std::runtime_error("No practice during a gauntlet.");
-        }
-        if (multiplayer) {
-            throw std::runtime_error("Practice is for solo play, not servers.");
         }
         const auto problem = replay_practice_problem(info, map, selected_style);
         if (!problem.empty()) {

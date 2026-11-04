@@ -1,7 +1,8 @@
 import { test, expect } from "bun:test";
 import { NativeRoomService, validSnapshot, validRoomEvent, type RoomTransport } from "./room-service";
 import type { RoomHandlers } from "../../web/src/net/room";
-import type { ServerMsg, NetSample, Snapshot } from "../../web/src/net/protocol";
+import { decodeSnapshot, type ServerMsg, type NetSample, type Snapshot } from "../../web/src/net/protocol";
+import { ROOM_WIRE_STYLES } from "./room-styles";
 import type { MenuMessage } from "./bridge";
 const sample: NetSample = { tick: 1, x: 0, y: 0, z: 0, vx: 1, vy: 0, vz: 0, yaw: 0, pitch: 0, flags: 0 };
 const welcome = (id: string, map = "bhop_eazy"): ServerMsg => ({
@@ -61,32 +62,87 @@ function fixture(ensureAccount: () => Promise<boolean> = async () => true) {
     },
   };
 }
-function pose(f: ReturnType<typeof fixture>, tick = 1) {
+/** A batch as the game sends it (room_pose.hpp): five samples, four ticks apart, ending at `tick`. */
+function pose(f: ReturnType<typeof fixture>, tick = 20) {
   return {
     generation: f.service.view.generation,
     id: f.service.view.id,
     map: "bhop_eazy",
-    sample: { ...sample, tick },
+    samples: [16, 12, 8, 4, 0].map((back) => ({ ...sample, tick: tick - back })),
     meta: { style: "sideways", track: 0, timer: 2, timerTicks: 100 },
     weapon: 2,
     silenced: true,
   };
 }
-test("room service validates native pose identity, caps it at20Hz and batches existing wire metadata", async () => {
+test("room service validates native pose identity and sends each batch as it arrives", async () => {
   const f = fixture();
   try {
     await f.service.join("test");
     f.handlers[0].message(welcome("test"));
     expect(f.service.pose({ ...pose(f), generation: -1 })).toBe(false);
     expect(f.service.pose(pose(f))).toBe(true);
-    expect(f.service.pose(pose(f, 2))).toBe(false);
-    f.advance();
-    expect(f.service.pose(pose(f, 2))).toBe(true);
-    f.service.flush();
-    expect(f.poses).toHaveLength(2);
-    expect(f.batches[0]).toEqual([{ style: 3, track: 0, timer: 2, timerTicks: 100 }, 2, true]);
+    expect(f.poses.map((s) => s.tick)).toEqual([4, 8, 12, 16, 20]);
+    expect(f.batches).toEqual([[{ style: 3, track: 0, timer: 2, timerTicks: 100 }, 2, true]]);
+    // A repeat or an older batch is refused; nothing waits for a page timer or a minimum gap.
+    expect(f.service.pose(pose(f))).toBe(false);
+    expect(f.service.pose(pose(f, 40))).toBe(true);
+    expect(f.batches).toHaveLength(2);
+    expect(f.service.pose({ ...pose(f, 60), samples: [] })).toBe(false);
+    expect(f.service.pose({ ...pose(f, 60), samples: Array(9).fill(sample) })).toBe(false);
+    expect(f.service.pose({ ...pose(f, 60), meta: { style: "nope", track: 0, timer: 0, timerTicks: 0 } })).toBe(false);
     expect(f.service.command({ t: "chat", text: "hello" })).toBe(true);
     expect(f.service.command({ t: "spec", target: 999 })).toBe(false);
+  } finally {
+    f.service.leave();
+  }
+});
+test("the room hears when the attempt turns into practice, with the movement, and again after a reconnect", async () => {
+  const f = fixture();
+  const practiceMessages = () => f.commands.filter((m) => (m as { t: string }).t === "practice");
+  const wait = (ms: number) => {
+    for (let waited = 0; waited < ms; waited += 50) f.advance();
+  };
+  try {
+    f.service.practice(true);
+    await f.service.join("test");
+    f.handlers[0].message(welcome("test"));
+    expect(practiceMessages()).toEqual([]);
+    f.service.pose(pose(f));
+    expect(practiceMessages()).toEqual([{ t: "practice", on: true }]);
+    // A restart on a practice spawn flips it twice in a moment: the room gets the latest state, once.
+    f.service.practice(false);
+    f.service.pose(pose(f, 40));
+    f.service.practice(true);
+    f.service.pose(pose(f, 60));
+    expect(practiceMessages()).toHaveLength(1);
+    f.service.practice(false);
+    wait(600);
+    f.service.pose(pose(f, 80));
+    expect(practiceMessages()).toEqual([
+      { t: "practice", on: true },
+      { t: "practice", on: false },
+    ]);
+    // A new connection knows nothing of it: practising again is said again, a real run needs no message.
+    f.service.practice(true);
+    f.handlers[0].message(welcome("test"));
+    f.service.pose(pose(f, 100));
+    expect(practiceMessages()).toHaveLength(3);
+    expect(practiceMessages()[2]).toEqual({ t: "practice", on: true });
+  } finally {
+    f.service.leave();
+  }
+});
+test("game-paced batches go out with steady spacing while page timers are stalled", async () => {
+  const f = fixture();
+  try {
+    await f.service.join("test");
+    f.handlers[0].message(welcome("test"));
+    // The page clock never moves and flush() never runs, as in a throttled hidden page.
+    for (let tick = 20; tick <= 2000; tick += 20) expect(f.service.pose(pose(f, tick))).toBe(true);
+    expect(f.batches).toHaveLength(100);
+    const ticks = f.poses.map((s) => s.tick);
+    expect(ticks).toHaveLength(500);
+    expect(ticks.every((tick, i) => tick === (i + 1) * 4)).toBe(true);
   } finally {
     f.service.leave();
   }
@@ -244,10 +300,8 @@ test("latest native timer metadata is sent with its sample batch and kick stops 
     await f.service.join("test");
     f.handlers[0].message(welcome("test"));
     f.service.pose(pose(f));
-    f.advance();
-    f.service.pose({ ...pose(f, 2), meta: { style: "sideways", track: 0, timer: 3, timerTicks: 200 } });
-    f.service.flush();
-    expect(f.batches[0]).toEqual([{ style: 3, track: 0, timer: 3, timerTicks: 200 }, 2, true]);
+    f.service.pose({ ...pose(f, 40), meta: { style: "sideways", track: 0, timer: 3, timerTicks: 200 } });
+    expect(f.batches[1]).toEqual([{ style: 3, track: 0, timer: 3, timerTicks: 200 }, 2, true]);
     f.handlers[0].message({ t: "kicked", reason: "Removed" });
     expect(f.service.view.status).toBe("closed");
     expect(f.service.command({ t: "chat", text: "late" })).toBe(false);
@@ -320,6 +374,92 @@ test("kick cancels scheduled map work and rejects delayed native map acknowledgm
     expect(f.sent.filter((m) => m.type === "roomEvent" && m.event.t === "nativeMap")).toHaveLength(0);
     await f.service.join("test");
     expect(f.handlers).toHaveLength(2);
+  } finally {
+    f.service.leave();
+  }
+});
+/**
+ * A snapshot frame from web 0.0.36's room encoder (protocol.ts encodeSnapshot, the layout native decodes with its
+ * vendored decodeSnapshot): a Segmented player (wire style 8), an Infinite one (9) and a Backwards one (10).
+ */
+const SNAPSHOT_0036 =
+  "AgMA0klrAQIBCAACKADSBAAAkAEAAAABAAAgQQAAoEEAAIBCLAH0/wAAAEAAAAQBAACwQQAAoEEAAIBCLAH0/wAAAEAAAAIBAQkAAzcALhYAACADAAAAAQAA" +
+  "8EEAAKBBAACAQiwB9P8AAABAAAADAgEKAQJGAGMAAACwBAAAAAEAACBCAACgQQAAgEIsAfT/AAAAQAAABAEAACRCAACgQQAAgEIsAfT/AAAAQAAAAQIAAgI=";
+/** A 0.0.36 welcome for a socket that sent wire=11: every style in the roster, a practice tag, wide metas. */
+function welcome0036(): ServerMsg {
+  const players = ROOM_WIRE_STYLES.map((style, slot) => ({
+    slot,
+    id: `p${slot}`,
+    name: `Player ${slot}`,
+    style,
+    ...(style === "backwards" ? { practice: true } : {}),
+  }));
+  return {
+    ...(welcome("test") as Extract<ServerMsg, { t: "welcome" }>),
+    players: players as never,
+    metas: {
+      8: { style: 8, track: 0, timer: 2, timerTicks: 1234, ping: 40 },
+      9: { style: 9, track: 0, timer: 3, timerTicks: 5678, ping: 55 },
+      10: { style: 10, track: 1, timer: 2, timerTicks: 99, ping: 70 },
+    },
+  };
+}
+const race = (style: string) => ({
+  id: "r1",
+  state: "challenge",
+  map: "bhop_eazy",
+  style,
+  track: 0,
+  you: "b",
+  a: { name: "Web player", slot: 10, finish: null },
+  b: { name: "Player", slot: 0, finish: null },
+  expiresAt: Date.now() + 30000,
+  goAt: null,
+  endsAt: null,
+});
+test("web 0.0.36 snapshots with Segmented, Infinite and Backwards players pass and decode", async () => {
+  const snapshot = decodeSnapshot(Buffer.from(SNAPSHOT_0036, "base64"));
+  expect(snapshot).not.toBeNull();
+  expect(validSnapshot(snapshot!)).toBe(true);
+  expect(snapshot!.blocks.map((block) => block.meta?.style)).toEqual([8, 9, 10]);
+  expect(snapshot!.blocks.map((block) => block.samples.length)).toEqual([2, 1, 2]);
+  const f = fixture();
+  try {
+    await f.service.join("test");
+    f.handlers[0].message(welcome("test"));
+    f.handlers[0].snapshot(snapshot!, 0);
+    const sent = f.sent.filter((m) => m.type === "roomSnapshot") as unknown as { snapshot: Snapshot }[];
+    expect(sent).toHaveLength(1);
+    expect(sent[0].snapshot.blocks.map((block) => block.slot)).toEqual([1, 2, 3]);
+    expect(f.service.view.metas["3"]).toMatchObject({ style: 10, track: 1, timerTicks: 99 });
+    // A style past this build's (a newer room) still passes; it shows without a style tag.
+    const newer = {
+      ...snapshot!,
+      blocks: [{ ...snapshot!.blocks[0], meta: { ...snapshot!.blocks[0].meta!, style: 11 } }],
+    };
+    expect(validSnapshot(newer)).toBe(true);
+  } finally {
+    f.service.leave();
+  }
+});
+test("web 0.0.36 welcomes, joins, patches and races with every style pass", async () => {
+  const message = welcome0036();
+  expect(validRoomEvent(message)).toBe(true);
+  for (const style of ROOM_WIRE_STYLES) {
+    expect(validRoomEvent({ t: "join", player: { slot: 20, id: "x", name: "X", style } } as never)).toBe(true);
+    expect(validRoomEvent({ t: "player", slot: 20, patch: { style } } as never)).toBe(true);
+    expect(validRoomEvent({ t: "race", race: race(style) } as never)).toBe(true);
+  }
+  expect(validRoomEvent({ t: "player", slot: 10, patch: { practice: true } } as never)).toBe(true);
+  expect(validRoomEvent({ t: "join", player: { slot: 20, id: "x", name: "X", style: "zigzag" } } as never)).toBe(true);
+  const f = fixture();
+  try {
+    await f.service.join("test");
+    f.handlers[0].message(message);
+    expect(f.service.view.status).toBe("open");
+    expect(f.service.view.players).toHaveLength(ROOM_WIRE_STYLES.length);
+    expect(f.service.view.players[10]).toMatchObject({ style: "backwards", practice: true });
+    expect(f.service.view.metas["10"]).toMatchObject({ style: 10 });
   } finally {
     f.service.leave();
   }

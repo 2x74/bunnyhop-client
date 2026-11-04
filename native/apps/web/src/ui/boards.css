@@ -32,6 +32,10 @@
 .leaderboard .rb-tools { order: 1; }
 .leaderboard .rb-styles { order: 2; flex: 1 0 100%; box-sizing: border-box; flex-wrap: nowrap; }
 .leaderboard .rb-styles button { flex: 1 1 auto; padding-inline: 0.5rem; }
+/* From ten styles one row no longer fits the pause menu (1280 to 1920 wide): two even rows instead. */
+@container rb (max-width: 64rem) {
+  .leaderboard .rb-styles { display: grid; grid-template-columns: repeat(var(--rb-half, 6), minmax(0, 1fr)); }
+}
 @container rb (max-width: 47.5rem) {
   .leaderboard .rb-styles { display: grid; grid-template-columns: repeat(auto-fill, minmax(6.4rem, 1fr)); }
 }

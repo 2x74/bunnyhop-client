@@ -4,6 +4,7 @@
 #include "hud_editor.hpp"
 #include "weapon_menu.hpp"
 #include "preferences.hpp"
+#include "spectate.hpp"
 
 namespace native {
 
@@ -56,6 +57,10 @@ struct HudFrame {
     HudDemoState &layout_demo;
     float display_scale;
     std::string layout_editor_key;
+    const SpectatePicker &spectate_picker;
+    SpectatorBar spectator_bar;
+    // Freecam or spectator free look: no crosshair, as nothing aims.
+    bool free_camera = false;
 
     void draw() const;
 

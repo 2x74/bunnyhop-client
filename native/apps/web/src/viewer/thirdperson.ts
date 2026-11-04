@@ -10,6 +10,9 @@ import { SpectatorCamera, type SpectatorTarget } from "./cameras";
 
 export class ThirdPerson {
   active = false;
+  /** Freecam (freecam.ts): your bunny is drawn and posed where your body is, without taking the camera. */
+  private body = false;
+  private hidden = false;
   get shadowRoot(): THREE.Object3D { return this.model.root; }
   private pendingAttack = 0;
   private pendingInspect = 0;
@@ -35,7 +38,7 @@ export class ThirdPerson {
 
   toggle(): boolean {
     this.active = !this.active;
-    this.model.root.visible = this.active;
+    this.model.root.visible = (this.active || this.body) && !this.hidden;
     this.spec.snap();
     this.model.snap();
     return this.active;
@@ -47,7 +50,16 @@ export class ThirdPerson {
 
   /** Hidden while the replay viewer is open (the live model would otherwise stand in its scene). */
   setHidden(hidden: boolean): void {
-    this.model.root.visible = this.active && !hidden;
+    this.hidden = hidden;
+    this.model.root.visible = (this.active || this.body) && !hidden;
+  }
+
+  /** Freecam: draw your bunny at your body (frame() poses it; the camera is the freecam's). */
+  setBody(on: boolean): void {
+    if (on === this.body) return;
+    this.body = on;
+    this.model.root.visible = (this.active || this.body) && !this.hidden;
+    if (!this.active) this.model.snap();
   }
 
   /** A carrot swing (viewmodel attack kind) to show on the third-person model next frame. */
@@ -110,7 +122,7 @@ export class ThirdPerson {
    * the Source / Classic / Potato looks skip the whole bone setup every frame.
    */
   frame(camera: THREE.PerspectiveCamera, prev: PlayerState, curr: PlayerState, alpha: number, yaw: number, pitch: number, cmd: { forward: number; side: number }, dt: number, visualTime?: number, poseHidden = true): boolean {
-    if (!this.active && !poseHidden && this.posed) {
+    if (!this.active && !this.body && !poseHidden && this.posed) {
       this.pendingAttack = 0;
       this.pendingInspect = 0;
       this.pendingShot = false;

@@ -65,6 +65,15 @@ struct RestartPlacement {
         return result;
     }
 
+    // A restart at `point` in `track`'s start zone (a track-style switch): no start point, never practice.
+    static RestartPlacement at(BhContext *core, const std::string &map, uint32_t track, const StartPoint &point) {
+        RestartPlacement result;
+        check(core, bh_set_position(core, point.position[0], point.position[1], point.position[2], point.yaw));
+        if (const auto names = restart_names(map, track)) apply_names(core, names);
+        check(core, bh_state(core, &result.state));
+        return result;
+    }
+
     void
     custom(BhContext *core,
            const std::string &map,

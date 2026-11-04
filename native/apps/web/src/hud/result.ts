@@ -26,6 +26,7 @@ import { formatDelta, splitLead } from "./time-face";
 import { hasRewards, playReel } from "./reel";
 import { playedText } from "../map-time";
 import type { Submission } from "../api";
+import { outdatedRefusal } from "../uploads";
 import type { RunResult, SubmissionView } from "../hud";
 
 const reduced = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -216,6 +217,11 @@ export class ResultCard {
         if ("code" in s && s.code === "unranked_map") {
           text = "Unranked map. Saved on this device.";
           cls = "dim";
+        } else if (!s.id && "code" in s && outdatedRefusal(s.code)) {
+          // This tab is older than what the server takes now (a deploy since it loaded): what to do, in one line.
+          if (s.reason) console.info("run not accepted:", s.reason);
+          text = "Not submitted: this page is out of date. Reload it to update.";
+          cls = "bad";
         } else if (s.id) {
           if (s.reason) console.info("run not accepted:", s.reason);
           text = "Not accepted: the replay didn't check out.";

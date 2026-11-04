@@ -134,7 +134,8 @@ export const NATIVE_BINDS: readonly [keyof typeof DEFAULT_BINDS, string][] = [
   ["scoreboard", "Scoreboard"],
   ["spectatorNext", "Next player (spectating)"],
   ["spectatorPrevious", "Previous player (spectating)"],
-  ["spectatorMode", "Spectator camera"],
+  ["spectatorMode", "Spectate"],
+  ["freecam", "Freecam"],
   ["showTriggers", "Show triggers"],
   ["showClips", "Show player clips"],
 ];

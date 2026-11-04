@@ -19,6 +19,7 @@ import { GUEST_REFUSED_MS, resolveMe } from "./me-rules";
 import { WAVEDASH } from "./platform/env";
 import { wavedashCredentials, wavedashUserId } from "./platform/wavedash";
 import type { GiftTarget, GiftWallet, GiftPreview, GiftDelivery } from "./gifting";
+import { WIRE_STYLES } from "./net/protocol";
 
 /** Account-owned name badge selection and Prism appearance. */
 /** One of your map groups (map-groups.ts; GET / POST /me/map-groups). */
@@ -189,6 +190,11 @@ export interface LeaderboardEntry {
   sync: number;
   /** Physics version the run was played with (core.ts PHYSICS_*; absent from APIs before physics versions = 1). */
   physics?: number;
+  /**
+   * What the record scores towards the overall rank now, from this board read (apps/api boards.ts withPoints). Absent
+   * on unrated maps, styles with no overall weight, and from servers before v0.0.36.
+   */
+  points?: number;
 }
 
 /**
@@ -213,7 +219,8 @@ export interface RunStats {
   client?: { kind: "native" | "desktop" | "browser"; label: string };
   version?: string;
   fps?: number;
-  mouse?: { sensitivity?: number; dpi?: number; pollHz?: number; raw?: boolean };
+  /** `vertical`: a vertical sensitivity set apart from the sensitivity; `invertY`: mouse Y inverted (v0.0.36+). */
+  mouse?: { sensitivity?: number; dpi?: number; pollHz?: number; raw?: boolean; vertical?: number; invertY?: boolean };
   turn?: { yawSpeed: number; angleSpeedKey: number };
   play?: { attempt?: number; seconds?: number; session?: number; sessionSeconds?: number };
   /** The runner's view (native client): the shape drawn (width / height), how it filled the monitor, the FOV. */
@@ -463,6 +470,16 @@ export interface PointsRecord {
   points: number;
   /** What it adds to the total after the per-place weighting (RECORD_WEIGHTING). */
   counted: number;
+  /** What the board's WR scores: the most the board gives (absent from servers before v0.0.36). */
+  wr?: number;
+}
+
+/** A page of a player's top points (GET /players/:id/points). `more`: rows after this page (servers from v0.0.36). */
+export interface PointsPage {
+  scope: string;
+  records: PointsRecord[];
+  offset?: number;
+  more?: boolean;
 }
 
 export type CosmeticChoice = Record<"background" | "frame" | "title" | "ghost" | "trail" | "outfit" | "knife" | "finish" | "glove" | "hat" | "body", string | null> & {
@@ -472,6 +489,8 @@ export type CosmeticChoice = Record<"background" | "frame" | "title" | "ghost" |
   hairLength?: number | null;
   /** Knives (with their finishes) the game swaps between (progression.ts KnifePool); absent = none. */
   knifePool?: import("./progression").KnifePool | null;
+  /** The overall Number One's title colour ("#rrggbb", ranking.ts shownRankColor); absent = the title's own. */
+  rankColor?: string | null;
 };
 
 /**
@@ -1381,6 +1400,8 @@ export const api = {
     u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
     u.searchParams.set("v", String(version));
     u.searchParams.set("style", style);
+    // The wire styles this build decodes (protocol.ts LEGACY_META_STYLES): without it the room sends the legacy form.
+    u.searchParams.set("wire", String(WIRE_STYLES.length));
     return u.toString();
   },
   /** Gzip .bhr bytes of a verified run, for ghosts and watch mode. */
@@ -1391,8 +1412,9 @@ export const api = {
     const l = p.look && typeof p.look.outfit === "string" ? { outfit: p.look.outfit, loadout: cleanLoadout(p.look.loadout) } : null;
     return { id: p.id, name: p.name, playerGlow: p.playerGlow ?? null, look: l?.loadout ? { outfit: l.outfit, loadout: l.loadout } : null };
   },
-  async playerPoints(id: string, scope = "all"): Promise<{ scope: string; records: PointsRecord[] }> {
-    return json(`/players/${encodeURIComponent(id)}/points?scope=${encodeURIComponent(scope)}`);
+  async playerPoints(id: string, scope = "all", page: { offset?: number; limit?: number } = {}): Promise<PointsPage> {
+    const q = `${page.offset ? `&offset=${page.offset}` : ""}${page.limit ? `&limit=${page.limit}` : ""}`;
+    return json(`/players/${encodeURIComponent(id)}/points?scope=${encodeURIComponent(scope)}${q}`);
   },
   /** A board row's stats card (cached at the edge; 404 for runs that aren't on a public board). */
   async runStats(runId: string, signal?: AbortSignal): Promise<RunStats> {
