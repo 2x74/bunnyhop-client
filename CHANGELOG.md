@@ -1,5 +1,45 @@
 # Changelog
 
+## v0.7.1 — Native
+
+Update from Settings → Updates: press Update, then Restart to update. Your settings, replays and maps are kept.
+
+**Ranked**
+- Physics v24 and timer rules 4, matching website v0.0.36. Your existing runs don't change.
+- Runs on bhop_playboy_csgo, bhop_dtt_trainning2, bhop_futile and bhop_4tele count again, with the website's map
+  fixes. bhop_futile blocks prehops in the start zone, like CS:S servers: leave it with one jump.
+- Clips never run out, on every map, so maps you shoot to boost don't stop for a reload.
+- bhop_2_S4RO, bhop_alt_jestas, bhop_dust_temple and bhop_mourning show their real lighting.
+
+**Infinite**
+- Noclip through the start for speed now counts, as on the website: fly through, drop out of noclip and cross the start
+  for real. The run starts with the speed you built, up to 3510. Before, a flight ended your recording.
+- A landing that noclip moves out of the start doesn't start the run. Land in the start, then leave it.
+
+**Backwards**
+- New style: Backwards (`!bw`). In the air, face away from where you're going, or your movement keys don't count. It has
+  its own boards, like on the website.
+
+**Spectating**
+- N opens a list of players to watch, as does `!spec` with no name. R, B or M stops watching.
+- Space or F switches between in-eye, chase and free look. Left and right click switch players.
+- Spectating no longer leaves third person on, which used to turn your next attempt into practice.
+
+**Freecam**
+- `!freecam` (or `!fc`, or bind it in Settings → Keys) flies the camera ahead to look at the map while your body coasts.
+  The timer keeps running and the run still counts.
+
+**Servers**
+- Practice, checkpoints and Segmented work on servers. Players who are practising show "practice" instead of a time, and
+  `!hide` hides everyone else.
+- You can save up to 1000 checkpoints.
+- One player in Segmented or Infinite no longer freezes everyone else on your screen, and every style shows on the Tab
+  board and name tags.
+- Number keys go to the menu that's open. With a vote or the spectate list on screen, they no longer change your gun.
+
+**Jump stats**
+- `!ssj 80` shows only jumps with 80% gain or more, also in Settings → HUD → Jump stats.
+
 ## v0.7.0 — Native
 
 ### Added anti-piracy
