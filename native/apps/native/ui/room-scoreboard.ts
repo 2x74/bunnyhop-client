@@ -22,6 +22,10 @@ export function runningSeconds(view: RoomView, slot: number, now: number): numbe
   const readAt = view.metaAt?.[String(slot)] ?? now;
   return meta.timerTicks / 100 + Math.max(0, (now - readAt) / 1000);
 }
+/** The room's practice tag (roster `practice`, rooms from web 0.0.36), newer than the vendored roster type. */
+function isPractising(player: object): boolean {
+  return "practice" in player && player.practice === true;
+}
 /** Display only. Server metadata remains untrusted for records and score writes. */
 export function roomScoreboard(
   view: RoomView,
@@ -39,6 +43,9 @@ export function roomScoreboard(
     if (p.spec != null) {
       status = `SPEC → ${view.players.find((other) => other.slot === p.spec)?.name ?? "?"}`;
       statusKind = "spec";
+    } else if (isPractising(p)) {
+      // A practice attempt is never a run, so its time isn't shown (web net/players.ts).
+      status = "practice";
     } else if (m) {
       const seconds =
         m.timerTicks / 100 + (m.timer === 2 ? Math.max(0, (now - (view.metaAt?.[String(p.slot)] ?? now)) / 1000) : 0);

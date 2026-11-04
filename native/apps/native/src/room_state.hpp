@@ -83,6 +83,8 @@ class RoomState {
         std::deque<Sample> samples;
         double arrived = 0, offset = 0, batch = .1, jitter = 0, meta_at = 0;
         bool clock = false, spectator = false;
+        // Their attempt is practice (roster `practice`, rooms from web 0.0.36): the tag says so instead of a time.
+        bool practice = false;
         uint32_t rendered = 0;
         double rendered_at = -1;
         // The tick drawn, advanced at real time and eased toward the interpolation target (playback_tick).
@@ -128,6 +130,10 @@ class RoomState {
                 if (peer.actor.loadout.size() > 200) peer.actor.loadout.clear();
             } else
                 peer.actor.loadout.clear();
+        }
+        if (!patch || p.contains("practice")) {
+            const auto practice = p.find("practice");
+            peer.practice = practice != p.end() && practice->is_boolean() && practice->get<bool>();
         }
         if (!patch || p.contains("spec")) {
             peer.spectator = p.contains("spec") && !p["spec"].is_null();
@@ -622,7 +628,7 @@ public:
     }
 
     // What a player's tag shows after the name (net/players.ts): their time while running or finished, "start" in the
-    // start zone, preceded by the style's short name unless it is Normal.
+    // start zone or "practice" during a practice attempt, preceded by the style's short name unless it is Normal.
     void tag_detail(unsigned slot, double now, HudLabel<48> &out) const {
         constexpr unsigned timer_start = 1, timer_running = 2, timer_finished = 3;
         out.assign("");
@@ -630,14 +636,16 @@ public:
         if (found == peers.end()) return;
         const auto &peer = found->second;
         const auto &wire = peer.wire;
-        if (!wire.known) return;
+        if (!wire.known && !peer.practice) return;
         const auto *style = wire.known && wire.style != 0 ? wire_style_at(wire.style) : nullptr;
         if (style) out.assign(style->short_name);
         const auto detail = [&out](std::string_view text) {
             if (!out.empty()) out.append(" · ");
             out.append(text);
         };
-        if (wire.timer == timer_running || wire.timer == timer_finished) {
+        if (peer.practice) {
+            detail("practice");
+        } else if (wire.timer == timer_running || wire.timer == timer_finished) {
             const double running =
                     wire.timer == timer_running && peer.meta_at > 0 ? std::max(0., now - peer.meta_at) : 0;
             HudLabel<48> time;

@@ -512,7 +512,7 @@ void test_room_tag_detail() {
     assert(detail.empty());
 }
 
-// Rooms from web 0.0.36 relay every wire style (room_styles.hpp).
+// Rooms from web 0.0.36 relay every wire style and a practice tag (room_styles.hpp).
 void test_room_wire_styles() {
     native::RoomState room;
     room.event(
@@ -527,7 +527,7 @@ void test_room_wire_styles() {
                 native::Json::array(
                         {{{"slot", 0}, {"name", "Me"}, {"style", "autohop"}},
                          {{"slot", 1}, {"name", "Back"}, {"style", "backwards"}},
-                         {{"slot", 2}, {"name", "Inf"}, {"style", "infinite"}}}
+                         {{"slot", 2}, {"name", "Inf"}, {"style", "infinite"}, {"practice", true}}}
                 )},
                {"metas",
                 {{"1", {{"style", 10}, {"track", 0}, {"timer", 1}, {"timerTicks", 0}, {"ping", 20}}},
@@ -536,6 +536,13 @@ void test_room_wire_styles() {
     native::HudLabel<48> detail;
     room.tag_detail(1, 10, detail);
     assert(detail.view() == "BW · start");
+    room.tag_detail(2, 10, detail);
+    assert(detail.view() == "INF · practice");
+    room.event(
+            {{"generation", 1},
+             {"id", "easy"},
+             {"event", {{"t", "player"}, {"slot", 2}, {"patch", {{"practice", false}}}}}}
+    );
     room.tag_detail(2, 10, detail);
     assert(detail.view().starts_with("INF · 00:0"));
     native::HudScoreboard board;
