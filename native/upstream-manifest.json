@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "repository": "https://github.com/2x74/bunnyhop",
-  "commit": "803fd7e02765a3f42a8ac993bfd7ed5c95cda1f0",
+  "commit": "00cb266e2a61922f646ee179902217e4e5b3557a",
   "areas": [
     "crates/core",
     "crates/vendor",
