@@ -43,6 +43,7 @@
 #include "weapon_menu.hpp"
 #include "start_point.hpp"
 #include "restart_placement.hpp"
+#include "track_style_switch.hpp"
 #include "run_timing.hpp"
 #include "weapon_commands.hpp"
 #include "eye_clearance.hpp"
@@ -116,6 +117,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -666,7 +668,10 @@ int run(const native::Options &opt) {
         );
         run_history.select(map_id, active_track, active_style, double(SDL_GetTicksNS()) / run_second_ns);
     };
+    // A track-style switch's restart point for the next reset (track_style_switch.hpp).
+    std::optional<native::StartPoint> restart_at;
     auto reset = [&]() {
+        const auto at = std::exchange(restart_at, std::nullopt);
         stop_camera_preparation();
         viewer.controls = {};
         viewer.controls.pending.reset();
@@ -697,13 +702,15 @@ int run(const native::Options &opt) {
         hud.context(replay_list, map_id, active_style, active_track);
         room.solo_display(map_id, replay_player, active_style);
         game.restart(active_style);
-        const auto restart = native::RestartPlacement::place(
-                core.get(),
-                map_id,
-                active_track,
-                zones,
-                tutorial_runner.lesson && tutorial_runner.lesson->is_active() ? nullptr : &start_points
-        );
+        const auto restart =
+                at ? native::RestartPlacement::at(core.get(), map_id, active_track, *at)
+                   : native::RestartPlacement::place(
+                             core.get(),
+                             map_id,
+                             active_track,
+                             zones,
+                             tutorial_runner.lesson && tutorial_runner.lesson->is_active() ? nullptr : &start_points
+                     );
         curr = restart.state;
         if (tutorial_runner.lesson && tutorial_runner.lesson->is_active())
             tutorial_runner.restart(core.get(), active_style, curr);
@@ -3135,6 +3142,26 @@ int run(const native::Options &opt) {
         uint64_t &sim_ns = input_scheduler.sim_ns;
         input_timeline.begin_frame(input, simulation_active, now_ns);
         while (input_scheduler.due(tick_ns)) {
+            const bool lesson = tutorial_runner.lesson && tutorial_runner.lesson->is_active();
+            const bool can_switch = !viewer.active && !practice.noclip && !lesson;
+            const auto change = can_switch ? native::TrackStyleSwitch::due(
+                                                     core.get(),
+                                                     curr,
+                                                     zones,
+                                                     selected_style,
+                                                     active_style,
+                                                     practice.infinite_flight.flying(),
+                                                     float(input.yaw())
+                                             )
+                                           : std::nullopt;
+            if (change) {
+                active_track = change->track;
+                restart_at = change->at;
+                reset();
+                toast(change->toast, 2000);
+                input_scheduler.reset(SDL_GetTicksNS());
+                break;
+            }
             const double counts_before = input.yaw_counts;
             input_timeline.take_tick(input, sim_ns, tick_ns, opt.frames != 0);
             const double mouse_counts = input.yaw_counts - counts_before;

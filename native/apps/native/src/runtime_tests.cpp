@@ -5,6 +5,7 @@
 #include "leave_hold.hpp"
 #include "map_jobs.hpp"
 #include "settings.hpp"
+#include "track_style_switch.hpp"
 #ifdef NDEBUG
 #undef NDEBUG
 #endif
@@ -105,10 +106,43 @@ void test_infinite_flight_stuck_notice() {
     assert(!flight.flying() && !flight.flew() && !flight.on());
 }
 
+// Landing in another track's start restarts there in that track's style (web session.ts switchTrackStyle).
+void test_track_style_switch() {
+    using Switch = native::TrackStyleSwitch;
+    const std::vector<BhZone> zones = {
+            {0, 1, 0, {100, -480, 0}, {140, -224, 300}},
+            {1, 1, 0, {280, -480, 0}, {320, -224, 300}},
+            {0, 0, 0, {540, -480, 0}, {580, -224, 300}},
+    };
+    BhRunState bonus{};
+    bonus.in_start = 1;
+    bonus.track = 1;
+    BhState player{};
+    player.position[0] = 150;
+    player.position[1] = -300;
+    player.position[2] = -5;
+    const auto change = Switch::due(bonus, player, zones, "infinite", "infinite", false, 90);
+    assert(change && change->track == 1 && change->toast == "Bonus 1, Normal");
+    assert(change->at.position == (std::array<float, 3>{139, -300, 1}) && change->at.yaw == 90 && !change->at.practice);
+    // Still flying through it, already in Normal, or out of the start: nothing.
+    assert(!Switch::due(bonus, player, zones, "infinite", "infinite", true, 90));
+    assert(!Switch::due(bonus, player, zones, "infinite", "autohop", false, 90));
+    BhRunState left = bonus;
+    left.in_start = 0;
+    assert(!Switch::due(left, player, zones, "infinite", "infinite", false, 90));
+    // Back in the main start after a bonus: the selected style again.
+    BhRunState main = bonus;
+    main.track = 0;
+    player.position[0] = 560;
+    const auto back = Switch::due(main, player, zones, "infinite", "autohop", false, 0);
+    assert(back && back->track == 0 && back->toast == "Main track, Infinite");
+}
+
 int main() {
     test_resource_loading();
     test_practice_mode();
     test_infinite_flight_stuck_notice();
+    test_track_style_switch();
     native::Practice p;
     assert(p.key_allowed("save", true));
     assert(!p.key_allowed("tele", true));
