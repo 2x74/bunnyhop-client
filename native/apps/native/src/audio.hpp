@@ -5,6 +5,7 @@
 #include "map_audio_mix.hpp"
 #include "movement_audio.hpp"
 #include "announcer.hpp"
+#include "infinite_flight.hpp"
 #include "impact_audio.hpp"
 #include "music.hpp"
 #include "spatial_audio.hpp"
@@ -861,7 +862,8 @@ public:
         const int hop = run.measured_jumps > measured ? (run.perfect_jumps > perfect ? 1 : 0) : -1;
         measured = run.measured_jumps;
         perfect = run.perfect_jumps;
-        const bool broken = run.status != 1 || p.on_ladder || (p.events & (1 | 8)) || s.movement_mode != 0;
+        const bool broken =
+                run.status != 1 || p.on_ladder || (p.events & (1 | 8 | event_flight)) || s.movement_mode != 0;
         const auto event = announcer.tick(announcer_prefs, speed, scroll_style ? hop : -1, p.grounded, dt, broken);
         if (!event.empty()) announce(event);
         if (longjumps.tick(s, jump_observation, dt, movement_style, announcer_prefs.at("ljThreshold").get<double>()))

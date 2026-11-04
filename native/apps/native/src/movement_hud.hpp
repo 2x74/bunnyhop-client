@@ -428,6 +428,12 @@ public:
 
     void reset() { *this = {}; }
 
+    // A flight tick (Infinite's noclip) is no part of a jump: the next jump starts a fresh chain and sync.
+    void skip_jump() {
+        jumps_.reset();
+        jump_sync = jumps_.sync();
+    }
+
     void tick_jump(const BhCmd &command, const BhState &state) {
         constexpr double minimum_gain = 3;
         if (const auto reading = jumps_.feed(command, state); reading && std::abs(reading->gain) >= minimum_gain) {
@@ -566,6 +572,8 @@ struct HudExtras {
     size_t spectator_count = 0;
     // Freecam's status line, quiet in the practice slot (the run still counts, so not practice's colours).
     HudLabel<96> freecam_line;
+    // Infinite's noclip while the core flies, quiet in the practice slot for the same reason.
+    HudLabel<32> flight_line;
     uint32_t ghost_buttons = 0;
     bool have_ghost = false;
     std::optional<double> personal_best;
@@ -788,6 +796,8 @@ void draw_movement_widgets(
         line("practice", extras.freecam_line.view(), width / 2, height / 2 + 28, true);
     } else if (!segmented.empty()) {
         line("practice", segmented, width / 2, height / 2 + 28, true, cream);
+    } else if (!extras.flight_line.empty() && !practice) {
+        line("practice", extras.flight_line.view(), width / 2, height / 2 + 28, true);
     } else if (practice) {
         label.format("Practice | checkpoint %u", checkpoint);
         line("practice", label.view(), width / 2, height / 2 + 28, true);

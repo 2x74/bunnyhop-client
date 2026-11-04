@@ -114,7 +114,7 @@ nlohmann::json PracticeController::state(const std::string &unavailable, bool th
             {"active", active},
             {"thirdPerson", third_person},
             {"tool", tool.empty() ? nlohmann::json(nullptr) : nlohmann::json(tool)},
-            {"noclip", noclip},
+            {"noclip", noclip || infinite_flight.on()},
             {"menuOpen", menu_open},
             {"count", checkpoints.size()},
             {"current", number()},

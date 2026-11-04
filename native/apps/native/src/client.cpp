@@ -805,19 +805,13 @@ int run(const native::Options &opt) {
                     return;
                 }
                 if (action == "noclip") {
+                    // Infinite flies in the core: the recording carries on and the attempt stays a real one.
+                    if (!practice.noclip && practice.infinite_flight.toggle(core.get())) return;
                     if (!practice.noclip) {
                         BhRunState before{};
                         bh_run_state(core.get(), &before);
-                        // Infinite flies to the start rather than practising, so noclip there closes the
-                        // recording without marking the attempt practice: leaving the start zone records
-                        // a fresh run. A flight cannot be re-simulated from commands, so the recording
-                        // cannot simply continue across it.
-                        if (selected_style == "infinite") {
-                            run_event(practice.enter(core.get(), "noclip", recorder, heartbeat, score_notice));
-                        } else {
-                            practice_use("noclip");
-                            if (before.status == 1) toast("Noclip: timer stopped. Press R for a real run.", 3500);
-                        }
+                        practice_use("noclip");
+                        if (before.status == 1) toast("Noclip: timer stopped. Press R for a real run.", 3500);
                         practice.noclip = true;
                         practice.begin_flight(curr);
                     } else {
@@ -1409,13 +1403,16 @@ int run(const native::Options &opt) {
                             toast("Start points are unavailable in tutorial lessons");
                             return;
                         }
-                        const auto problem = native::start_point_problem(curr, practice.noclip);
+                        const auto problem =
+                                native::start_point_problem(curr, practice.noclip || practice.infinite_flight.flying());
                         if (!problem.empty()) {
                             toast(problem);
                             return;
                         }
                         constexpr unsigned start_point_toast_ms = 3000, practice_spawn_toast_ms = 8000;
-                        const auto save = native::plan_start_point(curr, zones, active_track, practice.active);
+                        const auto save = native::plan_start_point(
+                                curr, zones, active_track, practice.active || practice.infinite_flight.flew()
+                        );
                         start_points.save(map_id, active_track, save.state, input.yaw(), input.pitch, save.practice);
                         toast(save.message, save.practice ? practice_spawn_toast_ms : start_point_toast_ms);
                     }
@@ -3202,7 +3199,11 @@ int run(const native::Options &opt) {
                     BhSettings style_settings{};
                     bh_style_settings(active_style.c_str(), &style_settings);
                     w_release = native::w_release_context(
-                            active_style, practice.active, practice.noclip, curr, style_settings.autohop != 0
+                            active_style,
+                            practice.active,
+                            practice.noclip || practice.infinite_flight.on(),
+                            curr,
+                            style_settings.autohop != 0
                     );
                 }
                 if (w_release) {
@@ -3225,10 +3226,17 @@ int run(const native::Options &opt) {
                             "Stepping simulation");
                     require(bh_last_command(core.get(), &cmd), core.get(), "Reading filtered command");
                     input.events(curr);
+                    if (const auto notice = practice.infinite_flight.observe(core.get(), curr))
+                        toast(std::string(*notice), 4000);
                 }
             }
             renderer->simulation_tick();
-            hud.movement.tick_jump(cmd, curr);
+            // Infinite's flight ticks feed no jump stats, SSJ, sync or announcer, as practice noclip.
+            const bool flight_tick = (curr.events & native::event_flight) != 0;
+            if (flight_tick)
+                hud.movement.skip_jump();
+            else
+                hud.movement.tick_jump(cmd, curr);
             hud.tick(curr);
             hud.command_tick(cmd, curr.tick);
             if (input_log && !viewer.active) {
@@ -3292,9 +3300,9 @@ int run(const native::Options &opt) {
                 native::SsjTick info;
                 info.jumped = (curr.events & (1u << 1)) != 0;  // EVENT_JUMPED
                 info.teleported = (curr.events & native::teleported) != 0;
-                info.in_start = practice.noclip ? false : timing_before.in_start != 0;
-                info.noclip = practice.noclip || feedback.ssj_was_noclip;
-                if (timing_before.status == 1)
+                info.in_start = practice.noclip || flight_tick ? false : timing_before.in_start != 0;
+                info.noclip = practice.noclip || flight_tick || feedback.ssj_was_noclip;
+                if (timing_before.status == 1 && !flight_tick)
                     info.time = (timing_before.last_tick - timing_before.start_tick) * step_dt;
                 hud.configure_feedback(feedback);
                 if (timing.update_flags & 4) reset_feedback(false, true);  // restarted
@@ -3357,7 +3365,7 @@ int run(const native::Options &opt) {
                     active_style,
                     hud.preferences().long_jump,
                     timing_before.in_start != 0,
-                    practice.noclip
+                    practice.noclip || flight_tick
             );
             if (const auto pitch =
                         native::trainer_jump_sound(hud.preferences(), feedback.strafe_trainer.take_landing()))
@@ -3801,6 +3809,9 @@ int run(const native::Options &opt) {
                     gauntlet_good = delta < 0;
                 }
             }
+            hud.extras.flight_line.assign(
+                    practice.infinite_flight.flying() ? native::InfiniteFlight::hud_line : std::string_view()
+            );
             const auto spectator_bar = free_cameras.hud(
                     hud.extras,
                     spectator.has_value(),

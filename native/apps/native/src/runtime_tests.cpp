@@ -85,9 +85,27 @@ void test_resource_loading() {
     assert(failed && alive == 0);
 }
 
+// The core still flies after the key went off (no room to land): the player hears it once per stuck landing.
+void test_infinite_flight_stuck_notice() {
+    native::Practice practice;
+    auto &flight = practice.infinite_flight;
+    assert(!flight.toggle(nullptr));
+    BhState flew{};
+    flew.events = native::event_flight;
+    const BhState walked{};
+    assert(flight.observe(nullptr, flew) == native::InfiniteFlight::stuck_notice);
+    assert(flight.flying() && flight.flew());
+    assert(!flight.observe(nullptr, flew));
+    assert(!flight.observe(nullptr, walked) && !flight.flying() && flight.flew());
+    assert(flight.observe(nullptr, flew) == native::InfiniteFlight::stuck_notice);
+    practice.restart();
+    assert(!flight.flying() && !flight.flew() && !flight.on());
+}
+
 int main() {
     test_resource_loading();
     test_practice_mode();
+    test_infinite_flight_stuck_notice();
     native::Practice p;
     assert(p.key_allowed("save", true));
     assert(!p.key_allowed("tele", true));

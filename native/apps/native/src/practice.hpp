@@ -1,6 +1,7 @@
 #pragma once
 #include "hud_text.hpp"
 #include "bunnyhop_native.h"
+#include "infinite_flight.hpp"
 #include <algorithm>
 #include <string>
 #include <vector>
@@ -24,12 +25,14 @@ struct Practice {
     HudLabel<80> segment_label;
     std::string tool;
     BhNoclipState flight{};
+    // Infinite's noclip flies in the core and isn't practice; it lives here because the same key and menu drive it.
+    InfiniteFlight infinite_flight;
     std::vector<Checkpoint> checkpoints;
     size_t current = 0;
     int64_t hinted_run = -1;
 
     bool key_allowed(const std::string &action, bool timed) const {
-        // Noclip works mid-run in any mode: it stops the timer (bh_practice_enter).
+        // Noclip works mid-run in any mode: it stops the timer (bh_practice_enter, or Infinite's first flight tick).
         return action == "save" || (!segmented && action == "noclip") || !timed || active || menu_open
                || (segmented && (action == "tele" || action == "prev" || action == "next"));
     }
@@ -49,6 +52,7 @@ struct Practice {
         segment_loads = -1;
         segment_label.assign("");
         noclip = false;
+        infinite_flight.restart();
         tool.clear();
         hinted_run = -1;
     }
@@ -104,7 +108,7 @@ void draw_checkpoint_menu(Hud &hud, float /*width*/, float height, const Practic
     hud.overlay_text(x, y + 56, label.view(), 14, practice.checkpoints.empty() ? dim : cream);
     hud.overlay_text(x, y + 78, "3. Previous", 14, practice.number() <= 1 ? dim : cream);
     hud.overlay_text(x, y + 100, "4. Next", 14, practice.number() >= practice.checkpoints.size() ? dim : cream);
-    label.format("5. Noclip: %s", practice.noclip ? "on" : "off");
+    label.format("5. Noclip: %s", practice.noclip || practice.infinite_flight.on() ? "on" : "off");
     hud.overlay_text(x, y + 122, label.view(), 14, cream);
     label.format("6. Keep speed: %s", practice.segmented ? "always" : keep_velocity ? "on" : "off");
     hud.overlay_text(x, y + 144, label.view(), 14, cream);
