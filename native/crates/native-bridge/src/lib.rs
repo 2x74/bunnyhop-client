@@ -1669,7 +1669,14 @@ impl Map {
             return Err(e);
         }
         if let Some(t) = &mut self.timer {
-            if let Some(v) = t.update_observed(cmd, BhState::from(&self.game), Some(&self.game)) {
+            let after = BhState::from(&self.game);
+            // Infinite's flight ticks never start or finish a run (website sim.ts afterStep).
+            let clamp = if self.game.events & game::EVENT_FLIGHT != 0 {
+                t.flight_tick(after.tick, after.position, after.velocity)
+            } else {
+                t.update_observed(cmd, after, Some(&self.game))
+            };
+            if let Some(v) = clamp {
                 clamped = true;
                 self.game.state.velocity = v;
                 // The clamp replaced the speed this tick measured. A clamp before the step needs no fence: the step
