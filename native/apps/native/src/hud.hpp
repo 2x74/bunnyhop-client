@@ -19,6 +19,7 @@
 #include "hud_result.hpp"
 #include "hud_readouts.hpp"
 #include "toasts.hpp"
+#include "room_styles.hpp"
 
 namespace native {
 class NativeHud {
@@ -1575,11 +1576,11 @@ private:
         }
     }
 
-    // v0.5.1: the map, and under it the style in the accent colour.
+    // v0.5.1: the map, and under it the style's name in the accent colour.
     void draw_map_line(std::string_view map, std::string_view style, unsigned track) {
         const auto [x, y] = place("map", edge_margin, map_top);
         native::HudLabel<128> label;
-        label.assign(style);
+        label.assign(native::wire_style_name(style));
         if (track) {
             native::HudLabel<32> bonus;
             bonus.format(" / BONUS %u", track);
