@@ -23,6 +23,8 @@ const coreConstantNames = [
   "EVENT_TELEPORTED",
   "EVENT_JUMPED",
   "EVENT_LANDED",
+  // replay.ts reads it to tell which replays may fly.
+  "IN_FLIGHT",
 ];
 
 // Web module (without extension) -> native adapter in ui/.
