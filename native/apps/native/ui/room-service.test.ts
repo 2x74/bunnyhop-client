@@ -61,32 +61,51 @@ function fixture(ensureAccount: () => Promise<boolean> = async () => true) {
     },
   };
 }
-function pose(f: ReturnType<typeof fixture>, tick = 1) {
+/** A batch as the game sends it (room_pose.hpp): five samples, four ticks apart, ending at `tick`. */
+function pose(f: ReturnType<typeof fixture>, tick = 20) {
   return {
     generation: f.service.view.generation,
     id: f.service.view.id,
     map: "bhop_eazy",
-    sample: { ...sample, tick },
+    samples: [16, 12, 8, 4, 0].map((back) => ({ ...sample, tick: tick - back })),
     meta: { style: "sideways", track: 0, timer: 2, timerTicks: 100 },
     weapon: 2,
     silenced: true,
   };
 }
-test("room service validates native pose identity, caps it at20Hz and batches existing wire metadata", async () => {
+test("room service validates native pose identity and sends each batch as it arrives", async () => {
   const f = fixture();
   try {
     await f.service.join("test");
     f.handlers[0].message(welcome("test"));
     expect(f.service.pose({ ...pose(f), generation: -1 })).toBe(false);
     expect(f.service.pose(pose(f))).toBe(true);
-    expect(f.service.pose(pose(f, 2))).toBe(false);
-    f.advance();
-    expect(f.service.pose(pose(f, 2))).toBe(true);
-    f.service.flush();
-    expect(f.poses).toHaveLength(2);
-    expect(f.batches[0]).toEqual([{ style: 3, track: 0, timer: 2, timerTicks: 100 }, 2, true]);
+    expect(f.poses.map((s) => s.tick)).toEqual([4, 8, 12, 16, 20]);
+    expect(f.batches).toEqual([[{ style: 3, track: 0, timer: 2, timerTicks: 100 }, 2, true]]);
+    // A repeat or an older batch is refused; nothing waits for a page timer or a minimum gap.
+    expect(f.service.pose(pose(f))).toBe(false);
+    expect(f.service.pose(pose(f, 40))).toBe(true);
+    expect(f.batches).toHaveLength(2);
+    expect(f.service.pose({ ...pose(f, 60), samples: [] })).toBe(false);
+    expect(f.service.pose({ ...pose(f, 60), samples: Array(9).fill(sample) })).toBe(false);
+    expect(f.service.pose({ ...pose(f, 60), meta: { style: "nope", track: 0, timer: 0, timerTicks: 0 } })).toBe(false);
     expect(f.service.command({ t: "chat", text: "hello" })).toBe(true);
     expect(f.service.command({ t: "spec", target: 999 })).toBe(false);
+  } finally {
+    f.service.leave();
+  }
+});
+test("game-paced batches go out with steady spacing while page timers are stalled", async () => {
+  const f = fixture();
+  try {
+    await f.service.join("test");
+    f.handlers[0].message(welcome("test"));
+    // The page clock never moves and flush() never runs, as in a throttled hidden page.
+    for (let tick = 20; tick <= 2000; tick += 20) expect(f.service.pose(pose(f, tick))).toBe(true);
+    expect(f.batches).toHaveLength(100);
+    const ticks = f.poses.map((s) => s.tick);
+    expect(ticks).toHaveLength(500);
+    expect(ticks.every((tick, i) => tick === (i + 1) * 4)).toBe(true);
   } finally {
     f.service.leave();
   }
@@ -244,10 +263,8 @@ test("latest native timer metadata is sent with its sample batch and kick stops 
     await f.service.join("test");
     f.handlers[0].message(welcome("test"));
     f.service.pose(pose(f));
-    f.advance();
-    f.service.pose({ ...pose(f, 2), meta: { style: "sideways", track: 0, timer: 3, timerTicks: 200 } });
-    f.service.flush();
-    expect(f.batches[0]).toEqual([{ style: 3, track: 0, timer: 3, timerTicks: 200 }, 2, true]);
+    f.service.pose({ ...pose(f, 40), meta: { style: "sideways", track: 0, timer: 3, timerTicks: 200 } });
+    expect(f.batches[1]).toEqual([{ style: 3, track: 0, timer: 3, timerTicks: 200 }, 2, true]);
     f.handlers[0].message({ t: "kicked", reason: "Removed" });
     expect(f.service.view.status).toBe("closed");
     expect(f.service.command({ t: "chat", text: "late" })).toBe(false);

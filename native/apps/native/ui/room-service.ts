@@ -4,6 +4,7 @@ import {
   parseClientMsg,
   styleIndex,
   WORLD_LIMIT,
+  MAX_SAMPLES,
   CLOSE,
   type ClientMsg,
   type NetMeta,
@@ -84,6 +85,22 @@ const uint = (n: unknown, max = 0xffffffff): n is number =>
   Number.isSafeInteger(n) && Number(n) >= 0 && Number(n) <= max;
 const metaValid = (m: NetMeta): boolean =>
   !!m && uint(m.style, 7) && uint(m.track, 64) && uint(m.timer, 3) && uint(m.timerTicks) && uint(m.ping, 65535);
+/** A batch from the game: up to MAX_SAMPLES valid samples, ticks rising past the last batch's. */
+function poseSamplesValid(samples: unknown, lastTick: number): samples is NetSample[] {
+  if (!Array.isArray(samples) || samples.length < 1 || samples.length > MAX_SAMPLES) return false;
+  let previous = lastTick;
+  for (const sample of samples) {
+    if (!sampleValid(sample) || sample.tick <= previous) return false;
+    previous = sample.tick;
+  }
+  return true;
+}
+function poseMeta(value: unknown): Omit<NetMeta, "ping"> | null {
+  if (!value || typeof value !== "object") return null;
+  const meta = value as Record<string, unknown>;
+  if (!isStyleId(meta.style) || !uint(meta.track, 64) || !uint(meta.timer, 3) || !uint(meta.timerTicks)) return null;
+  return { style: styleIndex(meta.style), track: meta.track, timer: meta.timer, timerTicks: meta.timerTicks };
+}
 export function validSnapshot(value: Snapshot): boolean {
   return (
     !!value &&
@@ -258,13 +275,9 @@ export class NativeRoomService {
   private transport: RoomTransport | null = null;
   private listeners = new Set<() => void>();
   private now: () => number;
-  private lastPose = -Infinity;
   private lastSnapshot = -Infinity;
   private lastTick = -1;
   private pendingSnapshot: Snapshot | null = null;
-  private batch: Omit<NetMeta, "ping"> | null = null;
-  private weapon: number | null = null;
-  private silenced = false;
   private timer: ReturnType<typeof setInterval> | null = null;
   private connectionEpoch = 0;
   private pendingMap: string | null = null;
@@ -373,7 +386,6 @@ export class NativeRoomService {
         this.connectionEpoch++;
         this.transport?.close(CLOSE.MAP_CHANGE);
         this.transport = null;
-        this.batch = null;
         this.pendingSnapshot = null;
         this.view.status = "connecting";
         this.view.detail = `Loading ${change.map}…`;
@@ -390,7 +402,6 @@ export class NativeRoomService {
     const { id, generation } = this.view;
     this.connectionEpoch++;
     this.transport?.close(CLOSE.MAP_CHANGE);
-    this.batch = null;
     this.pendingSnapshot = null;
     this.view.status = "connecting";
     this.view.detail = "Joining the new map…";
@@ -424,8 +435,7 @@ export class NativeRoomService {
     this.view.nextMap = null;
     this.view.metaAt = {};
     this.pendingSnapshot = null;
-    this.batch = null;
-    this.lastPose = this.lastSnapshot = -Infinity;
+    this.lastSnapshot = -Infinity;
     this.lastTick = -1;
     this.view.generation++;
     if (id) this.dependencies.send({ type: "roomEvent", id, generation, event: { t: "nativeLeave" } });
@@ -461,53 +471,30 @@ export class NativeRoomService {
     this.transport.send(message);
     return true;
   }
+  /**
+   * One batch of your movement from the game (room_pose.hpp), sent on arrival. The game paces batches by simulated
+   * ticks, so the hidden page's throttled timers never delay them.
+   */
   pose(value: unknown): boolean {
     if (!value || typeof value !== "object" || !this.transport || this.view.status !== "open") return false;
-    const pose = value as Record<string, unknown>,
-      meta = pose.meta as Record<string, unknown>;
-    if (
-      pose.generation !== this.view.generation ||
-      pose.id !== this.view.id ||
-      pose.map !== this.view.map ||
-      !sampleValid(pose.sample) ||
-      !meta ||
-      !isStyleId(meta.style) ||
-      ![meta.track, meta.timer, meta.timerTicks].every((v) => uint(v)) ||
-      Number(meta.track) > 64 ||
-      Number(meta.timer) > 3
-    )
+    const pose = value as Record<string, unknown>;
+    if (pose.generation !== this.view.generation || pose.id !== this.view.id || pose.map !== this.view.map)
       return false;
-    if (this.now() - this.lastPose < 50 || pose.sample.tick <= this.lastTick) return false;
-    this.lastPose = this.now();
-    this.lastTick = pose.sample.tick;
-    this.view.metas[String(this.view.you)] = {
-      style: styleIndex(meta.style),
-      track: Number(meta.track),
-      timer: Number(meta.timer),
-      timerTicks: Number(meta.timerTicks),
-      ping: this.view.metas[String(this.view.you)]?.ping ?? 0,
-    };
-    (this.view.metaAt ??= {})[String(this.view.you)] = this.now();
-    this.transport.pushSample(pose.sample);
-    this.batch = {
-      style: styleIndex(meta.style),
-      track: Number(meta.track),
-      timer: Number(meta.timer),
-      timerTicks: Number(meta.timerTicks),
-    };
-    this.weapon =
-      Number.isInteger(pose.weapon) && Number(pose.weapon) >= 0 && Number(pose.weapon) <= 25
-        ? Number(pose.weapon)
-        : null;
-    this.silenced = pose.silenced === true;
+    const meta = poseMeta(pose.meta);
+    if (!meta || !poseSamplesValid(pose.samples, this.lastTick)) return false;
+    for (const sample of pose.samples) this.transport.pushSample(sample);
+    this.lastTick = pose.samples[pose.samples.length - 1].tick;
+    const you = String(this.view.you);
+    this.view.metas[you] = { ...meta, ping: this.view.metas[you]?.ping ?? 0 };
+    (this.view.metaAt ??= {})[you] = this.now();
+    const weapon = uint(pose.weapon, 25) ? pose.weapon : null;
+    this.transport.flushSamples(meta, weapon, pose.silenced === true);
+    // The page timer that also drives the countdown cues can be throttled while the page is hidden.
+    this.audioCountdown();
     return true;
   }
   flush(): void {
     this.audioCountdown();
-    if (this.batch) {
-      this.transport?.flushSamples(this.batch, this.weapon, this.silenced);
-      this.batch = null;
-    }
     this.flushSnapshot();
   }
   private flushSnapshot(): void {
@@ -691,7 +678,6 @@ export class NativeRoomService {
       this.connectionEpoch++;
       this.transport?.close();
       this.transport = null;
-      this.batch = null;
       this.pendingSnapshot = null;
       this.view.players = [];
       this.view.vote = null;
