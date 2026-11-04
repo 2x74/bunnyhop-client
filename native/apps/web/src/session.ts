@@ -11,7 +11,7 @@ import { keepRunOffer } from "./ui/keep-run";
 
 import * as THREE from "three";
 import { clientResultSettled, saveClientRun, type ClientRunSummary } from "./client-bridge";
-import { EVENT_JUMPED, EVENT_TELEPORTED, applyRestartPoint, restartPoint, withRestoredState, type Core, type PlayerState, type RestartPoint, type Settings } from "./core";
+import { EVENT_FLIGHT, EVENT_JUMPED, EVENT_TELEPORTED, IN_FLIGHT, applyRestartPoint, restartPoint, withRestoredState, type Core, type PlayerState, type RestartPoint, type Settings } from "./core";
 import { GhostManager } from "./ghost";
 import { formatDelta, Hud, type SubmissionView } from "./hud";
 import type { UserCmd, Input } from "./input";
@@ -152,6 +152,16 @@ export class RunSession {
   private prac = new PracticeAttempt();
   /** Noclip is on (practice-mode/controller.ts): the HUD's Practice line says so. */
   practiceNoclip = false;
+  /**
+   * Infinite's noclip is on (practice-mode/controller.ts): every command carries IN_FLIGHT and the core flies it
+   * (crates/core game/flight.rs). Recorded like any command, so the attempt stays a real run (timer.ts flightTick keeps
+   * the flight out of the timed part). Off on every reset.
+   */
+  flightOn = false;
+  /** The core flew the last tick (EVENT_FLIGHT). Can stay on a little after flightOn goes off: a landing inside a wall
+   * keeps flying until there's room. */
+  flying = false;
+  private flightStuckSaid = false;
   /** A practice attempt (a tool, not practice mode) back in a start zone says it's still practice, once (afterStep). */
   private practiceStartHint: "off" | "armed" | "said" = "off";
   /** The pause menu's Practice item (main.ts sets it where practice mode is available). */
@@ -342,8 +352,8 @@ export class RunSession {
     let c: TickCmd;
     {
       // Standing in a start zone whose track runs in another style (a bonus while W-Only is selected, or back on the
-      // main track after a bonus): restart right here in that track's style.
-      if (this.timer.inStart && styleForTrack(this.selectedStyle, this.timer.track) !== this.runStyle) {
+      // main track after a bonus): restart right here in that track's style. Not while flying through one (Infinite).
+      if (this.timer.inStart && !this.flying && styleForTrack(this.selectedStyle, this.timer.track) !== this.runStyle) {
         const active = this.o.input.samplerState !== null;
         const restarted = this.switchTrackStyle(active ? sample.yaw : this.o.input.yaw);
         if (active && restarted) return sample; // applyTick discards it; do not run beforeStep on the new world.
@@ -356,6 +366,8 @@ export class RunSession {
         // the neutral command, this keeps any other path from feeding keys).
         if (this.freecam !== null) sample = neutralCommand(sample);
         c = quantize(sample.forwardmove, sample.sidemove, sample.yaw, sample.pitch, sample.buttons);
+        // Infinite flight: the bit rides in the recorded command (before the style filter, which keeps it).
+        if (this.flightOn) c = { ...c, buttons: (c.buttons | IN_FLIGHT) >>> 0 };
       }
       c = this.styleFilter.apply(c, this.o.core.state());
       beforeStep(this.o.core, this.timer, c);
@@ -553,17 +565,20 @@ export class RunSession {
     const ssjAt = { inStart: t.inStart, time: t.status === "running" ? t.ticks() * t.tickInterval : null };
     const measured = t.measuredJumps, perfect = t.perfectJumps;
     const { state, update } = afterStep(this.o.core, this.timer, cmd, events);
+    this.afterFlight(events);
+    const flying = this.flying;
     if (update.started || update.restarted) announcerPolicy.resetAttempt();
     const measuredHop = t.measuredJumps > measured ? t.perfectJumps > perfect : null;
     const scroll = this.runStyle === "scroll" || this.runStyle === "legit";
-    const broken = this.unranked || state.onLadder || !!(events & (EVENT_TELEPORTED | EVENT_RESPAWNED)) || t.status !== "running";
+    const broken = this.unranked || flying || state.onLadder || !!(events & (EVENT_TELEPORTED | EVENT_RESPAWNED)) || t.status !== "running";
     const cue = announcerPolicy.tick(prefs.get().audio.announcer, Math.sqrt(state.velocity[0] ** 2 + state.velocity[1] ** 2), scroll ? measuredHop : null, state.grounded, t.tickInterval, broken);
     if (cue && !broken) announce(cue);
     if (scroll && measuredHop && !broken && prefs.get().audio.perfectTick) sfx("split", 0.12, 1.5);
     if (update.started) this.runMouse.feed(mouseFromPrefs(prefs.get()), false);
-    this.ssj.feed(cmd, state, events, ssjAt);
-    this.movementStats.feed(cmd, state, events, t, { map: this.o.map, style: this.runStyle, track: t.track, practice: this.unranked });
-    this.hud.tick(cmd, state, events, { settings: this.settings, style: this.runStyle }); // HUD: keys overlay / speed graph / jump stats see exactly the simulated command
+    this.ssj.feed(cmd, state, events, flying ? { inStart: false, time: null, noclip: true } : ssjAt);
+    if (flying) this.movementStats.reset(state);
+    else this.movementStats.feed(cmd, state, events, t, { map: this.o.map, style: this.runStyle, track: t.track, practice: this.unranked });
+    this.hud.tick(cmd, state, events, flying ? { settings: this.settings, style: this.runStyle, noclip: true } : { settings: this.settings, style: this.runStyle }); // HUD: keys overlay / speed graph / jump stats see exactly the simulated command
     if (!this.experimentalInput) {
       this.recorder.push(cmd.forward, cmd.side, cmd.yaw, cmd.pitch, cmd.buttons, u.look ?? null);
       if (u.nullBinds) this.recorder.nullBinds = true; // header.nullBinds: the anticheat expects instant key switches
@@ -622,6 +637,17 @@ export class RunSession {
       void this.finish(state);
     }
     return state;
+  }
+
+  /** After a step: whether the core flew it (Infinite noclip), and one line when a landing is stuck in a wall. */
+  private afterFlight(events: number): void {
+    this.flying = (events & EVENT_FLIGHT) !== 0;
+    if (this.flying) this.prac.flew(); // (a start point set after a flight is a practice spawn)
+    if (!this.flying || this.flightOn) this.flightStuckSaid = false;
+    else if (!this.flightStuckSaid) {
+      this.flightStuckSaid = true;
+      this.hud.toast("You're inside a wall. Fly out of it to land.", 4000, "practice", "bad");
+    }
   }
 
   /**
@@ -735,6 +761,7 @@ export class RunSession {
     this.clientResult++;
     this.attempt++;
     this.lessonPractice = this.scripted = this.freeGun = false;
+    this.flightOn = this.flying = this.flightStuckSaid = false; // (the core reset ended any flight)
     // A fresh recording from a core reset: the only way back from a practice attempt (attempt.ts).
     if (this.prac.reset()) this.attempts.practiceExit(this.o.map);
     this.practiceStartHint = "off";
@@ -985,15 +1012,10 @@ export class RunSession {
    * A noclip tick (the core ran practice_noclip_tick instead of step): the HUD and the live frames follow, nothing is
    * recorded, and a run in progress keeps its clock going without zones (timer.ts coast). The attempt is practice.
    */
-  afterNoclip(u: UserCmd, events: number, flight?: { position: number[]; velocity: number[] }): PlayerState {
+  afterNoclip(u: UserCmd, events: number): PlayerState {
     const cmd: TickCmd = { forward: u.forwardmove, side: u.sidemove, yaw: u.yaw, pitch: u.pitch, buttons: u.buttons };
     const state = this.o.core.state();
-    if (flight && this.timer.options.startReentryCap) {
-      // Infinite (native practice.rs bh_practice_noclip_tick): the timer arms in the start zone and never starts; flying
-      // out of it caps the flight's speed for the next tick.
-      const clamp = this.timer.noclipTick(state.tick, flight.position, flight.velocity);
-      if (clamp) flight.velocity.splice(0, 3, ...clamp);
-    } else if (this.timer.status === "running") this.timer.coast(state.tick);
+    if (this.timer.status === "running") this.timer.coast(state.tick);
     this.hud.tick(cmd, state, events, { settings: this.settings, style: this.runStyle, noclip: true });
     this.ssj.feed(cmd, state, events, { inStart: false, time: null, noclip: true });
     this.movementStats.reset(state);
@@ -1125,7 +1147,9 @@ export class RunSession {
     // Freecam takes the line while it's on; a run that counts keeps a quiet line (no yellow timer).
     if (this.freecam !== null) this.hud.setPractice(this.freecam, !(this.unranked && this.o.map !== TUTORIAL_MAP));
     else if (this.segmenting) this.hud.setPractice(`Segmented${loads ? ` · ${loads} load${loads === 1 ? "" : "s"}` : ""}`, true);
-    else this.hud.setPractice(this.unranked && this.o.map !== TUTORIAL_MAP ? (this.prac.tool === "flight" ? (this.practiceNoclip ? "Noclip" : "Not saved · noclip used") : this.practiceNoclip ? "Practice · noclip" : "Practice") : null, false, this.onPracticeSpawn ? practiceSpawnLine(clearStartKey()) : null);
+    // Infinite's noclip counts (the flight is recorded and simulated): a quiet line while flying.
+    else if (this.flying && !this.unranked) this.hud.setPractice("Noclip", true);
+    else this.hud.setPractice(this.unranked && this.o.map !== TUTORIAL_MAP ? (this.practiceNoclip || this.flying ? "Practice · noclip" : "Practice") : null, false, this.onPracticeSpawn ? practiceSpawnLine(clearStartKey()) : null);
     const pb = getPB(this.o.map, this.styleFor(t.track), t.track);
     const splitTotal = t.splitTotal();
     const lastSplit = t.splits[t.splits.length - 1];

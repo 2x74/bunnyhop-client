@@ -1,7 +1,8 @@
 //! Practice mode noclip (apps/web/src/practice/): the client flies the player itself (CS:S FullNoClipMove, ported in
 //! apps/web/src/practice/noclip.ts) and hands the core the position each tick; the map keeps running around it.
 //!
-//! Nothing here is reachable from a ranked simulation: `step` never calls these, and the replay re-simulation and the
+//! Infinite's flights (game/flight.rs) reuse the tick and the landing search below from inside `step`. Otherwise
+//! nothing here is reachable from a ranked simulation: `step` never calls these, and the replay re-simulation and the
 //! verifier (apps/web/src/sim.ts, verifier.ts) only reset, apply the start-zone restart point, step recorded commands
 //! and clamp prespeed. A recording that went through noclip can't re-simulate (no command produces it), and the client
 //! never submits a practice attempt.
@@ -34,6 +35,22 @@ impl Game {
     /// 100 units each), then the same with the crouched hull. Returns 1 (standing), 2 (crouched) or 0 (no free space
     /// found: left at `position`, standing).
     pub fn practice_noclip_exit(&mut self, position: [f32; 3], velocity: [f32; 3], yaw: f32, pitch: f32) -> u32 {
+        match self.noclip_free_spot(position, yaw, pitch) {
+            Some((p, crouched)) => {
+                self.place_noclip(p, velocity, crouched);
+                1 + crouched as u32
+            }
+            None => {
+                self.place_noclip(position, velocity, false);
+                0
+            }
+        }
+    }
+
+    /// Where leaving noclip at `position` puts the player (CS:S FindPassableSpace): `position` if the standing hull
+    /// fits there, else the first free spot along the view's forward, right, left, up, down and back (1-unit steps,
+    /// up to 100 units each), then the same with the crouched hull. `(feet, crouched)`, or None (no free space).
+    pub(super) fn noclip_free_spot(&self, position: [f32; 3], yaw: f32, pitch: f32) -> Option<([f32; 3], bool)> {
         let (sy, cy) = playsrc_collision::math::sin_cos(yaw.to_radians());
         let (sp, cp) = playsrc_collision::math::sin_cos(pitch.to_radians());
         // AngleVectors (roll 0): forward, right, up.
@@ -56,12 +73,10 @@ impl Game {
                 })
             };
             if let Some(p) = found {
-                self.place_noclip(p, velocity, crouched);
-                return 1 + crouched as u32;
+                return Some((p, crouched));
             }
         }
-        self.place_noclip(position, velocity, false);
-        0
+        None
     }
 
     /// The hull fits at `p` (feet) without starting in solid.
@@ -75,7 +90,7 @@ impl Game {
 
     /// Puts the player at `position` in the air with `velocity`. The next `step` categorizes the position first
     /// (the origin differs from where the last move left it, as after any teleport).
-    fn place_noclip(&mut self, position: [f32; 3], velocity: [f32; 3], crouched: bool) {
+    pub(super) fn place_noclip(&mut self, position: [f32; 3], velocity: [f32; 3], crouched: bool) {
         self.state = State::from_player(Player { position, velocity, grounded: false, crouched, jump_latched: false }, self.policy);
         self.last_move_origin = [f32::NAN; 3];
         self.touch_origin = [f32::NAN; 3];

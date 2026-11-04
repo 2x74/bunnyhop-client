@@ -660,3 +660,40 @@ pub(crate) fn cs_deleted_props_v24(entities: &[Entity], fingerprint: u32) -> Vec
         .map(|(i, _)| i)
         .collect()
 }
+
+/// Trigger outputs that fire when the player leaves the trigger, not when they enter it, from physics v24. Only mapper
+/// mistakes the mapper has confirmed; every other output on the build is unchanged. Matched by entity fingerprint, then
+/// the trigger's brush model.
+pub(crate) struct EndTouchOutputs {
+    #[allow(dead_code)]
+    pub map: &'static str,
+    pub fingerprint: u32,
+    /// Brush models (`*N`) whose OnStartTouch outputs become OnEndTouch outputs.
+    pub models: &'static [&'static str],
+    /// Why, for the reader.
+    #[allow(dead_code)]
+    pub reason: &'static str,
+}
+
+pub(crate) const END_TOUCH_OUTPUTS_V24: &[EndTouchOutputs] = &[EndTouchOutputs {
+    map: "bhop_weed_funhouse",
+    fingerprint: 0x4c9105fd,
+    models: &["*1", "*2"],
+    reason: "the two floor boosters (512 x 512 x 8 trigger_multiples) fire `OnStartTouch !activator,AddOutput,Basevelocity \
+             boostAmountX boostAmountY 1550`. With Source's vector parse (v24) that launches the player the moment they land \
+             on the pad. The mapper (weedgotmefunky33) meant OnEndTouch, and staff agreed on Discord (2026-11-04): the boost \
+             applies when the player leaves the pad, like a normal bhop booster. The map's only other push, a trigger_push, \
+             has no brush and does nothing.",
+}];
+
+/// Entity indices whose OnStartTouch outputs fire on EndTouch on this build from physics v24 (`END_TOUCH_OUTPUTS_V24`);
+/// empty for every other map.
+pub(crate) fn end_touch_outputs_v24(entities: &[Entity], fingerprint: u32) -> Vec<usize> {
+    let Some(fix) = END_TOUCH_OUTPUTS_V24.iter().find(|m| m.fingerprint == fingerprint) else { return Vec::new() };
+    entities
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| e.classname().starts_with("trigger_") && e.get("model").is_some_and(|m| fix.models.contains(&m)))
+        .map(|(i, _)| i)
+        .collect()
+}

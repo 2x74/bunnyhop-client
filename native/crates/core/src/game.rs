@@ -19,6 +19,8 @@ mod usable;
 mod map_fixes;
 // Practice mode noclip (never called by `step`; see the module docs).
 mod practice;
+mod flight;
+pub use flight::{cap_horizontal, cap_speed, flight_move, EVENT_FLIGHT, EVENT_FLIGHT_LANDED, FLIGHT_EXIT_CAP, FLIGHT_TOP_SPEED, IN_FLIGHT};
 // DanZay's VScript objective gates, emulated natively on bhop_cooksassistant (physics v16).
 mod vscript;
 mod mechanics;
@@ -206,7 +208,8 @@ pub const PHYSICS_V22: u32 = 22;
 pub const PHYSICS_V23: u32 = 23;
 /// v24: v23 + an infinite clip on every map (`game/weapons.rs` `infinite_clip`) + Source's keyvalue vector parse for the player's `basevelocity` and `origin` (`UTIL_StringToVector`: atof
 /// per token, missing tokens 0), so bhop_weed_funhouse's `basevelocity boostAmountX boostAmountY 1550` boosters launch
-/// as on srcds; and per-map changes in `game/map_fixes.rs` (`PARENTED_DOORS_V24`, `CS_DELETED_PROPS_V24`). No new fix bits.
+/// as on srcds; and per-map changes in `game/map_fixes.rs` (`PARENTED_DOORS_V24`, `CS_DELETED_PROPS_V24`,
+/// `END_TOUCH_OUTPUTS_V24`: those two boosters fire on OnEndTouch, as their mapper meant). No new fix bits.
 pub const PHYSICS_V24: u32 = 24;
 /// Diagnostic pseudo-versions (never valid in a replay, whose field is a u8): `PHYSICS_DIAG | fix bits` turns on only
 /// the listed fixes, to tell which fix changes a replay (tools: /tmp physics-v2 analysis). The fix bits are the low 31
@@ -435,6 +438,12 @@ pub fn map_event_clock_v23_table() -> Vec<(&'static str, u32)> {
 /// Entity indices `game/map_fixes.rs` `CS_DELETED_PROPS_V24` removes on this build from physics v24 (tests, tools).
 pub fn map_cs_deleted_props_v24(entities: &[Entity]) -> Vec<usize> {
     map_fixes::cs_deleted_props_v24(entities, map_fixes::entity_fingerprint(entities))
+}
+
+/// Entity indices whose OnStartTouch outputs fire on EndTouch on this build from physics v24 (`game/map_fixes.rs`
+/// `END_TOUCH_OUTPUTS_V24`; tests, tools).
+pub fn map_end_touch_outputs_v24(entities: &[Entity]) -> Vec<usize> {
+    map_fixes::end_touch_outputs_v24(entities, map_fixes::entity_fingerprint(entities))
 }
 
 /// The map a parsed entity lump matches in `game/map_fixes.rs` `PARENTED_PROPS_V24` (tests, tools, `physics::prop_sources`).
@@ -1465,6 +1474,8 @@ pub struct Game {
     map_logic_case: bool,
     /// v24: entity indices of the props CS:S deletes at spawn on this build (`map_fixes::CS_DELETED_PROPS_V24`).
     cs_deleted_props: Vec<usize>,
+    /// v24: entity indices of the triggers whose OnStartTouch outputs fire on EndTouch (`map_fixes::END_TOUCH_OUTPUTS_V24`).
+    end_touch_outputs: Vec<usize>,
     /// v24 (`map_fixes::PARENTED_PROPS_V24`): parented prop_dynamics with moving collision on this build; their collision is
     /// attached at load and taken away at reset before v24.
     parented_props: Vec<usize>,
@@ -1492,6 +1503,11 @@ struct Extra {
     /// Original template member for each runtime instance, after initial_ents.len().
     instance_sources: Vec<usize>,
     scripts19: scripts19::State,
+    /// Infinite flight (game/flight.rs, physics v24): the player is flying. False on every other style and version.
+    flying: bool,
+    /// Infinite flight: this tick's landing spot and crouch (`Game::flight_landing`), before the normal step. An output
+    /// of the tick only (None on every other tick), so it's not digested.
+    landing: Option<([f32; 3], bool)>,
 }
 
 impl Extra {
@@ -1534,6 +1550,10 @@ impl Extra {
             for i in &self.instance_sources { out.extend_from_slice(&(*i as u32).to_le_bytes()); }
         }
         self.scripts19.digest(&mut out);
+        // (Never set before physics v24 or outside Infinite: those digests are unchanged.)
+        if self.flying {
+            out.extend_from_slice(b"flying\0");
+        }
         out
     }
 }
@@ -1570,6 +1590,7 @@ impl Game {
         let map_event_clock_v24 = map_fixes::event_clock_v24(map_fingerprint).is_some();
         let map_logic_case = map_fixes::logic_case_v23(&entities).is_some();
         let cs_deleted_props = map_fixes::cs_deleted_props_v24(&entities, map_fingerprint);
+        let end_touch_outputs = map_fixes::end_touch_outputs_v24(&entities, map_fingerprint);
         let parented_props: Vec<usize> = if map_fixes::parented_props_v24(&entities).is_some() {
             entities.iter().enumerate()
                 .filter(|(_, e)| e.classname().to_ascii_lowercase().starts_with("prop_dynamic") && e.get("parentname").is_some_and(|p| !p.is_empty()))
@@ -1689,6 +1710,7 @@ impl Game {
             map_fingerprint,
             map_logic_case,
             cs_deleted_props,
+            end_touch_outputs,
             parented_props,
         };
         game.link_hierarchy();
@@ -1723,7 +1745,7 @@ impl Game {
         let spawn_changed = (self.map_mechanics.is_some() && (PHYSICS_V19..=PHYSICS_LATEST).contains(&self.settings.physics_version) != (PHYSICS_V19..=PHYSICS_LATEST).contains(&settings.physics_version))
             || ((self.map_parented_doors || map_fixes::v21_spawn_edits(self.map_mechanics) || self.initial_ents.iter().any(|e| kin::rot_door_spawn_angles(e).is_some()))
                 && (PHYSICS_V21..=PHYSICS_LATEST).contains(&self.settings.physics_version) != (PHYSICS_V21..=PHYSICS_LATEST).contains(&settings.physics_version))
-            || (self.map_parented_doors_v24
+            || ((self.map_parented_doors_v24 || !self.end_touch_outputs.is_empty())
                 && (PHYSICS_V24..=PHYSICS_LATEST).contains(&self.settings.physics_version) != (PHYSICS_V24..=PHYSICS_LATEST).contains(&settings.physics_version))
             || (self.settings.physics_fixes() ^ settings.physics_fixes())
             & (PHYSICS_FIX_DOOR_START_OPEN | PHYSICS_FIX_TRAIN_SPAWN | PHYSICS_FIX_MAP_DOOR_TRAVEL)
@@ -1856,6 +1878,19 @@ impl Game {
                     e.removed = true;
                     e.solid = false;
                     e.visible = false;
+                }
+            }
+        }
+        // v24: reviewed OnStartTouch outputs that the mapper meant as OnEndTouch (map_fixes::END_TOUCH_OUTPUTS_V24). The
+        // outputs are built at load, before the version is known, so the event is renamed here; older versions keep it.
+        if (PHYSICS_V24..=PHYSICS_LATEST).contains(&self.settings.physics_version) {
+            for &i in &self.end_touch_outputs {
+                let Some(e) = self.ents.get_mut(i) else { continue };
+                if e.outputs.iter().any(|o| &*o.event == "onstarttouch") {
+                    let end: std::sync::Arc<str> = "onendtouch".into();
+                    for o in std::sync::Arc::make_mut(&mut e.outputs).iter_mut().filter(|o| &*o.event == "onstarttouch") {
+                        o.event = end.clone();
+                    }
                 }
             }
         }
@@ -2092,6 +2127,13 @@ impl Game {
     }
 
     pub fn step(&mut self, cmd: Cmd) -> Result<(), String> {
+        // Infinite flights (physics v24, game/flight.rs): a flight tick replaces the rest; a landing steps on below.
+        self.extra.landing = None;
+        if (self.extra.flying || cmd.buttons & IN_FLIGHT != 0) && self.flight_step(cmd) {
+            return Ok(());
+        }
+        // The rest of the tick never sees the bit (an inert bit where flights aren't allowed, gone on a landing).
+        let cmd = Cmd { buttons: cmd.buttons & !IN_FLIGHT, ..cmd };
         self.timing_path = self.observe_timing.then(|| movement::accepted_path::AcceptedPath::unsupported("movement-not-executed"));
         self.jumpstats_valid = false;
         self.air_speed_gain = None;
@@ -2099,7 +2141,7 @@ impl Game {
         let before_events = self.state;
         // RNGFix telehop: no fix right after another map teleport (`g_bMapTeleportedSequentialTicks`).
         let map_teleported_last_tick = self.events & EVENT_MAP_TELEPORT != 0;
-        self.events = 0;
+        self.events = if self.extra.landing.is_some() { EVENT_FLIGHT_LANDED } else { 0 };
         self.attack = None;
         self.weapon_events = 0;
         self.view_angle_change = [0.0; 3];

@@ -291,6 +291,7 @@ function consumeLoginParams(): { msg: string; ok: boolean } | null {
   url.searchParams.delete("login_error");
   history.replaceState(null, "", url);
   if (err) console.warn("Discord sign-in:", err);
+  if (ok === "discord-roles") return { msg: "Discord linked. Your stats show on your Discord profile now.", ok: true };
   return ok ? { msg: "Discord linked. Your runs are saved to your account.", ok: true } : { msg: "Discord sign-in didn't finish.", ok: false };
 }
 

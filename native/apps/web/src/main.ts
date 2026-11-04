@@ -808,7 +808,7 @@ let presenceRoomAt = -1e9;
 // The same seconds are this map's time played on this device (map-time.ts).
 startPlaytime(() => input.locked && !replayViewer.active && !(mp?.isSpectating ?? false), (s) => mapName !== TUTORIAL_MAP && mapTime.played(mapName, s));
 // Weapon commands (weapon-commands.ts): !usp / !glock / !knife / !gun / !guns in chat, their binds below.
-initWeaponCommands({ input: experimentWeapons.input, session, canGive: () => !replayViewer.active && !(mp?.isSpectating ?? false) && !practiceMode.noclipping && !freecam.active });
+initWeaponCommands({ input: experimentWeapons.input, session, canGive: () => !replayViewer.active && !(mp?.isSpectating ?? false) && !practiceMode.noclipping && !session.flightOn && !session.flying && !freecam.active });
 registerWeaponChatCommands();
 initPaint(w.root, camera, () => !replayViewer.active && !(mp?.isSpectating ?? false), w.skyFaces);
 initMeasure(w.root, scene, camera, () => !replayViewer.active && !(mp?.isSpectating ?? false), w.skyFaces);
@@ -1085,7 +1085,7 @@ function bindPolicy(): { turnBinds: boolean; nullBinds: boolean } {
  * allows it (practice: every style), else undefined (off). Never while flying in practice noclip (W flies there).
  */
 function wReleasePolicy(): WReleaseContext | undefined {
-  if (!prefs.get().wRelease || practiceMode.noclipping) return undefined;
+  if (!prefs.get().wRelease || practiceMode.noclipping || session.flightOn) return undefined;
   const inputStyle = session.timer.inStart ? session.styleFor(session.timer.track) : session.runStyle;
   if (!session.practicing && !wReleaseAllowed(inputStyle)) return undefined;
   const s = core.state();
@@ -1262,7 +1262,7 @@ function frame(now: number) {
     // Source (x, y, z) -> three (x, z, -y). Under a ceiling the eye stays below it, as in CS:S (clearEyeZ); flying in
     // practice noclip it has nothing to stay below.
     const top = lerp(prev.position[2] + hullTop(prev.crouched), curr.position[2] + hullTop(curr.crouched));
-    camera.position.set(x, practiceMode.noclipping ? z : clearEyeZ(eyeTrace, x, y, top, z), -y);
+    camera.position.set(x, practiceMode.noclipping || session.flying ? z : clearEyeZ(eyeTrace, x, y, top, z), -y);
     camera.rotation.y = ((viewYaw - 90) * Math.PI) / 180;
     camera.rotation.x = (-input.pitch * Math.PI) / 180;
     camera.rotation.z = 0;

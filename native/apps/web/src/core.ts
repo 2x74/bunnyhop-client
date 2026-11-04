@@ -111,6 +111,12 @@ export interface PlayerState {
   airSpeedGain?: number;
   airBestGain?: number;
   categorizedGroundJump?: CategorizedGroundJump;
+  /**
+   * Physics v24, Infinite: this tick ended a flight (EVENT_FLIGHT_LANDED). Where the landing put the player (feet) and
+   * whether crouched, before the tick's normal step moved them (crates/core Game::flight_landing). The timer keeps a
+   * start the flight armed only if this spot is in the start zone (timer.ts update). Absent on every other tick.
+   */
+  flightLanding?: { position: [number, number, number]; crouched: boolean };
   position: [number, number, number];
   velocity: [number, number, number];
   viewOffsetZ: number;
@@ -297,7 +303,7 @@ export const PHYSICS_V21 = 21;
 export const PHYSICS_V22 = 22;
 /** Per-map changes only (map_fixes.rs), shipped with timer rules 3. Replays retain their recorded physics and rules. */
 export const PHYSICS_V23 = 23;
-/** Infinite clip on every map (no reloads); Source's keyvalue vector parse for the player's basevelocity / origin (bhop_weed_funhouse's boosters launch); bhop_playboy_csgo's spiral steps turn with their column; props CS:S deletes at spawn are gone (bhop_hell's barrels). Shipped with timer rules 4. */
+/** Infinite clip on every map (no reloads); Source's keyvalue vector parse for the player's basevelocity / origin (bhop_weed_funhouse's boosters launch, on leaving the pad as its mapper meant); bhop_playboy_csgo's spiral steps turn with their column; props CS:S deletes at spawn are gone (bhop_hell's barrels). Shipped with timer rules 4. */
 export const PHYSICS_V24 = 24;
 /** Versions this code knows (the wasm build must support them too, see Core.setSettings). */
 export const isPhysicsVersion = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= PHYSICS_V1 && (v as number) <= PHYSICS_VERSION;
@@ -351,6 +357,23 @@ export const EVENT_ATTACK = 1 << 5;
 export const EVENT_WEAPON = 1 << 6;
 /** Physics v22: this tick took back the previous tick's edge landing: airborne, no friction tick, no jump. */
 export const EVENT_EDGEBUG = 1 << 8;
+/**
+ * Physics v24, Infinite: the player flew this tick (input.ts IN_FLIGHT; crates/core game/flight.rs). The state after it
+ * is the flight's; the timer reads it (timer.ts flightTick).
+ */
+export const EVENT_FLIGHT = 1 << 9;
+/** Physics v24, Infinite: this tick ended a flight; the landing spot is PlayerState.flightLanding (crates/core flight.rs). */
+export const EVENT_FLIGHT_LANDED = 1 << 10;
+/**
+ * Command bit (crates/core game/flight.rs IN_FLIGHT): this tick flies. Set on every command while Infinite's noclip is on
+ * (session.ts). Only Infinite replays on physics v24 / timer rules 4 may carry it (replay.ts flightAllowed,
+ * verifier.ts); elsewhere the core ignores it.
+ */
+export const IN_FLIGHT = 1 << 24;
+/** Infinite flight's top speed (crates/core FLIGHT_TOP_SPEED; practice-mode/noclip.ts INFINITE_NOCLIP_TOP_SPEED). */
+export const FLIGHT_TOP_SPEED = 3500;
+/** Horizontal speed a flight's landing keeps at most (crates/core FLIGHT_EXIT_CAP; the Infinite start re-entry cap). */
+export const FLIGHT_EXIT_CAP = 3510;
 
 interface Exports {
   memory: WebAssembly.Memory;
@@ -782,6 +805,7 @@ export class Core {
       ...(s[31] === 1 ? { edgeLanding: true } : {}),
       airSpeedGain: len > 33 ? s[32] : NaN,
       airBestGain: len > 33 ? s[33] : NaN,
+      ...(len > 37 && s[34] === s[34] ? { flightLanding: { position: [s[34], s[35], s[36]] as [number, number, number], crouched: s[37] !== 0 } } : {}),
     };
   }
 

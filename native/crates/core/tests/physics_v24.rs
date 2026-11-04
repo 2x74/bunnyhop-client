@@ -2,14 +2,16 @@
 //!
 //! - The player's `basevelocity` / `origin` keyvalues are read as Source's `UTIL_StringToVector` reads them (atof per
 //!   token, missing tokens 0): bhop_weed_funhouse's boosters (`basevelocity boostAmountX boostAmountY 1550`) launch the
-//!   player as on srcds (tools/parity `weed_drop`, `weed_airon`: bit-exact for 200 / 250 ticks), and did nothing before.
+//!   player, and did nothing before.
+//! - `map_fixes::END_TOUCH_OUTPUTS_V24`: those two boosters fire on OnEndTouch, as the mapper meant: leaving the pad launches
+//!   the player, as srcds does on a copy of the BSP with the key renamed (tools/parity `weed_et_*`, bit-exact).
 //! - bhop_playboy_csgo (`map_fixes::PARENTED_DOORS_V24`): the spiral room's steps turn with their column, rot2.
 //! - `map_fixes::CS_DELETED_PROPS_V24`: props CS:S deletes at spawn (bhop_hell's barrels) are gone.
 //! - `map_fixes::EVENT_CLOCK_V24`: bhop_4tele's boost pads on EventQueueFix's clock.
 //! - `map_fixes::PARENTED_PROPS_V24`: bhop_dtt_trainning2's crate blocks ride their sinking doors.
 //! - Every map: shots don't use up the clip (bhoptimer `shavit_misc_weaponcommands 5`), so no reload ever starts.
 
-use bunnyhop_core::game::{map_cs_deleted_props_v24, map_event_clock_v24_for, map_parented_doors_v24_for, map_parented_props_v24_for, EVENT_TELEPORTED, PHYSICS_V23, PHYSICS_V24};
+use bunnyhop_core::game::{map_cs_deleted_props_v24, map_end_touch_outputs_v24, map_event_clock_v24_for, map_parented_doors_v24_for, map_parented_props_v24_for, EVENT_TELEPORTED, PHYSICS_V23, PHYSICS_V24};
 use bunnyhop_core::{Cmd, Game, Settings};
 use std::path::PathBuf;
 
@@ -25,26 +27,89 @@ fn load(name: &str, version: u32) -> Option<Game> {
     Some(game)
 }
 
-/// Falls onto booster *1 (a 512 x 512 x 8 trigger_multiple on the floor at z 64) moving forward, as tools/parity
-/// `weed_airon` does on srcds: the highest upward speed over 250 commands.
-fn weed_launch(version: u32) -> Option<f32> {
+/// Runs `cmds` on bhop_weed_funhouse from `origin` with `velocity`, autohop on. Returns every command's upward speed.
+fn weed_run(version: u32, origin: [f32; 3], yaw: f32, velocity: [f32; 3], cmds: &[Cmd]) -> Option<Vec<f32>> {
     let mut game = load("bhop_weed_funhouse", version)?;
-    game.set_position([4300.0, -1700.0, 300.0], -90.0);
-    game.state.velocity = [150.0, -400.0, 0.0];
-    let mut top = f32::MIN;
-    for _ in 0..250 {
-        game.step(Cmd { forward: 400.0, side: 0.0, yaw: -90.0, pitch: 0.0, buttons: 0 }).unwrap();
-        top = top.max(game.state.velocity[2]);
-    }
-    Some(top)
+    game.set_position(origin, yaw);
+    game.state.velocity = velocity;
+    Some(cmds.iter().map(|&c| { game.step(c).unwrap(); game.state.velocity[2] }).collect())
 }
 
+fn cmds(n: usize, forward: f32, yaw: f32, buttons: u32) -> Vec<Cmd> {
+    vec![Cmd { forward, side: 0.0, yaw, pitch: 0.0, buttons }; n]
+}
+
+const IN_JUMP: u32 = 2;
+const IN_DUCK: u32 = 4;
+
+/// Booster *1 is a 512 x 512 x 8 trigger_multiple on the floor at z 64 (x 4192..4704, y -2148..-1636). Its
+/// `OnStartTouch !activator,AddOutput,Basevelocity boostAmountX boostAmountY 1550` fires on EndTouch from v24
+/// (`map_fixes::END_TOUCH_OUTPUTS_V24`). Expected values are srcds on a copy of the BSP with the key renamed OnEndTouch
+/// (tools/parity, /tmp/bh-0036/funhouse-report.md; the core is bit-exact with it on every case).
 #[test]
-fn weed_funhouse_boosters_launch_from_v24() {
-    let (Some(v23), Some(v24)) = (weed_launch(PHYSICS_V23), weed_launch(PHYSICS_V24)) else { return };
-    assert!(v23 < 1.0, "v23 keeps ignoring the malformed basevelocity, top vz {v23}");
-    // srcds: 1549.75 on the landing tick's next command (1550 * 1.005 minus a tick of gravity).
-    assert!((v24 - 1549.75).abs() < 0.01, "v24 launches as on srcds, top vz {v24}");
+fn weed_funhouse_boosters_fire_on_end_touch_from_v24() {
+    let pad = [4448.0, -1892.0, 66.0];
+    // Dropped onto the pad and standing on it: no boost (srcds weed_et_drop: vz stays 0 for 200 commands).
+    let Some(drop) = weed_run(PHYSICS_V24, [4448.0, -1892.0, 120.0], 90.0, [0.0; 3], &cmds(200, 0.0, 90.0, 0)) else { return };
+    assert!(drop.iter().all(|&v| v <= 0.0), "standing on the pad does nothing until the player leaves it");
+
+    // Jumping off: the jump's command, two commands climbing through the 8 u pad, then EndTouch at the end of the frame
+    // whose move took the feet above it; its AddOutput runs before the next command, which gets the 1550 u/s on top of the jump
+    // (srcds weed_et_jumpoff: 289.99, 281.99, 273.99, 1823.74).
+    let mut jump = cmds(30, 0.0, 90.0, 0);
+    jump.push(Cmd { buttons: IN_JUMP, ..jump[0] });
+    jump.extend(cmds(20, 0.0, 90.0, 0));
+    let up = weed_run(PHYSICS_V24, pad, 90.0, [0.0; 3], &jump).unwrap();
+    let j = 30;
+    let srcds = [289.99, 281.99, 273.99, 1823.74];
+    assert!(up[j..j + 4].iter().zip(srcds).all(|(a, b)| (a - b).abs() < 0.01), "jumping off launches as on srcds: {:?}", &up[j - 1..j + 5]);
+
+    // Walking off the pad's edge: the boost on the command after the hull leaves it (srcds weed_et_walkoff: 1545.75).
+    let walk = weed_run(PHYSICS_V24, pad, 90.0, [0.0; 3], &cmds(150, 400.0, 90.0, 0)).unwrap();
+    let top = walk.iter().cloned().fold(f32::MIN, f32::max);
+    assert!((top - 1545.75).abs() < 0.01, "walking off launches as on srcds, top vz {top}");
+    let launch = walk.iter().position(|&v| v > 1000.0).unwrap();
+    assert!(walk[..launch].iter().all(|&v| v <= 0.0), "no boost before the player leaves the pad");
+
+    // Ducked jump off (srcds weed_et_duckoff: 1835.74).
+    let mut duck = cmds(30, 0.0, 90.0, 0);
+    duck.push(Cmd { buttons: IN_JUMP | IN_DUCK, ..duck[0] });
+    duck.extend(cmds(20, 0.0, 90.0, IN_DUCK));
+    let top = weed_run(PHYSICS_V24, pad, 90.0, [0.0; 3], &duck).unwrap().into_iter().fold(f32::MIN, f32::max);
+    assert!((top - 1835.74).abs() < 0.01, "duck-jumping off launches as on srcds, top vz {top}");
+
+    // Landing on the pad with jump held (autohop): launched on the way up from the hop.
+    let top = weed_run(PHYSICS_V24, [4448.0, -1892.0, 120.0], 90.0, [0.0; 3], &cmds(60, 0.0, 90.0, IN_JUMP))
+        .unwrap().into_iter().fold(f32::MIN, f32::max);
+    assert!((top - 1823.74).abs() < 0.01, "bhopping off the pad launches as on srcds, top vz {top}");
+
+    // v23 never applied the malformed basevelocity at all.
+    let v23 = weed_run(PHYSICS_V23, pad, 90.0, [0.0; 3], &jump).unwrap().into_iter().fold(f32::MIN, f32::max);
+    assert!(v23 < 300.0, "v23 keeps ignoring the boosters, top vz {v23}");
+}
+
+/// Only the two boosters on this build; the map's other outputs and every other map are unchanged.
+#[test]
+fn weed_funhouse_end_touch_table_pins_the_two_boosters() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps/bhop_weed_funhouse.bsp");
+    if !path.exists() {
+        eprintln!("skipping: {} not present", path.display());
+        return;
+    }
+    let bsp = bunnyhop_core::parse_bsp(&std::fs::read(&path).unwrap()).unwrap();
+    let list = bunnyhop_core::physics::entity_list_with_outputs(&bsp, true);
+    let hits = map_end_touch_outputs_v24(&list.entities);
+    let models: Vec<_> = hits.iter().map(|&i| list.entities[i].get("model").unwrap_or("")).collect();
+    assert_eq!(models, ["*1", "*2"]);
+    for &i in &hits {
+        assert!(list.outputs[i].iter().all(|o| &*o.event == "onstarttouch"), "the build's boosters still say OnStartTouch");
+    }
+    for other in ["bhop_eazy", "bhop_4tele", "bhop_finalmap_strange_fixed2"] {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("../../maps/{other}.bsp"));
+        let Ok(bytes) = std::fs::read(&path) else { continue };
+        let bsp = bunnyhop_core::parse_bsp(&bytes).unwrap();
+        assert!(map_end_touch_outputs_v24(&bunnyhop_core::physics::entity_list_with_outputs(&bsp, true).entities).is_empty(), "{other}");
+    }
 }
 
 fn brush(game: &Game, model: u32) -> ([f32; 3], [f32; 3]) {

@@ -48,6 +48,8 @@ interface Settings {
   records: boolean;
   minFinishers: number;
   minTier: number;
+  minFinishersAnyTier: number;
+  dailyCap: number;
   minImprovePct: number;
   minImproveSec: number;
   classicOnly: boolean;
@@ -166,12 +168,14 @@ export function recordsView(d: RecordsDeps): View {
       check("records", "Post top 10s and server records"),
       numIn("minFinishers", "Min finishers"),
       numIn("minTier", "Min tier (0 = any)"),
+      numIn("minFinishersAnyTier", "or finishers on any tier (0 = off)"),
       numIn("minImprovePct", "Min improvement %", "0.01"),
       numIn("minImproveSec", "or min improvement s", "0.001"),
-      check("classicOnly", "Classic styles only (no Auto-strafe)"),
+      check("classicOnly", "Classic styles only (no Auto-strafe, Low Gravity, Segmented or Infinite)"),
       check("bonuses", "Include bonuses"),
       numIn("cooldownMin", "Map cooldown (min)"),
       numIn("coalesceSec", "Batch window (s)"),
+      numIn("dailyCap", "Posts per day (0 = no cap)"),
       h("button", { type: "submit", class: "primary" }, "Save"),
     );
     return h(

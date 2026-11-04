@@ -103,7 +103,7 @@
 // count deltas. Everything else follows v9 (including its stamina/count flags). This preserves both the original
 // mouse motion and the manual-turn markers on scaled/accelerated mice; integer recordings retain v8/v9 encoding.
 
-import { PHYSICS_V1, PHYSICS_V7, type RestartPoint, type Settings } from "./core";
+import { IN_FLIGHT, PHYSICS_V1, PHYSICS_V7, type RestartPoint, type Settings } from "./core";
 import { TIMER_RULES_V1, TIMER_RULES_V3 } from "./timer";
 import { styleDef } from "./styles";
 import { trackOf, trackSuffix, type Zone, type ZoneKind } from "./zones";
@@ -181,6 +181,20 @@ export const styleReplayAllowed = (h: ReplayHeader): boolean => styleReplayProbl
  * v0.7.0's stay v23 / rules 3. No older Infinite replay exists.
  */
 export const INFINITE_PHYSICS_FROM = 23;
+/**
+ * First physics version and timer rules of Infinite flights (v0.0.36: input.ts IN_FLIGHT, crates/core game/flight.rs,
+ * timer.ts flightTick). Before them the core ignores the bit, so no older replay can fly.
+ */
+export const FLIGHT_PHYSICS_FROM = 24;
+export const FLIGHT_RULES_FROM = 4;
+/** Whether the header's replay may carry flight commands (IN_FLIGHT): Infinite on physics v24 / timer rules 4 or later. */
+export const flightAllowed = (h: ReplayHeader): boolean =>
+  replayStyle(h) === "infinite" && replayPhysics(h) >= FLIGHT_PHYSICS_FROM && replayTimerRules(h) >= FLIGHT_RULES_FROM;
+/** Command index of the first IN_FLIGHT command (input.ts), or -1. */
+export function firstFlightCommand(buttons: ArrayLike<number>): number {
+  for (let i = 0; i < buttons.length; i++) if (buttons[i] & IN_FLIGHT) return i;
+  return -1;
+}
 /** First physics version of Segmented runs (v0.0.30): no older Segmented replay can exist. */
 export const SEGMENTED_PHYSICS_FROM = 19;
 /** Why the header's style can't come with its format / physics / timer rules (styleReplayAllowed), or null. */

@@ -17,7 +17,7 @@
   {
     "path": "apps/web/src/core.ts",
     "classification": "native patch",
-    "baseline": "998ab04bbfbd30b316d71a805d8332271ca34156"
+    "baseline": "9bc2012957b3364c7d2a5567af88143a21f2d88c"
   },
   {
     "path": "apps/web/src/feedback/modal.ts",
@@ -142,7 +142,12 @@
   {
     "path": "crates/core/src/game.rs",
     "classification": "native patch",
-    "baseline": "3b247dd55ba6790942e6324c1d812d5a51d7d970"
+    "baseline": "8ec12b05a419e2f69e51ad0b924e7feac41bf323"
+  },
+  {
+    "path": "crates/core/src/game/flight.rs",
+    "classification": "native patch",
+    "baseline": "56b22b337b7ea6b05c4a73b4e65e81f6d5bb93ea"
   },
   {
     "path": "crates/core/src/game/kin.rs",
@@ -157,7 +162,7 @@
   {
     "path": "crates/core/src/game/practice.rs",
     "classification": "native patch",
-    "baseline": "e9a87c986fdf2e8b960a8bfdade310a71f1af667"
+    "baseline": "ad515035018b6cf0f2da3f4ce2e3d336d96d8fc8"
   },
   {
     "path": "crates/core/src/game/propdoor.rs",
@@ -197,7 +202,7 @@
   {
     "path": "crates/core/src/wasm.rs",
     "classification": "native patch",
-    "baseline": "99fd945d47c52bc4fe4e3855b4bc2da845b30bcc"
+    "baseline": "f934683c633c7b52715e06a6bf041b043455754e"
   },
   {
     "path": "crates/core/src/wasm_content.rs",

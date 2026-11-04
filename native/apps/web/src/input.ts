@@ -80,6 +80,8 @@ export const IN_DROP = 1 << 12;
 export const IN_RELOAD = 1 << 13;
 export const IN_SLOT_SHIFT = 14;
 export const IN_SLOT_MASK = 3 << IN_SLOT_SHIFT;
+/** Infinite flight (core.ts IN_FLIGHT): set by the session while Infinite's noclip is on, never by the input itself. */
+export { IN_FLIGHT } from "./core";
 /** Slot numbers: primary (sniper), secondary (pistol), knife. */
 export const SLOT_PRIMARY = 1;
 export const SLOT_PISTOL = 2;

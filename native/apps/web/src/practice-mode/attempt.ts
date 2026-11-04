@@ -10,11 +10,9 @@
 
 /**
  * A practice tool that moves the player outside the simulation, or a practice spawn (start-point.ts) that begins the
- * attempt there. "flight": Infinite's noclip (styles.ts StyleDef.airJump). As on the native client it isn't practice mode
- * and the timer keeps its start-zone rules through it (timer.ts noclipTick), but a replay can't re-simulate a flight, so
- * the attempt is never submitted either.
+ * attempt there. (Infinite's noclip isn't one: the core flies it from the recorded commands, crates/core game/flight.rs.)
  */
-export type PracticeUse = "teleport" | "noclip" | "spawn" | "flight";
+export type PracticeUse = "teleport" | "noclip" | "spawn";
 
 export class PracticeAttempt {
   /** Practice mode is on: every attempt is practice, also after a restart. */
@@ -54,6 +52,14 @@ export class PracticeAttempt {
   }
 
   /**
+   * Infinite's flight (crates/core game/flight.rs) moved the player this attempt. The attempt stays clean (the flight is
+   * recorded and re-simulated), but the place wasn't walked to: a start point set from here is a practice spawn.
+   */
+  flew(): void {
+    this.moved = true;
+  }
+
+  /**
    * A reset (core reset, fresh recording): the new attempt is clean unless practice mode is on. True if a practice
    * attempt just gave way to a clean one (attempts.ts counts these as practice exits).
    */
@@ -79,7 +85,6 @@ const restartHow = (key: string | null) => (key ? `Press ${key}` : "Type !r");
 
 /** The line when a clean attempt turns into practice. `restartKey`: the restart bind's label, if it has one. */
 export function practiceFlipLine(running: boolean, restartKey: string | null, tool: PracticeUse | null = null): string {
-  if (tool === "flight") return `${running ? "Your run stopped. " : ""}Runs after noclip aren't saved. ${restartHow(restartKey)} for a ranked run.`;
   return running ? `This run is practice now. ${restartHow(restartKey)} to restart for a real run.` : `Practice until you restart. ${restartHow(restartKey)} for a real run.`;
 }
 
@@ -100,6 +105,5 @@ export function practiceSpawnToast(clearKey: string | null): string {
 
 /** The line when a practice attempt (a tool, not practice mode) comes back to a start zone. */
 export function practiceStartLine(restartKey: string | null, tool: PracticeUse | null = null): string {
-  if (tool === "flight") return `This run won't be saved: you used noclip. ${restartHow(restartKey)} for a ranked run.`;
   return `Still practice. ${restartHow(restartKey)} to restart for a real run.`;
 }

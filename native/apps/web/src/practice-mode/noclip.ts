@@ -23,7 +23,9 @@ const WORLD_LIMIT = 16384 - 80 - 1;
 
 /**
  * sv_noclipspeed for a style: the CS:S 5 everywhere but Infinite (styles.ts StyleDef.airJump), which flies at 3500 u/s.
- * Not the CS:S plugin's 11.400651: it assumed a server at sv_maxspeed 307.
+ * Not the CS:S plugin's 11.400651: it assumed a server at sv_maxspeed 307. Infinite's flight itself runs in the core
+ * (crates/core game/flight.rs flight_move, the same move in f32), recorded and re-simulated; this one is for the other
+ * styles' practice noclip and the tests that compare the two.
  */
 export function noclipSpeed(airJump: boolean): number {
   return airJump ? INFINITE_NOCLIP_TOP_SPEED / MAX_SPEED : NOCLIP_SPEED;

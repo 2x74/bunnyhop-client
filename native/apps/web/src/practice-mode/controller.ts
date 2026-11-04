@@ -176,6 +176,7 @@ export class Practice {
   private endNoclip(): void {
     this.noclip = null;
     this.h.session.practiceNoclip = false;
+    this.h.session.flightOn = false;
   }
 
   /** A bound action. True if it was a practice action (they're always consumed). */
@@ -257,7 +258,7 @@ export class Practice {
         { label: `Teleport to checkpoint (${Math.max(at, 1)})`, disabled: !n },
         { label: "Previous", disabled: at <= 1 },
         { label: "Next", disabled: at >= n },
-        { label: "Noclip", detail: this.noclip ? "on" : "off" },
+        { label: "Noclip", detail: this.noclip || this.h.session.flightOn ? "on" : "off" },
         // (bhoptimer hides its velocity toggle for segmented checkpoints: a load always restores the speed.)
         seg ? { label: "Keep speed", detail: "always", disabled: true } : { label: "Keep speed", detail: keep ? "on" : "off" },
       ],
@@ -281,27 +282,27 @@ export class Practice {
     return !!styleDef(this.h.session.runStyle)?.airJump;
   }
 
-  /** One noclip tick in place of command -> step -> afterStep. */
+  /** One noclip tick in place of command -> step -> afterStep (every style but Infinite, which flies in the core). */
   noclipStep(sample: UserCmd): { state: PlayerState; events: number } {
     const n = this.noclip!;
-    const flight = this.flying;
-    noclipMove(n, { forwardmove: sample.forwardmove, sidemove: sample.sidemove, yaw: sample.yaw, pitch: sample.pitch, up: (sample.buttons & IN_JUMP) !== 0, slow: (sample.buttons & IN_DUCK) !== 0, speed: noclipSpeed(flight) }, this.h.session.settings.tickInterval);
+    noclipMove(n, { forwardmove: sample.forwardmove, sidemove: sample.sidemove, yaw: sample.yaw, pitch: sample.pitch, up: (sample.buttons & IN_JUMP) !== 0, slow: (sample.buttons & IN_DUCK) !== 0, speed: noclipSpeed(false) }, this.h.session.settings.tickInterval);
     const events = noclipTick(this.h.core, n);
-    return { state: this.h.session.afterNoclip(sample, events, flight ? n : undefined), events };
+    return { state: this.h.session.afterNoclip(sample, events), events };
   }
 
   private toggleNoclip(): void {
     const core = this.h.core;
     const session = this.h.session;
+    if (this.flying) {
+      // Infinite: the core flies the commands (IN_FLIGHT, crates/core game/flight.rs) and the replay records them, so
+      // the attempt stays a real run. A run in progress ends on the first flight tick, and a flight never starts one
+      // (timer.ts flightTick); the run starts once you cross the start zone without flying. Letting go lands you where
+      // you are, keeping the speed the flight built (capped at 3510 sideways).
+      session.flightOn = !session.flightOn;
+      return;
+    }
     if (!this.noclip) {
-      if (this.flying) {
-        // Infinite, as on the native client (practice.rs bh_practice_enter): a run in progress ends, an idle or armed
-        // timer is kept, and the flight never starts one (timer.ts noclipTick). Not practice mode, but a replay can't
-        // re-simulate the flight, so this attempt isn't saved (attempt.ts "flight").
-        const running = session.timer.status === "running";
-        session.practiceUse("flight");
-        if (running) session.timer.reset();
-      } else {
+      {
         // From here the attempt is practice. A run in progress keeps its clock (timer.ts coast); otherwise the timer
         // goes idle, so flying out of a start zone doesn't start one.
         session.practiceUse("noclip");

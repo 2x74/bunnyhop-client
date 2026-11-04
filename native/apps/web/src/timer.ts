@@ -41,6 +41,11 @@ export interface TickState {
   touchCrouched?: boolean;
   /** On a ladder (core PlayerState.onLadder): never a valid start under timer rules 2. */
   onLadder?: boolean;
+  /**
+   * Infinite flights (physics v24): this tick ended a flight. Where the landing put the player, before the normal step
+   * (core PlayerState.flightLanding). Absent on every other tick.
+   */
+  flightLanding?: { position: readonly number[]; crouched: boolean };
 }
 
 export interface TimerUpdate {
@@ -340,11 +345,38 @@ export class RunTimer {
   }
 
   /**
-   * Infinite's practice noclip tick (native run.rs noclip_tick), instead of coast(): a flight never starts the run, or
-   * the timer would run while flying to the end of the map. An idle timer arms while the flight is in a start zone;
-   * flying out of it leaves the timer idle and keeps the speed the flight built, capped horizontally at
-   * startReentryCap (vertical kept). Returns that capped velocity for the caller to apply to the flight, else null.
-   * Every other style, and a running or finished run, just coasts. Never called on re-simulation.
+   * Infinite's flight tick (core EVENT_FLIGHT, physics v24; native run.rs noclip_tick), instead of update(): a flight
+   * never starts or finishes a run, or the timer would run while flying to the end of the map.
+   * - A run in progress ends: back to idle without a finish (`restarted`), as native's noclip does (bh_practice_enter).
+   *   So no flight tick is ever inside a timed run, which the verifier also checks (verifier.ts).
+   * - An idle timer arms while the flight is in a start zone; flying out of it leaves the timer idle and keeps the speed
+   *   the flight built, capped horizontally at startReentryCap (vertical kept): `clampVelocity`, applied to the flight.
+   * - A finished run stays finished.
+   * The run then starts the usual way: in a start zone without flying (the landing, or flying in and landing there),
+   * then out of it. The armed state lasts through the landing only if the landing spot is still in the start zone
+   * (update, TickState.flightLanding); a landing relocated out of it starts nothing. Every other style just coasts
+   * (the core never flies them).
+   */
+  flightTick(s: Pick<TickState, "tick" | "position" | "velocity">): TimerUpdate {
+    const out: TimerUpdate = {};
+    if (this.status === "running" || this.pendingStart !== 0) {
+      if (this.status === "running") out.restarted = true;
+      this.status = "idle";
+      this.startTick = this.endTick = 0;
+      this.pendingStart = 0;
+      this.armed = false;
+      this.clearStats();
+    }
+    const clamp = this.noclipTick(s.tick, s.position, s.velocity);
+    if (clamp) out.clampVelocity = clamp;
+    return out;
+  }
+
+  /**
+   * Infinite's noclip tick (native run.rs noclip_tick), the timer part of flightTick: an idle timer arms while the
+   * flight is in a start zone; flying out of it leaves the timer idle and keeps the speed the flight built, capped
+   * horizontally at startReentryCap (vertical kept). Returns that capped velocity for the caller to apply to the flight,
+   * else null. Every other style, and a running or finished run, just coasts.
    */
   noclipTick(tick: number, position: readonly number[], velocity: readonly number[]): [number, number, number] | null {
     const cap = this.options.startReentryCap;
@@ -352,7 +384,7 @@ export class RunTimer {
       this.coast(tick);
       return null;
     }
-    this.lastTick = tick;
+    this.coast(tick);
     // The flight state is f64; native reads it as the f32 the core holds.
     position = position.map(Math.fround);
     let clamp: [number, number, number] | null = null;
@@ -361,14 +393,16 @@ export class RunTimer {
       this.track = trackOf(start);
       this.pendingStart = 0;
       this.inStart = this.wasInStart = this.armed = true;
-    } else if (this.armed) {
-      this.armed = this.inStart = this.wasInStart = false;
-      const [vx, vy, vz] = velocity.map(Math.fround);
-      const speed = Math.sqrt(vx * vx + vy * vy);
-      if (speed > cap) {
-        const f = cap / speed;
-        clamp = [Math.fround(vx * f), Math.fround(vy * f), Math.fround(vz)];
+    } else {
+      if (this.armed) {
+        const [vx, vy, vz] = velocity.map(Math.fround);
+        const speed = Math.sqrt(vx * vx + vy * vy);
+        if (speed > cap) {
+          const f = cap / speed;
+          clamp = [Math.fround(vx * f), Math.fround(vy * f), Math.fround(vz)];
+        }
       }
+      this.armed = this.inStart = this.wasInStart = false;
     }
     return clamp;
   }
@@ -377,8 +411,17 @@ export class RunTimer {
     const out: TimerUpdate = {};
     const wasRunning = this.status === "running";
     this.lastTick = s.tick;
-    const from = this.prevPosition;
+    // A flight's landing moved the player before this tick's step: the step's movement begins at the landing spot.
+    const from = s.flightLanding?.position ?? this.prevPosition;
     this.prevPosition = s.position;
+    // Infinite flights: a start the flight armed (flightTick) carries over the landing only if the landing spot is still
+    // in that start zone. A landing that put the player outside it (noclip_free_spot can move them up to 100 units) is not
+    // a crossing of the start: the timer goes back to plain idle and needs a later non-flying entry and exit.
+    if (s.flightLanding && this.armed && this.status === "idle"
+      && touching(s.flightLanding.position, s.flightLanding.crouched, this.zones, "start", this.track) === null) {
+      this.armed = this.inStart = this.wasInStart = false;
+      this.pendingStart = 0;
+    }
     if (s.onLadder || events & (EVENT_JUMPED | EVENT_TELEPORTED | EVENT_RESPAWNED)) this.lastPerfectTick = -1;
     // End zone touched by this tick's trigger pass, before a teleport in that pass moved the player out of it (not when
     // the player died in it: the respawn ends the run).
