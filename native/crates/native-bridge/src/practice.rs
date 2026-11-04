@@ -50,8 +50,23 @@ pub unsafe extern "C" fn bh_practice_from_replay(
     }
 }
 
+/// Checkpoints kept per map, as on the web (bhoptimer's 1000). The host drops its oldest to save past this.
+pub const MAX_CHECKPOINTS: usize = 1000;
+/// What a map's checkpoints may hold together: snapshots plus Segmented paths. Past it the host drops its oldest,
+/// and the newest checkpoint always stays. The web allows 128 MiB of wasm32 snapshots; the same snapshots measure
+/// 1.41x larger here (64-bit entities), from 135 KB on bhop_eazy to 2.5 MB on bhop_treason. 180 MiB keeps as many
+/// checkpoints as the web on every map (treason keeps 76). Measured process growth stays within 3% of the estimate.
+pub const CHECKPOINT_BUDGET_BYTES: usize = 180 << 20;
+
+/// Whether a checkpoint of `bytes` may join ones holding `retained`. The first always may, however large.
+pub(crate) fn fits_budget(retained: usize, bytes: usize, budget: usize) -> bool {
+    retained == 0 || retained.saturating_add(bytes) <= budget
+}
+
 pub struct Checkpoint {
     game: game::GameState,
+    /// The snapshot and Segmented path's size, counted once at save.
+    pub(crate) bytes: usize,
     pub(crate) segment: Option<segments::Mark>,
     settings: BhSettings,
     filter: styles::Filter,
@@ -59,11 +74,6 @@ pub struct Checkpoint {
     command: BhCmd,
     yaw: f32,
     pitch: f32,
-}
-impl Checkpoint {
-    fn bytes(&self) -> usize {
-        self.game.approx_bytes()
-    }
 }
 /// sv_maxspeed the noclip flight multiplies (CS:S `FullNoClipMove`).
 const NOCLIP_MAX_SPEED: f64 = 320.0;
@@ -273,12 +283,25 @@ pub unsafe extern "C" fn bh_practice_save(ctx: *mut BhContext, yaw: f32, pitch: 
             finite(&[yaw, pitch])?;
             let settings = c.settings;
             let m = c.map()?;
-            if m.checkpoints.iter().filter(|s| s.is_some()).count() >= 100 {
-                return Err("100 practice checkpoints already retained".into());
+            if m.checkpoints.iter().flatten().count() >= MAX_CHECKPOINTS {
+                return Err(format!(
+                    "{MAX_CHECKPOINTS} practice checkpoints already retained"
+                ));
+            }
+            let game = m.game.save_state();
+            let segment = m.segment_mark()?;
+            let bytes = game.approx_bytes() + segment.as_ref().map_or(0, segments::Mark::bytes);
+            let retained: usize = m.checkpoints.iter().flatten().map(|cp| cp.bytes).sum();
+            if !fits_budget(retained, bytes, CHECKPOINT_BUDGET_BYTES) {
+                return Err(format!(
+                    "practice checkpoints exceed {} MiB",
+                    CHECKPOINT_BUDGET_BYTES >> 20
+                ));
             }
             let checkpoint = Checkpoint {
-                game: m.game.save_state(),
-                segment: m.segment_mark()?,
+                game,
+                bytes,
+                segment,
                 settings,
                 filter: m.filter.clone(),
                 timer: m.timer.clone(),
@@ -286,12 +309,6 @@ pub unsafe extern "C" fn bh_practice_save(ctx: *mut BhContext, yaw: f32, pitch: 
                 yaw,
                 pitch,
             };
-            if m.checkpoints.iter().any(Option::is_some)
-                && m.checkpoints.iter().flatten().map(Checkpoint::bytes).sum::<usize>()
-                    .saturating_add(checkpoint.bytes()) > 128 << 20
-            {
-                return Err("practice checkpoints exceed 128 MiB".into());
-            }
             let at = m
                 .checkpoints
                 .iter()

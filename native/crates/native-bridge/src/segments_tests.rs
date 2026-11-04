@@ -370,3 +370,123 @@ fn segmented_v19_snapshots_retain_script_instances_and_gravity_on_every_tick() {
         }
     }
 }
+
+unsafe fn last_error(ctx: *mut BhContext) -> String {
+    unsafe {
+        CStr::from_ptr(bh_last_error(ctx))
+            .to_string_lossy()
+            .into_owned()
+    }
+}
+
+#[test]
+fn checkpoints_stop_at_the_cap_and_older_ones_keep_their_place() {
+    let fixture = Fixture::new();
+    let path = prop_fixture(&fixture);
+    unsafe {
+        let ctx = bh_create();
+        assert_eq!(bh_load_map(ctx, path.as_ptr(), fixture.root().as_ptr()), 1);
+        let mut handles = Vec::new();
+        for tick in 0..practice::MAX_CHECKPOINTS as u32 {
+            step(ctx, tick, 1);
+            let handle = bh_practice_save(ctx, 0.0, 0.0);
+            assert_ne!(handle, 0, "{}", last_error(ctx));
+            handles.push(handle);
+        }
+        assert_eq!(bh_practice_save(ctx, 0.0, 0.0), 0);
+        assert_eq!(
+            last_error(ctx),
+            "1000 practice checkpoints already retained"
+        );
+        // The host drops its oldest to save past the cap; the rest still restore where they were saved.
+        assert_eq!(bh_practice_free(ctx, handles[0]), 1);
+        assert_ne!(bh_practice_save(ctx, 0.0, 0.0), 0);
+        let mut snapshot = BhSnapshot::default();
+        assert_eq!(
+            bh_practice_restore(ctx, handles[1], &mut BhCmd::default(), &mut snapshot),
+            1
+        );
+        assert_eq!(snapshot.player.tick, 2);
+        assert_eq!(bh_practice_save(ctx, 0.0, 0.0), 0);
+        bh_destroy(ctx);
+    }
+}
+
+#[test]
+fn the_newest_checkpoint_always_fits_and_the_rest_stay_within_the_budget() {
+    let budget = practice::CHECKPOINT_BUDGET_BYTES;
+    assert!(practice::fits_budget(0, budget * 2, budget));
+    assert!(practice::fits_budget(budget - 10, 10, budget));
+    assert!(!practice::fits_budget(budget - 10, 11, budget));
+    assert!(!practice::fits_budget(usize::MAX, 1, budget));
+}
+
+#[test]
+fn segmented_paths_count_toward_the_checkpoint_budget() {
+    let fixture = Fixture::new();
+    let path = prop_fixture(&fixture);
+    unsafe {
+        let ctx = bh_create();
+        assert_eq!(bh_load_map(ctx, path.as_ptr(), fixture.root().as_ptr()), 1);
+        let options = BhRunOptions {
+            rules: 2,
+            ..BhRunOptions::default()
+        };
+        assert_eq!(
+            bh_run_configure(ctx, &options, timer_zones().as_ptr(), 2),
+            1
+        );
+        assert_eq!(
+            bh_record_begin(
+                ctx,
+                ptr::null(),
+                c"segmented".as_ptr(),
+                c"test".as_ptr(),
+                10
+            ),
+            1
+        );
+        step(ctx, 0, 5);
+        let first = bh_practice_save(ctx, 0.0, 0.0);
+        let mut newest = first;
+        const LOADS: u32 = 200;
+        for load in 0..LOADS {
+            // Save, play a branch that is thrown away, load, carry on: every cycle adds a load and a range.
+            step(ctx, 1000 + load, 1);
+            restore(ctx, newest);
+            step(ctx, 10 + load, 1);
+            newest = bh_practice_save(ctx, 0.0, 0.0);
+            assert_ne!(newest, 0, "{}", last_error(ctx));
+        }
+        let m = (*ctx).map.as_ref().unwrap();
+        let bytes = |handle: u32| m.checkpoints[handle as usize - 1].as_ref().unwrap().bytes;
+        let per_load =
+            std::mem::size_of::<segments::Load>() + std::mem::size_of::<std::ops::Range<usize>>();
+        assert!(bytes(newest) >= bytes(first) + LOADS as usize * per_load);
+        bh_destroy(ctx);
+    }
+}
+
+#[test]
+#[ignore = "requires original release BSPs (BH_V19_MAPS)"]
+fn checkpoints_on_bhop_treason_stop_at_the_byte_budget() {
+    let directory = std::env::var("BH_V19_MAPS").unwrap();
+    unsafe {
+        let ctx = bh_create();
+        let path = CString::new(format!("{directory}/bhop_treason.bsp")).unwrap();
+        assert_eq!(bh_load_map(ctx, path.as_ptr(), ptr::null()), 1);
+        assert_eq!(bh_reset(ctx), 1);
+        let mut kept = 0;
+        while bh_practice_save(ctx, 0.0, 0.0) != 0 {
+            kept += 1;
+            assert!(kept <= practice::MAX_CHECKPOINTS);
+        }
+        assert_eq!(last_error(ctx), "practice checkpoints exceed 180 MiB");
+        let m = (*ctx).map.as_ref().unwrap();
+        let retained: usize = m.checkpoints.iter().flatten().map(|cp| cp.bytes).sum();
+        assert!(retained <= practice::CHECKPOINT_BUDGET_BYTES);
+        // About 2.5 MB a snapshot: as many as the web keeps there.
+        assert!((70..=80).contains(&kept), "kept {kept}");
+        bh_destroy(ctx);
+    }
+}

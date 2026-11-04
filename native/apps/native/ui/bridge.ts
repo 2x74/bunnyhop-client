@@ -659,6 +659,8 @@ declare global {
       joinRoom?: (id: string) => void;
       onRoomPose?: (value: unknown) => void;
       onRoomCommand?: (value: unknown) => void;
+      /** This attempt is practice (true) or a real run again (room_bridge.cpp publish_practice). */
+      onRoomPractice?: (value: unknown) => void;
       /** The watched replay's speed graph and markers (replay-host.ts), once per replay. */
       onReplayTimeline?: (value: unknown) => void;
       /** The host's answer to Practice from here (replay-practice.ts). */

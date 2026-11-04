@@ -395,13 +395,9 @@ function render(): void {
       .filter((item) => item.map === state.map && item.track === state.track)
       .sort((x, y) => y.recordedAt - x.recordedAt)[0];
     if (!app.classList.contains("native-steady")) send({ type: "replays", action: "list" });
-    // Practice works solo (web rules.ts practiceUnavailable): the host says where; never in a room, a gauntlet or a replay.
+    // Practice works where the host says (web rules.ts practiceUnavailable): rooms too, never a gauntlet or a replay.
     const practice =
-      state.practice.available &&
-      !state.practice.unavailable &&
-      !roomService.view.id &&
-      !gauntlet.id &&
-      !state.playback.active
+      state.practice.available && !state.practice.unavailable && !gauntlet.id && !state.playback.active
         ? {
             on: state.practice.mode,
             count: state.practice.count,
@@ -983,6 +979,7 @@ window.bunnyhopNativeMenu = {
   onRoomCommand: (value) => {
     roomService.command(value);
   },
+  onRoomPractice: (value) => roomService.practice(value === true),
   // A friend pressed Join on your Discord activity. The host has already checked the secret.
   settle,
   onLeaveMap: teardownMap,

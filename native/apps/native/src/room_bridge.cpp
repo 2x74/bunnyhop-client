@@ -86,6 +86,20 @@ nlohmann::json RoomBridge::presence_activity(
     return native::discord::build_activity(status, discord_settings, hash_room, unix_now);
 }
 
+void RoomBridge::publish_practice(bool practicing) {
+    // A reloaded menu starts out not practising.
+    if (!menu_ || !menu_ready_ || !*menu_ready_) {
+        practice_sent_ = false;
+        return;
+    }
+    if (practicing == practice_sent_) return;
+    practice_sent_ = practicing;
+    menu_->evaluate_js(
+            practicing ? "window.bunnyhopNativeMenu?.onRoomPractice?.(true)"
+                       : "window.bunnyhopNativeMenu?.onRoomPractice?.(false)"
+    );
+}
+
 void RoomBridge::publish_tick(
         MenuWebView *menu,
         bool menu_ready,

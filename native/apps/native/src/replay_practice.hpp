@@ -90,14 +90,10 @@ struct ReplayTakeover {
          std::span<const BhZone> zones,
          const std::string &selected_style,
          bool gauntlet,
-         bool multiplayer,
          std::optional<uint32_t> tick = std::nullopt,
          const std::string &map = {}) {
         if (gauntlet) {
             throw std::runtime_error("No practice during a gauntlet.");
-        }
-        if (multiplayer) {
-            throw std::runtime_error("Practice is for solo play, not servers.");
         }
         const auto problem = replay_practice_problem(info, map, selected_style);
         if (!problem.empty()) {

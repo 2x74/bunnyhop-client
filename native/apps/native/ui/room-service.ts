@@ -24,9 +24,14 @@ import { isStyleId } from "../../web/src/styles";
 import { roomStyleId } from "./room-styles";
 import type { RoomHandlers, RoomStatus } from "../../web/src/net/room";
 import type { MenuMessage } from "./bridge";
+/**
+ * (0.0.36) The attempt turned into practice or back: the room patches your roster's `practice`, and the others see a
+ * practice tag instead of a time. Older rooms drop it.
+ */
+type PracticeMsg = { t: "practice"; on: boolean };
 export interface RoomTransport {
   rtt?: number;
-  send(message: ClientMsg): void;
+  send(message: ClientMsg | PracticeMsg): void;
   pushSample(sample: NetSample): void;
   flushSamples(meta: Omit<NetMeta, "ping">, weapon?: number | null, silenced?: boolean): void;
   close(code?: number): void;
@@ -43,6 +48,8 @@ interface Dependencies {
   /** The knife and finish held now: the knife pool's pick (player/cosmetics.ts getHeldLoadout). */
   heldKnife?: () => { knife: string; finish: string };
 }
+/** At most one practice message this often, so restarts on a practice spawn send the latest state (net/mp.ts). */
+const PRACTICE_SEND_MS = 600;
 /** Restarts that swap the knife send one message once they stop (net/mp.ts sendHeldKnife's pause). */
 const HELD_KNIFE_PAUSE_MS = 1500;
 export interface RoomView {
@@ -292,6 +299,9 @@ export class NativeRoomService {
   private youId: string | null = null;
   private introducedLobbies = new Set<string>();
   private knifeTimer: ReturnType<typeof setTimeout> | null = null;
+  private practicing = false;
+  private practiceSent = false;
+  private practiceAt = -Infinity;
   private cue(id: string): void {
     this.dependencies.send({ type: "audioCue", id, gain: 1, rate: 1 });
   }
@@ -461,6 +471,19 @@ export class NativeRoomService {
     if (shown.knife === held.knife && shown.finish === held.finish) return;
     this.transport.send({ t: "knife", knife: held.knife, finish: held.finish });
   }
+  /** The host says this attempt is practice, or a real run again. The next batch of your movement tells the room. */
+  practice(on: boolean): void {
+    this.practicing = on;
+  }
+  /** Sent with the movement batches, as net/mp.ts syncPractice does: a spectator or a menu sends nothing. */
+  private syncPractice(): void {
+    const now = this.now();
+    if (this.practicing === this.practiceSent || !this.transport || this.view.status !== "open") return;
+    if (this.view.you < 0 || now - this.practiceAt < PRACTICE_SEND_MS) return;
+    this.practiceSent = this.practicing;
+    this.practiceAt = now;
+    this.transport.send({ t: "practice", on: this.practicing });
+  }
   command(value: unknown): boolean {
     let message: ClientMsg | null = null;
     try {
@@ -489,6 +512,7 @@ export class NativeRoomService {
     const you = String(this.view.you);
     this.view.metas[you] = { ...meta, ping: this.view.metas[you]?.ping ?? 0 };
     (this.view.metaAt ??= {})[you] = this.now();
+    this.syncPractice();
     const weapon = uint(pose.weapon, 25) ? pose.weapon : null;
     this.transport.flushSamples(meta, weapon, pose.silenced === true);
     // The page timer that also drives the countdown cues can be throttled while the page is hidden.
@@ -628,6 +652,9 @@ export class NativeRoomService {
       this.view.change = message.change;
       this.scheduleChange(message.change);
       this.sendHeldKnife();
+      // A new connection: the room knows nothing of practice yet (the next batch says so if it is).
+      this.practiceSent = false;
+      this.practiceAt = -Infinity;
     } else if (message.t === "join") {
       this.view.players = this.view.players.filter((p) => p.slot !== message.player.slot);
       if (this.view.players.length < 64) this.view.players.push(message.player);

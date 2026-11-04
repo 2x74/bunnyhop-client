@@ -64,8 +64,8 @@ void PracticeController::save(
         uint32_t track
 ) {
     auto handle = bh_practice_save(core, float(input.yaw()), float(input.pitch));
-    // Retain the newest 100 snapshots within the bridge's 128 MiB cap.
-    // On large maps evict the oldest and retry, as the web checkpoint store does.
+    // The bridge keeps max_checkpoints within its byte budget. Past either, drop the oldest and retry, as the web
+    // checkpoint store does: the new checkpoint always stays.
     while (!handle && !checkpoints.empty() && std::string(bh_last_error(core)).find("Segmented") == std::string::npos) {
         bh_practice_free(core, checkpoints.front().handle);
         checkpoints.erase(checkpoints.begin());

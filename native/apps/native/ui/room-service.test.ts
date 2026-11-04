@@ -96,6 +96,42 @@ test("room service validates native pose identity and sends each batch as it arr
     f.service.leave();
   }
 });
+test("the room hears when the attempt turns into practice, with the movement, and again after a reconnect", async () => {
+  const f = fixture();
+  const practiceMessages = () => f.commands.filter((m) => (m as { t: string }).t === "practice");
+  const wait = (ms: number) => {
+    for (let waited = 0; waited < ms; waited += 50) f.advance();
+  };
+  try {
+    f.service.practice(true);
+    await f.service.join("test");
+    f.handlers[0].message(welcome("test"));
+    expect(practiceMessages()).toEqual([]);
+    f.service.pose(pose(f));
+    expect(practiceMessages()).toEqual([{ t: "practice", on: true }]);
+    // A restart on a practice spawn flips it twice in a moment: the room gets the latest state, once.
+    f.service.practice(false);
+    f.service.pose(pose(f, 40));
+    f.service.practice(true);
+    f.service.pose(pose(f, 60));
+    expect(practiceMessages()).toHaveLength(1);
+    f.service.practice(false);
+    wait(600);
+    f.service.pose(pose(f, 80));
+    expect(practiceMessages()).toEqual([
+      { t: "practice", on: true },
+      { t: "practice", on: false },
+    ]);
+    // A new connection knows nothing of it: practising again is said again, a real run needs no message.
+    f.service.practice(true);
+    f.handlers[0].message(welcome("test"));
+    f.service.pose(pose(f, 100));
+    expect(practiceMessages()).toHaveLength(3);
+    expect(practiceMessages()[2]).toEqual({ t: "practice", on: true });
+  } finally {
+    f.service.leave();
+  }
+});
 test("game-paced batches go out with steady spacing while page timers are stalled", async () => {
   const f = fixture();
   try {
