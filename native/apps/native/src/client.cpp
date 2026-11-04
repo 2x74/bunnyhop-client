@@ -759,6 +759,11 @@ int run(const native::Options &opt) {
                     toast(unavailable);
                     return;
                 }
+                if (free_cameras.freecam.active() && native::freecam_blocks_practice(action)) {
+                    const auto &codes = input_timeline.binds().codes("freecam");
+                    toast(native::Freecam::practice_refusal(codes.empty() ? std::string_view() : codes.front()));
+                    return;
+                }
                 BhRunState timing{};
                 bh_run_state(core.get(), &timing);
                 practice.segment_status(bh_segment_loads(core.get()));

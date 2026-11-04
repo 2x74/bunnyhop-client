@@ -65,10 +65,21 @@ void test_places_and_blocked_actions() {
     assert(native::freecam_unavailable({false, false, false}) == "Load a map to use freecam.");
     assert(native::freecam_unavailable({true, true, false}) == "Freecam isn't available in the tutorial.");
     assert(native::freecam_unavailable({true, false, true}) == "The replay viewer has its own free camera.");
-    for (const char *action : {"inspect", "thirdPerson", "noclip", "cpSave", "giveUsp", "slot1", "drop", "setStart"})
+    for (const char *action : {"inspect", "thirdPerson", "giveUsp", "slot1", "drop", "setStart"})
         assert(native::freecam_blocks_action(action));
     for (const char *action : {"restart", "restartBonus", "restartMain", "cycleStyle", "freecam", "chat"})
         assert(!native::freecam_blocks_action(action));
+}
+
+// !tele, !noclip, !cp menu digits and the practice binds all ask through the same practice actions, so one check stops
+// them all while the camera flies.
+void test_practice_actions_wait_for_the_body() {
+    for (const char *action : {"toggle", "on", "off", "save", "tele", "prev", "next", "noclip"})
+        assert(native::freecam_blocks_practice(action));
+    for (const char *action : {"menu", "keepVelocity"})
+        assert(!native::freecam_blocks_practice(action));
+    assert(native::Freecam::practice_refusal("") == "Your body takes no input in freecam. !freecam to go back.");
+    assert(native::Freecam::practice_refusal("KeyV") == "Your body takes no input in freecam. V to go back.");
 }
 
 void test_speeds_and_world_limit() {
@@ -439,6 +450,7 @@ void test_freecam_run_matches_a_hands_off_run(const std::filesystem::path &keep)
 int main(int argc, char **argv) {
     test_neutral_command_is_a_released_command();
     test_places_and_blocked_actions();
+    test_practice_actions_wait_for_the_body();
     test_speeds_and_world_limit();
     test_flying_follows_the_camera_view_with_pitch();
     test_shift_and_alt_fly_when_bound();
