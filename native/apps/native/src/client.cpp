@@ -3142,9 +3142,14 @@ int run(const native::Options &opt) {
         uint64_t &sim_ns = input_scheduler.sim_ns;
         input_timeline.begin_frame(input, simulation_active, now_ns);
         while (input_scheduler.due(tick_ns)) {
+            const double counts_before = input.yaw_counts;
+            input_timeline.take_tick(input, sim_ns, tick_ns, opt.frames != 0);
+            const double mouse_counts = input.yaw_counts - counts_before;
+            // A track-style switch restarts facing where this tick's mouse motion turned the view, and drops the
+            // tick's command (website session.ts command).
             const bool lesson = tutorial_runner.lesson && tutorial_runner.lesson->is_active();
             const bool can_switch = !viewer.active && !practice.noclip && !lesson;
-            const auto change = can_switch ? native::TrackStyleSwitch::due(
+            const auto track_switch = can_switch ? native::TrackStyleSwitch::due(
                                                      core.get(),
                                                      curr,
                                                      zones,
@@ -3154,17 +3159,6 @@ int run(const native::Options &opt) {
                                                      float(input.yaw())
                                              )
                                            : std::nullopt;
-            if (change) {
-                active_track = change->track;
-                restart_at = change->at;
-                reset();
-                toast(change->toast, 2000);
-                input_scheduler.reset(SDL_GetTicksNS());
-                break;
-            }
-            const double counts_before = input.yaw_counts;
-            input_timeline.take_tick(input, sim_ns, tick_ns, opt.frames != 0);
-            const double mouse_counts = input.yaw_counts - counts_before;
             BhRunState timing_before{};
             bh_run_state(core.get(), &timing_before);
             prev = curr;
@@ -3192,7 +3186,7 @@ int run(const native::Options &opt) {
                 bh_last_command(core.get(), &cmd);
                 input.set_angles(cmd.pitch, cmd.yaw, 5);
                 viewer.record_view(cmd, curr.tick);
-            } else {
+            } else if (!track_switch) {
                 const bool turns_allowed = captured
                                            && native::turn_binds_allowed(
                                                    active_style,
@@ -3256,6 +3250,14 @@ int run(const native::Options &opt) {
                     if (const auto notice = practice.infinite_flight.observe(core.get(), curr))
                         toast(std::string(*notice), 4000);
                 }
+            }
+            if (track_switch) {
+                active_track = track_switch->track;
+                restart_at = track_switch->at;
+                reset();
+                toast(track_switch->toast, 2000);
+                input_scheduler.reset(SDL_GetTicksNS());
+                break;
             }
             renderer->simulation_tick();
             // Infinite's flight ticks feed no jump stats, SSJ, sync or announcer, as practice noclip.
