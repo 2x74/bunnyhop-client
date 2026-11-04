@@ -2,6 +2,7 @@
 #include "room_state.hpp"
 #include "room_modes.hpp"
 #include "discord_rpc.hpp"
+#include "room_pose.hpp"
 #include <chrono>
 #include <functional>
 #include <optional>
@@ -10,7 +11,6 @@
 namespace native {
 
 struct Options;
-struct Input;
 class MenuWebView;
 
 class RoomBridge {
@@ -42,23 +42,22 @@ public:
             bool menu_visible,
             bool tutorial_practice
     );
-    void publish_pose(
-            Clock::time_point now,
-            Clock::time_point started,
+    // Once per simulated tick (not during replay playback): samples your movement and sends a batch when one is due.
+    void publish_tick(
             MenuWebView *menu,
             bool menu_ready,
-            BhContext *core,
             const std::string &map_id,
-            bool playback,
             bool spectator,
             const BhState &curr,
-            const Input &input,
+            const BhCmd &cmd,
             const BhRunState &run_state,
+            const BhWeaponReport &weapon,
             const std::string &active_style
     );
 
 private:
-    Clock::time_point room_time = Clock::now();
+    RoomPoseBatcher poses_;
+    uint64_t pose_generation_ = 0;
     Clock::time_point presence_time{};
     std::string presence_map;
     int64_t presence_started = 0;

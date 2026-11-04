@@ -170,6 +170,9 @@ struct MenuWebView::Impl {
 
         auto config = [WKWebViewConfiguration new];
         config.websiteDataStore = WKWebsiteDataStore.defaultDataStore;
+        // A room's socket lives in this page while it is hidden behind the game: don't let WebKit throttle its
+        // timers or suspend it.
+        if (@available(macOS 14.0, *)) config.preferences.inactiveSchedulingPolicy = WKInactiveSchedulingPolicyNone;
         delegate = [BHNativeMenuDelegate new];
         delegate.initialNavigation = YES;
         const auto shared = state;

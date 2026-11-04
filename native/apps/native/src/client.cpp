@@ -3253,6 +3253,11 @@ int run(const native::Options &opt) {
             bh_run_state(core.get(), &timing);
             BhWeaponReport weapon{};
             bh_weapon_report(core.get(), &weapon);
+            if (!viewer.active) {
+                room_bridge.publish_tick(
+                        menu.get(), menu_ready, map_id, spectator.has_value(), curr, cmd, timing, weapon, active_style
+                );
+            }
             BhAttackReport attack{};
             if (!viewer.active && !practice.active && !tutorial_practice() && !opt.frames
                 && opt.runtime_smoke.empty()) {
@@ -3916,20 +3921,6 @@ int run(const native::Options &opt) {
             } catch (const std::exception &e) {
                 std::cerr << "Menu backdrop: " << e.what() << '\n';
             }
-        room_bridge.publish_pose(
-                now,
-                started,
-                menu.get(),
-                menu_ready,
-                core.get(),
-                map_id,
-                viewer.active,
-                spectator.has_value(),
-                curr,
-                input,
-                run_state,
-                active_style
-        );
         video_smoke.frame(running);
         ++frame;
         ++title_frames;

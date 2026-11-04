@@ -7,7 +7,7 @@ import { isExtend } from "../../web/src/net/protocol";
 import { copyLobbyInvite } from "../../web/src/net/lobby";
 import { state } from "./bridge";
 import { formatTime } from "../../web/src/timer";
-import { styleLabel } from "../../web/src/styles";
+import { roomStyleLabel } from "./room-styles";
 import type { NativeRoomService } from "./room-service";
 import { openReport, reportButton } from "./report";
 
@@ -135,7 +135,7 @@ export function roomPanel(
             "div.native-room-player",
             null,
             h("button.link-btn", { type: "button", onclick: () => profile(player.id) }, player.name),
-            h("small.dim", null, styleLabel(player.style)),
+            h("small.dim", null, roomStyleLabel(player.style)),
             h(
               "small.dim",
               null,
@@ -184,7 +184,7 @@ export function roomPanel(
               h(
                 "p.dim",
                 null,
-                `${r.state} · ${styleLabel(r.style)}${r.track ? ` · Bonus ${r.track}` : ""}${r.outcome ? ` · ${r.outcome}` : ""}`,
+                `${r.state} · ${roomStyleLabel(r.style)}${r.track ? ` · Bonus ${r.track}` : ""}${r.outcome ? ` · ${r.outcome}` : ""}`,
               ),
               ...(r.state === "challenge" && r.you === "b"
                 ? [

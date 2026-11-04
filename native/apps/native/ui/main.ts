@@ -46,6 +46,7 @@ import { installMuteButton } from "./mute-button";
 import { installTutorialProgress } from "./tutorial-entry";
 import { watchGauntletSplit } from "./gauntlet-watch";
 import { NativeRoomService } from "./room-service";
+import { announceRoomWireStyles } from "./room-styles";
 import { RoomConnection } from "../../web/src/net/room";
 import { setRoomPresence, setRaceTag, currentRoom, currentRace } from "../../web/src/net/presence";
 import { serverBrowser } from "../../web/src/ui/servers";
@@ -778,6 +779,7 @@ function chatKeyLabel(): string | null {
   const code = state.settings.binds.chat?.[0];
   return code ? keyLabel(code) : null;
 }
+announceRoomWireStyles(api);
 const roomService = new NativeRoomService({
   chatKey: chatKeyLabel,
   heldKnife: getHeldLoadout,

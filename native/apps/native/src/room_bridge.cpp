@@ -1,16 +1,13 @@
 #include "room_bridge.hpp"
 #include "options.hpp"
-#include "native_input.hpp"
 #include "menu_webview.hpp"
 #include "tutorial_runner.hpp"
-#include <map>
+#include "room_styles.hpp"
 
 namespace native {
 namespace {
 
 constexpr auto presence_interval = std::chrono::milliseconds(250);
-constexpr auto pose_interval = std::chrono::milliseconds(50);
-constexpr int pose_tick_ms = 10;
 
 std::string hash_room(const std::string &text) {
     char hex[65]{};
@@ -79,81 +76,49 @@ nlohmann::json RoomBridge::presence_activity(
         bool tutorial_practice,
         int64_t unix_now
 ) const {
-    static const std::map<std::string, std::string> style_names = {
-            {"autohop", "Normal"},
-            {"legit", "EZ Scroll"},
-            {"scroll", "Legit Scroll"},
-            {"wonly", "W-Only"},
-            {"sideways", "Sideways"},
-            {"hsw", "Half-Sideways"},
-            {"lowgrav", "Low Gravity"},
-            {"segmented", "Segmented"},
-            {"autostrafe", "Auto-strafe"}
-    };
     native::discord::Status status;
     status.kind = map_id.empty() ? "menu" : playback ? "replay" : (!captured || menu_visible) ? "paused" : "playing";
     status.mode = playback ? "replay" : !room.id.empty() ? "multiplayer" : tutorial_practice ? "practice" : "solo";
     status.map = map_id == native::TutorialRunner::map_id ? "the tutorial" : map_id;
-    const auto named = style_names.find(active_style);
-    status.style = named == style_names.end() ? active_style : named->second;
+    status.style = wire_style_name(active_style);
     status.started_at = presence_started;
     status.room = room.id;
     return native::discord::build_activity(status, discord_settings, hash_room, unix_now);
 }
 
-void RoomBridge::publish_pose(
-        Clock::time_point now,
-        Clock::time_point started,
+void RoomBridge::publish_tick(
         MenuWebView *menu,
         bool menu_ready,
-        BhContext *core,
         const std::string &map_id,
-        bool playback,
         bool spectator,
         const BhState &curr,
-        const Input &input,
+        const BhCmd &cmd,
         const BhRunState &run_state,
+        const BhWeaponReport &weapon,
         const std::string &active_style
 ) {
-    if (menu && menu_ready && core && !playback && !spectator && !room.id.empty() && room.map == map_id
-        && now - room_time >= pose_interval) {
-        BhWeaponReport weapon{};
-        bh_weapon_report(core, &weapon);
-        const auto tick =
-                uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(now - started).count() / pose_tick_ms);
-        const nlohmann::json pose = {
-                {"generation", room.generation},
-                {"id", room.id},
-                {"map", map_id},
-                {"sample",
-                 {{"tick", tick},
-                  {"x", curr.position[0]},
-                  {"y", curr.position[1]},
-                  {"z", curr.position[2]},
-                  {"vx", curr.velocity[0]},
-                  {"vy", curr.velocity[1]},
-                  {"vz", curr.velocity[2]},
-                  {"yaw", input.yaw()},
-                  {"pitch", input.pitch},
-                  {"flags", room_events | (curr.grounded ? 1 : 0) | (curr.crouched ? 2 : 0)}}},
-                {"meta",
-                 {{"style", active_style},
-                  {"track", run_state.track},
-                  {"timer",
-                   run_state.status == 2   ? 3
-                   : run_state.status == 1 ? 2
-                   : run_state.in_start    ? 1
-                                           : 0},
-                  {"timerTicks",
-                   run_state.status ? (run_state.status == 2 ? run_state.end_tick : curr.tick) - run_state.start_tick
-                                    : 0}}},
-                {"weapon", weapon.active},
-                {"silenced", weapon.silencer != 0}
-        };
-        menu->evaluate_js("window.bunnyhopNativeMenu?.onRoomPose?.(" + pose.dump() + ")");
-        room_events = 0;
-        room_time = now;
+    if (room.generation != pose_generation_) {
+        poses_.clear();
+        pose_generation_ = room.generation;
     }
+    const bool sending = menu && menu_ready && !spectator && !room.id.empty() && room.map == map_id;
+    if (!poses_.advance(sending)) return;
+    RoomPoseSample sample;
+    std::copy(std::begin(curr.position), std::end(curr.position), sample.position.begin());
+    std::copy(std::begin(curr.velocity), std::end(curr.velocity), sample.velocity.begin());
+    // The command's view, as web sends: the angles the tick was simulated with.
+    sample.yaw = cmd.yaw;
+    sample.pitch = cmd.pitch;
+    sample.flags = room_events | (curr.grounded ? room_flag_grounded : 0) | (curr.crouched ? room_flag_crouched : 0);
+    room_events = 0;
+    poses_.add(sample);
+    if (!poses_.batch_due()) return;
+    auto meta = room_pose_meta(run_state, curr.tick, active_style);
+    meta.weapon = weapon.active;
+    meta.silenced = weapon.silencer != 0;
+    const auto message = room_pose_message(room.generation, room.id, map_id, poses_.samples(), meta);
+    menu->evaluate_js("window.bunnyhopNativeMenu?.onRoomPose?.(" + message.dump() + ")");
+    poses_.clear();
 }
 
 }  // namespace native
