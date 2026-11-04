@@ -24,7 +24,7 @@ index 01bc5f7..1066f48 100644
  playsrc-collision = { path = "../vendor/collision" }
  playsrc-movement = { path = "../vendor/movement" }
 diff --git a/crates/core/src/game.rs b/crates/core/src/game.rs
-index 8ec12b0..2c11417 100644
+index 9fcf4c5..bc6d874 100644
 --- a/crates/core/src/game.rs
 +++ b/crates/core/src/game.rs
 @@ -1291,8 +1291,8 @@ impl Tracer for Scene<'_> {

@@ -17,7 +17,7 @@
   {
     "path": "apps/web/src/core.ts",
     "classification": "native patch",
-    "baseline": "9bc2012957b3364c7d2a5567af88143a21f2d88c"
+    "baseline": "172f95b3ebac7f87d1476ce11151cefb2a4bb62c"
   },
   {
     "path": "apps/web/src/feedback/modal.ts",
@@ -142,7 +142,7 @@
   {
     "path": "crates/core/src/game.rs",
     "classification": "native patch",
-    "baseline": "8ec12b05a419e2f69e51ad0b924e7feac41bf323"
+    "baseline": "9fcf4c5ac2dd75dfdc053deae384d206ce5ed03b"
   },
   {
     "path": "crates/core/src/game/flight.rs",

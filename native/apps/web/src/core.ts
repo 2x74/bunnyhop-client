@@ -264,7 +264,8 @@ export const PROP_TRANSFORM_KEY = 1 << 20;
  * - v23: v22 + per-map changes only (map_fixes.rs). Every map not listed there plays as on v22.
  * - v24: v23 + Source's UTIL_StringToVector for the player's AddOutput basevelocity / origin (atof per token, missing
  *   tokens 0; before, anything but 3 clean numbers was ignored), PARENTED_DOORS_V24 (bhop_playboy_csgo) and
- *   CS_DELETED_PROPS_V24 (bhop_hell and 6 more maps).
+ *   CS_DELETED_PROPS_V24 (bhop_hell and 6 more maps), END_TOUCH_OUTPUTS_V24 (bhop_weed_funhouse's boosters fire on
+ *   OnEndTouch), the infinite clip, and Infinite flights (IN_FLIGHT commands fly in the core, only in Infinite).
  */
 export const PHYSICS_V1 = 1;
 /** Weapon commands and the USP silencer (research/WEAPONS.md). */

@@ -208,8 +208,8 @@ pub const PHYSICS_V22: u32 = 22;
 pub const PHYSICS_V23: u32 = 23;
 /// v24: v23 + an infinite clip on every map (`game/weapons.rs` `infinite_clip`) + Source's keyvalue vector parse for the player's `basevelocity` and `origin` (`UTIL_StringToVector`: atof
 /// per token, missing tokens 0), so bhop_weed_funhouse's `basevelocity boostAmountX boostAmountY 1550` boosters launch
-/// as on srcds; and per-map changes in `game/map_fixes.rs` (`PARENTED_DOORS_V24`, `CS_DELETED_PROPS_V24`,
-/// `END_TOUCH_OUTPUTS_V24`: those two boosters fire on OnEndTouch, as their mapper meant). No new fix bits.
+/// as on srcds; per-map changes in `game/map_fixes.rs` (`PARENTED_DOORS_V24`, `CS_DELETED_PROPS_V24`, `END_TOUCH_OUTPUTS_V24`: those two boosters fire on OnEndTouch, as their mapper meant);
+/// and Infinite flights (`IN_FLIGHT` commands fly in `game/flight.rs`, only with `air_jump`; speed capped at 3500, landing at 3510). No new fix bits.
 pub const PHYSICS_V24: u32 = 24;
 /// Diagnostic pseudo-versions (never valid in a replay, whose field is a u8): `PHYSICS_DIAG | fix bits` turns on only
 /// the listed fixes, to tell which fix changes a replay (tools: /tmp physics-v2 analysis). The fix bits are the low 31

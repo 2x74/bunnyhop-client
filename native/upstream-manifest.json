@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "repository": "https://github.com/2x74/bunnyhop",
-  "commit": "7f3a681882aba371fa91430ce2dc372d4cfc9d4b",
+  "commit": "803fd7e02765a3f42a8ac993bfd7ed5c95cda1f0",
   "areas": [
     "crates/core",
     "crates/vendor",
@@ -16,10 +16,10 @@
     "apps/web/src/assets/audio/sfx/announcer_perfect-1.webm"
   ],
   "patches": {
-    "native-core.patch": "217ea389d7b9ee7e42f03d3c5846b774e2ba924d13e320dd0bc43cbc1e3fae30",
-    "native-web.patch": "a4c2709c1b73a87ef88005223b6fbe4c89ea64197c5b3711f0f2c20c098f4723"
+    "native-core.patch": "8bcf669a3a206a378972453afbdcc7422ba8badb741517f6836d6602939b2d40",
+    "native-web.patch": "3e580fa36e50652ecd99c3ad0c0495d4feb871510bbeb766a893543b36a33c07"
   },
-  "sourceTreeSha256": "fe719bafed428901cbdf316695e4f96607afb392f4427a017bb9ed2e2bb41167",
+  "sourceTreeSha256": "160064f387f966d42581b21df08c2baae6ac77cae4ad2bd9dda80de804c83724",
   "sources": {
     "apps/web/src/about/about.css": "1a89ee791a663ae8e00840bf284cca40c5dfd3d1786e7808ac57a2fce6a88742",
     "apps/web/src/about/changelog-page.ts": "bfbe95c9fcb55ff795edc5aab6fc52081c9ed401f160cdf0f3af91d96fa9f1c7",
@@ -465,7 +465,7 @@
     "apps/web/src/content/player.ts": "648667f695137f54842b35106d25b0eea136958c5eabfc827e364315aad024ef",
     "apps/web/src/content/resolve.ts": "9eb166131b4257bba0813e99d95a1b680d64089db779d1615a72b0bec2b08812",
     "apps/web/src/content/sounds.ts": "b74ccf55391071dcfbe4f0b0fba6ef36168b2d8f7b940cfce817c88f74eef65b",
-    "apps/web/src/core.ts": "60fbd54ec2ca1c8bac601ec9e8bec53f948a31d786d53c0e57846e3f9346a425",
+    "apps/web/src/core.ts": "0c2830daaeba2d5f1822d0cd62a047c4b16ce59e38d4e99d0e069a0f3f837d0b",
     "apps/web/src/countries.ts": "6a7f264a3bcfca727b21829e7b9d0d95f6a862a5abc26bced20f359149171a5a",
     "apps/web/src/creators.ts": "c7b176e9bcc9c8113af718b60c9a7b093a2e891f0cd33ad800546a84c4e9c5b2",
     "apps/web/src/csgo.ts": "28af87277a8d47945e28e44dd279e30d31a41dd7d266a9cfb5815c0b7b771bc8",
@@ -1043,7 +1043,7 @@
     "crates/core/src/bin/tracesim.rs": "e82cdb4c0eb7d102a2b2f14b42b58dd9752de8b1a81bc1ff0013d127b558b6e5",
     "crates/core/src/content.rs": "02c8f43ed2fc6120f274d6b40b732308b14a5534e6575c3482ccc903517723e1",
     "crates/core/src/entities.rs": "e514d1687fc9540b140781f3a5b80ac5eb4afd6e0fc8f36aaf5dc0ca054b1832",
-    "crates/core/src/game.rs": "285932e3a22694e20fe94064edae651898a3d40353cd15e55424e9f323697501",
+    "crates/core/src/game.rs": "3164a722786a5d5e91e0fd4706ecc76be97988ddda5e6d862a75c4a8a17244a6",
     "crates/core/src/game/flight.rs": "6dc32f5aea6d3c858c7915d992064bef49db295a132b2320eb2fa03eefa22884",
     "crates/core/src/game/kin.rs": "b761543d7f2a6c900a1b0b0dcc35d70e67d189d3d780384b50cbb00c8ec90bb8",
     "crates/core/src/game/map_fixes.rs": "994bcf900d7f5194935f1292dee5b372a77d0827312fcf7af6d12ad0f0cabdff",
@@ -1601,7 +1601,7 @@
     "apps/web/src/content/player.ts": "648667f695137f54842b35106d25b0eea136958c5eabfc827e364315aad024ef",
     "apps/web/src/content/resolve.ts": "9eb166131b4257bba0813e99d95a1b680d64089db779d1615a72b0bec2b08812",
     "apps/web/src/content/sounds.ts": "b74ccf55391071dcfbe4f0b0fba6ef36168b2d8f7b940cfce817c88f74eef65b",
-    "apps/web/src/core.ts": "663348eb069a4cec5e0ed73020fcb127d4dd32cc210c0397bbb240c5776a1979",
+    "apps/web/src/core.ts": "4791c42e9ab163fb25cc11197d6ecf335f7cee688a8c34c0f3c797f6ac68087b",
     "apps/web/src/countries.ts": "6a7f264a3bcfca727b21829e7b9d0d95f6a862a5abc26bced20f359149171a5a",
     "apps/web/src/creators.ts": "c7b176e9bcc9c8113af718b60c9a7b093a2e891f0cd33ad800546a84c4e9c5b2",
     "apps/web/src/csgo.ts": "28af87277a8d47945e28e44dd279e30d31a41dd7d266a9cfb5815c0b7b771bc8",
@@ -2185,7 +2185,7 @@
     "crates/core/src/bin/tracesim.rs": "e82cdb4c0eb7d102a2b2f14b42b58dd9752de8b1a81bc1ff0013d127b558b6e5",
     "crates/core/src/content.rs": "02c8f43ed2fc6120f274d6b40b732308b14a5534e6575c3482ccc903517723e1",
     "crates/core/src/entities.rs": "e514d1687fc9540b140781f3a5b80ac5eb4afd6e0fc8f36aaf5dc0ca054b1832",
-    "crates/core/src/game.rs": "d8062ece1e12eccc693db6a3aa980f85cf25d11e4240045e912fdf44361be3dc",
+    "crates/core/src/game.rs": "cf4397b509c92f4781add9e7e0ea6844c67772d09ba474367bff692bab1de426",
     "crates/core/src/game/flight.rs": "847f1f711c96c1e7fa36c76364f1467d61c187b193b0fca1038d9f45b2957a42",
     "crates/core/src/game/kin.rs": "aa5ff6a2f94c70a57badc5509c683e51edb30b6da4a39665781c9e5986133c5d",
     "crates/core/src/game/map_fixes.rs": "994bcf900d7f5194935f1292dee5b372a77d0827312fcf7af6d12ad0f0cabdff",
