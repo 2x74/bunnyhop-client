@@ -31,6 +31,7 @@ function fixture(where: "room" | "solo" = "room") {
             openNominateMenu: () => actions.push("nominate"),
             invite: () => {},
             race: (arg) => actions.push(["race", arg]),
+            report: (arg) => actions.push(["report", arg]),
           }
         : null,
   };
