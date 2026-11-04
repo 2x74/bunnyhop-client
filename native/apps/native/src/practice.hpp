@@ -57,11 +57,15 @@ struct Practice {
         hinted_run = -1;
     }
 
+    // Drops the checkpoints and practice state. The attempt itself goes on (a room join, a gauntlet, a replay), so
+    // what it flew stays with it until it restarts, as the website's PracticeAttempt only resets with the attempt.
     void clear(BhContext *core) {
         if (core)
             for (const auto &cp : checkpoints)
                 bh_practice_free(core, cp.handle);
+        const auto flight = infinite_flight;
         *this = Practice{};
+        infinite_flight = flight;
     }
 
     void retain(Checkpoint cp) {

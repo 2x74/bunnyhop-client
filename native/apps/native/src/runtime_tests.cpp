@@ -98,6 +98,9 @@ void test_infinite_flight_stuck_notice() {
     assert(!flight.observe(nullptr, flew));
     assert(!flight.observe(nullptr, walked) && !flight.flying() && flight.flew());
     assert(flight.observe(nullptr, flew) == native::InfiniteFlight::stuck_notice);
+    // Joining a room or a gauntlet clears practice, not the attempt: a start point set now is still a practice spawn.
+    practice.clear(nullptr);
+    assert(flight.flying() && flight.flew());
     practice.restart();
     assert(!flight.flying() && !flight.flew() && !flight.on());
 }
