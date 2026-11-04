@@ -1478,19 +1478,7 @@ int run(const native::Options &opt) {
                         reset();
                     }
                 } else if (action == "cycleStyle") {
-                    static const std::vector<std::string> order = {
-                            "autohop",
-                            "legit",
-                            "scroll",
-                            "wonly",
-                            "sideways",
-                            "hsw",
-                            "lowgrav",
-                            "segmented",
-                            "autostrafe"
-                    };
-                    auto at = std::find(order.begin(), order.end(), selected_style);
-                    selected_style = order[(size_t(at - order.begin()) + 1) % order.size()];
+                    selected_style = std::string(native::next_menu_style(selected_style));
                     reset();
                 } else if (action == "slot1" || action == "slot2" || action == "slot3")
                     input.pulse = (input.pulse & ~(3u << 14)) | (uint32_t(action.back() - '0') << 14);
@@ -2321,6 +2309,10 @@ int run(const native::Options &opt) {
                             preferences = native::patch_settings(
                                     preferences, native::movement_stat_patch(preferences, message)
                             );
+                            json_writer.write(cache / "settings.json", preferences);
+                            apply_preferences();
+                        } else if (action == "ssjChat") {
+                            preferences = native::patch_settings(preferences, native::ssj_chat_patch(message));
                             json_writer.write(cache / "settings.json", preferences);
                             apply_preferences();
                         } else if (action == "raceMenu") {

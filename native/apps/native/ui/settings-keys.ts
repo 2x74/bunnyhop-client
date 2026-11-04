@@ -73,6 +73,7 @@ export const REQUESTED_KEYS: readonly RequestedKey[] = [
   hud("hud.strafeTrainer.showPace", boolean),
   hud("hud.strafeTrainer.sound", boolean),
   hud("hud.ssj.chat", boolean),
+  hud("hud.ssj.minGain", number(0, 100, true)),
   ...SSJ_FIELDS.map((field) => hud(`hud.ssj.fields.${field}`, boolean)),
   hud("hud.jhud.sync", boolean),
   hud("hud.jhud.jss", boolean),

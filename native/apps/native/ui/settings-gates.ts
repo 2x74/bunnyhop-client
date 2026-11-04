@@ -99,6 +99,7 @@ const ROWS: Record<string, Gate> = {
   "hud/Strafe trainer/Turn hints": needs("strafeTrainerHints"),
   "hud/Strafe trainer/Jump sound": needs("hudStrafeTrainerSound"),
   "hud/Jump stats/Chat": needs("hudSsjChat"),
+  "hud/Jump stats/Only gain from": needs("hudSsjMinGain"),
   "hud/Jump stats/HUD": needs("jumpStats"),
   "hud/Jump stats/Jumps": needs("jumpStatsMode", "jumpStatsInterval"),
   "hud/Jump stats/Speed": needs("hudSsjFieldsSpeed"),
@@ -181,6 +182,9 @@ const ROWS: Record<string, Gate> = {
   "ghost/Players and name tags/Ghost tags": needs("ghostTag"),
   "ghost/Players and name tags/Player glow": needs("showPlayerGlow"),
   "ghost/Players and name tags/First-person glow": needs("firstPersonGlow"),
+  "ghost/Players and name tags/Show other players": excluded(
+    "Native hides other players for the session with !hide; there's no saved setting for it yet.",
+  ),
   "ghost/Players and name tags/Player tags": needs("tagsPlayers"),
   "ghost/Players and name tags/Names through walls": needs("tagsThroughWalls"),
   "ghost/Look/Opacity": needs("ghostOpacity"),

@@ -123,7 +123,7 @@ public:
             step = Step::closed;
             return true;
         }
-        const size_t available = step == Step::player ? count : step == Step::track ? track_count : 8;
+        const size_t available = step == Step::player ? count : step == Step::track ? track_count : race_styles.size();
         if (pick == 9 && available > 8) {
             page = (page + 1) % ((available + 7) / 8);
             return true;
@@ -143,10 +143,8 @@ public:
                 step = Step::closed;
             }
         } else {
-            constexpr std::array<const char *, 8> styles = {
-                    "autohop", "legit", "wonly", "sideways", "hsw", "autostrafe", "scroll", "lowgrav"
-            };
-            command.format("/race #%u %s %u", opponent, styles[index], track);
+            const auto style = race_styles[index];
+            command.format("/race #%u %.*s %u", opponent, int(style.size()), style.data(), track);
             step = Step::closed;
         }
         return true;
@@ -173,18 +171,17 @@ void draw_race_picker(Hud &hud, int width, int height, float percent, const Race
     );
     const size_t count = picker.step == Step::player  ? picker.count
                          : picker.step == Step::track ? picker.track_count
-                                                      : 8;
-    constexpr std::array<std::string_view, 8> styles = {
-            "Autohop", "EZ Scroll", "W-only", "Sideways", "Half-sideways", "Auto-strafe", "Legit Scroll", "Low gravity"
-    };
+                                                      : race_styles.size();
     HudLabel<160> label;
     for (size_t i = picker.page * 8; i < std::min(count, picker.page * 8 + 8); ++i) {
         if (picker.step == Step::player)
             label.format("%zu. %.*s", i % 8 + 1, int(picker.names[i].view().size()), picker.names[i].view().data());
         else if (picker.step == Step::track)
             label.format(picker.tracks[i] ? "%zu. Bonus %u" : "%zu. Main track", i % 8 + 1, picker.tracks[i]);
-        else
-            label.format("%zu. %.*s", i + 1, int(styles[i].size()), styles[i].data());
+        else {
+            const auto name = wire_style_name(race_styles[i]);
+            label.format("%zu. %.*s", i % 8 + 1, int(name.size()), name.data());
+        }
         hud.overlay_text(x + 18, y + 62 + float(i % 8) * 30, label.view(), 14, {.94f, .91f, .86f, 1});
     }
     hud.overlay_text(x + 18, y + 337, count > 8 ? "9. Next page   0. Cancel" : "0. Cancel", 12, {.64f, .66f, .7f, 1});
