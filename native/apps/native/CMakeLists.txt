@@ -615,7 +615,18 @@ if(BUILD_TESTING)
             WORKING_DIRECTORY "${BUNNYHOP_ROOT}" FIXTURES_SETUP viewmodel_feel_oracle TIMEOUT 120)
         add_test(NAME native_viewmodel_feel COMMAND bunnyhop-native-viewmodel-feel-tests "${VIEWMODEL_FEEL_ORACLE}")
         set_tests_properties(native_viewmodel_feel PROPERTIES FIXTURES_REQUIRED viewmodel_feel_oracle)
+        set(VIEWMODEL_POSE_ORACLE "${CMAKE_CURRENT_BINARY_DIR}/viewmodel-pose-oracle.json")
+        add_test(NAME native_viewmodel_pose_oracle
+            COMMAND "${BUN_EXECUTABLE}" apps/native/src/viewmodel-pose-oracle.ts "${VIEWMODEL_POSE_ORACLE}")
+        set_tests_properties(native_viewmodel_pose_oracle PROPERTIES
+            WORKING_DIRECTORY "${BUNNYHOP_ROOT}" FIXTURES_SETUP viewmodel_pose_oracle TIMEOUT 120)
+        add_test(NAME native_viewmodel_pose COMMAND bunnyhop-native-viewmodel-pose-tests "${VIEWMODEL_POSE_ORACLE}")
+        set_tests_properties(native_viewmodel_pose PROPERTIES FIXTURES_REQUIRED viewmodel_pose_oracle)
     endif()
+    add_executable(bunnyhop-native-viewmodel-pose-tests src/viewmodel_pose_tests.cpp)
+    target_include_directories(bunnyhop-native-viewmodel-pose-tests PRIVATE vendor)
+    target_compile_options(bunnyhop-native-viewmodel-pose-tests PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
     add_executable(bunnyhop-native-viewmodel-feel-tests src/viewmodel_feel_tests.cpp)
     target_include_directories(bunnyhop-native-viewmodel-feel-tests PRIVATE vendor)
     target_compile_options(bunnyhop-native-viewmodel-feel-tests PRIVATE
