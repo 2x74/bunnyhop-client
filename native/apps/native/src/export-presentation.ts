@@ -7,6 +7,7 @@ import { gunById } from "../../web/src/viewmodel/guns/index";
 import { mkdir, readFile, writeFile, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { bundledMusic, exportMusic } from "./export-music";
+import { exportHudGlyphs } from "./export-hud-glyphs";
 const root = resolve(import.meta.dir, "../../..");
 const out = resolve(Bun.argv[2] ?? join(root, "target/native-assets"));
 await mkdir(join(out, "audio"), { recursive: true });
@@ -28,6 +29,7 @@ const image = r.render();
 await writeFile(join(out, "hud.rgba"), image.pixels);
 image.free();
 r.free();
+const hudGlyphs = await exportHudGlyphs(out, Resvg, font);
 const source = join(root, "apps/web/src/assets/audio");
 const manifest = JSON.parse(await readFile(join(source, "manifest.json"), "utf8"));
 const nativeAudio = join(root, "apps/native/assets/audio");
@@ -123,7 +125,8 @@ manifest.music = bundledMusic(manifest.music);
 exportMusic(out, manifest.music);
 await writeFile(join(out, "audio.json"), JSON.stringify(manifest));
 console.log(
-  `Native presentation assets: 95 font glyphs, ${tasks.length} sound variants, ${manifest.music.length} bundled OST tracks`,
+  `Native presentation assets: 95 font glyphs, ${hudGlyphs} marks and flags, ${tasks.length} sound variants, ` +
+    `${manifest.music.length} bundled OST tracks`,
 );
 
 // Keep lesson geometry, BSP identity and original deterministic demonstration recordings together.

@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import {
+  hostFlag,
   hostMarks,
   hostNameLook,
   hostScoreboard,
@@ -80,4 +81,20 @@ test("the Tab board is the room screen's rows; a running time ticking alone isn'
   expect(posted.length).toBe(1);
   feed.update(hostScoreboard({ ...view, metas: {} } as RoomView, { now: 2500, server: 2500, ping: 25, at: 0 }));
   expect(posted.length).toBe(2);
+});
+
+test("pride flags reach the host as their own codes; unknown codes are no flag", () => {
+  expect(hostFlag("PRIDE-TRANS")).toBe("PRIDE-TRANS");
+  expect(hostFlag("PRIDE-PROGRESS")).toBe("PRIDE-PROGRESS");
+  expect(hostFlag("US")).toBe("us");
+  for (const code of ["PRIDE-XX", "pride-trans", "PRIDE-", "USA", "", null, 7]) expect(hostFlag(code)).toBeNull();
+});
+
+test("the peak mark after a name is the hardest tier held, and a pick of any peak wears it", () => {
+  const ids = (marks: Record<string, unknown>) => hostMarks(readMarks(marks)).map((mark) => mark.id);
+  // An account merge can bring two: only the highest shows.
+  expect(ids({ special: ["peak-8", "peak-10"] })).toEqual(["peak-10"]);
+  expect(hostMarks(readMarks({ special: ["peak-9"] }))).toEqual([{ id: "peak-9", name: "Cleared a T9 map" }]);
+  expect(ids({ special: ["peak-9"], nameBadges: ["peak-8"] })).toEqual(["peak-9"]);
+  expect(ids({ special: ["peak-11"] })).toEqual([]);
 });

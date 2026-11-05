@@ -324,7 +324,7 @@ void hud_parity_smoke(Gl &gl, NativeHud &hud, int width, int height, Save save) 
             {{"head",
               {{"room", "Bunnyhop community"},
                {"map", "bhop_lol_tutorial"},
-               {"tier", 7},
+               {"tier", 10},
                {"timeLeft", "12:34 left"},
                {"max", 16}}},
              {"rows",
@@ -348,7 +348,7 @@ void hud_parity_smoke(Gl &gl, NativeHud &hud, int width, int height, Save save) 
                         {"special", {"mapper"}}},
                        {{"slot", 1},
                         {"name", "Runner"},
-                        {"country", "GB"},
+                        {"country", "PRIDE-PROGRESS"},
                         {"style", "scroll"},
                         {"status", "00:20.170"},
                         {"statusKind", "running"},
@@ -367,6 +367,7 @@ void hud_parity_smoke(Gl &gl, NativeHud &hud, int width, int height, Save save) 
     );
     const Json host_marks = Json::array(
             {{{"id", "contributor"}, {"name", "Contributor"}},
+             {{"id", "peak-9"}, {"name", "Cleared a T9 map"}},
              {{"id", "verified"}, {"name", "Verified"}},
              {{"id", "supporter"}, {"name", "Supporter"}},
              {{"id", "gifter-prism"},
@@ -393,7 +394,7 @@ void hud_parity_smoke(Gl &gl, NativeHud &hud, int width, int height, Save save) 
                  {"nativeBadge", "Verified Supporter Mapper"}},
             Json{{"nativeNameColor", "#6ff0f0"},
                  {"nativeNameEffect", "glow"},
-                 {"nativeCountry", "GB"},
+                 {"nativeCountry", "PRIDE-TRANS"},
                  {"nativeBadge", "Booster"}},
             Json{{"nativeNameColor", "#a8b8ff"}, {"nativeNameEffect", "sparkle"}, {"nativeCountry", "JP"}}
     };

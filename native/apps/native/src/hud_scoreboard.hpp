@@ -116,7 +116,7 @@ public:
             row.look = host_name_appearance(
                     player.value("look", nlohmann::json()), player.value("marks", nlohmann::json()), row.look
             );
-        row.country = json_text(player, "country", 2);
+        row.country = flag_code(json_text(player, "country", flag_code_max_bytes));
         row.host = json_flag(player, "host");
         const auto rank = player.find("rank");
         if (rank != player.end() && rank->is_object()) {
