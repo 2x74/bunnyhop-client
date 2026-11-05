@@ -145,9 +145,15 @@ void draw_spectating(NativeHud &hud, int width, int height, const RoomShot &shot
     if (shot.spectating == "free") view.toggle_free(controls);
     const auto target = room.spectator_target.value_or(256);
     const bool shown = room.spectated(at).has_value();
-    draw_spectator_bar(
-            hud, width, height, 100, {true, !shown, room.player_name(target), view.hint("KeyR", default_binds())}
-    );
+    const SpectatorBar bar{
+            true,
+            !shown,
+            room.player_name(target),
+            view.hint("KeyR", default_binds()),
+            watched_name_look(room.appearance(target), target),
+            at
+    };
+    draw_spectator_bar(hud, width, height, 100, bar);
     if (!shot.spectate_menu) return;
     SpectatePicker picker;
     picker.show(room.display(), room.spectator_target);

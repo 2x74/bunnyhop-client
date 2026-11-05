@@ -3951,7 +3951,7 @@ int run(const native::Options &opt) {
             hud.extras.flight_line.assign(
                     practice.infinite_flight.flying() ? native::InfiniteFlight::hud_line : std::string_view()
             );
-            const auto spectator_bar = free_cameras.hud(
+            auto spectator_bar = free_cameras.hud(
                     hud.extras,
                     spectator.has_value(),
                     spectated_actor.has_value(),
@@ -3960,6 +3960,8 @@ int run(const native::Options &opt) {
                                     : std::string_view(),
                     input_timeline.binds()
             );
+            if (spectator) spectator_bar.look = native::watched_name_look(room.appearance(*spectator), *spectator);
+            spectator_bar.seconds = steady_seconds;
             // The crosshair is sized in CSS pixels, like the website's: the display's scale, not the HUD's.
             hud.set_display_scale(SDL_GetWindowDisplayScale(window.get()));
             const auto area = viewer.hud_area(

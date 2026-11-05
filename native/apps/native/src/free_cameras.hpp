@@ -76,7 +76,12 @@ struct FreeCameras {
         };
         extras.freecam_line.assign(freecam.active() ? freecam.hud_line(first("freecam")) : std::string_view());
         if (!spectating) return {};
-        return {true, !shown, name, spectator.hint(first("restart"), binds)};
+        SpectatorBar bar;
+        bar.shown = true;
+        bar.waiting = !shown;
+        bar.name = name;
+        bar.hint = spectator.hint(first("restart"), binds);
+        return bar;
     }
 
     // After the frame placed its own view in |eye| and |view|: a flying camera takes over (returns true). The spectator
