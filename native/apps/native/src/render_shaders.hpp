@@ -21,6 +21,9 @@ struct Actor {
     // A race ghost that cut this frame (ghost_playback.hpp GhostEventCursor::cut): its bunny first runs through its
     // path's last moments (Renderer::preroll_ghosts) instead of carrying on or snapping.
     bool preroll = false;
+    // Posed once per simulation tick from `frame` (the replay viewer): shown this far (0-1) from the tick before to it,
+    // root included (actor_ticks.hpp). Unset: shown as posed, at frame.position.
+    std::optional<float> tickBlend;
     // Nothing in the right hand (an avatar gesture): no knife or gun drawn.
     bool emptyHand = false;
     // The strafe key (command units, +-450): the bunny banks into strafes. The Source water level (2+ swims).

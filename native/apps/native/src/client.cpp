@@ -3813,7 +3813,14 @@ int run(const native::Options &opt) {
                 renderer->set_viewmodel_visible(false);
                 BhWeaponReport held{};
                 bh_weapon_report(core.get(), &held);
-                auto self = native_render::own_actor(state, input.pitch, input.yaw(), held.active);
+                // A replay's bunny poses on each tick's own state and blends between ticks (actor_ticks.hpp).
+                auto self = native_render::own_actor(
+                        viewer.active ? native_render::at_tick(state, curr) : state,
+                        input.pitch,
+                        input.yaw(),
+                        held.active
+                );
+                if (viewer.active) self.tickBlend = blend;
                 BhCmd last_command{};
                 if (bh_last_command(core.get(), &last_command)) self.sidemove = last_command.side;
                 self.outfit = viewer.active ? viewer.runner_outfit : outfit;

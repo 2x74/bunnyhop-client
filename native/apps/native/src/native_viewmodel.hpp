@@ -520,7 +520,8 @@ class NativeViewmodel {
         pose.insert(pose.end(), hold.skin.begin(), hold.skin.end());
         // Where the drawn gun's muzzle is: the feet yaw and the bank, as draw_posed_actor places the model.
         BhTransform t{};
-        std::copy(actor.frame.position, actor.frame.position + 3, t.origin);
+        const auto origin = actor_origin(actor);
+        std::copy(origin.begin(), origin.end(), t.origin);
         t.angles[1] = feetYaw;
         t.angles[2] = float(actor_bank(actor.id));
         const auto &m = hold.muzzle;
@@ -1109,7 +1110,15 @@ public:
 
     double actor_bank(const std::string &id) const {
         const auto found = actorAnimationStates.find(id);
-        return found == actorAnimationStates.end() ? 0 : found->second->bank;
+        return found == actorAnimationStates.end() ? 0 : found->second->shown.bank;
+    }
+
+    // Where the bunny's feet origin is drawn: between its last two ticks when it's tick-presented, else its frame's.
+    std::array<float, 3> actor_origin(const native_render::Actor &actor) const {
+        const auto &position = actor.frame.position;
+        const auto found = actor.tickBlend ? actorAnimationStates.find(actor.id) : actorAnimationStates.end();
+        if (found == actorAnimationStates.end()) return {position[0], position[1], position[2]};
+        return found->second->shown.root;
     }
 
     // The ground under a point for the bunny's planted feet (web legs.ts probeFromTrace): a line straight down through
@@ -1275,7 +1284,8 @@ public:
                 state.set_seed(actor_seed(actor, l));
                 state.motion = motionScale;
                 state.pose(input, seconds, pulses.snapped, pulses.swing, pose, acting);
-                actorYaw = float(state.feetYaw);
+                if (actor.tickBlend && !acting) state.present(*actor.tickBlend, pose);
+                actorYaw = float(state.shown.feet_yaw);
             }
             actor_actions(actor, pulses, l, seconds, actorYaw, acting);
         }
@@ -1293,9 +1303,9 @@ public:
             float spin = 0
     ) {
         const auto &l = look(actor.outfit, actor.loadout);
-        const auto &frame = actor.frame;
         BhTransform t{};
-        std::copy(frame.position, frame.position + 3, t.origin);
+        const auto origin = actor_origin(actor);
+        std::copy(origin.begin(), origin.end(), t.origin);
         t.angles[1] = actorYaw + spin;
         t.angles[2] = float(actor_bank(actor.id));
         auto model = actor_model(t);
@@ -1317,20 +1327,18 @@ public:
         const auto &tail = actorActions[actor.id].ponytail;
         const float ponytail[4] = {float(tail.pitch), float(tail.side), l.hairLength, 0};
         gl.Uniform4fv(actorProgram.ponytail, 1, ponytail);
-        world_body_uniforms(actorProgram, frame.position);
+        world_body_uniforms(actorProgram, origin.data());
         if (source != native_render::GhostSource::none) ghost_uniforms(actorProgram, actor, source);
         const auto visibleParts = parts_for(actor, l);
         gl.Enable(GL_DEPTH_TEST);
         gl.Disable(GL_CULL_FACE);
         gl.DepthFunc(GL_LEQUAL);
         if (showGlow && actor.playerGlow && actor.playerGlow->enabled && actor.opacity >= .999f) {
-            const float distance = std::hypot(
-                    std::hypot(eye[0] - frame.position[0], eye[1] - frame.position[1]), eye[2] - frame.position[2]
-            );
+            const float distance = std::hypot(std::hypot(eye[0] - origin[0], eye[1] - origin[1]), eye[2] - origin[2]);
             gl.Uniform2f(actorProgram.glowNearFade, 14, 60);
             gl.Uniform1f(actorProgram.glowDistance, native_render::glow_distance(distance));
-            const float top[3] = {frame.position[0], frame.position[1], frame.position[2] + 64};
-            const auto feet = native_render::to_web_space(frame.position), head = native_render::to_web_space(top);
+            const float top[3] = {origin[0], origin[1], origin[2] + 64};
+            const auto feet = native_render::to_web_space(origin.data()), head = native_render::to_web_space(top);
             gl.Uniform3fv(actorProgram.glowAxisA, 1, feet.data());
             gl.Uniform3fv(actorProgram.glowAxisB, 1, head.data());
             draw_glow(visibleParts, actorProgram, actor.playerGlow->aura && distance < 650, 1);
