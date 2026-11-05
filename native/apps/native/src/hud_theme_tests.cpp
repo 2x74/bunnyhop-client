@@ -427,7 +427,8 @@ void test_scoreboard_tiers() {
 }
 
 void test_scoreboard_and_names() {
-    native::HudScoreboard board;
+    const auto board_owner = std::make_unique<native::HudScoreboard>();
+    auto &board = *board_owner;
     board.contract(
             {{"head", {{"room", "Test room"}, {"map", "bhop_test"}, {"tier", 8}, {"max", 16}}},
              {"rows",
@@ -508,7 +509,8 @@ void test_merged_menu_contracts() {
     assert(decoration.appearance.badges[1].glyph == native::NameMark::verified);
     assert(decoration.appearance.badges[2].glyph == native::NameMark::gift);
     assert(decoration.appearance.effect == native::NameEffect::paint);
-    native::RoomState room;
+    const auto room_owner = std::make_unique<native::RoomState>();
+    auto &room = *room_owner;
     room.display_contract(
             {{"type", "scoreboard"},
              {"head", {{"room", "Decorated"}, {"map", "bhop_test"}, {"max", 16}}},
@@ -595,7 +597,8 @@ void test_tag_sight_fades() {
 }
 
 void test_room_tag_detail() {
-    native::RoomState room;
+    const auto room_owner = std::make_unique<native::RoomState>();
+    auto &room = *room_owner;
     room.event(
             {{"generation", 1},
              {"id", "easy"},
@@ -670,7 +673,8 @@ void test_room_wire_styles() {
 void test_tags_and_race_picker() {
     test_room_tag_detail();
     test_room_wire_styles();
-    native::RoomState room;
+    const auto room_owner = std::make_unique<native::RoomState>();
+    auto &room = *room_owner;
     std::array<native_render::Actor, 1> actors;
     actors[0].id = "1";
     actors[0].name = "Bunny";
@@ -723,7 +727,8 @@ void test_tags_and_race_picker() {
             }
     );
     assert(visible.has("16.731s | -0.020s"));
-    native::HudScoreboard board;
+    const auto board_owner = std::make_unique<native::HudScoreboard>();
+    auto &board = *board_owner;
     board.count = 1;
     board.rows[0].name = "Opponent";
     board.rows[0].slot = 3;
@@ -757,7 +762,8 @@ void test_tags_and_race_picker() {
 }
 
 void test_ghost_progress() {
-    native::HudExtras extras;
+    const auto extras_owner = std::make_unique<native::HudExtras>();
+    auto &extras = *extras_owner;
     extras.ghost(
             {{"map", "test"},
              {"style", "autohop"},
@@ -802,7 +808,8 @@ void test_ghost_progress() {
 }
 
 void test_results_toasts_and_room_widgets() {
-    native::HudResult result;
+    const auto result_owner = std::make_unique<native::HudResult>();
+    auto &result = *result_owner;
     result.finish(4, 12.345, 1, 13, true);
     assert(result.delta && *result.delta < 0 && result.stamp == native::ResultStamp::pending);
     assert(result.status_line.view() == "Submitting…");
@@ -861,7 +868,8 @@ void test_results_toasts_and_room_widgets() {
     DrawProbe toast_probe;
     native::draw_toasts(toast_probe, 1280, 720, 100, toasts, 2);
     assert(toast_probe.texts == 5);
-    native::RoomState room;
+    const auto room_owner = std::make_unique<native::RoomState>();
+    auto &room = *room_owner;
     room.vote = {
             {"options", {{{"map", "bhop_a"}}, {{"extend", true}, {"minutes", 10}}}},
             {"counts", native::Json::array({3u, 1u})},
@@ -893,7 +901,8 @@ void test_movement_widgets_and_restart() {
     movement.offset.assign("Offset -1");
     movement.first_jump.assign("FJT 0 ticks");
     movement.long_jump.assign("LJ 275.50");
-    native::HudExtras extras;
+    const auto extras_owner = std::make_unique<native::HudExtras>();
+    auto &extras = *extras_owner;
     extras.contract({{"pb", 12.345}, {"spectators", {"Watcher"}}, {"ghostButtons", native::left}});
     BhRunState run{};
     run.track = 1;
