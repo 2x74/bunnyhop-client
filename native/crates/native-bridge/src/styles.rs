@@ -1,6 +1,6 @@
 //! Exact command/style transform from apps/web/src/styles.ts and autostrafe.ts.
 use super::{BhCmd, BhSettings, BhState};
-pub const IDS: [&str; 11] = [
+pub const IDS: [&str; 12] = [
     "autohop",
     "legit",
     "scroll",
@@ -12,6 +12,7 @@ pub const IDS: [&str; 11] = [
     "segmented",
     "infinite",
     "backwards",
+    "adonly",
 ];
 const JUMP: u32 = 1 << 1;
 const FORWARD: u32 = 1 << 3;
@@ -116,11 +117,29 @@ pub fn faces_backwards(yaw: f32, vx: f32, vy: f32) -> Option<bool> {
     Some(dot <= 0.0 && dot * dot >= BW_DOT_SQ * speed_sq)
 }
 
+/// run.rs strafe counting (styles.ts StrafeKeys): "ad" counts A/D direction changes, "ws" W/S changes, "w" W
+/// presses, "press" every fresh A or D press (A/D-Only, bhoptimer strafe_count_a / strafe_count_d).
+pub const STRAFE_KEYS_AD: u32 = 0;
+pub const STRAFE_KEYS_WS: u32 = 1;
+pub const STRAFE_KEYS_W: u32 = 2;
+pub const STRAFE_KEYS_PRESS: u32 = 3;
+
 pub fn strafe_keys(id: &str) -> u32 {
     match id {
-        "wonly" => 2,
-        "sideways" => 1,
-        _ => 0,
+        "wonly" => STRAFE_KEYS_W,
+        "sideways" => STRAFE_KEYS_WS,
+        "adonly" => STRAFE_KEYS_PRESS,
+        _ => STRAFE_KEYS_AD,
+    }
+}
+
+/// styles.ts StrafeKeys as the replay header names them.
+pub fn strafe_keys_name(keys: u32) -> &'static str {
+    match keys {
+        STRAFE_KEYS_WS => "ws",
+        STRAFE_KEYS_W => "w",
+        STRAFE_KEYS_PRESS => "press",
+        _ => "ad",
     }
 }
 #[derive(Clone)]
@@ -133,6 +152,8 @@ pub struct Filter {
     still: u32,
     ground_ticks: u32,
     bw_ground: u32,
+    /// A/D-Only: the run's side key, -1 (A), 0 (none yet) or +1 (D).
+    side_lock: i32,
 }
 impl Filter {
     pub fn new(id: &str, physics: u32) -> Self {
@@ -146,13 +167,15 @@ impl Filter {
             ground_ticks: 2,
             // A spawn is not a landing.
             bw_ground: BW_GROUND_GRACE + 1,
+            side_lock: 0,
         }
     }
     pub fn reset(&mut self, physics: u32) {
         *self = Self::new(&self.id, physics);
     }
     /// `edge_landing`: physics v22's landing that the next command can still take back (`State::edge_landing`).
-    pub fn apply(&mut self, mut c: BhCmd, s: BhState, edge_landing: bool) -> BhCmd {
+    /// `running`: the run is under way before the tick (timer.ts RunTimer.started); only A/D-Only reads it.
+    pub fn apply(&mut self, mut c: BhCmd, s: BhState, edge_landing: bool, running: bool) -> BhCmd {
         if s.on_ladder != 0 {
             self.from_ladder = true;
         } else if s.grounded != 0 {
@@ -234,7 +257,11 @@ impl Filter {
         }
         // Without a jump the core takes an edge landing back before it moves, so the key rules see an air tick.
         let grounded = s.grounded != 0 && !(edge_landing && c.buttons & JUMP == 0);
-        if grounded || s.on_ladder != 0 || self.from_ladder {
+        let on_ladder = s.on_ladder != 0 || self.from_ladder;
+        if self.id == "adonly" {
+            return self.ad_only(c, grounded, on_ladder, running);
+        }
+        if grounded || on_ladder {
             return c;
         }
         if ["wonly", "sideways"].contains(&self.id.as_str()) {
@@ -274,6 +301,52 @@ impl Filter {
         }
         c
     }
+    /// styles.ts StyleFilter.adOnly and filterCommand's lock. The lock clears while the run isn't under way; the first
+    /// air sidemove sign of a run picks the key, and the command that locks keeps its sidemove, so the verifier
+    /// re-filtering the recorded command locks on the same tick. W, S and the other key are then blocked in the air.
+    fn ad_only(&mut self, mut c: BhCmd, grounded: bool, on_ladder: bool, running: bool) -> BhCmd {
+        if !running {
+            self.side_lock = 0;
+        } else if self.side_lock == 0 && !grounded && !on_ladder {
+            self.side_lock = if c.side < 0.0 {
+                -1
+            } else if c.side > 0.0 {
+                1
+            } else {
+                0
+            };
+        }
+        if grounded || on_ladder {
+            return c;
+        }
+        if c.buttons & FORWARD != 0 || c.forward > 0.0 {
+            c.forward = 0.0;
+            c.buttons &= !FORWARD;
+        }
+        if c.buttons & BACK != 0 || c.forward < 0.0 {
+            c.forward = 0.0;
+            c.buttons &= !BACK;
+        }
+        // Unlike W-Only's A/D block, the other key's bit alone keeps the locked key's sidemove (null binds).
+        if self.side_lock > 0 {
+            if c.side < 0.0 {
+                c.side = 0.0;
+            }
+            c.buttons &= !LEFT;
+        }
+        if self.side_lock < 0 {
+            if c.side > 0.0 {
+                c.side = 0.0;
+            }
+            c.buttons &= !RIGHT;
+        }
+        c
+    }
+
+    pub fn side_lock(&self) -> i32 {
+        self.side_lock
+    }
+
     /// styles.ts StyleFilter.backwards: in the air and on the first ground ticks after a landing, a view that doesn't
     /// face backwards loses its movement keys. Ladders, the air after one and slow speeds are exempt.
     fn backwards(&mut self, mut c: BhCmd, s: &BhState) -> BhCmd {
@@ -338,7 +411,8 @@ mod tests {
                     ..BhState::default()
                 };
                 let edge_landing = row["state"]["edgeLanding"].as_bool().unwrap();
-                let got = filter.apply(command(&row["cmd"]), state, edge_landing);
+                let running = row["running"].as_bool().unwrap_or(false);
+                let got = filter.apply(command(&row["cmd"]), state, edge_landing, running);
                 let mut expected = command(&row["expected"]);
                 // The pinned web filter predates v29 IN_TURN_FAST. All other fields remain its exact oracle.
                 if style == "scroll" {

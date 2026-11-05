@@ -12,6 +12,8 @@ const cases=[];for(const style of STYLE_DEFS)for(const physics of Array.from({le
  const filter=new StyleFilter(styleDef(style.id),physics),rows=[];
  for(let i=0;i<320;i++){const axis=[-450,-300,-100,0,100,300,450];const cmd={forward:axis[rnd()%axis.length],side:axis[rnd()%axis.length],yaw:Math.fround((rnd()%100000-50000)/31),pitch:Math.fround((rnd()%1000-500)/10),buttons:rnd()&0x1fffff};
  const velocity=[velocityAxis(),velocityAxis(),velocityAxis()];
- const state={grounded:i%17<5,onLadder:i%41>=35,edgeLanding:i%17<2,velocity};rows.push({cmd,state,expected:filter.apply(cmd,state)});}
+ // running toggles off for a stretch now and then, so A/D-Only's lock is both set and cleared.
+ const running=i%29>=4;
+ const state={grounded:i%17<5,onLadder:i%41>=35,edgeLanding:i%17<2,velocity};rows.push({cmd,state,running,expected:filter.apply(cmd,state,running)});}
  cases.push({style:style.id,physics,rows});
 }console.log(JSON.stringify(cases));

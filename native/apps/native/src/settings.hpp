@@ -30,7 +30,8 @@ inline const std::set<std::string> styles = {
         "segmented",
         "autostrafe",
         "infinite",
-        "backwards"
+        "backwards",
+        "adonly"
 };
 
 // EZ Scroll ("legit") and Legit Scroll ("scroll"): every hop is a timed press, so

@@ -48,6 +48,8 @@ mod run_timing_tests;
 mod styles;
 #[cfg(test)]
 mod backwards_tests;
+#[cfg(test)]
+mod adonly_tests;
 pub use assets::{BhAttackReport, BhFloorWeapon, BhWeaponReport};
 pub use assets::{BhMaterialExtra, BhPropGroup, BhSkyInfo};
 pub use look::{BhLookSample, BhLookSampleV2};
@@ -1168,7 +1170,7 @@ pub unsafe extern "C" fn bh_run_configure(
         call(ctx, |c| {
             let mut options = input(options)?;
             if ![1, 2, 3, 4].contains(&options.rules)
-                || options.strafe_keys > 2
+                || options.strafe_keys > styles::STRAFE_KEYS_PRESS
                 || !options.prespeed_cap.is_finite()
                 || options.prespeed_cap < 0.0
                 || !options.start_reentry_cap.is_finite()
@@ -1651,7 +1653,9 @@ impl Map {
         }
         let cmd = if filter {
             let edge_landing = self.game.state.edge_landing.is_some();
-            self.filter.apply(cmd, BhState::from(&self.game), edge_landing)
+            // timer.ts RunTimer.started before the tick: running, or a rules-2 first tick still in the zone.
+            let running = self.timer.as_ref().is_some_and(|t| t.state.status == 1 || t.state.pending_start != 0);
+            self.filter.apply(cmd, BhState::from(&self.game), edge_landing, running)
         } else {
             cmd
         };
