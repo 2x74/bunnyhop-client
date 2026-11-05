@@ -970,6 +970,7 @@ int run(const native::Options &opt) {
         auto next_renderer = map_preparation.renderer ? std::move(map_preparation.renderer)
                                                       : std::make_unique<native::Renderer>(gl, next.core.get(), assets);
         next_renderer->set_map_identity(id, detail.is_object() ? detail.value("sha256", std::string()) : std::string());
+        next_renderer->load_map_volumes(data_location::from_utf8(path));
         game.install(std::move(next.core), std::move(next_renderer), practice, audio);
         map_audio.start(core.get(), data_location::from_utf8(path), data_location::from_utf8(content));
         // The pause screen shows this map itself, never the home tour.

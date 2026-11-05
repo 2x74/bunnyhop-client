@@ -866,6 +866,27 @@ if(BUILD_TESTING)
     endif()
 endif()
 
+# The water and ladders ghosts and other players swim and climb from: a synthetic BSP, then the website's own code on
+# the BSPs in native/maps (skipped without any).
+if(BUILD_TESTING)
+    add_executable(bunnyhop-native-map-volumes-tests src/map_volumes_tests.cpp)
+    target_include_directories(bunnyhop-native-map-volumes-tests PRIVATE vendor src)
+    target_compile_options(bunnyhop-native-map-volumes-tests PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
+    add_test(NAME native_map_volumes COMMAND bunnyhop-native-map-volumes-tests)
+    find_program(MAP_VOLUMES_BUN bun)
+    if(MAP_VOLUMES_BUN)
+        set(MAP_VOLUMES_ORACLE "${CMAKE_CURRENT_BINARY_DIR}/map-volumes-oracle.json")
+        add_test(NAME native_map_volumes_oracle COMMAND "${MAP_VOLUMES_BUN}" apps/native/src/map-volumes-oracle.ts
+            "${BUNNYHOP_ROOT}/maps" "${MAP_VOLUMES_ORACLE}")
+        set_tests_properties(native_map_volumes_oracle PROPERTIES
+            WORKING_DIRECTORY "${BUNNYHOP_ROOT}" FIXTURES_SETUP map_volumes_oracle TIMEOUT 120)
+        add_test(NAME native_map_volumes_web COMMAND bunnyhop-native-map-volumes-tests "${MAP_VOLUMES_ORACLE}")
+        set_tests_properties(native_map_volumes_web PROPERTIES
+            FIXTURES_REQUIRED map_volumes_oracle SKIP_RETURN_CODE 77 TIMEOUT 120)
+    endif()
+endif()
+
 # A replay seek pre-rolls the cameras and the bunny from the replay's own frames before the cut.
 if(BUILD_TESTING)
     add_executable(bunnyhop-native-replay-preroll-tests src/replay_preroll_tests.cpp)
