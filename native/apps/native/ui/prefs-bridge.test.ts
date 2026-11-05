@@ -162,9 +162,11 @@ test("website settings the host adds later map by name, with the website's value
   }
   const keys = REQUESTED_KEYS.map((entry) => entry.key);
   expect(new Set(keys).size).toBe(keys.length);
+  // Objects the host adds whole, kept beside the typed settings (bridge.ts readHostSettings).
+  const objects = ["hudLayoutWeb", "mapLooks"];
   for (const mapping of MAPPINGS)
     for (const key of mapping.keys)
-      expect(key in state.settings || keys.includes(key) || key === "hudLayoutWeb").toBe(true);
+      expect([key, key in state.settings || keys.includes(key) || objects.includes(key)]).toEqual([key, true]);
   state.settingsKeys = [...Object.keys(state.settings), "hudKeysOpacity"];
   state.extraSettings = { hudKeysOpacity: 0.6 };
   const prefs = clone(DEFAULT_PREFS);

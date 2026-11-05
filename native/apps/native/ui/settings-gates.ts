@@ -369,9 +369,17 @@ export const NATIVE_GATES: Readonly<Record<string, Gate>> = {
   "paint/Keys/Change keys": menuOnly,
 };
 
+/** Rows whose label carries a number that changes ("Own brightness or Fullbright on 3 maps, this one too"). */
+const LABEL_PATTERNS: readonly [RegExp, Gate][] = [
+  [/^graphics\/Colour & visibility\/Own brightness or Fullbright on \d+ maps?(, this one too)?$/, needs("mapLooks")],
+];
+
 /** The gate of a row, or null when the table doesn't place it. */
 export function gateFor(section: string, group: string, label: string): Gate | null {
-  return ROWS[`${section}/${group}/${label}`] ?? ROWS[`${section}/*/${label}`] ?? ROWS[`${section}/${group}/*`] ?? null;
+  const listed = ROWS[`${section}/${group}/${label}`] ?? ROWS[`${section}/*/${label}`] ?? ROWS[`${section}/${group}/*`];
+  if (listed) return listed;
+  const key = `${section}/${group}/${label}`;
+  return LABEL_PATTERNS.find(([pattern]) => pattern.test(key))?.[1] ?? null;
 }
 
 /** Every listed website row and its gate (for the coverage test). */

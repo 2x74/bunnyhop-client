@@ -321,6 +321,107 @@ void test_layouts_and_options() {
     }
 }
 
+// Pride flags draw from the glyph sheet, and an unknown code draws no flag and leaves no gap; a pride code is never
+// cut to two letters (that would be Puerto Rico's flag).
+void test_pride_flags() {
+    const unsigned trans = native::flag_glyph("PRIDE-TRANS");
+    assert(trans && trans == native::sheet_glyph("PRIDE-TRANS") && trans != native::flag_glyph("PR"));
+    assert(native::flag_glyph("PRIDE-PROGRESS") != trans);
+    for (const auto code : {"PRIDE-XX", "PRIDE-", "pride-trans", "PRIDE-TRANS2", "peak-9"})
+        assert(!native::flag_glyph(code));
+    assert(native::flag_code("PRIDE-TRANS") == "PRIDE-TRANS" && native::flag_code("PRIDE-XX").empty());
+    const auto board = std::make_unique<native::HudScoreboard>();
+    board->contract(
+            {{"head", {{"room", "Flags"}, {"map", "bhop_test"}, {"tier", 2}, {"max", 8}}},
+             {"rows",
+              native::Json::array(
+                      {{{"slot", 1}, {"name", "Proud"}, {"country", "PRIDE-TRANS"}},
+                       {{"slot", 2}, {"name", "Newer"}, {"country", "PRIDE-XX"}},
+                       {{"slot", 3}, {"name", "Country"}, {"country", "us"}}}
+              )}}
+    );
+    std::set<std::string> flags;
+    for (size_t i = 0; i < board->count; ++i)
+        flags.insert(board->rows[i].country);
+    assert(flags == std::set<std::string>({"PRIDE-TRANS", "", "us"}));
+    DrawProbe probe;
+    native::draw_scoreboard(probe, 1280, 720, 100, *board, 0, 0);
+    assert(probe.flags == 3);
+    const auto line = native::chat_decoration({{"nativeCountry", "PRIDE-NONBINARY"}});
+    assert(line.country == "PRIDE-NONBINARY");
+    assert(native::chat_decoration({{"country", "PRIDE-TRANS"}}).country == "PRIDE-TRANS");
+    assert(native::chat_decoration({{"nativeCountry", "PRIDE-XX"}}).country.empty());
+}
+
+// The peak mark after a name is drawn from its own picture; an unknown peak keeps the plain badge.
+void test_peak_marks() {
+    const auto look = native::host_name_appearance(
+            nullptr,
+            native::Json::array(
+                    {{{"id", "verified"}, {"name", "Verified"}},
+                     {{"id", "peak-10"}, {"name", "Cleared a T10 map"}},
+                     {{"id", "peak-12"}, {"name", "Cleared a T12 map"}}}
+            )
+    );
+    assert(look.badge_count == 3);
+    assert(look.badges[0].glyph == native::NameMark::verified && !look.badges[0].sheet);
+    assert(look.badges[1].sheet == native::sheet_glyph("peak-10") && look.badges[1].sheet);
+    assert(look.badges[2].glyph == native::NameMark::badge && !look.badges[2].sheet);
+    assert(native::name_badge_color(look.badges[1], 0) == native::NameColor({1, 1, 1, 1}));
+}
+
+// hud-glyphs.json as the build writes it; anything this build doesn't place, or of the wrong size, is skipped.
+void test_glyph_sheet() {
+    const std::string cell(native::sheet_glyph_bytes, '\x7f');
+    const auto encoded = native::base64(cell);
+    const auto glyphs = native::read_glyph_sheet(
+            {{"cell", 32},
+             {"glyphs",
+              {{"peak-9", encoded},
+               {"PRIDE-OMNI", encoded},
+               {"PRIDE-NEW", encoded},
+               {"peak-8", native::base64("short")},
+               {"PRIDE-ACE", 7}}}}
+    );
+    assert(glyphs.size() == 2);
+    std::set<unsigned> cells;
+    for (const auto &glyph : glyphs) {
+        cells.insert(glyph.cell);
+        assert(glyph.rgba.size() == native::sheet_glyph_bytes && glyph.rgba[5] == 0x7f);
+    }
+    assert(cells == std::set<unsigned>({native::sheet_glyph("peak-9"), native::sheet_glyph("PRIDE-OMNI")}));
+    assert(native::read_glyph_sheet({{"cell", 16}, {"glyphs", {{"peak-9", encoded}}}}).empty());
+    assert(native::read_glyph_sheet("not a sheet").empty());
+    assert(native::load_glyph_sheet("missing-hud-glyphs.json").empty());
+}
+
+// The Tab board's tier tag reads T1–T10 like the website, and a tier the scale doesn't have never breaks it.
+void test_scoreboard_tiers() {
+    const auto board = std::make_unique<native::HudScoreboard>();
+    for (const auto &[raw, label] :
+         {std::pair{8, "T8"},
+          std::pair{9, "T9"},
+          std::pair{10, "T10"},
+          std::pair{11, "T10"},
+          std::pair{0, "T?"},
+          std::pair{-3, "T?"}}) {
+        board->contract(
+                {{"head", {{"room", "Tiers"}, {"map", "bhop_tomb2"}, {"tier", raw}, {"max", 8}}},
+                 {"rows", native::Json::array()}}
+        );
+        DrawProbe probe;
+        native::draw_scoreboard(probe, 1280, 720, 100, *board, 0, 0);
+        assert(probe.has(label));
+        assert(!probe.has("T7+"));
+    }
+    assert(native::tier_name(8) == "Brutal" && native::tier_name(9) == "Nightmare");
+    assert(native::tier_name(10) == "Impossible" && native::tier_name(0) == "Unrated");
+    const auto pink = native::tier_color(8), white = native::tier_color(10), unrated = native::tier_color(0);
+    assert(pink[0] == 1 && std::abs(pink[1] - 110 / 255.f) < 1e-6f && std::abs(pink[2] - 199 / 255.f) < 1e-6f);
+    assert(std::abs(white[0] - 242 / 255.f) < 1e-6f && white[2] == 1);
+    assert(native::tier_color(42) == white && unrated == native::tier_color(-1));
+}
+
 void test_scoreboard_and_names() {
     native::HudScoreboard board;
     board.contract(
@@ -358,7 +459,7 @@ void test_scoreboard_and_names() {
             NoAllocations no_allocations;
             native::draw_scoreboard(probe, size.first, size.second, 100, board, 1, 0);
         }
-        assert(probe.has("Test room") && probe.has("T7+") && probe.has("00:12.345") && probe.has("Normal"));
+        assert(probe.has("Test room") && probe.has("T8") && probe.has("00:12.345") && probe.has("Normal"));
         // Spectators are listed under the table, as on the website.
         assert(probe.has("Spectating: ") && probe.has("Spectator -> First"));
         assert(probe.flags == 1 && probe.names == 1 && probe.avatars == 1);
@@ -1109,6 +1210,10 @@ int main() {
     test_ssj_gain_filter();
     test_layouts_and_options();
     test_scoreboard_and_names();
+    test_scoreboard_tiers();
+    test_pride_flags();
+    test_peak_marks();
+    test_glyph_sheet();
     test_merged_menu_contracts();
     test_tags_and_race_picker();
     test_ghost_progress();

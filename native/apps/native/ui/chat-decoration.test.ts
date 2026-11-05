@@ -44,3 +44,9 @@ test("a supporter with no equipped badges shows no marks, as on the website", ()
   expect(decoration.nativeMarks).toEqual([]);
   expect(decoration.nativeBadge).toBe("Supporter");
 });
+
+test("chat lines carry a pride flag as its code and drop unknown ones", () => {
+  expect(nativeChatDecoration({ country: "PRIDE-NONBINARY" }).nativeCountry).toBe("PRIDE-NONBINARY");
+  expect(nativeChatDecoration({ country: "PRIDE-XX" }).nativeCountry).toBeUndefined();
+  expect(nativeChatDecoration({ country: "de" }).nativeCountry).toBe("DE");
+});

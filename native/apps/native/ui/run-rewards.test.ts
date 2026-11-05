@@ -175,3 +175,16 @@ describe("verified result forwarding", () => {
     expect(host.received.find((message) => message.status === "verified")).toMatchObject({ generation: 1, xp: 120 });
   });
 });
+
+test("the tier and map achievements of v0.0.37 reach the run's reward reel with what they unlock", () => {
+  const lines = runRewardLines(0, undefined, ["t8_clears_5", "t9_clears_3", "true_architect", "tier_10"]);
+  expect(lines).toEqual(
+    expect.arrayContaining([
+      { title: "Deep End", detail: "Finish 5 different maps of tier 8 or higher" },
+      { title: "Sleepless", detail: "Finish 3 different maps of tier 9 or higher" },
+      { title: "True Architect", detail: "Finish bhop_lol_backrooms" },
+      { title: "Flare", detail: "New background" },
+      { title: "Silver Wreath", detail: "New hat" },
+    ]),
+  );
+});

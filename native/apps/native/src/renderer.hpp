@@ -2021,7 +2021,7 @@ public:
     }
 
     void graphics_settings(const nlohmann::json &settings) {
-        chosenGraphics = native::GraphicsSettings::read(settings);
+        chosenGraphics = native::GraphicsSettings::read(settings, mapName);
         graphics = runnerView ? native::runner_view_graphics(chosenGraphics, *runnerView) : chosenGraphics;
         const bool previousRoute = ghostOptions.route, previousPath = ghostOptions.route_path;
         ghostOptions.read(settings);

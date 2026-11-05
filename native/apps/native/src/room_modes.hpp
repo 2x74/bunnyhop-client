@@ -1,6 +1,7 @@
 #pragma once
 #include <nlohmann/json.hpp>
 #include "hud_scoreboard.hpp"
+#include "menu_rows.hpp"
 #include "room_styles.hpp"
 #include <algorithm>
 #include <cmath>
@@ -116,6 +117,30 @@ public:
         step = count ? Step::player : Step::closed;
     }
 
+    // How many choices the current step has.
+    size_t available() const {
+        return step == Step::player ? count : step == Step::track ? track_count : race_styles.size();
+    }
+
+    // The panel and its rows: this page's choices, the next page when there is one, and Cancel.
+    MenuRows rows(int width, int height, float percent) const {
+        constexpr float panel_width = 440, panel_height = 380, first_row = 56, row_height = 30;
+        constexpr float next_page_top = 305, cancel_top = 331, footer_height = 26;
+        constexpr size_t page_size = 8;
+        const HudGeometry geometry(width, height, percent);
+        MenuRows out;
+        out.width = panel_width;
+        out.height = panel_height;
+        out.left = geometry.width / 2 - panel_width / 2;
+        out.top = geometry.height / 2 - panel_height / 2;
+        const size_t shown = std::min(available(), (page + 1) * page_size) - std::min(available(), page * page_size);
+        for (size_t i = 0; i < shown; ++i)
+            out.add(unsigned(i + 1), out.top + first_row + float(i) * row_height, row_height);
+        if (available() > page_size) out.add(9, out.top + next_page_top, footer_height);
+        out.add(0, out.top + cancel_top, footer_height);
+        return out;
+    }
+
     bool key(std::string_view code, bool down, bool repeat) {
         if (step == Step::closed || !down || repeat || code.size() != 6 || !code.starts_with("Digit")) return false;
         const unsigned pick = unsigned(code.back() - '0');
@@ -123,7 +148,7 @@ public:
             step = Step::closed;
             return true;
         }
-        const size_t available = step == Step::player ? count : step == Step::track ? track_count : race_styles.size();
+        const size_t available = this->available();
         if (pick == 9 && available > 8) {
             page = (page + 1) % ((available + 7) / 8);
             return true;
@@ -151,15 +176,26 @@ public:
     }
 };
 
+// `pointer`: the cursor in HUD units while a chat line holds it out, for the row it is on.
 template <class Hud>
-void draw_race_picker(Hud &hud, int width, int height, float percent, const RacePicker &picker) {
+void draw_race_picker(
+        Hud &hud,
+        int width,
+        int height,
+        float percent,
+        const RacePicker &picker,
+        std::optional<std::array<float, 2>> pointer = std::nullopt
+) {
     using Step = RacePicker::Step;
+    constexpr float text_inset = 6;
+    constexpr NameColor cream = {.94f, .91f, .86f, 1};
+    constexpr NameColor dim = {.64f, .66f, .7f, 1};
     if (picker.step == Step::closed) return;
-    const HudGeometry geometry(width, height, percent);
-    const float x = geometry.width / 2 - 220;
-    const float y = geometry.height / 2 - 190;
+    const auto layout = picker.rows(width, height, percent);
+    const float x = layout.left, y = layout.top;
     hud.overlay_begin(width, height, percent);
-    hud.overlay_rect(x, y, 440, 380, {.025f, .027f, .04f, .96f});
+    hud.overlay_rect(x, y, layout.width, layout.height, {.025f, .027f, .04f, .96f});
+    draw_menu_hover(hud, layout, layout.hovered(pointer));
     hud.overlay_text(
             x + 18,
             y + 16,
@@ -169,22 +205,24 @@ void draw_race_picker(Hud &hud, int width, int height, float percent, const Race
             20,
             {1, .71f, .24f, 1}
     );
-    const size_t count = picker.step == Step::player  ? picker.count
-                         : picker.step == Step::track ? picker.track_count
-                                                      : race_styles.size();
     HudLabel<160> label;
-    for (size_t i = picker.page * 8; i < std::min(count, picker.page * 8 + 8); ++i) {
+    for (size_t row = 0; row < layout.count; ++row) {
+        const auto &place = layout.rows[row];
+        const size_t i = picker.page * 8 + place.digit - 1;
+        if (place.digit == 0 || place.digit == 9) {
+            hud.overlay_text(x + 18, place.top + text_inset, place.digit ? "9. Next page" : "0. Cancel", 12, dim);
+            continue;
+        }
         if (picker.step == Step::player)
-            label.format("%zu. %.*s", i % 8 + 1, int(picker.names[i].view().size()), picker.names[i].view().data());
+            label.format("%u. %.*s", place.digit, int(picker.names[i].view().size()), picker.names[i].view().data());
         else if (picker.step == Step::track)
-            label.format(picker.tracks[i] ? "%zu. Bonus %u" : "%zu. Main track", i % 8 + 1, picker.tracks[i]);
+            label.format(picker.tracks[i] ? "%u. Bonus %u" : "%u. Main track", place.digit, picker.tracks[i]);
         else {
             const auto name = wire_style_name(race_styles[i]);
-            label.format("%zu. %.*s", i % 8 + 1, int(name.size()), name.data());
+            label.format("%u. %.*s", place.digit, int(name.size()), name.data());
         }
-        hud.overlay_text(x + 18, y + 62 + float(i % 8) * 30, label.view(), 14, {.94f, .91f, .86f, 1});
+        hud.overlay_text(x + 18, place.top + text_inset, label.view(), 14, cream);
     }
-    hud.overlay_text(x + 18, y + 337, count > 8 ? "9. Next page   0. Cancel" : "0. Cancel", 12, {.64f, .66f, .7f, 1});
     hud.overlay_end(width, height);
 }
 

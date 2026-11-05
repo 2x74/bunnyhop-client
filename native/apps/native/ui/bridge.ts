@@ -1175,6 +1175,9 @@ function readHostSettings(value: unknown): void {
   const extra = { ...state.extraSettings, ...requestedPatch(input) };
   const layout = input.hudLayoutWeb;
   if (layout && typeof layout === "object" && !Array.isArray(layout)) extra.hudLayoutWeb = layout;
+  // Per-map Brightness / Fullbright (map-looks.ts cleans them when they reach prefs).
+  const looks = input.mapLooks;
+  if (looks && typeof looks === "object" && !Array.isArray(looks)) extra.mapLooks = looks;
   state.extraSettings = extra;
 }
 

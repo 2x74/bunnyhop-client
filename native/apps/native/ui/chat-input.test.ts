@@ -1,5 +1,11 @@
 import { test, expect } from "bun:test";
-import { protocolChatText, ChatSuggestionFence, cycleSpectator, resolveRaceCommand } from "./chat-input";
+import {
+  ChatStyleSwitch,
+  protocolChatText,
+  ChatSuggestionFence,
+  cycleSpectator,
+  resolveRaceCommand,
+} from "./chat-input";
 test("protocol cap respects UTF16 units without emitting partial surrogate pairs", () => {
   expect(protocolChatText("a".repeat(127) + "🐰")).toBe("a".repeat(127));
   expect(protocolChatText("a".repeat(126) + "🐰x")).toBe("a".repeat(126) + "🐰");
@@ -39,4 +45,25 @@ test("spectator cycle starts at first/last and skips self/spectators", () => {
   expect(cycleSpectator(players, 0, 2, -1)).toBe(4);
   expect(cycleSpectator(players, 0, 4, 1)).toBe(2);
   expect(cycleSpectator([{ slot: 0 }], 0, null, 1)).toBeNull();
+});
+
+test("a style command reads its own switch back, unless the host refuses it", () => {
+  const sent: string[] = [];
+  let refused = false;
+  const make = () =>
+    new ChatStyleSwitch(
+      () => "autohop",
+      (id) => {
+        sent.push(id);
+        return !refused;
+      },
+    );
+  const taken = make();
+  taken.set("lowgrav");
+  expect(taken.style()).toBe("lowgrav");
+  refused = true;
+  const locked = make();
+  locked.set("lowgrav");
+  expect(locked.style()).toBe("autohop");
+  expect(sent).toEqual(["lowgrav", "lowgrav"]);
 });

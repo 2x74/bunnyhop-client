@@ -7,6 +7,7 @@
 #endif
 #include <cassert>
 #include <cstdio>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -28,6 +29,7 @@ struct Outcome {
     bool race_handled = false;
     std::optional<unsigned> watch;
     bool checkpoint_picked = false;
+    bool look_handled = false;
     bool reached_binds = false;
 };
 
@@ -37,7 +39,9 @@ struct Menus {
     native::RacePicker race;
     native::SpectatePicker spectate;
     bool checkpoints = false;
-    native::NumberedMenus numbered{guns, triggers, race, spectate, checkpoints};
+    native::LookMenu look;
+    native::Json settings = native::default_settings();
+    native::NumberedMenus numbered{guns, triggers, race, spectate, checkpoints, look};
     native::BindTable binds;
     native::HudScoreboard board;
     std::vector<Zone> zones;
@@ -60,6 +64,7 @@ struct Menus {
         if (menu == Menu::race) race.open(board, zones);
         if (menu == Menu::spectate) assert(spectate.show(board, std::nullopt));
         if (menu == Menu::checkpoints) checkpoints = true;
+        if (menu == Menu::look && !look.open()) look.toggle("bhop_eazy", settings);
         numbered.opened(menu);
     }
 
@@ -83,12 +88,13 @@ struct Menus {
             outcome.checkpoint_picked = true;
             return outcome;
         }
+        if ((outcome.look_handled = look.key(code, true, false, settings).handled)) return outcome;
         outcome.reached_binds = !numbered.owns(code, true, vote_shown);
         return outcome;
     }
 };
 
-constexpr Menu every_menu[] = {Menu::guns, Menu::triggers, Menu::race, Menu::spectate, Menu::checkpoints};
+constexpr Menu every_menu[] = {Menu::guns, Menu::triggers, Menu::race, Menu::spectate, Menu::checkpoints, Menu::look};
 
 void test_opening_one_closes_the_others() {
     for (const Menu first : every_menu)
@@ -165,6 +171,59 @@ void test_open_menus_own_the_digits() {
     assert(!menus.numbered.any_open() && !menus.numbered.owns("Digit6", true, false));
 }
 
+// !bright's menu takes the digits over the others, and gives them up to the next menu opened.
+void test_look_menu_takes_the_digits() {
+    const auto menus = std::make_unique<Menus>();
+    menus->open(Menu::guns);
+    menus->open(Menu::look);
+    assert(menus->digit("Digit1").look_handled && !menus->guns.open);
+    assert(!menus->digit("Digit8").reached_binds);
+    menus->open(Menu::spectate);
+    assert(!menus->look.open() && menus->digit("Digit1").watch == 4u);
+}
+
+// A click on a menu a chat line opened is its row's digit; a click away from the panel closes the menu.
+void test_clicks_pick_rows() {
+    constexpr int width = 1280, height = 720;
+    constexpr float percent = 100;
+    const auto menus = std::make_unique<Menus>();
+    assert(!menus->numbered.chat_menu_open());
+    menus->open(Menu::spectate);
+    assert(menus->numbered.chat_menu_open());
+    const auto rows = menus->spectate.rows(width, height, percent);
+    const auto middle = [&](size_t row) {
+        const auto &place = rows.rows[row];
+        return std::array<float, 2>{rows.left + rows.width / 2, place.top + place.height / 2};
+    };
+    assert(menus->numbered.click(width, height, percent, middle(1)).code == "Digit2");
+    const auto close = menus->numbered.click(width, height, percent, middle(rows.count - 1));
+    assert(close.code == "Digit0");
+    const auto title = menus->numbered.click(width, height, percent, {rows.left + 20, rows.top + 4});
+    assert(!title.code && !title.outside);
+    assert(menus->numbered.click(width, height, percent, {1, 1}).outside);
+    menus->open(Menu::guns);
+    assert(!menus->numbered.chat_menu_open() && !menus->numbered.click(width, height, percent, {1, 1}).outside);
+}
+
+// Ten race styles take two pages: the picker's own "9. Next page" line takes the click.
+void test_race_pages_click() {
+    constexpr int width = 1920, height = 1080;
+    constexpr float percent = 100;
+    const auto menus = std::make_unique<Menus>();
+    menus->open(Menu::race);
+    menus->digit("Digit1");
+    assert(menus->race.step == native::RacePicker::Step::style);
+    const auto rows = menus->race.rows(width, height, percent);
+    bool next_page = false;
+    for (size_t i = 0; i < rows.count; ++i) {
+        const auto &row = rows.rows[i];
+        const auto click = menus->numbered.click(width, height, percent, {rows.left + 30, row.top + row.height / 2});
+        assert(click.code == "Digit" + std::to_string(row.digit));
+        next_page |= row.digit == 9;
+    }
+    assert(next_page == (menus->race.available() > 8));
+}
+
 }  // namespace
 
 int main() {
@@ -173,5 +232,8 @@ int main() {
     test_each_menu_gets_its_own_digit();
     test_the_guns_key_closes_the_guns_menu();
     test_open_menus_own_the_digits();
+    test_look_menu_takes_the_digits();
+    test_clicks_pick_rows();
+    test_race_pages_click();
     std::puts("numbered menus passed");
 }

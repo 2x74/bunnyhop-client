@@ -184,9 +184,10 @@ void HudFrame::draw_notifications() const {
         native::draw_result(hud, width, height, percent, hud.result, double(SDL_GetTicksNS()) / nanoseconds_per_second);
         native::draw_toasts(hud, width, height, percent, hud.toasts, double(SDL_GetTicksNS()) / nanoseconds_per_second);
         native::draw_race(hud, width, height, percent, room_modes.display(), epoch_ms());
-        native::draw_race_picker(hud, width, height, percent, race_picker);
+        native::draw_race_picker(hud, width, height, percent, race_picker, menu_pointer);
         native::draw_spectator_bar(hud, width, height, percent, spectator_bar);
-        spectate_picker.draw(hud, width, height, percent);
+        spectate_picker.draw(hud, width, height, percent, menu_pointer);
+        if (look_menu) look_menu->draw(hud, width, height, percent, menu_pointer);
     }
     room.draw_change(hud, width, height, prefs.hud_scale, epoch_ms());
 }

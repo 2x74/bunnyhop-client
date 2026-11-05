@@ -151,6 +151,15 @@ The HUD layout editor runs in the host, over the game (`src/hud_editor.cpp`): F2
 either side; the run status, notices and replay banner, which the website doesn't have, are anchored `hudLayout`
 entries. HUD presets keep the player’s strafe trainer switch. Settings → HUD → Layout preset sends `hudPreset` with `classic`, `minimal` or `streamer`.
 
+Chat reads commands as the website does, including a Russian layout (`!ызус` is `!spec`) and a leading dot (`.rtv`).
+The numbered menus a chat line opens (`!spec`, `!race`, `!bright`) keep the cursor out until they close: their rows
+take clicks and the keys keep playing (`src/menu_cursor.hpp`). `!bright` and `!fb` set Brightness and Fullbright for
+the map you're on. The `mapLooks` setting keeps them by map name, for play and replays on that map
+(`src/map_look.hpp`); Settings → Graphics keeps the values for every other map.
+
+Peak marks after names and pride flags in the flag column are drawn from the website's own pictures at build time
+(`src/export-hud-glyphs.ts` writes `hud-glyphs.json`).
+
 Account → Edit avatar is the website's avatar editor (`ui/avatar-editor.ts`). The menu has no WebGL, so it sends
 `avatarRender` with the spec, its packed loadout and backdrop, and the host poses and draws the bunny offscreen
 (`src/avatar_service.hpp`), answering `bunnyhopNativeAvatar({id, png | webp | saved | error})`. The saved picture is a

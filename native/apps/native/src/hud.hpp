@@ -444,7 +444,7 @@ class NativeHud {
         atlas_text(x, y, ascii, size, color);
     }
 
-    void prepare_glyph_atlas() {
+    void prepare_glyph_atlas(const std::vector<native::SheetGlyph> &sheet) {
         std::vector<uint8_t> pixels(native::hud_glyph_width * native::hud_glyph_height * 4);
         const auto marks = native::hud_mark_pixels();
         for (unsigned index = 1; index <= native::hud_mark_text.size() && !marks.empty(); ++index) {
@@ -467,6 +467,15 @@ class NativeHud {
                     const size_t to = ((top + y) * native::hud_glyph_width + left + x) * 4;
                     std::copy_n(flags.data() + from, 4, pixels.data() + to);
                 }
+            }
+        }
+        for (const auto &glyph : sheet) {
+            const unsigned left = (glyph.cell % native::hud_glyph_columns) * native::hud_glyph_cell;
+            const unsigned top = (glyph.cell / native::hud_glyph_columns) * native::hud_glyph_cell;
+            const size_t row_bytes = native::hud_glyph_cell * 4;
+            for (unsigned y = 0; y < native::hud_glyph_cell; ++y) {
+                const size_t to = ((top + y) * native::hud_glyph_width + left) * 4;
+                std::copy_n(glyph.rgba.data() + y * row_bytes, row_bytes, pixels.data() + to);
             }
         }
         gl.GenTextures(1, &glyph_atlas_);
@@ -767,7 +776,8 @@ public:
     }
 
     void overlay_badge(float x, float y, const native::NameBadge &badge, double seconds) {
-        glyph(x, y, unsigned(badge.glyph) + 1, 18, 18, native::name_badge_color(badge, seconds), true);
+        const unsigned cell = badge.sheet ? badge.sheet : unsigned(badge.glyph) + 1;
+        glyph(x, y, cell, 18, 18, native::name_badge_color(badge, seconds), true);
     }
 
     void overlay_badges(float x, float y, const native::NameAppearance &look, double seconds) {
@@ -1254,7 +1264,9 @@ else{color=vec4(ink.rgb,ink.a*(uv.x<-1.?1.:texture(font,uv).a));}})"
         chat_rows_.reserve(128);
         chat_input_carets_.reserve(1024);
         chat_input_identity_.reserve(512);
-        prepare_glyph_atlas();
+        const auto sheet = native::load_glyph_sheet(assets / "hud-glyphs.json");
+        if (sheet.empty()) std::cerr << "HUD glyph sheet is missing: peak marks and pride flags are hidden\n";
+        prepare_glyph_atlas(sheet);
         gl.GenTextures(1, &atlas);
         gl.BindTexture(GL_TEXTURE_2D, atlas);
         gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);

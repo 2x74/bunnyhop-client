@@ -27,6 +27,7 @@ import {
   type NameEffect,
   type PlayerMarks,
 } from "../../web/src/creators";
+import { isPrideFlag } from "../../web/src/countries";
 import type { ScoreHead, ScoreRow } from "../../web/src/net/scoreboard";
 import { roomScoreboard, runningSeconds } from "./room-scoreboard";
 import type { RoomView } from "./room-service";
@@ -59,7 +60,7 @@ export interface HostScoreRow {
   look: HostNameLook;
   marks: HostMark[];
   rank: { name: string; color: string } | null;
-  /** Lower-case ISO 3166 code for the flag, or null. */
+  /** Lower-case ISO 3166 code for the flag, a pride flag ("PRIDE-TRANS", countries.ts PRIDE_FLAGS), or null. */
   country: string | null;
   style: string;
   status: string;
@@ -136,6 +137,16 @@ export function hostMarks(marks: PlayerMarks): HostMark[] {
     .filter((mark): mark is HostMark => mark !== null);
 }
 
+/**
+ * The flag the host draws for a profile flag: a country as its lower-case code, a pride flag as its own code, or null
+ * for anything else (an unknown code shows no flag).
+ */
+export function hostFlag(code: unknown): string | null {
+  if (typeof code !== "string") return null;
+  if (isPrideFlag(code)) return code;
+  return /^[a-z]{2}$/i.test(code) ? code.toLowerCase() : null;
+}
+
 /** `seconds`: the run time while it runs; `at`: when that was (Unix ms). */
 export function hostScoreRow(row: ScoreRow, seconds: number | null, at: number, afk = false): HostScoreRow {
   return {
@@ -145,7 +156,7 @@ export function hostScoreRow(row: ScoreRow, seconds: number | null, at: number, 
     look: hostNameLook(row),
     marks: hostMarks(row),
     rank: row.rank ? { name: row.rank.name, color: row.rank.color } : null,
-    country: typeof row.country === "string" && /^[a-z]{2}$/i.test(row.country) ? row.country.toLowerCase() : null,
+    country: hostFlag(row.country),
     style: row.style,
     status: row.status,
     statusKind: row.statusKind,

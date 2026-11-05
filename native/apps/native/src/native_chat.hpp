@@ -51,12 +51,13 @@ inline ChatDecoration chat_decoration(const nlohmann::json &message) {
     decoration.color2 = json_text(message, "nativeNameColor2");
     decoration.effect = json_text(message, "nativeNameEffect");
     decoration.badge = json_text(message, "nativeBadge");
-    decoration.country = json_text(message, "nativeCountry", 2);
+    decoration.country = json_text(message, "nativeCountry", flag_code_max_bytes);
     decoration.rank = json_text(message, "nativeRank", 64);
     decoration.rank_color = json_text(message, "nativeRankColor");
     decoration.profile = json_text(message, "nativeProfileId");
     decoration.tone = json_text(message, "tone", 16);
-    if (decoration.country.empty()) decoration.country = json_text(message, "country", 2);
+    if (decoration.country.empty()) decoration.country = json_text(message, "country", flag_code_max_bytes);
+    decoration.country = flag_code(std::move(decoration.country));
     const auto rank = message.find("rank");
     if (decoration.rank.empty() && rank != message.end() && rank->is_object()) {
         decoration.rank = json_text(*rank, "name", 64);
@@ -388,7 +389,7 @@ public:
         if (text.empty()) return;
         decoration.badge = clean(decoration.badge, 64);
         decoration.rank = clean(decoration.rank, 64);
-        decoration.country = clean(decoration.country, 8);
+        decoration.country = flag_code(clean(decoration.country, flag_code_max_bytes));
         if (!chat_identifier(decoration.profile)) decoration.profile.clear();
         if (decoration.color.size() != 7 || decoration.color[0] != '#'
             || !std::all_of(decoration.color.begin() + 1, decoration.color.end(), [](unsigned char c) {

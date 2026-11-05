@@ -45,6 +45,7 @@ if (import.meta.main) {
       "native-assets/audio.json",
       "native-assets/tutorial.json",
       "native-assets/hud.rgba",
+      "native-assets/hud-glyphs.json",
       "licenses/SDL3.txt",
       "licenses/dr_libs.txt",
       "licenses/stb.txt",

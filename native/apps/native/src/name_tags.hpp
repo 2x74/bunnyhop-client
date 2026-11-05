@@ -1,5 +1,6 @@
 #pragma once
 #include "graphics_settings.hpp"
+#include "hud_glyph_sheet.hpp"
 #include "hud_text.hpp"
 #include "hud_geometry.hpp"
 #include <nlohmann/json.hpp>
@@ -49,6 +50,8 @@ enum class NameMark : unsigned {
 
 struct NameBadge {
     NameMark glyph = NameMark::badge;
+    // A peak mark's own picture in the glyph atlas (hud_glyph_sheet.hpp), drawn instead of `glyph`; 0 for none.
+    unsigned sheet = 0;
     std::array<NameColor, 3> colors = {NameColor{1, 1, 1, 1}, NameColor{1, 1, 1, 1}, NameColor{1, 1, 1, 1}};
     unsigned color_count = 0;
     bool animated = false;
@@ -146,6 +149,7 @@ host_name_appearance(const nlohmann::json &value, const nlohmann::json &marks, N
                                                      : kind == "x"      ? NameMark::x
                                                                         : NameMark::creator)
                                                   : NameMark::badge;
+        badge.sheet = id.starts_with("peak-") ? sheet_glyph(id) : 0;
         look.marks |= 1u << unsigned(badge.glyph);
         badge.animated = json_flag(mark, "animated");
         const auto colors = mark.find("colors");

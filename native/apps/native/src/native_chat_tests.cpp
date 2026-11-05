@@ -73,7 +73,8 @@ int main() {
     chat.push(
             "unsafe", "runner", "error", 14, 12, {"red;bad", "badge\nline", "USAUSAUSA", "rank", "", {}, {}, {}, {}, {}}
     );
-    assert(chat.visible(14).back().decoration.color.empty() && chat.visible(14).back().decoration.country.size() == 8);
+    // A country code with no flag is dropped, so the line leaves no gap for one.
+    assert(chat.visible(14).back().decoration.color.empty() && chat.visible(14).back().decoration.country.empty());
     chat.open();
     chat.clear_input();
     chat.insert("selected😀");

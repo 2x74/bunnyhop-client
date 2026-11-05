@@ -26,6 +26,7 @@ if (values["prebuilt-resources"]) {
     "target/native-assets/runner.bin",
     "target/native-assets/audio.json",
     "target/native-assets/hud.rgba",
+    "target/native-assets/hud-glyphs.json",
     "target/native-assets/tutorial.json",
   ]) {
     if (!existsSync(join(root, file))) throw new Error(`Prebuilt resource missing: ${file}`);

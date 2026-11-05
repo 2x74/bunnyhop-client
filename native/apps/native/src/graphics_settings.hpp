@@ -1,5 +1,6 @@
 #pragma once
 #include "look_settings.hpp"
+#include "map_look.hpp"
 #include "nlohmann/json.hpp"
 #include <algorithm>
 #include <array>
@@ -39,7 +40,8 @@ inline nlohmann::json default_graphics_settings() {
             {"graphicsBloom", true},
             {"graphicsMaterialResponse", true},
             {"graphicsSkyExposure", 0.},
-            {"paint", {{"color", "#ff4040"}, {"size", "medium"}}}
+            {"paint", {{"color", "#ff4040"}, {"size", "medium"}}},
+            {map_looks_key, nlohmann::json::object()}
     };
     settings.update(default_look_settings());
     return settings;
@@ -104,6 +106,10 @@ inline bool patch_graphics_setting(nlohmann::json &out, const std::string &key, 
     if (patch_look_setting(out, key, value)) return true;
     const auto defaults = default_graphics_settings();
     if (!defaults.contains(key)) return false;
+    if (key == map_looks_key) {
+        out[key] = clean_map_looks(value);
+        return true;
+    }
     if (key == "paint") {
         if (!value.is_object() || value.size() > 2) throw std::runtime_error("Invalid paint settings");
         auto next = out.contains(key) ? out.at(key) : defaults.at(key);
@@ -167,7 +173,8 @@ struct GraphicsSettings {
     enum class Background { live, still, off } background = Background::live;
     LookSettings look;
 
-    static GraphicsSettings read(const nlohmann::json &settings) {
+    // `map`: the map being drawn, whose own Brightness and Fullbright win (map_look.hpp); empty for the global values.
+    static GraphicsSettings read(const nlohmann::json &settings, std::string_view map = {}) {
         auto values = default_graphics_settings();
         for (const auto &[key, value] : settings.items())
             patch_graphics_setting(values, key, value);
@@ -201,6 +208,9 @@ struct GraphicsSettings {
         result.background = values.at("graphicsMenuBackground") == "off"     ? Background::off
                             : values.at("graphicsMenuBackground") == "still" ? Background::still
                                                                              : Background::live;
+        const auto own = map_look_for(values, map);
+        if (own.brightness) result.brightness = float(*own.brightness);
+        if (own.fullbright) result.fullbright = *own.fullbright;
         return result;
     }
 
