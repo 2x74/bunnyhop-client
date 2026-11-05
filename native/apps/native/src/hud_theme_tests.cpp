@@ -552,8 +552,11 @@ void test_room_wire_styles() {
     auto &board = *board_owner;
     board.add({{"slot", 1}, {"name", "Back"}, {"style", "autohop"}}, {{"style", 10u}}, 0, 0);
     assert(board.rows[0].style == "backwards");
-    board.add({{"slot", 2}, {"name", "Later"}, {"style", "zigzag"}}, {{"style", 11u}}, 0, 0);
-    assert(board.rows[1].style == "zigzag");
+    board.add({{"slot", 2}, {"name", "Ad"}, {"style", "autohop"}}, {{"style", 11u}}, 0, 0);
+    assert(board.rows[1].style == "adonly");
+    board.add({{"slot", 3}, {"name", "Later"}, {"style", "zigzag"}}, {{"style", 12u}}, 0, 0);
+    assert(board.rows[2].style == "zigzag");
+    assert(native::score_style_label("adonly") == "A/D-Only");
     assert(native::score_style_label("backwards") == "Backwards");
     assert(native::score_style_label("infinite") == "Infinite");
     assert(native::score_style_label("zigzag") == "zigzag");
@@ -629,7 +632,8 @@ void test_tags_and_race_picker() {
     assert(picker.step == native::RacePicker::Step::style);
     assert(picker.key("Digit2", true, false));
     assert(picker.command.view() == "/race #3 legit 0");
-    // Ten styles (all but Segmented) take two pages: Backwards on the first, Infinite and Auto-strafe on the second.
+    // Eleven styles (all but Segmented) take two pages: Backwards and A/D-Only on the first, Low Gravity, Infinite and
+    // Auto-strafe on the second.
     const auto race_style = [&](const char *page_key, const char *pick) {
         picker.open(board, zones);
         picker.key("Digit1", true, false);
@@ -639,9 +643,11 @@ void test_tags_and_race_picker() {
         return std::string(picker.command.view());
     };
     assert(race_style(nullptr, "Digit7") == "/race #3 backwards 0");
-    assert(race_style("Digit9", "Digit1") == "/race #3 infinite 0");
-    assert(race_style("Digit9", "Digit2") == "/race #3 autostrafe 0");
-    assert(race_style("Digit9", "Digit3").empty());
+    assert(race_style(nullptr, "Digit8") == "/race #3 adonly 0");
+    assert(race_style("Digit9", "Digit1") == "/race #3 lowgrav 0");
+    assert(race_style("Digit9", "Digit2") == "/race #3 infinite 0");
+    assert(race_style("Digit9", "Digit3") == "/race #3 autostrafe 0");
+    assert(race_style("Digit9", "Digit4").empty());
     assert(std::find(native::race_styles.begin(), native::race_styles.end(), "segmented") == native::race_styles.end());
 }
 
