@@ -290,6 +290,46 @@ const float *bh_prop_vertices(const BhContext *ctx, size_t *float_count);
 const uint32_t *bh_prop_indices(const BhContext *ctx, size_t *index_count);
 const BhPropGroup *bh_prop_groups(const BhContext *ctx, size_t *count);
 int bh_prop_transform(BhContext *ctx, uint32_t entity, BhTransform *out);
+
+/* Every moving prop (doors, parented and animated props) in entity order, into the caller's buffer; the count.
+ * Animated props are visible by their PROP_ANIM flags, the others by the entity. */
+typedef struct BhPropTransform {
+    uint32_t entity;
+    float origin[3], angles[3];
+    uint32_t visible;
+} BhPropTransform;
+
+size_t bh_prop_transforms(const BhContext *ctx, BhPropTransform *out, size_t capacity);
+
+/* Animated map props (render only). prop_dynamics drawn on their own, with the studio handle of their model (0: it
+ * can't load, the frozen group stays). States: what the map's I/O asked each to play; sequence seconds at visual time
+ * t are base + (t - since) * rate. Read them again only when the serial moves. */
+typedef struct BhAnimatedProp {
+    uint32_t entity;
+    int32_t skin;
+    uint32_t studio;
+} BhAnimatedProp;
+
+typedef struct BhPropAnimState {
+    uint32_t entity, flags; /* flags: hidden 1, removed 2 */
+    float base, since, rate;
+} BhPropAnimState;
+
+const BhAnimatedProp *bh_animated_props(BhContext *ctx, size_t *count);
+uint32_t bh_prop_anim_serial(const BhContext *ctx);
+size_t bh_prop_anim_states(const BhContext *ctx, BhPropAnimState *out, size_t capacity);
+/* State `index`'s sequence and DefaultAnim as "anim\0default\0"; the bytes written, 0 if they don't fit. */
+size_t bh_prop_anim_names(const BhContext *ctx, size_t index, char *out, size_t capacity);
+
+/* TextureScroll ($basetexturetransform) and AnimatedTexture ($basetexture) proxies, parallel to bh_materials.
+ * Flipbook frames 1..frames-1 are handed over once each by bh_texture_frame; frame 0 is bh_texture. */
+typedef struct BhMaterialMotion {
+    double scroll_rate, scroll_angle, frame_rate;
+    uint32_t frames, no_wrap;
+} BhMaterialMotion;
+
+const BhMaterialMotion *bh_material_motion(BhContext *ctx, size_t *count);
+int bh_texture_frame(BhContext *ctx, int32_t texture, uint32_t frame, BhImage *out);
 /* Water geometry JSON: volumes [minx,miny,minz,maxx,maxy,maxz] and convex plane lists [nx,ny,nz,d]. */
 const char *bh_water_json(BhContext *ctx, size_t *byte_count);
 /* Read/decode Source content with pakfile precedence; buffers last until next request of same kind. */

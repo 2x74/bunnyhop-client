@@ -109,6 +109,8 @@ impl MapLoad {
                     };
                     let mut map = Map::load_cancellable(&path, root.as_deref(), settings, &check)?;
                     prepare_textures(&mut map, &check)?;
+                    map.prepare_motion(&check)?;
+                    map.prepare_prop_models(&check)?;
                     Ok(LoadedMap(map))
                 }))
                 .unwrap_or_else(|_| Err("Rust panic preparing map".into()));
