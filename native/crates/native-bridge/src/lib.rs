@@ -19,6 +19,15 @@ mod map_load;
 pub use map_load::{bh_load_map_begin, bh_load_map_poll, bh_load_map_cancel};
 mod release_crypto;
 mod assets;
+mod map_motion;
+pub use map_motion::{
+    BhMaterialMotion, BhMaterialWireframe, bh_material_motion, bh_material_wireframes, bh_texture_frame,
+};
+mod map_props;
+pub use map_props::{
+    BhAnimatedProp, BhPropAnimState, BhPropTransform, bh_animated_props, bh_prop_anim_names, bh_prop_anim_serial,
+    bh_prop_anim_states, bh_prop_transforms,
+};
 mod look;
 mod v29;
 pub use v29::{
@@ -318,6 +327,8 @@ struct Map {
     segments: segments::History,
     /// Infinite's noclip key is on (flight.rs).
     flight_on: bool,
+    motion: map_motion::Motion,
+    prop_models: map_props::PropModels,
 }
 impl Map {
     fn load_cancellable(
@@ -624,6 +635,8 @@ impl Map {
             checkpoints: Vec::new(),
             segments: segments::History::default(),
             flight_on: false,
+            motion: map_motion::Motion::default(),
+            prop_models: map_props::PropModels::default(),
         })
     }
     fn transform(&mut self, model: u32) -> Result<BhTransform, String> {
@@ -1519,26 +1532,8 @@ pub unsafe extern "C" fn bh_prop_transform(
 ) -> c_int {
     unsafe {
         call(ctx, |c| {
-            let g = &c.map()?.game;
-            let (origin, angles) = g
-                .moving_prop_transforms()
-                .into_iter()
-                .find(|t| t.0 == entity as usize)
-                .map(|t| (t.1, t.2))
-                .or_else(|| g.entity_transform(entity as usize))
-                .ok_or("unknown prop entity")?;
-            output(
-                out,
-                BhTransform {
-                    origin,
-                    angles,
-                    visible: u32::from(
-                        g.overlay_states()
-                            .nth(entity as usize)
-                            .is_some_and(|flags| flags & 2 != 0),
-                    ),
-                },
-            )
+            let transform = c.map()?.single_prop_transform(entity as usize).ok_or("unknown prop entity")?;
+            output(out, transform)
         })
     }
 }

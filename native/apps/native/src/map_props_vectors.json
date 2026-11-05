@@ -1,0 +1,493 @@
+{
+ "randoms": [
+  {
+   "seed": 0,
+   "values": [
+    0.26642920868471265,
+    0.0003297457005828619,
+    0.2232720274478197,
+    0.1462021479383111,
+    0.46732782293111086,
+    0.5450490827206522
+   ]
+  },
+  {
+   "seed": 1,
+   "values": [
+    0.6270739405881613,
+    0.002735721180215478,
+    0.5274470399599522,
+    0.9810509674716741,
+    0.9683778982143849,
+    0.281103502959013
+   ]
+  },
+  {
+   "seed": 3735928559,
+   "values": [
+    0.9413696140982211,
+    0.26719574979506433,
+    0.772033357527107,
+    0.35816076025366783,
+    0.47554167779162526,
+    0.8382313968613744
+   ]
+  },
+  {
+   "seed": 4294967295,
+   "values": [
+    0.8964226141106337,
+    0.189478256739676,
+    0.7156526781618595,
+    0.9440599093213677,
+    0.8452364315744489,
+    0.5391399988438934
+   ]
+  }
+ ],
+ "hashes": [
+  {
+   "text": "models/plar/butterfly.mdl",
+   "n": 0,
+   "hash": 1726221356
+  },
+  {
+   "text": "models/antosha/bhop_retrowave/coin.mdl",
+   "n": 2654435761,
+   "hash": 2779479552
+  },
+  {
+   "text": "",
+   "n": 7,
+   "hash": 739150122
+  },
+  {
+   "text": "café ☕ 🐇",
+   "n": 3,
+   "hash": 1410620519
+  }
+ ],
+ "entityPairs": [
+  [
+   [
+    "classname",
+    "worldspawn"
+   ],
+   [
+    "mapversion",
+    "12"
+   ]
+  ],
+  [],
+  [
+   [
+    "classname",
+    "prop_dynamic"
+   ],
+   [
+    "targetname",
+    "fly"
+   ],
+   [
+    "origin",
+    "1 2 3"
+   ],
+   [
+    "targetname",
+    "fly2"
+   ]
+  ],
+  [
+   [
+    "origin",
+    "-5 0.5 7"
+   ],
+   [
+    "classname",
+    "info_player_start"
+   ]
+  ],
+  [
+   [
+    "Classname",
+    "light"
+   ],
+   [
+    "origin",
+    "0 0 0"
+   ]
+  ]
+ ],
+ "mapSeed": 3158226324,
+ "tables": [
+  {
+   "cps": [
+    1,
+    0.5,
+    2.5
+   ],
+   "looping": [
+    true,
+    false,
+    true
+   ],
+   "idle": [
+    {
+     "seq": 0,
+     "weight": 1
+    },
+    {
+     "seq": 1,
+     "weight": 3
+    },
+    {
+     "seq": 2,
+     "weight": 2
+    }
+   ]
+  },
+  {
+   "cps": [
+    0.8,
+    1.6
+   ],
+   "looping": [
+    true,
+    true
+   ],
+   "idle": [
+    {
+     "seq": 1,
+     "weight": -2
+    },
+    {
+     "seq": 0,
+     "weight": 1
+    }
+   ]
+  },
+  {
+   "cps": [
+    1.25
+   ],
+   "looping": [
+    false
+   ],
+   "idle": []
+  }
+ ],
+ "animators": [
+  {
+   "seed": 12345,
+   "min": 2,
+   "max": 6,
+   "table": 0,
+   "at": [
+    {
+     "time": 0,
+     "sequence": 0,
+     "cycle": 0
+    },
+    {
+     "time": 0.05,
+     "sequence": 0,
+     "cycle": 0
+    },
+    {
+     "time": 0.3,
+     "sequence": 0,
+     "cycle": 0
+    },
+    {
+     "time": 1.2,
+     "sequence": 0,
+     "cycle": 0
+    },
+    {
+     "time": 2.95,
+     "sequence": 0,
+     "cycle": 0
+    },
+    {
+     "time": 3,
+     "sequence": 0,
+     "cycle": 0
+    },
+    {
+     "time": 5.5,
+     "sequence": 0,
+     "cycle": 0
+    },
+    {
+     "time": 9.99,
+     "sequence": 1,
+     "cycle": 1
+    },
+    {
+     "time": 14.2,
+     "sequence": 1,
+     "cycle": 1
+    },
+    {
+     "time": 30,
+     "sequence": 0,
+     "cycle": 0.1310869289562131
+    },
+    {
+     "time": 61.7,
+     "sequence": 1,
+     "cycle": 1
+    },
+    {
+     "time": 4.1,
+     "sequence": 0,
+     "cycle": 0
+    },
+    {
+     "time": 0.2,
+     "sequence": 0,
+     "cycle": 0
+    },
+    {
+     "time": 125,
+     "sequence": 2,
+     "cycle": 0.7027173223905123
+    }
+   ]
+  },
+  {
+   "seed": 999,
+   "min": 0,
+   "max": 0,
+   "table": 0,
+   "at": [
+    {
+     "time": 0,
+     "sequence": 0,
+     "cycle": 0
+    },
+    {
+     "time": 0.05,
+     "sequence": 0,
+     "cycle": 0
+    },
+    {
+     "time": 0.3,
+     "sequence": 1,
+     "cycle": 0.04999999999999999
+    },
+    {
+     "time": 1.2,
+     "sequence": 1,
+     "cycle": 0
+    },
+    {
+     "time": 2.95,
+     "sequence": 2,
+     "cycle": 0.37499999999999756
+    },
+    {
+     "time": 3,
+     "sequence": 2,
+     "cycle": 0.4999999999999971
+    },
+    {
+     "time": 5.5,
+     "sequence": 0,
+     "cycle": 0.34999999999999876
+    },
+    {
+     "time": 9.99,
+     "sequence": 2,
+     "cycle": 0.925000000000046
+    },
+    {
+     "time": 14.2,
+     "sequence": 1,
+     "cycle": 0.20000000000001616
+    },
+    {
+     "time": 30,
+     "sequence": 2,
+     "cycle": 0.7499999999996199
+    },
+    {
+     "time": 61.7,
+     "sequence": 1,
+     "cycle": 0.04999999999969873
+    },
+    {
+     "time": 4.1,
+     "sequence": 2,
+     "cycle": 0.24999999999999467
+    },
+    {
+     "time": 0.2,
+     "sequence": 1,
+     "cycle": 0
+    },
+    {
+     "time": 125,
+     "sequence": 1,
+     "cycle": 1.4139800441625994e-12
+    }
+   ]
+  },
+  {
+   "seed": 4242,
+   "min": 1.5,
+   "max": 1.5,
+   "table": 1,
+   "at": [
+    {
+     "time": 0,
+     "sequence": 0,
+     "cycle": 0
+    },
+    {
+     "time": 0.05,
+     "sequence": 0,
+     "cycle": 0
+    },
+    {
+     "time": 0.3,
+     "sequence": 0,
+     "cycle": 0
+    },
+    {
+     "time": 1.2,
+     "sequence": 0,
+     "cycle": 0
+    },
+    {
+     "time": 2.95,
+     "sequence": 1,
+     "cycle": 0.16000000000000014
+    },
+    {
+     "time": 3,
+     "sequence": 1,
+     "cycle": 0.23999999999999977
+    },
+    {
+     "time": 5.5,
+     "sequence": 1,
+     "cycle": 0.24000000000000044
+    },
+    {
+     "time": 9.99,
+     "sequence": 1,
+     "cycle": 0.42400000000000126
+    },
+    {
+     "time": 14.2,
+     "sequence": 1,
+     "cycle": 0.16000000000000014
+    },
+    {
+     "time": 30,
+     "sequence": 1,
+     "cycle": 0.4400000000000017
+    },
+    {
+     "time": 61.7,
+     "sequence": 1,
+     "cycle": 0.1600000000000068
+    },
+    {
+     "time": 4.1,
+     "sequence": 1,
+     "cycle": 0.9999999999999998
+    },
+    {
+     "time": 0.2,
+     "sequence": 0,
+     "cycle": 0
+    },
+    {
+     "time": 125,
+     "sequence": 1,
+     "cycle": 0.4400000000000125
+    }
+   ]
+  },
+  {
+   "seed": 7,
+   "min": 5,
+   "max": 10,
+   "table": 2,
+   "at": [
+    {
+     "time": 0,
+     "sequence": 0,
+     "cycle": 0
+    },
+    {
+     "time": 0.05,
+     "sequence": 0,
+     "cycle": 0
+    },
+    {
+     "time": 0.3,
+     "sequence": 0,
+     "cycle": 0
+    },
+    {
+     "time": 1.2,
+     "sequence": 0,
+     "cycle": 0
+    },
+    {
+     "time": 2.95,
+     "sequence": 0,
+     "cycle": 0
+    },
+    {
+     "time": 3,
+     "sequence": 0,
+     "cycle": 0
+    },
+    {
+     "time": 5.5,
+     "sequence": 0,
+     "cycle": 0.4268452927935873
+    },
+    {
+     "time": 9.99,
+     "sequence": 0,
+     "cycle": 1
+    },
+    {
+     "time": 14.2,
+     "sequence": 0,
+     "cycle": 1
+    },
+    {
+     "time": 30,
+     "sequence": 0,
+     "cycle": 1
+    },
+    {
+     "time": 61.7,
+     "sequence": 0,
+     "cycle": 1
+    },
+    {
+     "time": 4.1,
+     "sequence": 0,
+     "cycle": 0
+    },
+    {
+     "time": 0.2,
+     "sequence": 0,
+     "cycle": 0
+    },
+    {
+     "time": 125,
+     "sequence": 0,
+     "cycle": 1
+    }
+   ]
+  }
+ ]
+}

@@ -3874,6 +3874,7 @@ int run(const native::Options &opt) {
                     curr, input, simulation_active && captured && !viewer.active && !spectator, spectator.has_value()
             );
             renderer->set_room_actors(actors);
+            renderer->set_world_time(native::world_visual_seconds(prev.tick, curr.tick, blend, step_dt, viewer.active));
             renderer->draw(
                     width,
                     height,

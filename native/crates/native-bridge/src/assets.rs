@@ -197,35 +197,9 @@ pub unsafe extern "C" fn bh_studio_load(ctx: *mut BhContext, path: *const c_char
     let mut handle = 0;
     unsafe {
         call(ctx, |c| {
-            let path = vfs::normalize(string(path)?);
-            let m = c.map()?;
-            if let Some(i) = m.assets.models.iter().position(|model| model.path == path) {
-                handle = i as u32 + 1;
-                return Ok(());
-            }
-            for _ in 0..64 {
-                match studio::load(&m.vfs, &path) {
-                    studio::Load::Ready(model) => {
-                        m.assets
-                            .model_info
-                            .push(CString::new(model.info_json()).map_err(|e| e.to_string())?);
-                        m.assets.models.push(*model);
-                        handle = m.assets.models.len() as u32;
-                        return Ok(());
-                    }
-                    studio::Load::Error(e) => return Err(e),
-                    studio::Load::Missing => {}
-                }
-                if !fetch_pending(
-                    &mut m.vfs,
-                    m.root.as_deref(),
-                    &mut m.loose,
-                    &mut m.attempted,
-                ) {
-                    break;
-                }
-            }
-            Err(format!("studio content missing: {path}"))
+            let path = string(path)?;
+            handle = c.map()?.load_studio(path)?;
+            Ok(())
         })
     };
     handle
