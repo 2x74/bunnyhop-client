@@ -74,7 +74,11 @@ Check sensitivity with a physical mouse before using Raw; it has not completed t
 - Settings → Display → Fullscreen picks the monitor, resolution and refresh rate exclusive fullscreen switches to,
   so 4:3 (1280×960, 1024×768, 1440×1080) and 16:10 modes work. A new mode shows at once and goes back after ten
   seconds unless you press Enter. A resolution of another shape than the monitor asks Windows for Stretched or Black
-  bars; drivers set to override games decide themselves. `--windowed` recovers from any mode.
+  bars; drivers set to override games decide themselves. On Windows, fullscreen at the desktop's own mode changes
+  no display mode, so opening the menu doesn't blank the monitor.
+- A borderless or fullscreen switch must present its first frames (`src/display_check.hpp`). One the system refuses,
+  or whose swaps stall, goes back to windowed and saves it. A switch the game never came back from leaves
+  `display-check.json` in the data folder, and the next launch starts windowed. `--windowed` does the same by hand.
 - Graphics → Aspect ratio gives the same picture in borderless without a mode change. With black bars the HUD and
   crosshair stay inside the picture. Mouse turning is counts × sensitivity × 0.022° in every mode.
 - Windows: Display → Low latency mode presents through DXGI (flip model, tearing, VRR) and uses NVIDIA Reflex

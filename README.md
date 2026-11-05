@@ -20,6 +20,17 @@ Default keys match the website: WASD, Space or wheel to jump, Ctrl to duck, E to
 person, Escape for the menu. Alt+Enter toggles fullscreen. Settings, binds, HUD layout and cosmetics use the
 website's screens, so they carry over.
 
+### Stuck in fullscreen
+
+If fullscreen or borderless doesn't show, the game goes back to windowed by itself, and a game that froze or was
+closed while switching starts windowed next time. To force it, start the game once with `--windowed`; it starts
+windowed and keeps that setting:
+
+- Windows: in PowerShell, `& ".\bunnyhop-native.exe" --windowed` from the game folder, or add `--windowed` after the
+  target of a shortcut.
+- macOS: `open "bunnyhop.lol - Native.app" --args --windowed`
+- Linux: `./bunnyhop-native --windowed`
+
 ## Ranked runs
 
 Every finished run is saved locally first. A run uploads for ranking only from a build the server has admitted;

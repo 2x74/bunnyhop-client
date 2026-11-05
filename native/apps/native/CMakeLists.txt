@@ -506,6 +506,13 @@ if(BUILD_TESTING)
             $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
         add_test(NAME native_file_dialogs COMMAND bunnyhop-native-file-dialog-tests)
         set_tests_properties(native_file_dialogs PROPERTIES TIMEOUT 20)
+        # Display recovery around the window mode driver; SDL only for its headers.
+        add_executable(bunnyhop-native-display-check-tests src/display_check_tests.cpp)
+        target_include_directories(bunnyhop-native-display-check-tests PRIVATE vendor src)
+        target_link_libraries(bunnyhop-native-display-check-tests PRIVATE SDL3::SDL3)
+        target_compile_options(bunnyhop-native-display-check-tests PRIVATE
+            $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
+        add_test(NAME native_display_check COMMAND bunnyhop-native-display-check-tests)
         add_executable(bunnyhop-native-video-tests
             src/video_export_tests.cpp src/video_export.cpp src/video_codecs.cpp src/audio_pack.cpp)
         target_include_directories(bunnyhop-native-video-tests PRIVATE include vendor src)

@@ -4,10 +4,17 @@
 #include "window_frame.hpp"
 #include "window_settings.hpp"
 #include <SDL3/SDL.h>
+#include <cmath>
+#include <cstdint>
 #include <string>
 #include <vector>
 
 namespace native {
+// Whether the window's frames can reach the screen: shown, not minimized and not covered.
+inline bool window_can_show(SDL_Window *window) {
+    return !(SDL_GetWindowFlags(window) & (SDL_WINDOW_HIDDEN | SDL_WINDOW_MINIMIZED | SDL_WINDOW_OCCLUDED));
+}
+
 // SDL window operations stay on the event/context thread. Preferences are only
 // committed after apply() succeeds; failure rolls back the prior native mode.
 class WindowController {
@@ -23,6 +30,10 @@ class WindowController {
     std::optional<WindowBounds> normal_;
     std::string desired_ = "windowed", error_;
     ExclusiveTarget exclusive_;
+    // Windows: fullscreen at the desktop's own mode is SDL's fullscreen without a display mode (see set_exclusive).
+    bool desktop_exclusive_ = false;
+    // Windows: when the borderless window is fitted to its display again after leaving exclusive fullscreen.
+    std::vector<uint64_t> settle_at_ns_;
 
     static std::vector<WindowArea> areas() {
         std::vector<WindowArea> out;
@@ -37,6 +48,7 @@ class WindowController {
     }
 
     bool set_mode(const std::string &mode, const ExclusiveTarget &target) {
+        desktop_exclusive_ = false;
         if (mode == "windowed")
             return SDL_SetWindowFullscreen(window_, false) && SDL_SetWindowFullscreenMode(window_, nullptr)
                    && SDL_SetWindowBordered(window_, true);
@@ -133,11 +145,27 @@ class WindowController {
                && SDL_SyncWindow(window_);
     }
 
+    static bool is_desktop_mode(const SDL_DisplayMode &mode) {
+        const auto *desktop = SDL_GetDesktopDisplayMode(mode.displayID);
+        return desktop && desktop->w == mode.w && desktop->h == mode.h && desktop->pixel_density == mode.pixel_density
+               && std::abs(desktop->refresh_rate - mode.refresh_rate) < .01f;
+    }
+
     bool set_exclusive(const ExclusiveTarget &target) {
         SDL_SetWindowBordered(window_, true);
         const auto mode = exclusive_mode(target.mode);
         if (!mode) return false;
         if (!move_to_display(mode->displayID)) return false;
+#ifdef _WIN32
+        // SDL sets even the desktop's own mode with ChangeDisplaySettingsEx, and resets it each time the menu opens:
+        // the monitor goes black for a second or more both ways. At the desktop mode SDL's fullscreen without a display
+        // mode shows the same picture, presented the same way (Windows' fullscreen optimizations), with no mode change.
+        if (is_desktop_mode(*mode)) {
+            if (!SDL_SetWindowFullscreenMode(window_, nullptr) || !SDL_SetWindowFullscreen(window_, true)) return false;
+            desktop_exclusive_ = true;
+            return SDL_SyncWindow(window_);
+        }
+#endif
         if (!SDL_SetWindowFullscreenMode(window_, &*mode) || !SDL_SetWindowFullscreen(window_, true)) return false;
         if (!SDL_SyncWindow(window_)) return false;
         request_display_scaling(window_, target.scaling == "bars" ? DisplayScaling::bars : DisplayScaling::stretch);
@@ -154,6 +182,19 @@ class WindowController {
         if (!SDL_GetDisplayBounds(SDL_GetDisplayForWindow(window_), &r)) return std::nullopt;
         r.h += 1;
         return r;
+    }
+
+    // Windows: leaving an exclusive mode resets the monitor, and when that finishes Windows moves and rescales windows
+    // (WM_DISPLAYCHANGE, WM_DPICHANGED), which can leave the borderless menu window smaller than its display, looking
+    // windowed. It is fitted to the display again over the next two seconds.
+    void settle_after_exclusive() {
+#ifdef _WIN32
+        constexpr uint64_t settle_delays_ns[] = {250'000'000, 1'000'000'000, 2'000'000'000};
+        const uint64_t now = SDL_GetTicksNS();
+        settle_at_ns_.clear();
+        for (const auto delay : settle_delays_ns)
+            settle_at_ns_.push_back(now + delay);
+#endif
     }
 
     bool restore_bounds(WindowBounds b, bool requirePosition = false) {
@@ -180,7 +221,7 @@ public:
     std::string mode() const {
         const auto flags = SDL_GetWindowFlags(window_);
         if (!(flags & SDL_WINDOW_FULLSCREEN)) return flags & SDL_WINDOW_BORDERLESS ? "borderless" : "windowed";
-        return SDL_GetWindowFullscreenMode(window_) ? "fullscreen" : "borderless";
+        return SDL_GetWindowFullscreenMode(window_) || desktop_exclusive_ ? "fullscreen" : "borderless";
     }
 
     bool
@@ -233,7 +274,15 @@ public:
             return false;
         }
         desired_ = requested;
+        if (changed && old == "fullscreen" && requested == "borderless") settle_after_exclusive();
         return true;
+    }
+
+    // Once per frame: the re-fits settle_after_exclusive() scheduled.
+    void settle(uint64_t now_ns) {
+        if (settle_at_ns_.empty() || now_ns < settle_at_ns_.front()) return;
+        settle_at_ns_.erase(settle_at_ns_.begin());
+        refit();
     }
 
     std::optional<WindowBounds> observe_bounds() {

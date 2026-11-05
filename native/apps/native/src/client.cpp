@@ -84,6 +84,7 @@
 #include "window_sdl.hpp"
 #include "window_mode_driver.hpp"
 #include "display_catalog.hpp"
+#include "display_check.hpp"
 #include "display_mode_tryout.hpp"
 #include "hud_area.hpp"
 #include "console_host.hpp"
@@ -270,17 +271,17 @@ int run(const native::Options &opt) {
         std::cerr << "Settings: " << startup_data.error << '\n';
     }
     if (opt.sensitivity_set) preferences["sensitivity"] = opt.sensitivity;
-    // Recovery: --windowed resets a display mode the player cannot leave and keeps it.
-    if (opt.windowed && preferences.value("windowMode", std::string()) != "windowed") {
-        preferences["windowMode"] = "windowed";
+    native::WindowController window_controller(window.get());
+    const bool persist_window = !opt.hidden && !opt.frames && opt.menu_smoke.empty() && opt.runtime_smoke.empty();
+    // Recovery: --windowed, or a switch the last session never saw present, starts windowed and keeps it.
+    native::DisplayGuard<native::WindowModeDriver> display_guard(cache);
+    if (persist_window && display_guard.launch(preferences, opt.windowed)) {
         try {
             native::save_settings(cache / "settings.json", preferences);
         } catch (const std::exception &e) {
             std::cerr << "Settings: " << e.what() << '\n';
         }
     }
-    native::WindowController window_controller(window.get());
-    const bool persist_window = !opt.hidden && !opt.frames && opt.menu_smoke.empty() && opt.runtime_smoke.empty();
     // Keep the display defaults this launch chose (display_defaults.hpp), so the next launch reads the same ones.
     if (first_settings && persist_window) {
         try {
@@ -300,9 +301,9 @@ int run(const native::Options &opt) {
     // Exclusive fullscreen is borderless while the menu is open, and nothing
     // changes while the window is minimized (window_modes.hpp).
     native::WindowModeDriver window_modes(window_controller, preferences.value("windowMode", std::string("windowed")));
-    if (persist_window && !window_modes.launch(preferences, bool(menu), saved_window)) {
-        std::cerr << "Window: " << window_controller.error() << '\n';
-        preferences["windowMode"] = window_controller.mode();
+    if (persist_window) {
+        display_guard.watch(window_modes, SDL_GetTicksNS);
+        window_modes.launch(preferences, bool(menu), saved_window);
     }
     // Monitors and their modes for Settings → Display, and the ten-second trial of a new exclusive mode.
     native::DisplayCatalog display_catalog;
@@ -491,6 +492,9 @@ int run(const native::Options &opt) {
     }
     if (const auto update_notice = updater.startup_notice(); !update_notice.empty())
         hud.toasts.push(update_notice, double(SDL_GetTicksNS()) / 1e9, 8);
+    constexpr unsigned display_notice_ms = 10000;
+    if (const auto display_notice = display_guard.notice(); !display_notice.empty())
+        hud.toasts.push(display_notice, double(SDL_GetTicksNS()) / 1e9, display_notice_ms / 1000.);
     if (!opt.frames && opt.menu_smoke.empty() && opt.runtime_smoke.empty()) updater.check_if_due();
 
     auto reset_feedback = [&](bool incomplete_history = false, bool keep_jump_stats = false) {
@@ -3989,12 +3993,35 @@ int run(const native::Options &opt) {
         display_tryout.draw(hud, width, height, SDL_GetTicksNS());
         const GLenum gl_error = gl.GetError();
         if (gl_error != GL_NO_ERROR) throw std::runtime_error("OpenGL error " + std::to_string(gl_error));
-        frame_diagnostics.mark(native::FrameDiagnostics::kRender, SDL_GetTicksNS());
+        const uint64_t swap_start_ns = SDL_GetTicksNS();
+        frame_diagnostics.mark(native::FrameDiagnostics::kRender, swap_start_ns);
+        bool swapped = true;
         if (low_latency.active())
             low_latency.present(prefs.vsync);
-        else if (!SDL_GL_SwapWindow(window.get()))
+        else
+            swapped = SDL_GL_SwapWindow(window.get());
+        const uint64_t swap_end_ns = SDL_GetTicksNS();
+        // Right after a display mode switch a failed swap means the mode doesn't show: windowed instead (below).
+        if (!swapped && !display_guard.checking())
             throw std::runtime_error(std::string("Swapping framebuffer failed: ") + SDL_GetError());
-        frame_diagnostics.mark(native::FrameDiagnostics::kSwap, SDL_GetTicksNS());
+        frame_diagnostics.mark(native::FrameDiagnostics::kSwap, swap_end_ns);
+        window_controller.settle(swap_end_ns);
+        const bool window_visible = focused && native::window_can_show(window.get());
+        switch (display_guard.after_swap(
+                preferences, swap_end_ns, swap_end_ns - swap_start_ns, window_visible, swapped, display_tryout.active()
+        )) {
+            case native::DisplayOutcome::windowed:
+                json_writer.write(cache / "settings.json", preferences);
+                apply_preferences();
+                menu_state.settings_changed();
+                toast(display_guard.notice(), display_notice_ms);
+                break;
+            case native::DisplayOutcome::revert_trial:
+                display_tryout.revert();
+                break;
+            case native::DisplayOutcome::none:
+                break;
+        }
         frame_pacer.after_swap(gl, prefs.limit_queued_frames && !opt.frames);
         frame_diagnostics.mark(native::FrameDiagnostics::kGpuWait, SDL_GetTicksNS());
         sky_library.frame(menu && menu->visible());

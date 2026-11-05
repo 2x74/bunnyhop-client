@@ -29,7 +29,7 @@ public:
         answer_ = Answer::none;
         menu->set_visible(false);
         modes.set_menu(false, false, after);
-        if (!shows_exclusive(window)) {
+        if (!modes.shows("fullscreen")) {
             error_ = "The display mode couldn't be shown";
             answer_ = Answer::revert;
             return false;
@@ -39,6 +39,11 @@ public:
     }
 
     bool active() const { return trial_.active(); }
+
+    // The mode on trial doesn't present (display_check.hpp): back to the previous one at the next finish_due().
+    void revert() {
+        if (trial_.active()) answer_ = Answer::revert;
+    }
 
     const std::string &error() const { return error_; }
 
@@ -102,13 +107,16 @@ private:
     std::string mode_label_;
     std::string error_;
 
-    static bool shows_exclusive(SDL_Window *window) {
-        return window && (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) && SDL_GetWindowFullscreenMode(window);
-    }
-
     void describe(SDL_Window *window) {
+        const SDL_DisplayID display = SDL_GetDisplayForWindow(window);
+        // Fullscreen at the desktop's own mode has no fullscreen mode of its own (window_sdl.hpp set_exclusive).
         const auto *mode = SDL_GetWindowFullscreenMode(window);
-        const char *name = SDL_GetDisplayName(SDL_GetDisplayForWindow(window));
+        if (!mode) mode = SDL_GetDesktopDisplayMode(display);
+        if (!mode) {
+            mode_label_ = "This monitor's own mode";
+            return;
+        }
+        const char *name = SDL_GetDisplayName(display);
         char label[192];
         std::snprintf(
                 label,
