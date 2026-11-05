@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.7.2 — Native
+
+Update from Settings → Updates: press Update, then Restart to update. Your settings, replays and maps are kept.
+
+**Fullscreen**
+- If fullscreen or borderless doesn't show, the game goes back to windowed by itself and keeps that. A game that froze
+  or was closed while switching starts windowed next time and tells you why.
+- Windows: Fullscreen at your desktop's resolution no longer switches the monitor's mode, so Esc no longer turns the
+  screen black for a moment. Coming back to the menu from another resolution, the window fills the screen again instead
+  of looking windowed. We haven't seen this on a real PC yet, so tell us if Esc still goes black.
+- Start the game with `--windowed` to force windowed and keep it. The README says how on Windows, macOS and Linux.
+
+**Updates**
+- The game checks for a new version when it starts and every few hours while it runs. When one is out, the home screen
+  says so: Update downloads it, then Restart to update installs it. Not now hides it until the next version.
+
 ## v0.7.1 — Native
 
 Update from Settings → Updates: press Update, then Restart to update. Your settings, replays and maps are kept.
