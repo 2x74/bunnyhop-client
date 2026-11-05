@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "repository": "https://github.com/2x74/bunnyhop",
-  "commit": "4816744abe4235353c75b5b10c762e0aaf0a7d98",
+  "commit": "bc711059b9cd97ee34c168c4f09383ceb2d93106",
   "areas": [
     "crates/core",
     "crates/vendor",
@@ -19,7 +19,7 @@
     "native-core.patch": "48b7d801a09a63e5fe70588dc71eec0f2a136af9a95248655877b879567943d3",
     "native-web.patch": "cad3229af869b15ddd45c93e01e082a60d0c2755eeb721abcc1660755882fb31"
   },
-  "sourceTreeSha256": "b961e4c66c47eeb9654a78f60d1759fc1c8abe864184e8130512fd6d002ec736",
+  "sourceTreeSha256": "2be4be8beb6ebdc51cc7c03bb2d07fb580c15488ebd28ec8aa176594701506ab",
   "sources": {
     "apps/web/src/about/about.css": "1a89ee791a663ae8e00840bf284cca40c5dfd3d1786e7808ac57a2fce6a88742",
     "apps/web/src/about/changelog-page.ts": "bfbe95c9fcb55ff795edc5aab6fc52081c9ed401f160cdf0f3af91d96fa9f1c7",
@@ -1216,7 +1216,7 @@
     "crates/vendor/phy/src/lib.rs": "53cdceaacd6eadb73148256ab13c6daf53f719ed2b0276ebde0ee512121ed228",
     "crates/vendor/phy/src/solid.rs": "6bc80441a3a283ee99f595148622ebf38b775d98035521e582c726d619570c49",
     "crates/vendor/vpk/Cargo.toml": "3d2dfba504ac746963a466ed3783b91f7ec66d692deddb6797d00cc66bd87f87",
-    "crates/vendor/vpk/src/lib.rs": "33d4c9d5699bd5e8fd862cff678abd88f8bd2ab33259d6f91eff8f19fe942a3e",
+    "crates/vendor/vpk/src/lib.rs": "6b8facff89f7c7ae4653552ce037ab8f295063f2a15d90be595774796e7faf20",
     "crates/vendor/vtf/COMPATIBILITY.md": "e6ccf6098011967fdcb3f83e79364bd580e191824eba2d10bf4faa87514fd239",
     "crates/vendor/vtf/Cargo.toml": "63102ca5758e169dfd724db574efc4e1b401ff17e6487fbf4542f971586a6aa2",
     "crates/vendor/vtf/src/lib.rs": "c624a7bfe9c32299b51d5bcc721169fa7afd128ef7c0106b0830d35a7411f2c5",
@@ -2424,7 +2424,7 @@
     "crates/vendor/phy/src/solid.rs": "6bc80441a3a283ee99f595148622ebf38b775d98035521e582c726d619570c49",
     "crates/vendor/thirdpartylegalnotices.txt": "21319cf7b185d8676801680bc394655a028bc84e257ed844023c8bbed66d3a9e",
     "crates/vendor/vpk/Cargo.toml": "3d2dfba504ac746963a466ed3783b91f7ec66d692deddb6797d00cc66bd87f87",
-    "crates/vendor/vpk/src/lib.rs": "33d4c9d5699bd5e8fd862cff678abd88f8bd2ab33259d6f91eff8f19fe942a3e",
+    "crates/vendor/vpk/src/lib.rs": "6b8facff89f7c7ae4653552ce037ab8f295063f2a15d90be595774796e7faf20",
     "crates/vendor/vtf/COMPATIBILITY.md": "e6ccf6098011967fdcb3f83e79364bd580e191824eba2d10bf4faa87514fd239",
     "crates/vendor/vtf/Cargo.toml": "63102ca5758e169dfd724db574efc4e1b401ff17e6487fbf4542f971586a6aa2",
     "crates/vendor/vtf/src/lib.rs": "c624a7bfe9c32299b51d5bcc721169fa7afd128ef7c0106b0830d35a7411f2c5",
