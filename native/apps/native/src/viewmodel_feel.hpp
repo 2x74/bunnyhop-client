@@ -10,14 +10,14 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <numbers>
 
 namespace native_vm {
 
 // Row-major 3x4: rotation columns forward, left, up of view space, translation in the last column.
 using Matrix34 = std::array<float, 12>;
 
-inline constexpr double radians_per_degree = std::numbers::pi / 180;
+inline constexpr double pi = 3.14159265358979323846, euler = 2.71828182845904523536;
+inline constexpr double radians_per_degree = pi / 180;
 inline constexpr Matrix34 identity34 = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0};
 
 // A damped spring: value and velocity.
@@ -232,14 +232,14 @@ private:
         if (s.landed < 0) {
             dip.v -= land_impact(s.landed) * dip_kick * bob_amount;
             // Critically damped: a kick v peaks at v / (omega e).
-            hard.v -= hard_landing(s.landed) * hard_max * hard_omega * std::numbers::e * std::min(1., bob_amount / .5);
+            hard.v -= hard_landing(s.landed) * hard_max * hard_omega * euler * std::min(1., bob_amount / .5);
         }
     }
 
     void compose(const FeelInput &s, double bob_amount, double time) {
         const double dip_units = std::clamp(dip.x, -4., 2.);
         const double settle = soft_limit(hard.x, hard_max);
-        const double breathe = std::sin(time * (2 * std::numbers::pi / breathing_period_seconds)) * bob_amount;
+        const double breathe = std::sin(time * (2 * pi / breathing_period_seconds)) * bob_amount;
         const double pitch = s.pitch > 180 ? s.pitch - 360 : s.pitch;
         const double fx = vertical_bob * .4 + lag[0] - pitch * .035 - duck * .4;
         const double fy = -lateral_bob * .2 + lag[1] + pitch * .03 + shift + duck * .25;
@@ -258,8 +258,7 @@ private:
     // cl_bob's phase (radians) for bob time `t` and cycle length `length`: a rise and a fall half.
     static double bob_phase(double t, double length) {
         const double c = std::fmod(t, length) / length;
-        return c < bob_up ? std::numbers::pi * c / bob_up
-                          : std::numbers::pi + std::numbers::pi * (c - bob_up) / (1 - bob_up);
+        return c < bob_up ? pi * c / bob_up : pi + pi * (c - bob_up) / (1 - bob_up);
     }
 
     Matrix34 matrix = identity34;
@@ -465,7 +464,7 @@ public:
         if (settle_on && landed < 0) {
             // A critically damped kick peaks at v / (w e): sized so the drop peaks at settle_max_units x hardness.
             const double hardness = hard_landing(landed);
-            if (hardness > 0) settle.v -= settle_max_units * hardness * settle_omega * std::numbers::e;
+            if (hardness > 0) settle.v -= settle_max_units * hardness * settle_omega * euler;
         }
         z = settle_on ? std::clamp(settle.x, -settle_max_units, 0.) : 0;
         if (!settle_on) settle = {};
@@ -588,7 +587,7 @@ private:
         constexpr double decay = 2.2, peak_scale = 1.9;
         if (t <= a || t >= b) return 0;
         const double u = (t - a) / (b - a);
-        return std::sin(std::numbers::pi * u) * std::exp(-decay * u) * peak_scale;
+        return std::sin(pi * u) * std::exp(-decay * u) * peak_scale;
     }
 
     double quiet = 0, clock = 0, settle_seconds = not_settling;
@@ -619,6 +618,41 @@ public:
 private:
     double landed = 0, last_vertical_speed = 0;
     bool have_last = false, last_grounded = true;
+};
+
+// The in-eye camera options in live play (main.ts): landings fed every simulation tick, the settle and FOV read every
+// frame in first person.
+class EyeCamera {
+public:
+    void configure(bool settle, bool speed_fov) {
+        settle_on = settle;
+        speed_fov_on = speed_fov;
+    }
+
+    void tick(bool grounded, double vertical_speed) { landing.tick(grounded, vertical_speed); }
+
+    // A frame in your own eyes; `flying`: practice noclip or Infinite's flight, where the settle stays off.
+    void frame(double dt, double horizontal_speed, bool flying) {
+        feel.update(dt, landing.take(), horizontal_speed, settle_on && !flying, speed_fov_on);
+    }
+
+    // A frame seen any other way (third person, a replay, spectating): the landing passes unused.
+    void skip_frame() { landing.take(); }
+
+    // Units to add to the rendered eye's height (<= 0) and degrees to add to the FOV.
+    double height() const { return feel.z; }
+
+    double fov() const { return feel.fov; }
+
+    void reset() {
+        feel.reset();
+        landing.reset();
+    }
+
+private:
+    EyeFeel feel;
+    LandingWatch landing;
+    bool settle_on = false, speed_fov_on = false;
 };
 
 }  // namespace native_vm

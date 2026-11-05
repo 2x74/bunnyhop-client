@@ -21,6 +21,7 @@
 #include "third_person_events.hpp"
 #include "knife_spinner.hpp"
 #include "inspect_cues.hpp"
+#include "first_person_weapons.hpp"
 #include <span>
 #include "nlohmann/json.hpp"
 #include <filesystem>
@@ -437,7 +438,7 @@ class Renderer {
     std::optional<uint32_t> viewmodelWeapon;
     std::optional<native_render::Actor> spectatedActor;
     uint32_t spectatedTick = ~0u, spectatedFlags = 0;
-    bool spectatedSilenced = false, viewmodelLeftHand = false;
+    bool spectatedSilenced = false, viewmodelLeftHand = false, inspectQuiet = false;
     native_render::EventQueue<unsigned, 32> spectatedAttacks;
     // Source look (source_hdr.hpp): CS:S's exposure and bloom on maps whose lightmap came from HDR lighting.
     BhLightmapInfo lightmapInfo{1, 0};
@@ -1669,6 +1670,11 @@ public:
 
     void set_flashlight(bool value) { flashlightEnabled = value; }
 
+    void set_inspect_style(bool quiet) {
+        inspectQuiet = quiet;
+        if (viewmodel) viewmodel->set_inspect_style(quiet);
+    }
+
     void set_viewmodel_bob(float value) {
         if (viewmodel) viewmodel->set_bob(value);
     }
@@ -1979,6 +1985,7 @@ public:
             viewmodel->prepare_graphics();
         else
             viewmodel = std::make_unique<NativeViewmodel>(gl, assetRoot);
+        viewmodel->set_inspect_style(inspectQuiet);
         co_yield "resource";
         gl.Enable(GL_DEPTH_TEST);
         gl.DepthFunc(GL_LEQUAL);
@@ -2151,8 +2158,12 @@ public:
         if (viewmodel) viewmodel->inspect_cues().clear();
     }
 
-    void inspect_press() {
-        if (viewmodel) viewmodel->inspect_press();
+    // Your inspect key; true when the press is yours only (it starts the quiet check, so it isn't recorded).
+    bool inspect_press() { return viewmodel && viewmodel->inspect_press(); }
+
+    // A replay's inspect: the knife's own tricks.
+    void remote_inspect_press() {
+        if (viewmodel) viewmodel->remote_inspect_press();
     }
 
     void inspect_held(bool value) {
@@ -2293,7 +2304,7 @@ public:
             }
         }
         if (actor) { /* Actor pulses are already fenced by RoomState, independently of interpolated pose ticks. */
-            if (viewmodel && actor->inspect) viewmodel->inspect_press();
+            if (viewmodel && actor->inspect) viewmodel->remote_inspect_press();
             if (actor->attack) spectatedAttacks.push(actor->attack);
             if (spectatedTick != ~0u && actor->silenced != spectatedSilenced) spectatedFlags |= 256;
             spectatedTick = actor->frame.tick;
@@ -2312,6 +2323,14 @@ public:
     void simulation_tick() {
         BhWeaponReport weapon{};
         BhAttackReport attack{};
+        if (viewmodel) {
+            BhSnapshot player{};
+            BhCmd command{};
+            if (bh_snapshot(core, &player)) {
+                bh_last_command(core, &command);
+                viewmodel->simulation_tick(player.player, command.side);
+            }
+        }
         if (bh_weapon_report(core, &weapon)) queuedWeaponFlags |= weapon.flags;
         if (bh_attack_report(core, &attack)) {
             queuedAttack = true;

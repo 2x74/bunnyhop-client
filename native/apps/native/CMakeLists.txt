@@ -623,6 +623,11 @@ if(BUILD_TESTING)
         add_test(NAME native_viewmodel_pose COMMAND bunnyhop-native-viewmodel-pose-tests "${VIEWMODEL_POSE_ORACLE}")
         set_tests_properties(native_viewmodel_pose PROPERTIES FIXTURES_REQUIRED viewmodel_pose_oracle)
     endif()
+    add_executable(bunnyhop-native-first-person-tests src/first_person_weapons_tests.cpp)
+    target_include_directories(bunnyhop-native-first-person-tests PRIVATE vendor)
+    target_compile_options(bunnyhop-native-first-person-tests PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
+    add_test(NAME native_first_person_weapons COMMAND bunnyhop-native-first-person-tests)
     add_executable(bunnyhop-native-viewmodel-pose-tests src/viewmodel_pose_tests.cpp)
     target_include_directories(bunnyhop-native-viewmodel-pose-tests PRIVATE vendor)
     target_compile_options(bunnyhop-native-viewmodel-pose-tests PRIVATE

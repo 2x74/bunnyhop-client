@@ -403,8 +403,13 @@ int run(const native::Options &opt) {
     } catch (const std::exception &e) {
         std::cerr << "Start points: " << e.what() << '\n';
     }
+    // Settings, Viewmodel, Movement feel: the optional hard-landing camera settle and speed FOV (live play only).
+    native_vm::EyeCamera eye_camera;
     auto apply_preferences = [&]() {
         prefs = native::Preferences::from_settings(preferences);
+        eye_camera.configure(
+                preferences.at("viewmodelLandSettle").get<bool>(), preferences.at("viewmodelSpeedFov").get<bool>()
+        );
         discord_settings = native::discord::settings_from(preferences);
         menu_state.settings_changed();
         graphics_menu_pacer.settings(preferences);
@@ -451,6 +456,7 @@ int run(const native::Options &opt) {
                     preferences.at("viewmodelBob").get<float>(),
                     preferences.at("viewmodelSway").get<float>()
             );
+            renderer->set_inspect_style(preferences.at("viewmodelInspect") == "quiet");
             renderer->set_color_blind(preferences.value("colorBlind", std::string("off")));
             renderer->set_actor_models(
                     preferences.value("playerModel", std::string("bunny")),
@@ -688,6 +694,7 @@ int run(const native::Options &opt) {
         if (pending_action != "play") cancel_prefetch();
         gun_menu.close();
         trigger_menu.close();
+        eye_camera.reset();
         bh_record_end(core.get());
         room_events |= 8;
         practice.restart();
@@ -1494,8 +1501,9 @@ int run(const native::Options &opt) {
                 else if (action == "lastWeapon")
                     input.pulse = (input.pulse & ~(3u << 14)) | (last_slot << 14);
                 else if (action == "inspect") {
-                    if (renderer) renderer->inspect_press();
-                    if (core) bh_record_inspect(core.get(), 1);
+                    // The quiet check is yours only: a replay starts with the press that carries on into the tricks.
+                    const bool private_press = renderer && renderer->inspect_press();
+                    if (core && !private_press) bh_record_inspect(core.get(), 1);
                 } else if (action == "drop")
                     input.pulse |= 1u << 12;
                 else if (action == "reload")
@@ -3269,6 +3277,7 @@ int run(const native::Options &opt) {
                 break;
             }
             renderer->simulation_tick();
+            eye_camera.tick(curr.grounded != 0, curr.velocity[2]);
             // Infinite's flight ticks feed no jump stats, SSJ, sync or announcer, as practice noclip.
             const bool flight_tick = (curr.events & native::event_flight) != 0;
             if (flight_tick)
@@ -3300,7 +3309,7 @@ int run(const native::Options &opt) {
             if (viewer.active) {
                 BhReplayEvents e{};
                 if (bh_replay_events(core.get(), prev.tick, curr.tick, &e)) {
-                    if (e.inspect_signal) renderer->inspect_press();
+                    if (e.inspect_signal) renderer->remote_inspect_press();
                     renderer->inspect_held(e.inspect_held != 0);
                 }
             }
@@ -3694,6 +3703,14 @@ int run(const native::Options &opt) {
             // The replay camera does this itself for its in-eye view; flying in noclip there is nothing to stay under.
             if (!viewer.active && !external_camera && (spectator || !practice.noclip))
                 eye[2] = native::clear_eye_z(core.get(), eye[0], eye[1], eye_hull_top, eye[2]);
+            // Only ever down from the eye, so it can't lift the camera into a ceiling.
+            const bool own_eyes = !viewer.active && !external_camera && !spectator && !opt.camera;
+            if (own_eyes) {
+                const bool flying = practice.noclip || practice.infinite_flight.on();
+                eye_camera.frame(frame_seconds, std::hypot(curr.velocity[0], curr.velocity[1]), flying);
+                eye[2] += float(eye_camera.height());
+            } else
+                eye_camera.skip_frame();
             if (spectator) room.spectator_run(display_run, display_style, *spectator, steady_seconds, epoch_ms());
             if (hide_players) actors.clear();
             native::PrimaryGhost primary_ghost;
@@ -3742,7 +3759,8 @@ int run(const native::Options &opt) {
             if (local_scope && simulation_active) scope.frame(frame_seconds);
             renderer->use_runner_view(viewer.active ? viewer.runner_view : std::nullopt);
             const float view_fov = viewer.active && viewer.runner_view ? float(viewer.runner_view->fov) : prefs.fov;
-            renderer->set_camera_fov(local_scope ? scope.fov(prefs.fov) : view_fov);
+            const float own_fov = prefs.fov + float(eye_camera.fov());
+            renderer->set_camera_fov(local_scope ? scope.fov(own_fov) : view_fov);
             if (local_scope && scope.scoped()) renderer->set_viewmodel_visible(false);
             const bool world_record_finish =
                     !viewer.active && !spectator && !practice.active && !turn_admission.local_only
