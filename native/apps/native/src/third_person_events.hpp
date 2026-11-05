@@ -60,6 +60,13 @@ inline Actor own_actor(const BhSnapshot &state, float pitch, float yaw, uint32_t
     return actor;
 }
 
+// A snapshot with its player at a whole tick (the replay viewer shows a smoothed one between ticks).
+inline BhSnapshot at_tick(const BhSnapshot &shown, const BhState &tick) {
+    BhSnapshot out = shown;
+    out.player = tick;
+    return out;
+}
+
 // The bunny at one of the frames before a cut (replay_preroll.hpp): `model`'s look and weapon with the frame's state,
 // view and strafe key, and none of `model`'s gestures.
 inline Actor prerolled_actor(const Actor &model, const native::PrerollFrame &frame) {

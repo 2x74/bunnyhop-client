@@ -5,6 +5,7 @@
 #include "actor_bank.hpp"
 #include "actor_gestures.hpp"
 #include "actor_legs.hpp"
+#include "actor_ticks.hpp"
 #include "actor_springs.hpp"
 #include <vector>
 #include <array>
@@ -558,6 +559,9 @@ struct State {
     BodyBank bodyBank;
     LegLayer legs;
     double bank = 0;
+    // The last two posed ticks, and what's shown this frame: the last pose, or a blend of the two (present()).
+    TickPresentation ticks;
+    ShownPose shown;
     // Per-model 0..1 seed (idle shift phase, ear twitch schedule), the reduced-motion scale, and the visual clock at
     // the last ear update.
     double seed = 0, motion = 1, twitchAt = 0;
@@ -1008,9 +1012,17 @@ struct State {
                     std::copy_n(out.data() + d.rigParents[i] * 12, 12, out.data() + i * 12);
         }
         earPose(s, dt, seconds, resetNow, out, acting);
-        if (!acting) framePose = out;
+        shown = {feetYaw, bank, s.position};
+        if (!acting) {
+            framePose = out;
+            ticks.keep(out, feetYaw, bank, s.position, resetNow);
+        }
         return true;
     }
+
+    // Shows the bunny `amount` of the way from the tick before to the last pose (the replay viewer poses it once per
+    // tick; actor_ticks.hpp), into `out` and `shown`.
+    void present(double amount, V &out) { shown = ticks.present(amount, out); }
 
 private:
     V framePose;

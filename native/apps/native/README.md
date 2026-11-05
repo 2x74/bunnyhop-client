@@ -97,6 +97,8 @@ Check sensitivity with a physical mouse before using Raw; it has not completed t
 - Settings → Viewmodel → Inspect: Quiet starts with a short blade check that only you see. Press again for the knife's
   tricks, which replays record. An attack blends an inspect out instead of cutting to the swing.
 - Settings → Viewmodel → Hard landing settle and Speed FOV are off by default and only move the picture.
+- With your system's reduce motion setting on, the hands, the gun's movement and the bunny in third person move at 45%
+  and Speed FOV stays off, as on the website.
 - The M4A1 has its own model and puts its suppressor on and off in 2.0 s (physics 25).
 
 

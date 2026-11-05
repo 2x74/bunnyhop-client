@@ -15,11 +15,35 @@ const BONES_EVERY = 3;
 const OUTFIT = "outfit-cream";
 
 // The floor the ground probe sees around the start: a gentle wave, so planted feet follow a slope. Below the drop
-// there's no floor within the probe's reach and the feet use their own plane.
-const FLOOR = { waveX: 1.5, waveY: 0.8, periodX: 37, periodY: 23 };
+// there's no floor within the probe's reach and the feet use their own plane. Far along x (teleports, apart from the
+// feet's reach of each other): a 16-unit stair, a lift (its height per frame) and two ramps rising along x.
+const FLOOR = {
+  waveX: 1.5,
+  waveY: 0.8,
+  periodX: 37,
+  periodY: 23,
+  stair: { from: 10000, edge: 10100, rise: 16 },
+  lift: { from: 20000 },
+  ramps: [
+    { from: 30000, at: 30100, slope: 0.5 },
+    { from: 40000, at: 40100, slope: 0.8 },
+  ],
+};
 const DROP_Z = -335;
+let liftZ = 0;
 function floorAt(x: number, y: number): number {
+  for (let i = FLOOR.ramps.length - 1; i >= 0; i--) {
+    const ramp = FLOOR.ramps[i];
+    if (x >= ramp.from) return ramp.slope * (x - ramp.at);
+  }
+  if (x >= FLOOR.lift.from) return liftZ;
+  if (x >= FLOOR.stair.from) return x > FLOOR.stair.edge ? FLOOR.stair.rise : 0;
   return FLOOR.waveX * Math.sin(x / FLOOR.periodX) + FLOOR.waveY * Math.cos(y / FLOOR.periodY);
+}
+// Where the hull rests on a ramp: on its uphill edge, 16 units out (as Source's box does).
+const HULL_HALF = 16;
+function onRamp(ramp: { at: number; slope: number }, x: number): number {
+  return ramp.slope * (x - ramp.at) + Math.abs(ramp.slope) * HULL_HALF;
 }
 function probe(x: number, y: number, z: number): number | null {
   const ground = floorAt(x, y);
@@ -41,6 +65,8 @@ interface Player {
 interface Segment {
   name: string;
   seconds: number;
+  // A teleport (and snap) to here, facing this yaw, as the segment starts.
+  teleport?: { pos: [number, number, number]; yaw: number };
   // Sets the player for time t (s) into the segment; `dt` is this frame's step.
   step: (p: Player, t: number, dt: number) => void;
 }
@@ -188,6 +214,66 @@ for (let i = 0; i < 3; i++) {
 }
 segments.push(stand("final stand", 1.6));
 
+// Changing support: Astra's stair edge (the feet origin over the lower floor, the hull on the tread), a foot beside the
+// edge, walking down the stair, a lift carrying planted feet, a walk up and down a ramp (the hips drop for the lower
+// foot) and a ramp steeper than the soles tilt.
+const { stair, ramps } = FLOOR;
+const standAt = (name: string, seconds: number, pos: [number, number, number]): Segment => ({
+  name,
+  seconds,
+  step: (p) => {
+    onGround(p, 0);
+    p.pos = [...pos];
+  },
+});
+const walkRamp = (name: string, seconds: number, speed: number): Segment => ({
+  name,
+  seconds,
+  step: (p) => {
+    onGround(p, 0);
+    p.vel[0] = speed;
+    p.vel[2] = speed * ramps[0].slope;
+    p.pos[2] = onRamp(ramps[0], p.pos[0]);
+  },
+});
+segments.push(
+  { ...stand("to the stairs", 1), teleport: { pos: [stair.edge - 30, 0, 0], yaw: 0 } },
+  standAt("stair edge", 1.5, [stair.edge - 8, 0, stair.rise]),
+  standAt("onto the tread", 1, [stair.edge + 2, 0, stair.rise]),
+  {
+    name: "down the stair",
+    seconds: 1.2,
+    step: (p) => {
+      onGround(p, 0);
+      p.vel[0] = -40;
+      p.pos[2] = p.pos[0] > stair.edge - HULL_HALF ? stair.rise : 0;
+    },
+  },
+  { ...stand("to the lift", 1), teleport: { pos: [FLOOR.lift.from + 100, 0, 0], yaw: 0 } },
+  {
+    name: "lift",
+    seconds: 1,
+    step: (p, t) => {
+      onGround(p, 0);
+      liftZ = 100 * t;
+      p.pos[2] = liftZ;
+      p.vel[2] = 100;
+    },
+  },
+  {
+    name: "lift top",
+    seconds: 0.6,
+    step: (p) => {
+      onGround(p, 0);
+      p.pos[2] = liftZ;
+    },
+  },
+  { ...stand("to the ramp", 1), teleport: { pos: [ramps[0].at, 0, onRamp(ramps[0], ramps[0].at)], yaw: 0 } },
+  walkRamp("up the ramp", 2.5, 6),
+  walkRamp("down the ramp", 1.5, -6),
+  { ...stand("steep ramp", 0.8), teleport: { pos: [ramps[1].at, 0, onRamp(ramps[1], ramps[1].at)], yaw: 0 } },
+);
+
 const SNAP_SEGMENT = "strafe hop 1";
 const SWINGS = [1, 4];
 
@@ -236,9 +322,13 @@ function run(data: StudioData) {
     index = 0;
   for (const segment of segments) {
     // A teleport: the website snaps on a jump this far by itself; both sides are told.
-    let snap = index === 0 || segment.name === SNAP_SEGMENT;
+    let snap = index === 0 || segment.name === SNAP_SEGMENT || segment.teleport !== undefined;
     if (segment.name === SNAP_SEGMENT) {
       p.pos = [p.pos[0] + 400, p.pos[1] + 400, p.pos[2]];
+    }
+    if (segment.teleport) {
+      p.pos = [...segment.teleport.pos];
+      p.yaw = segment.teleport.yaw;
     }
     for (let t = 0; t < segment.seconds; index++) {
       const dt = FRAME_SECONDS[index % FRAME_SECONDS.length];
@@ -267,6 +357,7 @@ function run(data: StudioData) {
         segment: segment.name,
         time,
         snap,
+        lift: liftZ,
         pose,
         feetYaw: inside.yaw,
         bank: inside.bodyBank.bank,

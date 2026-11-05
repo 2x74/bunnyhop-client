@@ -92,6 +92,30 @@ int main() {
     assert(!cursor.advance(103.9, true, snapped));
     assert(!cursor.advance(100, true, snapped) && snapped);
     assert(!cursor.advance(900, true, snapped) && snapped);
-    std::cout << "Recorded 2.5s trails, seeks, teleport cuts, route markers, source colours, toggles and ghost "
-                 "playback passed\n";
+    // The bunny pre-rolls on a cut: its first moving frame, leaving its start after being parked, a seek or a restart.
+    cursor.reset();
+    cursor.advance(100, false, snapped);
+    assert(!cursor.cut);
+    cursor.advance(100, false, snapped);
+    assert(!cursor.cut);
+    cursor.advance(100.4, true, snapped);
+    assert(cursor.cut && !snapped);
+    cursor.advance(101.2, true, snapped);
+    assert(!cursor.cut);
+    cursor.advance(40, true, snapped);
+    assert(cursor.cut && snapped);
+    cursor.reset();
+    cursor.advance(300, true, snapped);
+    assert(cursor.cut);
+    // Through 0.6 s of the path before the shown tick, from just after a teleport in it, nothing before tick 0.
+    path.teleports.assign(1001, 0);
+    assert(ghost_preroll_ticks(path, 500, .6) == std::pair(440u, 500u));
+    assert(ghost_preroll_ticks(path, 30, .6) == std::pair(0u, 30u));
+    path.teleports[470] = 1;
+    assert(ghost_preroll_ticks(path, 500, .6) == std::pair(470u, 500u));
+    path.teleports[500] = 1;
+    assert(ghost_preroll_ticks(path, 500, .6) == std::pair(500u, 500u));
+    assert(ghost_preroll_ticks(path, 5000, .6).second == 1000);
+    std::cout << "Recorded 2.5s trails, seeks, teleport cuts, route markers, source colours, toggles, ghost "
+                 "playback and pre-roll passed\n";
 }

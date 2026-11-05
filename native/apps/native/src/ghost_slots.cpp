@@ -92,6 +92,13 @@ bool GhostSlots::present(
     actor.inspect = 0;
     actor.inspectHeld = false;
     const auto range = cursors[index].advance(pose.tick, pose.moving, actor.snapped);
+    actor.preroll = cursors[index].cut;
+    if (actor.preroll) actor.snapped = false;
+    // The strafe key, for the bank into strafes (ghost.ts sample).
+    BhCmd command{};
+    const uint32_t shown_tick = actor.frame.tick;
+    if (pose.moving && shown_tick > 0 && bh_ghost_command(core, slot.handle, shown_tick, &command))
+        actor.sidemove = command.side;
     BhReplayEvents events{};
     if (range && bh_ghost_events(core, slot.handle, range->first, range->second, &events)) {
         actor.attack = events.cosmetic;

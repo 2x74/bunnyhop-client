@@ -1,6 +1,6 @@
 // The third-person bunny against the website's own model (actor-pose-oracle.ts): the CS:S animation, the bank into
-// turns, the leg layer (planting, steps, jump phases, landings, idle shift, climb and swim) and the ears, frame by
-// frame through a scripted run at mixed frame rates.
+// turns, the leg layer (planting, steps, jump phases, landings, idle shift, climb and swim; slopes, a stair edge, a
+// lift and ramps) and the ears, frame by frame through a scripted run at mixed frame rates.
 #include "actor_anim.hpp"
 #include <cmath>
 #include <filesystem>
@@ -9,6 +9,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -44,12 +45,43 @@ const char *mode_name(LegMode mode) {
     return "";
 }
 
-// The oracle's floor: a gentle wave the probe finds within reach below the point it's given.
-native_actor_anim::GroundProbe wave_probe(const J &floor) {
-    const double wave_x = floor.at("waveX"), wave_y = floor.at("waveY");
-    const double period_x = floor.at("periodX"), period_y = floor.at("periodY");
-    return [=](double x, double y, double z) -> std::optional<double> {
-        const double ground = wave_x * std::sin(x / period_x) + wave_y * std::cos(y / period_y);
+// The oracle's floor: a gentle wave, and far along x a stair, a lift (`lift` is its height this frame) and ramps.
+struct Floor {
+    struct Ramp {
+        double from, at, slope;
+    };
+
+    double wave_x, wave_y, period_x, period_y;
+    double stair_from, stair_edge, stair_rise, lift_from;
+    std::vector<Ramp> ramps;
+    double lift = 0;
+
+    explicit Floor(const J &floor)
+        : wave_x(floor.at("waveX"))
+        , wave_y(floor.at("waveY"))
+        , period_x(floor.at("periodX"))
+        , period_y(floor.at("periodY"))
+        , stair_from(floor.at("stair").at("from"))
+        , stair_edge(floor.at("stair").at("edge"))
+        , stair_rise(floor.at("stair").at("rise"))
+        , lift_from(floor.at("lift").at("from")) {
+        for (const auto &ramp : floor.at("ramps"))
+            ramps.push_back({ramp.at("from"), ramp.at("at"), ramp.at("slope")});
+    }
+
+    double at(double x, double y) const {
+        for (auto ramp = ramps.rbegin(); ramp != ramps.rend(); ++ramp)
+            if (x >= ramp->from) return ramp->slope * (x - ramp->at);
+        if (x >= lift_from) return lift;
+        if (x >= stair_from) return x > stair_edge ? stair_rise : 0;
+        return wave_x * std::sin(x / period_x) + wave_y * std::cos(y / period_y);
+    }
+};
+
+// The probe finds the floor within reach below the point it's given.
+native_actor_anim::GroundProbe floor_probe(const Floor &floor) {
+    return [&floor](double x, double y, double z) -> std::optional<double> {
+        const double ground = floor.at(x, y);
         if (ground <= z && ground >= z - probe_depth_units) return ground;
         return std::nullopt;
     };
@@ -145,11 +177,13 @@ int main(int argc, char **argv) {
         check(std::abs(seed - oracle.at("seed").get<double>()) <= seed_tolerance,
               "the model's seed isn't the website's");
         state->set_seed(seed);
-        state->legs.set_ground_probe(wave_probe(oracle.at("floor")));
+        const auto floor = std::make_unique<Floor>(oracle.at("floor"));
+        state->legs.set_ground_probe(floor_probe(*floor));
         native_actor_anim::V skin;
         Worst worst;
         for (const auto &frame : oracle.at("frames")) {
             const auto &pose = frame.at("pose");
+            floor->lift = frame.at("lift");
             state->pose(input_of(pose), frame.at("time"), frame.at("snap"), pose.at("attack").get<int>() != 0, skin);
             compare_frame(frame, *state, skin, data->bind, worst);
         }

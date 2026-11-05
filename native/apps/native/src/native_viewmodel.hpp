@@ -53,10 +53,8 @@ class NativeViewmodel {
     double gunFlashStarted = -100;
     std::shared_ptr<native_actor_anim::Data> actorAnimationData;
     std::unordered_map<std::string, std::unique_ptr<native_actor_anim::State>> actorAnimationStates;
-    // The website's reduced-motion policy (viewmodel/feel.ts REDUCED_MOTION): motion at 45%.
-    static constexpr double reduced_motion_scale = .45;
     BhContext *groundCore = nullptr;
-    double actorMotion = 1;
+    double motionScale = 1;
     Gl &gl;
     using PlayerProgram = native_render::PlayerProgram;
     using PlayerMaterial = native_render::PlayerMaterial;
@@ -520,13 +518,19 @@ class NativeViewmodel {
                                    || acting->gesture.arms[1].turn || acting->gesture.arms[1].reach);
         hold.apply(pose, input, arms_free);
         pose.insert(pose.end(), hold.skin.begin(), hold.skin.end());
-        const double yaw = feetYaw * native_gun::radians_per_degree;
+        // Where the drawn gun's muzzle is: the feet yaw and the bank, as draw_posed_actor places the model.
+        BhTransform t{};
+        const auto origin = actor_origin(actor);
+        std::copy(origin.begin(), origin.end(), t.origin);
+        t.angles[1] = feetYaw;
+        t.angles[2] = float(actor_bank(actor.id));
         const auto &m = hold.muzzle;
-        state.muzzle = std::array<float, 3>{
-                actor.frame.position[0] + float(m[0] * std::cos(yaw) - m[1] * std::sin(yaw)),
-                actor.frame.position[1] + float(m[0] * std::sin(yaw) + m[1] * std::cos(yaw)),
-                actor.frame.position[2] + float(m[2])
-        };
+        state.muzzle = native::transform_point(actor_model(t), {float(m[0]), float(m[1]), float(m[2])});
+    }
+
+    // The bunny's model matrix: its feet yaw, and the bank into turns rolling the body about its hips.
+    static native::Matrix actor_model(const BhTransform &t) {
+        return native::model_matrix_about(t, float(native_actor_anim::bank_hip_units));
     }
 
     void actor_actions(
@@ -1106,7 +1110,15 @@ public:
 
     double actor_bank(const std::string &id) const {
         const auto found = actorAnimationStates.find(id);
-        return found == actorAnimationStates.end() ? 0 : found->second->bank;
+        return found == actorAnimationStates.end() ? 0 : found->second->shown.bank;
+    }
+
+    // Where the bunny's feet origin is drawn: between its last two ticks when it's tick-presented, else its frame's.
+    std::array<float, 3> actor_origin(const native_render::Actor &actor) const {
+        const auto &position = actor.frame.position;
+        const auto found = actor.tickBlend ? actorAnimationStates.find(actor.id) : actorAnimationStates.end();
+        if (found == actorAnimationStates.end()) return {position[0], position[1], position[2]};
+        return found->second->shown.root;
     }
 
     // The ground under a point for the bunny's planted feet (web legs.ts probeFromTrace): a line straight down through
@@ -1191,10 +1203,11 @@ public:
 
     std::span<const float> actor_bind() const { return actorBind; }
 
-    // The world the bunnies' planted feet probe for ground (null: the feet's own plane), and prefers-reduced-motion.
+    // The world the bunnies' planted feet probe for ground (null: the feet's own plane), and prefers-reduced-motion
+    // (the bunnies' and the first-person weapons' motion scale).
     void set_actor_context(BhContext *world, bool reduced_motion) {
         groundCore = world;
-        actorMotion = reduced_motion ? reduced_motion_scale : 1;
+        motionScale = native::motion_scale(reduced_motion);
     }
 
     // Drops an actor's animation and gesture state, so its next pose starts from scratch.
@@ -1269,9 +1282,10 @@ public:
                 input.jumped = actor.jumped;
                 state.hood(l.hoodDown);
                 state.set_seed(actor_seed(actor, l));
-                state.motion = actorMotion;
+                state.motion = motionScale;
                 state.pose(input, seconds, pulses.snapped, pulses.swing, pose, acting);
-                actorYaw = float(state.feetYaw);
+                if (actor.tickBlend && !acting) state.present(*actor.tickBlend, pose);
+                actorYaw = float(state.shown.feet_yaw);
             }
             actor_actions(actor, pulses, l, seconds, actorYaw, acting);
         }
@@ -1289,16 +1303,12 @@ public:
             float spin = 0
     ) {
         const auto &l = look(actor.outfit, actor.loadout);
-        const auto &frame = actor.frame;
         BhTransform t{};
-        std::copy(frame.position, frame.position + 3, t.origin);
+        const auto origin = actor_origin(actor);
+        std::copy(origin.begin(), origin.end(), t.origin);
         t.angles[1] = actorYaw + spin;
-        // The bank into turns rolls the body about its hips, so the feet and head swing opposite ways by a few units.
         t.angles[2] = float(actor_bank(actor.id));
-        auto model = native::model_matrix(t);
-        for (int r = 0; r < 3; r++)
-            model[12 + r] -= float(native_actor_anim::bank_hip_units) * model[8 + r];
-        model[14] += float(native_actor_anim::bank_hip_units);
+        auto model = actor_model(t);
         for (int r = 0; r < 3; r++) {
             model[r] *= 1 - squash * .5f;
             model[4 + r] *= 1 - squash * .5f;
@@ -1317,20 +1327,18 @@ public:
         const auto &tail = actorActions[actor.id].ponytail;
         const float ponytail[4] = {float(tail.pitch), float(tail.side), l.hairLength, 0};
         gl.Uniform4fv(actorProgram.ponytail, 1, ponytail);
-        world_body_uniforms(actorProgram, frame.position);
+        world_body_uniforms(actorProgram, origin.data());
         if (source != native_render::GhostSource::none) ghost_uniforms(actorProgram, actor, source);
         const auto visibleParts = parts_for(actor, l);
         gl.Enable(GL_DEPTH_TEST);
         gl.Disable(GL_CULL_FACE);
         gl.DepthFunc(GL_LEQUAL);
         if (showGlow && actor.playerGlow && actor.playerGlow->enabled && actor.opacity >= .999f) {
-            const float distance = std::hypot(
-                    std::hypot(eye[0] - frame.position[0], eye[1] - frame.position[1]), eye[2] - frame.position[2]
-            );
+            const float distance = std::hypot(std::hypot(eye[0] - origin[0], eye[1] - origin[1]), eye[2] - origin[2]);
             gl.Uniform2f(actorProgram.glowNearFade, 14, 60);
             gl.Uniform1f(actorProgram.glowDistance, native_render::glow_distance(distance));
-            const float top[3] = {frame.position[0], frame.position[1], frame.position[2] + 64};
-            const auto feet = native_render::to_web_space(frame.position), head = native_render::to_web_space(top);
+            const float top[3] = {origin[0], origin[1], origin[2] + 64};
+            const auto feet = native_render::to_web_space(origin.data()), head = native_render::to_web_space(top);
             gl.Uniform3fv(actorProgram.glowAxisA, 1, feet.data());
             gl.Uniform3fv(actorProgram.glowAxisB, 1, head.data());
             draw_glow(visibleParts, actorProgram, actor.playerGlow->aura && distance < 650, 1);
@@ -1440,6 +1448,7 @@ private:
         in.feel = !previewing;
         in.bob = bobScale;
         in.sway = swayScale;
+        in.motion = motionScale;
         in.quiet_inspect = quietInspect;
         return in;
     }

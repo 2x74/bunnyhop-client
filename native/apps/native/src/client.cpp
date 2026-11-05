@@ -970,6 +970,7 @@ int run(const native::Options &opt) {
         auto next_renderer = map_preparation.renderer ? std::move(map_preparation.renderer)
                                                       : std::make_unique<native::Renderer>(gl, next.core.get(), assets);
         next_renderer->set_map_identity(id, detail.is_object() ? detail.value("sha256", std::string()) : std::string());
+        next_renderer->load_map_volumes(data_location::from_utf8(path));
         game.install(std::move(next.core), std::move(next_renderer), practice, audio);
         map_audio.start(core.get(), data_location::from_utf8(path), data_location::from_utf8(content));
         // The pause screen shows this map itself, never the home tour.
@@ -3782,7 +3783,8 @@ int run(const native::Options &opt) {
             const bool own_eyes = !viewer.active && !external_camera && !spectator && !opt.camera;
             if (own_eyes) {
                 const bool flying = practice.noclip || practice.infinite_flight.on();
-                eye_camera.frame(frame_seconds, std::hypot(curr.velocity[0], curr.velocity[1]), flying);
+                const double motion = native::motion_scale(menu_reduced_motion);
+                eye_camera.frame(frame_seconds, std::hypot(curr.velocity[0], curr.velocity[1]), flying, motion);
                 eye[2] += float(eye_camera.height());
             } else
                 eye_camera.skip_frame();
@@ -3811,7 +3813,14 @@ int run(const native::Options &opt) {
                 renderer->set_viewmodel_visible(false);
                 BhWeaponReport held{};
                 bh_weapon_report(core.get(), &held);
-                auto self = native_render::own_actor(state, input.pitch, input.yaw(), held.active);
+                // A replay's bunny poses on each tick's own state and blends between ticks (actor_ticks.hpp).
+                auto self = native_render::own_actor(
+                        viewer.active ? native_render::at_tick(state, curr) : state,
+                        input.pitch,
+                        input.yaw(),
+                        held.active
+                );
+                if (viewer.active) self.tickBlend = blend;
                 BhCmd last_command{};
                 if (bh_last_command(core.get(), &last_command)) self.sidemove = last_command.side;
                 self.outfit = viewer.active ? viewer.runner_outfit : outfit;

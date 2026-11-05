@@ -455,7 +455,7 @@ if(BUNNYHOP_BUILD_CLIENT)
     endif()
 endif()
 if(BUILD_TESTING)
-    foreach(parity_test IN ITEMS scene_draw_list graphics_settings zone_effects native_chat render_math water_capture texture_bleed room_state gameplay data_location sniper_zoom music_envelope weapon_menu ghost_trails activity cosmetics window_settings window_modes display_modes hud_theme replay_controls ghost_compare)
+    foreach(parity_test IN ITEMS scene_draw_list graphics_settings zone_effects native_chat render_math water_capture texture_bleed room_state gameplay data_location sniper_zoom music_envelope weapon_menu ghost_trails actor_ticks activity cosmetics window_settings window_modes display_modes hud_theme replay_controls ghost_compare)
         add_executable(bunnyhop-native-${parity_test}-tests src/${parity_test}_tests.cpp)
         target_include_directories(bunnyhop-native-${parity_test}-tests PRIVATE include vendor src)
         target_compile_options(bunnyhop-native-${parity_test}-tests PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
@@ -869,6 +869,27 @@ if(BUILD_TESTING)
             "${ACTOR_POSE_ASSETS}" "${ACTOR_POSE_ORACLE}")
         set_tests_properties(native_actor_pose_web PROPERTIES
             FIXTURES_REQUIRED actor_pose_oracle SKIP_RETURN_CODE 77 TIMEOUT 60)
+    endif()
+endif()
+
+# The water and ladders ghosts and other players swim and climb from: a synthetic BSP, then the website's own code on
+# the BSPs in native/maps (skipped without any).
+if(BUILD_TESTING)
+    add_executable(bunnyhop-native-map-volumes-tests src/map_volumes_tests.cpp)
+    target_include_directories(bunnyhop-native-map-volumes-tests PRIVATE vendor src)
+    target_compile_options(bunnyhop-native-map-volumes-tests PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
+    add_test(NAME native_map_volumes COMMAND bunnyhop-native-map-volumes-tests)
+    find_program(MAP_VOLUMES_BUN bun)
+    if(MAP_VOLUMES_BUN)
+        set(MAP_VOLUMES_ORACLE "${CMAKE_CURRENT_BINARY_DIR}/map-volumes-oracle.json")
+        add_test(NAME native_map_volumes_oracle COMMAND "${MAP_VOLUMES_BUN}" apps/native/src/map-volumes-oracle.ts
+            "${BUNNYHOP_ROOT}/maps" "${MAP_VOLUMES_ORACLE}")
+        set_tests_properties(native_map_volumes_oracle PROPERTIES
+            WORKING_DIRECTORY "${BUNNYHOP_ROOT}" FIXTURES_SETUP map_volumes_oracle TIMEOUT 120)
+        add_test(NAME native_map_volumes_web COMMAND bunnyhop-native-map-volumes-tests "${MAP_VOLUMES_ORACLE}")
+        set_tests_properties(native_map_volumes_web PROPERTIES
+            FIXTURES_REQUIRED map_volumes_oracle SKIP_RETURN_CODE 77 TIMEOUT 120)
     endif()
 endif()
 
