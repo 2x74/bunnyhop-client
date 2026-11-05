@@ -2017,6 +2017,8 @@ public:
         auto loading = mapPropMeshes->load(core, propGroups, names);
         while (!loading.step())
             co_yield "animated prop";
+        mapPropMeshes->bind_bones(GL_TEXTURE0 + map_prop_bone_unit);
+        gl.ActiveTexture(GL_TEXTURE0);
     }
 
     void prepare_sky() {

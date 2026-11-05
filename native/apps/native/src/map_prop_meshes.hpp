@@ -43,7 +43,8 @@ public:
                 ++frozen_;
             co_yield "animated prop";
         }
-        if (!props.instances().empty()) create_bone_texture();
+        // The world shaders sample it on every draw, so it exists even when nothing poses.
+        create_bone_texture();
         prepare_states(core);
         std::cout << "Map props: " << props.instances().size() << " animated props, " << props.model_count()
                   << " models, " << frozen_ << " frozen\n";
@@ -326,7 +327,7 @@ private:
     }
 
     void create_bone_texture() {
-        const uint32_t rows = uint32_t((props.bone_count() + bones_per_row - 1) / bones_per_row);
+        const uint32_t rows = std::max(1u, uint32_t((props.bone_count() + bones_per_row - 1) / bones_per_row));
         GLint limit = 0;
         gl.GetIntegerv(GL_MAX_TEXTURE_SIZE, &limit);
         if (GLint(rows) > limit) throw std::runtime_error("Too many animated prop bones for one texture");
