@@ -15,7 +15,7 @@ namespace {
 
 using native::Json;
 
-bool near(double a, double b) {
+bool close_to(double a, double b) {
     return std::abs(a - b) < 1e-9;
 }
 
@@ -30,13 +30,13 @@ void test_map_look_wins_on_its_map() {
             {{"mapLooks", {{"bhop_aux_a9", {{"brightness", 1.3}}}, {"bhop_dumb_blocks_3", {{"fullbright", true}}}}}}
     );
     const auto aux = native::GraphicsSettings::read(settings, "bhop_aux_a9");
-    assert(near(aux.brightness, 1.3f) && !aux.fullbright);
+    assert(close_to(aux.brightness, 1.3f) && !aux.fullbright);
     const auto blocks = native::GraphicsSettings::read(settings, "bhop_dumb_blocks_3");
-    assert(near(blocks.brightness, 1.2f) && blocks.fullbright);
+    assert(close_to(blocks.brightness, 1.2f) && blocks.fullbright);
     const auto other = native::GraphicsSettings::read(settings, "bhop_eazy");
-    assert(near(other.brightness, 1.2f) && !other.fullbright);
+    assert(close_to(other.brightness, 1.2f) && !other.fullbright);
     const auto home = native::GraphicsSettings::read(settings);
-    assert(near(home.brightness, 1.2f) && !home.fullbright);
+    assert(close_to(home.brightness, 1.2f) && !home.fullbright);
 }
 
 // Saved or sent looks are cleaned like the website's: bad names and values are dropped, brightness is clamped, and
@@ -73,12 +73,12 @@ void test_look_menu_patches() {
     assert(!menu.pick(native::LookMenu::reset, settings) && !menu.pick(native::LookMenu::everywhere, settings));
     settings = native::patch_settings(settings, *menu.pick(native::LookMenu::brighter, settings));
     menu.refresh(settings);
-    assert(near(settings["mapLooks"]["bhop_aux_a9"]["brightness"].get<double>(), 1.15));
+    assert(close_to(settings["mapLooks"]["bhop_aux_a9"]["brightness"].get<double>(), 1.15));
     settings = native::patch_settings(settings, *menu.pick(native::LookMenu::fullbright, settings));
     menu.refresh(settings);
     assert(settings["mapLooks"]["bhop_aux_a9"] == Json({{"brightness", 1.15}, {"fullbright", true}}));
     const auto everywhere = *menu.pick(native::LookMenu::everywhere, settings);
-    assert(near(everywhere["graphicsBrightness"].get<double>(), 1.15) && everywhere["graphicsFullbright"] == true);
+    assert(close_to(everywhere["graphicsBrightness"].get<double>(), 1.15) && everywhere["graphicsFullbright"] == true);
     assert(everywhere["mapLooks"] == Json::object());
     const auto reset = *menu.pick(native::LookMenu::reset, settings);
     assert(reset == Json({{"mapLooks", Json::object()}}));
@@ -98,13 +98,13 @@ void test_look_menu_bar_and_limits() {
     native::LookMenu menu;
     menu.toggle("bhop_dark", settings);
     const auto darker = *menu.pick(native::LookMenu::darker, settings);
-    assert(near(darker["mapLooks"]["bhop_dark"]["brightness"].get<double>(), .5));
+    assert(close_to(darker["mapLooks"]["bhop_dark"]["brightness"].get<double>(), .5));
     const auto rows = menu.rows(1280, 720, 100);
     const float bar_y = rows.top + 59;
     assert(!menu.bar_value(1280, 720, 100, rows.left + 18, rows.top + 120));
-    assert(near(*menu.bar_value(1280, 720, 100, rows.left + 18, bar_y), .5));
-    assert(near(*menu.bar_value(1280, 720, 100, rows.left + 18 + 330, bar_y), 2));
-    assert(near(*menu.bar_value(1280, 720, 100, rows.left + 18 + 110, bar_y), 1));
+    assert(close_to(*menu.bar_value(1280, 720, 100, rows.left + 18, bar_y), .5));
+    assert(close_to(*menu.bar_value(1280, 720, 100, rows.left + 18 + 330, bar_y), 2));
+    assert(close_to(*menu.bar_value(1280, 720, 100, rows.left + 18 + 110, bar_y), 1));
 }
 
 // The cursor stays out while the menu it was held for is open, comes back to the game once it closes, and a pause
@@ -130,7 +130,7 @@ void test_hud_point() {
     const native::HudArea area{100, 50, 1920, 1080};
     const auto at = native::hud_point(160, 100, area, 2, 100);
     const native::HudGeometry geometry(1920, 1080, 100);
-    assert(near(at[0], (320 - 100) / geometry.scale) && near(at[1], (200 - 50) / geometry.scale));
+    assert(close_to(at[0], (320 - 100) / geometry.scale) && close_to(at[1], (200 - 50) / geometry.scale));
 }
 
 }  // namespace

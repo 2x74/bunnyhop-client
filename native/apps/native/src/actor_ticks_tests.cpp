@@ -9,7 +9,7 @@
 namespace {
 using native_actor_anim::TickPresentation;
 
-bool near(double a, double b) {
+bool close_to(double a, double b) {
     return std::abs(a - b) < 1e-5;
 }
 
@@ -23,14 +23,14 @@ void test_blend() {
     ticks.keep(first, 350, 2, {0, 0, 0}, false);
     std::vector<float> shown(12, -1);
     auto pose = ticks.present(.5, shown);
-    assert(near(shown[0], 0) && same_angle(pose.feet_yaw, 350) && near(pose.root[0], 0));
+    assert(close_to(shown[0], 0) && same_angle(pose.feet_yaw, 350) && close_to(pose.root[0], 0));
     ticks.keep(second, 10, 4, {10, 0, 2}, false);
     pose = ticks.present(.25, shown);
-    assert(near(shown[0], 2.5) && near(shown[11], 2.5));
-    assert(same_angle(pose.feet_yaw, 355) && near(pose.bank, 2.5));
-    assert(near(pose.root[0], 2.5) && near(pose.root[2], .5));
+    assert(close_to(shown[0], 2.5) && close_to(shown[11], 2.5));
+    assert(same_angle(pose.feet_yaw, 355) && close_to(pose.bank, 2.5));
+    assert(close_to(pose.root[0], 2.5) && close_to(pose.root[2], .5));
     pose = ticks.present(1.5, shown);
-    assert(near(shown[0], 10) && same_angle(pose.feet_yaw, 10) && near(pose.root[0], 10));
+    assert(close_to(shown[0], 10) && same_angle(pose.feet_yaw, 10) && close_to(pose.root[0], 10));
 }
 
 void test_teleport_holds() {
@@ -40,13 +40,13 @@ void test_teleport_holds() {
     ticks.keep(after, 90, 0, {500, 0, 0}, true);
     std::vector<float> shown(12);
     auto pose = ticks.present(.9, shown);
-    assert(near(shown[0], 1) && near(pose.root[0], 0) && same_angle(pose.feet_yaw, 0));
+    assert(close_to(shown[0], 1) && close_to(pose.root[0], 0) && same_angle(pose.feet_yaw, 0));
     pose = ticks.present(1, shown);
-    assert(near(shown[0], 7) && near(pose.root[0], 500));
+    assert(close_to(shown[0], 7) && close_to(pose.root[0], 500));
     ticks.reset();
     ticks.keep(after, 90, 0, {500, 0, 0}, false);
     ticks.present(0, shown);
-    assert(near(shown[0], 7));
+    assert(close_to(shown[0], 7));
 }
 }  // namespace
 
