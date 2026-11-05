@@ -4,6 +4,23 @@
 
 Update from Settings → Updates: press Update, then Restart to update. Your settings, replays and maps are kept.
 
+**Ranked**
+- Physics v25 and timer rules 4, matching website v0.0.37. Your existing runs don't change.
+- Every jump starts 1.5 units above the floor, as on Momentum and on CS:S servers with a landfix, so a jump goes the
+  same height every time. Crouch jumps onto ledges right at the height limit, like the long platform on
+  bhop_tranquility, now work every time instead of depending on how you landed.
+- Ramps and curves no longer stop you dead or freeze you in mid-air: the quarter-pipe on bhop_badges_mini, the drop
+  shaft on bhop_kotodama and the last stage of bhop_aux_a9 play smoothly now.
+
+**A/D-Only**
+- New style: A/D-Only (`!ad`, also `!a`, `!d`, `!aonly`, `!donly` and `!adonly`). Strafe with only A or only D in the
+  air: the first one you use in a run is the only one that works, and W and S do nothing. It has its own boards, like on
+  the website.
+
+**Replays**
+- Head-to-head links (`/h2h/…`) open in the replay viewer: the first run plays and the second rides along as the compare
+  ghost, with the time ahead or behind.
+
 **Fullscreen**
 - If fullscreen or borderless doesn't show, the game goes back to windowed by itself and keeps that. A game that froze
   or was closed while switching starts windowed next time and tells you why.
