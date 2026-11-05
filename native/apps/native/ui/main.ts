@@ -13,7 +13,7 @@ import { h } from "../../web/src/ui/dom";
 import { fetchMapIndex, mapBrowser, closeMapPanel } from "../../web/src/ui/maps";
 import { MapZoneWarning } from "./map-zone-warning";
 import { onNavigate } from "../../web/src/ui/nav";
-import { onViewerRequest } from "../../web/src/viewer/request";
+import { h2hFromPath, onViewerRequest } from "../../web/src/viewer/request";
 import { onRaceRequest } from "../../web/src/player/race";
 import { applyState, openAuth, openExternal, runSeconds, send, state, onBeforeSend, LIVE_ORIGIN } from "./bridge";
 import { NativeActivityService } from "./activity-service";
@@ -1108,6 +1108,12 @@ window.addEventListener("bunnyhop:navigate", (event) => {
   }
   if (url.pathname === "/gauntlets") {
     show("gauntlets");
+    return;
+  }
+  // Head to head: run A in the native viewer with run B as its compare ghost (replays.ts).
+  const pair = h2hFromPath(url.pathname);
+  if (pair) {
+    void watchRequest({ target: { runId: pair.a }, h2h: { runId: pair.b } }).catch(() => openWeb(url.pathname));
     return;
   }
   const replay = /^\/replay\/([\w-]+)$/.exec(url.pathname);

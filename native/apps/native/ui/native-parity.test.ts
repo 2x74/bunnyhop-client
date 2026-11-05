@@ -910,3 +910,42 @@ test("solo SSJ commands toggle in the host without relying on stale menu setting
     await browser.close();
   }
 });
+
+test("a head-to-head link plays run A natively with run B as its compare ghost", async () => {
+  const { browser, page, errors } = await open(1280, 720);
+  try {
+    for (const id of ["run_a", "run_b"])
+      await page.route(`**/api/runs/${id}/replay`, (r) =>
+        r.fulfill({ status: 200, contentType: "application/octet-stream", body: Buffer.from(`bhr-${id}`) }),
+      );
+    await page.route("**/api/runs/run_b", (r) => r.fulfill({ json: { player: { id: "p2", name: "Bee" } } }));
+    await page.evaluate(() =>
+      window.dispatchEvent(
+        new CustomEvent("bunnyhop:navigate", { detail: { url: "https://bunnyhop.lol/h2h/run_a/run_b" } }),
+      ),
+    );
+    await page.waitForFunction(() => (window as any).messages.some((m: any) => m.type === "replayData"));
+    const replays = (await page.evaluate(() => (window as any).messages)).filter((m: any) => m.type === "replayData");
+    expect(replays.map((m: any) => [m.action, m.name])).toEqual([["play", "run_a"]]);
+    // Nothing is compared until run A is up: the host compares only during playback.
+    expect((await page.evaluate(() => (window as any).messages)).some((m: any) => m.type === "replayCompare")).toBe(
+      false,
+    );
+    await page.evaluate(() =>
+      window.bunnyhopNativeMenu.onState({
+        playback: { active: true, id: "import-a", tick: 1, totalTicks: 10, paused: false, speed: 1 },
+      }),
+    );
+    await page.waitForFunction(() => (window as any).messages.some((m: any) => m.type === "replayCompare"));
+    const compare = (await page.evaluate(() => (window as any).messages)).find((m: any) => m.type === "replayCompare");
+    expect([compare.action, compare.kind, compare.name, atob(compare.replayBase64)]).toEqual([
+      "set",
+      "custom",
+      "Bee",
+      "bhr-run_b",
+    ]);
+    expect(errors).toEqual([]);
+  } finally {
+    await browser.close();
+  }
+}, 20_000);
