@@ -93,3 +93,25 @@ export function resolveRaceCommand(
     return { error: bonusTracks.length ? `This map has no Bonus ${track}.` : "This map has no bonus." };
   return { text: `/race #${who.slot} ${style} ${track}` };
 }
+
+/**
+ * A style command's switch, for one chat line. The host takes the style a moment later, but the website's command
+ * reads it back at once to say "!n goes back to Normal" only when the switch took (chat-commands.ts switchStyle).
+ * `request` sends the switch and says whether the host will take it.
+ */
+export class ChatStyleSwitch {
+  private asked: StyleId | null = null;
+
+  constructor(
+    private readonly current: () => StyleId,
+    private readonly request: (id: StyleId) => boolean,
+  ) {}
+
+  style(): StyleId {
+    return this.asked ?? this.current();
+  }
+
+  set(id: StyleId): void {
+    if (this.request(id)) this.asked = id;
+  }
+}

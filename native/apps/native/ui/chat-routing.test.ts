@@ -1,4 +1,5 @@
 import { afterAll, test, expect } from "bun:test";
+import { ChatStyleSwitch } from "./chat-input";
 import { dispatchNativeChat } from "./chat-routing";
 import { state } from "./bridge";
 import { chatCommands, suggestChat, type ChatContext } from "../../web/src/chat-commands";
@@ -134,4 +135,42 @@ test("explicit practice arguments and aliases keep their intent", () => {
   f.line("!practice invalid");
   expect(f.actions).toHaveLength(5);
   expect(f.replies.at(-1)).toContain("[on|off]");
+});
+test("a Russian layout or a leading dot runs the command, and the room gets it in its usual form", () => {
+  const f = fixture();
+  f.line("!ызус");
+  f.line(".rtv");
+  f.line(".кем");
+  f.line("!кфсу Экролин");
+  expect(f.actions).toEqual([
+    ["spec", ""],
+    ["race", "Экролин"],
+  ]);
+  expect(f.sent).toEqual([
+    { t: "chat", text: "/rtv" },
+    { t: "chat", text: "/rtv" },
+  ]);
+});
+test("chat that only looks like a command stays chat, as typed", () => {
+  const f = fixture();
+  const lines = ["...", ". ok", ".lol", ".gg", "!привет", "/спасибо", "кем"];
+  for (const text of lines) f.line(text);
+  expect(f.actions).toEqual([]);
+  expect(f.sent).toEqual(lines.map((text) => ({ t: "chat", text })));
+});
+test("a style command says how to get back to Normal, only when the switch takes", () => {
+  for (const taken of [true, false]) {
+    const f = fixture();
+    const styleSwitch = new ChatStyleSwitch(
+      () => "autohop",
+      () => taken,
+    );
+    f.context.game!.style = () => styleSwitch.style();
+    f.context.game!.setStyle = (id) => styleSwitch.set(id);
+    f.line("!lg");
+    expect(f.replies.includes("Low Gravity. !n goes back to Normal.")).toBe(taken);
+  }
+  const back = fixture();
+  back.line("!n");
+  expect(back.replies.some((reply) => reply.includes("goes back to Normal"))).toBe(false);
 });

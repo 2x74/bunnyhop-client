@@ -1,8 +1,15 @@
-import { protocolChatText, ChatSuggestionFence, cycleSpectator, resolveRaceCommand } from "./chat-input";
+import {
+  protocolChatText,
+  ChatStyleSwitch,
+  ChatSuggestionFence,
+  cycleSpectator,
+  resolveRaceCommand,
+} from "./chat-input";
 import { dispatchNativeChat } from "./chat-routing";
 import { api } from "../../web/src/api";
 import {
   findChatCommand,
+  normalizeChatLine,
   suggestChat,
   registerChatCommand,
   type ChatContext,
@@ -38,7 +45,8 @@ export type ChatAction =
         | "showTriggers"
         | "showClips"
         | "freecam"
-        | "spectateMenu";
+        | "spectateMenu"
+        | "raceMenu";
       track?: number;
       weapon?: string;
       weaponId?: number;
@@ -210,11 +218,19 @@ export class NativeChatService {
     if (typeof value !== "string") return;
     const text = protocolChatText(value.trim());
     if (!text) return;
-    if (!this.room.view.id && /^[!/]report(?:\s|$)/i.test(text)) this.openRoom();
+    if (!this.room.view.id && /^[!/]report(?:\s|$)/i.test(normalizeChatLine(text))) this.openRoom();
     const epoch = this.accountEpoch,
       reply = (text: string, opts?: ReplyOpts) => {
         if (epoch === this.accountEpoch) this.reply(text, opts);
       };
+    // The host refuses a style during a gauntlet or while a map loads (and says why).
+    const styleSwitch = new ChatStyleSwitch(
+      () => state.style,
+      (id) => {
+        send({ type: "style", id });
+        return !state.gauntlet.id && !state.loading;
+      },
+    );
     const player = (query: string) => {
       const q = query.trim().toLowerCase();
       return (
@@ -231,8 +247,8 @@ export class NativeChatService {
       clearStartPoint: () => emit({ type: "chatAction", action: "clearStart" }),
       game: {
         key: (action) => state.settings.binds[action]?.[0] ?? null,
-        style: () => state.style,
-        setStyle: (id) => send({ type: "style", id }),
+        style: () => styleSwitch.style(),
+        setStyle: (id) => styleSwitch.set(id),
         practice: (action) => send({ type: "practice", action }),
         // The website's !freecam / !fc / !freelook: the host flies the camera (freecam.hpp), or free look while watching.
         freecam: () => send({ type: "chatAction", action: "freecam" }),
@@ -280,10 +296,8 @@ export class NativeChatService {
               );
             },
             race: (arg) => {
-              if (!arg) {
-                this.openRoom();
-                return;
-              }
+              // No name: the host's pick menus, as for a plain "!race" it catches itself.
+              if (!arg) return emit({ type: "chatAction", action: "raceMenu" });
               const resolved = resolveRaceCommand(arg, this.room.view.players, this.room.view.you, state.style);
               if ("error" in resolved) return reply(resolved.error);
               this.room.command({ t: "chat", text: resolved.text });
