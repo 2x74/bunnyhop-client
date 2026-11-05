@@ -18,6 +18,10 @@
 
 namespace native {
 SdlSession::SdlSession() {
+#ifdef _WIN32
+    // SDL's default borderless window style retains WS_CAPTION, which can draw over the composited menu.
+    SDL_SetHint("SDL_BORDERLESS_WINDOWED_STYLE", "0");
+#endif
     SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_SYSTEM_SCALE, "0");
     SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_SPEED_SCALE, "1");
     SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_WARP_MOTION, "0");
