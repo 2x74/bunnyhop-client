@@ -43,6 +43,17 @@
     0.8452364315744489,
     0.5391399988438934
    ]
+  },
+  {
+   "seed": 2031191778,
+   "values": [
+    0.9055392914451659,
+    0.3388263564556837,
+    0.7878233056981117,
+    0.6811081620398909,
+    0.8698142266366631,
+    0.35070283035747707
+   ]
   }
  ],
  "hashes": [
@@ -119,6 +130,34 @@
   ]
  ],
  "mapSeed": 3158226324,
+ "golden": {
+  "entityPairs": [
+   [
+    [
+     "classname",
+     "worldspawn"
+    ]
+   ],
+   [
+    [
+     "classname",
+     "prop_dynamic"
+    ],
+    [
+     "targetname",
+     "thumper"
+    ],
+    [
+     "origin",
+     "-267 -308 -9312"
+    ]
+   ]
+  ],
+  "mapSeed": 14988861,
+  "entity": 7,
+  "model": "models/props_combine/combinethumper002.mdl",
+  "seed": 2031191778
+ },
  "tables": [
   {
    "cps": [
@@ -174,6 +213,28 @@
     false
    ],
    "idle": []
+  },
+  {
+   "cps": [
+    1,
+    0.5,
+    0.25
+   ],
+   "looping": [
+    true,
+    true,
+    false
+   ],
+   "idle": [
+    {
+     "seq": 1,
+     "weight": 1
+    },
+    {
+     "seq": 2,
+     "weight": 3
+    }
+   ]
   }
  ],
  "animators": [
@@ -486,6 +547,59 @@
      "time": 125,
      "sequence": 0,
      "cycle": 1
+    }
+   ]
+  },
+  {
+   "seed": 2031191778,
+   "min": 2,
+   "max": 5,
+   "table": 3,
+   "at": [
+    {
+     "time": 0,
+     "sequence": 0,
+     "cycle": 0
+    },
+    {
+     "time": 2,
+     "sequence": 0,
+     "cycle": 0
+    },
+    {
+     "time": 4,
+     "sequence": 0,
+     "cycle": 0
+    },
+    {
+     "time": 6,
+     "sequence": 1,
+     "cycle": 0.5916910628322514
+    },
+    {
+     "time": 9,
+     "sequence": 2,
+     "cycle": 0.0708455314161256
+    },
+    {
+     "time": 13,
+     "sequence": 2,
+     "cycle": 0.0708455314161256
+    },
+    {
+     "time": 20,
+     "sequence": 2,
+     "cycle": 0.34584553141612595
+    },
+    {
+     "time": 30,
+     "sequence": 1,
+     "cycle": 0.4416910628322519
+    },
+    {
+     "time": 60,
+     "sequence": 2,
+     "cycle": 0.02084553141612666
     }
    ]
   }
