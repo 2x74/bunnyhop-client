@@ -42,8 +42,9 @@ inline uint32_t salt_of(std::string_view id) {
 }
 
 // A gun's recoil from its definition (guns/types.ts GunDef.recoil): the kick's size per spring and how fast it settles.
+// The default is none at all (an older asset bundle, whose fire clip has its recoil baked in).
 struct RecoilSpec {
-    double kick = 0, back = 0, roll = 0, settle = 1;
+    double kick = 0, back = 0, roll = 0, settle = 0;
 };
 
 class GunRecoil {
@@ -63,6 +64,7 @@ public:
     void stop() { springs_ = {}; }
 
     void advance(double dt) {
+        if (spec_.settle <= 0) return;
         const double omega = std::sqrt(spec_.settle);
         for (size_t i = 0; i < springs_.size(); i++)
             spring_step(springs_[i], 0, i == sink ? omega * sink_frequency : omega, damping[i], dt);

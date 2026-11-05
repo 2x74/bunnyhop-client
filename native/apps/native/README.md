@@ -92,6 +92,8 @@ Check sensitivity with a physical mouse before using Raw; it has not completed t
 
 - A weapon switch lowers the old weapon out of view over 0.15 s while the new one comes up. The core still switches
   on its tick, so equip and fire timing are unchanged.
+- Gun recoil builds up under rapid fire and through the Glock's burst, and rocks side to side from shot to shot. An
+  empty gun twitches when it clicks. Reloads, inspects and the suppressor blend in and out instead of cutting.
 - The hands move like the website's: CS:S bob, lag and strafe tilt, a landing dip, a short settle after a really hard
   fall, and an idle in the wrist and fingers. Bob now defaults to 50%; a saved Bob of exactly 100% moves to 50% once.
 - Settings → Viewmodel → Inspect: Quiet starts with a short blade check that only you see. Press again for the knife's

@@ -5,6 +5,8 @@
 //   switching     the outgoing weapon lowers out of view over 0.15 s while the new one's draw starts at once (the
 //                 knife keeps animating as it goes; a gun plays its holster from wherever it was). Presentation only:
 //                 the core switched on its tick. A reset never lowers anything.
+//   gun clips     a new clip crossfades from the pose on screen (guns/anim.ts play); every shot kicks the recoil
+//                 springs (gun_recoil.hpp), so rapid fire and bursts build up.
 //   inspects      the knife's chain (viewmodel_inspect.hpp), the quiet style for your own presses, attacks blending it
 //                 out with the knife home in the fist by the middle of the blend, chain switches crossfading.
 //   hand idle     the knife wrist and two fingers easing while idle, a settle after an action; on a gun the trigger
@@ -13,6 +15,7 @@
 //                 the gun's own motion, and its shot's FOV kick.
 //
 // NativeViewmodel draws the layers this returns. first_person_weapons_tests.cpp drives it with synthetic clips.
+#include "gun_recoil.hpp"
 #include "viewmodel_clips.hpp"
 #include "viewmodel_feel.hpp"
 #include "viewmodel_inspect.hpp"
@@ -50,6 +53,7 @@ enum class Action {
     holster,
     grip_index,
     grip_open,
+    dry_fire,
     preview
 };
 
@@ -73,14 +77,17 @@ inline constexpr std::array<std::string_view, action_count> action_clip_names = 
         "holster",
         "gripIndex",
         "gripOpen",
+        "dryFire",
         ""
 };
 
-// A gun's motion data (export-viewmodels.ts gunMotion): its class and where its right grip sits on the gun bone.
+// A gun's motion data (export-viewmodels.ts gunMotion): its class, where its right grip sits on the gun bone and its
+// recoil (none in older bundles, whose fire clip has it baked in).
 struct GunMotionInfo {
     GunClass cls = GunClass::rifle;
     size_t pivot_bone = 0;
     std::array<float, 3> pivot{};
+    RecoilSpec recoil;
 };
 
 // Everything read once from the asset metadata.
@@ -121,6 +128,15 @@ inline FirstPersonConfig FirstPersonConfig::from_metadata(const nlohmann::json &
         info.cls = gun_class_named(gun.at("cls").get<std::string>());
         info.pivot_bone = gun.at("part").get<size_t>();
         info.pivot = gun.at("pivot").get<std::array<float, 3>>();
+        if (gun.contains("recoil")) {
+            const auto &recoil = gun.at("recoil");
+            info.recoil = {
+                    recoil.at("kick").get<double>(),
+                    recoil.at("back").get<double>(),
+                    recoil.at("roll").get<double>(),
+                    recoil.at("settle").get<double>()
+            };
+        }
         out.guns.emplace(id, info);
     }
     out.gun_lower_seconds = metadata.value("gunLowerSeconds", out.gun_lower_seconds);
@@ -238,6 +254,10 @@ public:
         clock_ = 0;
         side_move_ = 0;
         gap_distance_ = gap_angle_ = 0;
+        fade_.seconds = 0;
+        recoil_ = {};
+        recoil_matrix_ = identity34;
+        preview_fire_ = false;
     }
 
     // One simulation tick of the player: landings for the feel, the side move for the strafe tilt.
@@ -263,6 +283,8 @@ public:
         current_.action = Action::preview;
         current_.preview_clip = current_.entry ? current_.entry->clip_or_idle(clip) : nullptr;
         current_.started = started;
+        preview_fire_ = clip == action_clip_names[size_t(Action::fire)];
+        fade_.seconds = 0;
         combo_.cancel_draw();
     }
 
@@ -315,8 +337,42 @@ private:
     double time_in(const WeaponState &state, double seconds) const { return std::max(0., seconds - state.started); }
 
     void start(WeaponState &state, const FirstPersonInput &in, Action action) {
+        if (&state == &current_ && state.weapon > knife_weapon_id) begin_fade(state.action, action);
         state.action = action;
         state.started = in.seconds;
+    }
+
+    // guns/anim.ts play: how long a new gun clip crossfades from the pose on screen (0: it cuts).
+    static double gun_fade_seconds(Action from, Action to) {
+        constexpr double clip_fade = .12, settle_fade = .22;
+        // A shot cuts these short and the gun settles back to idle (anim.ts fire).
+        const bool cut_by_shot = from == Action::inspect || from == Action::shell_start || from == Action::shell_insert
+                                 || from == Action::shell_end || from == Action::silencer_on
+                                 || from == Action::silencer_off;
+        switch (to) {
+            case Action::draw:
+            case Action::preview:
+                return 0;
+            case Action::inspect:
+                return settle_fade;
+            case Action::idle:
+                // A draw, a reload, the shotgun's end and the silencer finish on the idle pose and hand straight over.
+                return from == Action::inspect || from == Action::shell_start || from == Action::shell_insert
+                               ? settle_fade
+                               : 0;
+            case Action::fire:
+            case Action::dry_fire:
+                if (from == Action::idle || from == Action::fire || from == Action::dry_fire) return 0;
+                return cut_by_shot ? settle_fade : clip_fade;
+            default:
+                return clip_fade;
+        }
+    }
+
+    void begin_fade(Action from, Action to) {
+        fade_.seconds = current_.pose.empty() ? 0 : gun_fade_seconds(from, to);
+        fade_.elapsed = 0;
+        if (fade_.seconds > 0) fade_.from.assign(current_.pose.begin(), current_.pose.end());
     }
 
     // Whether a new weapon (or a new model of it) came into hand this frame.
@@ -343,6 +399,8 @@ private:
             last_shot_ = no_shot;
             const auto info = config_.guns.find(std::string(in.item));
             gun_info_ = info == config_.guns.end() ? GunMotionInfo{} : info->second;
+            recoil_.set_gun(in.item, gun_info_.recoil);
+            recoil_matrix_ = identity34;
         }
         return true;
     }
@@ -392,7 +450,7 @@ private:
         lowering_.state = current_;
         lowering_.from = current_.pose;
         lowering_.started = clock_;
-        lowering_.motion = gun_motion_matrix_;
+        lowering_.motion = concat(gun_motion_matrix_, recoil_matrix_);
         lowering_.active = true;
         lowering_.state.action = Action::holster;
         lowering_.state.started = in.seconds;
@@ -401,17 +459,28 @@ private:
     // `switched`: the weapon came into hand this frame. Its silencer state may differ from the last gun's (a switch
     // puts an unfinished change back from physics 25), but a switch never starts an attach or detach.
     void weapon_events(const FirstPersonInput &in, bool switched) {
-        if (current_.weapon > knife_weapon_id && in.has_report && (in.flags & silencer_flag) && !switched) {
+        const bool gun = current_.weapon > knife_weapon_id;
+        if (gun && in.has_report && (in.flags & silencer_flag) && !switched) {
             start(current_, in, in.silenced ? Action::silencer_on : Action::silencer_off);
             grip_idle_.quiet_reset();
         } else if (in.shot)
             shot(in);
         else if (in.flags & reload_started_flag)
             reload_started(in);
-        else if (current_.weapon > knife_weapon_id && current_.shell_gun && in.has_report)
+        else if (gun && current_.shell_gun && in.has_report)
             shell_events(in);
-        if (in.flags & dry_fire_flag) grip_idle_.quiet_reset();
+        if (in.flags & dry_fire_flag) dry_fire(in);
         if (in.has_report) current_.rounds = in.rounds;
+    }
+
+    // The click of an empty gun: a twitch and the trigger (its clip), a small kick, over the gun when it's at rest.
+    void dry_fire(const FirstPersonInput &in) {
+        grip_idle_.quiet_reset();
+        if (current_.weapon <= knife_weapon_id) return;
+        recoil_.dry_fire();
+        const bool at_rest = current_.action == Action::idle || current_.action == Action::fire
+                             || current_.action == Action::dry_fire;
+        if (at_rest && current_.plain[size_t(Action::dry_fire)]) start(current_, in, Action::dry_fire);
     }
 
     void shot(const FirstPersonInput &in) {
@@ -427,6 +496,7 @@ private:
         if (current_.weapon <= knife_weapon_id) return;
         start(current_, in, Action::fire);
         last_shot_ = clock_;
+        recoil_.shot();
         grip_idle_.quiet_reset();
     }
 
@@ -500,6 +570,7 @@ private:
 
     void advance_gun(double dt, const FirstPersonInput &in) {
         grip_idle_.update(dt);
+        recoil_.advance(dt);
         const auto *clip = current_.clip();
         if (!clip || current_.action == Action::idle || current_.action == Action::preview) return;
         if (time_in(current_, in.seconds) < clip->duration) return;
@@ -653,13 +724,51 @@ private:
         if (!current_.entry || !clip) return;
         sample_clip(data_, *current_.entry, *clip, time_in(current_, in.seconds), false, current_.pose);
         if (in.feel && current_.action == Action::idle) apply_grip_idle();
+        crossfade(dt);
         const GunMotionInfo &motion = gun_info_;
+        recoil_matrix_ = recoil_matrix(in);
         gun_motion_.bob = in.bob;
         gun_motion_.sway = in.sway;
-        gun_motion_matrix_ = in.feel ? gun_motion_.update(dt, motion.cls, &movement, pivot_of(motion)) : identity34;
+        const auto pivot = transformed(recoil_matrix_, pivot_of(motion));
+        gun_motion_matrix_ = in.feel ? gun_motion_.update(dt, motion.cls, &movement, pivot) : identity34;
         auto &layer = output_.layers[output_.count++];
-        layer = {current_.entry, &current_.pose, concat(clamp_gun_feel(feel), gun_motion_matrix_), true, 1};
+        const Matrix34 view = concat(concat(clamp_gun_feel(feel), gun_motion_matrix_), recoil_matrix_);
+        layer = {current_.entry, &current_.pose, view, true, 1};
         if (in.feel) layer.fov_scale = 1 - fov_kick(motion.cls) * std::min(1., in.bob);
+    }
+
+    // A new clip's crossfade from the pose on screen when it started (guns/anim.ts update).
+    void crossfade(double dt) {
+        if (fade_.seconds <= 0) return;
+        fade_.elapsed += dt;
+        const double f = fade_.elapsed / fade_.seconds;
+        if (f >= 1 || fade_.from.size() != current_.pose.size()) {
+            fade_.seconds = 0;
+            return;
+        }
+        fade_.shown.assign(fade_.from.begin(), fade_.from.end());
+        blend_flat(fade_.shown, current_.pose, smooth_step(f));
+        current_.pose.swap(fade_.shown);
+    }
+
+    // The recoil on the gun this frame. A still preview of the fire clip shows its first shot at the preview's time.
+    Matrix34 recoil_matrix(const FirstPersonInput &in) const {
+        const size_t at = gun_info_.pivot_bone * floats_per_bone;
+        if (at + floats_per_bone > current_.pose.size()) return identity34;
+        const float *gun = current_.pose.data() + at;
+        if (current_.action != Action::preview) return recoil_.matrix(gun, gun_info_.pivot);
+        if (!preview_fire_) return identity34;
+        GunRecoil first_shot;
+        first_shot.set_gun(current_.item, gun_info_.recoil);
+        first_shot.shot();
+        first_shot.advance(time_in(current_, in.seconds));
+        return first_shot.matrix(gun, gun_info_.pivot);
+    }
+
+    static std::array<float, 3> transformed(const Matrix34 &m, const std::array<float, 3> &p) {
+        return {m[0] * p[0] + m[1] * p[1] + m[2] * p[2] + m[3],
+                m[4] * p[0] + m[5] * p[1] + m[6] * p[2] + m[7],
+                m[8] * p[0] + m[9] * p[1] + m[10] * p[2] + m[11]};
     }
 
     // The trigger finger and support hand of the grip idle, toward the baked poses at full strength.
@@ -708,6 +817,11 @@ private:
         return size * (t < punch_seconds ? t / punch_seconds : std::exp(-(t - punch_seconds) * ease_rate));
     }
 
+    struct ClipFade {
+        double seconds = 0, elapsed = 0;
+        std::vector<float> from, shown;
+    };
+
     struct GunLowering {
         bool active = false;
         WeaponState state;
@@ -726,6 +840,10 @@ private:
     GunMotion gun_motion_;
     GunMotionInfo gun_info_;
     Matrix34 gun_motion_matrix_ = identity34;
+    GunRecoil recoil_;
+    Matrix34 recoil_matrix_ = identity34;
+    bool preview_fire_ = false;
+    ClipFade fade_;
     bool shown_last_frame_ = false;
     HandIdle hand_idle_;
     GripIdle grip_idle_;
