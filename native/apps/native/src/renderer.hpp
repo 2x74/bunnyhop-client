@@ -1608,10 +1608,6 @@ public:
                 {"waterVolumes", p.waterVolumes}};
     }
 
-    void set_actor_models(const std::string &player, const std::string &ghost) {
-        if (viewmodel) viewmodel->actor_models(player, ghost);
-    }
-
     void set_player_glow(std::optional<native_render::Glow> glow) {
         if (viewmodel) viewmodel->player_glow(std::move(glow));
     }

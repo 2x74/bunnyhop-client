@@ -341,9 +341,6 @@ export interface NativeAudioState {
   error: string;
 }
 export interface NativeSettings {
-  /** The runner is retired, as on the website: the menu never offers or sends it (the host still reads old files). */
-  playerModel: "bunny";
-  ghostModel: "same" | "bunny";
   mouseDiagnostics: boolean;
   inputBackend: "auto" | "sdl" | "raw";
   windowMode: WindowMode;
@@ -754,8 +751,6 @@ function defaultSettings(): NativeSettings {
   const crosshair = web.crosshair;
   const trainer = web.hud.strafeTrainer;
   return {
-    playerModel: "bunny",
-    ghostModel: "same",
     mouseDiagnostics: web.inputStats,
     inputBackend: "auto",
     capturePbScreenshots: false,
@@ -1117,8 +1112,6 @@ export function settingsPatch(value: unknown): Partial<NativeSettings> {
     ["cross", "cross-dot", "dot", "t", "circle", "none"].includes(input.crosshairStyle)
   )
     out.crosshairStyle = input.crosshairStyle;
-  if (input.playerModel === "bunny") out.playerModel = input.playerModel;
-  if (input.ghostModel === "same" || input.ghostModel === "bunny") out.ghostModel = input.ghostModel;
   if (typeof input.colorBlind === "string" && ["off", "redGreen", "blueYellow"].includes(input.colorBlind))
     out.colorBlind = input.colorBlind;
   if (typeof input.keysStyle === "string" && ["classic", "minimal", "keycaps"].includes(input.keysStyle))

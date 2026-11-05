@@ -828,9 +828,6 @@ public:
         return out;
     }
 
-    // Persisted retired model choices always resolve to the equipped bunny.
-    void actor_models(const std::string &, const std::string &) {}
-
     void ghost_cosmetics(const std::string &id) {
         const auto colors = cosmetic_colors(id);
         auto toLinear = [](float c) {

@@ -108,8 +108,6 @@ function releaseResources(stage: string, exe: string) {
     "native-assets/actor-animations.json",
     "native-assets/actor-animations.bin",
     "native-assets/tp-inspects.json",
-    "native-assets/runner.json",
-    "native-assets/runner.bin",
     "native-assets/audio.json",
     "native-assets/tutorial.json",
     "native-assets/hud.rgba",

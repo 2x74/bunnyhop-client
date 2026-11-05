@@ -101,8 +101,6 @@ inline Json default_settings() {
             {"viewmodelLeftHand", false},
             {"viewmodelBob", 1.0},
             {"viewmodelSway", 1.0},
-            {"playerModel", "bunny"},
-            {"ghostModel", "same"},
             {"showGhost", true},
             {"ghostOpacity", .55},
             {"ghostNearFade", true},
@@ -553,9 +551,6 @@ inline Json patch_settings(const Json &current, const Json &patch, bool switch_l
                            return std::isxdigit(c);
                        })))
                 throw std::runtime_error("Crosshair color must be #rrggbb");
-        } else if (key == "playerModel" || key == "ghostModel") {
-            if (!v.is_string() || (v != "bunny" && v != "runner" && !(key == "ghostModel" && v == "same")))
-                throw std::runtime_error("Unknown player model");
         } else if (key == "colorBlind") {
             if (!v.is_string() || (v != "off" && v != "redGreen" && v != "blueYellow"))
                 throw std::runtime_error("Unknown color-blind palette");

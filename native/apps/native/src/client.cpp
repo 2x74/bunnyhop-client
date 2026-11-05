@@ -452,10 +452,6 @@ int run(const native::Options &opt) {
                     preferences.at("viewmodelSway").get<float>()
             );
             renderer->set_color_blind(preferences.value("colorBlind", std::string("off")));
-            renderer->set_actor_models(
-                    preferences.value("playerModel", std::string("bunny")),
-                    preferences.value("ghostModel", std::string("same"))
-            );
             renderer->set_zones_visible(preferences.value("zonesVisible", true));
             renderer->set_effects_visible(preferences.value("effectsVisible", true));
             renderer->set_triggers_visible(preferences.value("triggersVisible", false));

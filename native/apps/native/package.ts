@@ -379,14 +379,7 @@ if (import.meta.main) {
     copy(join(root, "target/native-menu/menu.html"), join(resources, "menu.html"));
     const assets = join(root, "target/native-assets");
     treeFiles(assets);
-    for (const file of [
-      "actor-animations.json",
-      "actor-animations.bin",
-      "tp-inspects.json",
-      "runner.json",
-      "runner.bin",
-      "avatar.json",
-    ]) {
+    for (const file of ["actor-animations.json", "actor-animations.bin", "tp-inspects.json", "avatar.json"]) {
       if (!existsSync(join(assets, file))) throw new Error(`Required hosted actor animation asset missing: ${file}`);
     }
     copy(assets, join(resources, "native-assets"));

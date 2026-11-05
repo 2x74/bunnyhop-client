@@ -53,10 +53,11 @@ inline nlohmann::json default_graphics_binds() {
             {"clearMeasure", nlohmann::json::array()}};
 }
 
+// Everyone is drawn as the bunny, as on the website: the old player and ghost model choices are dropped quietly
+// instead of being reported as unknown settings.
 inline void migrate_retired_models(nlohmann::json &settings) {
-    for (const auto *key : {"playerModel", "ghostModel"}) {
-        if (settings.contains(key) && settings.at(key) == "runner") settings[key] = "bunny";
-    }
+    for (const auto *key : {"playerModel", "ghostModel"})
+        settings.erase(key);
 }
 
 inline constexpr std::array<std::string_view, 14> paint_colors = {
