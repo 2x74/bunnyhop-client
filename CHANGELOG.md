@@ -31,6 +31,14 @@ Update from Settings → Updates: press Update, then Restart to update. Your set
 - `!bright` opens a quick menu for this map's brightness and Fullbright, and `!fb` switches Fullbright. Both are kept
   per map; Settings → Graphics keeps the value for every other map.
 
+**Third person**
+- Everyone is the bunny, as on the website: the classic runner and the player and ghost model settings are gone.
+- Feet plant and step when you stop and turn, legs tuck and reach in the air, landings sink with how hard they were,
+  and the bunny leans into strafes, climbs ladders and swims. Its ears twitch the same way in every replay.
+- Distant players and ghosts keep a readable outline.
+- The chase camera rises over your shoulder in tight corridors and no longer pumps against walls. Seeking in a replay
+  or starting a video export puts the camera and the bunny where playback would have them.
+
 **First person**
 - The website's weapons pass: the knife and gun move like on the website (CS:S bob, lag, strafe tilt, landing dip), the
   old weapon lowers out while the new one draws, attacks blend an inspect out instead of cutting it, and your hand
