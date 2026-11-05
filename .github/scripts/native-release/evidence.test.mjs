@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { artifactName, collectEvidence, MAX_EVIDENCE_BYTES, sha256, targets, validateEvidence, serializeEvidence } from './evidence.mjs';
-import { PINNED_WASM_SHA256, PARITY_SUITE, parityArtifactName, parityFiles, fixtureVersions, fixtureTrials, behaviorCounters } from './parity-contract.mjs';
+import { PINNED_WASM_SHA256, PINNED_PHYSICS, PARITY_SUITE, parityArtifactName, parityFiles, fixtureVersions, fixtureTrials, behaviorCounters } from './parity-contract.mjs';
 const context = { repository: '2x74/bunnyhop-client', sourceSha: 'a'.repeat(40), ref: 'refs/heads/main', workflowRef: '2x74/bunnyhop-client/.github/workflows/native-release.yml@refs/heads/main', event: 'workflow_dispatch', runId: '1234', runAttempt: '2', version: '0.0.2', platform: 'all' };
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'native-evidence-'));
@@ -13,7 +13,7 @@ function fixture() {
     const [os, arch] = platform.split('/');
     const archive = `bunnyhop-native-0.0.2-${os}-${arch}.${os === 'linux' ? 'tar.gz' : 'zip'}`;
     const bytes = Buffer.from(`fixture-only archive ${platform}`);
-    const report = { schema: 1, releaseEligible: true, version: '0.0.2', platform, archive, bytes: bytes.length, sha256: sha256(bytes), canonicalWasmSha256: PINNED_WASM_SHA256, binarySha256: 'c'.repeat(64), menuSha256: 'd'.repeat(64), assetsSha256: 'e'.repeat(64), wasm: `bunnyhop-web/${PINNED_WASM_SHA256.slice(0, 12)}`, physics: 24, rules: 4, binaryHashMode: os === 'darwin' ? 'macho-code-v1' : 'sha256' };
+    const report = { schema: 1, releaseEligible: true, version: '0.0.2', platform, archive, bytes: bytes.length, sha256: sha256(bytes), canonicalWasmSha256: PINNED_WASM_SHA256, binarySha256: 'c'.repeat(64), menuSha256: 'd'.repeat(64), assetsSha256: 'e'.repeat(64), wasm: `bunnyhop-web/${PINNED_WASM_SHA256.slice(0, 12)}`, physics: PINNED_PHYSICS, rules: 4, binaryHashMode: os === 'darwin' ? 'macho-code-v1' : 'sha256' };
     report.build = `bunnyhop-native/${sha256(['package-v1', os, arch, report.binarySha256, report.menuSha256, report.assetsSha256, report.canonicalWasmSha256].join('\0')).slice(0, 24)}`;
     const dir = join(root, artifactName(target, context.runId, context.runAttempt));
     mkdirSync(dir);
@@ -27,7 +27,7 @@ function fixture() {
     for (const file of parityFiles) writeFileSync(join(parityDir, file), data);
     const behavior = Object.fromEntries(behaviorCounters.map(key => [key, 0]));
     const parity = { schema: 1, suite: PARITY_SUITE, pass: true, platform, sourceSha: context.sourceSha, runId: context.runId, runAttempt: context.runAttempt,
-      wasmSha256: PINNED_WASM_SHA256, runnerSha256: 'f'.repeat(64), physics: 24, contrastPhysics: 16, ladderContrastPhysics: 17, comparedStates: 1900, mismatchRows: 0, missingPhysics: [],
+      wasmSha256: PINNED_WASM_SHA256, runnerSha256: 'f'.repeat(64), physics: PINNED_PHYSICS, contrastPhysics: 16, ladderContrastPhysics: 17, comparedStates: Object.keys(fixtureTrials).reduce((n, name) => n + fixtureVersions(name).length * 100, 0), mismatchRows: 0, missingPhysics: [],
       files: parityFiles.map(name => ({ name, sha256: digest })), fixtures: Object.keys(fixtureTrials).map(name => ({
         name, mapSha256: digest, trials: fixtureTrials[name], divergentStates: 1,
         versions: fixtureVersions(name).map(physics => ({ physics, comparedStates: 100, actualStates: 100, mismatchRows: 0, firstMismatch: null, missingPhysics: [], commandsSha256: digest, wasmStatesSha256: digest, nativeStatesSha256: digest })),
@@ -49,7 +49,7 @@ function withEvidence(fn) {
 test('collects immutable coordinates and verifies archive/report/checksum bytes', () => withEvidence(e => {
   assert.equal(e.artifacts.length, 3);
   assert.equal(e.artifacts[0].name, 'bunnyhop-windows-x64-1234-2');
-  assert.equal(e.artifacts[0].report.physics, 24);
+  assert.equal(e.artifacts[0].report.physics, PINNED_PHYSICS);
 }));
 for (const [name, mutate] of [
   ['missing parity artifact', e => { delete e.artifacts[0].parity; }],
