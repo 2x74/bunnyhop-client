@@ -15,6 +15,7 @@ import type { Arm } from "../../web/src/viewmodel/inspects/kit";
 const FRAMES = 900;
 const FRAME_SECONDS = [1 / 30, 1 / 144, 1 / 60, 1 / 240, 1 / 97];
 const PIVOT = [12.5, -4.75, -6.25];
+const RESET_FRAME = 450;
 
 /** The movement on frame `f`: a run, then bhops, a hard fall, crouching and a snap around. */
 function inputAt(f: number): FeelInput & { dt: number } {
@@ -55,6 +56,8 @@ for (let f = 0; f < FRAMES; f++) {
   clock += input.dt;
   const V = viewFeel.update(input.dt, input, 0.5, 1, clock);
   const def = gunById("ak47")!;
+  // A seek mid-run: nothing carried over (the idle drift's clock, ground contact, the strafe filter).
+  if (f === RESET_FRAME) rifle.reset();
   rifle.bob = 0.5;
   rifle.update(input.dt, def, input, PIVOT);
   pistol.bob = 1;
@@ -149,5 +152,13 @@ function gripIdle(reducedMotion: boolean) {
 
 await writeFile(
   process.argv[2] ?? "viewmodel-feel-oracle.json",
-  JSON.stringify({ pivot: PIVOT, frames, reduced, hand, grip: gripIdle(false), gripReduced: gripIdle(true) }),
+  JSON.stringify({
+    pivot: PIVOT,
+    resetFrame: RESET_FRAME,
+    frames,
+    reduced,
+    hand,
+    grip: gripIdle(false),
+    gripReduced: gripIdle(true),
+  }),
 );

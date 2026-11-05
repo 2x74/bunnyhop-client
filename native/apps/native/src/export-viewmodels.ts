@@ -31,7 +31,9 @@ import { KnifeHold } from "../../web/src/viewmodel/knives/hold";
 import { KNIVES } from "../../web/src/viewmodel/knives/index";
 import { gunFpCtx, gunRig } from "../../web/src/viewmodel/guns/rig";
 import { GunPoser } from "../../web/src/viewmodel/guns/pose";
+import { HOLSTER_TIME, type GunAnimator } from "../../web/src/viewmodel/guns/anim";
 import { GUNS, gunById } from "../../web/src/viewmodel/guns/index";
+import type { GunDef } from "../../web/src/viewmodel/guns/types";
 import {
   bunnyGunGeometry,
   bunnyHold,
@@ -48,11 +50,10 @@ import { WHIRL_FLICK } from "../../web/src/viewmodel/knives/whirligig";
 // it so the baked clips don't depend on when they were built; native adds the spinner's flicks at runtime.
 Object.defineProperty(performance, "now", { value: () => 0, configurable: true });
 const directory = resolve(process.argv[2] ?? "target/native-assets");
-/**
- * A switch away from a gun lowers it out of view over this long (guns/presenter.ts GUN_LOWER; the presenter can't be
- * imported here, it loads the game's audio).
- */
-const GUN_LOWER_SECONDS = 0.2;
+/** A switch away from a gun lowers it out of view over this long (guns/presenter.ts GUN_LOWER). */
+const GUN_LOWER_SECONDS = HOLSTER_TIME;
+/** The dry fire's twitch and trigger squeeze (guns/anim.ts overlays). */
+const DRY_FIRE_SECONDS = 0.5;
 /**
  * The grip idle's poses at full strength (guns/anim.ts overlays): the trigger finger eased off the trigger, the support
  * fingers relaxed. Native blends toward them by how far the idle has them.
@@ -239,6 +240,29 @@ function holdGrip(poser: GunPoser, field: "indexOff" | "leftOpen", value: number
     anim.pose[field] = Math.max(anim.pose[field], value);
   };
 }
+/** How long each baked gun clip runs (s); idle and the grip poses are single frames. */
+function gunClipSeconds(def: GunDef, action: string): number {
+  if (action === "idle" || action.startsWith("grip")) return 0;
+  if (action.startsWith("reload")) return def.timing.reload ?? 2.5;
+  if (action.startsWith("silencer")) return silencerLength(def);
+  const seconds: Record<string, number> = {
+    fire: 0.8,
+    dryFire: DRY_FIRE_SECONDS,
+    inspect: 2.4,
+    shellStart: def.timing.shells?.start ?? 0.45,
+    shellInsert: def.timing.shells?.each ?? 0.5,
+    shellEnd: def.timing.shells?.end ?? 0.6,
+    holster: GUN_LOWER_SECONDS,
+  };
+  return seconds[action] ?? Math.min(def.timing.draw, 1) * 0.85;
+}
+/**
+ * A shot or a dry fire without its recoil kick: native runs the recoil springs itself (gun_recoil.hpp), so rapid fire
+ * builds up as on the website. The clip keeps what the shot does to the gun's parts (slide, bolt, trigger, pump).
+ */
+function withoutRecoil(anim: GunAnimator) {
+  (anim as unknown as { rv: Float64Array }).rv.fill(0);
+}
 /** What native needs to blend knife poses and move the hand (inspects/kit.ts Arm, inspects/runtime.ts blends). */
 function knifeRig() {
   const arm = new Arm(vr);
@@ -326,6 +350,7 @@ for (const glove of GLOVE_STYLE_IDS) {
       "reload",
       "reloadEmpty",
       "inspect",
+      "dryFire",
       ...(def.timing.shells ? ["shellStart", "shellInsert", "shellEnd"] : []),
       ...(def.silencer ? ["silencerOn", "silencerOff"] : []),
       "holster",
@@ -337,31 +362,15 @@ for (const glove of GLOVE_STYLE_IDS) {
         const poser = new GunPoser();
         poser.setGun(def, glove);
         poser.anim.silenced = silenced;
-        const duration =
-          action === "idle"
-            ? 0
-            : action.startsWith("reload")
-              ? (def.timing.reload ?? 2.5)
-              : action === "fire"
-                ? 0.8
-                : action === "inspect"
-                  ? 2.4
-                  : action === "shellStart"
-                    ? (def.timing.shells?.start ?? 0.45)
-                    : action === "shellInsert"
-                      ? (def.timing.shells?.each ?? 0.5)
-                      : action === "shellEnd"
-                        ? (def.timing.shells?.end ?? 0.6)
-                        : action.startsWith("silencer")
-                          ? silencerLength(def)
-                          : action === "holster"
-                            ? GUN_LOWER_SECONDS
-                            : action.startsWith("grip")
-                              ? 0
-                              : Math.min(def.timing.draw, 1) * 0.85;
+        const duration = gunClipSeconds(def, action);
         if (action === "draw") poser.draw();
-        else if (action === "fire") poser.anim.fire();
-        else if (action.startsWith("reload")) poser.anim.reload(duration, action === "reloadEmpty");
+        else if (action === "fire") {
+          poser.anim.fire();
+          withoutRecoil(poser.anim);
+        } else if (action === "dryFire") {
+          poser.anim.dryFire();
+          withoutRecoil(poser.anim);
+        } else if (action.startsWith("reload")) poser.anim.reload(duration, action === "reloadEmpty");
         else if (action === "inspect") poser.anim.inspect();
         else if (action === "shellStart") poser.anim.shellStart(duration);
         else if (action === "shellInsert") poser.anim.shellInsert(duration);
@@ -546,7 +555,15 @@ await writeFile(
     },
     knifeRig: knifeRig(),
     gunMotion: Object.fromEntries(
-      GUNS.map((d) => [d.id, { cls: d.cls, part: gr.part("Gun"), pivot: Array.from(d.right.o) }]),
+      GUNS.map((d) => [
+        d.id,
+        {
+          cls: d.cls,
+          part: gr.part("Gun"),
+          pivot: Array.from(d.right.o),
+          recoil: { kick: d.recoil.kick, back: d.recoil.back, roll: d.recoil.roll, settle: d.recoil.settle },
+        },
+      ]),
     ),
     gunLowerSeconds: GUN_LOWER_SECONDS,
     gripIdle: { indexOff: GRIP_INDEX_OFF, leftOpen: GRIP_LEFT_OPEN },

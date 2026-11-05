@@ -1,7 +1,8 @@
 // The first-person weapons pass as a player sees it, on synthetic one-bone clips whose translation says which clip
 // and time is showing: a switch lowers the old weapon out while the new one draws, resets and hidden frames never
 // lower anything, the quiet inspect is yours only, an attack blends an inspect out, the gun's grip eases when quiet,
-// a shot kicks the viewmodel FOV and a hard landing dips the hands.
+// a shot kicks the viewmodel FOV and a hard landing dips the hands; gun clips crossfade, rapid shots build recoil up,
+// an interrupted silencer change shows what the core put back, and a reset leaves nothing of what came before.
 #include "first_person_weapons.hpp"
 #include <cassert>
 #include <cstdio>
@@ -15,6 +16,9 @@ constexpr double frame_seconds = .01;
 // The synthetic clips: the bone's x says which clip, y the time into it, z a grip-idle basis offset.
 constexpr float knife_idle = 1, knife_draw = 2, knife_slash = 3, knife_stab = 4, own_trick = 10, second_trick = 11;
 constexpr float quiet_check = 20, gun_idle = 31, gun_draw = 32, gun_fire = 33, gun_reload = 34, gun_holster = 35;
+constexpr float gun_inspect = 36, gun_dry = 37, silencer_on = 40, silenced_holster = 41, silenced_idle = 42;
+constexpr float silenced_draw = 43;
+constexpr uint32_t usp_id = 3, m4a1_id = 18;
 
 struct Library {
     std::vector<float> data;
@@ -48,6 +52,12 @@ struct Library {
         clip(gun, "holster", .2, gun_holster);
         clip(gun, "gripIndex", 0, gun_idle, 1);
         clip(gun, "gripOpen", 0, gun_idle, 2);
+        clip(gun, "inspect", 2.4, gun_inspect);
+        clip(gun, "dryFire", .5, gun_dry);
+        clip(gun, "silencerOn", 2, silencer_on);
+        clip(gun, "holster:silenced", .15, silenced_holster);
+        clip(gun, "idle:silenced", 0, silenced_idle);
+        clip(gun, "draw:silenced", .5, silenced_draw);
     }
 };
 
@@ -68,6 +78,19 @@ native_vm::FirstPersonConfig config() {
     return out;
 }
 
+// The same with the Cottontail's and the Furrow's recoil (export-viewmodels.ts gunMotion).
+native_vm::FirstPersonConfig config_with_recoil() {
+    auto out = config();
+    native_vm::GunMotionInfo pistol;
+    pistol.cls = native_vm::GunClass::pistol;
+    pistol.recoil = {3.2, 0.9, 1.6, 230};
+    out.guns["usp"] = pistol;
+    native_vm::GunMotionInfo rifle;
+    rifle.recoil = {2.2, 1.1, 1.2, 160};
+    out.guns["m4a1"] = rifle;
+    return out;
+}
+
 struct Harness {
     Library library;
     std::unique_ptr<native_vm::FirstPersonWeapons> weapons;
@@ -75,8 +98,11 @@ struct Harness {
     double seconds = 0;
     uint32_t tick = 0;
     uint32_t weapon = native_vm::knife_weapon_id;
+    bool silenced = false;
 
-    Harness() { weapons = std::make_unique<native_vm::FirstPersonWeapons>(config(), library.data); }
+    explicit Harness(native_vm::FirstPersonConfig setup = config()) {
+        weapons = std::make_unique<native_vm::FirstPersonWeapons>(std::move(setup), library.data);
+    }
 
     // One frame (a tick each), with these events.
     const native_vm::FirstPersonOutput &step(bool shot = false, uint32_t flags = 0, bool feel = true) {
@@ -85,13 +111,15 @@ struct Harness {
         in.weapon = weapon;
         const bool knife = weapon == native_vm::knife_weapon_id;
         in.entry = knife ? &library.knife : &library.gun;
-        in.entry_name = knife ? "knife:carrot:knit" : "gun:usp:knit";
-        in.item = knife ? "carrot" : "usp";
+        const bool m4a1 = weapon == m4a1_id;
+        in.entry_name = knife ? "knife:carrot:knit" : m4a1 ? "gun:m4a1:knit" : "gun:usp:knit";
+        in.item = knife ? "carrot" : m4a1 ? "m4a1" : "usp";
         in.tick = ++tick;
         in.shot = shot;
         in.flags = flags;
         in.attack_mode = 1;
         in.has_report = !knife;
+        in.silenced = silenced;
         in.feel = feel;
         in.quiet_inspect = true;
         seconds += frame_seconds;
@@ -109,6 +137,11 @@ struct Harness {
 
 float clip_id(const native_vm::ViewmodelLayer &layer) {
     return (*layer.pose)[3];
+}
+
+// The weapon in hand (drawn last, over one lowering out).
+const native_vm::ViewmodelLayer &in_hand(const native_vm::FirstPersonOutput &out) {
+    return out.layers[out.count - 1];
 }
 
 float grip_offset(const native_vm::ViewmodelLayer &layer) {
@@ -132,7 +165,8 @@ void test_knife_lowers_while_the_gun_draws() {
     assert(clip_id(first.layers[1]) == gun_draw);
     const float start = hand_height(first.layers[0]);
     float lowest = start;
-    for (int frame = 0; frame < 18; frame++) {
+    // It's gone in 0.15 s (viewmodel.ts KNIFE_HOLSTER).
+    for (int frame = 0; frame < 13; frame++) {
         const auto &out = h.step();
         assert(out.count == 2);
         lowest = std::min(lowest, hand_height(out.layers[0]));
@@ -250,6 +284,131 @@ void test_hard_landings_settle_the_hands() {
     assert(bhop < .1f && hard > .8f);
 }
 
+// How far the gun's muzzle points up (degrees) as the layer draws it.
+double muzzle_up_degrees(const native_vm::ViewmodelLayer &layer) {
+    return std::asin(std::clamp(double(layer.view[8]), -1., 1.)) / native_vm::radians_per_degree;
+}
+
+// The highest the muzzle gets with shots every `cycle` seconds (one shot if `cycle` is 0), with no movement feel.
+double recoil_peak(double cycle) {
+    Harness h(config_with_recoil());
+    h.weapon = m4a1_id;
+    h.run(1);
+    double peak = 0;
+    double since_shot = cycle;
+    for (int frame = 0; frame < 100; frame++) {
+        const bool shot = cycle > 0 ? since_shot >= cycle - 1e-9 : frame == 0;
+        if (shot) since_shot = 0;
+        since_shot += frame_seconds;
+        const auto &out = h.step(shot, 0, false);
+        assert(clip_id(out.layers[0]) >= gun_idle);
+        peak = std::max(peak, muzzle_up_degrees(out.layers[0]));
+    }
+    return peak;
+}
+
+// Every shot kicks the recoil springs, so a string of shots climbs higher than one (guns/anim.ts fire); the fire clip
+// itself restarts with each shot, as the website's slide and trigger do.
+void test_rapid_fire_builds_the_recoil_up() {
+    const double single = recoil_peak(0), rapid = recoil_peak(.09);
+    assert(single > .5);
+    assert(rapid > single * 1.3);
+    Harness h(config_with_recoil());
+    h.weapon = m4a1_id;
+    h.run(1);
+    h.step(true, 0, false);
+    h.run(2);
+    assert(std::abs(muzzle_up_degrees(h.step(false, 0, false).layers[0])) < 1e-3);
+}
+
+// A new gun clip crossfades from what's on screen: an inspect over 0.22 s, a shot out of it back over 0.22 s.
+void test_gun_clips_crossfade() {
+    Harness h;
+    h.weapon = usp_id;
+    h.run(1);
+    h.weapons->press_inspect(true, true);
+    const float entering = clip_id(h.step().layers[0]);
+    assert(entering > gun_idle && entering < gun_inspect);
+    h.run(.22);
+    assert(clip_id(h.step().layers[0]) == gun_inspect);
+    const float leaving = clip_id(h.step(true).layers[0]);
+    assert(leaving < gun_inspect && leaving > gun_fire);
+    h.run(.22);
+    assert(clip_id(h.step().layers[0]) == gun_fire);
+    // Shot to shot and idle to shot cut, as the website's overlays restart.
+    assert(clip_id(h.step(true).layers[0]) == gun_fire);
+}
+
+// The click of an empty gun: its twitch clip and a small kick.
+void test_dry_fire_twitches() {
+    Harness h(config_with_recoil());
+    h.weapon = m4a1_id;
+    h.run(1);
+    const auto &click = h.step(false, native_vm::dry_fire_flag, false);
+    assert(clip_id(click.layers[0]) == gun_dry);
+    h.run(.05);
+    assert(muzzle_up_degrees(h.step(false, 0, false).layers[0]) > .05);
+    h.run(.5);
+    assert(clip_id(h.step(false, 0, false).layers[0]) == gun_idle);
+}
+
+// Physics 25: switching away 0.5 s into the M4A1's attach. It lowers with the can as it showed (the website's
+// outgoing viewmodel keeps its silencer state); the core put the silencer back off, so it comes out plain next time.
+void test_interrupted_attach_comes_back_as_the_core_has_it() {
+    Harness h;
+    h.weapon = m4a1_id;
+    h.run(1);
+    h.silenced = true;
+    h.step(false, native_vm::silencer_flag);
+    h.run(.3);
+    assert(clip_id(h.step().layers[0]) == silencer_on);
+    h.run(.2);
+    h.weapon = native_vm::knife_weapon_id;
+    h.silenced = false;
+    h.step();
+    h.run(.08);
+    const auto &lowering = h.step();
+    assert(lowering.count == 2 && clip_id(lowering.layers[0]) == silenced_holster);
+    h.run(1);
+    h.weapon = m4a1_id;
+    assert(clip_id(in_hand(h.step())) == gun_draw);
+    h.run(1);
+    assert(clip_id(h.step().layers[0]) == gun_idle);
+}
+
+// A spectated player's silenced bit flips with a switch (the new gun's state, or an interrupted change put back): the
+// gun coming out draws instead of playing an attach or detach.
+void test_a_switch_never_starts_the_silencer() {
+    Harness h;
+    h.weapon = usp_id;
+    h.silenced = true;
+    h.run(1);
+    assert(clip_id(h.step().layers[0]) == silenced_idle);
+    h.weapon = m4a1_id;
+    h.silenced = false;
+    assert(clip_id(in_hand(h.step(false, native_vm::silencer_flag))) == gun_draw);
+}
+
+// After a reset the same frames pose the same, whatever was shown before (two exports of one replay match).
+void test_a_reset_forgets_what_came_before() {
+    auto after_reset = [](double before_seconds) {
+        auto h = std::make_unique<Harness>(config_with_recoil());
+        h->weapon = m4a1_id;
+        h->run(before_seconds);
+        h->step(true);
+        h->weapons->reset();
+        std::vector<native_vm::Matrix34> views;
+        for (const uint32_t weapon : {native_vm::knife_weapon_id, m4a1_id}) {
+            h->weapon = weapon;
+            for (int frame = 0; frame < 150; frame++)
+                views.push_back(h->step(frame == 120).layers[0].view);
+            h->weapons->reset();
+        }
+        return views;
+    };
+    assert(after_reset(1.3) == after_reset(4.7));
+}
+
 // Previews hold the weapon still.
 void test_previews_have_no_feel() {
     Harness h;
@@ -269,5 +428,11 @@ int main() {
     test_shot_kicks_the_viewmodel_fov();
     test_hard_landings_settle_the_hands();
     test_previews_have_no_feel();
-    std::puts("First-person switching, inspects, grip idle, FOV kick and landings passed");
+    test_rapid_fire_builds_the_recoil_up();
+    test_gun_clips_crossfade();
+    test_dry_fire_twitches();
+    test_interrupted_attach_comes_back_as_the_core_has_it();
+    test_a_switch_never_starts_the_silencer();
+    test_a_reset_forgets_what_came_before();
+    std::puts("First-person switching, inspects, grip idle, FOV kick, landings, recoil and silencer passed");
 }

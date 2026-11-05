@@ -306,9 +306,14 @@ public:
     // Bob and sway amounts, and the reduced-motion scale (reduced_motion.hpp).
     double bob = 1, sway = 1, motion = 1;
 
+    // Back to rest with no history (a seek, an export's start): springs, the idle clock, ground contact and velocity.
     void reset() {
         springs = {};
         targets = {};
+        clock = 0;
+        was_grounded = true;
+        ground_seconds = 1;
+        smoothed = last_velocity = {};
         have_velocity = false;
         lateral_acceleration = 0;
     }
