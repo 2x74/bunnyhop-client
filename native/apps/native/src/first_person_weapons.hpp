@@ -123,7 +123,10 @@ inline FirstPersonConfig FirstPersonConfig::from_metadata(const nlohmann::json &
         quiet_chain.insert(quiet_chain.end(), chain.begin(), chain.end());
     }
     if (metadata.contains("knifeRig")) out.knife_rig = KnifeRig::from_json(metadata.at("knifeRig"));
-    for (const auto &[id, gun] : metadata.value("gunMotion", nlohmann::json::object()).items()) {
+    // A named copy: looping over `metadata.value(...).items()` keeps only the items() proxy alive in C++20, so the
+    // copy value() returns is destroyed before the loop runs (MSVC then reads its nulled entries and throws).
+    const auto gun_motion = metadata.value("gunMotion", nlohmann::json::object());
+    for (const auto &[id, gun] : gun_motion.items()) {
         GunMotionInfo info;
         info.cls = gun_class_named(gun.at("cls").get<std::string>());
         info.pivot_bone = gun.at("part").get<size_t>();
