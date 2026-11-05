@@ -8,6 +8,7 @@ namespace native {
 
 void ReplayPlayer::begin(const std::filesystem::path &file) {
     runner_view.reset();
+    preroll.clear();
     active = true;
     paused = false;
     speed = 1;

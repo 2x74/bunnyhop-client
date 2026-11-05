@@ -5,6 +5,7 @@
 #include "bunnyhop_native.h"
 #include "ghost_playback.hpp"
 #include "render_shaders.hpp"
+#include "replay_preroll.hpp"
 #include <algorithm>
 #include <cstdint>
 #include <optional>
@@ -56,6 +57,20 @@ inline Actor own_actor(const BhSnapshot &state, float pitch, float yaw, uint32_t
     actor.frame.pitch = pitch;
     actor.frame.yaw = yaw;
     actor.frame.weapon = weapon;
+    return actor;
+}
+
+// The bunny at one of the frames before a cut (replay_preroll.hpp): `model`'s look and weapon with the frame's state,
+// view and strafe key, and none of `model`'s gestures.
+inline Actor prerolled_actor(const Actor &model, const native::PrerollFrame &frame) {
+    auto actor = own_actor(frame.snapshot, frame.view.pitch, frame.view.yaw, model.frame.weapon);
+    actor.id = model.id;
+    actor.outfit = model.outfit;
+    actor.loadout = model.loadout;
+    actor.opacity = model.opacity;
+    actor.emptyHand = model.emptyHand;
+    actor.playerGlow = model.playerGlow;
+    actor.sidemove = frame.view.side;
     return actor;
 }
 

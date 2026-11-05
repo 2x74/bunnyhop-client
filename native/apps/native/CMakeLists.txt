@@ -823,6 +823,16 @@ if(BUILD_TESTING)
     endif()
 endif()
 
+# A replay seek pre-rolls the cameras and the bunny from the replay's own frames before the cut.
+if(BUILD_TESTING)
+    add_executable(bunnyhop-native-replay-preroll-tests src/replay_preroll_tests.cpp)
+    target_include_directories(bunnyhop-native-replay-preroll-tests PRIVATE include vendor src)
+    target_link_libraries(bunnyhop-native-replay-preroll-tests PRIVATE bunnyhop_core_native)
+    add_test(NAME native_replay_preroll COMMAND bunnyhop-native-replay-preroll-tests
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../target/native-assets")
+    set_tests_properties(native_replay_preroll PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60)
+endif()
+
 if(BUILD_TESTING)
     add_executable(bunnyhop-native-run-vault-tests src/run_vault_tests.cpp)
     target_include_directories(bunnyhop-native-run-vault-tests PRIVATE vendor)

@@ -2,9 +2,13 @@
 #include "bunnyhop_native.h"
 #include "eye_clearance.hpp"
 #include "native_input.hpp"
+#include "replay_preroll.hpp"
+#include <algorithm>
 #include <array>
 #include <optional>
+#include <span>
 #include <chrono>
+#include <cmath>
 #include <functional>
 #include <limits>
 #include <string>
@@ -29,6 +33,14 @@ struct ReplayCamera {
 private:
     static constexpr double rad = 3.14159265358979323846 / 180;
     double last_seconds = NAN, chase_yaw = NAN, chase_pitch = 0, chase_dist = NAN, chase_height = 0, chase_z = NAN;
+    // The chase cam's collision hysteresis (seconds the way out has been clear) and its crane when cramped: the eased
+    // weight, the clearance above the pulled-in camera, and that clearance's own hold.
+    double chase_hold = 0, crane = 0, crane_rise = NAN, crane_hold = 0;
+    // Once the way back out clears, the chase cam waits this long before easing out, so a wall flickering in and out
+    // of the trace doesn't pump it (web cameras.ts CHASE_HOLD).
+    static constexpr double chase_hold_seconds = .15, chase_ease_out_rate = 3.5;
+    // Pushed in close (a corridor), it rises up to this many units and looks this far past the player, this high.
+    static constexpr double crane_rise_units = 34, crane_ahead_units = 26, crane_up_units = 6;
     double eye_last_z = NAN, eye_last_view = 0, eye_error = 0, orbit_angle = NAN;
     // Orbit: a slow turn around the runner, at a fixed distance and height, that walls pull in like the chase camera.
     static constexpr double orbit_degrees_per_second = 24, orbit_distance_units = 150, orbit_height_degrees = 16;
@@ -85,6 +97,52 @@ private:
         eye_last_z = NAN;
         eye_error = 0;
         fly_pos[0] = heading = NAN;
+    }
+
+    // A collision-limited distance: in at once to `target`, out (eased) only after `target` has allowed more for
+    // chase_hold_seconds.
+    static void hysteresis(double &distance, double &hold, double target, bool snap, double dt) {
+        constexpr double clearer_units = .5;
+        if (snap || std::isnan(distance) || target < distance) {
+            distance = target;
+            hold = 0;
+            return;
+        }
+        // The hold counts only while the way out is actually clearer than where the camera is.
+        if (target < distance + clearer_units) {
+            hold = 0;
+            return;
+        }
+        hold += dt;
+        if (hold >= chase_hold_seconds) distance += (target - distance) * damp(chase_ease_out_rate, dt);
+    }
+
+    // Cramped (a wall pushed the camera in below ~70% of its distance): it cranes straight up, as far as the space
+    // above allows, and looks a little past the player, so the body doesn't fill the frame. Both eased. Returns false
+    // (and looks nowhere) when it isn't cramped.
+    bool
+    crane_over(BhContext *core, Point at, const Point &pivot, double yaw_radians, double reach, bool fresh, double dt) {
+        constexpr double cramped_from = .72, cramped_span = .45, crane_in_rate = 7, crane_out_rate = 2.2;
+        constexpr double unseen_crane = .002, ceiling_gap_units = 3;
+        const double cramped = std::clamp((cramped_from - reach) / cramped_span, 0., 1.);
+        const double wanted = cramped * cramped * (3 - 2 * cramped);
+        crane = fresh ? wanted : crane + (wanted - crane) * damp(wanted > crane ? crane_in_rate : crane_out_rate, dt);
+        if (crane <= unseen_crane) {
+            crane_rise = NAN;
+            return false;
+        }
+        const Point top = {at[0], at[1], at[2] + crane_rise_units};
+        const double rise =
+                core ? std::max(0., crane_rise_units * trace(core, at, top, 6) - ceiling_gap_units) : crane_rise_units;
+        hysteresis(crane_rise, crane_hold, rise, fresh || std::isnan(crane_rise), dt);
+        at[2] += crane_rise * crane;
+        const Point past = {
+                pivot[0] + std::cos(yaw_radians) * crane_ahead_units * crane,
+                pivot[1] + std::sin(yaw_radians) * crane_ahead_units * crane,
+                pivot[2] + crane_up_units * crane
+        };
+        look(at, past);
+        return true;
     }
 
     void look(const Point &from, const Point &at) {
@@ -300,6 +358,21 @@ public:
         look(want, pivot);
     }
 
+    // After a cut, the chase and flyby cameras run through the run's last moments (replay_preroll.hpp) so they
+    // continue from where continuous playback would have them. The other modes don't smooth anything.
+    void preroll(BhContext *core, std::span<const PrerollFrame> frames, double tick_seconds) {
+        if ((mode != "chase" && mode != "flyby") || frames.empty()) return;
+        Input scratch;
+        float eye[3];
+        bool first = true;
+        for (const auto &frame : frames) {
+            const auto &player = frame.snapshot.player;
+            const double seconds = player.tick * tick_seconds;
+            sample(core, player, frame.view.yaw, frame.view.pitch, seconds, eye, scratch, first ? 0 : tick_seconds);
+            first = false;
+        }
+    }
+
     // Free roaming (OBS_MODE_ROAMING): |input| is the camera's own view and keys, never the player's counted view.
     // Shift and Alt pick fixed speeds; |speed_ups| is the base the freecam wheel sets.
     void move(const Input &input, double dt, bool fast = false, bool slow = false, double speed_ups = 500) {
@@ -439,13 +512,11 @@ public:
                           pivot[1] - std::sin(a) * std::cos(p) * ideal,
                           pivot[2] + std::sin(p) * ideal};
             const double target = std::max(4., ideal * trace(core, pivot, want, 6) - 2);
-            if (fresh || !std::isfinite(chase_dist) || target < chase_dist)
-                chase_dist = target;
-            else
-                chase_dist += (target - chase_dist) * damp(3, dt);
+            hysteresis(chase_dist, chase_hold, target, fresh, dt);
+            const double reach = chase_dist / ideal;
             for (int j = 0; j < 3; ++j)
-                want[j] = pivot[j] + (want[j] - pivot[j]) * chase_dist / ideal;
-            look(want, pivot);
+                want[j] = pivot[j] + (want[j] - pivot[j]) * reach;
+            if (!crane_over(core, want, pivot, a, reach, fresh, dt)) look(want, pivot);
         }
         std::copy(position.begin(), position.end(), eye);
         view.set_angles(pitch, yaw, 5);

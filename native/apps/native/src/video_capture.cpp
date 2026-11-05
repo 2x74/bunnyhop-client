@@ -10,7 +10,7 @@ constexpr float default_hud_percent = 100;
 constexpr uint32_t teleported_event = 1;
 constexpr uint32_t attacked_event = 32;
 constexpr uint32_t noclip_movement_mode = 1;
-constexpr unsigned crouched_flag = 1, grounded_flag = 2;
+constexpr unsigned crouched_flag = 1, grounded_flag = 2, ladder_flag = 4;
 
 void checked(bool result, const char *message) {
     if (!result) throw std::runtime_error(message);
@@ -41,6 +41,8 @@ VideoCapture::VideoCapture(
     if (options.has_audio())
         audio_ =
                 std::make_unique<ReplayAudioTrack>(scene_.assets, scene_.cache, scene_.settings, scene_.style, options);
+    // The clip's first frame is a cut: the chase and flyby cameras and the bunny pre-roll what came before it.
+    preroll_ = gather_replay_preroll(core_, options.from, options.tick_interval);
     checked(bh_replay_seek(core_, audio_ ? 0 : options.from, &next_), "Cannot seek video clip start");
     if (audio_) audio_->tick(core_, next_, options.tick_interval);
     previous_ = next_;
@@ -155,11 +157,17 @@ void VideoCapture::place_actor(const BhSnapshot &state) {
         actor.frame.yaw = next_command_.yaw;
         actor.frame.view_offset_z = state.player.view_offset_z;
         actor.frame.flags = (state.player.crouched ? crouched_flag : 0) | (state.player.grounded ? grounded_flag : 0)
-                            | (state.player.events & attacked_event);
+                            | (state.player.on_ladder ? ladder_flag : 0) | (state.player.events & attacked_event);
+        actor.waterLevel = state.water_level;
+        actor.sidemove = next_command_.side;
         BhWeaponReport held{};
         bh_weapon_report(core_, &held);
         actor.frame.weapon = held.active;
         actor_events_.apply(actor);
+        if (!preroll_.empty()) {
+            renderer_.preroll_actor(actor, preroll_, options_.tick_interval);
+            actor.snapped = false;
+        }
         actors.push_back(std::move(actor));
     }
     renderer_.set_room_actors(actors);
@@ -171,6 +179,7 @@ void VideoCapture::draw_sample(double tick, double dt) {
     const BhSnapshot state = interpolated(tick, mix);
     const double seconds = tick * options_.tick_interval;
     float eye[3];
+    camera_.preroll(core_, preroll_, options_.tick_interval);
     camera_.sample(core_, state.player, input_.yaw(), input_.pitch, seconds, eye, input_, dt);
     renderer_.set_replay_actor(nullptr, 0, 0);
     renderer_.set_spectated_actor(std::nullopt);
@@ -178,6 +187,7 @@ void VideoCapture::draw_sample(double tick, double dt) {
     renderer_.set_viewmodel_visible(options_.weapon && !camera_.third_person());
     renderer_.set_camera_fov(scene_.settings.value("fov", default_fov_degrees));
     place_actor(state);
+    preroll_.clear();
     renderer_.set_zone_state(run_.track, run_);
     targets_.bind_scene();
     renderer_.draw(targets_.render_width(), targets_.render_height(), eye, input_, &state, seconds);

@@ -1609,6 +1609,19 @@ public:
                 {"waterVolumes", p.waterVolumes}};
     }
 
+    // After a cut the bunny runs through the run's last moments (replay_preroll.hpp), like the cameras, so its legs,
+    // bank, ears and animation continue from where continuous playback would have them.
+    void preroll_actor(const native_render::Actor &model, std::span<const PrerollFrame> frames, double tick_seconds) {
+        if (!viewmodel) return;
+        bool first = true;
+        for (const auto &frame : frames) {
+            auto actor = native_render::prerolled_actor(model, frame);
+            actor.snapped = first;
+            viewmodel->pose_actor(actor, frame.snapshot.player.tick * tick_seconds);
+            first = false;
+        }
+    }
+
     // prefers-reduced-motion, as the menu reports it: the third-person bunny's bank, idle shift and jump poses at 45%.
     void set_reduced_motion(bool reduced) { reducedMotion = reduced; }
 

@@ -1143,7 +1143,11 @@ int run(const native::Options &opt) {
     auto seek_playback = [&](uint32_t tick) {
         if (!core || !viewer.active) return;
         native::ReplayPose pose;
+        std::vector<native::PrerollFrame> preroll;
         try {
+            preroll = native::gather_replay_preroll(
+                    core.get(), viewer.session.range.clamp(tick), viewer.session.range.tick_interval
+            );
             pose = viewer.session.seek(core.get(), tick);
         } catch (const std::exception &failure) {
             reset();
@@ -1157,6 +1161,8 @@ int run(const native::Options &opt) {
         audio.reset();
         hud.reset_history();
         if (viewer.camera.mode != "free") viewer.camera.reset();
+        viewer.camera.preroll(core.get(), preroll, viewer.session.range.tick_interval);
+        viewer.preroll = std::move(preroll);
         camera_controls.clear();
         reset_feedback(curr.tick != 0);
         reset_input_timing();
@@ -3724,6 +3730,10 @@ int run(const native::Options &opt) {
                 self.emptyHand = viewer.active && !viewer.weapon_third;
                 self.playerGlow = player_glow;
                 third_person_events.apply(self);
+                if (viewer.active && !viewer.preroll.empty()) {
+                    renderer->preroll_actor(self, viewer.preroll, step_dt);
+                    self.snapped = false;
+                }
                 if (spectator) {
                     if (const auto target = room.spectated(steady_seconds)) {
                         self = *target;
@@ -3732,6 +3742,7 @@ int run(const native::Options &opt) {
                 }
                 actors.push_back(self);
             }
+            viewer.preroll.clear();
             if (opt.camera) {
                 for (int k = 0; k < 3; k++)
                     eye[k] = (*opt.camera)[k];
