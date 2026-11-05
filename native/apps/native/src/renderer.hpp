@@ -402,6 +402,7 @@ class Renderer {
     float fieldOfView = 90;
     std::vector<native_render::Actor> roomActors;
     std::optional<native_render::Actor> replayActor, compareActor;
+    bool reducedMotion = false;
     std::string outfit, packedLoadout;
     GLuint refractColor = 0, refractDepth = 0;
     int refractWidth = 0, refractHeight = 0, waterQuality = 1;
@@ -1608,6 +1609,9 @@ public:
                 {"waterVolumes", p.waterVolumes}};
     }
 
+    // prefers-reduced-motion, as the menu reports it: the third-person bunny's bank, idle shift and jump poses at 45%.
+    void set_reduced_motion(bool reduced) { reducedMotion = reduced; }
+
     void set_player_glow(std::optional<native_render::Glow> glow) {
         if (viewmodel) viewmodel->player_glow(std::move(glow));
     }
@@ -2731,6 +2735,7 @@ public:
         lastYaw = input.yaw();
         lastPitch = input.pitch;
         if (viewmodel) viewmodel->view_angles(float(lastYaw), float(lastPitch));
+        if (viewmodel) viewmodel->set_actor_context(core, reducedMotion);
         if (profiling) {
             frameProfile = {};
             frameProfile.hdrAuthored = lightmapInfo.hdr;

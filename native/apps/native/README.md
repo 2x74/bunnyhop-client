@@ -189,6 +189,8 @@ Smoke runs that need no account:
 ```sh
 apps/native/build/bunnyhop-native --map /path/to/map.bsp --hidden --frames 30 --screenshot /tmp/native.ppm
 apps/native/build/bunnyhop-native --map /path/to/map.bsp --no-menu --hidden --presentation-smoke /tmp/hud
+# Stills of the third-person bunny standing, banking into strafes, mid-jump and far away (build the target first):
+apps/native/build/bunnyhop-native-actor-motion-smoke target/native-assets /tmp/bunny-motion
 ```
 
 Export replays to video without the game, one process for any number of jobs. It prints JSON progress lines and

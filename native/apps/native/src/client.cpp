@@ -3615,6 +3615,7 @@ int run(const native::Options &opt) {
             renderer->set_viewmodel_weapon(std::nullopt);
             renderer->set_viewmodel_visible(prefs.viewmodel && !opt.camera && (!viewer.active || viewer.weapon_eye));
             renderer->set_source_look(prefs.source_look);
+            renderer->set_reduced_motion(menu_reduced_motion);
             if (spectator) {
                 spectated_actor = room.spectated(steady_seconds);
                 const auto &target = spectated_actor;
@@ -3716,6 +3717,8 @@ int run(const native::Options &opt) {
                 BhWeaponReport held{};
                 bh_weapon_report(core.get(), &held);
                 auto self = native_render::own_actor(state, input.pitch, input.yaw(), held.active);
+                BhCmd last_command{};
+                if (bh_last_command(core.get(), &last_command)) self.sidemove = last_command.side;
                 self.outfit = viewer.active ? viewer.runner_outfit : outfit;
                 self.loadout = viewer.active ? viewer.runner_loadout : held_knife.loadout();
                 self.emptyHand = viewer.active && !viewer.weapon_third;
