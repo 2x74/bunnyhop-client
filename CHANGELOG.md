@@ -17,6 +17,20 @@ Update from Settings → Updates: press Update, then Restart to update. Your set
   air: the first one you use in a run is the only one that works, and W and S do nothing. It has its own boards, like on
   the website.
 
+**Tiers and rewards**
+- Map tiers go up to T10: T8 Brutal, T9 Nightmare, T10 Impossible, on the Tab board too.
+- A mark after your name shows the hardest tier you've cleared, in game as well as in the menu.
+- New tier rewards: the Flare, Riptide and Whiteout colourways, their trails, the Riptide ghost, card frames and
+  backgrounds, and the Silver Wreath. The achievements Deep End, Sleepless and True Architect are in too.
+
+**Chat**
+- Profile flags can be pride flags, shown on the Tab board, name tags and chat.
+- Chat commands work with a Russian layout on (`!ызус` is `!spec`) and with a dot in front (`.rtv`).
+- After a style command, chat says how to get back to Normal.
+- Menus you open from chat (`!spec`, `!race`, `!bright`) can be clicked.
+- `!bright` opens a quick menu for this map's brightness and Fullbright, and `!fb` switches Fullbright. Both are kept
+  per map; Settings → Graphics keeps the value for every other map.
+
 **First person**
 - The website's weapons pass: the knife and gun move like on the website (CS:S bob, lag, strafe tilt, landing dip), the
   old weapon lowers out while the new one draws, attacks blend an inspect out instead of cutting it, and your hand
