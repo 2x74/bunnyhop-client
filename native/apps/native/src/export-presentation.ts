@@ -4,6 +4,7 @@ import { SFX } from "../../web/src/audio/catalog";
 import { supporterGiftWave } from "../../web/src/audio/gift";
 import { GunAnimator, type BaseClip, type Cue } from "../../web/src/viewmodel/guns/anim";
 import { gunById } from "../../web/src/viewmodel/guns/index";
+import { silencerLength } from "../../web/src/viewmodel/guns/silencer";
 import { mkdir, readFile, writeFile, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { bundledMusic, exportMusic } from "./export-music";
@@ -104,6 +105,8 @@ manifest.weaponAudio = weaponIds.map((id) => {
   };
   const reload = def.timing.reload ?? 2.4,
     shells = def.timing.shells;
+  // The USP's attach and detach run 3.08 s, the M4A1's 2.0 s (physics v25); the audio scales them to the lock-out.
+  const silencer = def.silencer ? silencerLength(def) : 114 / 37;
   return {
     timing: def.timing,
     draw: cues("draw", Math.min(def.timing.draw, 1) * 0.85),
@@ -111,8 +114,9 @@ manifest.weaponAudio = weaponIds.map((id) => {
     reloadEmpty: cues("reload", reload, true),
     shellInsert: cues("shellInsert", shells?.each ?? 0.5),
     shellEnd: cues("shellEnd", shells?.end ?? 0.5),
-    silencerOn: cues("silencer", 114 / 37, false, true),
-    silencerOff: cues("silencer", 114 / 37, false, false),
+    silencerSeconds: silencer,
+    silencerOn: cues("silencer", silencer, false, true),
+    silencerOff: cues("silencer", silencer, false, false),
   };
 });
 const gift = supporterGiftWave(22050);

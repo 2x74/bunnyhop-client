@@ -84,7 +84,7 @@ void VideoCapture::step_simulation() {
     bh_last_command(core_, &next_command_);
     BhReplayEvents events{};
     bh_replay_events(core_, previous_.player.tick, next_.player.tick, &events);
-    if (events.inspect_signal) renderer_.inspect_press();
+    if (events.inspect_signal) renderer_.remote_inspect_press();
     renderer_.inspect_held(events.inspect_held != 0);
     renderer_.simulation_tick();
     hud_.tick(next_.player);

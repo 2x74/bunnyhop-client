@@ -5,6 +5,7 @@
 #endif
 #include <cassert>
 #include <chrono>
+#include <fstream>
 #include <iostream>
 // The impact fixture is a vertical wood wall; no SDL, GL or simulation instance.
 static float vertices[] = {0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 100, 0, 0, 0,
@@ -303,6 +304,17 @@ int main(int argc, char **argv) {
               "supporter_gift",
               "gun_silencer_twist"})
             assert(shipped.has_cue(id));
+        // The M4A1's suppressor (physics v25) sounds on its own 2.0 s schedule, seated at CS:S's 0.93 s; the USP keeps
+        // its 3.08 s.
+        std::ifstream manifest_file(std::filesystem::path(argv[1]) / "audio.json");
+        const auto manifest = nlohmann::json::parse(manifest_file);
+        const auto &m4a1 = manifest.at("weaponAudio").at(18);
+        const auto &usp = manifest.at("weaponAudio").at(3);
+        assert(m4a1.at("silencerSeconds") == 2.0);
+        assert(std::abs(usp.at("silencerSeconds").get<double>() - 114. / 37.) < 1e-9);
+        const auto &seat = m4a1.at("silencerOn").back();
+        assert(seat.at(1) == "silSeat" && std::abs(seat.at(0).get<double>() - .93) < .02);
+        assert(m4a1.at("silencerOff").back().at(0).get<double>() < 2.0);
     }
     std::filesystem::remove_all(dir);
     assert(SDL_WasInit(SDL_INIT_AUDIO) == 0);
