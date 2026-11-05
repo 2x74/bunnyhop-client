@@ -1104,16 +1104,26 @@ class Renderer {
         profile_elapsed(frameProfile.mapProps, start);
     }
 
-    // The posed props' draws, one per material group, in place of their frozen groups.
+    // The posed props' draws, one per material group, in place of their frozen groups. Props of one mesh draw group by
+    // group, so the draws of a material follow each other.
     void add_map_prop_draws() {
         if (!mapPropMeshes || !mapPropMeshes->active()) return;
         const auto instances = mapPropMeshes->props.instances();
-        for (size_t i = 0; i < instances.size(); ++i)
-            for (const auto &g : mapPropMeshes->groups(i)) {
-                native_render::SceneDraw draw{g.material, g.first, g.count, true, int32_t(instances[i].entity), 0};
-                draw.skinned = uint32_t(i + 1);
-                sceneDrawList.add(draw);
-            }
+        const auto order = mapPropMeshes->instances_by_mesh();
+        for (size_t run = 0; run < order.size();) {
+            const size_t mesh = mapPropMeshes->mesh_of(order[run]);
+            size_t end = run;
+            while (end < order.size() && mapPropMeshes->mesh_of(order[end]) == mesh)
+                ++end;
+            for (const auto &g : mapPropMeshes->groups(order[run]))
+                for (size_t k = run; k < end; ++k) {
+                    const uint32_t i = order[k];
+                    native_render::SceneDraw draw{g.material, g.first, g.count, true, int32_t(instances[i].entity), 0};
+                    draw.skinned = i + 1;
+                    sceneDrawList.add(draw);
+                }
+            run = end;
+        }
     }
 
     // Culls a posed prop by the sphere its sequence sweeps (map-props.ts sizes it the same way).
@@ -1313,6 +1323,9 @@ class Renderer {
                 gl.Disable(GL_BLEND);
                 gl.DepthMask(GL_TRUE);
             }
+            // A run of draws with one material and vertex array (posed props) binds them once.
+            std::optional<std::pair<uint32_t, bool>> boundMaterial;
+            std::optional<GLuint> boundVao;
             for (const auto &d : draws) {
                 const auto &m = d.material < materials.size() ? materials[d.material] : materials.front();
                 if (transparent(m) != (pass != 0) || (reflection && m.kind == 2)) continue;
@@ -1320,13 +1333,19 @@ class Renderer {
                 if (!transform.visible) continue;
                 const auto model = native::model_matrix(transform);
                 gl.UniformMatrix4fv(materialUniforms.model, 1, GL_FALSE, model.data());
-                bind_material(d.material, d.prop);
+                if (boundMaterial != std::pair(d.material, d.prop)) {
+                    bind_material(d.material, d.prop);
+                    boundMaterial = std::pair(d.material, d.prop);
+                }
                 bind_skinning(materialUniforms.skinned, materialUniforms.boneBase, d.skinned, skinnedBound);
                 if (wireframe(d.material) != linesBound) {
                     linesBound = !linesBound;
                     gl.PolygonMode(GL_FRONT_AND_BACK, linesBound ? GL_LINE : GL_FILL);
                 }
-                gl.BindVertexArray(draw_vao(d));
+                if (boundVao != draw_vao(d)) {
+                    boundVao = draw_vao(d);
+                    gl.BindVertexArray(*boundVao);
+                }
                 gl.DrawElements(
                         GL_TRIANGLES,
                         d.count,

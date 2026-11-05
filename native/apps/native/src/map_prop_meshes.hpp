@@ -77,6 +77,20 @@ public:
 
     GLuint vao(size_t instance) const { return models_[meshes_[instanceMeshes_[instance]].model].vao; }
 
+    size_t mesh_of(size_t instance) const { return instanceMeshes_[instance]; }
+
+    // Instances ordered by mesh, so a frame's draws come in runs that share a material and a vertex array.
+    std::span<const uint32_t> instances_by_mesh() {
+        if (byMesh_.size() != instanceMeshes_.size()) {
+            byMesh_.resize(instanceMeshes_.size());
+            std::iota(byMesh_.begin(), byMesh_.end(), 0u);
+            std::stable_sort(byMesh_.begin(), byMesh_.end(), [&](uint32_t a, uint32_t b) {
+                return instanceMeshes_[a] < instanceMeshes_[b];
+            });
+        }
+        return byMesh_;
+    }
+
     // Uploads the bone rows posed since the last upload; the texture stays bound to `unit`.
     void upload(GLenum unit) {
         const auto [first, end] = props.take_dirty();
@@ -126,6 +140,7 @@ private:
     std::vector<Model> models_;
     std::vector<Mesh> meshes_;
     std::vector<size_t> instanceMeshes_;
+    std::vector<uint32_t> byMesh_;
     std::vector<bool> owners_, replaced_;
     std::unordered_map<std::string, uint32_t> propMaterials_;
     std::vector<BhPropAnimState> states_;
@@ -147,6 +162,7 @@ private:
         models_.clear();
         meshes_.clear();
         instanceMeshes_.clear();
+        byMesh_.clear();
         props = {};
         frozen_ = animationFloats_ = 0;
         stateContext_ = nullptr;
