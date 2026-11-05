@@ -74,6 +74,8 @@ test("the Number One picks the title colour and a supporter the name gradient in
       "Frame",
       "Title",
       "Name",
+      "Avatar",
+      "Effects",
       "Badges",
       "Links",
     ]);
@@ -88,7 +90,7 @@ test("the Number One picks the title colour and a supporter the name gradient in
     await page.waitForFunction(() => document.querySelector(".ce .pf-status")?.textContent?.includes("Saved"));
     expect(writes).toContainEqual({ path: "/api/me/cosmetics", body: { rankColor: "#ff3366" } });
     await page.locator(".ce-part[data-part=name]").click();
-    expect(await page.locator(".ce-label").allInnerTexts()).toEqual(["Colour", "Effect", "Second colour"]);
+    expect(await page.locator(".ce-label").allInnerTexts()).toEqual(["Colour", "Effect", "Second colour", "Font"]);
     const saved = page.waitForRequest((r) => r.url().endsWith("/api/me/supporter") && r.method() !== "GET");
     await page.locator(".ce-item", { hasText: "Aqua" }).last().click();
     expect((await saved).postDataJSON()).toEqual({ nameColor2: "aqua" });

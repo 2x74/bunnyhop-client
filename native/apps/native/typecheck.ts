@@ -11,6 +11,10 @@ function browserGlobalTypes(file: string, source: string): string {
     // use the DOM Window type in the temporary check mirror.
     return source.replace("window.fetch = async", "(window as Window).fetch = async");
   }
+  if (file.endsWith("apps/web/src/ui/hover-card.ts")) {
+    // Bun types the global addEventListener's events as plain Event; in a browser it is window's (KeyboardEvent).
+    return source.replace('addEventListener("keydown", (e) =>', 'window.addEventListener("keydown", (e) =>');
+  }
   return source;
 }
 await rm(output, { recursive: true, force: true });
