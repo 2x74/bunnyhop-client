@@ -2,9 +2,9 @@
 // What the first-person weapons show each frame, without any GL: the knife or gun in hand from its baked clips, the
 // website's weapons pass on top (viewmodel/viewmodel.ts, guns/presenter.ts, guns/viewmodel.ts):
 //
-//   switching     the outgoing weapon lowers out of view over 0.2 s while the new one's draw starts at once (the knife
-//                 keeps animating as it goes; a gun plays its holster from wherever it was). Presentation only: the
-//                 core switched on its tick. A reset never lowers anything.
+//   switching     the outgoing weapon lowers out of view over 0.15 s while the new one's draw starts at once (the
+//                 knife keeps animating as it goes; a gun plays its holster from wherever it was). Presentation only:
+//                 the core switched on its tick. A reset never lowers anything.
 //   inspects      the knife's chain (viewmodel_inspect.hpp), the quiet style for your own presses, attacks blending it
 //                 out with the knife home in the fist by the middle of the blend, chain switches crossfading.
 //   hand idle     the knife wrist and two fingers easing while idle, a settle after an action; on a gun the trigger
@@ -88,7 +88,7 @@ struct FirstPersonConfig {
     std::unordered_map<std::string, std::vector<TrickSpec>> chains, quiet_chains;
     std::optional<KnifeRig> knife_rig;
     std::unordered_map<std::string, GunMotionInfo> guns;
-    double gun_lower_seconds = .2;
+    double gun_lower_seconds = .15;
     double grip_index_off = .28, grip_left_open = .3;
 
     static FirstPersonConfig from_metadata(const nlohmann::json &metadata);
@@ -234,6 +234,10 @@ public:
         last_seconds_.reset();
         previous_tick_.reset();
         last_shot_ = no_shot;
+        // No clock or history carried across the jump: the same replay from the same tick poses the same every time.
+        clock_ = 0;
+        side_move_ = 0;
+        gap_distance_ = gap_angle_ = 0;
     }
 
     // One simulation tick of the player: landings for the feel, the side move for the strafe tilt.
@@ -268,8 +272,8 @@ public:
         movement.landed = landing_.take();
         movement.sidemove = side_move_;
         const Matrix34 feel = in.feel ? view_feel_.update(dt, movement, in.bob, in.sway, clock_) : identity34;
-        switch_weapons(in);
-        if (!previous_tick_ || *previous_tick_ != in.tick || in.presentation_event) weapon_events(in);
+        const bool switched = switch_weapons(in);
+        if (!previous_tick_ || *previous_tick_ != in.tick || in.presentation_event) weapon_events(in, switched);
         previous_tick_ = in.tick;
         output_.count = 0;
         if (current_.weapon == knife_weapon_id) {
@@ -296,7 +300,7 @@ private:
     static constexpr double longest_frame_seconds = .1;
     // A gun's switch-away holster fades in from where it was over this long (guns/anim.ts play, "holster").
     static constexpr double holster_fade_seconds = .06;
-    static constexpr double knife_lower_seconds = .2;
+    static constexpr double knife_lower_seconds = .15;
 
     double advance_clock(double seconds) {
         // A gap longer than this since the last drawn frame (the viewmodel hidden, a seek): nothing lowers.
@@ -315,10 +319,11 @@ private:
         state.started = in.seconds;
     }
 
-    void switch_weapons(const FirstPersonInput &in) {
+    // Whether a new weapon (or a new model of it) came into hand this frame.
+    bool switch_weapons(const FirstPersonInput &in) {
         if (in.weapon == current_.weapon && in.entry_name == current_.entry_name) {
             current_.silenced_now = in.has_report ? in.silenced : current_.silenced_now;
-            return;
+            return false;
         }
         // A new weapon lowers the old one; new gloves or a new knife on the same weapon just swap the model.
         if (current_.weapon && in.weapon != current_.weapon && shown_last_frame_) lower_out(in);
@@ -339,6 +344,7 @@ private:
             const auto info = config_.guns.find(std::string(in.item));
             gun_info_ = info == config_.guns.end() ? GunMotionInfo{} : info->second;
         }
+        return true;
     }
 
     void begin_knife(const FirstPersonInput &in) {
@@ -392,8 +398,10 @@ private:
         lowering_.state.started = in.seconds;
     }
 
-    void weapon_events(const FirstPersonInput &in) {
-        if (current_.weapon > knife_weapon_id && in.has_report && (in.flags & silencer_flag)) {
+    // `switched`: the weapon came into hand this frame. Its silencer state may differ from the last gun's (a switch
+    // puts an unfinished change back from physics 25), but a switch never starts an attach or detach.
+    void weapon_events(const FirstPersonInput &in, bool switched) {
+        if (current_.weapon > knife_weapon_id && in.has_report && (in.flags & silencer_flag) && !switched) {
             start(current_, in, in.silenced ? Action::silencer_on : Action::silencer_off);
             grip_idle_.quiet_reset();
         } else if (in.shot)
@@ -629,7 +637,8 @@ private:
     // viewmodel.ts lowered: down and out of view, accelerating, the wrist turning the blade down about the hand.
     static Matrix34 knife_lowered(double u) {
         constexpr double hand_x = 16, hand_y = -6, hand_z = -7, pitch_degrees = 24, roll_degrees = 12;
-        constexpr double back = 1.5, right = 1, down = 9;
+        // Out to the right as well as down: the incoming gun's draw comes up the middle.
+        constexpr double back = 1.5, right = 3.5, down = 9;
         const double k = u * u;
         Matrix34 lowered{};
         angle_matrix(pitch_degrees * k, 0, roll_degrees * k, 0, 0, 0, lowered);

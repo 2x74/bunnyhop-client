@@ -90,14 +90,16 @@ Check sensitivity with a physical mouse before using Raw; it has not completed t
 
 ## Weapons
 
-- A weapon switch lowers the old weapon out of view over 0.2 s while the new one comes up. The core still switches
+- A weapon switch lowers the old weapon out of view over 0.15 s while the new one comes up. The core still switches
   on its tick, so equip and fire timing are unchanged.
 - The hands move like the website's: CS:S bob, lag and strafe tilt, a landing dip, a short settle after a really hard
   fall, and an idle in the wrist and fingers. Bob now defaults to 50%; a saved Bob of exactly 100% moves to 50% once.
 - Settings → Viewmodel → Inspect: Quiet starts with a short blade check that only you see. Press again for the knife's
   tricks, which replays record. An attack blends an inspect out instead of cutting to the swing.
 - Settings → Viewmodel → Hard landing settle and Speed FOV are off by default and only move the picture.
-- The M4A1 has its own model and puts its suppressor on and off in 2.0 s (physics 25).
+- The M4A1 has its own model and puts its suppressor on and off in 2.0 s (physics 25). Switching away before it's on
+  or off puts it back as it was, for the USP too.
+- Two exports of the same replay show the same viewmodel frames.
 
 
 

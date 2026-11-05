@@ -31,6 +31,7 @@ import { KnifeHold } from "../../web/src/viewmodel/knives/hold";
 import { KNIVES } from "../../web/src/viewmodel/knives/index";
 import { gunFpCtx, gunRig } from "../../web/src/viewmodel/guns/rig";
 import { GunPoser } from "../../web/src/viewmodel/guns/pose";
+import { HOLSTER_TIME } from "../../web/src/viewmodel/guns/anim";
 import { GUNS, gunById } from "../../web/src/viewmodel/guns/index";
 import {
   bunnyGunGeometry,
@@ -48,11 +49,8 @@ import { WHIRL_FLICK } from "../../web/src/viewmodel/knives/whirligig";
 // it so the baked clips don't depend on when they were built; native adds the spinner's flicks at runtime.
 Object.defineProperty(performance, "now", { value: () => 0, configurable: true });
 const directory = resolve(process.argv[2] ?? "target/native-assets");
-/**
- * A switch away from a gun lowers it out of view over this long (guns/presenter.ts GUN_LOWER; the presenter can't be
- * imported here, it loads the game's audio).
- */
-const GUN_LOWER_SECONDS = 0.2;
+/** A switch away from a gun lowers it out of view over this long (guns/presenter.ts GUN_LOWER). */
+const GUN_LOWER_SECONDS = HOLSTER_TIME;
 /**
  * The grip idle's poses at full strength (guns/anim.ts overlays): the trigger finger eased off the trigger, the support
  * fingers relaxed. Native blends toward them by how far the idle has them.
