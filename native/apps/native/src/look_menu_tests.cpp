@@ -87,6 +87,8 @@ void test_look_menu_patches() {
     menu.toggle("bhop_aux_a9", settings);
     menu.toggle("bhop_aux_a9", settings);
     assert(!menu.open());
+    menu.toggle("a map name the setting can't keep", settings);
+    assert(!menu.open());
 }
 
 // Darker stops at the slider's end, and a click on the bar sets the value under it, in the slider's steps.

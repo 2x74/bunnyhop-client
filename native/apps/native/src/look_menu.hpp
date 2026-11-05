@@ -24,9 +24,9 @@ public:
 
     const std::string &map() const { return map_; }
 
-    // Opens for `map`; a second "!bright" closes it, as on the website.
+    // Opens for `map`; a second "!bright" closes it, as on the website. A name the setting can't keep opens nothing.
     void toggle(std::string_view map, const nlohmann::json &settings) {
-        if (open_ || map.empty()) {
+        if (open_ || !valid_look_map_name(map)) {
             open_ = false;
             return;
         }

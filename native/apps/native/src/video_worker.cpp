@@ -168,8 +168,10 @@ Json export_hud_settings(Json settings, const VideoOptions &options) {
     return settings;
 }
 
-// The export's look over the player's graphics settings: Plain is the website's "classic" preset.
+// The export's look over the player's graphics settings: Plain is the website's "classic" preset. A map's own
+// Brightness and Fullbright stay out of videos, as on the website.
 Json export_graphics_settings(Json settings, const VideoOptions &options) {
+    settings.erase(std::string(map_looks_key));
     if (options.look == "settings") return settings;
     settings["graphicsPreset"] = options.look == "plain" ? "classic" : options.look;
     settings["sourceLook"] = options.look != "plain";
