@@ -137,6 +137,9 @@ export const REQUESTED_KEYS: readonly RequestedKey[] = [
   render("graphics.skyPackId", skyId),
   render("graphics.skyRotation", number(-180, 180)),
   render("graphics.lightingSource", choice("map", "pack")),
+  render("viewmodel.inspect", choice("tricks", "quiet")),
+  render("viewmodel.landSettle", boolean),
+  render("viewmodel.speedFov", boolean),
 ];
 
 export const REQUESTED_BY_KEY = new Map(REQUESTED_KEYS.map((entry) => [entry.key, entry]));

@@ -65,6 +65,38 @@ void test_start_point_snap() {
     assert(!native::snap_into_start_zone(player.position, {narrow}, 0));
 }
 
+// The website's migrateViewmodel: a value still equal to the default it was saved under moves once, a player's own
+// value stays, and an old value chosen again after the move sticks.
+void test_viewmodel_migration() {
+    const auto defaults = native::default_settings();
+    assert(defaults["viewmodelFov"] == 64 && defaults["viewmodelX"] == .5 && defaults["viewmodelZ"] == 0);
+    assert(defaults["viewmodelBob"] == .5 && defaults["viewmodelRev"] == 4);
+    assert(defaults["viewmodelInspect"] == "tricks" && defaults["viewmodelLandSettle"] == false);
+    assert(defaults["viewmodelSpeedFov"] == false);
+    // v0.0.29's wider viewmodel: an untouched old framing moves to it, a player's own framing stays.
+    native::Json untouched = {{"viewmodelFov", 54}, {"viewmodelX", .6}, {"viewmodelZ", -.9}, {"viewmodelBob", 1}};
+    native::migrate_viewmodel(untouched);
+    assert(!untouched.contains("viewmodelFov") && !untouched.contains("viewmodelZ") && untouched["viewmodelRev"] == 4);
+    assert(untouched["viewmodelBob"] == .5);
+    native::Json own = {{"viewmodelFov", 54}, {"viewmodelX", 2}, {"viewmodelBob", .8}};
+    native::migrate_viewmodel(own);
+    assert(own["viewmodelFov"] == 54 && own["viewmodelX"] == 2 && own["viewmodelRev"] == 4);
+    assert(own["viewmodelBob"] == .8);
+    native::Json chosen = {{"viewmodelFov", 54}, {"viewmodelX", .6}, {"viewmodelZ", -.9}, {"viewmodelRev", 3}};
+    native::migrate_viewmodel(chosen);
+    assert(chosen["viewmodelFov"] == 54 && chosen["viewmodelZ"] == -.9 && !chosen.contains("viewmodelBob"));
+    // v0.0.37's half Bob: an untouched CS:S Bob moves once; CS:S chosen again afterwards stays.
+    native::Json full_bob = {{"viewmodelBob", 1}, {"viewmodelRev", 3}};
+    native::migrate_viewmodel(full_bob);
+    assert(full_bob["viewmodelBob"] == .5 && full_bob["viewmodelRev"] == 4);
+    native::Json chosen_bob = {{"viewmodelBob", 1}, {"viewmodelRev", 4}};
+    native::migrate_viewmodel(chosen_bob);
+    assert(chosen_bob["viewmodelBob"] == 1);
+    assert(native::patch_settings(defaults, {{"viewmodelInspect", "quiet"}})["viewmodelInspect"] == "quiet");
+    rejects([&] { native::patch_settings(defaults, {{"viewmodelInspect", "fancy"}}); });
+    rejects([&] { native::patch_settings(defaults, {{"viewmodelSpeedFov", 1}}); });
+}
+
 int main() {
     test_start_point_snap();
     const auto defaults = native::default_settings();
@@ -75,17 +107,7 @@ int main() {
     assert(migrated["binds"]["jump"][0] == "MWheelDown" && migrated["binds"].contains("setStart"));
     // A full serialized configuration must remain loadable after the schema grows.
     assert(native::patch_settings(defaults, native::Json::parse(migrated.dump())) == migrated);
-    // v0.0.29's wider viewmodel: an untouched old framing moves to it, a player's own framing stays.
-    native::Json untouched = {{"viewmodelFov", 54}, {"viewmodelX", .6}, {"viewmodelZ", -.9}};
-    native::migrate_viewmodel(untouched);
-    assert(!untouched.contains("viewmodelFov") && !untouched.contains("viewmodelZ") && untouched["viewmodelRev"] == 3);
-    native::Json own = {{"viewmodelFov", 54}, {"viewmodelX", 2}};
-    native::migrate_viewmodel(own);
-    assert(own["viewmodelFov"] == 54 && own["viewmodelX"] == 2 && own["viewmodelRev"] == 3);
-    native::Json chosen = {{"viewmodelFov", 54}, {"viewmodelX", .6}, {"viewmodelZ", -.9}, {"viewmodelRev", 3}};
-    native::migrate_viewmodel(chosen);
-    assert(chosen["viewmodelFov"] == 54 && chosen["viewmodelZ"] == -.9);
-    assert(defaults["viewmodelFov"] == 64 && defaults["viewmodelX"] == .5 && defaults["viewmodelZ"] == 0);
+    test_viewmodel_migration();
     rejects([&] { native::patch_settings(defaults, {{"crosshairColor", "#fff;"}}); });
     rejects([&] { native::patch_settings(defaults, {{"crosshairColor", "#gg0000"}}); });
     rejects([&] { native::patch_settings(defaults, {{"viewmodelFov", 101}}); });

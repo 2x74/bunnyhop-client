@@ -13,7 +13,7 @@ import { hostSettings, MAPPINGS, nativeView, type HostSettings } from "./prefs-b
 import { WEBSITE_CHAT_BIND } from "./settings-gates";
 import { parseOldPresets, presetsToProfiles } from "./settings-presets";
 import { mergeSettings, nativeOnlySettings, syncDocument } from "./settings-sync";
-import { prefsFromNative, websiteSettingsText } from "./settings-transfer";
+import { migrateNativeViewmodel, prefsFromNative, websiteSettingsText } from "./settings-transfer";
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 
@@ -132,4 +132,15 @@ test.skipIf(!WEBSITE_CHAT_BIND)("a website settings file's binds.chat reaches th
   const out = binds.toNative(plan.next, { binds: { ...DEFAULT_BINDS } } as unknown as HostSettings);
   expect((out.binds as Record<string, string[]>).chat).toEqual(["Enter"]);
   expect((DEFAULT_PREFS.binds as Record<string, string[]>).chat).toEqual([...DEFAULT_BINDS.chat]);
+});
+
+test("old native settings files move an untouched Bob and framing to the current defaults once", () => {
+  expect(prefsFromNative({ viewmodelBob: 1 }, clone(DEFAULT_PREFS)).viewmodel.bob).toBe(0.5);
+  expect(prefsFromNative({ viewmodelBob: 1, viewmodelRev: 4 }, clone(DEFAULT_PREFS)).viewmodel.bob).toBe(1);
+  expect(prefsFromNative({ viewmodelBob: 0.8 }, clone(DEFAULT_PREFS)).viewmodel.bob).toBe(0.8);
+  const framing = { viewmodelFov: 54, viewmodelX: 0.6, viewmodelY: 1.5, viewmodelZ: -0.9 };
+  expect(migrateNativeViewmodel({ ...framing, viewmodelRev: 2 })).toMatchObject({ viewmodelFov: 64, viewmodelZ: 0 });
+  expect(migrateNativeViewmodel({ ...framing, viewmodelRev: 3 })).toMatchObject({ viewmodelFov: 54, viewmodelZ: -0.9 });
+  // In an import an absent value means "keep mine", so a partial old framing is left as it is.
+  expect(migrateNativeViewmodel({ viewmodelFov: 54 })).toEqual({ viewmodelFov: 54 });
 });
