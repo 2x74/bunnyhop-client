@@ -38,7 +38,7 @@ public:
             if (prop.entity >= owners_.size() || !owners_[prop.entity]) continue;
             const auto mesh = prop.studio ? mesh_for(core, prop.studio, prop.skin) : std::nullopt;
             if (mesh)
-                add_instance(prop.entity, *mesh);
+                add_instance(prop, *mesh);
             else
                 ++frozen_;
             co_yield "animated prop";
@@ -317,10 +317,12 @@ private:
         model.indices = {};
     }
 
-    void add_instance(uint32_t entity, size_t mesh) {
-        props.add_instance(entity, *models_[meshes_[mesh].model].rig);
+    void add_instance(const BhAnimatedProp &prop, size_t mesh) {
+        std::optional<native_map_props::RandomAnimator> random;
+        if (prop.random) random.emplace(prop.random_seed, prop.min_anim_time, prop.max_anim_time);
+        props.add_instance(prop.entity, *models_[meshes_[mesh].model].rig, std::move(random));
         instanceMeshes_.push_back(mesh);
-        replaced_[entity] = true;
+        replaced_[prop.entity] = true;
     }
 
     void create_bone_texture() {
@@ -381,6 +383,7 @@ private:
                 double(state.since),
                 double(state.rate)
         };
+        instance.set = (state.flags & native_map_props::prop_anim_set_flag) != 0;
         // A new sequence is posed again even when the frame stamp matches.
         instance.stamp = std::numeric_limits<double>::quiet_NaN();
     }

@@ -143,3 +143,36 @@ fn reads_texture_proxies_and_hands_over_flipbook_frames() {
         bh_destroy(c);
     }
 }
+
+/// tools/map-props/generate-vectors.ts: the website's hashSeed and the map fingerprint its random animators use.
+#[test]
+fn seeds_random_animators_like_the_website() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/native/src/map_props_vectors.json");
+    let vectors: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    for case in vectors["hashes"].as_array().unwrap() {
+        let text = case["text"].as_str().unwrap();
+        let n = case["n"].as_u64().unwrap() as u32;
+        assert_eq!(
+            u64::from(crate::map_props::hash_seed(text, n)),
+            case["hash"].as_u64().unwrap(),
+            "{text}"
+        );
+    }
+    let entities: Vec<bunnyhop_core::entities::Entity> = vectors["entityPairs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|pairs| bunnyhop_core::entities::Entity {
+            pairs: pairs
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|kv| (kv[0].as_str().unwrap().to_string(), kv[1].as_str().unwrap().to_string()))
+                .collect(),
+        })
+        .collect();
+    assert_eq!(
+        u64::from(crate::map_props::map_seed(&entities)),
+        vectors["mapSeed"].as_u64().unwrap()
+    );
+}

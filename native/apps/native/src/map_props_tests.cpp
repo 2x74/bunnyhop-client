@@ -182,6 +182,57 @@ void check_distance_steps(const nlohmann::json &oracle) {
     assert(differs);
 }
 
+// A sequence table standing in for a model (tools/map-props/generate-vectors.ts).
+struct VectorTable {
+    std::vector<double> rates;
+    std::vector<bool> loops;
+    std::vector<std::pair<int, double>> idle;
+
+    double cycles_per_second(int sequence) const { return rates[size_t(sequence)]; }
+
+    bool looping(int sequence) const { return loops[size_t(sequence)]; }
+
+    const std::vector<std::pair<int, double>> &idle_sequences() const { return idle; }
+};
+
+VectorTable table_from(const nlohmann::json &t) {
+    VectorTable table;
+    table.rates = t.at("cps").get<std::vector<double>>();
+    table.loops = t.at("looping").get<std::vector<bool>>();
+    for (const auto &c : t.at("idle"))
+        table.idle.push_back({c.at("seq").get<int>(), c.at("weight").get<double>()});
+    return table;
+}
+
+// RandomAnimation props: the website's seeded generator and its think-by-think switches, exactly.
+void check_random_animators(const nlohmann::json &vectors) {
+    for (const auto &r : vectors.at("randoms")) {
+        native_map_props::SeededRandom random(r.at("seed").get<uint32_t>());
+        for (const auto &value : r.at("values")) {
+            ++compared;
+            const double next = random.next();
+            if (next != value.get<double>()) fail("random " + r.at("seed").dump(), std::to_string(next));
+        }
+    }
+    std::vector<VectorTable> tables;
+    for (const auto &t : vectors.at("tables"))
+        tables.push_back(table_from(t));
+    for (const auto &a : vectors.at("animators")) {
+        auto &table = tables[a.at("table").get<size_t>()];
+        native_map_props::RandomAnimator animator(
+                a.at("seed").get<uint32_t>(), a.at("min").get<double>(), a.at("max").get<double>()
+        );
+        for (const auto &at : a.at("at")) {
+            const auto shown = animator.at(at.at("time").get<double>(), table);
+            const auto where = "animator " + a.at("seed").dump() + " at " + at.at("time").dump();
+            ++compared;
+            if (shown.sequence != at.at("sequence").get<int>())
+                fail(where, "sequence " + std::to_string(shown.sequence));
+            close_to(where, shown.cycle, at.at("cycle").get<double>(), 0);
+        }
+    }
+}
+
 void check_visual_time() {
     // Play: the newest tick and the frame's blend. A replay: the tick shown between the two.
     assert(std::abs(native::world_visual_seconds(9, 10, .25f, .01, false) - .1025) < 1e-12);
@@ -193,6 +244,13 @@ void check_visual_time() {
 
 int main(int argc, char **argv) {
     const std::string path = argc > 1 ? argv[1] : "map-props-oracle.json";
+    const std::string vectors_path = argc > 2 ? argv[2] : "map_props_vectors.json";
+    std::ifstream vectors_file(vectors_path);
+    if (!vectors_file) {
+        std::cerr << "Cannot open the map props vectors at " << vectors_path << '\n';
+        return 2;
+    }
+    check_random_animators(*std::make_unique<nlohmann::json>(nlohmann::json::parse(vectors_file)));
     std::ifstream file(path);
     if (!file) {
         std::cerr << "Cannot open the map props oracle at " << path

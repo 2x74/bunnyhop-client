@@ -12,6 +12,13 @@ pub struct BhAnimatedProp {
     pub skin: i32,
     /// `bh_studio_load` handle of its model, 0 when the model can't be loaded (it stays frozen).
     pub studio: u32,
+    /// `RandomAnimation 1`: it switches between its idle sequences every MinAnimTime..MaxAnimTime seconds, drawn from
+    /// `random_seed` (map-props.ts RandomAnimator).
+    pub random: u32,
+    pub random_seed: u32,
+    pub reserved: u32,
+    pub min_anim_time: f64,
+    pub max_anim_time: f64,
 }
 
 /// What an animated prop plays: sequence seconds at visual time t are `base + (t - since) * rate`.
@@ -43,6 +50,61 @@ pub(super) struct PropModels {
     ready: bool,
     props: Vec<BhAnimatedProp>,
 }
+
+/// map-props.ts hashSeed: FNV-1a over the text's UTF-16 code units, mixed with `n`.
+pub(super) fn hash_seed(text: &str, n: u32) -> u32 {
+    const OFFSET_BASIS: u32 = 2_166_136_261;
+    const PRIME: u32 = 16_777_619;
+    const MIX: u32 = 0x045d_9f3b;
+    let mut h = OFFSET_BASIS ^ n;
+    for unit in text.encode_utf16() {
+        h = (h ^ u32::from(unit)).wrapping_mul(PRIME);
+    }
+    (h ^ (h >> 16)).wrapping_mul(MIX)
+}
+
+/// The map's fingerprint for the random animators (render.ts): every entity's `classname|targetname|origin`, one per
+/// line, as the website's entity list reads them (exact keys, the last one wins, entities without keys left out).
+pub(super) fn map_seed(entities: &[bunnyhop_core::entities::Entity]) -> u32 {
+    let value = |e: &bunnyhop_core::entities::Entity, key: &str| {
+        e.pairs
+            .iter()
+            .rev()
+            .find(|(k, _)| k == key)
+            .map_or(String::new(), |(_, v)| v.clone())
+    };
+    let lines: Vec<String> = entities
+        .iter()
+        .filter(|e| !e.pairs.is_empty())
+        .map(|e| {
+            format!(
+                "{}|{}|{}",
+                value(e, "classname"),
+                value(e, "targetname"),
+                value(e, "origin")
+            )
+        })
+        .collect();
+    hash_seed(&lines.join("\n"), 0)
+}
+
+/// JavaScript's `parseInt(text, 10) || 0` is not 0.
+fn js_int_set(text: &str) -> bool {
+    let s = text.trim_start();
+    let digits = s.strip_prefix(['+', '-']).unwrap_or(s);
+    let leading: String = digits.chars().take_while(char::is_ascii_digit).collect();
+    leading.parse::<u64>().is_ok_and(|n| n != 0)
+}
+
+/// JavaScript's `parseFloat(text) || 0`.
+fn js_float_or_zero(text: Option<&str>) -> f64 {
+    map_motion::js_parse_float(text.unwrap_or(""))
+        .filter(|n| !n.is_nan())
+        .unwrap_or(0.0)
+}
+
+/// Seeds every random animator with the map and the prop: map-props.ts `hashSeed(path, mapSeed ^ (entity + 1) * k)`.
+const RANDOM_ENTITY_MULTIPLIER: u32 = 0x9e37_79b1;
 
 fn studio_model_path(entity: &bunnyhop_core::entities::Entity) -> Option<String> {
     if !entity.classname().to_ascii_lowercase().starts_with("prop_dynamic") {
@@ -93,15 +155,31 @@ impl Map {
         owners.sort_unstable();
         owners.dedup();
         let mut props = Vec::new();
+        let fingerprint = map_seed(&self.game.entities);
         for entity in owners {
             check()?;
-            let Some(e) = self.game.entities.get(entity as usize) else {
+            let Some(e) = self.game.entities.get(entity as usize).cloned() else {
                 continue;
             };
-            let Some(path) = studio_model_path(e) else { continue };
-            let skin = e.int("skin") as i32;
+            let Some(path) = studio_model_path(&e) else { continue };
             let studio = self.load_studio(&path).unwrap_or(0);
-            props.push(BhAnimatedProp { entity, skin, studio });
+            let mut prop = BhAnimatedProp {
+                entity,
+                skin: e.int("skin") as i32,
+                studio,
+                ..BhAnimatedProp::default()
+            };
+            if js_int_set(e.get("RandomAnimation").unwrap_or("")) && studio != 0 {
+                let model_path = &self.assets.models[studio as usize - 1].path;
+                prop.random = 1;
+                prop.random_seed = hash_seed(
+                    model_path,
+                    fingerprint ^ (entity + 1).wrapping_mul(RANDOM_ENTITY_MULTIPLIER),
+                );
+                prop.min_anim_time = js_float_or_zero(e.get("MinAnimTime"));
+                prop.max_anim_time = js_float_or_zero(e.get("MaxAnimTime"));
+            }
+            props.push(prop);
         }
         self.prop_models = PropModels { ready: true, props };
         Ok(())

@@ -105,6 +105,17 @@ public:
 
     bool still(int sequence) const { return still_[size_t(sequence)]; }
 
+    // The ACT_IDLE sequences in model order with their activity weights, for random animators.
+    const std::vector<std::pair<int, double>> &idle_sequences() {
+        if (!idle_) {
+            idle_.emplace();
+            for (size_t i = 0; i < rig.sequences.size(); ++i)
+                if (native_studio::lower_ascii(rig.sequences[i].activity) == "act_idle")
+                    idle_->push_back({int(i), rig.sequences[i].activity_weight});
+        }
+        return *idle_;
+    }
+
     // map-props.ts lookup (`LookupSequence`): a sequence name, else an activity; among an activity's sequences a
     // weighted pick fixed by the entity, so replays and exports agree. -1 for neither or an empty name.
     int lookup(std::string_view name, uint32_t entity) {
@@ -151,6 +162,7 @@ private:
     std::vector<double> rates_, reaches_;
     std::vector<bool> still_;
     std::unordered_map<std::string, std::vector<std::pair<int, double>>> lookups_;
+    std::optional<std::vector<std::pair<int, double>>> idle_;
 
     const std::vector<std::pair<int, double>> &candidates_for(std::string_view name) {
         auto key = native_studio::lower_ascii(name);
@@ -170,6 +182,138 @@ private:
     }
 };
 
+// map-props.ts seededRandom (mulberry32): random animators draw the same times and picks in every replay and export.
+class SeededRandom {
+public:
+    explicit SeededRandom(uint32_t seed) : state_(seed) {}
+
+    double next() {
+        static constexpr uint32_t increment = 0x6d2b79f5u;
+        state_ += increment;
+        uint32_t t = state_;
+        t = (t ^ (t >> 15)) * (t | 1u);
+        t ^= t + (t ^ (t >> 7)) * (t | 61u);
+        return double(t ^ (t >> 14)) / 4294967296.;
+    }
+
+private:
+    uint32_t state_;
+};
+
+// map-props.ts RandomAnimator: a `RandomAnimation 1` prop_dynamic as CDynamicProp::AnimThink switches it.
+// - Spawn ignores DefaultAnim: sequence 0, cycle 0, playback rate 0 until the first think at MinAnimTime..MaxAnimTime
+//   + 0.1 s.
+// - Thinks every 0.1 s after that; once the next switch time has passed:
+// ResetSequence(SelectWeightedSequence(ACT_IDLE))
+//   and the next switch MinAnimTime..MaxAnimTime later.
+// - ResetSequence keeps the cycle when the old sequence looped (else 0), and resets the rate to 1 only when the
+//   sequence changed or the old one didn't loop.
+// - Source draws at random; here a generator seeded by the map and the entity runs on the world's visual time. Switches
+//   are computed forward once and kept, so seeking back is a search.
+class RandomAnimator {
+public:
+    RandomAnimator(uint32_t seed, double min_seconds, double max_seconds)
+        : random_(seed)
+        , min_(min_seconds)
+        , max_(max_seconds) {
+        static constexpr size_t reserved_switches = 256;
+        segments_.reserve(reserved_switches);
+        segments_.push_back({0, 0, 0, 0});
+        next_switch_ = draw();
+        next_think_ = next_switch_ + think_seconds;
+    }
+
+    // `model` gives cycles_per_second(seq), looping(seq) and idle_sequences() (PropModel does).
+    template <class Model>
+    Shown at(double seconds, Model &model) {
+        extend(seconds, model);
+        size_t low = 0, high = segments_.size() - 1;
+        while (low < high) {
+            const size_t middle = (low + high + 1) / 2;
+            if (segments_[middle].start <= seconds)
+                low = middle;
+            else
+                high = middle - 1;
+        }
+        return {segments_[low].sequence, cycle_at(segments_[low], std::max(seconds, segments_[low].start), model)};
+    }
+
+private:
+    // CDynamicProp::AnimThink's interval, and how many switches a prop remembers (10 hours at one per think).
+    static constexpr double think_seconds = .1;
+    static constexpr size_t max_switches = size_t(1) << 18;
+    // Keeps 2.9 / 0.1 from flooring to 28: the think at exactly the switch time doesn't switch (`<` in AnimThink).
+    static constexpr double think_epsilon = 1e-6;
+
+    struct Segment {
+        double start;
+        int sequence;
+        double cycle;
+        double rate;
+    };
+
+    std::vector<Segment> segments_;
+    SeededRandom random_;
+    double min_, max_;
+    double next_switch_ = 0, next_think_ = 0;
+    bool loops_ = false;
+
+    // RandomFloat(min, max).
+    double draw() { return min_ + (max_ - min_) * random_.next(); }
+
+    template <class Model>
+    static double cycle_at(const Segment &s, double seconds, Model &model) {
+        const double cycle = s.cycle + (seconds - s.start) * model.cycles_per_second(s.sequence) * s.rate;
+        if (cycle >= 0 && cycle < 1) return cycle;
+        if (model.looping(s.sequence)) return cycle - std::floor(cycle);
+        return cycle < 0 ? 0 : 1;
+    }
+
+    // SelectWeightedSequence(ACT_IDLE, current): Source's reservoir pick; a negative weight keeps the current one.
+    template <class Model>
+    int pick(int current, Model &model) {
+        int sequence = -1;
+        double total = 0;
+        for (const auto &[candidate, weight] : model.idle_sequences()) {
+            if (candidate == current && weight < 0) return candidate;
+            const double magnitude = std::abs(weight);
+            total += magnitude;
+            const double roll = total > 0 ? std::floor(random_.next() * total) : 0;
+            if (total == 0 || roll < magnitude) sequence = candidate;
+        }
+        return sequence;
+    }
+
+    template <class Model>
+    void extend(double seconds, Model &model) {
+        while (next_think_ <= seconds && segments_.size() < max_switches && std::isfinite(next_think_))
+            think(model);
+    }
+
+    template <class Model>
+    void think(Model &model) {
+        const double now = next_think_;
+        const auto &last = segments_.back();
+        double cycle = cycle_at(last, now, model);
+        int sequence = last.sequence;
+        double rate = last.rate;
+        const int next = pick(sequence, model);
+        if (!loops_) cycle = 0;
+        const bool changed = next != sequence;
+        sequence = next < 0 ? 0 : next;
+        if (changed || !loops_) {
+            loops_ = model.looping(sequence);
+            rate = 1;
+        }
+        segments_.push_back({now, sequence, cycle, rate});
+        next_switch_ = now + draw();
+        next_think_ = now + think_seconds * (std::floor((next_switch_ - now) / think_seconds + think_epsilon) + 1);
+    }
+};
+
+// The core's PROP_ANIM_SET: the map's I/O set a sequence, which a random animator then follows instead.
+constexpr uint32_t prop_anim_set_flag = 4;
+
 // One posed prop.
 struct PropInstance {
     uint32_t entity = 0;
@@ -184,6 +328,9 @@ struct PropInstance {
     // Sequence the culling radius was sized for.
     int sized_for = -2;
     double radius = 1;
+    // RandomAnimation props, until the map's I/O sets a sequence (`set`).
+    std::optional<RandomAnimator> random;
+    bool set = false;
 };
 
 class MapProps {
@@ -197,13 +344,14 @@ public:
     }
 
     // Props in entity order.
-    void add_instance(uint32_t entity, uint32_t model) {
+    void add_instance(uint32_t entity, uint32_t model, std::optional<RandomAnimator> random = std::nullopt) {
         PropInstance instance;
         instance.entity = entity;
         instance.model = model;
+        instance.random = std::move(random);
         instance.slot = uint32_t(bone_count_);
         bone_count_ += models_[model]->rig.bones;
-        instances_.push_back(instance);
+        instances_.push_back(std::move(instance));
         rows_.resize(bone_count_ * row_floats);
     }
 
@@ -227,8 +375,10 @@ public:
     }
 
     // Sequence and cycle of a prop at visual time `seconds`.
-    Shown at(const PropInstance &instance, double seconds) {
-        return sequence_at(instance.state, seconds, *models_[instance.model]);
+    Shown at(PropInstance &instance, double seconds) {
+        auto &model = *models_[instance.model];
+        if (instance.random && !instance.set) return instance.random->at(seconds, model);
+        return sequence_at(instance.state, seconds, model);
     }
 
     // The culling radius around the prop's origin: its mesh plus the bones' reach over the sequence it plays now.

@@ -308,10 +308,13 @@ typedef struct BhAnimatedProp {
     uint32_t entity;
     int32_t skin;
     uint32_t studio;
+    /* RandomAnimation: switches idle sequences every min..max seconds, drawn from random_seed. */
+    uint32_t random, random_seed, reserved;
+    double min_anim_time, max_anim_time;
 } BhAnimatedProp;
 
 typedef struct BhPropAnimState {
-    uint32_t entity, flags; /* flags: hidden 1, removed 2 */
+    uint32_t entity, flags; /* flags: hidden 1, removed 2, set by the map's I/O 4 */
     float base, since, rate;
 } BhPropAnimState;
 

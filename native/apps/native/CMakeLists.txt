@@ -613,7 +613,8 @@ if(BUILD_TESTING)
             COMMAND "${BUN_EXECUTABLE}" apps/native/src/map-props-oracle.ts "${MAP_PROPS_ORACLE}")
         set_tests_properties(native_map_props_oracle PROPERTIES
             WORKING_DIRECTORY "${BUNNYHOP_ROOT}" FIXTURES_SETUP map_props_oracle TIMEOUT 120)
-        add_test(NAME native_map_props COMMAND bunnyhop-native-map-props-tests "${MAP_PROPS_ORACLE}")
+        add_test(NAME native_map_props COMMAND bunnyhop-native-map-props-tests "${MAP_PROPS_ORACLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/map_props_vectors.json")
         set_tests_properties(native_map_props PROPERTIES FIXTURES_REQUIRED map_props_oracle)
     endif()
     add_executable(bunnyhop-native-gun-hold-tests src/gun_hold_tests.cpp)
@@ -657,6 +658,7 @@ if(BUILD_TESTING)
         # The same exact arithmetic as the website: nothing may contract it into an FMA.
         target_compile_options(bunnyhop-native-jhud-tests PRIVATE -ffp-contract=off)
         target_compile_options(bunnyhop-native-closest-pos-tests PRIVATE -ffp-contract=off)
+        target_compile_options(bunnyhop-native-map-props-tests PRIVATE -ffp-contract=off)
     endif()
     add_test(NAME native_runner_help COMMAND bunnyhop-native-runner --help)
     # Decoding and pack scanning need no SDL, so these run everywhere.
