@@ -430,7 +430,9 @@ impl Map {
         check()?;
         let mut sp = bunnyhop_core::props::static_props(&bsp);
         let n_static = sp.props.len();
-        bunnyhop_core::props::add_props(&mut sp, game.render_props());
+        // Animated props get their own groups for the renderer to pose (map_props.rs), baked in their frozen pose for
+        // when it can't. It has to run before mark_props, which keeps the 3D skybox's animated props frozen.
+        bunnyhop_core::props::add_game_props(&mut sp, &game, true);
         bunnyhop_core::skybox::mark_props(&bsp, &mut sp, n_static);
         let props = loop {
             check()?;

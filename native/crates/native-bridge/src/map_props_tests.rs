@@ -205,3 +205,79 @@ fn seeds_the_golden_thumper_like_the_release() {
     );
     assert_eq!(golden["seed"].as_u64(), Some(u64::from(GOLDEN_SEED)));
 }
+
+/// A map the native client downloaded: `BH_NATIVE_MAPS` is its maps folder (one folder per BSP with the map and its
+/// `content`), e.g. ~/Library/Application Support/bunnyhop.lol/Bunnyhop Native/maps on macOS.
+fn downloaded_map(name: &str) -> (CString, CString) {
+    let root = std::env::var_os("BH_NATIVE_MAPS")
+        .expect("set BH_NATIVE_MAPS to the native client's maps folder");
+    let bsp = std::fs::read_dir(&root)
+        .unwrap()
+        .map(|entry| entry.unwrap().path().join(format!("{name}.bsp")))
+        .find(|path| path.is_file())
+        .unwrap_or_else(|| panic!("{name} isn't downloaded"));
+    let content = bsp.with_file_name("content");
+    let text = |path: &Path| CString::new(path.to_str().unwrap()).unwrap();
+    (text(&bsp), text(&content))
+}
+
+/// Animated props have to come with groups of their own (props::add_game_props), or nothing poses them.
+#[test]
+#[ignore = "requires a downloaded bhop_ceaseless (BH_NATIVE_MAPS)"]
+fn the_butterflies_have_their_own_groups_and_models() {
+    const CEASELESS_ANIMATED_PROPS: usize = 14;
+    let (bsp, content) = downloaded_map("bhop_ceaseless");
+    unsafe {
+        let c = bh_create();
+        assert_eq!(bh_load_map(c, bsp.as_ptr(), content.as_ptr()), 1);
+        let mut count = 0;
+        let props = bh_animated_props(c, &mut count);
+        assert_eq!(count, CEASELESS_ANIMATED_PROPS);
+        let props = std::slice::from_raw_parts(props, count);
+        let m = (*c).map.as_ref().unwrap();
+        for prop in props {
+            assert_ne!(prop.studio, 0, "entity {}: its model loads", prop.entity);
+            assert!(m.game.is_animated_prop(prop.entity as usize));
+            assert!(
+                m.assets
+                    .props
+                    .dynamic_groups
+                    .iter()
+                    .any(|g| g[0] == prop.entity)
+            );
+        }
+        bh_destroy(c);
+    }
+}
+
+/// RandomAnimation props are animated props since the core tracks them: each one gets its own groups and a seeded
+/// random animator instead of its DefaultAnim.
+#[test]
+#[ignore = "requires a downloaded bhop_shrubhop (BH_NATIVE_MAPS)"]
+fn random_animation_props_get_their_animators() {
+    const SHRUBHOP_RANDOM_PROPS: usize = 38;
+    let (bsp, content) = downloaded_map("bhop_shrubhop");
+    unsafe {
+        let c = bh_create();
+        assert_eq!(bh_load_map(c, bsp.as_ptr(), content.as_ptr()), 1);
+        let mut count = 0;
+        let props = std::slice::from_raw_parts(bh_animated_props(c, &mut count), count);
+        let random: Vec<&BhAnimatedProp> = props.iter().filter(|p| p.random != 0).collect();
+        assert_eq!(random.len(), SHRUBHOP_RANDOM_PROPS);
+        let m = (*c).map.as_ref().unwrap();
+        let fingerprint = crate::map_props::map_seed(&m.game.entities);
+        for prop in random {
+            let model = &m.assets.models[prop.studio as usize - 1].path;
+            assert_eq!(
+                prop.random_seed,
+                crate::map_props::random_animator_seed(model, fingerprint, prop.entity)
+            );
+            assert!(
+                prop.min_anim_time <= prop.max_anim_time,
+                "entity {}",
+                prop.entity
+            );
+        }
+        bh_destroy(c);
+    }
+}
