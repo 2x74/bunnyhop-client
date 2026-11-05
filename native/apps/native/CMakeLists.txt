@@ -480,6 +480,12 @@ if(BUILD_TESTING)
     # hud_theme.hpp inflates gzip data; Windows finds zlib.h only through the vcpkg target.
     find_package(ZLIB REQUIRED)
     target_link_libraries(bunnyhop-native-hud_theme-tests PRIVATE ZLIB::ZLIB)
+    # Supporter name fonts: the exported sheet, read and laid out as the HUD draws names.
+    add_executable(bunnyhop-native-name-font-tests src/name_font_sheet_tests.cpp)
+    target_include_directories(bunnyhop-native-name-font-tests PRIVATE include vendor src)
+    target_compile_options(bunnyhop-native-name-font-tests PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
+    target_link_libraries(bunnyhop-native-name-font-tests PRIVATE ZLIB::ZLIB)
+    add_test(NAME native_name_fonts COMMAND bunnyhop-native-name-font-tests "${CMAKE_CURRENT_SOURCE_DIR}/../../target/native-assets")
     add_executable(bunnyhop-native-grapheme-tests src/grapheme_tests.cpp)
     target_include_directories(bunnyhop-native-grapheme-tests PRIVATE src)
     target_compile_options(bunnyhop-native-grapheme-tests PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)

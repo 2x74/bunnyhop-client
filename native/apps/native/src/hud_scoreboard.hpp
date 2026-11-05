@@ -411,7 +411,7 @@ void draw_score_player(Hud &hud, float x, float right, float y, const ScoreRow &
     const auto name = utf8_prefix(row.name, glyphs);
     hud.overlay_name(x, y, name, text_size + 1, row.look, now);
     if (row.host) {
-        const float name_end = x + hud.overlay_text_width(name, text_size + 1) + 6;
+        const float name_end = x + hud.overlay_name_width(name, text_size + 1, row.look) + 6;
         draw_host_tag(hud, name_end + float(name_badge_count(row.look)) * badge_width, y);
     }
 }

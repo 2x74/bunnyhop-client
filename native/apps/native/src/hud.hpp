@@ -11,6 +11,7 @@
 #include "hud_geometry.hpp"
 #include "text_raster.hpp"
 #include "hud_text.hpp"
+#include "name_font_sheet.hpp"
 #include "native_chat.hpp"
 #include "hud_theme.hpp"
 #include "movement_hud.hpp"
@@ -26,6 +27,8 @@ class NativeHud {
     Gl &gl;
     GLuint program = 0, vao = 0, vbo = 0, atlas = 0;
     GLuint glyph_atlas_ = 0;
+    native::NameFontSheet name_fonts_;
+    std::array<GLuint, native::name_font_ids.size()> name_font_textures_{};
     std::vector<float> vertices;
 
     struct Batch {
@@ -43,6 +46,7 @@ class NativeHud {
         uint64_t batch;
         float origin_x, origin_y;
         float advance;
+        float baseline;
     };
 
     std::map<std::string, Raster> raster_cache;
@@ -111,7 +115,7 @@ class NativeHud {
 
     const Raster *raster(std::string_view value, float size, bool tabular = false) {
         if (value.empty()) return nullptr;
-        const int pixels = std::max(1, int(std::round(size * 1.3f * scale * element_scale)));
+        const int pixels = std::max(1, int(std::round(size * shaped_em_per_size * scale * element_scale)));
         for (auto &[key, cached] : raster_cache) {
             const auto separator = key.find(':');
             if (cached.pixels == pixels && cached.tabular == tabular
@@ -140,7 +144,8 @@ class NativeHud {
                 raster_batch_,
                 bitmap.origin_x,
                 bitmap.origin_y,
-                bitmap.advance
+                bitmap.advance,
+                bitmap.baseline
         };
         gl.GenTextures(1, &result.texture);
         gl.BindTexture(GL_TEXTURE_2D, result.texture);
@@ -339,8 +344,12 @@ class NativeHud {
     void rect(float x, float y, float w, float h, Color c) { quad(x, y, w, h, -2, -2, 0, 0, c); }
 
     static constexpr Color text_shadow{0, 0, 0, .85f};
+    // System-shaped text is rasterized with an em of 1.3 times its size.
+    static constexpr float shaped_em_per_size = 1.3f;
     static constexpr float atlas_advance_per_size = .6f;
     static constexpr float atlas_height_per_size = 1.3f;
+    // export-presentation.ts draws the HUD font with its baseline 42 px down each 52 px cell.
+    static constexpr float atlas_baseline_per_size = atlas_height_per_size * 42 / 52;
     static constexpr unsigned atlas_columns = 16;
     static constexpr float atlas_cell_u = 1.f / atlas_columns;
     static constexpr float atlas_cell_v = 1.f / 6;
@@ -495,6 +504,88 @@ class NativeHud {
                 GL_UNSIGNED_BYTE,
                 pixels.data()
         );
+    }
+
+    // Each loaded name font's atlas as a texture of white letters; the sheet keeps only the letter boxes.
+    void prepare_name_fonts() {
+        for (size_t i = 0; i < name_fonts_.faces.size(); ++i) {
+            auto &face = name_fonts_.faces[i];
+            if (!face.loaded()) continue;
+            std::vector<uint8_t> rgba(face.alpha.size() * 4, 255);
+            for (size_t pixel = 0; pixel < face.alpha.size(); ++pixel)
+                rgba[pixel * 4 + 3] = face.alpha[pixel];
+            face.alpha = {};
+            gl.GenTextures(1, &name_font_textures_[i]);
+            gl.BindTexture(GL_TEXTURE_2D, name_font_textures_[i]);
+            gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            gl.TexImage2D(
+                    GL_TEXTURE_2D, 0, GL_RGBA8, face.width, face.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data()
+            );
+        }
+    }
+
+    struct FaceName {
+        const native::NameFontFace *face;
+        GLuint texture;
+        native::NameFontFit fit;
+    };
+
+    // A name in its supporter font, when that font is loaded and can draw the name whole. `em` and `widest`: the
+    // default font's em and the name's width in it, in HUD units.
+    std::optional<FaceName> face_name(std::string_view value, native::NameFont font, float em, float widest) const {
+        const auto *face = name_fonts_.face(font);
+        if (!face) return std::nullopt;
+        const auto fit = native::fit_name_font(*face, name_fonts_.em, value, em, widest);
+        if (!fit) return std::nullopt;
+        return FaceName{face, name_font_textures_[size_t(font) - 1], *fit};
+    }
+
+    // The HUD font's em is the text size.
+    std::optional<FaceName> overlay_face_name(std::string_view value, float size, const native::NameAppearance &look) {
+        if (look.font == native::NameFont::none) return std::nullopt;
+        return face_name(value, look.font, size, text_width(value, size));
+    }
+
+    static constexpr std::array<std::array<float, 2>, 4> glow_offsets = {{{-1, 0}, {1, 0}, {0, -1}, {0, 1}}};
+
+    // Letter by letter from the font's atlas, from the pen at `x` on the `baseline`: the shadow, a glow's halo, then
+    // the name's colour or effect.
+    void draw_face_name(
+            float x,
+            float baseline,
+            std::string_view value,
+            const FaceName &name,
+            const native::NameAppearance &look,
+            double seconds,
+            bool shadow
+    ) {
+        if (!element_visible) return;
+        current_texture = name.texture;
+        const auto letters = [&](float dx, float dy, const auto &ink) {
+            native::name_font_quads(*name.face, value, x + dx, baseline + dy, name.fit, [&](const auto &letter) {
+                quad(letter.x,
+                     letter.y,
+                     letter.width,
+                     letter.height,
+                     letter.u,
+                     letter.v,
+                     letter.u_width,
+                     letter.v_height,
+                     ink(letter.along));
+            });
+        };
+        if (shadow) letters(1.f, 1.f, [](float) { return text_shadow; });
+        if (look.effect == native::NameEffect::glow) {
+            auto halo = look.color;
+            halo[3] *= .25f;
+            for (const auto &[dx, dy] : glow_offsets)
+                letters(dx, dy, [&](float) { return halo; });
+        }
+        letters(0.f, 0.f, [&](float along) { return themed_text(native::name_ink(look, along, seconds)); });
+        current_texture = atlas;
     }
 
     void glyph(float x, float y, unsigned index, float width, float height, Color color, bool colored = false) {
@@ -805,6 +896,12 @@ public:
             double seconds,
             bool center = false
     ) {
+        if (const auto face = overlay_face_name(value, size, look)) {
+            if (center) x -= face->fit.width / 2;
+            draw_face_name(x, y + size * atlas_baseline_per_size, value, *face, look, seconds, true);
+            overlay_badges(x + face->fit.width + 3, y, look, seconds);
+            return;
+        }
         const float advance = size * atlas_advance_per_size;
         const bool bitmap_font = fold_to_atlas(value);
         const auto *bitmap = bitmap_font ? nullptr : raster(value, size, true);
@@ -843,6 +940,12 @@ public:
             }
         }
         overlay_badges(x + 3, y, look, seconds);
+    }
+
+    // How wide overlay_name draws a name, without its marks.
+    float overlay_name_width(std::string_view value, float size, const native::NameAppearance &look) {
+        if (const auto face = overlay_face_name(value, size, look)) return face->fit.width;
+        return text_width(value, size);
     }
 
     void overlay_end(int width, int height) { flush(width, height); }
@@ -917,7 +1020,79 @@ public:
 
     static constexpr float max_chat_rows = 8;
     static constexpr float max_chat_rows_typing = 14;
+    static constexpr float chat_text_left = 25;
 
+private:
+    // A chat row's name drawn in its supporter font: the place the default font gives it (HUD units from the row's
+    // left) and the row's baseline. Only a name that sits whole on its row.
+    struct ChatFaceName {
+        std::string_view value;
+        float left, right, baseline;
+        FaceName name;
+    };
+
+    std::optional<ChatFaceName> chat_face_name(const ChatRow &row, float font, float pixels) {
+        const auto &look = row.source->decoration.appearance;
+        const size_t row_end = row.begin + row.text.size();
+        if (look.font == native::NameFont::none || row.name_begin < row.begin || row.name_end > row_end
+            || row.name_begin >= row.name_end)
+            return std::nullopt;
+        const auto &boxes = ranges(row.text, pixels, row.name_begin - row.begin, row.name_end - row.begin);
+        const auto *shaped_row = raster(row.text, font);
+        if (boxes.empty() || !shaped_row || shaped_row->baseline <= 0) return std::nullopt;
+        const float left = boxes.front().x / scale;
+        const float right = (boxes.back().x + boxes.back().width) / scale;
+        const auto value = std::string_view(row.text).substr(row.name_begin - row.begin, row.name_end - row.name_begin);
+        const auto name = face_name(value, look.font, font * shaped_em_per_size, right - left);
+        if (!name) return std::nullopt;
+        return ChatFaceName{value, left, right, shaped_row->baseline / (scale * element_scale), *name};
+    }
+
+    // shaped() for a chat row, leaving out the place of a name drawn in its own font.
+    void chat_shaped(
+            float y,
+            const std::string &value,
+            float size,
+            Color color,
+            float from,
+            float until,
+            const std::optional<ChatFaceName> &name
+    ) {
+        if (!name) {
+            shaped(chat_text_left, y, value, size, color, from, until);
+            return;
+        }
+        shaped(chat_text_left, y, value, size, color, from, std::min(until, name->left));
+        shaped(chat_text_left, y, value, size, color, std::max(from, name->right), until);
+    }
+
+    // A chat name in the row's own letters: the shaped row clipped to the name in its colour, with a halo for glow and
+    // in slices for paint and sparkle.
+    void paint_chat_name(const ChatRow &row, float y, float font, float pixels, const native::NameAppearance &look) {
+        const size_t begin = std::max(row.name_begin, row.begin);
+        const size_t end = std::min(row.name_end, row.begin + row.text.size());
+        if (begin >= end) return;
+        const double seconds = double(SDL_GetTicksNS()) / 1e9;
+        const bool sliced = look.effect == native::NameEffect::paint || look.effect == native::NameEffect::sparkle;
+        const unsigned slices = sliced ? 16 : 1;
+        for (const auto &range : ranges(row.text, pixels, begin - row.begin, end - row.begin)) {
+            const float from = range.x / scale, until = (range.x + range.width) / scale;
+            if (look.effect == native::NameEffect::glow) {
+                auto halo = look.color;
+                halo[3] = .25f;
+                shaped(chat_text_left - 1, y, row.text, font, halo, from, until);
+                shaped(chat_text_left + 1, y, row.text, font, halo, from, until);
+            }
+            for (unsigned i = 0; i < slices; ++i) {
+                const float left = (range.x + range.width * float(i) / slices) / scale;
+                const float right = (range.x + range.width * float(i + 1) / slices) / scale;
+                const auto ink = native::name_ink(look, float(i) / slices, seconds);
+                shaped(chat_text_left, y, row.text, font, ink, left, right);
+            }
+        }
+    }
+
+public:
     std::optional<native::ChatTarget> chat_hit(float xPixels, float yPixels, uint64_t viewportHash) const {
         return chat_hits_.hit(xPixels, yPixels, viewportHash);
     }
@@ -1095,14 +1270,15 @@ public:
             text(25, y - 23, label.view(), 12, amber);
         }
         for (const auto &row : rows) {
-            shaped(25, y, row.text, font, row.body);
+            const auto face = chat_face_name(row, font, pixels);
+            chat_shaped(y, row.text, font, row.body, 0, 1e9f, face);
             for (const auto &span : row.spans) {
                 const auto begin = std::max(span.begin, row.begin),
                            end = std::min(span.end, row.begin + row.text.size());
                 if (begin >= end) continue;
                 for (const auto &range : ranges(row.text, pixels, begin - row.begin, end - row.begin)) {
                     const float x = 25 + range.x / scale, rw = range.width / scale;
-                    shaped(25, y, row.text, font, span.color, range.x / scale, (range.x + range.width) / scale);
+                    chat_shaped(y, row.text, font, span.color, range.x / scale, (range.x + range.width) / scale, face);
                     if (span.target) {
                         rect(x, y + step - 4, rw, 1, span.color);
                         if (typing && layout_changed)
@@ -1125,27 +1301,14 @@ public:
                 for (const auto &range : ranges(row.text, pixels, begin - row.begin, end - row.begin))
                     paint(range);
             };
-            region(row.name_begin, row.name_end, [&](const auto &range) {
-                if (look.effect == native::NameEffect::glow) {
-                    auto halo = look.color;
-                    halo[3] = .25f;
-                    shaped(24, y, row.text, font, halo, range.x / scale, (range.x + range.width) / scale);
-                    shaped(26, y, row.text, font, halo, range.x / scale, (range.x + range.width) / scale);
-                }
-                const unsigned slices =
-                        look.effect == native::NameEffect::paint || look.effect == native::NameEffect::sparkle ? 16 : 1;
-                for (unsigned i = 0; i < slices; ++i) {
-                    const float left = (range.x + range.width * float(i) / slices) / scale;
-                    const float right = (range.x + range.width * float(i + 1) / slices) / scale;
-                    shaped(25,
-                           y,
-                           row.text,
-                           font,
-                           native::name_ink(look, float(i) / slices, double(SDL_GetTicksNS()) / 1e9),
-                           left,
-                           right);
-                }
-            });
+            if (face) {
+                const double seconds = double(SDL_GetTicksNS()) / 1e9;
+                draw_face_name(
+                        chat_text_left + face->left, y + face->baseline, face->value, face->name, look, seconds, false
+                );
+            } else {
+                paint_chat_name(row, y, font, pixels, look);
+            }
             if (row.begin == 0) {
                 if (!row.source->decoration.country.empty()) {
                     region(row.flag_begin, row.flag_begin + 6, [&](const auto &range) {
@@ -1267,6 +1430,9 @@ else{color=vec4(ink.rgb,ink.a*(uv.x<-1.?1.:texture(font,uv).a));}})"
         const auto sheet = native::load_glyph_sheet(assets / "hud-glyphs.json");
         if (sheet.empty()) std::cerr << "HUD glyph sheet is missing: peak marks and pride flags are hidden\n";
         prepare_glyph_atlas(sheet);
+        name_fonts_ = native::load_name_font_sheet(assets / "name-fonts.json");
+        if (!name_fonts_.em) std::cerr << "HUD name fonts are missing: supporters' names use the default font\n";
+        prepare_name_fonts();
         gl.GenTextures(1, &atlas);
         gl.BindTexture(GL_TEXTURE_2D, atlas);
         gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -1278,6 +1444,7 @@ else{color=vec4(ink.rgb,ink.a*(uv.x<-1.?1.:texture(font,uv).a));}})"
 
     ~NativeHud() {
         gl.DeleteTextures(1, &glyph_atlas_);
+        gl.DeleteTextures(GLsizei(name_font_textures_.size()), name_font_textures_.data());
         for (const auto &[key, raster] : raster_cache)
             gl.DeleteTextures(1, &raster.texture);
         gl.DeleteTextures(1, &atlas);

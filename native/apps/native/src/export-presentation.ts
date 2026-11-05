@@ -6,15 +6,15 @@ import { GunAnimator, type BaseClip, type Cue } from "../../web/src/viewmodel/gu
 import { gunById } from "../../web/src/viewmodel/guns/index";
 import { silencerLength } from "../../web/src/viewmodel/guns/silencer";
 import { mkdir, readFile, writeFile, stat } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { bundledMusic, exportMusic } from "./export-music";
 import { exportHudGlyphs } from "./export-hud-glyphs";
+import { exportNameFonts } from "./export-name-fonts";
+import { startResvg } from "./resvg";
 const root = resolve(import.meta.dir, "../../..");
 const out = resolve(Bun.argv[2] ?? join(root, "target/native-assets"));
 await mkdir(join(out, "audio"), { recursive: true });
-const resvgPath = Bun.resolveSync("@resvg/resvg-wasm", root);
-const { initWasm, Resvg } = await import(resvgPath);
-await initWasm(await readFile(join(dirname(resvgPath), "index_bg.wasm")));
+const Resvg = await startResvg();
 const font = await readFile(join(root, "tools/hermes/fonts/JetBrainsMono-Bold.ttf"));
 const escape = (s: string) => s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 const texts = Array.from(
@@ -31,6 +31,7 @@ await writeFile(join(out, "hud.rgba"), image.pixels);
 image.free();
 r.free();
 const hudGlyphs = await exportHudGlyphs(out, Resvg, font);
+const nameFonts = await exportNameFonts(out, Resvg, join(root, "apps/web/src/assets/name-fonts"));
 const source = join(root, "apps/web/src/assets/audio");
 const manifest = JSON.parse(await readFile(join(source, "manifest.json"), "utf8"));
 const nativeAudio = join(root, "apps/native/assets/audio");
@@ -129,7 +130,8 @@ manifest.music = bundledMusic(manifest.music);
 exportMusic(out, manifest.music);
 await writeFile(join(out, "audio.json"), JSON.stringify(manifest));
 console.log(
-  `Native presentation assets: 95 font glyphs, ${hudGlyphs} marks and flags, ${tasks.length} sound variants, ` +
+  `Native presentation assets: 95 font glyphs, ${hudGlyphs} marks and flags, ${nameFonts} name fonts, ` +
+    `${tasks.length} sound variants, ` +
     `${manifest.music.length} bundled OST tracks`,
 );
 

@@ -158,7 +158,9 @@ the map you're on. The `mapLooks` setting keeps them by map name, for play and r
 (`src/map_look.hpp`); Settings → Graphics keeps the values for every other map.
 
 Peak marks after names and pride flags in the flag column are drawn from the website's own pictures at build time
-(`src/export-hud-glyphs.ts` writes `hud-glyphs.json`).
+(`src/export-hud-glyphs.ts` writes `hud-glyphs.json`). Supporters' name fonts show on the Tab board, name tags, chat and
+the spectator bar: `src/export-name-fonts.ts` draws the website's font files into `name-fonts.json`, and a name is
+never wider than in the HUD font. A name with a letter the font doesn't have, such as Cyrillic, keeps the HUD font.
 
 Account → Edit avatar is the website's avatar editor (`ui/avatar-editor.ts`). The menu has no WebGL, so it sends
 `avatarRender` with the spec, its packed loadout and backdrop, and the host poses and draws the bunny offscreen
