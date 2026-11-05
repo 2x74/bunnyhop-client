@@ -625,6 +625,13 @@ if(BUILD_TESTING)
             WORKING_DIRECTORY "${BUNNYHOP_ROOT}" FIXTURES_SETUP viewmodel_pose_oracle TIMEOUT 120)
         add_test(NAME native_viewmodel_pose COMMAND bunnyhop-native-viewmodel-pose-tests "${VIEWMODEL_POSE_ORACLE}")
         set_tests_properties(native_viewmodel_pose PROPERTIES FIXTURES_REQUIRED viewmodel_pose_oracle)
+        set(GUN_RECOIL_ORACLE "${CMAKE_CURRENT_BINARY_DIR}/gun-recoil-oracle.json")
+        add_test(NAME native_gun_recoil_oracle
+            COMMAND "${BUN_EXECUTABLE}" apps/native/src/gun-recoil-oracle.ts "${GUN_RECOIL_ORACLE}")
+        set_tests_properties(native_gun_recoil_oracle PROPERTIES
+            WORKING_DIRECTORY "${BUNNYHOP_ROOT}" FIXTURES_SETUP gun_recoil_oracle TIMEOUT 120)
+        add_test(NAME native_gun_recoil COMMAND bunnyhop-native-gun-recoil-tests "${GUN_RECOIL_ORACLE}")
+        set_tests_properties(native_gun_recoil PROPERTIES FIXTURES_REQUIRED gun_recoil_oracle)
         set(MAP_PROPS_ORACLE "${CMAKE_CURRENT_BINARY_DIR}/map-props-oracle.json")
         add_test(NAME native_map_props_oracle
             COMMAND "${BUN_EXECUTABLE}" apps/native/src/map-props-oracle.ts "${MAP_PROPS_ORACLE}")
@@ -646,6 +653,10 @@ if(BUILD_TESTING)
     add_executable(bunnyhop-native-viewmodel-feel-tests src/viewmodel_feel_tests.cpp)
     target_include_directories(bunnyhop-native-viewmodel-feel-tests PRIVATE vendor)
     target_compile_options(bunnyhop-native-viewmodel-feel-tests PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
+    add_executable(bunnyhop-native-gun-recoil-tests src/gun_recoil_tests.cpp)
+    target_include_directories(bunnyhop-native-gun-recoil-tests PRIVATE vendor)
+    target_compile_options(bunnyhop-native-gun-recoil-tests PRIVATE
         $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
     add_executable(bunnyhop-native-gun-hold-tests src/gun_hold_tests.cpp)
     target_include_directories(bunnyhop-native-gun-hold-tests PRIVATE vendor)
