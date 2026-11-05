@@ -518,13 +518,18 @@ class NativeViewmodel {
                                    || acting->gesture.arms[1].turn || acting->gesture.arms[1].reach);
         hold.apply(pose, input, arms_free);
         pose.insert(pose.end(), hold.skin.begin(), hold.skin.end());
-        const double yaw = feetYaw * native_gun::radians_per_degree;
+        // Where the drawn gun's muzzle is: the feet yaw and the bank, as draw_posed_actor places the model.
+        BhTransform t{};
+        std::copy(actor.frame.position, actor.frame.position + 3, t.origin);
+        t.angles[1] = feetYaw;
+        t.angles[2] = float(actor_bank(actor.id));
         const auto &m = hold.muzzle;
-        state.muzzle = std::array<float, 3>{
-                actor.frame.position[0] + float(m[0] * std::cos(yaw) - m[1] * std::sin(yaw)),
-                actor.frame.position[1] + float(m[0] * std::sin(yaw) + m[1] * std::cos(yaw)),
-                actor.frame.position[2] + float(m[2])
-        };
+        state.muzzle = native::transform_point(actor_model(t), {float(m[0]), float(m[1]), float(m[2])});
+    }
+
+    // The bunny's model matrix: its feet yaw, and the bank into turns rolling the body about its hips.
+    static native::Matrix actor_model(const BhTransform &t) {
+        return native::model_matrix_about(t, float(native_actor_anim::bank_hip_units));
     }
 
     void actor_actions(
@@ -1292,12 +1297,8 @@ public:
         BhTransform t{};
         std::copy(frame.position, frame.position + 3, t.origin);
         t.angles[1] = actorYaw + spin;
-        // The bank into turns rolls the body about its hips, so the feet and head swing opposite ways by a few units.
         t.angles[2] = float(actor_bank(actor.id));
-        auto model = native::model_matrix(t);
-        for (int r = 0; r < 3; r++)
-            model[12 + r] -= float(native_actor_anim::bank_hip_units) * model[8 + r];
-        model[14] += float(native_actor_anim::bank_hip_units);
+        auto model = actor_model(t);
         for (int r = 0; r < 3; r++) {
             model[r] *= 1 - squash * .5f;
             model[4 + r] *= 1 - squash * .5f;
