@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.7.3 — Native
+
+Update from Settings → Updates: press Update, then Restart to update. Your settings, replays and maps are kept.
+
+- Maps load on Windows again. 0.7.2 stopped every map with "cannot use at() with null".
+- On macOS and Linux each gun now has its own grip and recoil, as on the website.
+
 ## v0.7.2 — Native
 
 Update from Settings → Updates: press Update, then Restart to update. Your settings, replays and maps are kept.

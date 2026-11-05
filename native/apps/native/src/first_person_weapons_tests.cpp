@@ -409,6 +409,29 @@ void test_a_reset_forgets_what_came_before() {
     assert(after_reset(1.3) == after_reset(4.7));
 }
 
+// Every gun in the bundle's gunMotion is read, with its class, grip pivot and recoil.
+void test_gun_motion_is_read_from_the_metadata() {
+    const auto metadata = nlohmann::json::parse(R"({
+        "inspects": {},
+        "gunMotion": {
+            "glock": {"cls": "pistol", "part": 4, "pivot": [1, 2, 3]},
+            "m4a1": {"cls": "rifle", "part": 7, "pivot": [4, 5, 6],
+                     "recoil": {"kick": 1.5, "back": 0.5, "roll": 0.25, "settle": 8}}
+        }
+    })");
+    const auto config = native_vm::FirstPersonConfig::from_metadata(metadata);
+    assert(config.guns.size() == 2);
+    const auto &glock = config.guns.at("glock");
+    assert(glock.cls == native_vm::GunClass::pistol);
+    assert(glock.pivot_bone == 4);
+    assert(glock.pivot[2] == 3);
+    const auto &m4a1 = config.guns.at("m4a1");
+    assert(m4a1.cls == native_vm::GunClass::rifle);
+    assert(m4a1.pivot_bone == 7);
+    assert(m4a1.recoil.kick == 1.5);
+    assert(m4a1.recoil.settle == 8);
+}
+
 // Previews hold the weapon still.
 void test_previews_have_no_feel() {
     Harness h;
@@ -419,6 +442,7 @@ void test_previews_have_no_feel() {
 }  // namespace
 
 int main() {
+    test_gun_motion_is_read_from_the_metadata();
     test_knife_lowers_while_the_gun_draws();
     test_gun_holsters_from_where_it_was();
     test_resets_and_hidden_frames_never_lower();
