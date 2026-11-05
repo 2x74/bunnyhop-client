@@ -41,6 +41,10 @@ Update from Settings → Updates: press Update, then Restart to update. Your set
 - Everyone is the bunny, as on the website: the classic runner and the player and ghost model settings are gone.
 - Feet plant and step when you stop and turn, legs tuck and reach in the air, landings sink with how hard they were,
   and the bunny leans into strafes, climbs ladders and swims. Its ears twitch the same way in every replay.
+- Feet stay planted on slopes and stairs and tilt with the ground, and the bunny steps up and down ledges instead of
+  standing in the air.
+- Ghosts and other players swim in water and climb ladders, ghosts lean into strafes and pick up their motion when a
+  run restarts, and replays show the bunny moving smoothly on high refresh rate screens.
 - Distant players and ghosts keep a readable outline.
 - The chase camera rises over your shoulder in tight corridors and no longer pumps against walls. Seeking in a replay
   or starting a video export puts the camera and the bunny where playback would have them.
@@ -52,6 +56,7 @@ Update from Settings → Updates: press Update, then Restart to update. Your set
 - The M4A1 has its own suppressor, with its own attach and detach timing and sounds.
 - Settings → Viewmodel: Inspect can be Quiet (your first press only checks the knife; replays always show the tricks),
   and Hard landing settle and Speed FOV are new, both off by default.
+- With your system's reduce motion setting on, the hands and guns move less, like on the website.
 - Viewmodel bob now defaults to 0.5. If you never changed it, it moves to 0.5 once; your own value stays.
 
 **Maps**
