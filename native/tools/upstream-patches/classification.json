@@ -2,7 +2,7 @@
   {
     "path": "apps/web/src/api.ts",
     "classification": "native patch",
-    "baseline": "da48d444668a15588ba996b4665f19c25fff3d99"
+    "baseline": "793ab37f5afe3e415e5e4bc628e9b45a44482975"
   },
   {
     "path": "apps/web/src/assets/audio/manifest.json",
@@ -12,12 +12,12 @@
   {
     "path": "apps/web/src/badge-glyphs.ts",
     "classification": "whitespace only; overwrite",
-    "baseline": "d1e3add88baef889ce0363b1d3ed03f70f461810"
+    "baseline": "c2113697f2d0e9a74242c2d1cdd4d9aa000f1034"
   },
   {
     "path": "apps/web/src/core.ts",
     "classification": "native patch",
-    "baseline": "172f95b3ebac7f87d1476ce11151cefb2a4bb62c"
+    "baseline": "07a67b282f7cd778103033692a3870c883fe7ab7"
   },
   {
     "path": "apps/web/src/feedback/modal.ts",
@@ -42,7 +42,7 @@
   {
     "path": "apps/web/src/net/hud.ts",
     "classification": "dropped 042dca41: menu builds use the chat-hud adapter; take upstream",
-    "baseline": "f16b4ed59d41ea114f80983d80740cd538778d1b"
+    "baseline": "7716e45b372a547761ff3112a40dad2cf340b25e"
   },
   {
     "path": "apps/web/src/net/scoreboard.ts",
@@ -62,7 +62,7 @@
   {
     "path": "apps/web/src/styles.ts",
     "classification": "native patch",
-    "baseline": "82ed44749baca3e23a2081a0039c5919b4d2adf7"
+    "baseline": "7d9a9136c13d695856b37630f9514a0f4d9ace96"
   },
   {
     "path": "apps/web/src/ui/account-name.ts",
@@ -82,7 +82,7 @@
   {
     "path": "apps/web/src/ui/country-picker.ts",
     "classification": "native patch",
-    "baseline": "44897ca6c68a6a277f8919c7240ff2f11b171dda"
+    "baseline": "e91ff6acf962d4e2c5ab3663cbd2202c5994ae6d"
   },
   {
     "path": "apps/web/src/ui/gifting.ts",
@@ -142,7 +142,7 @@
   {
     "path": "crates/core/src/game.rs",
     "classification": "native patch",
-    "baseline": "9fcf4c5ac2dd75dfdc053deae384d206ce5ed03b"
+    "baseline": "b4a837ce4af862fade3602a551eebda4411c2e77"
   },
   {
     "path": "crates/core/src/game/flight.rs",
@@ -177,7 +177,7 @@
   {
     "path": "crates/core/src/game/weapons.rs",
     "classification": "native patch",
-    "baseline": "8097ba024195731117ce947069ebe82af8d4ee9b"
+    "baseline": "c0713e0a068f99d5e33aec3542a701edb6392ec2"
   },
   {
     "path": "crates/core/src/lib.rs",
@@ -197,22 +197,22 @@
   {
     "path": "crates/core/src/props.rs",
     "classification": "native patch",
-    "baseline": "305ca34f9b3f8c3f60e78d3f92ebcb2e3d0dd0a3"
+    "baseline": "2f689d4250dd1f23394201aaaed8a651efc23687"
   },
   {
     "path": "crates/core/src/wasm.rs",
     "classification": "native patch",
-    "baseline": "f934683c633c7b52715e06a6bf041b043455754e"
+    "baseline": "c57a96a7892a2a54fa61d1cdd5f0e903325df754"
   },
   {
     "path": "crates/core/src/wasm_content.rs",
     "classification": "native patch",
-    "baseline": "00ba3ca9fafc76bbcbd867449be0cca3dc6ddf60"
+    "baseline": "e28797ff52f5c1f95e5e2230e7b6d3ee13ddc448"
   },
   {
     "path": "crates/core/src/wasm_studio.rs",
     "classification": "native patch",
-    "baseline": "8bcd394bbaf344efeb01d506be8f29f44190a79a"
+    "baseline": "e019b6f0dda1a2159d18e638e838bac15b82909b"
   },
   {
     "path": "crates/core/tests/entities.rs",
@@ -252,7 +252,7 @@
   {
     "path": "crates/vendor/collision/src/lib.rs",
     "classification": "native patch",
-    "baseline": "e589d5823ecc61db2e8df045d5b1b7b30beafdfe"
+    "baseline": "67fdadf9a7e4897ba669f959ab308dc8a0137e89"
   },
   {
     "path": "crates/vendor/collision/src/math.rs",
@@ -272,12 +272,12 @@
   {
     "path": "crates/vendor/movement/src/lib.rs",
     "classification": "older upstream; overwrite",
-    "baseline": "6acea9ecfaa52fc49c80ec31f017e1b8f412c86d"
+    "baseline": "c0e306c91096036a9df4763c0594af88bbd66a2b"
   },
   {
     "path": "crates/vendor/movement/src/movement.rs",
     "classification": "native patch",
-    "baseline": "0246d2c32c8c7d1c07fa26845c19130d8e5d7161"
+    "baseline": "720dd53dcde337ce22101fd16e82cf09846d7cd3"
   },
   {
     "path": "crates/vendor/thirdpartylegalnotices.txt",

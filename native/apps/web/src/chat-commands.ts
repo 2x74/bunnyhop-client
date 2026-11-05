@@ -203,6 +203,31 @@ export function chatCommands(): readonly ChatCommand[] {
 /** SourceMod's console names ("sm_noclip") typed in chat: the same command. */
 const stripSm = (name: string): string => (name.length > 3 && name.startsWith("sm_") ? name.slice(3) : name);
 
+/** Russian ЙЦУКЕН letters → the QWERTY letter on the same key (plus Ukrainian і, Belarusian ў): "ызус" → "spec". */
+const JCUKEN: Readonly<Record<string, string>> = Object.fromEntries(
+  [..."йцукенгшщзфывапролдячсмитьіў"].map((c, i) => [c, "qwertyuiopasdfghjklzxcvbnmso"[i]]),
+);
+
+/** `word` typed with a Russian layout on: its QWERTY letters, or null if it isn't one (or has nothing to map). */
+function fromJcuken(word: string): string | null {
+  if (!/[\u0400-\u04ff]/.test(word)) return null;
+  const out = [...word.toLowerCase()].map((c) => JCUKEN[c] ?? c).join("");
+  return NAME_RE.test(out) ? out : null;
+}
+
+/**
+ * A command typed with a Russian layout on ("!ызус", ".тщсдшз": that layout's "/" key types ".") or with a leading "."
+ * (".spec"), as the line rooms and runChatLine take ("!spec", "/noclip"). Only when the word is a known command, so
+ * chat stays chat ("...", ".lol", "!привет"); anything else comes back as typed. The arguments are left as typed.
+ */
+export function normalizeChatLine(text: string): string {
+  const m = /^\s*([!/.])([^\s!/.]+)(\s.*)?$/s.exec(text);
+  if (!m) return text;
+  const word = m[1] === "." && /^\w+$/.test(m[2]) ? m[2] : fromJcuken(m[2]);
+  if (!word || !findChatCommand(stripSm(word.toLowerCase()))) return text;
+  return `${m[1] === "." ? "/" : m[1]}${word}${m[3] ?? ""}`;
+}
+
 /**
  * The command in a chat line, or null if it's chat. "!name args" and "/name args" as rooms always took them (any
  * case; the name is the word right after the prefix; "!sm_name" is "!name"). Without a prefix only registered bare
@@ -210,7 +235,7 @@ const stripSm = (name: string): string => (name.length > 3 && name.startsWith("s
  * server's parseCommand.
  */
 export function parseChatLine(text: string): ParsedChatLine | null {
-  const t = text.trim();
+  const t = normalizeChatLine(text).trim();
   const m = /^([!/])(\w+)(?:\s+(.*))?$/.exec(t);
   if (m) {
     const arg = m[3]?.trim() ?? "";
@@ -298,6 +323,8 @@ function switchStyle(ctx: ChatContext, id: StyleId): void {
   if (spectating(ctx)) return ctx.reply("You're spectating. !r to play.");
   if (ctx.game.style() === id) return ctx.reply(`Already ${styleDef(id)!.name}. !r restarts.`);
   ctx.game.setStyle(id);
+  // The way back (JollyGain9 got into Low Gravity with !lg and couldn't find it). Not when the switch was refused.
+  if (id !== "autohop" && ctx.game.style() === id) ctx.reply(`${styleDef(id)!.name}. !n goes back to Normal.`);
 }
 
 /** bhoptimer's style commands (shavit-styles.cfg "command"), one per style, in menu order. */
@@ -310,6 +337,8 @@ export const STYLE_COMMANDS: Record<StyleId, readonly string[]> = {
   hsw: ["hsw", "halfsideways"],
   // Influx / shavit-style-backwards: "bw; backwards"; Swoobles: "backward".
   backwards: ["bw", "backwards", "backward", "bwd"],
+  // bhoptimer A/D-Only: "a; aonly; ad; d; donly".
+  adonly: ["ad", "a", "aonly", "d", "donly", "adonly"],
   lowgrav: ["lg", "lowgrav", "lowgravity"],
   // bhoptimer: "sr; seg; segment; segmented" (sr is also its !wr alias, so not here).
   segmented: ["seg", "segment", "segmented"],

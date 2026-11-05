@@ -3,7 +3,7 @@ import { getPlayerGlow, onPlayerGlow } from "./cosmetics";
 // PlayerModel: the one player-model contract used everywhere a player is drawn (replay viewer, live third person,
 // race ghosts, the menu background, other players in multiplayer).
 //
-//   const m = new PlayerModel({ style: "solid" });     // or "ghost" (+ color); { model: "runner" } to force one
+//   const m = new PlayerModel({ style: "solid" });     // or "ghost" (+ color)
 //   scene.add(m.root);
 //   every frame: m.setState(pose); m.update(dt);
 //   after teleports / seeks: m.snap();
@@ -11,28 +11,23 @@ import { getPlayerGlow, onPlayerGlow } from "./cosmetics";
 // Poses are in Source conventions (Z-up position in units, yaw/pitch in degrees, pitch + = looking down); the model
 // converts to three.js space itself. `root.position` is the feet in three.js space after update().
 //
-// Implementations (Settings -> Graphics -> Player model; ghosts can pick their own):
-//   - the bunnyhop.lol bunny (player/bunny/): our own character on the CS:S player skeleton, animated by the CS:S
-//     animations (cs_player_shared + the SDK animstate, identical to the CS:S models) when the hosted content is
-//     available, procedurally until then. Colourway from the "outfit" cosmetic. The default, and the fallback.
-//   - the classic runner (player/runner.ts): the original procedural low-poly runner.
-//   - CS:S player models (player/studio/): the real models from the hosted CS:S content (opt-in); the bunny shows while
-//     one loads or when there is no hosted content.
-// The facade swaps implementations live (setting changes, content arriving) without callers noticing.
+// The one implementation is the bunnyhop.lol bunny (player/bunny/): our own character on the CS:S player skeleton,
+// animated by the CS:S animations (cs_player_shared.mdl + the SDK animstate) when the hosted content is available,
+// procedurally until then (it switches live when the animations arrive). Colourway from the "outfit" cosmetic. The
+// CS:S player models and the classic runner were removed in v0.0.38 (owner: bunny player models only); old prefs that
+// chose them load as the bunny (ui/settings.ts migrateModels).
 
 import * as THREE from "three";
 import { playerUniforms, type PlayerUniforms } from "./materials";
-import { RunnerModel } from "./runner";
 import { BunnyModel } from "./bunny/model";
 import { getHeldLoadout, getOutfit, onHeldLoadout, onOutfit } from "./cosmetics";
 import type { CosmeticLoadout } from "../loadout";
 import { followLoadout, knifeOf } from "../viewmodel/equip";
 import { equippedKnife, onKnife } from "../viewmodel/knives/equipped";
 import type { KnifeDef } from "../viewmodel/knives/types";
-import { CsPlayerModel } from "./studio/csmodel";
-import { CT_SKINS, hasAnimRig, hasSkin, loadAnimRig, loadCsAsset, readyAnimRig, readyAsset, T_SKINS } from "./studio/loader";
+import { hasAnimRig, loadAnimRig, readyAnimRig } from "./studio/loader";
 import { onPlayerContent } from "../content/player";
-import { prefs, type PlayerModelChoice } from "../ui/settings";
+import { prefs } from "../ui/settings";
 
 export type PlayerStyle = "ghost" | "solid";
 
@@ -65,12 +60,18 @@ export interface PlayerPose {
   attack?: number;
   /**
    * Inspect signal since the last setState (viewmodel/inspects/combo.ts SIG_START = 1: the base inspect started,
-   * SIG_NEXT = 2: the next trick of the chain took over). The bunny and CS:S models play it as a gesture layer
+   * SIG_NEXT = 2: the next trick of the chain took over). The bunny plays it as a gesture layer
    * (viewmodel/inspects/third.ts); attacks and snaps cancel it.
    */
   inspect?: number;
   /** The inspect key is held (hold-to-loop tricks keep looping while true). */
   inspectHeld?: boolean;
+  /**
+   * On a ladder (the legs climb; no hop) and the water level (0..3; 2+ = swimming). Presentation only. Optional: without
+   * them the bunny only leaves the jump phases out while the motion isn't ballistic (player/bunny/legs.ts "float").
+   */
+  ladder?: boolean;
+  water?: number;
   /**
    * A shot from the gun in hand since the last setState (PlayerModel.setGun; the bunny kicks, flashes at the muzzle and
    * throws a case: player/bunny/gun-hold.ts). Knife swings stay `attack`.
@@ -83,8 +84,8 @@ export interface PlayerPose {
   gunReload?: { seconds: number; shell?: boolean; empty?: boolean } | null;
 }
 
-/** `model` values: a Settings choice, a CS:S team (uses the Settings skin for it), or a specific skin ("ct_gign"). */
-export type PlayerModelKind = PlayerModelChoice | "ct" | "t" | (typeof CT_SKINS)[number] | (typeof T_SKINS)[number];
+/** `model` values: only the bunny since v0.0.38 (kept so callers that name it still compile). */
+export type PlayerModelKind = "bunny";
 
 export interface PlayerModelOptions {
   playerGlow?: PlayerGlow | null;
@@ -100,8 +101,18 @@ export interface PlayerModelOptions {
   rim?: THREE.ColorRepresentation | null;
   /** Ghost: screen-door dithered transparency instead of blending (fully depth-correct, noisier). */
   dither?: boolean;
-  /** Force a model instead of the Settings choice (e.g. a multiplayer player's team / skin). */
+  /** Always the bunny (the option is kept for callers that name it). */
   model?: PlayerModelKind;
+  /**
+   * 0..1 seed for the bunny's idle variation (weight shift phase, ear twitch schedule). Default: from the outfit, style
+   * and colour, so the same model looks the same in every replay and export, and a ghost doesn't idle in step with you.
+   */
+  seed?: number;
+  /**
+   * The bunny's leg layer (player/bunny/legs.ts: planting, steps, jump phases, landings). Default on; off for a
+   * turntable that spins the model by its yaw (the Loadout's bunny), where planted steps would fight the spin.
+   */
+  legs?: boolean;
   /** Bunny colourway ("outfit-*" cosmetic id); default: the one you equipped (player/cosmetics.ts). */
   outfit?: string;
   /**
@@ -132,21 +143,11 @@ export interface PlayerModelImpl {
   dispose(): void;
 }
 
-/** Live players always use the bunny and its loadout; explicit model overrides are for the developer viewer. */
-export function resolveSkin(o: PlayerModelOptions): string {
-  const m = prefs.get().models;
-  let choice: string = o.model ?? "bunny";
-  if (choice === "css") choice = m.team;
-  if (choice === "ct") choice = m.ct;
-  else if (choice === "t") choice = m.t;
-  return choice;
-}
-
 export class PlayerModel {
   /** Add to the scene. Positioned at the feet by update(). */
   readonly root = new THREE.Group();
   readonly uniforms: PlayerUniforms = playerUniforms();
-  private impl: PlayerModelImpl;
+  private impl: BunnyModel;
   private o: PlayerModelOptions;
   private opacity: number | null = null;
   private nearFade: [number, number] | null = null;
@@ -156,9 +157,6 @@ export class PlayerModel {
   private gunSilencer = false;
   /** setHeldHidden: an empty hand. */
   private heldHidden = false;
-  private pose: PlayerPose | null = null;
-  private wanted = "";
-  private pendingSkin: string | null = null;
   private updated = false;
   private disposed = false;
   private unsub: (() => void)[] = [];
@@ -169,42 +167,36 @@ export class PlayerModel {
     this.root.name = "player-model";
     this.impl = this.bunny();
     this.root.add(this.impl.root);
-    this.choose();
     this.syncRim();
-    this.unsub.push(prefs.watch(() => { this.choose(); this.syncGlow(); }));
+    this.unsub.push(prefs.watch(() => this.syncGlow()));
     this.unsub.push(onPlayerGlow(() => this.syncGlow()));
     this.syncGlow();
-    this.unsub.push(
-      onPlayerContent(() => {
-        this.choose();
-        this.loadAnims();
-      }),
-    );
+    this.unsub.push(onPlayerContent(() => this.loadAnims()));
     this.unsub.push(
       onOutfit((id) => {
-        if (!this.o.outfit && this.impl instanceof BunnyModel) this.impl.setOutfit(id);
+        if (!this.o.outfit) this.impl.setOutfit(id);
       }),
     );
     this.unsub.push(
       onHeldLoadout((l) => {
-        if (this.o.loadout === undefined && this.impl instanceof BunnyModel) this.impl.setLoadout(l);
+        if (this.o.loadout === undefined) this.impl.setLoadout(l);
       }),
     );
     this.unsub.push(
       onKnife((k) => {
-        if (this.o.knife === undefined && this.o.loadout === undefined && this.impl instanceof BunnyModel) this.impl.setKnife(k);
+        if (this.o.knife === undefined && this.o.loadout === undefined) this.impl.setKnife(k);
       }),
     );
   }
 
-  /** The implementation in use: "bunny", "runner" or a CS:S skin such as "ct_urban". */
+  /** The implementation in use (always "bunny" since v0.0.38). */
   get kind(): string {
-    return this.impl instanceof CsPlayerModel ? this.impl.kind : this.impl instanceof BunnyModel ? "bunny" : "runner";
+    return "bunny";
   }
 
-  /** The bunny implementation (debugging / perf), or null. */
+  /** The bunny (debugging / perf). Never null since v0.0.38 (kept nullable for callers). */
   get bunnyModel(): BunnyModel | null {
-    return this.impl instanceof BunnyModel ? this.impl : null;
+    return this.impl;
   }
 
   private bunny(): BunnyModel {
@@ -213,17 +205,16 @@ export class PlayerModel {
 
   get playerGlow(): PlayerGlow | null { return this.o.playerGlow === undefined ? getPlayerGlow() : this.o.playerGlow; }
   setPlayerGlow(value: PlayerGlow | null | undefined): void { this.o.playerGlow = value; this.syncGlow(); }
-  private syncGlow(): void { if (this.impl instanceof BunnyModel) this.impl.setPlayerGlow(this.o.playerGlow === undefined ? getPlayerGlow() : this.o.playerGlow, this.o.previewGlow || prefs.get().showPlayerGlow, !prefs.get().graphics.potato); }
+  private syncGlow(): void { this.impl.setPlayerGlow(this.o.playerGlow === undefined ? getPlayerGlow() : this.o.playerGlow, this.o.previewGlow || prefs.get().showPlayerGlow, !prefs.get().graphics.potato); }
 
   /** The knife the bunny holds: explicit `knife`, else the explicit loadout's, else the one you equipped. */
   private knifeChoice(): KnifeDef | null {
     return this.o.knife !== undefined ? this.o.knife : this.o.loadout !== undefined ? knifeOf(this.o.loadout) : equippedKnife();
   }
 
-  /** Knife + finish + gloves (bunny). undefined = follow your equipped loadout. CS:S models keep w_knife. */
+  /** Knife + finish + gloves. undefined = follow your equipped loadout. */
   setLoadout(l: CosmeticLoadout | null | undefined): void {
     this.o.loadout = l;
-    if (!(this.impl instanceof BunnyModel)) return;
     this.impl.setLoadout(l === undefined ? getHeldLoadout() : l);
     this.impl.setKnife(this.knifeChoice());
   }
@@ -231,7 +222,7 @@ export class PlayerModel {
   /** Bunny colourway ("outfit-*" id); undefined = follow the one you equipped. */
   setOutfit(id: string | undefined): void {
     this.o.outfit = id;
-    if (this.impl instanceof BunnyModel) this.impl.setOutfit(id ?? getOutfit());
+    this.impl.setOutfit(id ?? getOutfit());
   }
 
   /**
@@ -241,24 +232,23 @@ export class PlayerModel {
   setHeldHidden(on: boolean): void {
     if (on === this.heldHidden) return;
     this.heldHidden = on;
-    if (!(this.impl instanceof BunnyModel)) return;
     this.impl.setKnifeHidden(on);
     this.impl.setGun(on ? null : this.gun);
   }
 
-  /** The blade in hand (bunny; null = the carrot, undefined = follow your equipped knife). CS:S models keep w_knife. */
+  /** The blade in hand (null = the carrot, undefined = follow your equipped knife). */
   setKnife(k: KnifeDef | null | undefined): void {
     this.o.knife = k;
-    if (this.impl instanceof BunnyModel) this.impl.setKnife(this.knifeChoice());
+    this.impl.setKnife(this.knifeChoice());
   }
 
   /**
    * A map-given gun in the bunny's right hand (a core weapon id: "glock", "m3"...; viewmodel/guns), null = back to the
-   * knife. The bunny only: the runner and CS:S models keep their knife.
+   * knife.
    */
   setGun(id: string | null): void {
     this.gun = id;
-    if (this.impl instanceof BunnyModel && !this.heldHidden) this.impl.setGun(id);
+    if (!this.heldHidden) this.impl.setGun(id);
   }
 
   /**
@@ -267,17 +257,22 @@ export class PlayerModel {
    */
   setGunSilencer(on: boolean): void {
     this.gunSilencer = on;
-    if (this.impl instanceof BunnyModel) this.impl.setGunSilencer(on);
+    this.impl.setGunSilencer(on);
+  }
+
+  /** The ground under the bunny's feet (Source z at x, y; null = none near) for planting on slopes; null: flat. */
+  setGroundProbe(p: ((x: number, y: number, z: number) => number | null) | null): void {
+    this.impl.setGroundProbe(p);
   }
 
   /** The bunny's gun muzzle in three.js world space as of the last update (false: no gun drawn, or another model). */
   gunMuzzle(out: THREE.Vector3): boolean {
-    return this.impl instanceof BunnyModel && this.root.visible && this.impl.gunMuzzle(out);
+    return this.root.visible && this.impl.gunMuzzle(out);
   }
 
   /** Bunny: switch to the CS:S animations once they're loaded (fetched once this model is animated). */
   private loadAnims(): void {
-    if (!(this.impl instanceof BunnyModel) || this.impl.animSource === "cs" || !this.updated || this.disposed) return;
+    if (this.impl.animSource === "cs" || !this.updated || this.disposed) return;
     const ready = readyAnimRig();
     if (ready) {
       this.impl.setAnimations(ready);
@@ -286,78 +281,10 @@ export class PlayerModel {
     if (!hasAnimRig()) return;
     loadAnimRig().then(
       (d) => {
-        if (!this.disposed && this.impl instanceof BunnyModel) this.impl.setAnimations(d);
+        if (!this.disposed) this.impl.setAnimations(d);
       },
       (e) => console.warn("player model: CS:S animations unavailable, the bunny keeps its procedural animation", e),
     );
-  }
-
-  /** The CS:S implementation (debugging / perf), or null when the runner is shown. */
-  get cs(): CsPlayerModel | null {
-    return this.impl instanceof CsPlayerModel ? this.impl : null;
-  }
-
-  /** Picks (and if needed loads) the implementation for the current Settings / content. */
-  private choose(): void {
-    if (this.disposed) return;
-    const skin = resolveSkin(this.o);
-    if (skin === this.wanted) return;
-    this.wanted = skin;
-    this.pendingSkin = null;
-    if (skin === "runner") {
-      if (!(this.impl instanceof RunnerModel)) this.swap(new RunnerModel(this.o, this.uniforms));
-      return;
-    }
-    if (skin === "bunny" || !hasSkin(skin)) {
-      // A CS:S skin without hosted content: the bunny stands in; re-evaluate when content arrives.
-      if (skin !== "bunny") this.wanted = "";
-      if (!(this.impl instanceof BunnyModel)) this.swap(this.bunny());
-      this.loadAnims();
-      return;
-    }
-    const ready = readyAsset(skin);
-    if (ready) {
-      this.swap(new CsPlayerModel(ready, this.o, this.uniforms));
-      return;
-    }
-    // Not loaded yet: fetch it once this model is actually animated (update()), so a hidden model (live third
-    // person while off, a disabled ghost) doesn't download anything.
-    this.pendingSkin = skin;
-    if (this.updated) this.load();
-  }
-
-  private load(): void {
-    const skin = this.pendingSkin;
-    if (!skin) return;
-    this.pendingSkin = null;
-    loadCsAsset(skin).then(
-      (asset) => {
-        if (this.disposed || this.wanted !== skin) return;
-        this.swap(new CsPlayerModel(asset, this.o, this.uniforms));
-      },
-      (e) => console.warn(`player model: ${skin} unavailable, using the bunny`, e),
-    );
-  }
-
-  private swap(next: PlayerModelImpl): void {
-    const prev = this.impl;
-    this.impl = next;
-    this.syncGlow();
-    prev.dispose();
-    this.root.add(next.root);
-    this.syncRim();
-    if (this.opacity !== null) next.setOpacity(this.opacity);
-    if (this.nearFade) next.setNearFade(...this.nearFade);
-    if (this.renderOrder !== null) next.setRenderOrder(this.renderOrder);
-    if (this.gun && next instanceof BunnyModel && !this.heldHidden) next.setGun(this.gun);
-    if (this.heldHidden && next instanceof BunnyModel) next.setKnifeHidden(true);
-    if (next instanceof BunnyModel) next.setGunSilencer(this.gunSilencer);
-    if (this.pose) {
-      next.setState(this.pose);
-      next.snap();
-      next.update(0);
-      this.place();
-    }
   }
 
   private place(): void {
@@ -368,7 +295,6 @@ export class PlayerModel {
 
   /** `rim`: the ghost's rim glow colour (PlayerModelOptions.rim); a new `color` without one resets it to the tint. */
   setStyle(style: PlayerStyle, color?: THREE.ColorRepresentation, dither?: boolean, rim?: THREE.ColorRepresentation | null): void {
-    const ghostChoiceChanged = (style === "ghost") !== (this.o.style === "ghost");
     this.o.style = style;
     if (color !== undefined) {
       this.o.color = color;
@@ -376,10 +302,6 @@ export class PlayerModel {
     } else if (rim !== undefined) this.o.rim = rim;
     if (dither !== undefined) this.o.dither = dither;
     this.impl.setStyle(style, color, dither);
-    if (ghostChoiceChanged) {
-      this.wanted = "";
-      this.choose();
-    }
     this.syncRim();
   }
 
@@ -410,7 +332,6 @@ export class PlayerModel {
   }
 
   setState(pose: PlayerPose): void {
-    this.pose = pose;
     this.impl.setState(pose);
   }
 
@@ -418,10 +339,29 @@ export class PlayerModel {
     this.impl.snap();
   }
 
+  /**
+   * Seek-safe restart: snaps, then animates through the poses of the `seconds` before the new moment (`poseAgo(u)` = the
+   * pose u seconds earlier, null to stop early, e.g. at a teleport) at 60 Hz, so the bank, legs, ears and the CS:S anim
+   * state arrive where continuous playback would have them instead of easing in from rest. Call before this frame's
+   * setState / update. Deterministic for the same poses.
+   */
+  preroll(poseAgo: (secondsAgo: number) => PlayerPose | null, seconds = 0.6): void {
+    this.impl.snap();
+    const step = 1 / 60;
+    let first = true;
+    for (let u = seconds; u > step * 0.5; u -= step) {
+      const p = poseAgo(u);
+      if (!p) continue;
+      this.impl.setState(p);
+      if (!first) this.impl.update(step);
+      else (this.impl.snap(), this.impl.update(0), (first = false));
+    }
+    this.place();
+  }
+
   update(dt: number): void {
     if (!this.updated) {
       this.updated = true;
-      this.load();
       this.loadAnims();
     }
     this.impl.update(dt);

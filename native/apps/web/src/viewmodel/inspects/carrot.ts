@@ -190,7 +190,10 @@ export const tossCatch: InspectClip = {
     const load = track([[0.34, 0], [0.52, 1, E.io], [0.6, -0.8, E.out], [0.85, 0, E.io]])(t);
     const dip = bump(t, TC.catch - 0.02, TC.catch + 0.55);
     const ext = track([[0.56, 0], [0.7, 1, E.out], [1.3, 1], [1.42, 0, E.io]])(t);
-    arm(W, ctx, p, tcRoll(t), 6 * load - 11 * dip, 0, [0, 0, -0.9 * load - 1.0 * dip], 14 * load + 14 * dip - 14 * ext, 0);
+    // The hand sinks while the carrot is up and rises to meet it (v0.0.38: the whole arc sits lower on screen, so its top
+    // stays in view at the default framing; the flight relative to the hand is unchanged).
+    const sink = hop(t, TC.toss + 0.05, TC.catch - 0.03, 1);
+    arm(W, ctx, p, tcRoll(t), 6 * load - 11 * dip - 7 * sink, 0, [0, 0, -0.9 * load - 1.0 * dip - 2.6 * sink], 14 * load + 14 * dip - 14 * ext, 0);
     hands(W, ctx, t, TC.toss - 0.07, TC.catch + 0.04);
     const up = tcUp(t), out = tcOut(t), a = tcTumble(t);
     if (up || a) {

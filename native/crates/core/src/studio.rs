@@ -243,6 +243,8 @@ pub struct StudioModel {
     pub includes: Vec<String>,
     pub mesh: SkinnedMesh,
     pub materials: Vec<StudioMaterial>,
+    /// Skin families (`MdlTextures::skins`): per family, the texture of each skin reference. Mesh groups use family 0.
+    pub skins: Vec<Vec<u16>>,
     groups: Vec<Group>,
 }
 
@@ -752,6 +754,7 @@ fn build(path: &str, group_bytes: Vec<Vec<u8>>, includes: Vec<String>, materials
         includes,
         mesh,
         materials,
+        skins: tex.map(|t| t.skins.clone()).unwrap_or_default(),
         groups,
     })
 }
@@ -1075,6 +1078,13 @@ impl StudioModel {
                 s.push(',');
             }
             let _ = write!(s, "[{},{},{}]", g[0], g[1], g[2]);
+        }
+        s.push_str("],\"skins\":[");
+        for (i, f) in self.skins.iter().enumerate() {
+            if i > 0 {
+                s.push(',');
+            }
+            let _ = write!(s, "[{}]", f.iter().map(|t| t.to_string()).collect::<Vec<_>>().join(","));
         }
         let _ = write!(s, "],\"vertexCount\":{},\"indexCount\":{}}}", self.mesh.vertices.len() / STUDIO_VERTEX_FLOATS, self.mesh.indices.len());
         s

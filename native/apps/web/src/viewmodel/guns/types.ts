@@ -19,8 +19,8 @@ import type { Curl } from "../knives/types";
  * sniper stand-ins (modelled as the ak47 / awp, borrowed by the other rifles / snipers: guns/index.ts GUN_STAND_IN).
  * The in-world names are GunDef.name.
  */
-export type GunId = "glock" | "usp" | "fiveseven" | "m3" | "xm1014" | "p90" | "ak47" | "awp";
-export const GUN_IDS: readonly GunId[] = ["glock", "usp", "fiveseven", "m3", "xm1014", "p90", "ak47", "awp"];
+export type GunId = "glock" | "usp" | "fiveseven" | "m3" | "xm1014" | "p90" | "ak47" | "awp" | "m4a1";
+export const GUN_IDS: readonly GunId[] = ["glock", "usp", "fiveseven", "m3", "xm1014", "p90", "ak47", "awp", "m4a1"];
 
 export type GunClass = "pistol" | "shotgun" | "smg" | "rifle" | "sniper";
 
@@ -62,6 +62,11 @@ export interface HandGrip extends HandPlace {
    * hand's fingers, which aren't part of the gun.
    */
   proxy?: [V3, V3, number][];
+  /**
+   * The firing hand's index rests on the trigger (guns/hold.ts solveTriggerIndex) instead of its authored curls: true
+   * (the pad on the blade TRIGGER_DOWN below its pivot) or that depth (units).
+   */
+  triggerRest?: boolean | number;
 }
 
 /** View-space framing of the gun at rest: origin (forward, left, up) and angles (pitch, yaw, roll; degrees). */
@@ -131,6 +136,8 @@ export interface SilencerSpec {
   tip: V3;
   /** The support hand around the can (gun-local, the can seated), solved onto it like a hold (guns/hold.ts). */
   grip: HandGrip;
+  /** Its choreography (guns/silencer.ts): the Cottontail's pistol screw-on (default) or a rifle's (the M4A1's). */
+  style?: "pistol" | "rifle";
 }
 
 export interface GunDef {
@@ -160,6 +167,8 @@ export interface GunDef {
   wrist?: { R?: number; L?: number };
   /** Elbow anchors (view space) the forearms aim toward; default guns/viewmodel.ts ELBOW (the pistols'). */
   elbows?: { R: V3; L: V3 };
+  /** The support elbow while its hand works away from the grip (guns/pose.ts WORK_ELBOW). */
+  workElbow?: V3;
   /**
    * Left-hand targets on the gun (reloads, racks, inspects; guns/anim.ts leftT): "mag" (holding the magazine as it
    * sits seated), "rack" (pinching the slide / bolt / charging handle), "port" (a shotgun's loading port, the shell's

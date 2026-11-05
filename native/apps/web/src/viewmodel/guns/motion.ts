@@ -5,7 +5,7 @@
 //   vertical rising off a jump the gun trails low and its muzzle dips; falling, it floats up a touch; the jump itself
 //            gives it a small downward tug and a landing an extra, weight-scaled sink (the knife feel's dip is on top)
 //   strafes  the gun lags against the air strafe's sideways acceleration (in view space) and rolls into it
-// Everything goes through soft springs (no step, no jitter at any frame rate) and stays small: a few tenths of a unit
+// Everything goes through soft springs (exact steps, feel.ts: the same curve at any frame rate) and stays small: a few tenths of a unit
 // and a degree or two; the crosshair doesn't move. Bob amount scales idle / speed / vertical, sway amount the strafe
 // part (Settings -> Viewmodel; 0 = off), prefers-reduced-motion scales all of it down. No allocation per frame.
 //
@@ -13,6 +13,7 @@
 // feel by the gun viewmodel; the audited pose (guns/pose.ts) never sees it.
 
 import { angleMatrix } from "../math";
+import { follow, landImpact, softLimit, springRamp } from "../feel";
 import type { GunDef } from "./types";
 
 /** What the gun feel reads each frame (main.ts passes the knife viewmodel's ViewmodelInput). */
@@ -29,6 +30,8 @@ export interface GunMotionInput {
 /** Weight per class (scales every response; long guns swing more, pistols less). */
 const WEIGHT: Record<GunDef["cls"], number> = { pistol: 0.8, smg: 1, shotgun: 1.15, rifle: 1.15, sniper: 1.3 };
 const D2R = Math.PI / 180;
+/** The strafe acceleration's smoothing rate (1/s). */
+const LAT_K = 8;
 
 const reducedMotion = (): boolean => {
   const mm = (globalThis as { matchMedia?: (q: string) => { matches: boolean } }).matchMedia;
@@ -45,15 +48,23 @@ export class GunMotion {
   // Springs: offset forward / left / up, angles pitch / yaw / roll (value, velocity).
   private x = new Float64Array(6);
   private v = new Float64Array(6);
+  /** The springs' targets at the last update (each step ramps from these to this frame's). */
+  private u = new Float64Array(6);
   private wasGrounded = true;
-  private lastVel = new Float64Array(3);
+  /** Seconds on the ground (a bhop touches it for a tick; a real jump starts from standing or running). */
+  private groundT = 1;
+  /** The velocity low-passed at LAT_K (world x, y): its rate of change is the smoothed acceleration, exactly. */
+  private sv = new Float64Array(2);
+  private lastVel = new Float64Array(2);
   private haveVel = false;
   private latAcc = 0;
   private motion = reducedMotion() ? 0.45 : 1;
+  private out = new Float64Array(6);
 
   reset(): void {
     this.x.fill(0);
     this.v.fill(0);
+    this.u.fill(0);
     this.haveVel = false;
     this.latAcc = 0;
   }
@@ -65,68 +76,79 @@ export class GunMotion {
     this.t += dt;
     // Targets (offset fwd / left / up, pitch / yaw / roll) from the movement, before the springs.
     let tf = 0, tl = 0, tu = 0, tp = 0, tr = 0;
+    let jumped = false, landed = 0, tug = 1;
     if (input && dt > 0) {
       const vx = input.velocity[0], vy = input.velocity[1], vz = input.velocity[2];
       const hs = Math.hypot(vx, vy);
-      // Tuck in at speed (bhop speeds: from about running speed, fully by ~1000 u/s).
+      // Tuck in at speed (bhop speeds: from about running speed, fully by ~1000 u/s): held a little closer, back and
+      // down, the muzzle dipping a touch, like a gun carried at a sprint.
       const sp = smooth(300, 1000, hs);
-      tf -= 0.45 * sp * bob;
-      tu -= 0.2 * sp * bob;
-      tp += 0.4 * sp * bob;
-      // Airborne: trail the vertical speed (rising: low, muzzle down; falling: up a touch).
+      tf -= 0.55 * sp * bob;
+      tu -= 0.25 * sp * bob;
+      tp += 0.5 * sp * bob;
+      // Airborne: trail the vertical speed (rising: low, muzzle down; falling: up a touch). Faded out at bhop speeds:
+      // every hop rises and falls the same, so a per-hop trail just pumps the gun up and down with the rhythm.
       if (!input.grounded) {
-        const k = clamp(vz / 300, -1, 1);
+        const k = clamp(vz / 300, -1, 1) * (1 - 0.9 * sp);
         tu -= 0.35 * k * bob;
         tp += 0.8 * k * bob;
       }
-      // Jump: a tug down as you leave the ground; landing: a sink by how hard (the knife feel dips too).
-      if (this.wasGrounded && !input.grounded && vz > 80) {
-        this.v[2] -= 5 * bob;
-        this.v[3] += 22 * bob;
-      }
-      if (input.landed < -50) {
-        const hard = clamp(-input.landed / 300, 0, 2.2);
-        this.v[2] -= 4.5 * hard * bob;
-        this.v[3] += 16 * hard * bob;
-      }
+      // Jump / landing kicks: after the springs below (at the end of the frame that shows them). The jump's tug is for
+      // a jump from the ground (standing or running); a bhop's one-tick touch gives a little of it.
+      jumped = this.wasGrounded && !input.grounded && vz > 80;
+      tug = this.groundT > 0.15 ? 1 : 0.15;
+      this.groundT = input.grounded ? this.groundT + dt : 0;
+      landed = input.landed;
       this.wasGrounded = input.grounded;
-      // Strafes: the sideways (view-left) acceleration, smoothed; the gun lags against it and rolls into it.
-      if (this.haveVel) {
-        const ax = (vx - this.lastVel[0]) / dt, ay = (vy - this.lastVel[1]) / dt;
-        const yaw = input.yaw * D2R;
-        const lat = -Math.sin(yaw) * ax + Math.cos(yaw) * ay;
-        this.latAcc += (clamp(lat, -3000, 3000) - this.latAcc) * (1 - Math.exp(-dt * 8));
-      }
+      // Strafes: the sideways (view-left) acceleration, smoothed; the gun lags against it and rolls into it. The
+      // smoothed acceleration is k (v - s) for s the velocity low-passed at k (the same filter as a finite difference
+      // smoothed at k, but solved exactly for a velocity moving linearly over the frame: no 1/dt, the same at any rate).
+      if (!this.haveVel) (this.sv[0] = this.lastVel[0] = vx), (this.sv[1] = this.lastVel[1] = vy), (this.haveVel = true);
+      this.sv[0] = follow(this.sv[0], this.lastVel[0], vx, LAT_K, dt);
+      this.sv[1] = follow(this.sv[1], this.lastVel[1], vy, LAT_K, dt);
       this.lastVel[0] = vx;
       this.lastVel[1] = vy;
-      this.lastVel[2] = vz;
-      this.haveVel = true;
+      const yaw = input.yaw * D2R;
+      const lat = LAT_K * (-Math.sin(yaw) * (vx - this.sv[0]) + Math.cos(yaw) * (vy - this.sv[1]));
+      this.latAcc = clamp(lat, -3000, 3000);
       const la = clamp(this.latAcc / 1500, -1, 1);
       tl -= 0.45 * la * sway;
       tr -= 1.8 * la * sway;
     }
-    // Springs toward the targets (soft, slightly underdamped: a gun has some mass).
-    const K = 90, C = 2 * Math.sqrt(K) * 0.7;
-    const steps = Math.ceil(dt / (1 / 240));
-    const h = steps ? dt / steps : 0;
-    const tgt0 = tf, tgt1 = tl, tgt2 = tu, tgt3 = tp, tgt5 = tr;
-    for (let s = 0; s < steps; s++) {
-      for (let i = 0; i < 6; i++) {
-        const target = i === 0 ? tgt0 : i === 1 ? tgt1 : i === 2 ? tgt2 : i === 3 ? tgt3 : i === 5 ? tgt5 : 0;
-        this.v[i] += (-K * (this.x[i] - target) - C * this.v[i]) * h;
-        this.x[i] += this.v[i] * h;
-      }
+    // Springs toward the targets (soft, slightly underdamped: a gun has some mass), stepped exactly (feel.ts), the
+    // targets ramping from last frame's (they come from smooth movement, so a ramp is closer than a step).
+    const W = Math.sqrt(90), Z = 0.7, u = this.u;
+    const T0 = tf, T1 = tl, T2 = tu, T3 = tp, T5 = tr;
+    springRamp(this.x, this.v, 0, u[0], T0, W, Z, dt);
+    springRamp(this.x, this.v, 1, u[1], T1, W, Z, dt);
+    springRamp(this.x, this.v, 2, u[2], T2, W, Z, dt);
+    springRamp(this.x, this.v, 3, u[3], T3, W, Z, dt);
+    springRamp(this.x, this.v, 4, 0, 0, W, Z, dt);
+    springRamp(this.x, this.v, 5, u[5], T5, W, Z, dt);
+    if (dt > 0) (u[0] = T0), (u[1] = T1), (u[2] = T2), (u[3] = T3), (u[5] = T5);
+    // Jump: a tug down as you leave the ground; landing: a sink by how hard (the knife feel dips too).
+    if (jumped) {
+      this.v[2] -= 5 * bob * tug;
+      this.v[3] += 22 * bob * tug;
     }
-    // Clamp: a nudge, never a swing.
-    for (let i = 0; i < 3; i++) this.x[i] = clamp(this.x[i], -1.2, 1.2);
-    for (let i = 3; i < 6; i++) this.x[i] = clamp(this.x[i], -3, 3);
+    if (landed < 0) {
+      // By how hard (feel.ts): a flat bhop landing ~0.16, a big drop up to 2 (was linear in the speed up to 2.2).
+      const hard = landImpact(landed) * 2;
+      this.v[2] -= 4.5 * hard * bob;
+      this.v[3] += 16 * hard * bob;
+    }
+    // Limits: a nudge, never a swing (soft, on the output: clamping the springs' state each frame made a big landing
+    // depend on the frame rate).
+    const X = this.out;
+    for (let i = 0; i < 3; i++) X[i] = softLimit(this.x[i], 1.2);
+    for (let i = 3; i < 6; i++) X[i] = softLimit(this.x[i], 3);
     // Idle drift (on top, not through the springs: it is already smooth).
     const t = this.t, ib = this.bob * w;
     const ip = (0.22 * Math.sin(t * 1.46) + 0.08 * Math.sin(t * 2.71 + 1.3)) * ib;
     const iy = (0.28 * Math.sin(t * 1.03 + 0.7) + 0.06 * Math.sin(t * 2.33)) * ib;
     const ir = 0.35 * Math.sin(t * 1.21 + 2.1) * ib;
     const iu = 0.05 * Math.sin(t * 1.46 + 0.5) * ib;
-    compose(this.x[3] + ip, this.x[4] + iy, this.x[5] + ir, this.x[0], this.x[1], this.x[2] + iu, pivot, this.M);
+    compose(X[3] + ip, X[4] + iy, X[5] + ir, X[0], X[1], X[2] + iu, pivot, this.M);
   }
 }
 

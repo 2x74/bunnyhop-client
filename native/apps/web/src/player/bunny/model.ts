@@ -11,7 +11,8 @@ import type { PlayerGlow } from "../glow-config";
 //     bone-to-model * inverse bind.
 //   - procedural (procedural.ts) on the same rig while the animations load, or when there is no hosted content.
 // Ears are bunny-only bones with spring dynamics driven by the head's world-space motion (hops, landings, turns,
-// speed), applied on top of either source.
+// speed), applied on top of either source. A small bank into turns (bank.ts; mostly in the air, where bhop strafes
+// happen; CS:S animations only) leans the whole bunny about its hips so strafes read from behind and at a distance.
 //
 // GPU skinning: bone matrices are written directly (DetachedBindMode, identity bind matrix). The mesh sits in Source
 // model space under a yaw group (feet yaw) and a Z-up -> Y-up group, like the CS:S models.
@@ -27,6 +28,9 @@ import { hoodOf } from "./prebuild-parts";
 import type { KnifeDef } from "../../viewmodel/knives/types";
 import { colourway, paletteOf, type Colourway } from "./palettes";
 import { BunnyProcedural } from "./procedural";
+import { BodyBank } from "./bank";
+import { LegLayer, type GroundProbe } from "./legs";
+import { motionScale, springRamp } from "../../viewmodel/feel";
 import { concat, EAR, EAR_DOWN, invert34, KNIFE_BONE, rig, type Rig } from "./rig";
 import { TpInspect, type TpBones } from "../../viewmodel/inspects/third";
 import { TP_CARROT } from "../../viewmodel/knives/ctx";
@@ -49,6 +53,9 @@ import { hypot2, hypot3 } from "../../hypot";
 
 const D2R = Math.PI / 180;
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
+/** The bank's pivot height above the feet (about the hips, units; bank.ts). */
+const BANK_HIP = 36;
+const BANK_PIVOT = new THREE.Vector3();
 /** Third-person muzzle flash size per gun class (the first-person quads, scaled for distance). */
 const FLASH_SIZE = { pistol: 1.7, smg: 1.5, rifle: 2.0, shotgun: 2.5, sniper: 2.3 } as const;
 const _pt = new THREE.Vector3();
@@ -127,9 +134,10 @@ interface Ear {
   base: number[];
   mid: number[];
   dir0: number[];
-  /** Tip proxy (Source world space) and its velocity. */
+  /** Tip proxy (Source world space) and its velocity; the spring's equilibrium at the last update (a ramp from it). */
   p: Float64Array;
   v: Float64Array;
+  eq: Float64Array;
   wb: Float64Array;
   hasBase: boolean;
   side: number;
@@ -261,6 +269,13 @@ export class BunnyModel implements PlayerModelImpl {
   private lastJump = -1;
   private wasGrounded = true;
   private yaw = 0;
+  /** Bank into turns (bank.ts). */
+  private bodyBank = new BodyBank();
+  /** Feet planting, jump phases, landings, idle shift, climb / swim (legs.ts). */
+  private legs: LegLayer;
+  private legsOn = true;
+  /** Per-model seed (0..1): idle shift phase, ear twitch schedule. Deterministic for the same options. */
+  private seed: number;
   private head = this.r.bone("Head1");
   private hood: BunnyHood = "up";
   private ears: Ear[] = this.makeEars("up");
@@ -274,10 +289,11 @@ export class BunnyModel implements PlayerModelImpl {
       const dir0 = down ? [EAR_DOWN.dir[0] * side, EAR_DOWN.dir[1], EAR_DOWN.dir[2]] : [EAR.dir[0] * side, EAR.dir[1], EAR.dir[2]];
       const mid = base.map((x, k) => x + dir0[k] * EAR.seg);
       const carrier = down ? this.r.bone(EAR_DOWN.carrier) : this.r.bone("Head1");
-      return { bone, carrier, base, mid, dir0, p: new Float64Array(3), v: new Float64Array(3), wb: new Float64Array(3), hasBase: false, side };
+      return { bone, carrier, base, mid, dir0, p: new Float64Array(3), v: new Float64Array(3), eq: new Float64Array(3), wb: new Float64Array(3), hasBase: false, side };
     });
   }
-  private earTwitch = 3;
+  /** The visual clock at the last ear update (the twitch schedule). */
+  private twitchAt = 0;
   private tmp = new Float32Array(12);
   private tmp2 = new Float32Array(12);
   /** Inspect gesture layer (created on the first inspect signal). */
@@ -299,8 +315,13 @@ export class BunnyModel implements PlayerModelImpl {
 
   constructor(o: PlayerModelOptions & { outfit?: string } = {}, uniforms: PlayerUniforms = playerUniforms(), anims: StudioData | null = null) {
     this.uniforms = uniforms;
+    // The distance contour (materials.ts uContour): world bunnies read at 50-120 px.
+    this.uniforms.uContour.value = 1;
     this.knife = o.knife ?? null;
     this.bodyLook = lookOf(o.outfit);
+    this.seed = o.seed ?? seedOf(`${o.outfit ?? ""}|${o.style ?? "solid"}|${o.color ?? ""}|${o.loadout?.hat ?? ""}`);
+    this.legs = new LegLayer(this.r, this.seed);
+    this.legsOn = o.legs !== false;
 
     this.hood = hoodOf(this.bodyLook, o.loadout?.hat);
     this.ears = this.makeEars(this.hood);
@@ -876,7 +897,8 @@ export class BunnyModel implements PlayerModelImpl {
         }
       }
       if (s.attack) anim.fire();
-      anim.update(snap ? 0 : dt, { vel: this.vel, eyeYaw: s.yaw, eyePitch: s.pitch, ducking: s.crouched, onGround: s.grounded, jumped }, snap ? s.visualTime : undefined);
+      const mode = this.legs.mode;
+      anim.update(snap ? 0 : dt, { vel: this.vel, eyeYaw: s.yaw, eyePitch: s.pitch, ducking: s.crouched, onGround: s.grounded, jumped, climbing: mode === "climb", swimming: mode === "swim" }, snap ? s.visualTime : undefined);
       anim.apply();
       const W = bs.buildMatrices();
       for (let i = 0; i < r.csBones; i++) {
@@ -888,6 +910,11 @@ export class BunnyModel implements PlayerModelImpl {
     } else {
       this.yaw = this.proc.update(snap ? 0 : dt, s, this.vel, snap, jumped, S);
     }
+    // Legs (legs.ts): with this frame's bank, so planted feet stay put in the world whatever the body does. Not on the
+    // avatar / loadout stage's acting poses (they pose the body by hand).
+    const bank = this.bodyBank.update(dt, s.yaw, s.grounded, hypot2(this.vel[0], this.vel[1]), s.sidemove ?? 0, !!this.cs, snap);
+    if (!this.acting && this.legsOn)
+      this.legs.apply(S, { dt, snap, grounded: s.grounded, crouched: s.crouched, vel: this.vel, pos: s.position, yaw: this.yaw, bank, bankHip: BANK_HIP, time: this.time, ladder: s.ladder, water: s.water });
     if (this.acting) this.applyActing(this.acting);
     // The gun in both hands (before the ears: its stance turns the chest and the head).
     if (this.gun) this.gunLayer(s, snap, dt);
@@ -907,7 +934,11 @@ export class BunnyModel implements PlayerModelImpl {
       bm[q + 8] = S[o + 2], bm[q + 9] = S[o + 6], bm[q + 10] = S[o + 10], bm[q + 11] = 0;
       bm[q + 12] = S[o + 3], bm[q + 13] = S[o + 7], bm[q + 14] = S[o + 11], bm[q + 15] = 1;
     }
-    this.yawG.rotation.z = this.yaw * D2R;
+    // Feet yaw, then the bank about the model's forward axis (order ZYX: the bank in the body's own frame), pivoting
+    // at the hips so the feet and head swing opposite ways by a few units instead of the head swinging over the feet.
+    this.yawG.rotation.set(bank * D2R, 0, this.yaw * D2R, "ZYX");
+    BANK_PIVOT.set(0, 0, BANK_HIP).applyEuler(this.yawG.rotation);
+    this.yawG.position.set(-BANK_PIVOT.x, -BANK_PIVOT.y, BANK_HIP - BANK_PIVOT.z);
     this.uniforms.uAxisA.value.copy(this.root.position).y += 8;
     this.uniforms.uAxisB.value.copy(this.root.position).y += 60;
     if (this.gun) {
@@ -937,12 +968,16 @@ export class BunnyModel implements PlayerModelImpl {
     const cy = Math.cos(this.yaw * D2R), sy = Math.sin(this.yaw * D2R);
     const P = s.position;
     const Lp = 6.5; // pendulum length
-    this.earTwitch -= dt;
+    // Idle twitches on a schedule of the visual clock and the model's seed (one per TWITCH_SLOT seconds, at a seeded
+    // moment, a seeded side): the same in every replay and export, not in step between bunnies. Standing, full motion.
     let twitch = 0;
-    if (this.earTwitch < 0) {
-      this.earTwitch = 2.5 + Math.random() * 4.5;
-      if (hypot2(this.vel[0], this.vel[1]) < 40) twitch = Math.random() < 0.5 ? 1 : -1;
-    }
+    const t1 = this.time, t0 = this.twitchAt;
+    this.twitchAt = t1;
+    if (!snap && t1 > t0 && t1 - t0 < 1 && hypot2(this.vel[0], this.vel[1]) < 40 && motionScale() === 1)
+      for (let j = Math.floor(t0 / TWITCH_SLOT); j <= Math.floor(t1 / TWITCH_SLOT); j++) {
+        const at = j * TWITCH_SLOT + 1.5 + 4 * hash01(this.seed, j);
+        if (at > t0 && at <= t1) twitch = hash01(this.seed + 0.5, j) < 0.5 ? 1 : -1;
+      }
     for (const e of this.ears) {
       const sx = e.side;
       const { bone: bIdx, base } = e;
@@ -963,23 +998,23 @@ export class BunnyModel implements PlayerModelImpl {
       target[0] = wb[0] + wd[0] * Lp, target[1] = wb[1] + wd[1] * Lp, target[2] = wb[2] + wd[2] * Lp;
       bv.fill(0);
       if (e.hasBase && dt > 0 && !snap) for (let k = 0; k < 3; k++) bv[k] = (wb[k] - e.wb[k]) / dt;
+      // Hanging from the lowered hood the ears are stiffer (they lie against the back rather than stand on the head).
+      const hang = this.hood === "down";
+      const K = hang ? 640 : 320, Crel = hang ? 34 : 21, Cabs = 1.0, G = 30;
+      // The spring a = K (target - p) - Crel (v - bv) - Cabs v - G rests at p = target + (Crel bv - G) / K: a damped
+      // spring toward that (omega = sqrt K, zeta = (Crel + Cabs) / (2 sqrt K)), stepped exactly with the rest point
+      // ramping from last frame's (viewmodel/feel.ts springRamp; it was sub-stepped Euler at 120 Hz).
+      const W = Math.sqrt(K), Z = (Crel + Cabs) / (2 * W);
       if (snap || !e.hasBase) {
-        for (let k = 0; k < 3; k++) (e.p[k] = target[k]), (e.v[k] = bv[k]);
+        for (let k = 0; k < 3; k++) (e.p[k] = target[k]), (e.v[k] = bv[k]), (e.eq[k] = target[k] + (Crel * bv[k] - (k === 2 ? G : 0)) / K);
       } else {
-        const steps = Math.max(1, Math.ceil(dt / (1 / 120)));
-        const h = dt / steps;
-        // Hanging from the lowered hood the ears are stiffer (they lie against the back rather than stand on the head).
-        const hang = this.hood === "down";
-        const K = hang ? 640 : 320, Crel = hang ? 34 : 21, Cabs = 1.0, G = 30;
-        // Idle twitch: a little sideways flick (perpendicular to the ear, in the horizontal plane).
-        if (twitch) (e.v[0] += -wd[1] * 70 * twitch * sx), (e.v[1] += wd[0] * 70 * twitch * sx);
-        for (let it = 0; it < steps; it++) {
-          for (let k = 0; k < 3; k++) {
-            const a = K * (target[k] - e.p[k]) - Crel * (e.v[k] - bv[k]) - Cabs * e.v[k] - (k === 2 ? G : 0);
-            e.v[k] += a * h;
-            e.p[k] += e.v[k] * h;
-          }
+        for (let k = 0; k < 3; k++) {
+          const eq = target[k] + (Crel * bv[k] - (k === 2 ? G : 0)) / K;
+          springRamp(e.p, e.v, k, e.eq[k], eq, W, Z, dt);
+          e.eq[k] = eq;
         }
+        // Idle twitch: a little sideways flick (perpendicular to the ear, in the horizontal plane), at the frame's end.
+        if (twitch) (e.v[0] += -wd[1] * 70 * twitch * sx), (e.v[1] += wd[0] * 70 * twitch * sx);
       }
       // Keep the proxy at pendulum length from the base.
       let dx = e.p[0] - wb[0], dy = e.p[1] - wb[1], dz = e.p[2] - wb[2];
@@ -1060,7 +1095,12 @@ export class BunnyModel implements PlayerModelImpl {
     fx.update(snap ? 0 : dt, hold.muzzle, hold.barrel);
   }
 
-  /** PLAYERANIMEVENT_JUMP from state alone (see studio/csmodel.ts). */
+  /** The ground under the feet for the leg layer's planting on slopes (null: the feet's plane). */
+  setGroundProbe(p: GroundProbe | null): void {
+    this.legs.setGroundProbe(p);
+  }
+
+  /** PLAYERANIMEVENT_JUMP from state alone (replays and ghosts have no jump events; rooms pass theirs). */
   private detectJump(s: PlayerPose, snap: boolean): boolean {
     const vz = this.vel[2];
     const now = this.time;
@@ -1091,4 +1131,24 @@ export class BunnyModel implements PlayerModelImpl {
     (this.depthMesh.material as THREE.Material).dispose();
     this.skeleton.dispose();
   }
+}
+
+/** A stable 0..1 seed from a string (FNV-1a). */
+function seedOf(k: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < k.length; i++) h = Math.imul(h ^ k.charCodeAt(i), 16777619);
+  return (h >>> 0) / 4294967296;
+}
+
+/** Seconds per idle ear twitch slot (one twitch at a seeded moment in each). */
+const TWITCH_SLOT = 7;
+/** A deterministic 0..1 from a seed and an integer. */
+function hash01(seed: number, j: number): number {
+  let h = Math.imul((seed * 4294967296) >>> 0 ^ 0x9e3779b9, 0x85ebca6b) ^ Math.imul(j | 0, 0xc2b2ae35);
+  h ^= h >>> 15;
+  h = Math.imul(h, 0x2c1b3c6d);
+  h ^= h >>> 12;
+  h = Math.imul(h, 0x297a2d39);
+  h ^= h >>> 15;
+  return (h >>> 0) / 4294967296;
 }

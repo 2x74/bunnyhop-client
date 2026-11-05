@@ -11,14 +11,14 @@
 import { beanpole } from "./models/beanpole";
 import { broadfork } from "./models/broadfork";
 import { cottontail } from "./models/cottontail";
-import { furrow } from "./models/furrow";
+import { furrow, furrowM4 } from "./models/furrow";
 import { hedgerow } from "./models/hedgerow";
 import { jackrabbit } from "./models/jackrabbit";
 import { seeddrill } from "./models/seeddrill";
 import { thumper } from "./models/thumper";
 import type { GunDef, GunId } from "./types";
 
-export const GUNS: readonly GunDef[] = [thumper, cottontail, jackrabbit, broadfork, hedgerow, seeddrill, furrow, beanpole];
+export const GUNS: readonly GunDef[] = [thumper, cottontail, jackrabbit, broadfork, hedgerow, seeddrill, furrow, beanpole, furrowM4];
 
 const byId = new Map<string, GunDef>(GUNS.map((g) => [g.id, g]));
 
@@ -33,7 +33,6 @@ export const GUN_STAND_IN: Record<string, GunId> = {
   ump45: "p90",
   galil: "ak47",
   famas: "ak47",
-  m4a1: "ak47",
   sg552: "ak47",
   aug: "ak47",
   m249: "ak47",

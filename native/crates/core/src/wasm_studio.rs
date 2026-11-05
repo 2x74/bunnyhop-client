@@ -44,6 +44,13 @@ pub unsafe extern "C" fn studio_load(path_ptr: *mut u8, path_len: usize) -> u32 
     })
 }
 
+/// Forgets every loaded model (handles become invalid). A map's core calls this before loading the next map's props,
+/// whose pakfile may hold a different model under the same path.
+#[unsafe(no_mangle)]
+pub extern "C" fn studio_unload_all() {
+    MODELS.with(|m| m.borrow_mut().clear());
+}
+
 fn model<R>(h: u32, f: impl FnOnce(&StudioModel) -> R) -> Option<R> {
     MODELS.with(|m| m.borrow().get((h as usize).wrapping_sub(1)).map(f))
 }
@@ -91,6 +98,19 @@ pub extern "C" fn studio_anim(h: u32, anim: u32) -> usize {
 /// Texture payload of a VTF by game path (takes ownership of the path): same output as `texture_payload`.
 #[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
 pub unsafe extern "C" fn texture_payload_path(path_ptr: *mut u8, path_len: usize, allow_s3tc: u32, need_alpha: u32) -> usize {
+    unsafe { texture_payload_path_frame(path_ptr, path_len, 0, allow_s3tc, need_alpha) }
+}
+
+/// Animation frames of a VTF by game path (takes ownership of the path): 0 if it isn't loaded or doesn't parse.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn texture_frames_path(path_ptr: *mut u8, path_len: usize) -> u32 {
+    let path = unsafe { owned_string(path_ptr, path_len) };
+    with(|c| c.vfs.read(&path).map_or(0, |b| materials::texture_frame_count(b) as u32))
+}
+
+/// `texture_payload_path` of animation frame `frame` (AnimatedTexture, apps/web/src/texture-scroll.ts).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn texture_payload_path_frame(path_ptr: *mut u8, path_len: usize, frame: u32, allow_s3tc: u32, need_alpha: u32) -> usize {
     let path = unsafe { owned_string(path_ptr, path_len) };
     with(|c| {
         c.scratch_u32.clear();
@@ -99,7 +119,7 @@ pub unsafe extern "C" fn texture_payload_path(path_ptr: *mut u8, path_len: usize
             c.error = format!("{path}: not loaded");
             return 0;
         };
-        match materials::texture_payload(bytes, allow_s3tc != 0, need_alpha != 0) {
+        match materials::texture_payload_frame(bytes, frame.min(u16::MAX as u32) as u16, allow_s3tc != 0, need_alpha != 0) {
             Ok(p) => {
                 c.scratch_u32.extend_from_slice(&[p.format, p.levels.len() as u32]);
                 for l in &p.levels {

@@ -37,6 +37,12 @@ export interface PlayerUniforms extends FinishUniforms, PlayerLookUniforms {
   uAxisB: THREE.IUniform<THREE.Vector3>;
   /** Near fade: fully hidden within x units of the body axis, fully visible beyond y (y <= x disables). */
   uNearFade: THREE.IUniform<THREE.Vector2>;
+  /**
+   * Distance contour (0 = off: the first-person hands, which share the solid shader). On for world bunnies: from ~250
+   * to ~650 units away (about 150 down to 60 px tall at 1080p) grazing edges darken and the bright rim fades, so arms,
+   * knees and the hoodie's outline separate from the body and from bright skies (players, ghosts, spectating).
+   */
+  uContour: THREE.IUniform<number>;
   /** Colourway palette (bunny: hoodie, trim, pants, pants trim, shoe, face, glove, detail), for accent codes >= 3. */
   uPalette: THREE.IUniform<THREE.Color[]>;
   /** Per-player rotor phase, integrated from horizontal movement speed. */
@@ -69,6 +75,7 @@ export function playerUniforms(): PlayerUniforms {
     uAxisA: { value: new THREE.Vector3() },
     uAxisB: { value: new THREE.Vector3(0, 64, 0) },
     uNearFade: { value: new THREE.Vector2(14, 60) },
+    uContour: { value: 0 },
     uPalette: { value: Array.from({ length: 8 }, () => new THREE.Color(0xffffff)) },
     uPropellerAngle: { value: 0 },
     uCapybara: { value: new THREE.Vector4() },
@@ -133,6 +140,7 @@ ${VERTEX_MAIN}
 const common = /* glsl */ `
 uniform vec3 uAxisA, uAxisB;
 uniform vec2 uNearFade;
+uniform float uContour;
 float nearFade() {
   if (uNearFade.y <= uNearFade.x) return 1.0;
   vec3 ab = uAxisB - uAxisA;
@@ -160,6 +168,12 @@ ${FRAGMENT_PARS}
 ${FABRIC_FRAGMENT_PARS}
 ${HAT_FX_FRAGMENT_PARS}
 ${HAT_DETAIL_FRAGMENT_PARS}
+${common}
+/** 0 near, 1 far (the distance contour, uContour): from the camera to the body's middle. */
+float farness() {
+  if (uContour <= 0.0) return 0.0;
+  return smoothstep(250.0, 650.0, length(cameraPosition - (uAxisA + uAxisB) * 0.5)) * uContour;
+}
 void main() {
   vec3 n = normalize(vNormalW);
   float back = gl_FrontFacing ? 1.0 : 0.0;
@@ -190,8 +204,15 @@ void main() {
 ${GLOVE_FRAGMENT_ALBEDO}
   vec3 col = albedo * (ambient * gm.aoA + key * vec3(0.78, 0.74, 0.68) * gm.aoK);
   float rim = pow(1.0 - max(dot(n, V), 0.0), 3.0);
-  col += rim * 0.22 * mix(vec3(1.0), uAccent, 0.35) * gm.aoA;
+  float far = farness();
+  col += rim * 0.22 * (1.0 - 0.8 * far) * mix(vec3(1.0), uAccent, 0.35) * gm.aoA;
   col += garmentLight(gm, n, V, L, key, ambient);
+  // Distance contour: darker grazing edges and a little more key contrast, so limbs read against the body.
+  if (far > 0.0) {
+    float edge = pow(1.0 - max(dot(n, V), 0.0), 1.6);
+    col *= 1.0 - far * 0.45 * edge;
+    col = mix(col, col * (0.8 + 0.35 * key), far * 0.5);
+  }
 ${GLOVE_FRAGMENT_LIGHT}
   col = mix(col * 0.38, col, back); // inside of the hood
   col = mix(col, vColor * 1.6 + 0.15, vGlow);
@@ -230,6 +251,8 @@ void main() {
   col = max(col + rimC * fres * 1.6, 0.0) + vec3(1.0) * fres * fres * 0.35;
   col += mix(uGhost, vec3(1.0), 0.45) * vGlow * 1.1;
   float a = uOpacity * (0.38 + 0.62 * fres) + vGlow * 0.35 * uOpacity;
+  // Far away a ghost's body fills in a little (a faint shape loses its limbs otherwise).
+  if (uContour > 0.0) a *= 1.0 + 0.3 * smoothstep(250.0, 650.0, length(cameraPosition - (uAxisA + uAxisB) * 0.5)) * uContour;
 ${HAT_FX_FRAGMENT_GHOST}
   a = clamp(a * nearFade(), 0.0, 1.0);
 #ifdef DITHER

@@ -33,8 +33,9 @@ const enum K {
   Inside,
 }
 
-/** Base radius of the fleece along the forearm (s from the arm root; the old sleeve's stations). */
-function fleeceR(s: number, L: number): number {
+/** Base radius of the fleece along the forearm (s from the arm root; the old sleeve's stations). Gloves with a long
+ * cuff over the sleeve hug it here (gloves/fp.ts). */
+export function fleeceR(s: number, L: number): number {
   const st: [number, number][] = [
     [-14, 2.55],
     [-7, 2.45],

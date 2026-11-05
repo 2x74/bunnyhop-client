@@ -22,6 +22,7 @@ import { hasAnimRig, loadAnimRig } from "../player/studio/loader";
 import { DEFAULT_COSMETICS } from "../progression";
 import { cleanLoadout, DEFAULT_LOADOUT } from "../loadout";
 import { NameTag, TagSight, type SightTrace } from "../player/tag";
+import { probeFromTrace } from "../player/bunny/legs";
 import { uiHidden } from "../ui/hide-ui";
 import { formatTime } from "../timer";
 import { styleDef } from "../styles";
@@ -191,6 +192,9 @@ export class RemotePlayers {
     const model = new PlayerModel({ style: "solid", playerGlow: p.info.playerGlow ?? null, color, outfit: p.info.outfit ?? DEFAULT_COSMETICS.outfit!, loadout: cleanLoadout(p.info.loadout) ?? { ...DEFAULT_LOADOUT } });
     if (this.renderer && this.camera) await compileModel(this.renderer, model.root, this.camera, this.scene);
     if (this.players.get(p.slot) !== p) return model.dispose();
+    // Feet plant on slopes (player/bunny/legs.ts) through the same world trace as the tags' line of sight.
+    const trace = this.trace;
+    if (trace) model.setGroundProbe(probeFromTrace(trace));
     p.model = model;
     this.scene.add(model.root);
     p.tag = new NameTag(color);

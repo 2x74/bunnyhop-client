@@ -133,7 +133,7 @@ const TOPICS: readonly Topic[] = [
   {
     names: ["styles", "style", "modes", "mode"],
     lines: (c) => [
-      "!n Normal · !ez EZ Scroll · !scroll Legit Scroll · !w W-Only · !sw Sideways · !hsw Half-Sideways · !bw Backwards · !auto Auto-strafe",
+      "!n Normal · !ez EZ Scroll · !scroll Legit Scroll · !w W-Only · !sw Sideways · !hsw Half-Sideways · !bw Backwards · !ad A/D-Only · !auto Auto-strafe",
       `${k(c, "!style", "cycleStyle")} lists them${c.game?.key("cycleStyle") ? ` (${c.game.key("cycleStyle")} cycles)` : ""}. Switching restarts the run; each style has its own leaderboard.`,
     ],
   },

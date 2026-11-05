@@ -464,7 +464,7 @@ export class Attract {
       world.setPotato(prefs.get().graphics.potato);
       world.setFullbright(prefs.get().graphics.fullbright);
       this.effectTime = 12;
-      this.updateEffects = time => world.update(core.brushOrigins(), time, core.effectStates());
+      this.updateEffects = time => world.update(core.brushOrigins(), time, core.effectStates(), core.propAnims());
       this.updateEffects(this.effectTime);
       this.scene.add(world.root);
       this.scene.onBeforeRender = (_r, _s, cam) => world.cull(cam);

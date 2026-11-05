@@ -5,7 +5,7 @@
 
 import { registerSettingsSection } from "../ui/settings-registry";
 import { DEFAULT_PREFS, horizontalFovAt, keyLabel, prefs, type Action, type Prefs, type ViewmodelHand } from "../ui/settings";
-import { VIEWMODEL_POS, VIEWMODEL_POS_V2 } from "./defaults";
+import { VIEWMODEL_BOB, VIEWMODEL_POS, VIEWMODEL_POS_V2 } from "./defaults";
 import { getLoadout, onLoadout } from "../player/cosmetics";
 import { h } from "../ui/dom";
 import { loadoutSummary } from "../ui/loadout-ui";
@@ -112,7 +112,20 @@ registerSettingsSection(
             preset,
           ),
         ],
-        [ui.group("Loadout", loadoutRow(ui), swing)],
+        [
+          ui.group(
+            "Loadout",
+            loadoutRow(ui),
+            swing,
+            ui.segmented<"tricks" | "quiet">("Inspect", () => P().viewmodel.inspect, set("inspect"), [
+              ["tricks", "Tricks"],
+              ["quiet", "Quiet"],
+            ], {
+              desc: () => `Tricks: ${key("inspect")} starts your knife's own tricks. Quiet: a short, calm look along the blade first; press ${key("inspect")} again during it for the tricks. Only you see the quiet look: other players and replays see the tricks.`,
+              keywords: "inspect quiet calm blade check tricks flourish",
+            }),
+          ),
+        ],
       ],
       advanced: [
         ui.group(
@@ -133,7 +146,7 @@ registerSettingsSection(
             step: 0.05,
             scale: 100,
             unit: "%",
-            desc: "Walk bob (cl_bob style, on the ground only), landing dip and breathing. 0 = perfectly still.",
+            desc: `Walk bob (cl_bob style, on the ground only), landing dip and breathing. 0 = perfectly still, 100% = CS:S, default ${Math.round(VIEWMODEL_BOB * 100)}%.`,
             keywords: "cl_bob bobbing",
           }),
           ui.range("Sway", () => P().viewmodel.sway, set("sway"), {
@@ -144,6 +157,14 @@ registerSettingsSection(
             unit: "%",
             desc: "Lag behind mouse movement (CS:S viewmodel lag) and the tilt when strafing. 0 = locked to the view.",
             keywords: "lag tilt cl_viewmodel",
+          }),
+          ui.toggle("Hard landing settle", () => P().viewmodel.landSettle, set("landSettle"), {
+            desc: "After a really hard fall your view dips a little and comes straight back (at most 1.8 units, gone in about a third of a second). Bhop landings never trigger it. Only the picture moves: your aim, view angles and movement are untouched. Off by default.",
+            keywords: "landing camera dip fall impact shake settle",
+          }),
+          ui.toggle("Speed FOV", () => P().viewmodel.speedFov, set("speedFov"), {
+            desc: "Widens your FOV by 3° once you're going faster than 750 u/s, easing back below 550, so it doesn't pump hop to hop. Off by default, and off with reduced motion.",
+            keywords: "fov speed zoom fast velocity feedback",
           }),
         ),
       ],

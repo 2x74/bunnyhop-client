@@ -18,6 +18,7 @@ import { getGhostCosmetics, onGhostCosmetics } from "./player/cosmetics";
 import { PlayerModel, type PlayerPose } from "./player/model";
 import { onRaceRequest, type RaceRequest } from "./player/race";
 import { NameTag, TagSight, type SightTrace } from "./player/tag";
+import { probeFromTrace } from "./player/bunny/legs";
 import { Trail } from "./player/trail";
 import { DEFAULT_LOADOUT, type CosmeticLoadout } from "./loadout";
 import { cosmeticBetween, decodeReplay, inspectBetween, replayStyle, type CosmeticEvent, type Replay } from "./replay";
@@ -106,7 +107,15 @@ export class Ghost {
    * World line of sight for the tag (core traceRay). Null = no occlusion (menu background). The tag hides behind walls
    * like other players' tags unless Settings -> Ghost -> Names through walls.
    */
-  trace: SightTrace | null = null;
+  private sightTrace: SightTrace | null = null;
+  /** World line of sight (tags) and the ground under the feet (planting on slopes, player/bunny/legs.ts). */
+  get trace(): SightTrace | null {
+    return this.sightTrace;
+  }
+  set trace(t: SightTrace | null) {
+    this.sightTrace = t;
+    this.model.setGroundProbe(t ? probeFromTrace(t) : null);
+  }
   /** Player time minus ghost time at the same point on its path (seconds; negative = you're ahead). */
   delta: number | null = null;
   /** The ghost's horizontal speed at the last match of split() (u/s); NaN: no match, or its route teleports there. */
@@ -229,8 +238,20 @@ export class Ghost {
     const elapsed = running ? t - d.startTick : null;
     const snapped = this.lastT >= 0 && (t < this.lastT - 1 || t - this.lastT > 200);
     if (snapped) {
-      this.model.snap();
       this.sight.reset();
+      if (moving) {
+        // Pre-roll the model through the ghost's last 0.6 s (PlayerModel.preroll), so a seek lands with the bank,
+        // legs and ears where they'd be, not easing in from rest. Stops at a teleport.
+        const ticks = 1 / this.d.tickInterval;
+        let from = Math.max(0, t - 0.6 * ticks);
+        for (let k = Math.floor(t); k > from && k > 0; k--) if (this.teleportBetween(k - 1, k)) from = k;
+        this.lastT = -1;
+        this.model.preroll((u) => {
+          const tt = t - u * ticks;
+          return tt < from ? null : { ...this.sample(tt, true), position: [...this.pose.position], velocity: [...this.pose.velocity] };
+        });
+        this.lastT = -1;
+      } else this.model.snap();
     }
     const pose = this.sample(t, moving);
     const live = moving && this.lastT >= 0 && t > this.lastT && t - this.lastT < 50;

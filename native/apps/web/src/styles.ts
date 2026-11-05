@@ -39,6 +39,15 @@
 //     keyboard can't produce).
 // The verifier enforces the rule exactly (a command that differs from the computed one is a style violation); what it
 // cannot know, as for every style, is whether the view yaws came from a hand on a mouse.
+//
+// A/D-Only (v0.0.37; bhoptimer "A/D-Only": block_w 1, block_s 1, a_or_d_only 1; research/NATIVE-AD-ONLY.md) blocks W and S
+// in the air like the other key blocks, and locks the run to one side key: the first air command with sidemove < 0 (A)
+// or > 0 (D) while the run is under way (StyleFilter.apply's `running`: RunTimer.started before the tick, i.e. running
+// or past its rules-2 first tick)
+// picks the key, and from then on the other key is blocked like block_a / block_d. The lock clears whenever the run
+// isn't under way (idle in or out of the start zone, finished) and on reset(): bhoptimer clears its iKeyCombo in
+// StartTimer, which it calls on every armed start-zone tick, so in both the key is the first one used in the air after
+// the run's last start. Ground, ladders and the air after a ladder are free, as for every key block.
 
 import { DEFAULT_SETTINGS, PHYSICS_V1, type Settings } from "./core";
 
@@ -57,7 +66,7 @@ const IN_BACK = 1 << 4;
 const IN_MOVELEFT = 1 << 9;
 const IN_MOVERIGHT = 1 << 10;
 
-export type StyleId = "autohop" | "legit" | "wonly" | "sideways" | "hsw" | "autostrafe" | "scroll" | "lowgrav" | "segmented" | "infinite" | "backwards";
+export type StyleId = "autohop" | "legit" | "wonly" | "sideways" | "hsw" | "autostrafe" | "scroll" | "lowgrav" | "segmented" | "infinite" | "backwards" | "adonly";
 
 export interface StyleDef {
   /** Stable key: replay header, PB/ghost storage, leaderboard boards, API routes. */
@@ -77,6 +86,11 @@ export interface StyleDef {
    * view faces within 36.87° of straight back against the velocity (StyleFilter.backwards, facesBackwards).
    */
   backwards?: boolean;
+  /**
+   * A/D-Only (bhoptimer a_or_d_only 1): in the air the run's first side key (A or D) is the only one that works
+   * (StyleFilter.adOnly). W and S are blocked through `block`.
+   */
+  adOnly?: boolean;
   /** One-line rule for menus. */
   rule: string;
   /** Assisted style: the strafe is computed in the air from the mouse (Auto-strafe; autostrafe.ts). */
@@ -106,9 +120,10 @@ export const STYLE_DEFS: readonly StyleDef[] = [
   { id: "sideways", name: "Sideways", short: "SW", brief: "Sideways", autohop: true, block: { w: false, a: true, s: false, d: true }, hsw: false, rule: "Only W and S in the air: face sideways and strafe with W/S." },
   { id: "hsw", name: "Half-Sideways", short: "HSW", brief: "Half-SW", autohop: true, block: { w: false, a: false, s: true, d: false }, hsw: true, rule: "Hold W plus A or D together in the air. S, pure W and pure A/D do nothing." },
   { id: "backwards", name: "Backwards", short: "BW", brief: "Backwards", autohop: true, block: NONE, hsw: false, backwards: true, rule: "Face back the way you came. In the air your keys only work while you look away from where you're going." },
+  { id: "adonly", name: "A/D-Only", short: "AD", brief: "A/D-Only", autohop: true, block: { w: true, a: false, s: true, d: false }, hsw: false, adOnly: true, rule: "Strafe with only A or only D in the air. The first one you use in a run is the only one that works. W and S do nothing." },
   { id: "lowgrav", name: "Low Gravity", short: "LG", brief: "Low Gravity", autohop: true, block: NONE, hsw: false, separate: true, rule: "Half gravity (400). Hold jump; every key works. Separate ranking; no overall points or progression." },
   { id: "segmented", name: "Segmented", short: "SEG", brief: "Segmented", autohop: true, block: NONE, hsw: false, segmented: true, separate: true, rule: "Save checkpoints and load them mid-run: the timer and the replay go back to the checkpoint. Normal movement. Separate ranking; no overall points or progression." },
-  { id: "infinite", name: "Infinite", short: "INF", brief: "Infinite", autohop: true, block: NONE, hsw: false, airJump: true, separate: true, rule: "Autohop on the ground. In the air every jump press rises again and keeps your speed, as many times as you like. Own ranking; counts a fifth towards the overall rank. No XP or progression." },
+  { id: "infinite", name: "Infinite", short: "INF", brief: "Infinite", autohop: true, block: NONE, hsw: false, airJump: true, separate: true, rule: "Autohop on the ground. In the air every jump press rises again and keeps your speed, as many times as you like. Own ranking; counts a fifth towards the overall rank, with maps scored as T3 at most. No XP or progression." },
   // Assisted styles stay last in the menu. WIRE_STYLES is independently append-only.
   { id: "autostrafe", name: "Auto-strafe", short: "AS", brief: "Auto-strafe", autohop: true, block: NONE, hsw: false, auto: true, rule: "Move the mouse in the air and the game presses A/D for you. Hold A, D or S to take over." },
 ];
@@ -167,8 +182,16 @@ export function nextStyle(id: string, dir = 1): StyleId {
 
 /** True if the style restricts movement keys (has an input filter). */
 export function restrictsKeys(d: StyleDef): boolean {
-  return d.hsw || d.block.w || d.block.a || d.block.s || d.block.d;
+  return d.hsw || d.block.w || d.block.a || d.block.s || d.block.d || !!d.adOnly;
 }
+
+/** True for A/D-Only (StyleDef.adOnly). */
+export function isAdOnly(id: string): boolean {
+  return !!BY_ID.get(id)?.adOnly;
+}
+
+/** A/D-Only's key lock: 0 none yet, -1 A (sidemove < 0), +1 D (sidemove > 0). */
+export type SideLock = -1 | 0 | 1;
 
 /** Player state the filter depends on: the state BEFORE the tick (bhoptimer reads m_hGroundEntity in OnPlayerRunCmd). */
 export interface StyleContext {
@@ -237,7 +260,7 @@ export function isBackwards(id: string): boolean {
  * Applies a style's key rules to the command for the next tick. Returns `cmd` itself (same object) when nothing is
  * blocked, else a new command. Idempotent: filter(filter(c)) === filter(c) as values.
  */
-export function filterCommand(style: StyleDef | null, cmd: TickCmd, ctx: StyleContext): TickCmd {
+export function filterCommand(style: StyleDef | null, cmd: TickCmd, ctx: StyleContext, lock: SideLock = 0): TickCmd {
   // A recorded restricted-style command must be a fixed point of this filter, including on the ground / ladders.
   if (style && !turnBindsAllowed(style.id) && (cmd.buttons & TURN_HOLD_BITS)) cmd = { ...cmd, buttons: cmd.buttons & ~TURN_HOLD_BITS };
   if (!style || !restrictsKeys(style) || ctx.grounded || ctx.onLadder) return cmd;
@@ -249,6 +272,11 @@ export function filterCommand(style: StyleDef | null, cmd: TickCmd, ctx: StyleCo
   if (k.a && ((b & IN_MOVELEFT) !== 0 || s < 0)) (s = 0), (b &= ~IN_MOVELEFT);
   if (k.s && ((b & IN_BACK) !== 0 || f < 0)) (f = 0), (b &= ~IN_BACK);
   if (k.d && ((b & IN_MOVERIGHT) !== 0 || s > 0)) (s = 0), (b &= ~IN_MOVERIGHT);
+  // A/D-Only: once the run's key is locked (StyleFilter.adOnly), the other key's sidemove is zeroed and its bit cleared.
+  // Unlike block_a / block_d, the other key's bit alone keeps the locked key's sidemove (null binds: D pressed over a
+  // held A sends +450 with both bits), as bhoptimer's a_or_d_only judges the sidemove sign with the bit.
+  if (lock > 0) (s = s < 0 ? 0 : s), (b &= ~IN_MOVELEFT);
+  if (lock < 0) (s = s > 0 ? 0 : s), (b &= ~IN_MOVERIGHT);
   if (style.hsw) {
     // bhoptimer force_hsw 1: W without A/D and A/D without W are blocked (S is blocked above).
     const fw = f > 0;
@@ -268,10 +296,11 @@ export function filterCommand(style: StyleDef | null, cmd: TickCmd, ctx: StyleCo
 }
 
 /** Which keys count as a strafe for the run stats (bhoptimer strafe_count_w/a/s/d). */
-export type StrafeKeys = "ad" | "ws" | "w";
+export type StrafeKeys = "ad" | "ws" | "w" | "press";
 
 export function strafeKeys(style: StyleDef | null): StrafeKeys {
   if (style?.id === "wonly") return "w";
+  if (style?.adOnly) return "press"; // every fresh A or D press (bhoptimer strafe_count_a / strafe_count_d)
   if (style?.id === "sideways") return "ws";
   return "ad";
 }
@@ -316,6 +345,8 @@ export class StyleFilter {
   private bwGround = BW_GROUND_GRACE + 1;
   /** Backwards: the last command's movement keys were zeroed (display only; the rule never reads it). */
   bwBlocked = false;
+  /** A/D-Only: the run's side key (SideLock), 0 until the first air A or D of the run. */
+  sideLock: SideLock = 0;
 
   /**
    * Auto-strafe from physics v5 (v0.0.10): holding S in the air pauses the computed strafe, so S slows you down and A/D
@@ -341,17 +372,36 @@ export class StyleFilter {
     this.groundTicks = 2;
     this.bwGround = BW_GROUND_GRACE + 1;
     this.bwBlocked = false;
+    this.sideLock = 0;
   }
 
-  /** `state` is the player state BEFORE the tick. */
-  apply(cmd: TickCmd, state: StyleContext): TickCmd {
+  /**
+   * `state` is the player state BEFORE the tick. `running`: the run is under way before the tick (RunTimer.started);
+   * only A/D-Only reads it (its key lock clears while it is false), so a caller that omits it never locks.
+   */
+  apply(cmd: TickCmd, state: StyleContext, running = false): TickCmd {
     if (state.onLadder) this.fromLadder = true;
     else if (state.grounded) this.fromLadder = false;
     if (this.style?.auto) return this.assist(cmd, state);
     if (this.style?.backwards) return this.backwards(cmd, state);
     // A v22 edge landing without a jump is an air tick: the core takes the landing back before it moves.
     const grounded = state.grounded && !(state.edgeLanding && !(cmd.buttons & IN_JUMP));
-    return filterCommand(this.style, cmd, { grounded, onLadder: state.onLadder || this.fromLadder });
+    const ctx = { grounded, onLadder: state.onLadder || this.fromLadder };
+    if (this.style?.adOnly) return this.adOnly(cmd, ctx, running);
+    return filterCommand(this.style, cmd, ctx);
+  }
+
+  /**
+   * A/D-Only (header): the lock clears while the run isn't under way. On a filtered (air, no ladder) command of a run,
+   * the first sidemove sign picks the key; the command that locks keeps its sidemove. filterCommand then blocks W, S and
+   * the other key. A command with sidemove 0 (no key, or A and D held cancelling) locks nothing. The lock is decided on
+   * the incoming sidemove, which the filter never changes on the locking command (nor on any later one with the locked
+   * key's sign), so the verifier, re-filtering the recorded command, locks on the same tick: a fixed point.
+   */
+  private adOnly(cmd: TickCmd, ctx: StyleContext, running: boolean): TickCmd {
+    if (!running) this.sideLock = 0;
+    else if (this.sideLock === 0 && !ctx.grounded && !ctx.onLadder) this.sideLock = cmd.side < 0 ? -1 : cmd.side > 0 ? 1 : 0;
+    return filterCommand(this.style, cmd, ctx, this.sideLock);
   }
 
   /**

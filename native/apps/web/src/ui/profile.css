@@ -72,12 +72,12 @@ body.potato .pc { transform: none; }
 .pc-group.long { font-size: calc(24 * var(--u)); }
 .pc-rank-line { font-size: calc(16 * var(--u)); color: var(--text); }
 .pc-points { font-size: calc(15 * var(--u)); color: var(--dim); }
-.pc-bars { display: grid; grid-template-columns: repeat(7, 1fr); gap: calc(8 * var(--u)); margin-top: calc(6 * var(--u)); }
+.pc-bars { display: grid; grid-template-columns: repeat(10, 1fr); gap: calc(5 * var(--u)); margin-top: calc(6 * var(--u)); }
 .pc-bar { display: flex; flex-direction: column; align-items: center; gap: calc(3 * var(--u)); }
 .pc-bar-track { position: relative; width: 100%; height: calc(40 * var(--u)); border-radius: calc(4 * var(--u)); background: rgba(255, 255, 255, 0.07); overflow: hidden; }
 .pc-bar-fill { position: absolute; left: 0; right: 0; bottom: 0; height: calc(var(--f) * 100%); min-height: 0; background: var(--tc); opacity: calc(0.55 + var(--full) * 0.45); }
-.pc-bar b { font-size: calc(17 * var(--u)); line-height: 1; }
-.pc-bar small { font-size: calc(12 * var(--u)) !important; color: var(--tc) !important; }
+.pc-bar b { font-size: calc(15 * var(--u)); line-height: 1; }
+.pc-bar small { font-size: calc(11 * var(--u)) !important; color: var(--tc) !important; }
 .pc-recs { display: grid; grid-template-columns: repeat(3, 1fr); align-items: center; text-align: center; }
 .pc-recs div { display: flex; flex-direction: column; }
 .pc-recs b { font-size: calc(32 * var(--u)); font-weight: 850; letter-spacing: -0.02em; }
@@ -124,12 +124,16 @@ body.potato .pc { transform: none; }
 .pc-bg-geode { --bg-card: radial-gradient(75% 70% at 6% -10%, rgba(95, 242, 223, 0.5), transparent 70%), radial-gradient(70% 60% at 108% 115%, rgba(143, 114, 255, 0.55), transparent 70%), conic-gradient(from 20deg at 72% 38%, rgba(95, 242, 223, 0.10) 0deg 35deg, transparent 35deg 70deg, rgba(143, 114, 255, 0.12) 70deg 110deg, transparent 110deg 160deg, rgba(214, 255, 248, 0.08) 160deg 200deg, transparent 200deg 360deg), linear-gradient(160deg, #1f2a3a 0%, #171b2a 55%, #10111a 100%); }
 .pc-bg-highroller { --bg-card: radial-gradient(60% 55% at 50% -10%, rgba(255, 214, 120, 0.42), transparent 70%), radial-gradient(rgba(255, 220, 140, 0.09) 1.5px, transparent 2.5px) 0 0 / 22px 22px, repeating-linear-gradient(45deg, rgba(0, 0, 0, 0.12) 0 2px, transparent 2px 9px), radial-gradient(120% 100% at 50% 40%, #1b7a4e 0%, #0f5a3a 55%, #08321f 100%); }
 .pc-bg-borealis { --bg-card: radial-gradient(1.5px 1.5px at 18% 22%, #fff9, transparent), radial-gradient(1px 1px at 64% 14%, #fff8, transparent), radial-gradient(1.5px 1.5px at 86% 30%, #fff7, transparent), radial-gradient(1px 1px at 40% 10%, #fff7, transparent), repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.05) 0 1px, transparent 1px 6px), radial-gradient(70% 45% at 30% 62%, rgba(63, 240, 160, 0.55), transparent 70%), radial-gradient(60% 45% at 72% 40%, rgba(154, 107, 255, 0.5), transparent 70%), linear-gradient(180deg, #0a1430 0%, #0d1d3a 55%, #071024 100%); }
+/* v0.0.37 top tiers: Flare (Deep End) burns up pink and orange from the bottom; Riptide (Sleepless) is deep water lit
+   azure from above. */
+.pc-bg-flare { --bg-card: radial-gradient(85% 55% at 30% 118%, rgba(255, 110, 199, 0.42), transparent 70%), radial-gradient(55% 40% at 90% 112%, rgba(255, 154, 60, 0.26), transparent 70%), linear-gradient(170deg, #2a0d1f 0%, #170812 60%, #0d050a 100%); }
+.pc-bg-riptide { --bg-card: radial-gradient(80% 55% at 60% -14%, rgba(79, 184, 255, 0.4), transparent 70%), repeating-linear-gradient(172deg, rgba(191, 230, 255, 0.04) 0 2px, transparent 2px 26px), linear-gradient(175deg, #0e2a4a 0%, #0a1a30 55%, #050d1a 100%); }
 .pc-bg-prism { --bg-card: conic-gradient(from 210deg at 80% 20%, rgba(255, 122, 154, 0.25), rgba(255, 216, 77, 0.2), rgba(94, 224, 138, 0.2), rgba(79, 168, 255, 0.25), rgba(196, 119, 255, 0.25), rgba(255, 122, 154, 0.25)), linear-gradient(160deg, #2a2240, #120e1e); }
 /* Frames (cosmetic slot "frame") */
 .pc-frame-plain { --frame: #2a3040; }
 .pc-frame-steel { --frame: linear-gradient(135deg, #5d6577 0%, #c9d1de 28%, #6b7385 50%, #aeb7c6 76%, #5d6577 100%); }
 .pc-frame-mint { --frame: linear-gradient(135deg, #1f5a35 0%, #5ee08a 35%, #2d7a43 60%, #8cf5a6 85%, #1f5a35 100%); }
-.pc-frame-tiers { --frame: linear-gradient(90deg, var(--tier-1), var(--tier-2), var(--tier-3), var(--tier-4), var(--tier-5), var(--tier-6), var(--tier-7)); }
+.pc-frame-tiers { --frame: linear-gradient(90deg, var(--tier-1), var(--tier-2), var(--tier-3), var(--tier-4), var(--tier-5), var(--tier-6), var(--tier-7), var(--tier-8), var(--tier-9), var(--tier-10)); }
 .pc-frame-ember { --frame: linear-gradient(135deg, #7a1020 0%, #ff5468 30%, #ff9a3c 55%, #ff5468 80%, #7a1020 100%); }
 .pc-frame-violet { --frame: linear-gradient(135deg, #3a1a5a 0%, #c477ff 30%, #6a3ab0 55%, #e2b8ff 80%, #3a1a5a 100%); }
 .pc-frame-gold { --frame: linear-gradient(135deg, #8a5a12 0%, #ffe08a 22%, #c8891e 45%, #fff1b8 62%, #b07a1c 82%, #ffd45e 100%); }
@@ -138,6 +142,9 @@ body.potato .pc { transform: none; }
 .pc-frame-geode { --frame: linear-gradient(#15161f, #15161f) center / calc(100% - 13 * var(--u, 1px)) calc(100% - 13 * var(--u, 1px)) no-repeat, repeating-conic-gradient(from 8deg, #5ff2df 0deg 7deg, #1a8f9c 7deg 12deg, #7a5ce8 12deg 18deg, #d6fff8 18deg 19.5deg, #3fd6cc 19.5deg 26deg, #3e2c9a 26deg 31deg); }
 .pc-frame-highroller { --frame: linear-gradient(#13140f, #13140f) center / calc(100% - 13 * var(--u, 1px)) calc(100% - 13 * var(--u, 1px)) no-repeat, repeating-linear-gradient(90deg, #a8761a 0 2px, #ffe08a 2px 3.5px, #e0b13a 3.5px 5px), linear-gradient(#e0b13a, #e0b13a); }
 .pc-frame-borealis { --frame: linear-gradient(#0a1430, #0a1430) center / calc(100% - 13 * var(--u, 1px)) calc(100% - 13 * var(--u, 1px)) no-repeat, conic-gradient(from 200deg, #3ff0a0, #2fd6c8, #9a6bff, #3ff0a0, #2fd6c8, #9a6bff, #3ff0a0); }
+/* v0.0.37 top tiers: Riptide (First T9) in azure and foam; Whiteout (First T10) a bright platinum. */
+.pc-frame-riptide { --frame: linear-gradient(135deg, #0e2a4a 0%, #4fb8ff 30%, #1a5a9a 55%, #bfe6ff 80%, #0e2a4a 100%); }
+.pc-frame-whiteout { --frame: linear-gradient(135deg, #9aa3b8 0%, #ffffff 24%, #d3d9e6 46%, #ffffff 64%, #b8c0d2 84%, #f2f4ff 100%); }
 /* Rank-held frames (overall top 3 / #1; revoked with the place). */
 .pc-crown { display: inline-block; width: 1.05em; height: 0.75em; margin-right: 0.3em; vertical-align: 0.02em; filter: drop-shadow(0 0 0.35em currentColor); }
 .pc-crown svg { display: block; width: 100%; height: 100%; }
@@ -160,7 +167,7 @@ body.potato .pc { transform: none; }
 .tk.got { color: var(--ring); background: color-mix(in srgb, var(--ring) 14%, #12151c); box-shadow: inset 0 0 0 2px var(--ring), 0 0 0.8rem color-mix(in srgb, var(--ring) 25%, transparent); }
 .tk.r0 { --ring: #c98a50; } .tk.r1 { --ring: #b9c3d6; } .tk.r2 { --ring: #f2b628; } .tk.r3 { --ring: #b98cff; }
 .tk.r3.got { background: linear-gradient(135deg, rgba(255, 122, 154, 0.22), rgba(121, 210, 255, 0.22), rgba(185, 140, 255, 0.28)), #12151c; }
-.tk.got.t1, .tk.got.t2, .tk.got.t3, .tk.got.t4, .tk.got.t5, .tk.got.t6, .tk.got.t7 { color: var(--tc); }
+.tk.got.t1, .tk.got.t2, .tk.got.t3, .tk.got.t4, .tk.got.t5, .tk.got.t6, .tk.got.t7, .tk.got.t8, .tk.got.t9, .tk.got.t10 { color: var(--tc); }
 .tk-sm { width: 1.6rem; height: 1.6rem; }
 .tk-lg { width: 3.4rem; height: 3.4rem; }
 .tk-prog { position: absolute; left: 12%; right: 12%; bottom: 8%; height: 3px; border-radius: 3px; background: rgba(255, 255, 255, 0.1); overflow: hidden; }

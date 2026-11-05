@@ -19,6 +19,11 @@
 // in ACT_HOP crossfades over the sequence's fade time like any other main-sequence change, so continuous bhops blend
 // landing -> take-off. A single-tick ground contact (bhop) doesn't end the jump (the CS:S client rarely sees it
 // either); landing needs LAND_GRACE seconds on the ground.
+// v0.0.38 additions (CS:S has none of them): the knife attack layer fades in and out (FIRE_IN / FIRE_OUT) instead of
+// snapping onto the upper body at full weight; climbing (a ladder) and swimming never play the hop, climbing runs the
+// legs with the climb speed and swimming slows them; the feet converge exponentially inside FADE_TURN_DEGREES (the
+// SDK's per-frame step, made exact for any frame rate). Landings, jump phases and foot planting are the bunny's leg
+// layer (player/bunny/legs.ts), on top of the pose this produces.
 
 import type { BoneSetup } from "./pose";
 import { STUDIO_SNAP, type StudioData } from "./data";
@@ -39,6 +44,9 @@ const MAX_BODY_YAW = 90;
 const JUMP_GROUND_IGNORE = 0.2;
 /** Ground contact needed to end a jump (see header). */
 export const LAND_GRACE = 0.025;
+/** Knife attack layer: fade in over this much of its cycle, out over the last FIRE_OUT. */
+const FIRE_IN = 0.06;
+const FIRE_OUT = 0.2;
 
 const angleNormalize = (a: number) => {
   a = a % 360;
@@ -115,6 +123,9 @@ export interface AnimInput {
   onGround: boolean;
   /** PLAYERANIMEVENT_JUMP this frame. */
   jumped: boolean;
+  /** On a ladder (no hop; the legs run with the climb speed) / swimming (no hop; slower legs). Presentation only. */
+  climbing?: boolean;
+  swimming?: boolean;
 }
 
 export interface Layer {
@@ -169,6 +180,8 @@ export class CsAnimState {
   // Fire layer (CCSPlayerAnimState FIRESEQUENCE_LAYER): the knife attack gesture, played over everything else.
   private fireSeq = -1;
   private fireCycle = 0;
+  /** fire() since the last update: its gesture starts at this frame (cycle 0), not a frame's worth in. */
+  private fireFresh = false;
 
   constructor(
     private d: StudioData,
@@ -210,6 +223,7 @@ export class CsAnimState {
     }
     this.fireSeq = this.seqIndex(name + this.suffix);
     this.fireCycle = 0;
+    this.fireFresh = true;
   }
 
   /** ClearAnimationState: e.g. after teleports / seeks. Feet snap to the eyes on the next update. */
@@ -218,6 +232,7 @@ export class CsAnimState {
     this.groundTime = 0;
     this.cycle = 0;
     this.fireSeq = -1;
+    this.fireFresh = false;
     this.feetInit = false;
     this.main.queue.length = 0;
     this.idleT.queue.length = 0;
@@ -258,7 +273,13 @@ export class CsAnimState {
     this.vy = s.vel[1];
     this.speed = hypot2(this.vx, this.vy);
     this.groundTime = s.onGround ? this.groundTime + dt : 0;
-    if (s.jumped) {
+    // Climbing or swimming: no hop (a ladder's "take-off" or a stroke upwards isn't a jump).
+    const floating = !!(s.climbing || s.swimming);
+    if (floating) (this.jumping = false), (this.firstJumpFrame = false);
+    // Climbing runs the legs with the climb (vertical) speed; swimming plays them slower.
+    if (s.climbing) this.speed = Math.max(this.speed, Math.abs(s.vel[2]));
+    this.playbackRate = s.swimming ? 0.6 : 1;
+    if (s.jumped && !floating) {
       // DoAnimationEvent( PLAYERANIMEVENT_JUMP )
       this.jumping = true;
       this.firstJumpFrame = true;
@@ -288,7 +309,8 @@ export class CsAnimState {
 
     this.computeAimSequence();
     // ComputeFireSequence (UpdateLayerSequenceGeneric): advance; done after one cycle.
-    if (this.fireSeq >= 0) {
+    if (this.fireSeq >= 0 && this.fireFresh) this.fireFresh = false;
+    else if (this.fireSeq >= 0) {
       this.fireCycle += dt * this.bs.cycleRate(this.fireSeq);
       if (this.fireCycle > 1) this.fireSeq = -1;
     }
@@ -309,7 +331,11 @@ export class CsAnimState {
       bs.accumulate(b.seq, c, b.weight);
     }
     for (const l of this.layers) if (l.weight > 0 && l.seq >= 0) bs.accumulate(l.seq, l.cycle, l.weight);
-    if (this.fireSeq >= 0) bs.accumulate(this.fireSeq, this.fireCycle, 1);
+    if (this.fireSeq >= 0) {
+      const c = this.fireCycle;
+      const w = smooth01(c / FIRE_IN) * smooth01((1 - c) / FIRE_OUT);
+      if (w > 0.001) bs.accumulate(this.fireSeq, c, w);
+    }
   }
 
   // --- Main sequence ------------------------------------------------------------------------------
@@ -460,9 +486,17 @@ export class CsAnimState {
   private convergeFeet(dt: number): void {
     const diff = angleNormalize(this.goalFeetYaw - this.feetYaw);
     const abs = Math.abs(diff);
-    let scale = 1;
-    if (abs <= FADE_TURN_DEGREES) scale = Math.max(0.01, Math.min(1, abs / FADE_TURN_DEGREES));
-    let maxmove = MP_FEETYAWRATE * dt * scale;
+    // Outside FADE_TURN_DEGREES the feet turn at 720 deg/s; inside, the SDK's rate scales with the distance left (abs / 45,
+    // at least 1%): an exponential approach at 720 / 45 = 16/s. Taken exactly, the step split where it crosses 45 deg
+    // (the SDK steps it per frame, so it depended on the frame rate).
+    const k = MP_FEETYAWRATE / FADE_TURN_DEGREES;
+    const linear = Math.max(0, (abs - FADE_TURN_DEGREES) / MP_FEETYAWRATE);
+    let maxmove: number;
+    if (dt <= linear) maxmove = MP_FEETYAWRATE * dt;
+    else {
+      const from = Math.min(abs, FADE_TURN_DEGREES), rest = dt - linear;
+      maxmove = abs - from + Math.max(from * (1 - Math.exp(-k * rest)), MP_FEETYAWRATE * 0.01 * rest);
+    }
     if (abs > MAX_BODY_YAW) maxmove = abs - MAX_BODY_YAW;
     if (abs < maxmove) this.feetYaw = this.goalFeetYaw;
     else this.feetYaw += diff > 0 ? maxmove : -maxmove;
@@ -486,4 +520,10 @@ export class CsAnimState {
     this.bs.setPoseParam(this.pMoveX, x);
     this.bs.setPoseParam(this.pMoveY, y);
   }
+}
+
+/** Smoothstep of x clamped to 0..1. */
+function smooth01(x: number): number {
+  const t = x <= 0 ? 0 : x >= 1 ? 1 : x;
+  return t * t * (3 - 2 * t);
 }

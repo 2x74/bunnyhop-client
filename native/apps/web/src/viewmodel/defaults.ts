@@ -11,10 +11,10 @@
  */
 export const VIEWMODEL_POS = { fov: 64, x: 0.5, y: 1.5, z: 0 } as const;
 /**
- * Revision of the default framing (Prefs.viewmodel.rev): 1 = v0.0.5's 54 / 0 / 0 / 0 (saved without a rev), 2 = v0.0.6's
- * 54 / 0.6 / 1.5 / -0.9, 3 = VIEWMODEL_POS.
+ * Revision of the viewmodel defaults (Prefs.viewmodel.rev): 1 = v0.0.5's framing 54 / 0 / 0 / 0 (saved without a rev),
+ * 2 = v0.0.6's 54 / 0.6 / 1.5 / -0.9, 3 = VIEWMODEL_POS (v0.0.29), 4 = Bob default VIEWMODEL_BOB (v0.0.38; framing as 3).
  */
-export const VIEWMODEL_REV = 3;
+export const VIEWMODEL_REV = 4;
 /** v0.0.5's default framing (revision 1). */
 export const VIEWMODEL_POS_V1 = { fov: 54, x: 0, y: 0, z: 0 } as const;
 /**
@@ -22,3 +22,11 @@ export const VIEWMODEL_POS_V1 = { fov: 54, x: 0, y: 0, z: 0 } as const;
  * the right. Still offered as the "CS:S" preset.
  */
 export const VIEWMODEL_POS_V2 = { fov: 54, x: 0.6, y: 1.5, z: -0.9 } as const;
+
+/**
+ * Default Bob amount (Prefs.viewmodel.bob; 1 = CS:S's cl_bob, landing dip and breathing at full size). Half of CS:S from
+ * v0.0.38 (VIEWMODEL_REV 4): the full CS:S walk bob read as exaggerated. The setting still goes to 150%.
+ */
+export const VIEWMODEL_BOB = 0.5;
+/** The Bob default before v0.0.38 (revisions 1-3): CS:S. */
+export const VIEWMODEL_BOB_V3 = 1;

@@ -220,6 +220,11 @@ export async function prepareMapContent(
     core.physicsReload();
     const stillMissing = core.physicsMissing();
     if (stillMissing.length) console.warn(`content: no collision model for ${stillMissing.length} prop model(s): ${stillMissing.slice(0, 5).join(", ")}`);
+  } else {
+    // No manifest (e.g. a dev server in a checkout without content-cache/): props have no collision, so this client's
+    // runs and replay re-simulations differ from the verifier's wherever a prop is touched (desync, DNF).
+    const missing = core.physicsMissing();
+    if (missing.length) console.warn(`content: no content manifest for this map: ${missing.length} prop model(s) have no collision, replays that touch them will desync: ${missing.slice(0, 5).join(", ")}`);
   }
 
   // Static props: models come from the pakfile or hosted content; their materials resolve after the sky.

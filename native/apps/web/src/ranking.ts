@@ -14,8 +14,9 @@
 //   total = Σ weighted[i] × 0.985^i over the player's records sorted best first (bhoptimer's osu!-style weighting,
 //   flatter than its 0.975)
 //
-// - base(tier) is triangular (T1 10, T2 30, T3 60, T4 100, T5 150, T6 210, T7+ 280). Tiers above 7 clamp to T7+; maps with
-//   no tier are unranked (0 points).
+// - base(tier) is triangular, 5 × t × (t + 1): T1 10, T2 30, T3 60, T4 100, T5 150, T6 210, T7 280, T8 360, T9 450,
+//   T10 550 (each step 10 more than the one before; T8–T10 joined in v0.0.37, before that every map above 7 scored as
+//   T7). Tiers above 10 clamp to T10; maps with no tier are unranked (0 points).
 // - Clear pays for finishing the map at all, with time on top. Placement only pays for players you actually beat, so last
 //   place on the most played map earns nothing for that map being popular.
 // - A WR pays 2× second place from 30 players up, and less below that, because a WR on an unplayed map is cheap.
@@ -33,7 +34,7 @@
 
 import { clampTier, type Tier } from "./tiers";
 
-export const TIER_BASE: Record<Tier, number> = { 1: 10, 2: 30, 3: 60, 4: 100, 5: 150, 6: 210, 7: 280 };
+export const TIER_BASE: Record<Tier, number> = { 1: 10, 2: 30, 3: 60, 4: 100, 5: 150, 6: 210, 7: 280, 8: 360, 9: 450, 10: 550 };
 export const BONUS_TRACK_FACTOR = 0.25;
 
 export const CLEAR_WEIGHT = 3;
@@ -90,7 +91,7 @@ export const TIER_PLACEMENT: Record<Tier, number> = Object.fromEntries(
  * "harder Normal" and keeps most; the key-restricted styles count 0.6. Every style also has its own ranking
  * (unweighted raw points), so style specialists get a board of their own.
  */
-export const STYLE_WEIGHT: Record<string, number> = { autohop: 1, legit: 0.8, scroll: 0.8, wonly: 0.6, sideways: 0.6, hsw: 0.6, autostrafe: 0, lowgrav: 0, segmented: 0, infinite: 0.2, backwards: 0.6 };
+export const STYLE_WEIGHT: Record<string, number> = { autohop: 1, legit: 0.8, scroll: 0.8, wonly: 0.6, sideways: 0.6, hsw: 0.6, autostrafe: 0, lowgrav: 0, segmented: 0, infinite: 0.2, backwards: 0.6, adonly: 0.6 };
 // Auto-strafe (assisted: the game presses A/D from your mouse) is a separate scored mode: its own boards, WRs and
 // style ranking (raw points, like every style), but weight 0, so it adds nothing to the overall rank (bhoptimer's
 // convention for assisted/TAS styles: rankingmultiplier 0). Styles missing here (none today; stale ids) earn nothing.
@@ -101,6 +102,8 @@ export const STYLE_WEIGHT: Record<string, number> = { autohop: 1, legit: 0.8, sc
 // (11-04): its records count a little towards the overall rank. It still earns no XP or clear achievements
 // (styles.ts separate): air jumps make hard maps easy.
 // Backwards (v0.0.36) is a key-restricted style like W-Only: plain movement, keys limited by the view, so 0.6.
+// A/D-Only (v0.0.37) too: plain movement, one side key, so 0.6 (bhoptimer's rankingmultiplier puts it at 1.5 against
+// W-Only's 1.33 and Sideways' 1.30; ours keep every key-restricted style level).
 
 /** True if records in this style earn (style-ranking) points: the style has its own ranking. */
 export const isRankedStyle = (style: string): boolean => Object.hasOwn(STYLE_WEIGHT, style);
@@ -121,9 +124,23 @@ export interface RecordInput {
   players: number;
 }
 
+/**
+ * The highest tier a style's boards are scored at (owner 11-04): Infinite's air jumps flatten a hard map, so a T7
+ * cleared in Infinite pays like a T3. Its first clears of empty T6/T7 boards had made a Grandmaster out of Infinite
+ * alone. src/points.ts tierSql mirrors this. T8–T10 (v0.0.37) are capped the same way.
+ */
+export const STYLE_MAX_TIER: Readonly<Record<string, Tier>> = { infinite: 3 };
+
+/** The tier a record is scored at: the map's (clamped to 1..10), capped for the styles in STYLE_MAX_TIER. */
+export function scoredTier(tier: number | null, style: string): Tier | null {
+  const t = clampTier(tier);
+  const cap = Object.hasOwn(STYLE_MAX_TIER, style) ? STYLE_MAX_TIER[style] : null;
+  return t && cap && t > cap ? cap : t;
+}
+
 /** Raw (style-blind) points of one record; 0 on unrated maps and for unknown styles. src/points.ts RAW_SQL mirrors this, operation for operation. */
 export function recordPointsRaw(r: RecordInput): number {
-  const t = clampTier(r.tier);
+  const t = scoredTier(r.tier, r.style);
   if (!t || r.ticks <= 0 || !isRankedStyle(r.style)) return 0;
   const track = r.track > 0 ? BONUS_TRACK_FACTOR : 1;
   const clear = CLEAR_WEIGHT * TIER_BASE[t];

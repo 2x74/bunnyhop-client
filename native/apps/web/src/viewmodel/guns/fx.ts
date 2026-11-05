@@ -17,6 +17,7 @@
 
 import * as THREE from "three";
 import type { GunDef } from "./types";
+import { VmRandom } from "../rand";
 import type { GunViewmodel } from "./viewmodel";
 
 const FLASH_LIFE = 0.06;
@@ -207,6 +208,8 @@ export class GunFx {
   /** A case hit the floor (`hull`: a shotgun's; the "caseMetal" / "caseShell" cues). */
   onBounce: ((hull: boolean) => void) | null = null;
   private up = new THREE.Vector3();
+  /** Flash size / roll and shell throws (seeded: an export shows the same every time; GunViewmodel.reseed). */
+  readonly rng = new VmRandom(0x51ed270b);
 
   constructor(scene: THREE.Scene, root: THREE.Object3D) {
     const a = assets();
@@ -302,7 +305,7 @@ export class GunFx {
           const vn = s.v.dot(this.up);
           if (vn < 0) s.v.addScaledVector(this.up, -vn * 1.35).multiplyScalar(0.45);
           s.p.addScaledVector(this.up, -FLOOR - h);
-          s.w.multiplyScalar(-0.6).add(this.d.set(Math.random() - 0.5, 0, Math.random() - 0.5).multiplyScalar(20));
+          s.w.multiplyScalar(-0.6).add(this.d.set(this.rng.next() - 0.5, 0, this.rng.next() - 0.5).multiplyScalar(20));
           this.onBounce?.(pool === this.pools[1]);
         }
         this.dq.setFromAxisAngle(this.d.copy(s.w).normalize(), s.w.length() * dt);
@@ -324,10 +327,10 @@ export class GunFx {
     if (this.pendingFlash) {
       this.pendingFlash = false;
       this.flashAge = 0;
-      this.flashRoll = Math.random() * Math.PI * 2;
+      this.flashRoll = this.rng.next() * Math.PI * 2;
       const big = def.cls === "shotgun" ? 1.35 : def.cls === "smg" ? 0.85 : 1;
       this.quiet = this.pendingQuiet;
-      this.flashSize = big * 1.15 * (0.85 + Math.random() * 0.3) * (this.soft ? 0.7 : 1) * (this.quiet ? 0.38 : 1);
+      this.flashSize = big * 1.15 * (0.85 + this.rng.next() * 0.3) * (this.soft ? 0.7 : 1) * (this.quiet ? 0.38 : 1);
       this.lightAge = 0;
       this.lightK = (this.quiet ? 0.25 : 1) * (def.cls === "shotgun" || def.cls === "sniper" ? 1.25 : def.cls === "smg" ? 0.7 : 1);
     }
@@ -397,8 +400,8 @@ export class GunFx {
       const p = this.smoke.puffs[i];
       p.age = 0;
       p.p.copy(this.v).addScaledVector(this.d, 0.6 + k * 0.9);
-      p.v.copy(this.d).multiplyScalar(14 + k * 8).add(this.s.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(5));
-      p.s = (heavy ? 1.6 : 1.0) * (0.8 + Math.random() * 0.4);
+      p.v.copy(this.d).multiplyScalar(14 + k * 8).add(this.s.set(this.rng.next() - 0.5, this.rng.next() - 0.5, this.rng.next() - 0.5).multiplyScalar(5));
+      p.s = (heavy ? 1.6 : 1.0) * (0.8 + this.rng.next() * 0.4);
       p.a = (onSil ? 0.12 : heavy ? 0.32 : 0.22) * (def.cls === "smg" ? 0.6 : 1);
     }
   }
@@ -416,14 +419,14 @@ export class GunFx {
     s.age = 0;
     s.p.copy(this.v);
     const speed = def.shell === "shotgun" ? 70 : 95;
-    s.v.copy(this.d).multiplyScalar(speed * (0.85 + Math.random() * 0.3));
-    s.v.y += 25 + Math.random() * 20;
+    s.v.copy(this.d).multiplyScalar(speed * (0.85 + this.rng.next() * 0.3));
+    s.v.y += 25 + this.rng.next() * 20;
     // Orientation: the casing's axis across the gun (sideways out of the port), then a random tumble.
     vm.dirOn(part, [0, -1, 0.2], this.d).transformDirection(vm.camRel);
     this.q.setFromUnitVectors(this.v.set(1, 0, 0), this.d);
-    this.e.set(Math.random() * 0.4, Math.random() * 0.4, Math.random() * 0.4);
+    this.e.set(this.rng.next() * 0.4, this.rng.next() * 0.4, this.rng.next() * 0.4);
     s.q.copy(this.q).multiply(this.dq.setFromEuler(this.e));
-    s.w.set((Math.random() - 0.5) * 30, (Math.random() - 0.5) * 30, 18 + Math.random() * 14);
+    s.w.set((this.rng.next() - 0.5) * 30, (this.rng.next() - 0.5) * 30, 18 + this.rng.next() * 14);
     s.s = def.shell === "smg" ? 0.85 : 1;
   }
 

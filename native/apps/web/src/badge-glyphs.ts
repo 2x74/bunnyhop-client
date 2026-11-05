@@ -1,5 +1,5 @@
 import { GIFTER_SVG } from "./creators";
-import { MAX_TIER, TIERS, tierLabel } from "./tiers";
+import { TIERS, tierLabel } from "./tiers";
 const P = (d: string) => `<path d="${d}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
 export const textGlyph = (s: string, size = 9) => `<text x="12" y="15.5" text-anchor="middle" font-size="${size}" font-weight="800" fill="currentColor" font-family="ui-sans-serif, system-ui, sans-serif">${s}</text>`;
 
@@ -36,6 +36,8 @@ export const GLYPHS: Record<string, string> = {
   // Batch 1 (progression.ts): !race (two arrows passing), Halloween (a pumpkin).
   race: P("M4 7h13M13 3l4 4-4 4M20 17H7M11 13l-4 4 4 4"),
   pumpkin: P("M12 7c-5 0-8 3-8 7s3 7 8 7 8-3 8-7-3-7-8-7zM12 7c-2.2 2.5-2.2 11.5 0 14M12 7c2.2 2.5 2.2 11.5 0 14M12 7V4c1.2 0 2.2.5 2.8 1.3"),
+  // True Architect (progression.ts TRUE_ARCHITECT, bhop_lol_backrooms): a set square with its ruler ticks.
+  architect: P("M4 20V4l16 16zM8 16v-4.4l4.4 4.4zM4 8h2.5M4 12h1.6M8 20v-2M12 20v-1.6"),
   // The secret (progression.ts WINGS): a small wing, feathers sweeping back from a heel.
   wing: P("M5 18c1-6 5-10 14-12-2 3-4.5 4.4-7.5 5 3 .2 5 .9 6.5 2-3 2.3-6.6 3.2-10.5 2.6M5 18h4"),
   // Gauntlets (progression.ts GAUNTLET_ACHIEVEMENTS), one glyph each (alternatives: tools/gauntlets/mark-options.ts).
@@ -50,5 +52,5 @@ export const GLYPHS: Record<string, string> = {
   g20: textGlyph("20", 10),
   g_hourglass: P("M7 3.5h10M7 20.5h10M8 3.5c0 5 8 5.5 8 8.5s-8 3.5-8 8.5M16 3.5c0 5-8 5.5-8 8.5s8 3.5 8 8.5"),
 };
-for (const t of TIERS) GLYPHS[`t${t}`] = textGlyph(tierLabel(t), t === MAX_TIER ? 8 : 10);
+for (const t of TIERS) GLYPHS[`t${t}`] = textGlyph(tierLabel(t), t >= 10 ? 8 : 10);
 

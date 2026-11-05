@@ -24,6 +24,7 @@ import { clearGunHolds } from "./hold";
 import type { BaseClip } from "./anim";
 import type { GunDef } from "./types";
 import { restOnFloor, worldGunGeometry, worldGunMaterial } from "./world";
+import { silencerLength } from "./silencer";
 import { GunImpacts } from "./impacts";
 
 const q = new URLSearchParams(location.search);
@@ -134,11 +135,18 @@ function worldCamera(): THREE.PerspectiveCamera {
 // ---------------------------------------------------------------------------------------------
 // First person
 
-type Spec = { gun: GunDef; hand: "right" | "left"; clip: string; t: number; dur?: number };
+type Spec = { gun: GunDef; hand: "right" | "left"; clip: string; t: number; dur?: number; id: string };
+
+/**
+ * Silencer clips asked of a gun without one (the M4A1 borrows the Furrow, and the core doesn't simulate its suppressor:
+ * crates/core game/weapons.rs): the cell says so instead of quietly showing the plain gun.
+ */
+const SIL_CLIPS = /^(silOn|silOff|idleSil)$/;
+const unsupported = (sp: Spec) => SIL_CLIPS.test(sp.clip) && !sp.gun.silencer;
 
 function parseCell(s: string): Spec {
   const [id, hand = "right", clip = "idle", t = "0", dur] = s.split(":");
-  return { gun: gunById(id) ?? GUNS[0], hand: hand === "left" ? "left" : "right", clip, t: Number(t), dur: dur ? Number(dur) : undefined };
+  return { gun: gunById(id) ?? GUNS[0], hand: hand === "left" ? "left" : "right", clip, t: Number(t), dur: dur ? Number(dur) : undefined, id };
 }
 
 function seekVm(vm: GunViewmodel, sp: Spec): void {
@@ -212,7 +220,7 @@ function firstPerson(): void {
       vm.draw();
     } else seekVm(vm, sp);
     const cell: Cell = {
-      label: `<b>${sp.gun.name}</b> · ${sp.gun.archetype} · ${sp.clip}${sp.clip === "idle" ? "" : " " + sp.t.toFixed(2)}`,
+      label: `<b>${sp.gun.name}</b>${sp.id !== sp.gun.id ? ` (as ${sp.id})` : ""} · ${sp.gun.archetype} · ${sp.clip}${sp.clip === "idle" ? "" : " " + sp.t.toFixed(2)}${unsupported(sp) ? " · <b>unsupported</b>: this gun has no silencer (not simulated by the core)" : ""}`,
       draw: (_x, _y, w, h, dt) => {
         cam.aspect = w / h;
         cam.updateProjectionMatrix();
@@ -263,8 +271,8 @@ function firstPerson(): void {
     inspect: (i = 0) => vms[i].inspect(),
     draw: (i = 0) => vms[i].draw(),
     dry: (i = 0) => vms[i].dryFire(),
-    /** The silencer on / off over `dur` (default the core's 3.08 s), `at` seconds in. */
-    silencer: (i: number, on: boolean, dur = 3.08, at = 0) => vms[i].silencer(on, dur, at),
+    /** The silencer on / off over `dur` (default the core's 3.08 s), `at` seconds in; false: this gun has none. */
+    silencer: (i: number, on: boolean, dur?: number, at = 0) => (vms[i].def?.silencer ? (vms[i].silencer(on, dur ?? silencerLength(vms[i].def!), at), true) : false),
     gun: (i: number, id: string) => {
       vms[i].setGun(gunById(id) ?? GUNS[0]);
       vms[i].draw();
@@ -352,7 +360,10 @@ function installLive(vm: GunViewmodel, _hold: { fire: boolean }): void {
     else if (e.code === "KeyF") vm.inspect();
     else if (e.code === "KeyE") vm.dryFire();
     else if (e.code === "KeyQ") vm.draw();
-    else if (e.code === "KeyV" && !vm.anim.busy) vm.silencer(!vm.anim.silenced, 3.08);
+    else if (e.code === "KeyV" && !vm.anim.busy) {
+      if (vm.def?.silencer) vm.silencer(!vm.anim.silenced, silencerLength(vm.def));
+      else info.textContent = `${vm.def?.name ?? "This gun"} has no silencer (unsupported: the core doesn't simulate one)`;
+    }
     else if (e.code === "KeyB") {
       burst = !burst;
       vm.anim.modeToggle();

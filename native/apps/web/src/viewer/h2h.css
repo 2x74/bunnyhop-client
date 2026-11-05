@@ -1,0 +1,26 @@
+/* Head to head (viewer/h2h.ts): the views and each run's panel above a solid footer (timeline and controls). h2h.ts
+   places the HUDs and panels over the canvas each frame (left / top / width / height). */
+
+#rv.rv-h2h .rv-panel { background: var(--ink-0); box-shadow: 0 -1px 0 var(--line); z-index: 3; }
+/* The scrubber's time preview and the small menus open over the panels. */
+#rv.rv-h2h .rv-titles { display: none; }
+#rv.rv-h2h .rv-top { background: none; justify-content: flex-end; }
+
+/* HUDs in their views, scaled to the view's height (--h2h-hud); the other run's only when it has a view. */
+#rv.rv-h2h .rv-hud { --hs: calc(var(--hud-scale, 1) * var(--h2h-hud, 1)); }
+#rv.rv-h2h-ghost .rv-hud.h2h-hud-other { display: none; }
+/* Jumps, strafes and sync live in each run's panel: not twice. */
+#rv.rv-h2h .rv-hud .hud-el[data-el="stats"], #rv.rv-h2h .rv-hud .hud-el[data-el="sync"] { display: none; }
+
+/* Each run's panel (drawn by viewer/h2h-panel.ts) */
+#rv canvas.h2h-panel { position: absolute; display: block; pointer-events: none; }
+#rv canvas.h2h-panel[hidden] { display: none; }
+
+/* Different builds, styles or tracks: one short line */
+#rv .h2h-note { position: absolute; top: 1rem; left: 1.1rem; font-size: 0.8rem; color: var(--amber-hi); text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9); pointer-events: none; }
+#rv .h2h-note[hidden] { display: none; }
+
+/* Compare menu: the run-link field */
+#rv .rv-menu-input { margin: 0.3rem 0.6rem; padding: 0.4rem 0.55rem; border-radius: var(--r-2); border: 1px solid var(--line-2); background: var(--ink-0); color: #fff; font: inherit; font-size: 0.82rem; }
+#rv .rv-menu-msg { min-height: 1rem; padding: 0 0.6rem; color: var(--amber-hi); font-size: 0.74rem; }
+#rv .rv-menu-go { align-self: flex-end; margin: 0.2rem 0.6rem 0.4rem; }

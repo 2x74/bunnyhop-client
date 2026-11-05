@@ -893,6 +893,40 @@ pub extern "C" fn map_sound_states() -> usize {
     })
 }
 
+/// Animated props (game/prop_anims.rs): display only, nothing here feeds back into the simulation. Bumped whenever the
+/// two below may read differently, so the client checks one number per frame.
+#[unsafe(no_mangle)]
+pub extern "C" fn prop_anim_serial() -> u32 {
+    with(|c| c.game.as_ref().map_or(0, |g| g.prop_anim_serial()))
+}
+
+/// Animated props now into scratch_f32, in entity order, 5 values each: entity, PROP_ANIM_* flags, base seconds, since
+/// seconds, playback rate (sequence seconds at visual time t = base + (t - since) * rate). Their sequence and default
+/// sequence names go to scratch_str, one `anim\tdefault` line per prop in the same order.
+#[unsafe(no_mangle)]
+pub extern "C" fn prop_anim_states() -> usize {
+    with(|c| {
+        c.scratch_f32.clear();
+        c.scratch_str.clear();
+        if let Some(g) = &c.game {
+            for (p, flags, base, since, rate) in g.prop_anim_states() {
+                c.scratch_f32.extend([p.ent as f32, flags as f32, base, since, rate]);
+                c.scratch_str.push_str(&p.anim);
+                c.scratch_str.push('\t');
+                c.scratch_str.push_str(&p.default_anim);
+                c.scratch_str.push('\n');
+            }
+        }
+        c.scratch_f32.len()
+    })
+}
+
+/// Length of the names `prop_anim_states` left in scratch_str.
+#[unsafe(no_mangle)]
+pub extern "C" fn prop_anim_names_len() -> usize {
+    with(|c| c.scratch_str.len())
+}
+
 /// `play` commands the map ran since the last call into scratch_str, one per line.
 #[unsafe(no_mangle)]
 pub extern "C" fn map_sound_commands() -> usize {

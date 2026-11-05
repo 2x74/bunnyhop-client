@@ -1,4 +1,5 @@
 import { videoGrade, VIDEO_LIMITS, type VideoGrade } from "../video-settings";
+import { sanitizeMapLooks, type MapLook } from "../map-look";
 import { ANGLE_SPEED_KEY_RANGE, YAW_SPEED_RANGE } from "../turn-binds";
 import type { LightingProfileId } from "../graphics/profiles";
 import { graphicsPreset as lookPreset, type GraphicsPreset as LookPreset } from "../graphics/presets";
@@ -9,7 +10,7 @@ import { DEFAULT_MOUSE_DPI } from "../mouse-settings";
 
 import { DEFAULT_BINDS } from "../binds";
 import { CLASSIC, DEFAULT_KEYS, HUD_ELEMENTS, HUD_SCALE, moveRetiredPlaces, type HudLayout, type KeysPrefs } from "../hud/layout";
-import { VIEWMODEL_POS, VIEWMODEL_POS_V1, VIEWMODEL_POS_V2, VIEWMODEL_REV } from "../viewmodel/defaults";
+import { VIEWMODEL_BOB, VIEWMODEL_BOB_V3, VIEWMODEL_POS, VIEWMODEL_POS_V1, VIEWMODEL_POS_V2, VIEWMODEL_REV } from "../viewmodel/defaults";
 import { DEFAULT_SSJ, type SsjPrefs } from "../ssj/stats";
 import { DEFAULT_JHUD, type JhudPrefs } from "../ssj/jhud";
 import { DEFAULT_TRIGGER_PREFS, normalizeTriggerPrefs, type TriggerPrefs } from "../triggers/volumes";
@@ -87,11 +88,6 @@ export type AspectFit = "stretch" | "bars";
 export type HiddenKeeps = "speedKeys" | "nothing";
 /** Leaderboard place beside the split (board-place.ts): off, the place ("#4"), or the place and top % ("#4 · top 3%"). */
 export type PlaceReadout = "off" | "place" | "top";
-/** Player model: the bunnyhop.lol bunny (default), the classic runner, or the original CS:S models (team + skin below). */
-export type PlayerModelChoice = "bunny" | "runner" | "css";
-export type CssTeam = "ct" | "t";
-export type CtSkin = "ct_urban" | "ct_gsg9" | "ct_sas" | "ct_gign";
-export type TSkin = "t_phoenix" | "t_leet" | "t_arctic" | "t_guerilla";
 export type CrosshairStyle = "cross" | "cross-dot" | "dot" | "t" | "circle" | "none";
 export type ViewmodelHand = "right" | "left";
 
@@ -259,19 +255,10 @@ export interface Prefs {
   /** Trigger and clip overlays (!showtriggers, !showclips, the !triggers menu; triggers/). Drawn only, never part of a run. */
   triggers: TriggerPrefs;
   /**
-   * Player models (replays, third person, other players, ghosts, menu background). The bunny animates with the CS:S
-   * animations when the hosted CS:S content is available (procedurally until then); the CS:S models need that content
-   * and fall back to the bunny without it. The bunny's colourway is a cosmetic (player/cosmetics.ts).
+   * Brightness and Fullbright for one map, keyed by map name (map-look.ts): set from !bright, !fb and the pause menu's
+   * On screen tab. graphics.brightness / graphics.fullbright are what every other map uses.
    */
-  models: {
-    player: PlayerModelChoice;
-    /** Ghosts: "same" as players, or their own choice. */
-    ghost: PlayerModelChoice | "same";
-    /** CS:S team and skin per team, for the "css" choice. */
-    team: CssTeam;
-    ct: CtSkin;
-    t: TSkin;
-  };
+  mapLooks: Record<string, MapLook>;
   graphics: {
     /** Rendering look (graphics/presets.ts), separate from the Quality presets below. */
     preset: LookPreset;
@@ -357,7 +344,7 @@ export interface Prefs {
     show: boolean;
     /** CS:S `viewmodel_fov` (horizontal at 4:3, Hor+ like fov_desired; CS:S 54). */
     fov: number;
-    /** Bob amount (cl_bob style walk bob, landing dip, breathing): 0 = off, 1 = CS:S. */
+    /** Bob amount (cl_bob style walk bob, landing dip, breathing): 0 = off, 1 = CS:S (default VIEWMODEL_BOB, half). */
     bob: number;
     /** Sway amount (viewmodel lag on mouse movement, strafe tilt): 0 = off, 1 = CS:S. */
     sway: number;
@@ -370,10 +357,16 @@ export interface Prefs {
     x: number;
     y: number;
     z: number;
+    /** The inspect key starts the knife's own tricks ("tricks") or a restrained blade check first ("quiet"; yours only). */
+    inspect: "tricks" | "quiet";
+    /** In first person, a very short settle of the camera's height after a genuinely hard fall (off by default). */
+    landSettle: boolean;
+    /** In first person, a tiny FOV ease at bhop speeds, with hysteresis (off by default). */
+    speedFov: boolean;
     /**
-     * Revision of the default framing these values were saved under (VIEWMODEL_REV): migrateViewmodel moves players
-     * who never changed it to the current default once (v0.0.6: lower and smaller; v0.0.29: wider, hands and sleeves in
-     * view), and leaves custom ones alone.
+     * Revision of the defaults these values were saved under (VIEWMODEL_REV): migrateViewmodel moves players who never
+     * changed them to the current defaults once (v0.0.6: lower and smaller; v0.0.29: wider, hands and sleeves in view;
+     * v0.0.38: Bob at half of CS:S), and leaves custom ones alone.
      */
     rev: number;
   };
@@ -450,7 +443,7 @@ export const ACTIONS: { id: Action; label: string }[] = [
 ];
 
 /** Default viewmodel framing (viewmodel/defaults.ts, a leaf module: no import cycle through the settings sections). */
-export { VIEWMODEL_POS, VIEWMODEL_REV };
+export { VIEWMODEL_BOB, VIEWMODEL_POS, VIEWMODEL_REV };
 
 /** Prefs.mouseNames: mouse binds use Source's button names (binds.ts mouseCode; 0.0.12). */
 export const MOUSE_NAMES = 2;
@@ -544,9 +537,9 @@ export const DEFAULT_PREFS: Prefs = {
   showPlayerGlow: true,
   showPlayers: true,
   firstPersonGlow: true,
-  models: { player: "bunny", ghost: "same", team: "ct", ct: "ct_urban", t: "t_leet" },
+  mapLooks: {},
   graphics: { preset: "source", waterReflections: true, bloom: true, mapProfiles: false, ambienceShowcase: false, lightingProfile: "map", skyMode: "map", skyPackId: null, skyRotation: 0, skyExposure: 0, lightingSource: "map", directContribution: 1, ambientContribution: 1, clouds: false, cloudQuality: "low", cloudCoverage: .45, cloudDensity: 1, contactShading: false, atmosphere: false, sunShafts: false, materialResponse: true, volumetric: false, spatialAA: true, localLights: false, localQuality: "medium", localBudget: 1, localStrength: .2, dynamicGI: false, tracedGI: false, giQuality: "low", giStrength: .25, giRange: 256, dynamicShadows: false, shadowQuality: "medium", shadowDistance: 1024, shadowStrength: .18, resolutionScale: 1, antialias: true, aspect: "native", aspectFit: "stretch", pixelated: false, anisotropy: 8, brightness: 1, gamma: 1, vibrance: 1, fullbright: false, menuBackground: "live", fullscreen: true, potato: false, flashlight: false, fpsLimit: 1000, uncapped: false, lowLatency: false, menuFps: 0 },
-  viewmodel: { show: true, ...VIEWMODEL_POS, bob: 1, sway: 1, hand: "right", rev: VIEWMODEL_REV },
+  viewmodel: { show: true, ...VIEWMODEL_POS, bob: VIEWMODEL_BOB, sway: 1, hand: "right", inspect: "tricks", landSettle: false, speedFov: false, rev: VIEWMODEL_REV },
   binds: DEFAULT_BINDS,
   practice: { keepVelocity: true },
   holdRestart: false,
@@ -574,7 +567,8 @@ function merge<T>(base: T, over: unknown): T {
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 
-function migrate(raw: Record<string, unknown>): Record<string, unknown> {
+/** `partial`: a settings import (settings-io.ts), where a missing value means "leave mine", not "the old default". */
+function migrate(raw: Record<string, unknown>, partial = false): Record<string, unknown> {
   if (typeof raw.verticalSensitivity !== "number" || !Number.isFinite(raw.verticalSensitivity)) delete raw.verticalSensitivity;
   else raw.verticalSensitivity = Math.max(0.01, Math.min(100, raw.verticalSensitivity));
   // Turn speeds: within what a replay may record (turn-binds.ts); a broken one falls back to the default.
@@ -602,26 +596,34 @@ function migrate(raw: Record<string, unknown>): Record<string, unknown> {
   migrateMouseNames(raw);
   migrateBonusBind(raw);
   migrateBinds(raw);
-  migrateViewmodel(raw);
+  migrateViewmodel(raw, partial);
   migrateAudio(raw);
   normalizeTriggerPrefs(raw.triggers);
   return migrateHud(raw);
 }
 
 /**
- * Viewmodel framing saved under an older default (no `rev`: before v0.0.6, framing 1; rev 2: v0.0.6-v0.0.28): the whole
- * prefs object is saved on any change, defaults included, so a stored framing equal to the default it was saved under
- * (FOV and all three offsets, absent counting as equal) is one the player never changed: it moves to the current default
- * (VIEWMODEL_POS). Any change of theirs keeps all four as they are. Either way it's marked current, so choosing an old
- * framing again later (the CS:S preset is rev 2's) sticks.
+ * Viewmodel prefs saved under older defaults. The whole prefs object is saved on any change, defaults included, so a
+ * stored value equal to the default it was saved under is one the player never changed, and it moves to the current
+ * default once; anything they changed stays. Either way the prefs are marked current, so choosing an old value again
+ * later (the CS:S framing preset is rev 2's, Bob 100% is CS:S) sticks.
+ *   framing  no `rev` (before v0.0.6): framing 1; rev 2 (v0.0.6-v0.0.28): framing 2. FOV and all three offsets equal to
+ *            it move to VIEWMODEL_POS together; any change of theirs keeps all four. In stored prefs an absent one counts
+ *            as equal (very old saves lack them); in a partial import (`partial`) all four must be there, since an absent
+ *            value there means "keep mine".
+ *   bob      revs 1-3 (before v0.0.38): a stored Bob of exactly the old default (CS:S, 1) moves to VIEWMODEL_BOB. An
+ *            absent Bob is left absent: stored prefs get the new default from DEFAULT_PREFS, an import keeps yours.
  */
-function migrateViewmodel(raw: Record<string, unknown>): void {
+function migrateViewmodel(raw: Record<string, unknown>, partial: boolean): void {
   const v = raw?.viewmodel as Record<string, unknown> | undefined;
   if (!v || typeof v !== "object" || Array.isArray(v)) return;
   const rev = typeof v.rev === "number" ? v.rev : 1;
   if (rev >= VIEWMODEL_REV) return;
-  const old = (rev <= 1 ? VIEWMODEL_POS_V1 : VIEWMODEL_POS_V2) as Record<string, number>;
-  if (Object.keys(old).every((k) => v[k] === undefined || v[k] === old[k])) Object.assign(v, VIEWMODEL_POS);
+  if (rev < 3) {
+    const old = (rev <= 1 ? VIEWMODEL_POS_V1 : VIEWMODEL_POS_V2) as Record<string, number>;
+    if (Object.keys(old).every((k) => (v[k] === undefined && !partial) || v[k] === old[k])) Object.assign(v, VIEWMODEL_POS);
+  }
+  if (v.bob === VIEWMODEL_BOB_V3) v.bob = VIEWMODEL_BOB;
   v.rev = VIEWMODEL_REV;
 }
 
@@ -647,7 +649,7 @@ function migrateAntialias(raw: Record<string, unknown>): void {
 }
 
 /** Brings stored / imported prefs of any earlier shape up to the current one (in place; settings-io.ts imports). */
-export const migratePrefs = migrate;
+export const migratePrefs = (raw: Record<string, unknown>, o: { partial?: boolean } = {}): Record<string, unknown> => migrate(raw, !!o.partial);
 
 /**
  * Binds saved before 0.0.12 named mouse buttons `Mouse${MouseEvent.button + 1}`: Mouse2 was the middle button, Mouse3
@@ -735,15 +737,12 @@ export function resetBind(binds: Record<Action, string[]>, action: Action): Acti
 }
 
 /**
- * Retired player / ghost overrides migrate to the bunny. Appearance now comes from each player's loadout.
- * Keep the old team fields only for importing older preference files and the developer model viewer.
+ * The player-model choice is gone (v0.0.38: the bunny everywhere; the CS:S models and the classic runner were removed).
+ * Stored prefs and imports from any older version drop `models` (player / ghost / team / skins), so every saved choice
+ * (bunny, runner, css, ct, t) loads as the bunny and an old export's model settings aren't reported as unknown.
  */
 function migrateModels(raw: Record<string, unknown>): void {
-  const m = raw?.models as Record<string, unknown> | undefined;
-  if (!m || typeof m !== "object") return;
-  if (m.player === "ct" || m.player === "t") m.team = m.player;
-  if (["ct", "t", "runner", "css"].includes(String(m.player))) m.player = "bunny";
-  if (["ct", "t", "runner", "css", "bunny"].includes(String(m.ghost))) m.ghost = "same";
+  if (raw && typeof raw === "object" && "models" in raw) delete raw.models;
 }
 
 /** Pre-layout prefs stored HUD visibility as hud.speed / hud.timer / ... booleans. */
@@ -767,7 +766,10 @@ function migrateHud(raw: Record<string, unknown>): Record<string, unknown> {
 /** Saved prefs (the PREFS_KEY JSON, or null: none saved) over the defaults, migrated. Throws on malformed JSON. */
 export function parsePrefs(raw: string | null): Prefs {
   if (!raw) return clone(DEFAULT_PREFS);
-  const p = merge(DEFAULT_PREFS, migrate(JSON.parse(raw)));
+  const m = migrate(JSON.parse(raw));
+  const p = merge(DEFAULT_PREFS, m);
+  // (merge keeps only the defaults' keys; the per-map looks are keyed by map name.)
+  p.mapLooks = sanitizeMapLooks(m.mapLooks);
   if (!COLOR_BLIND_MODES.some(([m]) => m === p.colorBlind)) p.colorBlind = DEFAULT_PREFS.colorBlind;
   p.graphics.preset = lookPreset(p.graphics.preset);
   return p;

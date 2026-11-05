@@ -65,6 +65,13 @@ export interface ExportSource {
   endExport(): void;
   cardInfo(includeLeaderboard?: boolean): Promise<CardInfo>;
   fileName(): string;
+  /**
+   * Draws the frame's HUD in place of the canvas HUD (head to head, viewer/h2h.ts: one HUD per view and each run's
+   * panel). `o`: the dialog's HUD toggles; `branding`: the wordmark.
+   */
+  overlay?(g: CanvasRenderingContext2D, w: number, h: number, t: number, o: { hud: boolean; speed?: boolean; keys: boolean; graph: boolean; caption?: string }, branding: boolean): void;
+  /** The ticks the export spans when they aren't the replay's (head to head: until the slower run ends). */
+  exportSpan?(): { n: number; tickrate: number; startTick: number; endTick: number };
 }
 
 import { RESOLUTIONS, FPS_CHOICES, QUALITIES, CODECS, MOTION_BLUR, SHORTS_PRESET, EDITING_PRESET, CAPTION_LIMIT, INTRO_S, OUTRO_S, normalizeExportOptions, exportBitrate, exportCost, exportSize, exportTimeline, keyframeInterval, motionBlurOf, savedSettings, setMotionBlur, type ExportCam, type ExportCodec, type ExportOptions } from "./export-options";
@@ -143,7 +150,7 @@ export async function exportMp4(src: ExportSource, o: ExportOptions, onProgress:
   const config = picked.config;
   const keyEvery = keyframeInterval(o);
 
-  const { from, to, runFrames, introFrames, outroFrames, total } = exportTimeline(d, o);
+  const { from, to, runFrames, introFrames, outroFrames, total } = exportTimeline(src.exportSpan?.() ?? d, o);
   const ticksPerFrame = d.tickrate / fps;
   const card = await src.cardInfo(o.outro);
 
@@ -267,6 +274,7 @@ export async function exportMp4(src: ExportSource, o: ExportOptions, onProgress:
     g.drawImage(renderer.domElement, 0, 0, w, hgt);
   };
   const overlay = (t: number) => {
+    if (src.overlay) return src.overlay(g, w, hgt, t, { hud: o.hud, speed: o.speed, keys: o.keys, graph: o.graph, caption: o.caption }, !!o.branding);
     hud.draw(g, d, t, src.deltaAt(t), { hud: o.hud, speed: o.speed, keys: o.keys, graph: o.graph, caption: o.caption, crosshair: !!o.crosshair && rig.firstPerson }, src.speedDiffAt(t));
     if (o.branding) drawBranding(g, w, hgt);
   };
@@ -469,7 +477,7 @@ export function openExportDialog(src: ExportSource, parent: HTMLElement, auto?: 
   };
   const summary = () => {
     try {
-      const { seconds: secs, total } = exportTimeline(d, o);
+      const { seconds: secs, total } = exportTimeline(src.exportSpan?.() ?? d, o);
       const res = exportSize(o);
       const size = (exportBitrate(o) * secs) / 8;
       info.textContent = `${res.w}×${res.h} · ${o.fps} fps · ${CODEC_LABEL[o.codec ?? "avc"]} · ${secs.toFixed(1)} s · ${total} frames · about ${mb(size)}`;

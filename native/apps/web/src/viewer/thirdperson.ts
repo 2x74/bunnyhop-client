@@ -7,6 +7,7 @@ import { traceRay, WEAPON_EVENT_RELOAD_STARTED, type AttackReport, type Core, ty
 import { PlayerModel } from "../player/model";
 import { gunForWeapon } from "../viewmodel/guns/presenter";
 import { SpectatorCamera, type SpectatorTarget } from "./cameras";
+import { probeFromTrace } from "../player/bunny/legs";
 
 export class ThirdPerson {
   active = false;
@@ -23,6 +24,8 @@ export class ThirdPerson {
   private inspectHeld = false;
   private spec: SpectatorCamera;
   private model = new PlayerModel({ style: "solid" });
+  private core: Core;
+  private water: number[][] | null = null;
   /** Posed at least once (its skin and animations load on the first update), and whether the pose is behind now. */
   private posed = false;
   private stale = false;
@@ -33,6 +36,9 @@ export class ThirdPerson {
     this.spec = new SpectatorCamera({ trace: (a, b, r) => traceRay(core, a, b, r), chase: { distance: 100, followRate: 14 } });
     this.model.root.visible = false;
     this.model.setNearFade(10, 34);
+    // The legs plant on slopes (player/bunny/legs.ts) with the world under the feet; water depth from the map's volumes.
+    this.model.setGroundProbe(probeFromTrace((a, b) => traceRay(core, a, b, 0)));
+    this.core = core;
     scene.add(this.model.root);
   }
 
@@ -148,12 +154,24 @@ export class ThirdPerson {
     s.crouched = curr.crouched;
     s.grounded = curr.grounded || prev.grounded;
     if (this.active) this.spec.update(camera, s, dt, "chase");
-    this.model.setState({ visualTime, position: s.pos, velocity: s.vel, yaw, pitch, crouched: s.crouched, grounded: s.grounded, forwardmove: cmd.forward, sidemove: cmd.side, attack: this.pendingAttack, inspect: this.pendingInspect, inspectHeld: this.inspectHeld, gunShot: this.pendingShot, gunReload: this.pendingReload });
+    this.model.setState({ visualTime, position: s.pos, velocity: s.vel, yaw, pitch, crouched: s.crouched, grounded: s.grounded, forwardmove: cmd.forward, sidemove: cmd.side, attack: this.pendingAttack, inspect: this.pendingInspect, inspectHeld: this.inspectHeld, gunShot: this.pendingShot, gunReload: this.pendingReload, ladder: curr.onLadder, water: this.waterLevel(s.pos, s.viewZ) });
     this.pendingAttack = 0;
     this.pendingInspect = 0;
     this.pendingShot = false;
     this.pendingReload = null;
     this.model.update(dt);
     return this.active;
+  }
+
+  /** Source-style water level from the map's water volumes: 0 dry, 1 feet, 2 waist (swimming), 3 eyes. Presentation only. */
+  private waterLevel(p: ArrayLike<number>, viewZ: number): number {
+    const vols = (this.water ??= this.core.waterVolumes());
+    let level = 0;
+    for (const v of vols) {
+      if (p[0] < v[0] || p[0] > v[3] || p[1] < v[1] || p[1] > v[4]) continue;
+      const at = (z: number) => z >= v[2] && z <= v[5];
+      level = Math.max(level, at(p[2] + viewZ) ? 3 : at(p[2] + 36) ? 2 : at(p[2] + 1) ? 1 : 0);
+    }
+    return level;
   }
 }

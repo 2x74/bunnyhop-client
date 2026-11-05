@@ -19,9 +19,9 @@ import { gunRig } from "./rig";
 import { gunGeometry } from "./rig";
 import type { GunDef } from "./types";
 import { GunPoser } from "./pose";
+import { silencerHoldTimes, silencerLength } from "./silencer";
 
 /** The silencer clip's length (s): CS:S add_silencer / detach_silencer, the core's lock-out. */
-const SILENCER_T = 114 / 37;
 
 export interface GunViolation {
   kind: "joint" | "gun";
@@ -196,7 +196,7 @@ function scenarios(def: GunDef): Scenario[] {
   }
   if (t.pump) out.push({ name: "fire-pump", dur: t.pump.at + t.pump.dur + 0.4, start: (vm) => vm.anim.fire() });
   if (def.silencer) {
-    const T = SILENCER_T;
+    const T = silencerLength(def);
     const on = (vm: GunPoser) => (vm.anim.silenced = true);
     out.push({ name: "silencer-on", dur: T + 0.3, start: (vm) => vm.anim.silencer(true, T) });
     out.push({ name: "silencer-off", dur: T + 0.3, start: (vm) => (on(vm), vm.anim.silencer(false, T)) });
@@ -331,8 +331,10 @@ export interface SilencerGripReport {
  * can (CS:S seconds: after it bites, mid twist, at the seat), per digit the gap of each segment to the can. Null
  * without a silencer.
  */
-export function silencerGripReport(def: GunDef, glove: GloveStyleId = "knit", times = [1.16, 1.3, 2.36]): SilencerGripReport | null {
+export function silencerGripReport(def: GunDef, glove: GloveStyleId = "knit", times?: number[]): SilencerGripReport | null {
   if (!def.silencer) return null;
+  times ??= silencerHoldTimes(def);
+  const T = silencerLength(def);
   const vm = new GunPoser();
   vm.clamp = false;
   vm.setGun(def, glove);
@@ -343,7 +345,7 @@ export function silencerGripReport(def: GunDef, glove: GloveStyleId = "knit", ti
   const digits: Record<string, number[][]> = {};
   let sink = Infinity;
   times.forEach((s, ti) => {
-    vm.anim.seek("silencer", s, SILENCER_T, false, true);
+    vm.anim.seek("silencer", s, T, false, true);
     vm.update(0);
     const W = vm.bonesW;
     const ss = segs(W);

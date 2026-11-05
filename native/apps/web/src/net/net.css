@@ -156,3 +156,15 @@ body.menu-open #mp-menu, body.menu-open #mp-scoreboard, body.menu-open #mp-specb
 .sb-name .country-flag { margin-right: 0.35em; }
 .chat-line .nm-marks { font-size: 0.92em; }
 .chat-link { color: var(--accent-hi, #ffc35f); text-decoration: underline; text-underline-offset: 2px; pointer-events: auto; }
+
+/* A menu a chat command opened keeps the cursor out (net/mp.ts menuCursor): its rows can be clicked. */
+body.chat-cursor #mp-menu { pointer-events: auto; }
+body.chat-cursor #mp-menu .mm-item:not(.off) { cursor: pointer; }
+body.chat-cursor #mp-menu .mm-item:not(.off):hover { background: rgba(255, 255, 255, 0.08); }
+
+/* The !bright quick menu (look-menu.ts): the slider under the title, a switch that only shows the state. */
+.mm-look { display: flex; align-items: center; gap: 0.7em; margin: 0.1em 0.2em 0.4em; }
+.mm-look .look-slider { flex: 1; min-width: 9em; }
+.mm-look .mm-detail { min-width: 3.2em; text-align: right; color: #fff; font-size: 0.95em; }
+.mm-item .look-switch { pointer-events: none; }
+.mm-item.quiet:not(.off) .mm-label { color: var(--dim); }

@@ -174,6 +174,23 @@ export interface EmailStart {
   devLink?: string;
 }
 
+/** GET /runs/:id (apps/api runs.ts runView): a run's public facts. 404 for runs that don't exist or aren't public. */
+export interface RunInfo {
+  id: string;
+  map: string;
+  style: string;
+  track: number;
+  status: string;
+  player: { id: string; name: string; playerGlow?: PlayerGlow | null };
+  ticks: number | null;
+  time: number | null;
+  jumps: number | null;
+  sync: number | null;
+  physics: number;
+  date: string;
+  rank: number | null;
+}
+
 export interface LeaderboardEntry {
   rank: number;
   runId: string;
@@ -1406,6 +1423,10 @@ export const api = {
   },
   /** Gzip .bhr bytes of a verified run, for ghosts and watch mode. */
   /** A run's player as the server knows them (a replay's own player name is whatever its client wrote). */
+  /** A run as the server shows it (GET /runs/:id): head to head checks both runs are verified and on one map. */
+  async runInfo(id: string): Promise<RunInfo> {
+    return json<RunInfo>(`/runs/${encodeURIComponent(id)}`);
+  },
   /** The run's player; `look`: also their bunny as it is now (colourway + loadout, for replays that don't record it). */
   async runPlayer(id: string, look = false): Promise<{ id: string; name: string; playerGlow: PlayerGlow | null; look: { outfit: string; loadout: CosmeticLoadout } | null }> {
     const p = (await json<{ player: { id: string; name: string; playerGlow?: PlayerGlow | null; look?: { outfit?: unknown; loadout?: unknown } } }>(`/runs/${encodeURIComponent(id)}${look ? "?look=1" : ""}`)).player;

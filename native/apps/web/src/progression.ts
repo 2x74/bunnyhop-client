@@ -281,9 +281,9 @@ export interface AchievementDef {
 }
 
 const at = (n: number, goal: number): [number, number] => [Math.min(n, goal), goal];
-const TIER_TITLE: Record<Tier, string | undefined> = { 1: undefined, 2: undefined, 3: "Climber", 4: "Daredevil", 5: "Untouchable", 6: "Ascended", 7: "Transcendent" };
-const RING_BY_TIER: Record<Tier, Ring> = { 1: 0, 2: 0, 3: 1, 4: 1, 5: 2, 6: 3, 7: 3 };
-/** "tier 3", "tier 7+" (achievement copy). */
+const TIER_TITLE: Record<Tier, string | undefined> = { 1: undefined, 2: undefined, 3: "Climber", 4: "Daredevil", 5: "Untouchable", 6: "Ascended", 7: "Transcendent", 8: "Immortal", 9: "Celestial", 10: "Eternal" };
+const RING_BY_TIER: Record<Tier, Ring> = { 1: 0, 2: 0, 3: 1, 4: 1, 5: 2, 6: 3, 7: 3, 8: 3, 9: 3, 10: 3 };
+/** "tier 3", "tier 10" (achievement copy). */
 const tierWords = (t: Tier) => `tier ${tierNum(t)}`;
 
 /** Time goals ("Sub-X on bhop_eazy"). Thresholds need tuning against real WRs (see research/RANKS.md open questions). */
@@ -303,6 +303,10 @@ export const TIME_GOALS: { map: string; seconds: number; name: string; ring: Rin
  * clearing it is the secret (WINGS below).
  */
 export const HOME_TURF_MAPS = ["bhop_lol_meadow", "bhop_lol_aero", "bhop_lol_backrooms", "bhop_lol_plaza"] as const;
+
+/** True Architect: a clear of bhop_lol_backrooms (tools/backrooms). */
+export const TRUE_ARCHITECT = "true_architect";
+export const BACKROOMS_MAP = "bhop_lol_backrooms";
 
 /** The Halloween collection (maps/index.json "halloween"; a test keeps them in step). */
 export const HALLOWEEN_MAPS = [
@@ -366,6 +370,9 @@ export const EARLY_HOPPER = "early_hopper";
  */
 export const SUPPORTER = "supporter";
 export const SUPPORTER_MIN_USD = 5;
+
+/** Distinct main-track clears (progression styles) of maps at tier `t` or higher. */
+const clearsFrom = (s: ProgressStats, t: Tier) => TIERS.filter((x) => x >= t).reduce((n, x) => n + (s.clearsByTier[x] ?? 0), 0);
 
 const fmtGoal = (s: number) => (s >= 60 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}` : `${s}s`);
 
@@ -444,10 +451,24 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     ring: 1,
     progress: (s) => at(clearedOf(s, HOME_TURF_MAPS), HOME_TURF_MAPS.length),
   },
+  // Luna's idea (11-04): the eleven levels of our own Backrooms map, main track, any style that counts as a clear.
+  {
+    id: TRUE_ARCHITECT,
+    name: "True Architect",
+    desc: `Finish ${BACKROOMS_MAP}`,
+    goal: "Clear Backrooms",
+    group: "maps",
+    icon: "architect",
+    ring: 1,
+    progress: (s) => at(clearedOf(s, [BACKROOMS_MAP]), 1),
+  },
   { id: "bonus_25", name: "Bonus Collector", desc: "Finish 25 bonus tracks", group: "maps", icon: "bonus", ring: 2, title: "Bonus Collector", progress: (s) => at(s.bonuses, 25) },
   { id: "t2_clears_25", name: "Second Gear", desc: "Finish 25 different tier 2 maps", goal: "Clear 25 T2 maps", group: "tier", icon: "t2", ring: 1, progress: (s) => at(s.clearsByTier[2] ?? 0, 25) },
   { id: "t3_clears_10", name: "Rock Face", desc: "Finish 10 different tier 3 maps", goal: "Clear 10 T3 maps", group: "tier", icon: "t3", ring: 2, progress: (s) => at(s.clearsByTier[3] ?? 0, 10) },
   { id: "t4_clears_5", name: "Hard Five", desc: "Finish 5 different tier 4 maps", goal: "Clear 5 T4 maps", group: "tier", icon: "t4", ring: 3, progress: (s) => at(s.clearsByTier[4] ?? 0, 5) },
+  // v0.0.37 (tiers to T10): the long goals above the first clears. Counted on the map's current tier, like every tier goal.
+  { id: "t8_clears_5", name: "Deep End", desc: "Finish 5 different maps of tier 8 or higher", goal: "Clear 5 T8+ maps", group: "tier", icon: "t8", ring: 3, progress: (s) => at(clearsFrom(s, 8), 5) },
+  { id: "t9_clears_3", name: "Sleepless", desc: "Finish 3 different maps of tier 9 or higher", goal: "Clear 3 T9+ maps", group: "tier", icon: "t9", ring: 3, progress: (s) => at(clearsFrom(s, 9), 3) },
   { id: "top10_25", name: "Fixture", desc: "Hold 25 top-10 places at once", group: "records", icon: "podium", ring: 3, title: "Fixture", progress: (s) => at(s.top10s, 25) },
   { id: "wr_10", name: "Ten Crowns", desc: "Hold 10 world records at once", group: "records", icon: "crown", ring: 3, progress: (s) => at(s.wrs, 10) },
   { id: "sideways_10", name: "Crab Walk", desc: "Finish 10 different maps in Sideways", goal: "Clear 10 maps in Sideways", group: "style", icon: "sw", ring: 2, progress: (s) => at(s.styleMaps.sideways ?? 0, 10) },
@@ -1141,6 +1162,23 @@ export const COSMETICS: CosmeticDef[] = [
   // Level 35 / 40: the card between Holo (30) and Four-Leaf (50).
   { id: "frame-brass", slot: "frame", name: "Brass", unlock: lvl(35), color: "#c9a24a" },
   { id: "bg-nightgarden", slot: "background", name: "Night Garden", unlock: lvl(40), color: "#102418" },
+  // v0.0.37: the top tiers (T8 Brutal pink, T9 Nightmare azure, T10 Impossible white: tiers.ts TIER_COLORS), a set each,
+  // earned with the first clear and kept if the map is re-tiered later (achievements are permanent). The hat for T10
+  // is player/bunny/hats.ts wreath; the card pieces are ui/profile.css .pc-frame-* / .pc-bg-* and og/cards.ts.
+  // Flare (First T8): a hot pink hoodie on black, and a pink trail that burns out orange.
+  { id: "outfit-flare", slot: "outfit", name: "Flare", unlock: ach("tier_8"), color: "#e0479f" },
+  { id: "trail-flare", slot: "trail", name: "Flare", unlock: ach("tier_8"), color: "#ff6ec7", color2: "#ff9a3c" },
+  // Riptide (First T9): deep-water navy with azure trim, an azure ghost glowing deep blue, an azure frame.
+  { id: "outfit-riptide", slot: "outfit", name: "Riptide", unlock: ach("tier_9"), color: "#0e2a4a" },
+  { id: "ghost-riptide", slot: "ghost", name: "Riptide", unlock: ach("tier_9"), color: "#4fb8ff", color2: "#1a4fd8" },
+  { id: "frame-riptide", slot: "frame", name: "Riptide", unlock: ach("tier_9"), color: "#4fb8ff" },
+  // Whiteout (First T10): all white with a cold glow, a white trail into pale ice, a platinum frame, the Silver Wreath.
+  { id: "outfit-whiteout", slot: "outfit", name: "Whiteout", unlock: ach("tier_10"), color: "#f4f6fb" },
+  { id: "trail-whiteout", slot: "trail", name: "Whiteout", unlock: ach("tier_10"), color: "#ffffff", color2: "#b8c8ff" },
+  { id: "frame-whiteout", slot: "frame", name: "Whiteout", unlock: ach("tier_10"), color: "#f2f4ff" },
+  // The long goals: Deep End (5 T8+ maps) and Sleepless (3 T9+ maps) each give the card background of their tier.
+  { id: "bg-flare", slot: "background", name: "Flare", unlock: ach("t8_clears_5"), color: "#2a0d1f" },
+  { id: "bg-riptide", slot: "background", name: "Riptide", unlock: ach("t9_clears_3"), color: "#0a1f3a" },
 ];
 
 // Titles: every achievement title, plus a few level titles. id = "title-<slug>".
@@ -1185,6 +1223,8 @@ COSMETICS.push(
   { id: "hat-lucky-coins", slot: "hat", name: "Lucky Coins", unlock: ach(SUPPORTER), color: "#ffcf4a", rarity: 4 },
   // Borealis: a ribbon of aurora light floating above the ears, its colours flowing round it.
   { id: "hat-aurora", slot: "hat", name: "Aurora", unlock: ach(SUPPORTER), color: "#3ff0a0", rarity: 4 },
+  // First T10 (v0.0.37): a wreath of small silver leaves round the hood, the two branches meeting over the brow.
+  { id: "hat-wreath", slot: "hat", name: "Silver Wreath", unlock: ach("tier_10"), color: "#dfe5f2" },
 );
 // The secret (WINGS above): the Tek look, a whole outfit rather than a colourway (player/bunny/tek.ts). Staff own it
 // like every earned item (staffGrant), so the owner always has it.

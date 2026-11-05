@@ -19,7 +19,11 @@ const RECV = fixed(0x3a3e45, "dark"), RECV_DARK = fixed(0x26292e, "dark"), PEA =
 const BORE = fixed(0x101114), LENS = fixed(0x2f6f73, "glass"), ORANGE = fixed(0xff7a1a), GRIP = fixed(0x55733d, "grip"), PAD = fixed(0x26292e, "grip");
 const LINE = fixed(0x17191c), LIP = fixed(0x626a76, "metal");
 /** The trigger's pivot (top of its blade, gun-local). */
-const TRIGGER: [number, number, number] = [2.55, 0, -0.35];
+/**
+ * The trigger's pivot (top of its blade, gun-local): tight in front of the grip's thin upper part, where the firing
+ * index's pad rests on it (v0.0.37, as the Furrow's; guns/hold.ts solveTriggerIndex).
+ */
+const TRIGGER: [number, number, number] = [0.3, 0, -0.42];
 /** The bolt's axis (gun-local y, z): its shroud's. */
 const BOLT_AXIS: [number, number] = [0, 1.2];
 
@@ -57,11 +61,15 @@ function build(k: KnifeCtx): void {
   for (const x of [1.6, 4.6]) box(k, [x, 0, (1.55 + SZ - 0.4) / 2], [0.28, 0.26, (SZ - 0.4 - 1.55) / 2 + 0.06], { paint: RECV_DARK, round: 0.08 });
   // --- Forestock (pea green, where the left hand rests), guard, trigger, grip, the stock with a cheek rest.
   slab(k, [[5.5, -0.6], [15.0, -0.45], [15.3, 0.25], [15.0, 0.85], [5.5, 0.85]], -0.7, 0.7, { paint: PEA, part: PART.grip, round: 0.3, bevel: 0.16 });
-  guard(k, [[3.5, -0.35], [3.4, -1.3], [2.2, -1.45], [1.4, -1.2], [1.35, -0.65]], 0.14, { paint: PEA_DARK, open: true });
-  trigger(k, TRIGGER, 0.67, { paint: STEEL_LIGHT });
+  // A short guard round the trigger, open at the back where it meets the grip's swell.
+  guard(k, [[1.65, -0.35], [1.58, -1.26], [0.85, -1.42], [0.3, -1.36]], 0.14, { paint: PEA_DARK, open: true });
+  trigger(k, TRIGGER, 0.55, { paint: STEEL_LIGHT });
   const b0 = BACK0;
-  slab(k, [along(b0, 0, -0.05), along(b0, -0.05, 1.0), [1.25, -0.5], along(b0, 1.1, GRIP_DEPTH), along(b0, GRIP_LEN, GRIP_DEPTH - 0.1), along(b0, GRIP_LEN, 0.05), along(b0, 1.5, -0.05)], -0.6, 0.6, { paint: PEA, part: PART.grip, round: 0.25, bevel: 0.15 });
-  if (fp) for (const y of [-1, 1]) slab(k, [along(b0, 0.6, 0.3), along(b0, 0.6, GRIP_DEPTH - 0.3), along(b0, GRIP_LEN - 0.3, GRIP_DEPTH - 0.4), along(b0, GRIP_LEN - 0.3, 0.3)], y > 0 ? 0.58 : -0.62, y > 0 ? 0.62 : -0.58, { paint: GRIP, part: PART.grip, round: 0.15, bevel: 0.02 });
+  // The grip: thin at the top (the firing index runs along it to the trigger), full depth below the guard where the
+  // other three fingers wrap it (a palm swell), as two slabs (a notched outline doesn't cap as one).
+  slab(k, [along(b0, 0, -0.05), along(b0, -0.05, 0.35), [0.1, -0.45], [-0.08, -0.98], along(b0, 0.8, -0.05)], -0.6, 0.6, { paint: PEA, part: PART.grip, round: 0.18, bevel: 0.14 });
+  slab(k, [along(b0, 0.7, -0.05), [-0.12, -0.92], along(b0, 0.85, GRIP_DEPTH), along(b0, GRIP_LEN, GRIP_DEPTH - 0.1), along(b0, GRIP_LEN, 0.05), along(b0, 1.5, -0.05)], -0.6, 0.6, { paint: PEA, part: PART.grip, round: 0.25, bevel: 0.15 });
+  if (fp) for (const y of [-1, 1]) slab(k, [along(b0, 1.3, 0.3), along(b0, 1.3, GRIP_DEPTH - 0.4), along(b0, GRIP_LEN - 0.3, GRIP_DEPTH - 0.4), along(b0, GRIP_LEN - 0.3, 0.3)], y > 0 ? 0.58 : -0.62, y > 0 ? 0.62 : -0.58, { paint: GRIP, part: PART.grip, round: 0.15, bevel: 0.02 });
   slab(k, [[-0.85, 1.35], [-9.4, 1.35], [-9.6, -2.0], [-8.4, -2.1], [-3.0, -1.0], [-0.9, -0.35]], -0.6, 0.6, { paint: PEA, round: 0.32, bevel: 0.15 });
   box(k, [-5.4, 0, 1.55], [2.2, 0.48, 0.25], { paint: PEA_DARK, round: 0.2 });
   box(k, [-9.65, 0, -0.32], [0.22, 0.62, 1.6], { paint: PAD, round: 0.18 });
@@ -77,16 +85,19 @@ export const beanpole: GunDef = {
   blurb: "A very long, very green bolt-action rifle.",
   cls: "sniper",
   build,
+  // v0.0.38 (Astra QA): the palm on the pistol grip (it sat up at the receiver, the fingers came out through it and
+  // the stock); fitted with tools/viewmodel/gun-grip-fit.ts. The index rests toward the trigger (guns/hold.ts).
   right: {
-    o: [-1.03, 0.0, -0.49],
-    up: [-0.2, 0, 0.98],
-    fwd: [0.965, 0.174, 0.197],
+    o: [-0.56, 0.0, -2.55],
+    up: [-0.375, 0, 0.927],
+    fwd: [0.927, 0.0, 0.375],
     index: { c: [16, 34, 20], spread: -4 },
     middle: { c: [84, 98, 75] },
     ring: { c: [88, 98, 75] },
     pinky: { c: [92, 96, 75] },
     thumb: { c: [12, 10, 6], spread: -10 },
     wrap: ["Middle", "Ring", "Pinky", "Thumb"],
+    triggerRest: true,
     seat: -0.02,
   },
   left: {

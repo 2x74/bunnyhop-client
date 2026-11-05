@@ -11,7 +11,7 @@ import { keepRunOffer } from "./ui/keep-run";
 
 import * as THREE from "three";
 import { clientResultSettled, saveClientRun, type ClientRunSummary } from "./client-bridge";
-import { EVENT_FLIGHT, EVENT_JUMPED, EVENT_TELEPORTED, IN_FLIGHT, applyRestartPoint, restartPoint, withRestoredState, type Core, type PlayerState, type RestartPoint, type Settings } from "./core";
+import { EVENT_FLIGHT, EVENT_FLIGHT_LANDED, EVENT_JUMPED, EVENT_TELEPORTED, IN_FLIGHT, applyRestartPoint, restartPoint, withRestoredState, type Core, type PlayerState, type RestartPoint, type Settings } from "./core";
 import { GhostManager } from "./ghost";
 import { formatDelta, Hud, type SubmissionView } from "./hud";
 import type { UserCmd, Input } from "./input";
@@ -28,7 +28,8 @@ import { afterStep, beforeStep, checkpointMatches, FRAME_STRIDE, frameFlags, mak
 import { blocksPrehops, EVENT_RESPAWNED, formatTime, RunTimer, type Split, type TickCmd } from "./timer";
 import { ZoneEditor, ZoneView } from "./zone-editor";
 import { zoneWarningToast } from "./zone-warning";
-import { loadZones, nextTrack, parseZoneSet, touching, trackName, tracksOf, zonesEqual, type ZoneSet, zoneSetToJson } from "./zones";
+import { loadZones, nextTrack, parseZoneSet, touching, trackName, trackOf, tracksOf, zonesEqual, type Zone, type ZoneSet, zoneSetToJson } from "./zones";
+import { landingBonusRestart, restartPositionIn } from "./flight-landing";
 import { api } from "./api";
 import { placeBoard, worldRecord } from "./shared-reads";
 import { formatPlace, placeBoardFrom, placeFor, type PlaceBoard } from "./board-place";
@@ -369,7 +370,7 @@ export class RunSession {
         // Infinite flight: the bit rides in the recorded command (before the style filter, which keeps it).
         if (this.flightOn) c = { ...c, buttons: (c.buttons | IN_FLIGHT) >>> 0 };
       }
-      c = this.styleFilter.apply(c, this.o.core.state());
+      c = this.styleFilter.apply(c, this.o.core.state(), this.timer.started);
       beforeStep(this.o.core, this.timer, c);
     }
     // v8: the live view state rides along to the recorder (a scripted command has none: that replay is written as v7).
@@ -512,15 +513,19 @@ export class RunSession {
 
   /** In a start zone of a track with another style: restart where the player stands (clamped into the zone). */
   private switchTrackStyle(yaw = this.o.input.yaw): boolean {
-    const track = this.timer.track;
     const s = this.o.core.state();
-    const z = touching(s.position, s.crouched, this.zones?.zones ?? [], "start", track);
+    const z = touching(s.position, s.crouched, this.zones?.zones ?? [], "start", this.timer.track);
     if (!z) return false;
-    const clamp = (v: number, i: number) => (z.maxs[i] - z.mins[i] > 2 ? Math.min(z.maxs[i] - 1, Math.max(z.mins[i] + 1, v)) : (z.mins[i] + z.maxs[i]) / 2);
-    const at = withRestartNames({ position: [clamp(s.position[0], 0), clamp(s.position[1], 1), Math.max(z.mins[2] + 1, s.position[2])], yaw }, this.o.map, track);
+    this.restartInStart(z, s.position, yaw);
+    return true;
+  }
+
+  /** Restarts in start zone `z`, in its track's style, at `position` (clamped into the zone), with a fresh recording. */
+  private restartInStart(z: Zone, position: readonly number[], yaw: number): void {
+    const track = trackOf(z);
+    const at = withRestartNames({ position: restartPositionIn(z, position), yaw }, this.o.map, track);
     this.o.restart(track, at);
     this.hud.toast(`${track > 0 ? trackName(track) : "Main track"}, ${styleLabel(this.runStyle)}`, 2000);
-    return true;
   }
 
   /** B / F4: the next track (main -> bonus 1 -> ... -> last bonus -> main). `reply`: as setStartPoint. */
@@ -566,6 +571,15 @@ export class RunSession {
     const measured = t.measuredJumps, perfect = t.perfectJumps;
     const { state, update } = afterStep(this.o.core, this.timer, cmd, events);
     this.afterFlight(events);
+    // An Infinite flight landed with the timer armed in, or running, a bonus: that tick may have started the bonus run
+    // in Infinite, which can't verify. Restart that bonus at its start point as a Normal attempt instead, before the
+    // tick is recorded (flight-landing.ts).
+    const bonus = events & EVENT_FLIGHT_LANDED ? landingBonusRestart(this.timer, this.runStyle, (track) => this.styleFor(track)) : null;
+    if (bonus !== null) {
+      this.o.restart(bonus);
+      this.hud.toast(`${trackName(bonus)}, ${styleLabel(this.runStyle)}`, 2000);
+      return this.o.core.state();
+    }
     const flying = this.flying;
     if (update.started || update.restarted) announcerPolicy.resetAttempt();
     const measuredHop = t.measuredJumps > measured ? t.perfectJumps > perfect : null;

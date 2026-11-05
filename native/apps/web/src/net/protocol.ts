@@ -159,7 +159,7 @@ export const LEGACY_META_STYLES = 8;
 export const LEGACY_ROSTER_STYLES = 9;
 
 /** Wire order of styles (frozen: never reorder, only append). */
-export const WIRE_STYLES: readonly StyleId[] = ["autohop", "legit", "wonly", "sideways", "hsw", "autostrafe", "scroll", "lowgrav", "segmented", "infinite", "backwards"];
+export const WIRE_STYLES: readonly StyleId[] = ["autohop", "legit", "wonly", "sideways", "hsw", "autostrafe", "scroll", "lowgrav", "segmented", "infinite", "backwards", "adonly"];
 export const styleIndex = (s: string): number => Math.max(0, WIRE_STYLES.indexOf(s as StyleId));
 
 export const styleAt = (i: number): StyleId | null => WIRE_STYLES[i] ?? null;

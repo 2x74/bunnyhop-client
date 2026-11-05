@@ -24,7 +24,7 @@ import { pinnedLine } from "./notes";
 import { markSeen } from "./seen";
 
 /** The daily sweep's rules (apps/api src/ac-player-rules.ts), for the Stop re-flags dialog. */
-const SWEEP_RULES = ["key-shape-repeat", "counted-yaw-missing", "missing-beats-repeat", "pooled-review", "gain-jump", "legit-jumps"];
+const SWEEP_RULES = ["key-shape-repeat", "key-follows-mouse-repeat", "counted-yaw-missing", "missing-beats-repeat", "pooled-review", "gain-jump", "legit-jumps"];
 
 export interface Evidence {
   code: string;

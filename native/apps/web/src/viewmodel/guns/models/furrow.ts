@@ -12,13 +12,17 @@ import type { KnifeCtx } from "../../knives/ctx";
 import { ball, box, groove, guard, lathe, pins, plate, rod, slab, trigger, type P2 } from "../shapes";
 import { gunPaint as fixed } from "../material";
 import type { V3 } from "../../../player/bunny/rig";
-import type { GunDef } from "../types";
+import type { GunDef, SilencerSpec } from "../types";
 
 const RECV = fixed(0x3f4436), RECV_DARK = fixed(0x2a2e25, "dark"), WOOD = fixed(0x9a6a3e, "wood"), WOOD_DARK = fixed(0x744c2a, "wood"), TWINE = fixed(0xd8c08a, "grip");
 const STEEL = fixed(0x3a3f47, "dark"), STEEL_LIGHT = fixed(0x707782, "metal"), BORE = fixed(0x101114), CARROT = fixed(0xff7a1a), CARROT_DARK = fixed(0xd65e14), SPROUT = fixed(0x58c64a);
 const SEAM = fixed(0x1e211a, "dark"), RIVET = fixed(0x8a9080, "metal"), LIP = fixed(0x6e785c);
-/** The trigger's pivot (top of its blade, gun-local). */
-const TRIGGER: [number, number, number] = [2.55, 0, -0.35];
+/**
+ * The trigger's pivot (top of its blade, gun-local): tight in front of the grip's thin upper part, where the firing
+ * index's pad rests on it (v0.0.37: guns/hold.ts solveTriggerIndex; the bunny's short fingers on a deep grip couldn't
+ * reach a trigger further out).
+ */
+const TRIGGER: [number, number, number] = [0.3, 0, -0.42];
 
 /** Barrel axis height. */
 const BZ = 1.2;
@@ -59,11 +63,15 @@ function build(k: KnifeCtx): void {
   slab(k, [[6.5, -0.5], [13.2, -0.4], [13.45, 0.6], [13.2, 1.7], [6.5, 1.7]], -0.72, 0.72, { paint: WOOD, part: PART.grip, round: 0.3, bevel: 0.16 });
   for (const x of [7.2, 12.6]) slab(k, [[x - 0.22, -0.56], [x + 0.22, -0.54], [x + 0.22, 1.76], [x - 0.22, 1.76]], -0.77, 0.77, { paint: TWINE, round: 0.12, bevel: 0.05 });
   // --- Guard, trigger, the walnut grip, the stock and its pad.
-  guard(k, [[3.5, -0.35], [3.4, -1.3], [2.2, -1.45], [1.4, -1.2], [1.35, -0.65]], 0.14, { paint: RECV, open: true });
-  trigger(k, TRIGGER, 0.67, { paint: STEEL_LIGHT });
+  // A short guard round the trigger, open at the back where it meets the grip's swell.
+  guard(k, [[1.65, -0.35], [1.58, -1.26], [0.85, -1.42], [0.3, -1.36]], 0.14, { paint: RECV, open: true });
+  trigger(k, TRIGGER, 0.55, { paint: STEEL_LIGHT });
   const b0 = BACK0;
-  slab(k, [along(b0, 0, -0.05), along(b0, -0.05, 1.0), [1.25, -0.5], along(b0, 1.1, GRIP_DEPTH), along(b0, GRIP_LEN, GRIP_DEPTH - 0.1), along(b0, GRIP_LEN, 0.05), along(b0, 1.5, -0.05)], -0.6, 0.6, { paint: WOOD, part: PART.grip, round: 0.25, bevel: 0.15 });
-  if (fp) for (const y of [-1, 1]) slab(k, [along(b0, 0.6, 0.3), along(b0, 0.6, GRIP_DEPTH - 0.3), along(b0, GRIP_LEN - 0.3, GRIP_DEPTH - 0.4), along(b0, GRIP_LEN - 0.3, 0.3)], y > 0 ? 0.58 : -0.62, y > 0 ? 0.62 : -0.58, { paint: WOOD_DARK, part: PART.grip, round: 0.15, bevel: 0.02 });
+  // The grip: thin at the top (the firing index runs along it to the trigger), full depth below the guard where the
+  // other three fingers wrap it (a palm swell), as two slabs (a notched outline doesn't cap as one).
+  slab(k, [along(b0, 0, -0.05), along(b0, -0.05, 0.35), [0.1, -0.45], [-0.08, -0.98], along(b0, 0.8, -0.05)], -0.6, 0.6, { paint: WOOD, part: PART.grip, round: 0.18, bevel: 0.14 });
+  slab(k, [along(b0, 0.7, -0.05), [-0.12, -0.92], along(b0, 0.85, GRIP_DEPTH), along(b0, GRIP_LEN, GRIP_DEPTH - 0.1), along(b0, GRIP_LEN, 0.05), along(b0, 1.5, -0.05)], -0.6, 0.6, { paint: WOOD, part: PART.grip, round: 0.25, bevel: 0.15 });
+  if (fp) for (const y of [-1, 1]) slab(k, [along(b0, 1.3, 0.3), along(b0, 1.3, GRIP_DEPTH - 0.4), along(b0, GRIP_LEN - 0.3, GRIP_DEPTH - 0.4), along(b0, GRIP_LEN - 0.3, 0.3)], y > 0 ? 0.58 : -0.62, y > 0 ? 0.62 : -0.58, { paint: WOOD_DARK, part: PART.grip, round: 0.15, bevel: 0.02 });
   slab(k, [[-0.85, 1.6], [-8.6, 1.2], [-8.8, -1.7], [-7.6, -1.8], [-2.6, -0.9], [-0.9, -0.4]], -0.58, 0.58, { paint: WOOD, round: 0.3, bevel: 0.15 });
   box(k, [-8.85, 0, -0.25], [0.22, 0.6, 1.5], { paint: RECV_DARK, round: 0.18 });
   // --- The carrot magazine (Mag bone): two slabs along its curve, darker ridges, a point at the bottom.
@@ -85,16 +93,19 @@ export const furrow: GunDef = {
   cls: "rifle",
   build,
   // The Hedgerow's grip and support hold (same grip profile, a handguard of the same depth).
+  // v0.0.38 (Astra QA): the palm on the pistol grip (it sat up at the receiver, the fingers came out through it and
+  // the stock); fitted with tools/viewmodel/gun-grip-fit.ts. The index rests toward the trigger (guns/hold.ts).
   right: {
-    o: [-1.03, 0.0, -0.49],
-    up: [-0.2, 0, 0.98],
-    fwd: [0.965, 0.174, 0.197],
+    o: [-0.56, 0.0, -2.55],
+    up: [-0.375, 0, 0.927],
+    fwd: [0.927, 0.0, 0.375],
     index: { c: [16, 34, 20], spread: -4 },
     middle: { c: [84, 98, 75] },
     ring: { c: [88, 98, 75] },
     pinky: { c: [92, 96, 75] },
     thumb: { c: [12, 10, 6], spread: -10 },
     wrap: ["Middle", "Ring", "Pinky", "Thumb"],
+    triggerRest: true,
     seat: -0.02,
   },
   left: {
@@ -125,4 +136,65 @@ export const furrow: GunDef = {
   recoil: { kick: 2.6, back: 0.5, roll: 0.8, settle: 320, slide: 1.0, slideTime: 0.07 },
   sounds: { fire: "gun_furrow_fire", magOut: "gun_mag_out", magIn: "gun_mag_in", slide: "gun_bolt" },
   tp: { o: [1.2, -0.8, 0.4], x: [0.15, 0.1, -0.98], z: [0, 1, 0], s: 1.35 },
+};
+
+// --- The M4A1 (physics v25: its silencer is simulated, research/WEAPONS.md): the Furrow with a screw-on suppressor.
+// Original design: a matte moss-olive tube, a walnut collar of eight flats where the hand turns it (each turn reads),
+// two twine bands like the handguard's, a dark steel nose. It screws onto the muzzle device's front face.
+
+const CAN = fixed(0x4a5638), CAN_DARK = fixed(0x343d28, "dark");
+/** Where the can's rear face seats (the muzzle device's front), the thread's length, the can's length and radius. */
+const SIL_SEAT = 20.5, SIL_THREAD = 0.5, SIL_L = 6.2, SIL_R = 0.66;
+
+function buildSuppressor(k: KnifeCtx): void {
+  const fp = k.view === "fp";
+  const x0 = SIL_SEAT;
+  const o = { c: [0, BZ] as [number, number], bone: "Sil" };
+  // Collar: eight walnut flats (the hand's purchase), rounded into the tube.
+  lathe(k, [[x0, SIL_R - 0.12], [x0 + 0.07, SIL_R - 0.02], [x0 + 0.35, SIL_R + 0.03], [x0 + 0.75, SIL_R + 0.03], [x0 + 1.05, SIL_R + 0.03], [x0 + 1.14, SIL_R - 0.04]], { ...o, paint: WOOD, cap: WOOD_DARK, part: PART.grip, sides: 8, phase: Math.PI / 8 });
+  // Tube: rows every 0.5 so the grip solver and the audits see where a finger rests (within the triangle budget).
+  const body: [number, number][] = [];
+  for (let x = x0 + 1.1; x <= x0 + SIL_L - 0.5; x += fp ? 0.5 : 5) body.push([x, SIL_R]);
+  body.push([x0 + SIL_L - 0.48, SIL_R]);
+  lathe(k, body, { ...o, paint: CAN, part: PART.grip, sides: fp ? 14 : 8, capStart: false, capEnd: false });
+  // Nose: dark steel, stepped in to the bore.
+  lathe(k, [[x0 + SIL_L - 0.5, SIL_R + 0.01], [x0 + SIL_L - 0.16, SIL_R + 0.01], [x0 + SIL_L - 0.03, SIL_R - 0.12], [x0 + SIL_L, SIL_R - 0.26], [x0 + SIL_L, 0.2]], { ...o, paint: CAN_DARK, part: PART.grip, sides: fp ? 14 : 8, capStart: false, capEnd: false });
+  lathe(k, [[x0 + SIL_L - 0.1, 0.2], [x0 + SIL_L + 0.005, 0.2]], { ...o, paint: BORE, cap: BORE, sides: 10, capStart: false });
+  // Two twine bands.
+  for (const x of [x0 + 2.2, x0 + SIL_L - 1.3]) lathe(k, [[x - 0.18, SIL_R + 0.05], [x + 0.18, SIL_R + 0.05]], { ...o, paint: TWINE, sides: fp ? 14 : 8, capStart: true, capEnd: true });
+}
+
+const suppressor: SilencerSpec = {
+  build: buildSuppressor,
+  style: "rifle",
+  axis: [0, BZ],
+  seat: SIL_SEAT,
+  thread: SIL_THREAD,
+  tip: [SIL_SEAT + SIL_L, 0, BZ],
+  // Overhand from the left, the palm on the can's left flank, fingers over the top (as the Cottontail's).
+  grip: {
+    o: [SIL_SEAT + 3.4, 0.0, BZ],
+    up: [-1, 0, 0],
+    fwd: [0, 0.35, 0.94],
+    index: { c: [70, 80, 60] },
+    middle: { c: [75, 85, 65] },
+    ring: { c: [80, 88, 65] },
+    pinky: { c: [85, 90, 65] },
+    thumb: { c: [10, 60, 50], spread: -22 },
+    wrap: ["Index", "Middle", "Ring", "Pinky", "Thumb"],
+    seat: -0.02,
+  },
+};
+
+/** The M4A1: the Furrow with its suppressor; the core's M4A1 timing (CS:S weapon_m4a1: cycle 0.09, 30 rounds, reload 3.05). */
+export const furrowM4: GunDef = {
+  ...furrow,
+  id: "m4a1",
+  archetype: "Rifle with a suppressor",
+  blurb: "The walnut garden rifle, with a screw-on suppressor.",
+  silencer: suppressor,
+  // The hand works far out at the muzzle: its forearm drops from there to the bottom edge (not back toward the camera).
+  workElbow: [24, 6, -30],
+  timing: { ...furrow.timing, cycle: 0.09, reload: 3.05 },
+  sounds: { ...furrow.sounds, silenced: "gun_cottontail_silenced" },
 };

@@ -58,6 +58,8 @@ export interface PlayerDetail {
   links?: { links: Record<string, string>; show: boolean };
   booster?: { member: boolean; boosting: boolean; since: number | null; checkedAt: number; hidden: boolean; shown: boolean } | null;
   wings?: { earned: boolean; at: number | null; runId: string | null };
+  /** Trusted: never shadowed automatically (apps/api src/ac-rule-clears.ts); null when not. */
+  trusted?: { note: string; set_by_name: string | null; until: number | null } | null;
   supporter?: { since: number; source: string | null; badgeShown: boolean; nameColor: string | null; nameEffect?: string | null; shown?: boolean; cents?: number } | null;
   configAdmin: boolean;
   sessions: { sessions: number; last_seen: number | null };

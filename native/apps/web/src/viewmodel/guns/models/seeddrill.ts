@@ -113,6 +113,8 @@ export const seeddrill: GunDef = {
   frame: { o: [21, -6.4, -6.2], a: [-1, 4, -4] },
   trigger: TRIGGER,
   elbows: { R: [8, -18, -18], L: [22, 8, -30] },
+  // On the pod (reload, inspect): the support forearm comes up diagonally from the lower left, not across the view.
+  workElbow: [12, 16, -26],
   // The thumbhole grip turns the firing wrist (a straighter one sends the sleeve across the top of the screen); the
   // support wrist 34 keeps its sleeve as low as before.
   wrist: { R: 40, L: 34 },

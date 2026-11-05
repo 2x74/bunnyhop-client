@@ -62,8 +62,13 @@
 //! Silenced shots use CS:S's Secondary_Mode (attack report mode 2: the quiet sound); the weapon script's damage, range
 //! and range modifier are the same either way (only the spread, not simulated, has *Alt values).
 //!
-//! Not simulated: the knife's draw time after a (re)spawn, the CT spawn pistol, grenades, the M4A1's silencer, scopes
-//! (client zoom only), weapon speeds, throwing a dropped weapon, reserve ammo.
+//! The M4A1's silencer (v25): the same, with `CWeaponM4A1::SecondaryAttack`'s own sequence (v_rif_m4a1.mdl
+//! add_silencer / detach_silencer: 61 frames at 30 fps, 2.0 s). Its weapon script also keeps damage 33, range 8192,
+//! range modifier 0.97 and cycle 0.09 for both modes (only the *Alt spread differs). Before v25 +attack2 does nothing on
+//! the M4A1, as it always did.
+//!
+//! Not simulated: the knife's draw time after a (re)spawn, the CT spawn pistol, grenades, the M4A1's silencer before
+//! v25, scopes (client zoom only), weapon speeds, throwing a dropped weapon, reserve ammo.
 
 use super::*;
 use std::sync::Arc;
@@ -127,6 +132,9 @@ pub const WEAPON_RESTORE_TICKS: u32 = 2 * WEAPON_COMMAND_COOLDOWN;
 /// The USP's silencer attach / detach time, s: v_pist_usp.mdl `add_silencer` / `detach_silencer` are 115 frames at 37 fps
 /// (`SequenceDuration()` = 114 / 37), read from the CS:S dedicated server's model (research/WEAPONS.md).
 pub const USP_SILENCER_TIME: f32 = 114.0 / 37.0;
+/// The M4A1's silencer attach / detach time (v25), s: v_rif_m4a1.mdl `add_silencer` / `detach_silencer` are 61 frames
+/// at 30 fps (60 / 30; read from the CS:S client's cstrike_pak_dir.vpk, 2026-11-04).
+pub const M4A1_SILENCER_TIME: f32 = 60.0 / 30.0;
 
 /// `weapon_report` flags (`EVENT_WEAPON`).
 pub const WEAPON_EVENT_SWITCHED: u32 = 1;
@@ -231,6 +239,8 @@ const fn gun(
 const GLOCK: u8 = 2;
 /// Weapon id of the USP (`GUNS`).
 const USP: u8 = 3;
+/// Weapon id of the M4A1 (`GUNS`).
+const M4A1: u8 = 18;
 /// v6: ticks between a burst-mode Glock's rounds at 100 tick, measured on srcds (tools/parity, 2026-10-07: rounds on
 /// commands n, n + 6, n + 12 wherever the burst starts; the next burst 50 ticks after the first round).
 const GLOCK_BURST_ROUND_TICKS: u32 = 6;
@@ -574,7 +584,7 @@ impl Game {
             burst: mode && gun.is_some_and(|g| g.burst),
             ent: None,
             name: None,
-            silenced: mode && id == USP,
+            silenced: mode && self.silencer_time(id).is_some(),
         };
         match slot {
             1 => self.arms.primary = Some(fresh()),
@@ -827,15 +837,13 @@ impl Game {
         if self.arms.silencer_tick != 0 && self.tick >= self.arms.silencer_tick {
             self.arms.silencer_tick = 0;
         }
-        if cmd.buttons & IN_ATTACK2 != 0
-            && gun.id == USP
-            && self.settings.physics_fixes() & PHYSICS_FIX_USP_SILENCER != 0
-            && self.tick >= self.arms.next_attack_tick.max(self.arms.next_secondary_tick)
-            && self.arms.reload_tick == 0
-        {
+        let silencer_time = self.silencer_time(gun.id);
+        if let Some(time) = silencer_time.filter(|_| {
+            cmd.buttons & IN_ATTACK2 != 0 && self.tick >= self.arms.next_attack_tick.max(self.arms.next_secondary_tick) && self.arms.reload_tick == 0
+        }) {
             let h = self.arms.slot_mut(slot).expect("active gun");
             h.silenced = !h.silenced;
-            let done = self.tick + self.delay_ticks(USP_SILENCER_TIME);
+            let done = self.tick + self.delay_ticks(time);
             self.arms.next_attack_tick = done;
             self.arms.next_secondary_tick = done;
             self.arms.silencer_tick = done;
@@ -880,6 +888,16 @@ impl Game {
             };
             self.arms.reload_tick = self.tick + self.delay_ticks(first).max(1);
             self.weapon_event(WEAPON_EVENT_RELOAD_STARTED);
+        }
+    }
+
+    /// The attach / detach time of weapon `id`'s silencer, None if it has none in this physics version: the USP's from
+    /// v7 (`PHYSICS_FIX_USP_SILENCER`), the M4A1's from v25.
+    pub(super) fn silencer_time(&self, id: u8) -> Option<f32> {
+        match id {
+            USP if self.settings.physics_fixes() & PHYSICS_FIX_USP_SILENCER != 0 => Some(USP_SILENCER_TIME),
+            M4A1 if (PHYSICS_V25..=PHYSICS_LATEST).contains(&self.settings.physics_version) => Some(M4A1_SILENCER_TIME),
+            _ => None,
         }
     }
 
@@ -939,7 +957,7 @@ impl Game {
                 }
             }
         }
-        // A silenced USP fires in CS:S's Secondary_Mode (its quiet sound); the damage is the same.
+        // A silenced USP (v7) or M4A1 (v25) fires in CS:S's Secondary_Mode (its quiet sound); the damage is the same.
         let silenced = self.arms.slot(slot).is_some_and(|h| h.silenced);
         self.report_attack(gun.id, if silenced { 2 } else { 1 }, eye, end, hit);
         // Damage falls off with distance: damage * rangeModifier ^ (distance / 500).

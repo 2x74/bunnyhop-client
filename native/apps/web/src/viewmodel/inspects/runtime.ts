@@ -8,10 +8,21 @@
 import type { KnifeDef, KnifeState } from "../knives/types";
 import { emitWeaponEvent } from "../events";
 import type { VmRig } from "../rig";
-import { InspectCombo, SIG_NEXT, SIG_START, type ComboEvent, type ComboPose } from "./combo";
+import { CANCEL_BLEND, InspectCombo, SIG_NEXT, SIG_START, type ComboEvent, type ComboPose } from "./combo";
 import { inspectSetFor } from "./index";
+import { isQuietSet, quietSet } from "./quiet";
+import { prefs } from "../../ui/settings";
 import { Arm, blendPoseH } from "./kit";
 import type { InspectCtx, InspectSet } from "./types";
+
+/** The longest attack cancel (s): a knife mid-toss or turned right round comes home over this long. */
+export const CANCEL_BLEND_MAX = 0.17;
+
+/** The cancel's blend for a knife `d` units and `a` rad from the fist (CANCEL_BLEND in hand, CANCEL_BLEND_MAX far out). */
+export function cancelBlend(d: number, a: number): number {
+  const far = Math.min(1, Math.max(d / 6, a / 2.4));
+  return CANCEL_BLEND + (CANCEL_BLEND_MAX - CANCEL_BLEND) * far * far * (3 - 2 * far);
+}
 
 export class VmInspect {
   readonly arm: Arm;
@@ -25,6 +36,12 @@ export class VmInspect {
   private pz: ComboPose = { cur: null, prev: null, mix: 1, weight: 0 };
   private angB: number[] = [];
   private angC: number[] = [];
+  /**
+   * How far the inspect has the knife from where the base pose holds it, at the last full-weight frame: the handle's
+   * travel (units) and turn (rad). A cancel blends out over longer the further it is (cancelBlend).
+   */
+  private gapD = 0;
+  private gapA = 0;
   /** No weapon events (sounds): the replay viewer's viewmodel (Viewmodel.silent). */
   silent = false;
   /** START / NEXT when a trick starts (for rooms and the replay trailer; HELD is `holding`). */
@@ -34,6 +51,9 @@ export class VmInspect {
   private blendBones: number[];
   private blendParent: (i: number) => number;
   private fingerBlend: { bones: Set<number>; w: number };
+  /** The knife's own weight during a cancel (it's back in the fist by the middle of the blend: a catch). */
+  private knifeBlend: { bones: Set<number>; w: number };
+  private cancelGroups: { bones: Set<number>; w: number }[];
 
   constructor(r: VmRig) {
     this.arm = new Arm(r);
@@ -42,6 +62,8 @@ export class VmInspect {
     const knife = new Set(this.arm.knife);
     this.blendBones = [...this.arm.all.filter((i) => !knife.has(i)).sort((a, b) => a - b), ...this.arm.knife];
     this.fingerBlend = { bones: new Set(Object.values(this.arm.fingers).flat()), w: 1 };
+    this.knifeBlend = { bones: new Set(this.arm.knife), w: 1 };
+    this.cancelGroups = [this.fingerBlend, this.knifeBlend];
     this.blendParent = (i) => (i === kp ? hand : r.parent[i]);
     const n = r.names.length * 12;
     this.Wc = new Float32Array(n);
@@ -70,8 +92,17 @@ export class VmInspect {
     return this.set;
   }
 
+  /**
+   * The quiet style (Settings -> Viewmodel -> Inspect: Quiet) on your own viewmodel: the chain starts with the quiet
+   * check. Never on the replay viewer's (silent) one: replays and rooms play the knife's own tricks.
+   */
+  private quiet(): boolean {
+    return !this.silent && !this.override && prefs.get().viewmodel.inspect === "quiet";
+  }
+
   private pick(): void {
-    const s = this.override ?? inspectSetFor(this.knife);
+    const base = this.override ?? inspectSetFor(this.knife);
+    const s = this.quiet() ? quietSet(base) : base;
     if (s === this.set) return;
     this.set = s;
     this.combo.setSpec(s.spec);
@@ -81,12 +112,19 @@ export class VmInspect {
     return this.combo.active;
   }
 
-  /** The inspect key is held during an inspect (network HELD level). */
+  /** The inspect key is held during an inspect (network HELD level; not during your quiet check, which isn't sent). */
   get holding(): boolean {
-    return this.combo.holding;
+    return this.combo.holding && !(this.offset && this.combo.trick === 0);
+  }
+
+  /** Tricks before the knife's own (1 with the quiet check in front): signals count the knife's own chain only. */
+  private get offset(): number {
+    return isQuietSet(this.set) ? 1 : 0;
   }
 
   press(): void {
+    // (The style is read when an inspect starts: a settings change mid-inspect waits for the next one.)
+    if (!this.combo.active) this.pick();
     this.handle(this.combo.press());
     this.publish();
   }
@@ -97,8 +135,14 @@ export class VmInspect {
     this.publish();
   }
 
-  cancel(reason: "attack" | "draw"): void {
-    this.handle(this.combo.cancel(reason));
+  /**
+   * An attack blends the inspect out: quickly with the knife in the fist (CANCEL_BLEND, CS-snappy), up to
+   * CANCEL_BLEND_MAX when the trick has it far out (mid-toss, spun round): it comes home like a catch, not a jump. A draw
+   * stops it at once (off screen); a switch away (the knife lowering) blends like an attack.
+   */
+  cancel(reason: "attack" | "draw" | "switch"): void {
+    if (reason === "draw") this.handle(this.combo.cancel("draw"));
+    else this.handle(this.combo.cancel("attack", cancelBlend(this.gapD, this.gapA)));
     this.publish();
   }
 
@@ -134,9 +178,22 @@ export class VmInspect {
       if (e.type === "start" || e.type === "trick") {
         const c = this.set.clips[e.trick];
         if (!this.silent) emitWeaponEvent({ type: "inspect", source: "local", trick: e.trick, name: c?.id });
-        this.onSignal?.(e.type === "start" ? SIG_START : SIG_NEXT);
+        // Rooms, the replay trailer and your third-person bunny see the knife's own chain: your quiet check sends
+        // nothing, the first trick after it starts their inspect.
+        const k = e.trick - this.offset;
+        if (k >= 0) this.onSignal?.(k === 0 ? SIG_START : SIG_NEXT);
       } else if (e.type === "cue" && !this.silent) emitWeaponEvent({ type: e.cue, source: "local", trick: e.trick });
     }
+  }
+
+  /** The knife handle's travel and turn between the base pose (W) and the inspect's (R). */
+  private measureGap(W: Float32Array, R: Float32Array): void {
+    const o = this.arm.kb * 12;
+    this.gapD = Math.hypot(R[o + 3] - W[o + 3], R[o + 7] - W[o + 7], R[o + 11] - W[o + 11]);
+    // Rotation angle between the two frames: acos((trace(Ra^T Rb) - 1) / 2).
+    let tr = 0;
+    for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) tr += W[o + r * 4 + c] * R[o + r * 4 + c];
+    this.gapA = Math.acos(Math.max(-1, Math.min(1, (tr - 1) / 2)));
   }
 
   /** Poses the inspect over W (the base pose with the knife hold applied). Cheap no-op when idle. */
@@ -164,9 +221,15 @@ export class VmInspect {
       R = Wp;
     }
     if (ang && pz.weight < 1) for (let i = 0; i < ang.length; i++) ang[i] = this.angB[i] + (ang[i] - this.angB[i]) * pz.weight;
-    // Cancel blend-out: the fingers hold the inspect's pose through the first half while the knife comes home, then
-    // close on it (closing them in step with a knife that is still travelling drags the fingertips through it).
-    if (pz.weight < 1) this.fingerBlend.w = Math.min(1, pz.weight * 2);
-    blendPoseH(W, R, pz.weight, this.blendBones, this.blendParent, pz.weight < 1 ? this.fingerBlend : undefined);
+    if (pz.weight >= 1) this.measureGap(W, R);
+    // Cancel blend-out: the knife comes home into the fist in the first half (a catch: a knife mid-toss slerping
+    // home in step with the arm hangs off the open hand on the way), the fingers hold the inspect's pose through that
+    // half, then close on it (closing them in step with a knife that is still travelling drags the fingertips through it).
+    if (pz.weight < 1) {
+      this.fingerBlend.w = Math.min(1, pz.weight * 2);
+      const k = Math.max(0, Math.min(1, (pz.weight - 0.45) / 0.55));
+      this.knifeBlend.w = k * k * (3 - 2 * k);
+    }
+    blendPoseH(W, R, pz.weight, this.blendBones, this.blendParent, pz.weight < 1 ? this.cancelGroups : undefined);
   }
 }

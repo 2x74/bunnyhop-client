@@ -1,4 +1,4 @@
-// Country, region and territory names from flag-icons (MIT); shared validation and picker options.
+// Country, region and territory names from flag-icons (MIT), and the pride flags; shared validation and picker options.
 export const COUNTRIES: Readonly<Record<string, string>> = {
   "AF": "Afghanistan",
   "AX": "Aland Islands",
@@ -266,8 +266,43 @@ export const COUNTRIES: Readonly<Record<string, string>> = {
   "DG": "Diego Garcia"
 };
 
+/**
+ * Pride flags, picked instead of a country (users.country_code holds one flag either way). Drawn by ui/pride-flags.ts
+ * at the size of the country flags. Older clients don't know these codes and show no flag (countryCode: null).
+ */
+export const PRIDE_FLAGS: Readonly<Record<string, string>> = {
+  "PRIDE-RAINBOW": "Rainbow",
+  "PRIDE-PROGRESS": "Progress Pride",
+  "PRIDE-INTERSEX-PROGRESS": "Intersex-inclusive Progress Pride",
+  "PRIDE-TRANS": "Transgender",
+  "PRIDE-BI": "Bisexual",
+  "PRIDE-PAN": "Pansexual",
+  "PRIDE-LESBIAN": "Lesbian",
+  "PRIDE-GAY": "Gay men",
+  "PRIDE-NONBINARY": "Nonbinary",
+  "PRIDE-ACE": "Asexual",
+  "PRIDE-ARO": "Aromantic",
+  "PRIDE-AROACE": "Aroace",
+  "PRIDE-DEMI": "Demisexual",
+  "PRIDE-GENDERFLUID": "Genderfluid",
+  "PRIDE-GENDERQUEER": "Genderqueer",
+  "PRIDE-AGENDER": "Agender",
+  "PRIDE-BIGENDER": "Bigender",
+  "PRIDE-DEMIBOY": "Demiboy",
+  "PRIDE-DEMIGIRL": "Demigirl",
+  "PRIDE-INTERSEX": "Intersex",
+  "PRIDE-POLY": "Polysexual",
+  "PRIDE-OMNI": "Omnisexual",
+};
+
+export const isPrideFlag = (code: string): boolean => Object.hasOwn(PRIDE_FLAGS, code);
+
+/** A profile flag's name: the country, region or pride flag. */
+export const flagName = (code: string): string => COUNTRIES[code] ?? PRIDE_FLAGS[code] ?? code;
+
+/** A valid profile flag code (a country, region or pride flag), or null. */
 export function countryCode(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const code = value.trim().toUpperCase();
-  return Object.hasOwn(COUNTRIES, code) ? code : null;
+  return Object.hasOwn(COUNTRIES, code) || isPrideFlag(code) ? code : null;
 }

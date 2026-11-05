@@ -173,6 +173,12 @@ export const replayVersionFor = (h: Pick<ReplayHeader, "spawn" | "settings" | "t
  */
 export const BACKWARDS_PHYSICS_FROM = 23;
 export const BACKWARDS_RULES_FROM = 3;
+/**
+ * First physics version and timer rules of A/D-Only runs (v0.0.37): a StyleFilter rule on v0.0.37's physics (no core
+ * change), so none on older physics or rules exists. Native v0.7.x (physics 24) can't send one either.
+ */
+export const ADONLY_PHYSICS_FROM = 25;
+export const ADONLY_RULES_FROM = 4;
 /** Low Gravity started with v9 format, physics v10 and timer rules 2; older combinations never existed. */
 export const styleReplayAllowed = (h: ReplayHeader): boolean => styleReplayProblem(h) === null;
 /**
@@ -202,6 +208,9 @@ export function styleReplayProblem(h: ReplayHeader): string | null {
   const style = replayStyle(h);
   if (style === "backwards" && !((h.version ?? 0) >= REPLAY_VERSION && replayPhysics(h) >= BACKWARDS_PHYSICS_FROM && replayTimerRules(h) >= BACKWARDS_RULES_FROM)) {
     return `style backwards requires replay v${REPLAY_VERSION}, physics v${BACKWARDS_PHYSICS_FROM} and timer rules ${BACKWARDS_RULES_FROM} or later`;
+  }
+  if (style === "adonly" && !((h.version ?? 0) >= REPLAY_VERSION && replayPhysics(h) >= ADONLY_PHYSICS_FROM && replayTimerRules(h) >= ADONLY_RULES_FROM)) {
+    return `style adonly requires replay v${REPLAY_VERSION}, physics v${ADONLY_PHYSICS_FROM} and timer rules ${ADONLY_RULES_FROM} or later`;
   }
   if (style === "lowgrav" && !((h.version ?? 0) >= 9 && replayPhysics(h) >= 10 && replayTimerRules(h) >= 2)) return "style lowgrav requires replay v9, physics v10 and timer rules 2 or later";
   if (style === "segmented" && !((h.version ?? 0) >= REPLAY_VERSION && replayPhysics(h) >= SEGMENTED_PHYSICS_FROM && replayTimerRules(h) >= 2)) {

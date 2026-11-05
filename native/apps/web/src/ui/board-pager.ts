@@ -195,8 +195,11 @@ export function pagedBoard<E>(view: BoardView<E>): PagedBoard<E> {
     const pinRows = p.pinned.map((e, i) => tag(view.row(e, { prev: p.pinned[i - 1] ?? null, first, mine: view.idOf(e) === myId, found: view.idOf(e) === found, pinned: true }), e));
     pins.replaceChildren(...pinRows);
     const lastPinned = p.pinned[p.pinned.length - 1] ?? null;
-    const bodyRows = p.entries.map((e, i) => {
-      const prev = i ? p.entries[i - 1] : (p.above ?? (p.offset === view.base ? lastPinned : null));
+    // A pinned row is never drawn twice (a server that answers the first page from offset 0 includes the WR again).
+    const pinnedIds = new Set(p.pinned.map((e) => view.idOf(e)));
+    const entries = p.entries.filter((e) => !pinnedIds.has(view.idOf(e)));
+    const bodyRows = entries.map((e, i) => {
+      const prev = i ? entries[i - 1] : (p.above ?? (p.offset === view.base ? lastPinned : null));
       return tag(view.row(e, { prev, first, mine: view.idOf(e) === myId, found: view.idOf(e) === found, pinned: false }), e);
     });
     rows.replaceChildren(...bodyRows);

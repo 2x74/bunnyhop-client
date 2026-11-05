@@ -75,9 +75,11 @@ export interface ContentManifest {
   /** Content not needed to render the map; clients fetch it only on demand. */
   optional?: {
     /**
-     * CS:S player models (models/player/{ct,t}_*.mdl + .vvd + .dx90.vtx), their `$includemodel` animation models
-     * (models/player/cs_player_shared.mdl, ak_anims_{ct,t}.mdl), the knife world models and all their materials
-     * ($basetexture + $bumpmap). Loaded on demand by apps/web/src/player/studio for ghosts, replays and other players.
+     * CS:S animation sources, loaded on demand by apps/web/src/player/studio/loader.ts: the player animation model
+     * models/player/cs_player_shared.mdl (the bunny's skeleton and sequences) and the knife viewmodel v_knife_t.mdl
+     * (the first-person hands' sequences). Manifests made before v0.0.38 also list the CS:S player models
+     * (models/player/{ct,t}_*), ak_anims_{ct,t}.mdl, the knife world models and their materials: the client no longer
+     * asks for any of those (tools/content/extract.ts --player-only rebuilds the group without them).
      */
     player?: ContentGroup;
     /**

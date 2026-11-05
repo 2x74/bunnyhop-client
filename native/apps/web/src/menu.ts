@@ -54,6 +54,7 @@ import { legalLinks } from "./ui/legal";
 import { discordLink, supportLink } from "./ui/community";
 import { group } from "./ui/controls";
 import { hideUiSwitch, quickGrid } from "./ui/quick-toggles";
+import { mapLookRows } from "./ui/map-look-rows";
 import { hudEditorAvailable, openHudEditor } from "./hud/editor";
 import { icon, type IconName } from "./ui/icons";
 import { lastRunReel } from "./hud/reel";
@@ -618,7 +619,7 @@ function profileItem(): HTMLElement {
  * On screen: the keys overlay and the other HUD pieces players switch most, one click each (ui/quick-toggles.ts: the
  * same switches as the top of Settings → HUD, writing the same prefs; the paused game behind shows the change).
  */
-function screenTab(): HTMLElement {
+function screenTab(map?: string): HTMLElement {
   const editKey = bindHint("hudEditor");
   return h(
     "div.pp-screen.quick-set",
@@ -631,6 +632,8 @@ function screenTab(): HTMLElement {
       hudEditorAvailable() ? h("button.btn.btn-sm", { type: "button", onclick: () => openHudEditor() }, "Edit layout", editKey ? h("kbd", null, editKey) : null) : null,
       h("button.link-btn", { type: "button", onclick: () => (sessionStorage.setItem("bunnyhop:settings-tab", "hud"), push("settings")) }, "All HUD settings", chev()),
     ),
+    // This map's Brightness / Fullbright: the !bright menu's choices (ui/map-look-rows.ts).
+    map ? mapLookRows(map) : null,
   );
 }
 
@@ -728,7 +731,7 @@ function pauseScreen(): HTMLElement {
     else if (t === "style" && a) content = styleTab(a, track);
     else if (t === "replays" && a) content = replaysTab(a, pb);
     else if (t === "server") content = serverTab();
-    else if (t === "screen") content = screenTab();
+    else if (t === "screen") content = screenTab(a?.map);
     else if (t === "help") content = helpTab(inRoom);
     panelBody.replaceChildren(...(content ? [content] : []));
     if (animate && !reducedMotion()) {

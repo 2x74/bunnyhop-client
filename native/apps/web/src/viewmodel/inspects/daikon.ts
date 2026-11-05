@@ -95,7 +95,8 @@ export const bladeCheck: InspectClip = {
     const level = track([[0.36, 0], [0.7, 1, E.out], [2.25, 1], [2.6, 0, E.io]])(t);
     const look = track([[0.75, 0], [1.4, 1, E.io], [1.5, 1], [2.2, 0, E.io]])(t);
     const over = track([[1.42, 0], [1.72, 1, E.whip], [2.05, 1], [2.3, 0, E.io]])(t);
-    arm(W, ctx, p, -40 * level + 170 * over, 8 * level, 18 * level + 6 * look, [-0.8 * look, 1.2 * look, 0.6 * level], 0, -55 * level);
+    // (v0.0.38: the fist lower and further in, so the long blade's tip stays on screen through the look.)
+    arm(W, ctx, p, -40 * level + 170 * over, 1 * level, 27 * level + 6 * look, [-0.8 * look - 0.6 * level, 1.2 * look + 0.9 * level, -0.5 * level], 0, -76 * level);
   },
 };
 

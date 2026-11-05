@@ -208,6 +208,12 @@ export class GunViewmodel {
     this.anim.silencer(on, dur, at);
   }
 
+  /** Back to the start of the seeded variation (recoil, flash, shells): a restart, a replay seek, an export's start. */
+  reseed(): void {
+    this.anim.reseed();
+    this.fxImpl?.rng.seed();
+  }
+
   /** The silencer's state with no animation (a draw, a restart): shown on the gun or not. */
   setSilenced(on: boolean): void {
     this.anim.silenced = on;
@@ -232,7 +238,7 @@ export class GunViewmodel {
       this.fxImpl = new GunFx(this.scene, this.root);
       // A case landing: "caseMetal" (brass: very bright, so a little slower and quiet) or "caseShell" (a hull).
       // guns/sounds.ts maps them (gun_case_metal / gun_case_shell); nothing plays until it does.
-      this.fxImpl.onBounce = (hull) => (hull ? this.onSound?.("caseShell", 0.55) : this.onSound?.("caseMetal", 0.4, 0.85 + Math.random() * 0.08));
+      this.fxImpl.onBounce = (hull) => (hull ? this.onSound?.("caseShell", 0.55) : this.onSound?.("caseMetal", 0.4, 0.85 + this.fxImpl!.rng.next() * 0.08));
       if (this.def) this.fxImpl.setGun(this.def);
     }
     return this.fxImpl;

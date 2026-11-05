@@ -29,6 +29,10 @@ pub struct Prop {
     /// `prop_dynamic` door01_left is shut in its idle pose, wide open in its bind pose (bhop_mirrorsedge_chpt1, feedback
     /// 2026-10-30). False for the static prop lump, which is drawn as baked.
     pub entity: bool,
+    /// An animated prop_dynamic (`Game::is_animated_prop`): its own groups like a moving prop (`owner`), which the
+    /// client replaces with the posed model; baked in the pose an unanimated entity prop gets, so a client that doesn't
+    /// animate it draws exactly what it drew before.
+    pub animated: bool,
 }
 
 #[derive(Default, Clone)]
@@ -49,7 +53,7 @@ pub fn add_props(sp: &mut StaticProps, props: impl IntoIterator<Item = (String, 
                 sp.models.len() - 1
             }
         };
-        sp.props.push(Prop { model, origin, angles, skin, owner, sky3d: false, scale: 1.0, entity: true });
+        sp.props.push(Prop { model, origin, angles, skin, owner, sky3d: false, scale: 1.0, entity: true, animated: false });
     }
 }
 
@@ -60,7 +64,7 @@ pub fn static_props(bsp: &Bsp) -> StaticProps {
     let props = sp
         .occurrences
         .iter()
-        .map(|o| Prop { model: o.model as usize, origin: v(o.origin), angles: v(o.angles), skin: o.skin, owner: 0, sky3d: false, scale: o.uniform_scale.value(), entity: false })
+        .map(|o| Prop { model: o.model as usize, origin: v(o.origin), angles: v(o.angles), skin: o.skin, owner: 0, sky3d: false, scale: o.uniform_scale.value(), entity: false, animated: false })
         .collect();
     StaticProps { models, props }
 }
@@ -373,7 +377,7 @@ pub fn build(sp: &StaticProps, vfs: &Vfs) -> PropMesh {
         out.instances += 1;
         let (angles, origin) = if p.owner != 0 { ([0.0; 3], [0.0; 3]) } else { (p.angles, p.origin) };
         let r = angle_matrix(angles);
-        let pose = if p.owner != 0 || (p.entity && rigid.get(p.model) == Some(&true)) { corrections.get(p.model).copied().flatten() } else { None };
+        let pose = if (p.owner != 0 && !p.animated) || (p.entity && rigid.get(p.model) == Some(&true)) { corrections.get(p.model).copied().flatten() } else { None };
         let posed = |v: [f32; 3], point: bool| match pose {
             Some(m) => [0, 1, 2].map(|i| m[i * 4] * v[0] + m[i * 4 + 1] * v[1] + m[i * 4 + 2] * v[2] + if point { m[i * 4 + 3] } else { 0.0 }),
             None => v,

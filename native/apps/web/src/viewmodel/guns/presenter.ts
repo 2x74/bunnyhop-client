@@ -25,7 +25,7 @@
 
 import type * as THREE from "three";
 import type { CosmeticLoadout } from "../../loadout";
-import { floorWeapons, USP_SILENCER_TIME, WEAPON_EVENT_DRY_FIRE, WEAPON_EVENT_MODE, WEAPON_EVENT_PICKED_UP, WEAPON_EVENT_RELOAD_FINISHED, WEAPON_EVENT_RELOAD_STARTED, WEAPON_EVENT_RESTORED, WEAPON_EVENT_SILENCER, WEAPON_IDS, type AttackReport, type BrushTransform, type Core, type WeaponReport } from "../../core";
+import { floorWeapons, silencerTime, WEAPON_EVENT_DRY_FIRE, WEAPON_EVENT_MODE, WEAPON_EVENT_PICKED_UP, WEAPON_EVENT_RELOAD_FINISHED, WEAPON_EVENT_RELOAD_STARTED, WEAPON_EVENT_RESTORED, WEAPON_EVENT_SILENCER, WEAPON_IDS, type AttackReport, type BrushTransform, type Core, type WeaponReport } from "../../core";
 import { impactSurface, modelOfEntity, playImpact } from "../../audio/impacts";
 import { gunById } from "./index";
 import { GunImpacts } from "./impacts";
@@ -37,6 +37,12 @@ import { FloorGuns } from "./world";
 
 /** Sim tick length (s): the core's reload ticks become animation seconds with it. */
 const TICK = 0.01;
+/**
+ * A switch away from a gun: the outgoing gun lowers out of view (its holster clip) over this long while the incoming
+ * weapon's draw comes up from below. Presentation only: the core switched on its tick and the new weapon's equip /
+ * fire timing is untouched (its draw starts at once; the outgoing gun is a second viewmodel, drawn underneath).
+ */
+export const GUN_LOWER = 0.2;
 
 /** The model for a core weapon id (core.ts WEAPON_IDS index); undefined for none / the knife / unknown. */
 export function gunForWeapon(weapon: number): GunDef | undefined {
@@ -64,7 +70,12 @@ export interface GunPresenterHost {
 }
 
 export class GunPresenter {
-  readonly vm: GunViewmodel;
+  /** The gun in hand's viewmodel (swapped with `lowerVm` on a switch: don't keep a reference across ticks). */
+  private cur: GunViewmodel;
+  /** The outgoing gun lowering out of view after a switch (made at the first switch away from a gun). */
+  private lowerVm: GunViewmodel | null = null;
+  private lowerT = Infinity;
+  private shown = true;
   readonly impacts = new GunImpacts();
   /** The weapon items lying in the world. */
   readonly floor = new FloorGuns();
@@ -87,10 +98,40 @@ export class GunPresenter {
 
   constructor(private h: GunPresenterHost) {
     this.tickS = h.tick ?? TICK;
-    this.vm = new GunViewmodel(h.replay ? { loadout: h.replay.loadout } : {});
+    this.cur = this.newVm();
     h.scene.add(this.impacts.root);
     if (!h.replay) h.scene.add(this.floor.root);
-    this.vm.onSound = (kind, gain, rate) => this.sound(this.active, kind, gain, rate);
+  }
+
+  /** The gun viewmodel in hand (its animator, actions). */
+  get vm(): GunViewmodel {
+    return this.cur;
+  }
+
+  private newVm(): GunViewmodel {
+    const vm = new GunViewmodel(this.h.replay ? { loadout: this.h.replay.loadout } : {});
+    vm.onSound = (kind, gain, rate) => this.sound(this.active, kind, gain, rate);
+    return vm;
+  }
+
+  /** Gloves (and accents) on both gun viewmodels (the replay viewer's runner; yours follow your loadout). */
+  setLoadout(l: CosmeticLoadout): void {
+    this.cur.setLoadout(l);
+    this.lowerVm?.setLoadout(l);
+    if (this.h.replay) this.h.replay.loadout = l;
+  }
+
+  /** The colourway on both gun viewmodels' hands (the replay viewer's runner). */
+  setOutfit(id: string | null | undefined): void {
+    this.outfit = id;
+    this.cur.setOutfit(id);
+    this.lowerVm?.setOutfit(id);
+  }
+  private outfit: string | null | undefined = undefined;
+
+  /** The outgoing gun is lowering out of view (a switch). */
+  get lowering(): boolean {
+    return this.lowerT < GUN_LOWER;
   }
 
   private sound(def: GunDef | null, kind: Parameters<typeof gunSound>[1], gain?: number, rate?: number): void {
@@ -102,49 +143,83 @@ export class GunPresenter {
     this.impacts.clear();
     this.impacts.root.removeFromParent();
     this.floor.root.removeFromParent();
-    this.vm.dispose();
+    this.cur.dispose();
+    this.lowerVm?.dispose();
   }
 
   /** Restart / respawn: straight to the core's state (the gun is drawn like a fresh spawn), impacts cleared. */
   reset(r: WeaponReport | null): void {
     this.impacts.clear();
+    this.lowerT = Infinity;
+    this.vm.reseed();
+    // No movement feel carried across the jump (speed tuck, air trail, strafe lag, landing sink).
+    this.vm.motion.reset();
     this.weapon = -1;
     this.shells = false;
     this.startLeft = 0;
     if (!this.h.replay) this.floor.update(floorWeapons(this.h.core));
     this.silenced = null;
     if (r) {
+      const before = this.active;
       this.tick({ ...r, floorChanged: false, flags: r.flags & ~WEAPON_EVENT_SILENCER }, null);
+      // The same gun still in hand without a draw (a replay seek, a restore): whatever it was doing before the jump (a
+      // reload, the silencer going on, a shot's recoil) isn't what the core has now, so it's simply held.
+      if (this.active && this.active === before && r.flags & WEAPON_EVENT_RESTORED) {
+        this.vm.anim.settle();
+        this.vm.setSilenced(r.silencer);
+      }
       // Inside the silencer's lock-out: straight into the animation where the core is (no sounds before that point).
       const def = this.active;
       if (def?.silencer && r.silencerTicks > 0) {
-        const total = this.silencerTotal();
+        const total = this.silencerTotal(r.active);
         this.vm.silencer(r.silencer, total, Math.max(0.001, total - (r.silencerTicks + 1) * this.tickS));
       }
     } else this.equip(0);
+    // A jump never lowers the gun that was out before it.
+    this.lowerT = Infinity;
   }
 
-  /** The silencer's lock-out (s): the core's tick count for USP_SILENCER_TIME. */
-  private silencerTotal(): number {
-    return Math.round(USP_SILENCER_TIME / this.tickS) * this.tickS;
+  /** The silencer's lock-out (s) of a core weapon id: the core's tick count for its attach / detach time. */
+  private silencerTotal(weapon: number): number {
+    return Math.round(silencerTime(weapon) / this.tickS) * this.tickS;
   }
 
   /** The gun in hand changed; `draw`: it comes out with the draw animation (not for a gun restored in hand, v10). */
   private equip(weapon: number, silenced = false, draw = true): void {
     this.weapon = weapon;
     const def = gunForWeapon(weapon) ?? null;
-    // A USP comes out with its silencer on or off as the core has it (the switch cancelled any attach / detach).
-    this.vm.setSilenced(silenced);
     if (def === this.active && def) {
+      // A USP comes out with its silencer on or off as the core has it (the switch cancelled any attach / detach).
+      this.vm.setSilenced(silenced);
       if (draw) this.vm.draw();
       return;
     }
+    // Switching away from a gun on screen: it lowers out of view while the next weapon comes up (the knife's deploy,
+    // the next gun's draw). Presentation only: the new weapon starts at once, as the core has it.
+    if (this.active && draw && this.shown) this.lowerOut();
     this.active = def;
     this.vm.setGun(def);
     this.vm.setSilenced(silenced);
     if (def && draw) this.vm.draw();
     this.shells = false;
     this.h.onGun?.(def ? def.id : null);
+  }
+
+  /** The gun in hand becomes the lowering one (its holster clip from wherever it is); the other viewmodel takes over. */
+  private lowerOut(): void {
+    let next = this.lowerVm;
+    if (!next) {
+      next = this.newVm();
+      if (this.h.replay) next.setLoadout(this.h.replay.loadout);
+      if (this.outfit !== undefined) next.setOutfit(this.outfit);
+    }
+    next.setVisible(this.shown);
+    this.lowerVm = this.cur;
+    this.cur = next;
+    // The next gun is set and drawn by equip (setGun on a viewmodel that held it before is a no-op: draw resets it).
+    this.cur.setGun(null);
+    this.lowerVm.anim.holster(GUN_LOWER);
+    this.lowerT = 0;
   }
 
   /** One sim tick: inventory events (switch, pickup, reloads, dry fire, mode) and this tick's shot. */
@@ -166,7 +241,7 @@ export class GunPresenter {
       }
       if (f & WEAPON_EVENT_DRY_FIRE) this.vm.dryFire();
       // The silencer going on / off: over the lock-out from this tick (the report has the ticks left after it).
-      if (f & WEAPON_EVENT_SILENCER) this.vm.silencer(r.silencer, r.silencerTicks > 0 ? (r.silencerTicks + 1) * this.tickS : this.silencerTotal());
+      if (f & WEAPON_EVENT_SILENCER) this.vm.silencer(r.silencer, r.silencerTicks > 0 ? (r.silencerTicks + 1) * this.tickS : this.silencerTotal(r.active));
       if (f & WEAPON_EVENT_RELOAD_STARTED) this.reloadStarted(def, r);
       else if (this.shells && r.clip > this.clip && r.reloadTicks > 0) this.vm.anim.shellInsert(r.reloadTicks * this.tickS);
       if (f & WEAPON_EVENT_RELOAD_FINISHED && this.shells) {
@@ -197,7 +272,7 @@ export class GunPresenter {
   }
 
   private shot(def: GunDef, a: AttackReport): void {
-    // Mode 2 from a gun: a silenced USP shot (CS:S Secondary_Mode).
+    // Mode 2 from a gun: a silenced USP (v7) or M4A1 (v25) shot (CS:S Secondary_Mode).
     const silenced = a.mode === 2 && !!def.silencer;
     this.vm.fire(silenced);
     const fwd = norm([a.end[0] - a.start[0], a.end[1] - a.start[1], a.end[2] - a.start[2]]);
@@ -237,14 +312,23 @@ export class GunPresenter {
     this.transforms = transforms;
     if (this.startLeft > 0 && (this.startLeft -= dt) <= 0 && this.shells) this.vm.anim.shellInsert(Math.max(0.1, this.firstShell));
     if (this.active) this.vm.update(dt, feel, motion);
+    if (this.lowerT < GUN_LOWER) {
+      this.lowerT += dt;
+      this.lowerVm!.update(dt, feel, motion);
+    }
     this.impacts.update(dt, transforms);
   }
 
   setVisible(v: boolean): void {
+    this.shown = v;
     this.vm.setVisible(v);
+    this.lowerVm?.setVisible(v);
+    if (!v) this.lowerT = Infinity;
   }
 
   render(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera): void {
+    // The outgoing gun first: the incoming weapon is drawn over it (each clears depth).
+    if (this.lowerT < GUN_LOWER) this.lowerVm!.render(renderer, camera);
     if (this.active) {
       this.impacts.setViewportHeight(renderer.domElement.height);
       this.vm.render(renderer, camera);

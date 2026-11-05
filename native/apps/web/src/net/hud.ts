@@ -221,10 +221,16 @@ export interface MenuItem {
   detail?: string;
   disabled?: boolean;
   selected?: boolean;
+  /** Shown at the row's end instead of `detail`, for looks only (a switch showing the state: the row is what's clicked). */
+  control?: HTMLElement;
+  /** A lesser choice, drawn dimmer (look-menu.ts "Use on all maps"). */
+  quiet?: boolean;
 }
 
 export interface MenuSpec {
   title: string;
+  /** Under the title, before the numbered rows (look-menu.ts: the brightness slider). */
+  head?: HTMLElement;
   items: MenuItem[];
   footer?: string;
   /** Key 0 label (default "Exit"). */
@@ -233,11 +239,16 @@ export interface MenuSpec {
   onExit?: () => void;
 }
 
-/** CS:S radio-style numbered menu on the left of the screen: keys 1-9 pick, 0 exits. */
+/**
+ * CS:S radio-style numbered menu on the left of the screen: keys 1-9 pick, 0 exits. With the cursor free (a chat
+ * command opened it: net/mp.ts) the rows can be clicked too.
+ */
 export class NumberMenu {
   readonly el = h("div#mp-menu", { hidden: true, role: "menu" });
   private spec: MenuSpec | null = null;
   readonly id = { current: "" };
+  /** After the menu closes (a pick, 0, or hide()). */
+  onHide: () => void = () => {};
 
   constructor(parent: HTMLElement) {
     parent.append(this.el);
@@ -264,26 +275,29 @@ export class NumberMenu {
 
   hide(id?: string): void {
     if (id && this.id.current !== id) return;
+    const was = !!this.spec;
     this.spec = null;
     this.id.current = "";
     this.el.hidden = true;
+    if (was) this.onHide();
   }
 
   private render(): void {
     const s = this.spec!;
     clear(this.el,
       h("div.mm-title", null, s.title),
+      s.head ?? null,
       ...s.items.map((it, i) =>
         h(
-          `div.mm-item${it.disabled ? ".off" : ""}${it.selected ? ".sel" : ""}`,
-          { role: "menuitem" },
+          `div.mm-item${it.disabled ? ".off" : ""}${it.selected ? ".sel" : ""}${it.quiet ? ".quiet" : ""}`,
+          { role: "menuitem", onclick: () => this.key(i + 1) },
           h("span.mm-key", null, `${i + 1}.`),
           h("span.mm-label", null, it.label),
-          it.detail ? h("span.mm-detail", null, it.detail) : null,
+          it.control ?? (it.detail ? h("span.mm-detail", null, it.detail) : null),
         ),
       ),
       s.footer ? h("div.mm-footer", null, s.footer) : null,
-      h("div.mm-item.exit", null, h("span.mm-key", null, "0."), h("span.mm-label", null, s.exit ?? "Exit")),
+      h("div.mm-item.exit", { role: "menuitem", onclick: () => this.key(0) }, h("span.mm-key", null, "0."), h("span.mm-label", null, s.exit ?? "Exit")),
     );
   }
 

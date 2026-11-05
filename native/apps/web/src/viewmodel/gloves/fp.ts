@@ -19,7 +19,7 @@ import type { V3 } from "../../player/bunny/rig";
 import type { GloveStyleId } from "../../loadout";
 import { vmRig, type VmRig } from "../rig";
 import { gp, MAT, NO_SEAM, PAL_SLOT, SLOT_G } from "./paint";
-import { sleeve } from "../sleeve";
+import { fleeceR, sleeve } from "../sleeve";
 
 const S = (slot: number): Paint => ({ code: 3 + slot });
 const HOODIE = S(PAL_SLOT.hoodie), TRIM = S(PAL_SLOT.trim), GLOVE = S(PAL_SLOT.glove);
@@ -319,7 +319,16 @@ export interface DigitSpec {
   creases?: boolean;
   /** Radius scale per path row (e.g. Bun-E's hinges pinched in); default 1. */
   rowScale?(i: number, d: number): number;
+  /** Flat-capped digit ends (Bun-E's mechanical fingers); otherwise every tip is rounded (TIP_DOME). */
+  hardTips?: boolean;
 }
+
+/**
+ * The rounded fingertip (v0.0.38; Astra QA: tips read as capped tubes): the last ring narrows and one more closes it
+ * into a short dome, [advance along the finger, radius] as fractions of the tip's radius. Adds ~0.12 units of length
+ * (the grip solver's capsules are unchanged); the closing cap is then a ring half the finger's width.
+ */
+const TIP_DOME: [number, number][] = [[0, 0.93], [0.34, 0.68]];
 
 /** Crease weight per digit path row: the finger joints (knuckle, middle, last) and the thumb's two. */
 const FINGER_CREASE: Record<number, number> = { 1: 0.55, 3: 1, 5: 0.8 };
@@ -360,18 +369,35 @@ function digits(b: Builder, h: Hand, sp: DigitSpec): void {
         return e ? add(p, scale(norm(sub(p, c)), e)) : p;
       });
     });
+    // Rounded tip: the last ring narrowed, two more rings closing it (they paint, weigh and shade as the tip).
+    if (!sp.hardTips) {
+      const c = centres[n - 1], dir = norm(sub(c, centres[n - 2]));
+      const [u, v] = frames[n - 1];
+      const rs = sc * (sp.rowScale?.(n - 1, d) ?? 1);
+      const ru = dg.ru[n - 1] * rs, rv = dg.rv[n - 1] * rs, r0 = (ru + rv) / 2;
+      const last = rows[n - 1];
+      rows[n - 1] = last.map((p) => add(c, scale(sub(p, c), TIP_DOME[0][1])));
+      for (const [adv, k] of TIP_DOME.slice(1)) rows.push(ring(add(c, scale(dir, adv * r0)), u, v, ru * k, rv * k, M, 2.25));
+    }
+    const R = rows.length;
+    const ci = (i: number) => Math.min(n - 1, i), qi = (i: number) => Math.min(n - 2, i);
     emit(b, rows, {
       seamless: sp.seamless,
-      paint: (i, k) => sp.paint({ i, s: (A[i] + A[Math.min(n - 1, i + 1)]) / 2, bn: (bnAt(i, k) + bnAt(i, k + 1)) / 2, ac: (acAt(i, k) + acAt(i, k + 1)) / 2 }, d),
-      weight: (i) => dg.w[i],
-      ao: (i, k) => fingerAO(d, acAt(i, k), bnAt(i, k), i === 0),
+      paint: (i, k) => {
+        const j = qi(i);
+        return sp.paint({ i: j, s: (A[j] + A[Math.min(n - 1, j + 1)]) / 2, bn: (bnAt(j, k) + bnAt(j, k + 1)) / 2, ac: (acAt(j, k) + acAt(j, k + 1)) / 2 }, d);
+      },
+      weight: (i) => dg.w[ci(i)],
+      ao: (i, k) => fingerAO(d, acAt(ci(i), k), bnAt(ci(i), k), i === 0),
       fin: (i, k) => {
-        const q = { i, s: A[i], bn: bnAt(i, k), ac: acAt(i, k) };
-        return [NO_SEAM, A[i], sp.wear?.(q, d) ?? 0, sp.creases === false ? 0 : (dg.thumb ? THUMB_CREASE : FINGER_CREASE)[i] ?? 0];
+        const j = ci(i);
+        const q = { i: j, s: A[j], bn: bnAt(j, k), ac: acAt(j, k) };
+        return [NO_SEAM, A[j], sp.wear?.(q, d) ?? 0, sp.creases === false || i >= n ? 0 : (dg.thumb ? THUMB_CREASE : FINGER_CREASE)[i] ?? 0];
       },
       capStart: sp.paint({ i: 0, s: 0, bn: 0, ac: 0 }, d),
       capEnd: sp.paint({ i: n - 2, s: A[n - 1], bn: 0, ac: 0 }, d),
     });
+    void R;
   });
 }
 
@@ -422,6 +448,9 @@ function handBand(b: Builder, h: Hand, s: number[], grow: (j: number, k: number)
     ao: (j) => (j === 0 || j === s.length - 1 ? 0.68 : 1) * sleeveShade(s[j]),
   });
 }
+
+/** A long cuff's radius that sits just on the sleeve at s (cuff() rings: the same 0.86 / 0.84 scale as the sleeve). */
+const hug = (h: Hand, s: number): number => fleeceR(s, h.L) + 0.05;
 
 /** A cuff around the forearm (the sleeve's frame), rows [s along the forearm from the arm root, radius]. */
 function cuff(b: Builder, h: Hand, rows0: [number, number][], paint: (j: number, k: number) => Paint, o: { N?: number; seamless?: boolean; seams?: number[]; wear?: (j: number) => number; wobble?: (j: number, a: number) => number; ao?: (j: number, k: number) => number } = {}): void {
@@ -653,15 +682,18 @@ const moto: StyleFn = (b, h) => {
     const side = dg.thumb ? norm(add(n0, scale(norm(cross(dir, h.palmN)), dot(cross(dir, h.palmN), h.wAx) > 0 ? -THUMB_TWIST : THUMB_TWIST))) : n0;
     dome(b, add(c, scale(side, (dg.thumb ? dg.ru[i0 + 1] : dg.rv[2]) * 0.92)), side, dir, dg.thumb ? 0.5 : 0.42, 0.3, 0.15, P(B.tips, MAT.plate), [[dg.bones[dg.thumb ? 1 : 0], 1]], 6, { seam: NO_SEAM, wear: 0.6 });
   }
-  // Long cuff over the sleeve, with a strap round it.
+  // Long cuff over the sleeve, with a strap round it. Its back edge hugs the sleeve and flares out (it stood off it,
+  // showing a dark gap inside: Astra, v0.0.38 QA).
   const L0 = h.L;
   cuff(b, h, [
+    [L0 - 1.62, hug(h, L0 - 1.62)],
+    [L0 - 1.5, hug(h, L0 - 1.5) + 0.12],
     [L0 - 1.45, 2.14],
     [L0 - 1.3, 2.26],
     [L0 + 0.1, 2.3],
     [L0 + 0.5, 2.18],
     [L0 + 0.68, 1.96],
-  ], () => P(B.strap, MAT.leather), { N: 16, seams: [L0 - 1.3, L0 + 0.5], wear: (j) => (j === 0 || j === 4 ? 0.8 : 0.15) });
+  ], () => P(B.strap, MAT.leather), { N: 16, seams: [L0 - 1.3, L0 + 0.5], wear: (j) => (j <= 2 || j === 6 ? 0.8 : 0.15) });
   // The strap: a thick band with square edges, closed by a snap on its outer side.
   cuff(b, h, [
     [L0 - 0.75, 2.3],
@@ -706,13 +738,15 @@ const specialist: StyleFn = (b, h) => {
   // Gauntlet cuff, a velcro strap round it, the pull tab off its top edge.
   const L0 = h.L;
   cuff(b, h, [
+    [L0 - 2.08, hug(h, L0 - 2.08)],
+    [L0 - 1.96, hug(h, L0 - 1.96) + 0.12],
     [L0 - 1.9, 2.2],
     [L0 - 1.75, 2.36],
     [L0 - 0.6, 2.3],
     [L0 + 0.3, 2.2],
     [L0 + 0.5, 2.12],
     [L0 + 0.68, 1.96],
-  ], () => P(B.strap, MAT.leather), { seams: [L0 - 1.75, L0 + 0.5], wear: (j) => (j <= 1 ? 0.8 : 0.1) });
+  ], () => P(B.strap, MAT.leather), { seams: [L0 - 1.75, L0 + 0.5], wear: (j) => (j <= 3 ? 0.8 : 0.1) });
   cuff(b, h, [
     [L0 - 1.0, 2.31],
     [L0 - 0.97, 2.46],
@@ -801,6 +835,7 @@ const bune: StyleFn = (b, h) => {
   digits(b, h, {
     seamless: true,
     creases: false,
+    hardTips: true,
     paint: (q, d) => {
       const joint = d < 4 ? q.i === 0 || q.i === 3 || q.i === 5 : q.i === 0 || q.i === 2 || q.i === 4;
       return joint || q.bn < -.35 ? P(B.fingers, MAT.rubber) : P(B.base, MAT.plate);

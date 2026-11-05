@@ -45,7 +45,7 @@
    two words, and VERSION stays below 0.1.0 while STAGE is alpha.
    ============================================================ */
 
-export const VERSION = "0.0.36";
+export const VERSION = "0.0.37";
 
 /** Release stage, printed after the number ("v0.0.4 alpha"). */
 export const STAGE = "alpha";
@@ -67,7 +67,7 @@ export interface ChangelogEntry {
 
 /** Notes for the next release, unpublished until promoted into CHANGELOG. */
 export const UPCOMING: ChangelogEntry = {
-  version: "0.0.37",
+  version: "0.0.38",
   date: "2026-11-04",
   kind: "minor",
   title: "Next update",
@@ -76,6 +76,21 @@ export const UPCOMING: ChangelogEntry = {
 
 /** Newest first. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "0.0.37",
+    date: "2026-11-04",
+    kind: "minor",
+    title: "Every jump the same height",
+    notes: [
+      "Every jump now starts 1.5 units above the floor, as on Momentum and on CS:S servers with a landfix, so a jump goes the same height every time. Crouch jumps onto ledges right at the height limit, like the long platform on bhop_tranquility, now work every time instead of depending on how you landed. Thanks to PonyTrap.",
+      "Ramps and curves no longer stop you dead or freeze you in mid-air. You slide on, as on Momentum: the quarter-pipe on bhop_badges_mini, the drop shaft on bhop_kotodama and the last stage of bhop_aux_a9 all play smoothly now. Thanks to Throwtop.",
+      "┃world-records on Discord posts one world record per message, each with its own video. World records on T5 and harder maps always post, first clears and long runs included. A card in ┃world-records or ┃snipes keeps saying WR after the record is beaten.",
+      "┃snipes keeps the run's card and replay link when the run is going to ┃world-records, and links the post once it's out.",
+      "Infinite runs are scored as T3 at most, since air jumps flatten a hard map. Infinite still counts a fifth towards your overall rank.",
+      "Verified players get a Verified role on Discord, with the blue check as its icon.",
+      "Your existing runs don't change. The desktop client gets the new jump in its next update; until then, its runs count as before.",
+    ],
+  },
   {
     version: "0.0.36",
     date: "2026-11-04",

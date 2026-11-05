@@ -198,6 +198,23 @@ export const MAP_SOUND_LAST_START = 4;
 export const OVERLAY_STATE_ACTIVE = 1;
 export const OVERLAY_STATE_VISIBLE = 2;
 
+/**
+ * An animated prop now (`Core.propAnims`, crates/core/src/game/prop_anims.rs): the sequence it plays and its sequence
+ * time, `base + (visualSeconds - since) * rate` seconds; `defaultAnim` is what a non-looping sequence goes back to.
+ */
+export interface PropAnimState {
+  entity: number;
+  anim: string;
+  defaultAnim: string;
+  base: number;
+  since: number;
+  rate: number;
+  /** TurnOff / Disable / StartDisabled. */
+  hidden: boolean;
+  /** Killed. */
+  removed: boolean;
+}
+
 /** `brushOrigins()` keys at or above this are moving entity props (prop_door_rotating): key - PROP_TRANSFORM_KEY = entity. */
 export const PROP_TRANSFORM_KEY = 1 << 20;
 
@@ -266,6 +283,10 @@ export const PROP_TRANSFORM_KEY = 1 << 20;
  *   tokens 0; before, anything but 3 clean numbers was ignored), PARENTED_DOORS_V24 (bhop_playboy_csgo) and
  *   CS_DELETED_PROPS_V24 (bhop_hell and 6 more maps), END_TOUCH_OUTPUTS_V24 (bhop_weed_funhouse's boosters fire on
  *   OnEndTouch), the infinite clip, and Infinite flights (IN_FLIGHT commands fly in the core, only in Infinite).
+ * - v25: v24 + Momentum Mod's sv_jump_z_offset 1.5: every ground jump starts exactly 1.5 above the floor (crates/vendor
+ *   movement Policy::jump_z_offset; research/NATIVE-JUMP-OFFSET-V25.md), so a jump's height no longer depends on where
+ *   inside a tick the previous landing fell (stock: 0.03-2.0 above the floor). A crouch jump peaks 65.5 above the floor,
+ *   so bhop_tranquility's +64 ledge clears. Air jumps (Infinite), ladder and swim jumps are unchanged.
  */
 export const PHYSICS_V1 = 1;
 /** Weapon commands and the USP silencer (research/WEAPONS.md). */
@@ -291,7 +312,7 @@ export const PHYSICS_V16 = 16;
 /** RNGFix parity: uphill / downhill inclines, edge bugs, trigger jumping and telehops as on RNGFix servers. */
 export const PHYSICS_V17 = 17;
 /** The physics version new runs are played and recorded with. */
-export const PHYSICS_VERSION = 24;
+export const PHYSICS_VERSION = 25;
 /** Climbable surface properties used by bhop_synthetic_fix. */
 export const PHYSICS_V18 = 18;
 /** Scoped entity makers and known velocity-script equivalents. */
@@ -306,6 +327,8 @@ export const PHYSICS_V22 = 22;
 export const PHYSICS_V23 = 23;
 /** Infinite clip on every map (no reloads); Source's keyvalue vector parse for the player's basevelocity / origin (bhop_weed_funhouse's boosters launch, on leaving the pad as its mapper meant); bhop_playboy_csgo's spiral steps turn with their column; props CS:S deletes at spawn are gone (bhop_hell's barrels). Shipped with timer rules 4. */
 export const PHYSICS_V24 = 24;
+/** Every ground jump starts 1.5 above the floor, as on Momentum Mod and landfix servers: jump heights no longer depend on the landing's sub-tick phase. */
+export const PHYSICS_V25 = 25;
 /** Versions this code knows (the wasm build must support them too, see Core.setSettings). */
 export const isPhysicsVersion = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= PHYSICS_V1 && (v as number) <= PHYSICS_VERSION;
 
@@ -431,6 +454,9 @@ interface Exports {
   sky_camera?: () => number;
   map_sound_serial?: () => number;
   map_sound_states?: () => number;
+  prop_anim_serial?: () => number;
+  prop_anim_states?: () => number;
+  prop_anim_names_len?: () => number;
   map_sound_commands?: () => number;
   overlay_volumes?: () => number;
   overlay_states?: () => number;
@@ -746,6 +772,30 @@ export class Core {
     const len = Math.min(this.x.map_sound_states(), out.length);
     out.set(this.f32(this.x.scratch_f32_ptr(), len));
     return len;
+  }
+
+  private propAnimCache: { serial: number; states: PropAnimState[] } | null = null;
+
+  /**
+   * Animated props (crates/core/src/game/prop_anims.rs): display only, nothing here reaches the simulation. What each
+   * one plays now, read again only when the core's serial moves (one call per frame otherwise). Null on a wasm without
+   * the export. Don't keep the array across frames: it's replaced when the state changes.
+   */
+  propAnims(): readonly PropAnimState[] | null {
+    if (!this.x.prop_anim_serial || !this.x.prop_anim_states) return null;
+    const serial = this.x.prop_anim_serial();
+    if (this.propAnimCache?.serial === serial) return this.propAnimCache.states;
+    const n = this.x.prop_anim_states();
+    const f = this.f32(this.x.scratch_f32_ptr(), n).slice();
+    // prop_anim_states also left the names in scratch_str.
+    const names = this.str(this.x.scratch_str_ptr(), this.x.prop_anim_names_len?.() ?? 0).split("\n");
+    const states: PropAnimState[] = [];
+    for (let i = 0, k = 0; i + 5 <= f.length; i += 5, k++) {
+      const [anim, def] = (names[k] ?? "").split("\t");
+      states.push({ entity: f[i], hidden: (f[i + 1] & 1) !== 0, removed: (f[i + 1] & 2) !== 0, base: f[i + 2], since: f[i + 3], rate: f[i + 4], anim: anim ?? "", defaultAnim: def ?? "" });
+    }
+    this.propAnimCache = { serial, states };
+    return states;
   }
 
   /** `play ...` commands the map ran since the last call. */
@@ -1096,6 +1146,11 @@ export class Core {
     return this.cx.studio_load(...this.giveStr(path));
   }
 
+  /** Forgets every loaded studio model (their handles too): before a map core loads the next map's animated props. */
+  studioUnloadAll(): void {
+    (this.cx as { studio_unload_all?: () => void }).studio_unload_all?.();
+  }
+
   /** Model metadata (JSON, see studio.rs `info_json`). */
   studioInfo(h: number): string {
     const n = this.cx.studio_info(h);
@@ -1119,9 +1174,19 @@ export class Core {
     return this.f32(this.x.scratch_f32_ptr(), n).slice();
   }
 
-  /** Texture data of a VTF by game path (must be loaded in the VFS). Same as `texture()`. */
-  texturePath(path: string, allowS3tc: boolean, needAlpha: boolean): TexturePayload | null {
-    const len = this.cx.texture_payload_path(...this.giveStr(path), allowS3tc ? 1 : 0, needAlpha ? 1 : 0);
+  /** Animation frames of a loaded VTF (game path); 0 when it isn't loaded or this wasm can't tell. */
+  textureFrames(path: string): number {
+    const f = (this.cx as { texture_frames_path?: (p: number, l: number) => number }).texture_frames_path;
+    return f ? f(...this.giveStr(path)) : 0;
+  }
+
+  /** Texture data of a VTF by game path (must be loaded in the VFS). Same as `texture()`. `frame`: an animation frame. */
+  texturePath(path: string, allowS3tc: boolean, needAlpha: boolean, frame = 0): TexturePayload | null {
+    const byFrame = (this.cx as { texture_payload_path_frame?: (p: number, l: number, f: number, s: number, a: number) => number }).texture_payload_path_frame;
+    if (frame && !byFrame) return null;
+    const len = frame && byFrame
+      ? byFrame(...this.giveStr(path), frame, allowS3tc ? 1 : 0, needAlpha ? 1 : 0)
+      : this.cx.texture_payload_path(...this.giveStr(path), allowS3tc ? 1 : 0, needAlpha ? 1 : 0);
     if (!len) return null;
     const h = this.u32(this.x.scratch_u32_ptr(), len).slice();
     const base = this.x.tex_bytes_ptr();
@@ -1394,7 +1459,7 @@ export const WEAPON_SNIPER = 4;
 export interface AttackReport {
   /** Weapon id (WEAPON_IDS): 1 = the knife, 2+ = guns. */
   weapon: number;
-  /** 1 = primary (knife slash, gun shot), 2 = secondary (knife stab; v7: a silenced USP shot, CS:S Secondary_Mode). */
+  /** 1 = primary (knife slash, gun shot), 2 = secondary (knife stab; a silenced USP (v7) or M4A1 (v25) shot, CS:S Secondary_Mode). */
   mode: 1 | 2;
   /** The trace hit something (world, a prop or a brush entity). */
   hit: boolean;
@@ -1484,6 +1549,13 @@ export const WEAPON_EVENT_RESTORED = 1024;
 export const USP_SILENCER_TIME = 114 / 37;
 /** When the CS:S sequences' sound events fire (s into the sequence): Weapon_USP.AttachSilencer / DetachSilencer. */
 export const USP_SILENCER_SOUND_AT = { attach: 0.3333 * (114 / 37), detach: 0.2544 * (114 / 37) } as const;
+/**
+ * The M4A1's silencer attach / detach time (s; physics v25): CS:S v_rif_m4a1.mdl `add_silencer` / `detach_silencer`,
+ * 61 frames at 30 fps (CWeaponM4A1::SecondaryAttack, the same lock-out as the USP's). 200 ticks at 100 tick.
+ */
+export const M4A1_SILENCER_TIME = 60 / 30;
+/** The silencer attach / detach time of a core weapon id (USP 3, M4A1 18), or 0 (none). */
+export const silencerTime = (weapon: number): number => (weapon === 3 ? USP_SILENCER_TIME : weapon === 18 ? M4A1_SILENCER_TIME : 0);
 
 /** The player's weapons after the last step (valid every tick). */
 export interface WeaponReport {

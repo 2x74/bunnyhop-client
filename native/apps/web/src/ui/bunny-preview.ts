@@ -95,7 +95,7 @@ export class BunnyScene {
   private modelOptions(look: BunnyLook) {
     return look.mode === "ghost"
       ? ({ model: "bunny", style: "ghost", color: colorOf(look.ghost, "#ffc23d"), rim: color2Of(look.ghost), loadout: look.loadout } as const)
-      : ({ model: "bunny", style: "solid", playerGlow: look.playerGlow ?? null, previewGlow: look.previewGlow, outfit: look.outfit ?? undefined, loadout: look.loadout } as const);
+      : ({ model: "bunny", style: "solid", playerGlow: look.playerGlow ?? null, previewGlow: look.previewGlow, outfit: look.outfit ?? undefined, loadout: look.loadout, legs: false } as const);
   }
 
   set(look: BunnyLook): void {
@@ -117,12 +117,12 @@ export class BunnyScene {
   drag(dx: number, w: number): void {
     const k = 540 / Math.max(240, w);
     this.turn += dx * k;
-    this.turnV = dx * k * 60;
   }
 
-  /** Lets go: keep a gentle fling. */
-  release(): void {
-    this.turnV = Math.max(-240, Math.min(240, this.turnV));
+  /** Lets go at `vx` CSS px/s (from the pointer's timestamps, ui/drag-velocity.ts): keep a gentle fling. */
+  release(vx = 0, w = 1000): void {
+    const k = 540 / Math.max(240, w);
+    this.turnV = Math.max(-240, Math.min(240, vx * k));
   }
 
   /**
@@ -168,9 +168,10 @@ export class BunnyScene {
   advance(dt: number): void {
     if (this.look.mode === "solid") {
       if (!this.dragging) {
+        // Inertia integrated exactly over the frame (the same turn at any frame rate).
         const damp = Math.exp(-dt * 2.4);
+        this.turn += (this.turnV * (1 - damp)) / 2.4 + (this.reduced ? 0 : 14) * dt;
         this.turnV *= damp;
-        this.turn += (this.turnV + (this.reduced ? 0 : 14)) * dt;
       }
       this.model.setState(this.standPose());
       this.model.update(Math.max(dt, 1e-4));

@@ -1,7 +1,7 @@
 import { appHref } from "../platform/navigation";
 import { getHeldLoadout, onHeldLoadout, setPlayerGlow } from "../player/cosmetics";
 import { lastKnownMe } from "../api";
-import { takeFreeCursor } from "../free-cursor";
+import { cursorFree, takeFreeCursor } from "../free-cursor";
 import { openFeedback } from "../feedback/state";
 import { openGiftDialog } from "../ui/gifting";
 import { resolveGiftTarget } from "./gift-target";
@@ -73,7 +73,7 @@ import { celebrateRun, openCustomise, runRewards } from "../ui/unlocks";
 import type { StaffRole } from "../progression";
 import { staffBadgeOf, type PlayerMarks } from "../creators";
 import { banner as notifyBanner } from "../notify";
-import { runChatLine, suggestChat, type ChatContext, type ChatGame, type ReplyOpts } from "../chat-commands";
+import { normalizeChatLine, runChatLine, suggestChat, type ChatContext, type ChatGame, type ReplyOpts } from "../chat-commands";
 
 export interface MultiplayerInit {
   serverId: string;
@@ -104,6 +104,8 @@ export class Multiplayer {
   private players: RemotePlayers;
   private chat: ChatBox;
   private menu: NumberMenu;
+  /** The cursor is out for a menu a chat command opened (chat.onClose): clickable rows until it closes. */
+  private menuCursor = false;
   private board: Scoreboard;
   private banner: Banner;
   private specBar: SpecBar;
@@ -216,8 +218,22 @@ export class Multiplayer {
     this.chat.suggest = (t) => suggestChat(t, "room");
     this.chat.onClose = () => {
       o.input.releaseAll();
-      o.input.recapture();
+      // A command that opened a pick menu (!spec, !nominate, !race) keeps the cursor out until the menu closes, so its
+      // rows can be clicked as well as picked with the number keys (guest-1349 clicked a name and nothing happened).
+      // After the line ran (the chat closes before its onSend); a click anywhere else takes the lock back.
+      const before = this.menu.open ? this.menu.id.current : "";
+      setTimeout(() => {
+        if (this.menu.open && this.menu.id.current !== before && cursorFree()) this.menuCursor = true;
+        else o.input.recapture();
+      });
     };
+    this.menu.onHide = () =>
+      setTimeout(() => {
+        // (A pick that opens the next menu, like !race's player then style, keeps the cursor.)
+        if (!this.menuCursor || this.menu.open) return;
+        this.menuCursor = false;
+        o.input.recapture();
+      });
     this.conn = new RoomConnection(o.serverId, () => o.session.selectedStyle, {
       message: (m) => this.onMessage(m),
       snapshot: (s, now) => {
@@ -231,11 +247,13 @@ export class Multiplayer {
       if (e.code === "Tab") this.board.show(false);
     });
     document.addEventListener("mousedown", (e) => {
+      if (this.menuCursor && !(e.target instanceof Element && e.target.closest("#mp-menu"))) this.menu.hide();
       if (this.spectating === null || !o.input.pointerLocked) return;
       if (e.button === 0) this.cycleSpectate(1);
       else if (e.button === 2) this.cycleSpectate(-1);
     });
     document.addEventListener("pointerlockchange", () => {
+      if (o.input.pointerLocked || !o.input.locked) this.menuCursor = false;
       if (!o.input.locked) {
         this.chat.close();
         this.board.show(false);
@@ -751,7 +769,9 @@ export class Multiplayer {
     },
   };
 
-  private onChat(text: string): void {
+  private onChat(typed: string): void {
+    // ".spec" or a Russian layout's "!ызус": the room gets "/spec", as its server parses (chat-commands.ts).
+    const text = normalizeChatLine(typed);
     const r = runChatLine(text, this.chatCtx);
     // "log": answered here (!help, an unknown command); the room only logs it (and adds staff help for staff).
     if (r !== "done") this.conn.send(r === "log" ? { t: "chat", text, local: true } : { t: "chat", text });
@@ -771,6 +791,7 @@ export class Multiplayer {
 
   private keydown(e: KeyboardEvent): void {
     if (this.chat.isOpen || !this.o.input.locked || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (this.menuCursor && e.code === "Escape") return this.menu.hide();
     if (e.code === "Tab") {
       e.preventDefault();
       if (!e.repeat) {
