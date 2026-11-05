@@ -52,7 +52,7 @@ void expect_near(double got, double want, double tolerance, const char *what, si
     }
 }
 
-// The knife feel, a rifle's and a pistol's own motion, and both in-eye cameras, frame by frame.
+// The knife feel, a rifle's (reset mid-run) and a pistol's own motion, and both in-eye cameras, frame by frame.
 void test_frames(const Json &oracle) {
     const std::array<float, 3> pivot = {
             oracle.at("pivot").at(0).get<float>(),
@@ -73,6 +73,7 @@ void test_frames(const Json &oracle) {
         const double dt = frame.at("dt").get<double>();
         const auto input = input_of(frame);
         clock += dt;
+        if (f == oracle.at("resetFrame").get<size_t>()) rifle->reset();
         expect_matrix(view->update(dt, input, .5, 1, clock), frame.at("feel"), "knife feel", f);
         expect_matrix(rifle->update(dt, native_vm::GunClass::rifle, &input, pivot), frame.at("rifle"), "rifle", f);
         const bool pistol_input = frame.at("pistolInput").get<bool>();
