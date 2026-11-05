@@ -321,6 +321,33 @@ void test_layouts_and_options() {
     }
 }
 
+// The Tab board's tier tag reads T1–T10 like the website, and a tier the scale doesn't have never breaks it.
+void test_scoreboard_tiers() {
+    const auto board = std::make_unique<native::HudScoreboard>();
+    for (const auto &[raw, label] :
+         {std::pair{8, "T8"},
+          std::pair{9, "T9"},
+          std::pair{10, "T10"},
+          std::pair{11, "T10"},
+          std::pair{0, "T?"},
+          std::pair{-3, "T?"}}) {
+        board->contract(
+                {{"head", {{"room", "Tiers"}, {"map", "bhop_tomb2"}, {"tier", raw}, {"max", 8}}},
+                 {"rows", native::Json::array()}}
+        );
+        DrawProbe probe;
+        native::draw_scoreboard(probe, 1280, 720, 100, *board, 0, 0);
+        assert(probe.has(label));
+        assert(!probe.has("T7+"));
+    }
+    assert(native::tier_name(8) == "Brutal" && native::tier_name(9) == "Nightmare");
+    assert(native::tier_name(10) == "Impossible" && native::tier_name(0) == "Unrated");
+    const auto pink = native::tier_color(8), white = native::tier_color(10), unrated = native::tier_color(0);
+    assert(pink[0] == 1 && std::abs(pink[1] - 110 / 255.f) < 1e-6f && std::abs(pink[2] - 199 / 255.f) < 1e-6f);
+    assert(std::abs(white[0] - 242 / 255.f) < 1e-6f && white[2] == 1);
+    assert(native::tier_color(42) == white && unrated == native::tier_color(-1));
+}
+
 void test_scoreboard_and_names() {
     native::HudScoreboard board;
     board.contract(
@@ -358,7 +385,7 @@ void test_scoreboard_and_names() {
             NoAllocations no_allocations;
             native::draw_scoreboard(probe, size.first, size.second, 100, board, 1, 0);
         }
-        assert(probe.has("Test room") && probe.has("T7+") && probe.has("00:12.345") && probe.has("Normal"));
+        assert(probe.has("Test room") && probe.has("T8") && probe.has("00:12.345") && probe.has("Normal"));
         // Spectators are listed under the table, as on the website.
         assert(probe.has("Spectating: ") && probe.has("Spectator -> First"));
         assert(probe.flags == 1 && probe.names == 1 && probe.avatars == 1);
@@ -1103,6 +1130,7 @@ int main() {
     test_ssj_gain_filter();
     test_layouts_and_options();
     test_scoreboard_and_names();
+    test_scoreboard_tiers();
     test_merged_menu_contracts();
     test_tags_and_race_picker();
     test_ghost_progress();
