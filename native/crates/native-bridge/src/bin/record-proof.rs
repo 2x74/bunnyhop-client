@@ -66,9 +66,11 @@ fn main() {
         rules: u(&spec, "timerRules"),
         block_prehops: u32::from(spec["style"] == "scroll"),
         start_reentry_cap: if spec["style"] == "infinite" { 3510.0 } else { 0.0 },
+        // styles.rs strafe_keys: "ad" 0, "ws" 1, "w" 2, "press" 3.
         strafe_keys: match spec["style"].as_str().unwrap() {
             "wonly" => 2,
             "sideways" => 1,
+            "adonly" => 3,
             _ => 0,
         },
     };
