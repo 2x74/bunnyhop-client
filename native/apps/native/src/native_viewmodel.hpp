@@ -53,10 +53,8 @@ class NativeViewmodel {
     double gunFlashStarted = -100;
     std::shared_ptr<native_actor_anim::Data> actorAnimationData;
     std::unordered_map<std::string, std::unique_ptr<native_actor_anim::State>> actorAnimationStates;
-    // The website's reduced-motion policy (viewmodel/feel.ts REDUCED_MOTION): motion at 45%.
-    static constexpr double reduced_motion_scale = .45;
     BhContext *groundCore = nullptr;
-    double actorMotion = 1;
+    double motionScale = 1;
     Gl &gl;
     using PlayerProgram = native_render::PlayerProgram;
     using PlayerMaterial = native_render::PlayerMaterial;
@@ -1191,10 +1189,11 @@ public:
 
     std::span<const float> actor_bind() const { return actorBind; }
 
-    // The world the bunnies' planted feet probe for ground (null: the feet's own plane), and prefers-reduced-motion.
+    // The world the bunnies' planted feet probe for ground (null: the feet's own plane), and prefers-reduced-motion
+    // (the bunnies' and the first-person weapons' motion scale).
     void set_actor_context(BhContext *world, bool reduced_motion) {
         groundCore = world;
-        actorMotion = reduced_motion ? reduced_motion_scale : 1;
+        motionScale = native::motion_scale(reduced_motion);
     }
 
     // Drops an actor's animation and gesture state, so its next pose starts from scratch.
@@ -1269,7 +1268,7 @@ public:
                 input.jumped = actor.jumped;
                 state.hood(l.hoodDown);
                 state.set_seed(actor_seed(actor, l));
-                state.motion = actorMotion;
+                state.motion = motionScale;
                 state.pose(input, seconds, pulses.snapped, pulses.swing, pose, acting);
                 actorYaw = float(state.feetYaw);
             }
@@ -1440,6 +1439,7 @@ private:
         in.feel = !previewing;
         in.bob = bobScale;
         in.sway = swayScale;
+        in.motion = motionScale;
         in.quiet_inspect = quietInspect;
         return in;
     }

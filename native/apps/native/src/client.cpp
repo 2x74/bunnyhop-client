@@ -3782,7 +3782,8 @@ int run(const native::Options &opt) {
             const bool own_eyes = !viewer.active && !external_camera && !spectator && !opt.camera;
             if (own_eyes) {
                 const bool flying = practice.noclip || practice.infinite_flight.on();
-                eye_camera.frame(frame_seconds, std::hypot(curr.velocity[0], curr.velocity[1]), flying);
+                const double motion = native::motion_scale(menu_reduced_motion);
+                eye_camera.frame(frame_seconds, std::hypot(curr.velocity[0], curr.velocity[1]), flying, motion);
                 eye[2] += float(eye_camera.height());
             } else
                 eye_camera.skip_frame();

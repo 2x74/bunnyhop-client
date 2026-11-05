@@ -149,7 +149,8 @@ struct FirstPersonInput {
     FeelInput movement;
     // Off for menu and export previews: the weapon holds still on its baked poses (no feel, no hand idle).
     bool feel = true;
-    double bob = .5, sway = 1;
+    // Bob and sway amounts (Settings, Viewmodel) and the reduced-motion scale (reduced_motion.hpp).
+    double bob = .5, sway = 1, motion = 1;
     bool quiet_inspect = false;
 };
 
@@ -267,7 +268,8 @@ public:
         auto movement = in.movement;
         movement.landed = landing_.take();
         movement.sidemove = side_move_;
-        const Matrix34 feel = in.feel ? view_feel_.update(dt, movement, in.bob, in.sway, clock_) : identity34;
+        const Matrix34 feel =
+                in.feel ? view_feel_.update(dt, movement, in.bob * in.motion, in.sway * in.motion, clock_) : identity34;
         switch_weapons(in);
         if (!previous_tick_ || *previous_tick_ != in.tick || in.presentation_event) weapon_events(in);
         previous_tick_ = in.tick;
@@ -519,7 +521,7 @@ private:
         const auto &rig = *config_.knife_rig;
         world_.resize(state.pose.size());
         bool posed = blend_inspect(rig, state);
-        const double amount = std::min(hand_idle_most, in.bob / hand_idle_bob_reference);
+        const double amount = std::min(hand_idle_most, in.bob / hand_idle_bob_reference) * in.motion;
         const auto hand = in.feel ? hand_idle_.pose(clock_, amount) : HandIdlePose{};
         if (hand.flex || hand.deviation || hand.index || hand.pinky) {
             if (!posed) to_world(rig, state.pose, world_);
@@ -608,7 +610,7 @@ private:
             const double u = std::clamp((clock_ - knife_lower_started_) / knife_lower_seconds, 0., 1.);
             if (!knife_.pose.empty())
                 output_.layers[output_.count++] = {
-                        knife_.entry, &knife_.pose, concat(knife_lowered(u), feel), false, 1
+                        knife_.entry, &knife_.pose, concat(knife_lowered(u, in.motion), feel), false, 1
                 };
         }
         if (!lowering_.active) return;
@@ -627,12 +629,12 @@ private:
     }
 
     // viewmodel.ts lowered: down and out of view, accelerating, the wrist turning the blade down about the hand.
-    static Matrix34 knife_lowered(double u) {
+    static Matrix34 knife_lowered(double u, double motion) {
         constexpr double hand_x = 16, hand_y = -6, hand_z = -7, pitch_degrees = 24, roll_degrees = 12;
         constexpr double back = 1.5, right = 1, down = 9;
         const double k = u * u;
         Matrix34 lowered{};
-        angle_matrix(pitch_degrees * k, 0, roll_degrees * k, 0, 0, 0, lowered);
+        angle_matrix(pitch_degrees * k * motion, 0, roll_degrees * k * motion, 0, 0, 0, lowered);
         lowered[3] = float(hand_x - (lowered[0] * hand_x + lowered[1] * hand_y + lowered[2] * hand_z) - back * k);
         lowered[7] = float(hand_y - (lowered[4] * hand_x + lowered[5] * hand_y + lowered[6] * hand_z) - right * k);
         lowered[11] = float(hand_z - (lowered[8] * hand_x + lowered[9] * hand_y + lowered[10] * hand_z) - down * k);
@@ -643,19 +645,20 @@ private:
         const auto *clip = current_.clip();
         if (!current_.entry || !clip) return;
         sample_clip(data_, *current_.entry, *clip, time_in(current_, in.seconds), false, current_.pose);
-        if (in.feel && current_.action == Action::idle) apply_grip_idle();
+        if (in.feel && current_.action == Action::idle) apply_grip_idle(in.motion);
         const GunMotionInfo &motion = gun_info_;
         gun_motion_.bob = in.bob;
         gun_motion_.sway = in.sway;
+        gun_motion_.motion = in.motion;
         gun_motion_matrix_ = in.feel ? gun_motion_.update(dt, motion.cls, &movement, pivot_of(motion)) : identity34;
         auto &layer = output_.layers[output_.count++];
         layer = {current_.entry, &current_.pose, concat(clamp_gun_feel(feel), gun_motion_matrix_), true, 1};
-        if (in.feel) layer.fov_scale = 1 - fov_kick(motion.cls) * std::min(1., in.bob);
+        if (in.feel) layer.fov_scale = 1 - fov_kick(motion.cls, in.motion) * std::min(1., in.bob);
     }
 
     // The trigger finger and support hand of the grip idle, toward the baked poses at full strength.
-    void apply_grip_idle() {
-        const auto grip = grip_idle_.pose();
+    void apply_grip_idle(double motion) {
+        const auto grip = grip_idle_.pose(motion);
         const double index = grip.index_off / config_.grip_index_off, open = grip.left_open / config_.grip_left_open;
         if (index <= 0 && open <= 0) return;
         const auto *eased = current_.silenced_now && current_.silenced[size_t(Action::grip_index)]
@@ -689,14 +692,14 @@ private:
     }
 
     // The shot's kick on the viewmodel FOV, a fraction of it (guns/viewmodel.ts fovKick): a 30 ms punch, an ease back.
-    double fov_kick(GunClass cls) const {
+    double fov_kick(GunClass cls, double motion) const {
         constexpr double kick_seconds = .4, punch_seconds = .03, ease_rate = 12;
         const double t = since_shot();
         if (t > kick_seconds || t < 0) return 0;
         const double size = cls == GunClass::shotgun || cls == GunClass::sniper ? .035
                             : cls == GunClass::smg || cls == GunClass::rifle    ? .012
                                                                                 : .022;
-        return size * (t < punch_seconds ? t / punch_seconds : std::exp(-(t - punch_seconds) * ease_rate));
+        return size * motion * (t < punch_seconds ? t / punch_seconds : std::exp(-(t - punch_seconds) * ease_rate));
     }
 
     struct GunLowering {

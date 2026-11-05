@@ -40,6 +40,7 @@
 #include <SDL3/SDL_opengl.h>
 #include "player_material.hpp"
 #include "ponytail_motion.hpp"
+#include "reduced_motion.hpp"
 #include <algorithm>
 #include <cmath>
 #include <deque>
@@ -1834,7 +1835,8 @@ public:
         }
     }
 
-    // prefers-reduced-motion, as the menu reports it: the third-person bunny's bank, idle shift and jump poses at 45%.
+    // prefers-reduced-motion, as the menu reports it: the bunnies' and the first-person weapons' motion at 45%
+    // (reduced_motion.hpp).
     void set_reduced_motion(bool reduced) { reducedMotion = reduced; }
 
     void set_player_glow(std::optional<native_render::Glow> glow) {

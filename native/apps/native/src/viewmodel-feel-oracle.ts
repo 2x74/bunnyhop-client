@@ -1,7 +1,8 @@
 // The website's first-person feel over a fixed stream of frames: the knife viewmodel's ViewFeel, the gun's GunMotion,
 // the in-eye EyeFeel, the knife hand's HandIdle and the gun hands' grip idle (GunAnimator overlays). The frames mix
 // frame lengths, running, bhops with one-tick ground touches, a hard fall, crouching, strafes and a 180 degree snap.
-// viewmodel_feel_tests.cpp replays the same stream on the C++ port and compares every frame.
+// viewmodel_feel_tests.cpp replays the same stream on the C++ port and compares every frame. The rifle, the eye and
+// the grip idle run again under prefers-reduced-motion.
 import { writeFile } from "node:fs/promises";
 import { ViewFeel, type FeelInput } from "../../web/src/viewmodel/feel";
 import { EyeFeel } from "../../web/src/viewmodel/eye-feel";
@@ -38,6 +39,10 @@ function inputAt(f: number): FeelInput & { dt: number } {
   };
 }
 
+// The page's prefers-reduced-motion, switchable: feel.ts reads it live, GunMotion and GunAnimator when they're built.
+const reducedQuery = { matches: false };
+(globalThis as { matchMedia?: (query: string) => { matches: boolean } }).matchMedia = () => reducedQuery;
+
 const viewFeel = new ViewFeel();
 const rifle = new GunMotion();
 const pistol = new GunMotion();
@@ -69,6 +74,21 @@ for (let f = 0; f < FRAMES; f++) {
     eyeOff: [eyeOff.z, eyeOff.fov],
   });
 }
+
+// Reduced motion: a rifle and an in-eye camera with both options on, over the same frames.
+reducedQuery.matches = true;
+const rifleReduced = new GunMotion();
+const eyeReduced = new EyeFeel();
+const reduced = [];
+for (let f = 0; f < FRAMES; f++) {
+  const input = inputAt(f);
+  rifleReduced.bob = 0.5;
+  rifleReduced.update(input.dt, gunById("ak47")!, input, PIVOT);
+  const speed = Math.hypot(input.velocity[0], input.velocity[1]);
+  eyeReduced.update(input.dt, input.landed, speed + (f >= 300 && f < 420 ? 400 : 0), true, true);
+  reduced.push({ rifle: Array.from(rifleReduced.M), eye: [eyeReduced.z, eyeReduced.fov] });
+}
+reducedQuery.matches = false;
 
 /** Stands in for the inspect kit's Arm and keeps what HandIdle asked of it. */
 function recordingArm() {
@@ -102,24 +122,32 @@ for (let f = 0; f < 700; f++) {
 }
 
 // The grip idle over a USP: quiet, a shot, quiet, a reload (its end settles the support hand), quiet.
-const anim = new GunAnimator(gunById("usp")!);
-anim.settle();
-const grip = [];
-for (let f = 0; f < 1200; f++) {
-  const dt = FRAME_SECONDS[f % FRAME_SECONDS.length];
-  let event = "";
-  if (f === 300) {
-    anim.fire();
-    event = "shot";
-  } else if (f === 500) {
-    anim.reload(1.2, false);
-    event = "reload";
-  } else if (f === 800) {
-    anim.dryFire();
-    event = "dry";
+function gripIdle(reducedMotion: boolean) {
+  reducedQuery.matches = reducedMotion;
+  const anim = new GunAnimator(gunById("usp")!);
+  reducedQuery.matches = false;
+  anim.settle();
+  const grip = [];
+  for (let f = 0; f < 1200; f++) {
+    const dt = FRAME_SECONDS[f % FRAME_SECONDS.length];
+    let event = "";
+    if (f === 300) {
+      anim.fire();
+      event = "shot";
+    } else if (f === 500) {
+      anim.reload(1.2, false);
+      event = "reload";
+    } else if (f === 800) {
+      anim.dryFire();
+      event = "dry";
+    }
+    anim.update(dt);
+    grip.push({ dt, event, clip: anim.clip, indexOff: anim.pose.indexOff, leftOpen: anim.pose.leftOpen });
   }
-  anim.update(dt);
-  grip.push({ dt, event, clip: anim.clip, indexOff: anim.pose.indexOff, leftOpen: anim.pose.leftOpen });
+  return grip;
 }
 
-await writeFile(process.argv[2] ?? "viewmodel-feel-oracle.json", JSON.stringify({ pivot: PIVOT, frames, hand, grip }));
+await writeFile(
+  process.argv[2] ?? "viewmodel-feel-oracle.json",
+  JSON.stringify({ pivot: PIVOT, frames, reduced, hand, grip: gripIdle(false), gripReduced: gripIdle(true) }),
+);

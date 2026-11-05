@@ -2,6 +2,7 @@
 // would notice: the same pose at any frame rate, bhop landings that never move the camera, a speed FOV that doesn't
 // pump hop to hop.
 #include "viewmodel_feel.hpp"
+#include "reduced_motion.hpp"
 #include <nlohmann/json.hpp>
 #include <cassert>
 #include <cstdio>
@@ -89,6 +90,38 @@ void test_frames(const Json &oracle) {
     }
 }
 
+// Under prefers-reduced-motion (reduced_motion.hpp): the rifle's own motion at 45%, the eye's settle at 45% and no
+// speed FOV, as the website's GunMotion and EyeFeel do it.
+void test_reduced_motion_frames(const Json &oracle) {
+    const std::array<float, 3> pivot = {
+            oracle.at("pivot").at(0).get<float>(),
+            oracle.at("pivot").at(1).get<float>(),
+            oracle.at("pivot").at(2).get<float>()
+    };
+    auto rifle = std::make_unique<native_vm::GunMotion>();
+    native_vm::EyeFeel eye;
+    rifle->bob = .5;
+    rifle->motion = native::reduced_motion_scale;
+    const auto &frames = oracle.at("frames");
+    const auto &reduced = oracle.at("reduced");
+    double lowest_settle = 0, widest_fov = 0;
+    for (size_t f = 0; f < frames.size(); f++) {
+        const auto &frame = frames[f];
+        const double dt = frame.at("dt").get<double>();
+        const auto input = input_of(frame);
+        const auto &rifle_matrix = rifle->update(dt, native_vm::GunClass::rifle, &input, pivot);
+        expect_matrix(rifle_matrix, reduced[f].at("rifle"), "reduced-motion rifle", f);
+        const double speed = std::hypot(input.velocity[0], input.velocity[1]);
+        eye.update(dt, input.landed, speed + (f >= 300 && f < 420 ? 400 : 0), true, true, native::reduced_motion_scale);
+        expect_near(eye.z, reduced[f].at("eye").at(0).get<double>(), value_tolerance, "reduced-motion settle", f);
+        expect_near(eye.fov, reduced[f].at("eye").at(1).get<double>(), value_tolerance, "reduced-motion fov", f);
+        lowest_settle = std::min(lowest_settle, eye.z);
+        widest_fov = std::max(widest_fov, eye.fov);
+    }
+    // The hard landings still settle the camera, a little; the speed FOV never shows.
+    assert(lowest_settle < 0 && widest_fov == 0);
+}
+
 void test_hand_idle(const Json &oracle) {
     native_vm::HandIdle hand;
     const auto &frames = oracle.at("hand");
@@ -104,10 +137,11 @@ void test_hand_idle(const Json &oracle) {
 }
 
 // The grip idle while the gun is idle: a shot and a click put it back at once, a reload's end settles the support hand.
-void test_grip_idle(const Json &oracle) {
+// `motion`: the reduced-motion scale the website's animator was built under (gripReduced: 45%).
+void test_grip_idle(const Json &oracle, const char *key, double motion) {
     native_vm::GripIdle grip;
     std::string clip = "idle";
-    const auto &frames = oracle.at("grip");
+    const auto &frames = oracle.at(key);
     for (size_t f = 0; f < frames.size(); f++) {
         const auto &frame = frames[f];
         const auto event = frame.at("event").get<std::string>();
@@ -117,7 +151,7 @@ void test_grip_idle(const Json &oracle) {
         if (clip == "reload" && now == "idle") grip.clip_ended(true);
         clip = now;
         if (now != "idle") continue;
-        const auto pose = grip.pose();
+        const auto pose = grip.pose(motion);
         expect_near(pose.index_off, frame.at("indexOff").get<double>(), value_tolerance, "trigger finger", f);
         expect_near(pose.left_open, frame.at("leftOpen").get<double>(), value_tolerance, "support fingers", f);
     }
@@ -199,8 +233,10 @@ int main(int argc, char **argv) {
     std::ifstream file(argv[1]);
     const auto oracle = Json::parse(file);
     test_frames(oracle);
+    test_reduced_motion_frames(oracle);
     test_hand_idle(oracle);
-    test_grip_idle(oracle);
+    test_grip_idle(oracle, "grip", 1);
+    test_grip_idle(oracle, "gripReduced", native::reduced_motion_scale);
     std::puts("viewmodel feel matches the website");
     return 0;
 }

@@ -303,7 +303,8 @@ inline double gun_weight(GunClass gun) {
 // as a 3x4 in viewmodel space about the right grip.
 class GunMotion {
 public:
-    double bob = 1, sway = 1;
+    // Bob and sway amounts, and the reduced-motion scale (reduced_motion.hpp).
+    double bob = 1, sway = 1, motion = 1;
 
     void reset() {
         springs = {};
@@ -314,7 +315,7 @@ public:
 
     // `input` null: idle drift only. `pivot`: the right grip in viewmodel space.
     const Matrix34 &update(double dt, GunClass gun, const FeelInput *input, const std::array<float, 3> &pivot) {
-        const double weight = gun_weight(gun);
+        const double weight = gun_weight(gun) * motion;
         const double bob_amount = bob * weight, sway_amount = sway * weight;
         clock += dt;
         Targets want{};
@@ -456,14 +457,15 @@ public:
         fast = false;
     }
 
-    // `landed`: the vertical speed of a landing this frame (< 0) or 0; `speed`: the horizontal speed.
-    void update(double dt, double landed, double speed, bool settle_on, bool speed_fov_on_setting) {
+    // `landed`: the vertical speed of a landing this frame (< 0) or 0; `speed`: the horizontal speed; `motion`: the
+    // reduced-motion scale (the settle shrinks with it, the speed FOV only shows at full motion).
+    void update(double dt, double landed, double speed, bool settle_on, bool speed_fov_on_setting, double motion = 1) {
         constexpr double settle_omega = 16, fov_ease_seconds = .7, fov_snap = .01;
         if (dt <= 0) return;
         spring_step(settle, 0, settle_omega, 1, dt);
         if (settle_on && landed < 0) {
             // A critically damped kick peaks at v / (w e): sized so the drop peaks at settle_max_units x hardness.
-            const double hardness = hard_landing(landed);
+            const double hardness = hard_landing(landed) * motion;
             if (hardness > 0) settle.v -= settle_max_units * hardness * settle_omega * euler;
         }
         z = settle_on ? std::clamp(settle.x, -settle_max_units, 0.) : 0;
@@ -472,7 +474,7 @@ public:
             fast = true;
         else if (speed < speed_fov_off)
             fast = false;
-        const double want = speed_fov_on_setting && fast ? speed_fov_degrees : 0;
+        const double want = speed_fov_on_setting && fast && motion >= 1 ? speed_fov_degrees : 0;
         fov += (want - fov) * (1 - std::exp(-dt / fov_ease_seconds));
         if (std::abs(fov - want) < fov_snap) fov = want;
     }
@@ -563,11 +565,12 @@ public:
         settle_seconds += dt;
     }
 
-    GripIdlePose pose() const {
+    // `motion`: the reduced-motion scale.
+    GripIdlePose pose(double motion = 1) const {
         constexpr double quiet_from = 1.2, quiet_fade = 1.5, settle_end = .5;
         GripIdlePose out;
         const double q = std::clamp((quiet - quiet_from) / quiet_fade, 0., 1.);
-        const double w = q * q * (3 - 2 * q);
+        const double w = q * q * (3 - 2 * q) * motion;
         const auto ease = [this](double rate, double phase) {
             return std::pow(std::max(0., std::sin(clock * rate + phase)), 2);
         };
@@ -575,7 +578,8 @@ public:
             out.index_off = .28 * w * ease(.83, .6);
             out.left_open = .16 * w * ease(.61, 2.4);
         }
-        if (settle_seconds < settle_end) out.left_open = std::max(out.left_open, .3 * bump(settle_seconds, .02, .45));
+        if (settle_seconds < settle_end)
+            out.left_open = std::max(out.left_open, .3 * bump(settle_seconds, .02, .45) * motion);
         return out;
     }
 
@@ -632,8 +636,8 @@ public:
     void tick(bool grounded, double vertical_speed) { landing.tick(grounded, vertical_speed); }
 
     // A frame in your own eyes; `flying`: practice noclip or Infinite's flight, where the settle stays off.
-    void frame(double dt, double horizontal_speed, bool flying) {
-        feel.update(dt, landing.take(), horizontal_speed, settle_on && !flying, speed_fov_on);
+    void frame(double dt, double horizontal_speed, bool flying, double motion) {
+        feel.update(dt, landing.take(), horizontal_speed, settle_on && !flying, speed_fov_on, motion);
     }
 
     // A frame seen any other way (third person, a replay, spectating): the landing passes unused.
