@@ -1835,6 +1835,31 @@ public:
         }
     }
 
+    // Race ghosts that cut this frame (Actor::preroll) run through their path's last moments before anything draws
+    // them, so a ghost starting with your run arrives moving the way it was in its start zone (ghost.ts pre-roll).
+    // The steps end one tick before `seconds`, on the same clock the frame poses them with.
+    void preroll_ghosts(double seconds) {
+        if (!viewmodel) return;
+        for (const auto &actor : roomActors)
+            if (actor.preroll && actor.ghost_slot >= 0 && size_t(actor.ghost_slot) < ghostPaths.size())
+                preroll_ghost(actor, ghostPaths[size_t(actor.ghost_slot)], seconds);
+    }
+
+    void preroll_ghost(const native_render::Actor &model, const native_render::GhostPath &path, double seconds) {
+        const auto [from, to] = native_render::ghost_preroll_ticks(path, model.frame.tick, replay_preroll_seconds);
+        auto actor = model;
+        actor.attack = actor.inspect = 0;
+        actor.inspectHeld = actor.jumped = false;
+        actor.gunReload.reset();
+        actor.sidemove = 0;
+        for (uint32_t tick = from; tick < to; ++tick) {
+            actor.frame = path.frames[tick];
+            actor.frame.weapon = model.frame.weapon;
+            actor.snapped = tick == from;
+            viewmodel->pose_actor(actor, seconds - double(to - tick) * path.interval);
+        }
+    }
+
     // prefers-reduced-motion, as the menu reports it: the bunnies' and the first-person weapons' motion at 45%
     // (reduced_motion.hpp).
     void set_reduced_motion(bool reduced) { reducedMotion = reduced; }
@@ -3086,6 +3111,7 @@ public:
         lastPitch = input.pitch;
         if (viewmodel) viewmodel->view_angles(float(lastYaw), float(lastPitch));
         if (viewmodel) viewmodel->set_actor_context(core, reducedMotion);
+        preroll_ghosts(seconds);
         if (profiling) {
             frameProfile = {};
             frameProfile.hdrAuthored = lightmapInfo.hdr;

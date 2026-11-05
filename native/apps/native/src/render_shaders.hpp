@@ -18,6 +18,9 @@ struct Actor {
     std::string outfit, loadout;
     float opacity = .45f;
     bool silenced = false, jumped = false, inspectHeld = false, snapped = false;
+    // A race ghost that cut this frame (ghost_playback.hpp GhostEventCursor::cut): its bunny first runs through its
+    // path's last moments (Renderer::preroll_ghosts) instead of carrying on or snapping.
+    bool preroll = false;
     // Nothing in the right hand (an avatar gesture): no knife or gun drawn.
     bool emptyHand = false;
     // The strafe key (command units, +-450): the bunny banks into strafes. The Source water level (2+ swims).
