@@ -536,7 +536,7 @@ function styleTab(a: MenuActions, track: number): HTMLElement {
           { type: "button", role: "radio", "aria-checked": String(on), tabindex: on ? "0" : "-1", "data-style": d.id, onclick: () => a.onStyle!(d.id) },
           h("span.sr-short", null, d.short),
           h("span.sr-text", null, h("b", null, d.name), h("small", null, d.rule)),
-          h("span.sr-pb", null, h("small", null, "PB"), pb ? h("b", null, formatTime(pb.time)) : h("b.dim", null, "—")),
+          pb ? h("span.sr-pb", null, h("small", null, "PB"), h("b", null, formatTime(pb.time))) : null,
         );
       }),
     );
@@ -649,9 +649,9 @@ function helpTab(inRoom: boolean): HTMLElement {
       null,
       h("h3", null, g.label),
       h(
-        "table.keys-table",
+        `table.keys-table${g.rows.some((r) => r.key) ? "" : ".no-keys"}`,
         null,
-        h("tbody", null, ...g.rows.map((r) => h("tr", null, h("th", null, r.what), h("td.pp-help-cmd", null, r.cmd ?? ""), h("td", null, r.key ? h("kbd", null, r.key) : "")))),
+        h("tbody", null, ...g.rows.map((r) => h("tr", null, h("th", null, r.what), h(`td.pp-help-cmd${(r.cmd ?? "").split(" ").length > 3 ? ".many" : ""}`, null, r.cmd ?? ""), h("td", null, r.key ? h("kbd", null, r.key) : "")))),
       ),
     );
   return h(

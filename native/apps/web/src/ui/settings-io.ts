@@ -19,7 +19,7 @@
 // through the same migration as stored prefs first. Keys missing from the document keep their current value.
 
 import { DEFAULT_PREFS, migratePrefs, type Prefs } from "./settings";
-import { importMapLooks, type MapLook } from "../map-look";
+import { importMapLooks } from "../map-look";
 import { PAINT_COLORS } from "../paint/prefs";
 import { TRIGGER_OPACITY, TRIGGER_STYLES, TRIGGER_THICKNESS } from "../triggers/volumes";
 import { COLOR_BLIND_MODES } from "../palette";
@@ -222,6 +222,7 @@ const RULES: [string, Rule][] = [
   ["viewmodel.bob", { range: [0, 1.5] }],
   ["viewmodel.sway", { range: [0, 1.5] }],
   ["viewmodel.hand", { oneOf: ["right", "left"] }],
+  ["viewmodel.inspect", { oneOf: ["tricks", "quiet"] }],
   ["viewmodel.x", { range: [-2, 2.5] }],
   ["viewmodel.y", { range: [-2, 2] }],
   ["viewmodel.z", { range: [-2, 2] }],
@@ -290,12 +291,15 @@ export function planSettingsImport(doc: SettingsDoc, current: Prefs): ImportPlan
   delete raw.mapLooks;
   walk(DEFAULT_PREFS as unknown as Record<string, unknown>, raw, next as unknown as Record<string, unknown>, "", plan);
   next.mapLooks = looks.next;
-  plan.applied.push(...looks.applied);
   plan.invalid.push(...looks.invalid);
-  for (const path of looks.applied) {
-    const [, map, k] = path.split(".") as [string, string, keyof MapLook];
-    if (current.mapLooks?.[map]?.[k] !== looks.next[map]?.[k]) plan.changed.push(path);
+  // Compared as {map, field}, not by splitting the path: map names can have dots.
+  for (const { map, field } of looks.entries) {
+    const path = `mapLooks.${map}.${field}`;
+    plan.applied.push(path);
+    if (current.mapLooks?.[map]?.[field] !== looks.next[map]?.[field]) plan.changed.push(path);
   }
+  // Maps of mine the 200-map cap dropped to make room: a change too (and Undo brings them back).
+  for (const map of looks.removed) plan.changed.push(`mapLooks.${map}`);
   return plan;
 }
 

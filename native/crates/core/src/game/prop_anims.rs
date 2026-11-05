@@ -14,6 +14,10 @@
 //! * SetPlaybackRate changes the rate from the current cycle on.
 //! * TurnOff / Disable hide it, TurnOn / Enable show it (EF_NODRAW only; "these do nothing about collisions"), and
 //!   StartDisabled starts it hidden. Kill removes it (`RtEnt::removed`).
+//! * RandomAnimation (`m_bRandomAnimator`) props switch between their ACT_IDLE sequences at MinAnimTime..MaxAnimTime
+//!   intervals instead of playing DefaultAnim. The switching itself is time-based, so the client derives it from the
+//!   map, the entity and the visual time (apps/web/src/map-props.ts `RandomAnimator`); this only tracks whether the
+//!   map's I/O has since set a sequence (`PROP_ANIM_SET`), which the client then follows instead.
 //!
 //! Sequence lengths, loop flags and activity lookups live in the model, so the client turns sequence time into cycles.
 
@@ -23,6 +27,8 @@ use crate::entities::Entity;
 /// `prop_anim_states` flags.
 pub const PROP_ANIM_HIDDEN: u32 = 1;
 pub const PROP_ANIM_REMOVED: u32 = 2;
+/// The map's I/O set a sequence (SetAnimation): a RandomAnimation prop follows that from then on.
+pub const PROP_ANIM_SET: u32 = 4;
 
 #[derive(Clone, Debug)]
 pub struct PropAnim {
@@ -38,6 +44,8 @@ pub struct PropAnim {
     pub rate: f32,
     /// EF_NODRAW.
     pub hidden: bool,
+    /// SetAnimation has been received (`PROP_ANIM_SET`).
+    pub set: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -48,12 +56,13 @@ pub struct PropAnims {
 
 const ANIM_INPUTS: [&str; 4] = ["setanimation", "setdefaultanimation", "setplaybackrate", "setanimationnoreset"];
 
-/// Whether `e` is a prop_dynamic the client animates: it has a DefaultAnim, or the map's I/O sends it an animation input.
+/// Whether `e` is a prop_dynamic the client animates: it has a DefaultAnim or RandomAnimation, or the map's I/O sends it
+/// an animation input.
 fn animated(e: &Entity, io_targets: &[String]) -> bool {
     if !e.classname().to_ascii_lowercase().starts_with("prop_dynamic") {
         return false;
     }
-    if e.get("DefaultAnim").is_some_and(|a| !a.trim().is_empty()) {
+    if e.get("DefaultAnim").is_some_and(|a| !a.trim().is_empty()) || e.int("RandomAnimation") != 0 {
         return true;
     }
     let name = e.get("targetname").unwrap_or("");
@@ -74,7 +83,7 @@ impl PropAnims {
             .filter(|(_, e)| animated(e, &io_targets))
             .map(|(i, e)| {
                 let anim = e.get("DefaultAnim").unwrap_or("").trim().to_string();
-                PropAnim { ent: i as u32, default_anim: anim.clone(), anim, base: 0.0, since_tick: 0, rate: 1.0, hidden: e.int("StartDisabled") != 0 }
+                PropAnim { ent: i as u32, default_anim: anim.clone(), anim, base: 0.0, since_tick: 0, rate: 1.0, hidden: e.int("StartDisabled") != 0, set: false }
             })
             .collect();
         Self { props }
@@ -102,6 +111,7 @@ impl PropAnim {
                 }
                 self.anim = anim.to_string();
                 (self.base, self.since_tick, self.rate) = (0.0, tick, 1.0);
+                self.set = true;
             }
             "setdefaultanimation" => self.default_anim = param.trim().to_string(),
             "setplaybackrate" => {
@@ -135,7 +145,7 @@ impl Game {
         let dt = self.settings.tick_interval;
         self.prop_anims.props.iter().map(move |p| {
             let removed = self.ents.get(p.ent as usize).is_none_or(|e| e.removed);
-            let flags = (p.hidden as u32 * PROP_ANIM_HIDDEN) | (removed as u32 * PROP_ANIM_REMOVED);
+            let flags = (p.hidden as u32 * PROP_ANIM_HIDDEN) | (removed as u32 * PROP_ANIM_REMOVED) | (p.set as u32 * PROP_ANIM_SET);
             (p, flags, p.base * dt, p.since_tick as f32 * dt, p.rate)
         })
     }
@@ -159,14 +169,14 @@ mod tests {
 
     #[test]
     fn rate_changes_keep_the_cycle() {
-        let mut p = PropAnim { ent: 0, anim: "idle".into(), default_anim: "idle".into(), base: 0.0, since_tick: 0, rate: 1.0, hidden: false };
+        let mut p = PropAnim { ent: 0, anim: "idle".into(), default_anim: "idle".into(), base: 0.0, since_tick: 0, rate: 1.0, hidden: false, set: false };
         p.input("setplaybackrate", "2", 100);
         assert_eq!(p.time_at(100), 100.0);
         assert_eq!(p.time_at(110), 120.0);
         p.input("setplaybackrate", "0", 110);
         assert_eq!(p.time_at(500), 120.0);
         p.input("setanimation", "open", 600);
-        assert_eq!((p.anim.as_str(), p.time_at(600), p.rate), ("open", 0.0, 1.0));
+        assert_eq!((p.anim.as_str(), p.time_at(600), p.rate, p.set), ("open", 0.0, 1.0, true));
         p.input("setdefaultanimation", " closed ", 601);
         assert_eq!(p.default_anim, "closed");
         p.input("turnoff", "", 602);

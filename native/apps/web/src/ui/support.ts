@@ -483,12 +483,12 @@ function topList(top: TopSupporter[] | "failed" | null): HTMLElement {
     "ol.sp-top",
     null,
     ...top.map((t, i) => {
-      const a = nameAttrs({ nameColor: t.nameColor, nameEffect: t.nameEffect, nameColor2: t.nameColor2 });
+      const a = nameAttrs({ nameColor: t.nameColor, nameEffect: t.nameEffect, nameColor2: t.nameColor2, nameFont: t.nameFont }, undefined, t.name);
       return h(
         "li.sp-top-row",
         null,
         h("span.sp-top-n", null, String(i + 1)),
-        h("button.sp-top-name", { type: "button", title: `${t.name}'s profile`, onclick: () => ((reopenTop = true), navigate({ screen: "profile", id: t.id })) }, h("span", { style: a.style, class: a.class }, t.name), t.badge ? supporterMark() : null),
+        h("button.sp-top-name", { type: "button", title: `${t.name}'s profile`, onclick: () => ((reopenTop = true), navigate({ screen: "profile", id: t.id })) }, h("span", a, t.name), t.badge ? supporterMark() : null),
         h("span.sp-top-amt", null, `$${t.dollars.toLocaleString("en-US")}`),
         h("span.sp-top-since", null, `since ${fmtSince(t.since)}`),
       );

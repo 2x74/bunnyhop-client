@@ -274,6 +274,11 @@ export function bindRunStats(root: HTMLElement): void {
   bindGlobal();
   root.addEventListener("pointerover", (e) => {
     if (e.pointerType === "touch") return;
+    // A player's name or picture shows their hover card instead (ui/hover-card.ts).
+    if (e.target instanceof Element && e.target.closest("[data-pcard]")) {
+      if (current) hideRunStats();
+      return;
+    }
     const row = rowOf(e.target);
     if (row) schedule(row, e.clientX, SHOW_MS);
     else if (current) hideRunStats(); // a header, a gap, or the rows were replaced under the pointer

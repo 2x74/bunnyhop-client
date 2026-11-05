@@ -6,10 +6,10 @@ import { countryFlag } from "./country-flag";
 
 import type { CosmeticChoice, Profile, RunCard } from "../api";
 import { cosmetic, DEFAULT_COSMETICS } from "../progression";
-import { STAFF_LABEL, staffBadgeOf, type NameLook } from "../creators";
+import { peakOf, STAFF_LABEL, staffBadgeOf, type NameLook, type PeakTier } from "../creators";
 import { fmtPoints, topPercent } from "../ranking";
 import { styleLabel } from "../styles";
-import { tierLabel, TIERS } from "../tiers";
+import { CARD_TIERS, cardTierCounts, cardTierLabel, tierColor, tierLabel } from "../tiers";
 import { formatTime } from "../timer";
 import { trackName } from "../zones";
 import { badgeChip } from "./badges";
@@ -18,6 +18,12 @@ import { avatarImg, pictureOf } from "./avatar";
 import { h } from "./dom";
 import { nameAttrs, nameMarks } from "./marks";
 import { adminLink } from "../staff-lens";
+import { decorated } from "./avatar-deco";
+import { cardLayers, watchCardFx } from "./card-fx";
+import type { CardBorderId, CardEffectId } from "../supporter-looks";
+
+/** Everything Edit card previews of a supporter's look over the saved one. */
+export type SupporterLook = NameLook & { avatarDeco?: import("../supporter-looks").AvatarDecoId | null; cardBorder?: CardBorderId | null; cardEffect?: CardEffectId | null };
 
 
 const CROWN_SVG = `<svg viewBox="0 0 20 14" aria-hidden="true"><path d="M2 12h16l1.4-9-5 3.6L10 1 5.6 6.6.6 3z" fill="currentColor"/><circle cx="10" cy="9" r="1.4" fill="rgba(0,0,0,0.35)"/></svg>`;
@@ -38,8 +44,11 @@ const HAT_SVG: Record<string, string> = {
 
 export interface CardOverrides {
   cosmetics?: CosmeticChoice;
-  /** A supporter's name colour being previewed in Edit card (undefined: the profile's own). */
-  nameLook?: NameLook;
+  /**
+   * A supporter's look being previewed in Edit card (undefined: the profile's own): name colour, effect and font, and
+   * (v0.0.37) the avatar decoration and the card border and effect.
+   */
+  nameLook?: SupporterLook;
   badges?: string[];
   featured?: RunCard[];
   /** The card's first appearance on a screen: it rises in and a sheen sweeps across it once. */
@@ -67,17 +76,48 @@ export function displayTitle(p: Profile, c: CosmeticChoice = p.cosmetics): strin
 /** "1,204 views" (null at none: the line stays quiet). */
 export const viewsLabel = (n: number | undefined): string | null => (n ? `${n.toLocaleString("en-US")} ${n === 1 ? "view" : "views"}` : null);
 
-function featTile(r: RunCard): HTMLElement {
+/**
+ * One of the card's three runs: tier and place, the map, the time with the points the record gives on the overall
+ * board (record_points.points, as the profile's Top points list shows it; none when the run isn't a current record).
+ */
+export function featTile(r: RunCard): HTMLElement {
   const place = r.rank === 1 ? h("span.pc-place.wr", null, "WR") : r.rank ? h("span.pc-place", null, `#${r.rank}`) : null;
   const tags = [r.track ? trackName(r.track) : null, r.style !== "autohop" ? styleLabel(r.style) : null, viewsLabel(r.views)].filter(Boolean).join(" · ");
+  const pts = r.points ? h("span.pc-feat-pts", { title: "Points this record gives on the overall board" }, fmtPoints(r.points), h("small", null, " pts")) : null;
   return h(
     `div.pc-feat-tile.t${r.tier ?? "x"}`,
-    { "data-run": r.runId, title: "Show in the list" },
+    { "data-run": r.runId },
     h("div.pc-feat-top", null, h(`span.pc-tier.t${r.tier ?? "x"}`, null, tierLabel(r.tier)), place),
     h("div.pc-feat-map", null, r.map.replace(/^bhop_/, "")),
-    h("div.pc-feat-time", null, formatTime(r.time)),
+    h("div.pc-feat-row", null, h("span.pc-feat-time", null, formatTime(r.time)), pts),
     tags ? h("div.pc-feat-tag", null, tags) : null,
   );
+}
+
+/**
+ * The peak treatment (v0.0.37): players whose hardest clear is T7 or higher (their peak mark) get a moving layer in
+ * that tier's colour, growing with the tier. T7 a slow light sweep across the card; T8 adds a light running round the
+ * frame; T9 adds motes drifting up; T10 has all three, brighter and quicker. CSS only, transform and opacity on their
+ * own layers (ui/profile.css .pc-peak), so nothing re-lays out; still under reduced motion and on Potato.
+ */
+//
+// Extension points (kept stable for other card effects, e.g. v37/supporter's borders and effects):
+//   - peakLayers() returns { cls, style, aura, inner }. Both cards (playerCard, ui/hover-card.ts hoverCardBody) put
+//     `aura` first inside the card (under .pc-inner / .hc-inner, so only the frame band shows it) and `inner` first
+//     inside the content box (behind the content). Another effect can return the same shape and be spread beside it.
+//   - CSS custom properties on the card: --peak (colour), --sweep / --sweep-a (sweep period and strength), --aura-t /
+//     --aura-a (frame light period and strength), --motes-a; layer classes .pc-aura / .pc-glint / .pc-motes. All motion
+//     is transform / opacity only, with a still state under prefers-reduced-motion and body.potato.
+//   - Frames and backgrounds stay plain classes setting --frame / --bg-card (profile.css .pc-frame-* / .pc-bg-*) with
+//     their OG twins in apps/api/src/og/cards.ts FRAMES / BGS; peakStill() there is the still version for images.
+export function peakLayers(peak: PeakTier | null): { cls: string; style: string; aura: HTMLElement | null; inner: HTMLElement[] } {
+  if (!peak) return { cls: "", style: "", aura: null, inner: [] };
+  return {
+    cls: `.pc-peak.pc-peak-${peak}`,
+    style: `--peak:${tierColor(peak)}`,
+    aura: peak >= 8 ? h("div.pc-aura", { "aria-hidden": "true" }) : null,
+    inner: [...(peak >= 9 ? [h("div.pc-motes", { "aria-hidden": "true" })] : []), h("div.pc-glint", { "aria-hidden": "true" })],
+  };
 }
 
 export function playerCard(p: Profile, o: CardOverrides = {}): HTMLElement {
@@ -89,20 +129,25 @@ export function playerCard(p: Profile, o: CardOverrides = {}): HTMLElement {
   const rank = p.rank;
   const s = p.stats;
   const title = displayTitle(p, c);
-  const maxClears = Math.max(1, ...TIERS.map((t) => s.rankedByTier[t] ?? 0));
+  // The peak's layers plus a supporter's border and effect (ui/card-fx.ts; stacking: supporter-looks.ts cardLayerPlan).
+  const sl: SupporterLook = { nameColor: p.player.nameColor, avatarDeco: p.player.avatarDeco, cardBorder: p.player.cardBorder, cardEffect: p.player.cardEffect, ...o.nameLook };
+  const peak = cardLayers(peakOf(p.player.special), sl);
+  const clears = cardTierCounts(s.clearsByTier), ranked = cardTierCounts(s.rankedByTier);
   // The staff badge (older APIs: from the role).
   const staff = p.player.staff !== undefined ? p.player.staff : staffBadgeOf(p.role);
   /** A supporter's name look (Edit card → Name previews over what's saved). */
-  const look = nameAttrs({ nameColor: p.player.nameColor, nameEffect: p.player.nameEffect, nameColor2: p.player.nameColor2, ...o.nameLook });
+  const look = nameAttrs({ nameColor: p.player.nameColor, nameEffect: p.player.nameEffect, nameColor2: p.player.nameColor2, nameFont: p.player.nameFont, ...o.nameLook }, undefined, p.player.name);
 
   // data-part: the parts the owner's card editor picks by clicking them (ui/profile.ts).
   const card = h(
-    `div.pc.pc-frame-${(c.frame ?? "frame-plain").replace(/^frame-/, "")}.pc-bg-${(c.background ?? "bg-night").replace(/^bg-/, "")}`,
-    { style: `--rank:${rank.group.color}`, "data-part": "frame" },
+    `div.pc.pc-frame-${(c.frame ?? "frame-plain").replace(/^frame-/, "")}.pc-bg-${(c.background ?? "bg-night").replace(/^bg-/, "")}${peak.cls}`,
+    { style: `--rank:${rank.group.color}${peak.style ? `;${peak.style}` : ""}`, "data-part": "frame" },
+    peak.aura,
     h(
       "div.pc-inner",
       { "data-part": "background" },
       h("div.pc-art", { "aria-hidden": "true" }),
+      ...peak.inner,
       h(
         "header.pc-head",
         null,
@@ -119,7 +164,7 @@ export function playerCard(p: Profile, o: CardOverrides = {}): HTMLElement {
       h(
         "div.pc-id",
         null,
-        avatarEl(p.player),
+        decorated(avatarEl(p.player), sl, { animate: true, watch: false }),
         h(
           "div.pc-who",
           null,
@@ -137,6 +182,7 @@ export function playerCard(p: Profile, o: CardOverrides = {}): HTMLElement {
                   .filter(Boolean)
                   .join(";"),
                 class: look.class,
+                "data-nm-font": look["data-nm-font"],
                 "data-part": p.supporterSettings ? "name" : undefined,
               },
               p.player.name,
@@ -187,15 +233,19 @@ export function playerCard(p: Profile, o: CardOverrides = {}): HTMLElement {
           h(
             "div.pc-bars",
             null,
-            ...TIERS.map((t) => {
-              const n = s.clearsByTier[t] ?? 0;
-              const of = s.rankedByTier[t] ?? 0;
+            // Seven bars, the last "T7+" holding T7 to T10 (owner, v0.0.37: tiers.ts cardTierCounts).
+            ...CARD_TIERS.map((t, i) => {
+              const n = clears[i];
+              const of = ranked[i];
+              // How much of the tier is done (a sliver for any clear, so one T9 shows), full colour once swept. Until
+              // v0.0.37 the height was clears over the biggest tier's map count, which left most players' bars empty.
+              const done = of ? Math.min(1, n / of) : 0;
               return h(
-                `div.pc-bar.t${t}`,
-                { title: `${tierLabel(t)}: ${n}/${of} maps` },
-                h("span.pc-bar-track", null, h("span.pc-bar-fill", { style: `--f:${of ? n / maxClears : 0};--full:${of ? Math.min(1, n / of) : 0}` })),
+                `div.pc-bar.t${t}${n ? "" : ".none"}`,
+                { title: `${cardTierLabel(t)}: ${n} of ${of} maps` },
+                h("span.pc-bar-track", null, h("span.pc-bar-fill", { style: `--f:${n ? Math.max(0.1, done) : 0};--full:${done >= 1 ? 1 : 0}` })),
                 h("b", null, String(n)),
-                h("small", null, tierLabel(t)),
+                h("small", null, cardTierLabel(t)),
               );
             }),
           ),
@@ -203,9 +253,12 @@ export function playerCard(p: Profile, o: CardOverrides = {}): HTMLElement {
         h(
           "div.pc-recs",
           null,
-          h("div", null, h("b.wr", null, String(s.wrs)), h("small", null, "WRs")),
-          h("div", null, h("b", null, String(s.top10s)), h("small", null, "Top 10s")),
-          h("div", null, h("b", null, String(s.maps)), h("small", null, "Maps")),
+          // Each count in its own column with its label; longer numbers step down a size so three of them never run
+          // together ("102 155 141" read as one number: UI audit, 11-05).
+          ...([[s.wrs, "WRs", ".wr"], [s.top10s, "Top 10s", ""], [s.maps, "Maps", ""]] as const).map(([n, label, cls]) => {
+            const v = n.toLocaleString("en-US");
+            return h(`div${v.length >= 5 ? ".xl" : v.length >= 3 ? ".l" : ""}`, null, h(`b${cls}`, null, v), h("small", null, label));
+          }),
         ),
       ),
       h(
@@ -226,6 +279,7 @@ export function playerCard(p: Profile, o: CardOverrides = {}): HTMLElement {
       o.enter ? h("div.pc-sweep", { "aria-hidden": "true" }) : null,
     ),
   );
+  watchCardFx(card);
   const stage = h(`div.pc-stage${o.enter ? ".pc-enter" : ""}`, null, card);
   tilt(stage, card);
   return stage;

@@ -37,10 +37,12 @@ import { fetchExportLeaderboard } from "./export-leaderboard";
 import { Core, floorWeapons, traceRay, WEAPON_IDS, weaponReport, type BrushTransform } from "../core";
 import { Ghost } from "../ghost";
 import { GHOST_CSS, type GhostKind } from "../player/colors";
-import { PlayerModel, type PlayerPose } from "../player/model";
+import { PlayerModel } from "../player/model";
 import { download, loadPBReplay } from "../pb";
 import { cosmeticBetween, decodeReplay, inspectBetween, replayFileName, replayStyle, type Replay } from "../replay";
 import { emitWeaponEvent } from "../viewmodel/events";
+import { setFinishClock } from "../viewmodel/finishes/shader";
+import { setFinishEnvironmentClock } from "../viewmodel/finishes/environment";
 import { FloorGuns } from "../viewmodel/guns/world";
 import type { WorldView } from "../render";
 import { simulate } from "../sim";
@@ -50,13 +52,14 @@ import { afterPaint, h } from "../ui/dom";
 import { hideUiKey, isHideUiKey, setUiHidden } from "../ui/hide-ui";
 import { prefs } from "../ui/settings";
 import { trackName } from "../zones";
-import { CameraRig, CAM_MODES, directShots, freeSpeedStep, type CamMode, type TraceFn } from "./cameras";
+import { CameraRig, CAM_MODES, CHASE_NEAR_FADE, directShots, freeSpeedStep, type CamMode, type TraceFn } from "./cameras";
 import { freeIntentFromCodes } from "../freecam";
 import type { CardInfo } from "./canvas-hud";
 import { openExportDialog, type ExportCam, type ExportSource } from "./export";
 import { runUrl, shareButton } from "../ui/share";
 import { ViewerHud } from "./hud";
-import { F_GROUNDED, F_LANDED, F_TELEPORTED, finalRunTime, ladderAt, prerollFrom, ReplayPlayer, sampleAt, type RunData, type ViewSample } from "./player";
+import { F_LANDED, F_TELEPORTED, finalRunTime, replayTicks, ReplayPlayer, sampleAt, type RunData, type ViewSample } from "./player";
+import { TickStepper, type TickSource } from "../player/tick-stepper";
 import { probeFromTrace } from "../player/bunny/legs";
 import { viewerRequestRunId, viewerUrl, type ReplayTarget, type ViewerRequest } from "./request";
 import { publicOrigin } from "../platform/env";
@@ -219,6 +222,9 @@ export class ReplayViewer implements ExportSource {
   private lastNow = performance.now();
   private lastShown = -1;
   private lastRenderedTick = NaN;
+  /** The bunny on the simulation's clock (viewer/player.ts TickStepper), for the model and run it was made for. */
+  private stepper = new TickStepper();
+  private stepperFor: { model: PlayerModel; data: RunData; src: TickSource } | null = null;
   private sample: ViewSample | undefined;
   private camPos = new THREE.Vector3();
   private exporting = false;
@@ -297,7 +303,7 @@ export class ReplayViewer implements ExportSource {
     this.playerShadow = new PlayerShadowProxy(host.scene, this.drawModel.root);
     this.model.root.visible = false;
     this.model.root.userData.h2hPrimary = true; // hidden in head to head's other view (viewer/h2h.ts)
-    this.model.setNearFade(10, 34);
+    this.model.setNearFade(...CHASE_NEAR_FADE);
     // The legs plant on slopes with the world under the feet (player/bunny/legs.ts).
     this.model.setGroundProbe(probeFromTrace((a, b) => this.trace(a, b, 0)));
     this.timeline = new Timeline({ seek: (t, final) => this.seekTo(t, final) });
@@ -1335,9 +1341,10 @@ export class ReplayViewer implements ExportSource {
     const i = Math.max(0, Math.min(d.n, Math.floor(t)));
     // Direct replay/export sampling also performs seeks; reset animation/camera history at those cuts. Both pre-roll the
     // run before the cut (cameras.ts, PlayerModel.preroll), so a seek lands where continuous playback would be.
+    let cut = false;
     if (this.lastShown < 0 || (Number.isFinite(this.lastRenderedTick) && (t < this.lastRenderedTick || (dt <= 0 && t !== this.lastRenderedTick)))) {
       rig.snap();
-      this.drawModel.preroll(prerollFrom(d, t));
+      cut = true;
     }
     this.lastRenderedTick = t;
     // Moving sprite trails are rebuilt from the brush history every frame (render.ts reconstructTrails). Playing (and
@@ -1415,9 +1422,6 @@ export class ReplayViewer implements ExportSource {
     model.setHeldHidden(!shown.third);
     this.playerShadow.update(s.pos, s.crouched, !showModel);
     {
-      // Grounded if any tick since the last frame touched the ground (bhop lands for a single tick).
-      let grounded = s.grounded;
-      if (!grounded && this.lastShown >= 0 && i > this.lastShown && i - this.lastShown < 30) for (let k = this.lastShown + 1; k <= i && !grounded; k++) grounded = (d.flags[k] & F_GROUNDED) !== 0;
       // Carrot swings recorded in the replay (cosmetic trailer), during normal playback.
       const playing = contiguous;
       const attack = playing ? cosmeticBetween(d.replay.cosmetic, this.lastShown, i) : 0;
@@ -1427,11 +1431,15 @@ export class ReplayViewer implements ExportSource {
       if (showModel && ins.sig && !this.exporting) emitWeaponEvent({ type: "inspect", source: "replay", position: [s.pos[0], s.pos[1], s.pos[2]] });
       // An empty hand (weapon off) doesn't swing or inspect.
       const tpHeld = shown.third;
-      const pose: PlayerPose = { visualTime: t * d.interval, position: s.pos, velocity: s.vel, yaw: s.yaw, pitch: s.pitch, crouched: s.crouched, grounded, forwardmove: s.forward, sidemove: s.side, attack: tpHeld ? attack : 0, inspect: tpHeld ? ins.sig : 0, inspectHeld: tpHeld && ins.held, ladder: ladderAt(d, t) };
       model.setGun(weapons && weapons.active >= 2 ? WEAPON_IDS[weapons.active] : null);
       model.setGunSilencer(!!weapons && weapons.active >= 2 && weapons.silencer);
-      model.setState(pose);
-      model.update(dt);
+      // On the simulation's clock (viewer/player.ts TickStepper): the model updates on each tick's own pose and blends
+      // between ticks, so the pose at a replay time is the same at any playback speed and frame rate. A cut pre-rolls.
+      if (this.stepperFor?.model !== model || this.stepperFor.data !== d) {
+        this.stepperFor = { model, data: d, src: replayTicks(d) };
+        this.stepper.reset();
+      }
+      this.stepper.show(model, this.stepperFor.src, t, cut, { attack: tpHeld ? attack : 0, inspect: tpHeld ? ins.sig : 0, inspectHeld: tpHeld && ins.held });
       if (arms) {
         if (attack) arms.swing(attack);
         if (ins.sig) arms.inspect(ins.sig);
@@ -1594,6 +1602,12 @@ export class ReplayViewer implements ExportSource {
   beginExport(): void {
     this.watchCount?.seek();
     this.exporting = true;
+    // The in-eye arms start from a clean presentation too (clocks, feel, both gun viewmodels): arms.reset at the next
+    // frame (ReplayArms.reset: Viewmodel.idle, GunPresenter.reset); animated finishes run on the replay's time.
+    this.armsTick = -1;
+    const replayTime = () => (Number.isFinite(this.lastRenderedTick) ? this.lastRenderedTick : 0) * (this.data?.interval ?? 0.01);
+    setFinishClock(replayTime);
+    setFinishEnvironmentClock(() => replayTime() * 1000);
     this.sound.stop();
     this.playing = false;
     this.updateControls();
@@ -1603,7 +1617,7 @@ export class ReplayViewer implements ExportSource {
     this.drawModel = new PlayerModel({ style: "solid", playerGlow: this.look.glow, outfit: this.look.outfit, loadout: this.look.loadout });
     this.drawModel.root.userData.h2hPrimary = true;
     this.playerShadow.bind(this.drawModel.root);
-    this.drawModel.setNearFade(10, 34);
+    this.drawModel.setNearFade(...CHASE_NEAR_FADE);
     this.drawModel.setGroundProbe(probeFromTrace((a, b) => this.trace(a, b, 0)));
     this.host.scene.add(this.drawModel.root);
     if (this.compare) {
@@ -1653,6 +1667,8 @@ export class ReplayViewer implements ExportSource {
 
   endExport(): void {
     this.exporting = false;
+    setFinishClock(null);
+    setFinishEnvironmentClock(null);
     this.exportWeapon = null;
     if (this.arms) this.arms.deployOnShow = true;
     if (this.drawModel !== this.model) {

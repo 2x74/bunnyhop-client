@@ -14,6 +14,9 @@
 //   the facing mask. Approximated without the frame-buffer copy: the same mask, tint and silhouette terms multiply what
 //   is already drawn behind the surface (blend dst * 2 * src), without the refraction offset and blur.
 //
+// Wireframe (SDK 2013 materialsystem/stdshaders/wireframe_dx9.cpp): the surface's triangle edges in $color, unlit and
+//   untextured; the faces between them are not drawn. bhop_4triedsame's escapism/test shaft walls use it.
+//
 // Cube maps come from vtf-cube.ts (HDR float16 / integer / RGBS decoded to sRGB RGBA8, one mip at most `maxSize`).
 
 import * as THREE from "three";
@@ -56,6 +59,28 @@ export function windowImposterParams(vmt: Vmt): ImposterParams | null {
     nofog: vmtFlag(vmt, "$nofog"),
     fade: proximity && toAlpha && min !== undefined && max !== undefined && max > min ? { min, max } : null,
   };
+}
+
+export interface WireframeParams {
+  color: [number, number, number];
+  alpha: number;
+}
+
+export function wireframeParams(vmt: Vmt): WireframeParams | null {
+  if (vmt.shader !== "wireframe") return null;
+  return { color: vmtColor(vmt, "$color") ?? [1, 1, 1], alpha: Math.min(1, Math.max(0, vmtFloat(vmt, "$alpha") ?? 1)) };
+}
+
+/** Wireframe: three.js draws the same triangle edges (`wireframe`), unlit in `$color`. */
+export function wireframeMaterial(p: WireframeParams): THREE.MeshBasicMaterial {
+  const m = new THREE.MeshBasicMaterial({
+    color: new THREE.Color(p.color[0], p.color[1], p.color[2]),
+    wireframe: true,
+    transparent: p.alpha < 1,
+    opacity: p.alpha,
+  });
+  m.name = "wireframe";
+  return m;
 }
 
 export function aftershockParams(vmt: Vmt): AftershockParams | null {
@@ -243,11 +268,12 @@ export function aftershockMaterial(p: AftershockParams, toSource: ToSourceUnifor
 /** What `ImposterSet` built for one material. */
 export type ImposterKind =
   | { kind: "window"; material: THREE.ShaderMaterial; average: [number, number, number]; params: ImposterParams }
-  | { kind: "aftershock"; material: THREE.ShaderMaterial };
+  | { kind: "aftershock"; material: THREE.ShaderMaterial }
+  | { kind: "wireframe"; material: THREE.MeshBasicMaterial };
 
 /**
  * The imposter materials of one world: VMTs read through `read` (the core's VFS), cube maps decoded once per path.
- * Only materials whose shader is WindowImposter or Aftershock ever reach here, so other maps pay nothing.
+ * Only materials whose shader is WindowImposter, Aftershock or Wireframe ever reach here, so other maps pay nothing.
  */
 export class ImposterSet {
   readonly toSource: ToSourceUniform = { value: new THREE.Matrix3() };
@@ -295,6 +321,8 @@ export class ImposterSet {
     if (!vmt) return null;
     const as = aftershockParams(vmt);
     if (as) return { kind: "aftershock", material: aftershockMaterial(as, this.toSource) };
+    const wire = wireframeParams(vmt);
+    if (wire) return { kind: "wireframe", material: wireframeMaterial(wire) };
     const p = windowImposterParams(vmt);
     const cube = p && this.cube(p.envmap);
     if (!p || !cube) return null;

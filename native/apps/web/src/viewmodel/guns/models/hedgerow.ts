@@ -57,7 +57,8 @@ function build(k: KnifeCtx): void {
   lathe(k, [[6.2, 0.4], [19.3, 0.4], [19.6, 0.32], [19.7, 0]], { c: [0, TZ], paint: STEEL, sides: 12 });
   box(k, [21.2, 0, BZ + 0.55], [0.18, 0.06, 0.2], { paint: LEAF, round: 0.05 });
   // --- Handguard: a green sleeve around barrel and tube, leaf vents along its sides.
-  slab(k, [[6.3, -0.55], [15.5, -0.45], [15.7, 1.0], [15.4, 1.95], [6.3, 1.95]], -0.82, 0.82, { paint: (i) => (i === 0 || i === 3 ? GREEN_DARK : GREEN), part: PART.grip, round: 0.3, bevel: 0.16 });
+  // (Its belly lifts past the support hand into a rounded nose, v0.0.37 polish: it was a plain block.)
+  slab(k, [[6.3, -0.55], [12.6, -0.5], [15.3, -0.25], [15.7, 0.85], [15.4, 1.95], [6.3, 1.95]], -0.82, 0.82, { paint: (i) => (i === 0 || i === 3 ? GREEN_DARK : GREEN), part: PART.grip, round: [0.3, 0.8, 0.5, 0.5, 0.3, 0.3], bevel: 0.16 });
   if (fp) for (const y of [-1, 1]) for (let i = 0; i < 5; i++) {
     const x = 7.6 + i * 1.6;
     k.leaf([[x - 0.45, y * 0.83, 0.75], [x, y * 0.84, 0.95], [x + 0.45, y * 0.83, 1.15]], (j) => [0.06, 0.2, 0.06][j] ?? 0.06, 0.03, [0, y, 0], () => VENT);

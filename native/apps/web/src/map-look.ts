@@ -45,7 +45,10 @@ export function cleanMapLook(raw: unknown): MapLook | null {
   return Object.keys(out).length ? out : null;
 }
 
-export const validMapName = (name: unknown): name is string => typeof name === "string" && NAME_RE.test(name);
+/** Names that would reach an object's prototype as keys, never map names. */
+const RESERVED = new Set(["__proto__", "constructor", "prototype"]);
+
+export const validMapName = (name: unknown): name is string => typeof name === "string" && NAME_RE.test(name) && !RESERVED.has(name);
 
 /** Saved or imported overrides, cleaned: valid map names, valid values, the newest MAP_LOOK_CAP. */
 export function sanitizeMapLooks(raw: unknown): Record<string, MapLook> {
@@ -103,28 +106,42 @@ export function useMapLookEverywhere(p: Pick<Prefs, "graphics" | "mapLooks">, ma
 
 export const mapLookCount = (p: Pick<Prefs, "mapLooks">): number => Object.keys(p.mapLooks ?? {}).length;
 
+/** One imported value: which map, which field. Kept apart (a map name can have dots: "mapLooks.a.b.brightness"). */
+export interface MapLookEntry {
+  map: string;
+  field: keyof MapLook;
+}
+
 /**
  * Imported overrides over mine (settings-io.ts): maps in the file replace those values, field by field; maps and
- * fields it doesn't mention keep mine. Returns the paths it took ("mapLooks.<map>.<field>") and the ones it refused.
+ * fields it doesn't mention keep mine. Returns what it took (`entries`), what it refused (`invalid`: paths for the
+ * report), and the maps of mine the 200-map cap dropped to make room (`removed`).
  */
-export function importMapLooks(mine: Record<string, MapLook>, raw: unknown): { next: Record<string, MapLook>; applied: string[]; invalid: string[] } {
+export function importMapLooks(
+  mine: Record<string, MapLook>,
+  raw: unknown,
+): { next: Record<string, MapLook>; entries: MapLookEntry[]; invalid: string[]; removed: string[] } {
   const next: Record<string, MapLook> = JSON.parse(JSON.stringify(mine ?? {}));
-  const applied: string[] = [];
+  const entries: MapLookEntry[] = [];
   const invalid: string[] = [];
-  if (raw === undefined) return { next, applied, invalid };
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { next, applied, invalid: ["mapLooks"] };
+  if (raw === undefined) return { next, entries, invalid, removed: [] };
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { next, entries, invalid: ["mapLooks"], removed: [] };
   for (const [name, v] of Object.entries(raw as Record<string, unknown>)) {
     const look = validMapName(name) ? cleanMapLook(v) : null;
     if (!look) {
       invalid.push(`mapLooks.${name}`);
       continue;
     }
-    for (const k of Object.keys(look) as (keyof MapLook)[]) applied.push(`mapLooks.${name}.${k}`);
+    // Fields that were there but wrong (beside a good one) are reported too.
+    for (const k of Object.keys(v as object)) if (!(k in look)) invalid.push(`mapLooks.${name}.${k}`);
+    for (const field of Object.keys(look) as (keyof MapLook)[]) entries.push({ map: name, field });
     const merged = { ...next[name], ...look };
     delete next[name];
     next[name] = merged;
   }
-  return { next: capLooks(next), applied, invalid };
+  capLooks(next);
+  const removed = Object.keys(mine ?? {}).filter((m) => !Object.hasOwn(next, m));
+  return { next, entries, invalid, removed };
 }
 
 let current: string | null = null;

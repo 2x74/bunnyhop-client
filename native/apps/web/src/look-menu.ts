@@ -10,7 +10,7 @@
 // in CS:S (bhop_aux_a9, bhop_dumb_blocks_3); the lighting matches Source, so this is about reaching the setting fast.
 
 import { registerChatCommand, type ChatContext } from "./chat-commands";
-import { holdFreeCursor, releaseHeldCursor } from "./free-cursor";
+import { holdFreeCursor } from "./free-cursor";
 import { isTextField, type Input } from "./input";
 import {
   BRIGHTNESS_MAX,
@@ -66,8 +66,11 @@ function spec(map: string): MenuSpec {
     value.textContent = brightnessLabel(look(map).brightness);
     if (menu) menu.el.querySelector(".mm-footer")!.textContent = footer(map);
   });
-  // (Keys stay the menu's: arrows on a focused slider would also move the player.)
+  // Keys stay the menu's and the game's: the slider gives its focus back once it's let go (a focused input would keep
+  // the movement keys from the game: input.ts isTextField), and its own arrow keys never move it.
   slider.addEventListener("keydown", (e) => e.preventDefault());
+  slider.addEventListener("change", () => slider.blur());
+  slider.addEventListener("pointerup", () => slider.blur());
   const sw = h("input.switch.sm.look-switch", { type: "checkbox", tabindex: "-1", "aria-hidden": "true" });
   sw.checked = l.fullbright;
   return {
@@ -96,19 +99,27 @@ const footer = (map: string) => (look(map).own ? `Set for ${map} only.` : `Chang
 
 export const lookMenuOpen = (): boolean => menu?.id.current === "look";
 
+/**
+ * What a key does while the menu is open: "close" (Esc), a digit to pick (0 closes), or null (not the menu's: the game
+ * or the field being typed in gets it). `typing`: the key went to the chat or another text field, not the menu's slider.
+ */
+export function lookMenuKey(code: string, o: { repeat?: boolean; modifier?: boolean; typing?: boolean }): "close" | number | null {
+  if (o.repeat || o.modifier || o.typing) return null;
+  if (code === "Escape") return "close";
+  const d = /^(?:Digit|Numpad)(\d)$/.exec(code);
+  return d ? Number(d[1]) : null;
+}
+
 /** Opens the quick menu for the map on screen (closes it if open). From chat, the cursor stays out for it. */
 export async function openLookMenu(reply?: (text: string) => void): Promise<void> {
   const map = lookMapNow();
   if (!map) return reply?.("Not available here.");
   if (menu?.open) return menu.hide();
   if (!menu) {
-    const { NumberMenu } = await import("./net/hud");
+    const { NumberMenu, releaseCursorOnClose } = await import("./net/hud");
     menu = new NumberMenu(document.getElementById("hud") ?? document.body);
     menu.el.classList.add("look-menu");
-    menu.onHide = () =>
-      setTimeout(() => {
-        if (!menu?.open && releaseHeldCursor()) input?.recapture();
-      });
+    releaseCursorOnClose(menu, () => input?.recapture());
   }
   hook();
   menu.show("look", spec(map));
@@ -118,17 +129,18 @@ export async function openLookMenu(reply?: (text: string) => void): Promise<void
 function hook(): void {
   if (hooked) return;
   hooked = true;
-  // Capture phase, ahead of the game's keys (as the guns menu): its digits pick, Esc closes.
+  // Capture phase, ahead of the game's keys (as the guns menu): its digits pick, Esc closes. Also with its own slider
+  // focused; never while typing in the chat or another text field.
   window.addEventListener(
     "keydown",
     (e) => {
-      if (!menu?.open || e.repeat || e.ctrlKey || e.metaKey || e.altKey || isTextField(e.target)) return;
-      if (e.code === "Escape") return menu.hide();
-      const d = /^(?:Digit|Numpad)(\d)$/.exec(e.code);
-      if (!d) return;
+      if (!menu?.open) return;
+      const action = lookMenuKey(e.code, { repeat: e.repeat, modifier: e.ctrlKey || e.metaKey || e.altKey, typing: isTextField(e.target) && !(e.target instanceof Node && menu.el.contains(e.target)) });
+      if (action === null) return;
       e.preventDefault();
       e.stopImmediatePropagation();
-      menu.key(Number(d[1]));
+      if (action === "close") menu.hide();
+      else menu.key(action);
     },
     true,
   );

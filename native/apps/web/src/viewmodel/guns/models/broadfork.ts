@@ -12,7 +12,7 @@ import { box, dome, groove, guard, lathe, pins, plate, rod, slab, trigger, type 
 import { gunPaint as fixed } from "../material";
 import type { GunDef } from "../types";
 
-const RECV = fixed(0x5b6069, "metal"), RECV_DARK = fixed(0x3f434a, "dark"), STEEL = fixed(0x3a3f47, "dark"), STEEL_LIGHT = fixed(0x6a707a, "metal"), BORE = fixed(0x101114);
+const RECV = fixed(0x4f545c, "metal"), RECV_DARK = fixed(0x3f434a, "dark"), STEEL = fixed(0x3a3f47, "dark"), STEEL_LIGHT = fixed(0x6a707a, "metal"), BORE = fixed(0x101114);
 const WOOD = fixed(0x8f5d36, "wood"), WOOD_DARK = fixed(0x6b4426, "wood"), LEAF = fixed(0x58c64a), LEAF_DARK = fixed(0x2f7d34), ORANGE = fixed(0xff7a1a);
 const HULL = fixed(0xc43c2c), BRASS = fixed(0xd8a640, "metal"), PAD = fixed(0x2b2a2c, "grip"), SEAM = fixed(0x2a2d33, "dark"), LIP = fixed(0x9aa1ab, "metal");
 /** The trigger's pivot (top of its blade, gun-local). */
@@ -34,6 +34,14 @@ const gripAt = (t: number, d: number): [number, number, number] => {
   const p = along(BACK0, t, d);
   return [p[0], 0, p[1]];
 };
+
+/** The stock's side profile (top line from the receiver to the heel, then the butt, the toe and the belly). */
+const STOCK: P2[] = [[-0.75, 1.55], [-2.0, 1.22], [-4.1, 1.45], [-4.25, -1.3], [-3.6, -1.5], [-1.6, -0.85], [-0.75, -0.2]];
+/** The stock's top (side 1) or belly (side -1) height at x, on its straight edges (for the wrap). */
+function stockAt(x: number, side: 1 | -1): number {
+  const [a, b] = side > 0 ? [STOCK[1], STOCK[2]] : [STOCK[5], STOCK[4]];
+  return a[1] + ((x - a[0]) / (b[0] - a[0])) * (b[1] - a[1]);
+}
 
 function build(k: KnifeCtx): void {
   const fp = k.view === "fp";
@@ -73,11 +81,16 @@ function build(k: KnifeCtx): void {
   slab(k, [along(b0, 0.7, -0.05), [-0.12, -0.88], along(b0, 0.85, GRIP_DEPTH), along(b0, GRIP_LEN, GRIP_DEPTH - 0.1), along(b0, GRIP_LEN, 0.05), along(b0, 1.5, -0.05)], -0.62, 0.62, { paint: WOOD, part: PART.grip, round: 0.25, bevel: 0.15 });
   const c0 = along(b0, GRIP_LEN, -0.05), c1 = along(b0, GRIP_LEN, GRIP_DEPTH - 0.05), c2 = along(b0, GRIP_LEN + 0.28, GRIP_DEPTH - 0.15), c3 = along(b0, GRIP_LEN + 0.28, 0.05);
   slab(k, [c0, c1, c2, c3], -0.64, 0.64, { paint: ORANGE, round: 0.12 });
-  slab(k, [[-0.75, 1.55], [-4.2, 1.35], [-4.2, -1.4], [-2.4, -1.05], [-1.2, -0.75], [-0.75, -0.2]], -0.6, 0.6, { paint: WOOD, round: 0.3, bevel: 0.15 });
+  // The stock (v0.0.37 polish: it was a box): a slim wrist, the comb rising to a rounded heel, an angled toe and the belly
+  // sweeping up to the grip. The leaf wrap, the pad and the sling loop follow its outline.
+  slab(k, STOCK, -0.6, 0.6, { paint: WOOD, round: [0.3, 0.6, 0.45, 0.3, 0.5, 0.8, 0.3], bevel: 0.15 });
   // Rubber butt pad, a steel sling loop under the stock.
-  slab(k, [[-4.18, 1.38], [-4.5, 1.36], [-4.5, -1.42], [-4.18, -1.43]], -0.62, 0.62, { paint: PAD, round: 0.1, bevel: 0.08 });
-  if (fp) guard(k, [[-3.35, -1.22], [-3.45, -1.62], [-3.85, -1.66], [-3.9, -1.3]], 0.05, { paint: STEEL_LIGHT, open: true });
-  if (fp) for (const [x, p] of [[-2.9, LEAF], [-3.15, LEAF_DARK]] as const) slab(k, [[x + 0.1, 1.48], [x - 0.1, 1.47], [x - 0.1, -1.18], [x + 0.1, -1.2]], -0.63, 0.63, { paint: p, round: 0.06, bevel: 0.03 });
+  slab(k, [[-4.08, 1.42], [-4.42, 1.36], [-4.55, -1.3], [-4.2, -1.38]], -0.62, 0.62, { paint: PAD, round: 0.1, bevel: 0.08 });
+  if (fp) guard(k, [[-3.0, -1.27], [-3.1, -1.7], [-3.5, -1.74], [-3.55, -1.42]], 0.05, { paint: STEEL_LIGHT, open: true });
+  if (fp) for (const [x, p] of [[-2.35, LEAF], [-2.6, LEAF_DARK]] as const) {
+    const top = stockAt(x, 1), bot = stockAt(x, -1);
+    slab(k, [[x + 0.1, top + 0.06], [x - 0.1, top + 0.06], [x - 0.1, bot - 0.06], [x + 0.1, bot - 0.06]], -0.63, 0.63, { paint: p, round: 0.06, bevel: 0.03 });
+  }
   // --- The shell the left hand loads (Aux; built seated in the tube behind the port, hidden until a reload).
   lathe(k, [[1.5, 0.33], [1.62, 0.33], [1.62, 0.3], [2.75, 0.29], [2.8, 0.2]], { c: [0, TZ], paint: (i) => (i < 1 ? BRASS : HULL), sides: 10, bone: "Aux" });
 }

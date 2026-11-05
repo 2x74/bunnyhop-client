@@ -8,8 +8,12 @@
 //                   that drifts past STEP_DIST or STEP_YAW becomes a step: the foot lifts and moves to where the
 //                   animation has it over STEP_TIME (one foot at a time), so turning on the spot is a few planted steps
 //                   instead of the feet spinning under the body. Corrections are bounded (MAX_REACH) and fade in / out.
-//                   Slopes: with a ground probe (setGroundProbe) each planted foot sits on the ground under it and the
-//                   pelvis drops (bounded) for the lower foot; without one the ground is the feet's plane.
+//                   Slopes: with a ground probe (setGroundProbe) every foot on the ground (planted or not) sits on the
+//                   ground under it, tilted to its slope (bounded), and the pelvis drops (bounded, smoothed) when a
+//                   foot is out of the leg's reach; without a probe the ground is the feet's plane. Locks and steps are
+//                   world positions (z too), so a planted foot stays put when the body rises or sinks on a slope; the
+//                   support under a lock is re-probed (a lift carries it), and a lock whose height is past REACH_Z
+//                   from the feet steps (stairs, ledges).
 //   jump phases     in the air the feet follow the vertical phase: a short extension right after take-off, a tuck at
 //                   the apex, a reach for the ground on the way down (none while crouched: a steady tuck instead).
 //   landings        a landing where the player stays down: the pelvis sinks with the feet planted (knees and ankles
@@ -44,8 +48,22 @@ export const MAX_REACH = 12;
 /** Pelvis drop (units) at full landing strength, and the hard rebound's leg compression at full hardness. */
 export const LAND_DROP = 4.2;
 const REBOUND = 5;
-/** Most the pelvis may move for planting / slopes (units). */
+/** Most the pelvis may move for landings and the idle shift (units). */
 const MAX_PELVIS = 6;
+/** Most the pelvis may drop for a foot's reach on a slope (units), and how fast that follows (1/s). */
+export const MAX_REACH_DROP = 10;
+const REACH_RATE = 30;
+/**
+ * Ground further than this (units) above or below the feet origin isn't under the foot (a gap, a ledge: the foot stands
+ * at the feet's plane), and a planted foot that ends up further steps (the body went up a stair or down a ledge).
+ */
+const REACH_Z = 12;
+/** The player hull's half width (units), and how far onto a support a replacement foothold goes past its edge. */
+const HULL_HALF = 16;
+const STEP_IN = 2;
+/** The feet tilt to the ground's slope up to this (deg), from probes this far apart (units). */
+const MAX_TILT = 35;
+const TILT_SPAN = 4;
 /** The floating detector measures acceleration over at least this long (s): longer than a tick. */
 const ACC_SPAN = 0.04;
 /** Ground contact needed to count as standing (s; one bhop tick never is) and the landing gate (airborne at least). */
@@ -118,12 +136,14 @@ interface Foot {
   foot: number;
   toe: number;
   locked: boolean;
-  /** Lock: world position (Source) and the model yaw when it locked. */
+  /** Lock: world position (Source; z the ground under it) and the model yaw when it locked, and its ground's slope. */
   lx: number;
   ly: number;
   lz: number;
   lyaw: number;
-  /** Step in progress: time (s, < 0 = none), from (world) and yaw from. */
+  lgx: number;
+  lgy: number;
+  /** Step in progress: time (s, < 0 = none), from (world, z the ground) and yaw from. */
   stepT: number;
   sx: number;
   sy: number;
@@ -135,6 +155,8 @@ interface Foot {
   px: number;
   py: number;
   hasP: boolean;
+  /** The lock was out of the leg's reach last frame, even with the pelvis down all the way: step it. */
+  short: boolean;
 }
 
 /** Scratch (no allocation per frame). */
@@ -142,6 +164,11 @@ const P = new Float64Array(3), Q = new Float64Array(3), R = new Float64Array(3),
 const M = new Float32Array(12), TMP = new Float32Array(12);
 const FOOT0 = new Float32Array(12), TOE0 = new Float32Array(12);
 const HJ = new Float64Array(3), KJ = new Float64Array(3), FJ = new Float64Array(3);
+/** Per-foot targets between the two passes of apply(): model-space ankle, lock yaw, ground normal (model), its weight. */
+const TGT = new Float64Array(2 * 8);
+const SUP = new Float64Array(4);
+const UP: readonly number[] = [0, 0, 1];
+const MAX_GRAD = Math.tan((MAX_TILT * Math.PI) / 180);
 
 export class LegLayer {
   /** Debug / tests: this frame's pelvis offset (model z, units), planting weight and how the body is moving. */
@@ -177,7 +204,11 @@ export class LegLayer {
   private plantW = 0;
   private idleT = 0;
   private climb = 0;
+  /** The pelvis's reach drop (units, <= 0) on slopes. */
+  private reach = 0;
   private seed: number;
+  /** Debug / tests: this frame's reach drop (included in pelvisDrop). */
+  reachDrop = 0;
 
   constructor(private r: Rig, seed = 0) {
     const leg = (s: "L" | "R"): Foot => ({
@@ -186,9 +217,9 @@ export class LegLayer {
       foot: r.index(`ValveBiped.Bip01_${s}_Foot`),
       toe: r.index(`ValveBiped.Bip01_${s}_Toe0`),
       locked: false,
-      lx: 0, ly: 0, lz: 0, lyaw: 0,
+      lx: 0, ly: 0, lz: 0, lyaw: 0, lgx: 0, lgy: 0,
       stepT: -1, sx: 0, sy: 0, sz: 0, syaw: 0,
-      w: 0, px: 0, py: 0, hasP: false,
+      w: 0, px: 0, py: 0, hasP: false, short: false,
     });
     this.feet = [leg("L"), leg("R")];
     this.pelvis = r.index("ValveBiped.Bip01_Pelvis");
@@ -203,14 +234,14 @@ export class LegLayer {
   }
 
   reset(): void {
-    for (const f of this.feet) (f.locked = false), (f.stepT = -1), (f.w = 0), (f.hasP = false);
+    for (const f of this.feet) (f.locked = false), (f.stepT = -1), (f.w = 0), (f.hasP = false), (f.short = false);
     this.steps = 0;
     this.groundTime = this.contactT = this.airTime = this.idleT = this.climb = 0;
     this.groundFrames = 0;
     this.landed = true;
     this.landT = this.rebT = 1e9;
     this.landK = this.rebK = this.airW = this.floatW = this.plantW = this.accAge = 0;
-    this.pelvisDrop = this.plant = 0;
+    this.pelvisDrop = this.plant = this.reach = this.reachDrop = 0;
   }
 
   /** Applies the layer to the skinning matrices S (model space, Source axes; the rig's bones). */
@@ -299,13 +330,18 @@ export class LegLayer {
     const cy = Math.cos(s.yaw * D2R), sy = Math.sin(s.yaw * D2R);
     const cb = Math.cos(s.bank * D2R), sb = Math.sin(s.bank * D2R);
     const h = s.bankHip;
+    // On the ground the pelvis sink and shift move the body, not the feet: they stay where the animation put them.
+    const onGround = 1 - this.airW;
+    // Feet on the ground follow the ground under them (with a probe): planted or not, also running on a ramp.
+    const probing = this.probe !== null && onGround > 0.001 && !climbing && !swimming;
+    let need = 0;
     for (let k = 0; k < 2; k++) {
       const f = this.feet[k];
+      const o = k * 8;
+      TGT[o + 7] = 0;
       if (f.foot < 0 || f.calf < 0 || f.thigh < 0) continue;
       this.joint(S, f.foot, P); // animated ankle (model)
-      let tx = P[0], ty = P[1], tz = P[2], yawFix = 0;
-      // On the ground the pelvis sink and shift move the body, not the feet: they stay where the animation put them.
-      const onGround = 1 - this.airW;
+      let tx = P[0], ty = P[1], tz = P[2], yawFix = 0, stepLift = 0;
       tz -= dz * onGround;
       ty -= dy * onGround;
 
@@ -337,51 +373,71 @@ export class LegLayer {
         tz += oz * a;
       }
 
+      // Model -> world for the animated ankle (yaw, then the bank about the hips), and the ground under it (world z).
+      const planting = this.plantW > 0.001;
+      const wx = planting || probing ? this.toWorldX(P, s, cy, sy, cb, sb, h) : 0;
+      const wy = planting || probing ? this.toWorldY(P, s, cy, sy, cb, sb, h) : 0;
+      // Where this foot can stand (support()): the ground under it, or the nearest reachable support (a stair's tread
+      // beside it), or none (it hangs toward the ground below, unlocked).
+      let ux = wx, uy = wy, groundHere = s.pos[2], supported = true;
+      if (planting || probing) {
+        this.support(wx, wy, s, SUP);
+        (ux = SUP[0]), (uy = SUP[1]), (groundHere = SUP[2]), (supported = SUP[3] > 0);
+      }
+      // The ground's slope where the foot stands (world gradient dz/dx, dz/dy).
+      let gradX = 0, gradY = 0;
+      if (probing && supported) [gradX, gradY] = this.slope(ux, uy, groundHere, s);
+      // Unplanted feet on the ground: lifted or lowered onto the ground under them (the planted part is below).
+      tz += (groundHere - s.pos[2]) * onGround * (1 - this.plantW);
+
       // On the ground, slow: planting.
-      if (this.plantW > 0.001) {
-        // Model -> world for the animated ankle (yaw, then the bank about the hips).
-        const wx = this.toWorldX(P, s, cy, sy, cb, sb, h), wy = this.toWorldY(P, s, cy, sy, cb, sb, h);
-        const groundHere = this.ground(wx, wy, s);
+      if (planting) {
         // In stance: down, and the animation has the foot nearly still in the world (a walk's planted foot), or the
         // body is barely moving at all.
         // (A planted foot in a gait that matches the speed is still; a skating one moves a little; a swinging one moves
         // at about twice the body's speed.)
         const still = !f.hasP || dt <= 0 || Math.hypot(wx - f.px, wy - f.py) / dt < STILL + 0.7 * speed || speed < 20;
         const contact = P[2] - ANKLE < 1.4 + Math.max(0, -dz) && still;
+        // (Only on support: an unsupported foot is never locked over empty space.)
+        const lock = () => supported && ((f.locked = true), (f.lx = ux), (f.ly = uy), (f.lz = groundHere), (f.lyaw = s.yaw), (f.lgx = gradX), (f.lgy = gradY));
         if (f.stepT >= 0) {
           f.stepT += dt;
           if (f.stepT >= STEP_TIME) {
             f.stepT = -1;
-            f.locked = true;
-            (f.lx = wx), (f.ly = wy), (f.lz = groundHere), (f.lyaw = s.yaw);
+            lock();
           }
-        } else if (!f.locked && contact) {
-          f.locked = true;
-          (f.lx = wx), (f.ly = wy), (f.lz = groundHere), (f.lyaw = s.yaw);
-        } else if (f.locked && P[2] - ANKLE > 3 + Math.max(0, -dz)) f.locked = false; // the animation lifts it: let go
-        let gx = wx, gy = wy, gz = groundHere, gyaw = s.yaw, lift = 0;
+        } else if (!f.locked && contact) lock();
+        else if (f.locked && P[2] - ANKLE > 3 + Math.max(0, -dz)) f.locked = false; // the animation lifts it: let go
+        if (f.locked && this.probe) {
+          // The support under the lock, again: a lift or a moving platform carries the foot up and down with it.
+          const g = this.groundZ(f.lx, f.ly, s, f.lz);
+          if (g !== f.lz) f.lz = g;
+        }
+        let gx = ux, gy = uy, gz = groundHere, gyaw = s.yaw, lift = 0;
         if (f.locked) {
-          const dist = Math.hypot(wx - f.lx, wy - f.ly), turn = Math.abs(wrap180(s.yaw - f.lyaw));
+          const dist = Math.hypot(ux - f.lx, uy - f.ly), turn = Math.abs(wrap180(s.yaw - f.lyaw));
           const other = this.feet[1 - k];
-          if ((dist > STEP_DIST || turn > STEP_YAW) && other.stepT < 0) {
+          // A lock far above or below the feet (the body went up a stair or down a ledge) steps too.
+          const height = Math.abs(f.lz - s.pos[2]) > REACH_Z || f.short;
+          if ((dist > STEP_DIST || turn > STEP_YAW || height) && other.stepT < 0) {
             // Step: from the lock to where the animation has the foot, lifting on the way.
             f.locked = false;
             f.stepT = 0;
             this.steps++;
             (f.sx = f.lx), (f.sy = f.ly), (f.sz = f.lz), (f.syaw = f.lyaw);
-          } else if (dist > MAX_REACH) f.locked = false;
-          else (gx = f.lx), (gy = f.ly), (gz = f.lz), (gyaw = f.lyaw);
+          } else if (dist > MAX_REACH || height) f.locked = false;
+          else (gx = f.lx), (gy = f.ly), (gz = f.lz), (gyaw = f.lyaw), (gradX = f.lgx), (gradY = f.lgy);
         }
         if (f.stepT >= 0) {
           const e = smooth01(f.stepT / STEP_TIME);
-          gx = f.sx + (wx - f.sx) * e;
-          gy = f.sy + (wy - f.sy) * e;
+          gx = f.sx + (ux - f.sx) * e;
+          gy = f.sy + (uy - f.sy) * e;
           gz = f.sz + (groundHere - f.sz) * e;
           gyaw = f.syaw + wrap180(s.yaw - f.syaw) * e;
           lift = STEP_LIFT * Math.sin(Math.PI * e);
         }
-        // World target -> model (undo the bank about the hips, then the yaw).
-        this.toModel(gx, gy, gz + ANKLE + lift, s, cy, sy, cb, sb, h, Q);
+        // World target (z relative to the feet origin) -> model (undo the bank about the hips, then the yaw).
+        this.toModel(gx, gy, gz - s.pos[2] + ANKLE + lift, s, cy, sy, cb, sb, h, Q);
         // Ground height of the animated foot above its plane is kept (a heel lifting in the animation stays lifted).
         const animLift = Math.max(0, P[2] - ANKLE);
         const w = this.plantW;
@@ -389,10 +445,49 @@ export class LegLayer {
         ty += (Q[1] - ty) * w;
         tz += (Q[2] + (f.locked ? Math.min(animLift, 0.6) : animLift) - tz) * w;
         yawFix = wrap180(gyaw - s.yaw) * w;
+        stepLift = lift * w;
         f.w = w;
         (f.px = wx), (f.py = wy), (f.hasP = true);
       } else (f.w = 0), (f.hasP = false);
-      this.solveLeg(S, k, tx, ty, tz, yawFix);
+
+      // The sole on the ground's slope (model space: the gradient's normal, turned into the body's yaw and bank).
+      let tw = 0;
+      if (probing && (gradX || gradY)) {
+        const nx = -gradX, ny = -gradY;
+        const mx = nx * cy + ny * sy, myb = -nx * sy + ny * cy;
+        U[0] = mx;
+        U[1] = myb * cb + sb;
+        U[2] = -myb * sb + cb;
+        tw = onGround;
+      }
+      TGT[o] = tx, TGT[o + 1] = ty, TGT[o + 2] = tz, TGT[o + 3] = yawFix;
+      TGT[o + 4] = tw ? U[0] : 0, TGT[o + 5] = tw ? U[1] : 0, TGT[o + 6] = tw ? U[2] : 1, TGT[o + 7] = tw;
+
+      // Reach: how far the hips must come down for this foot on the ground (a lower foot on a slope).
+      if (probing && supported) {
+        this.joint(S, f.thigh, HJ);
+        this.joint(S, f.calf, KJ);
+        const L = Math.hypot(KJ[0] - HJ[0], KJ[1] - HJ[1], KJ[2] - HJ[2]) + Math.hypot(P[0] - KJ[0], P[1] - KJ[1], P[2] - KJ[2]) - 0.1;
+        const horiz = Math.hypot(tx - HJ[0], ty - HJ[1]);
+        // (Without a step's lift: the drop follows where the foot lands, not the arc over it.)
+        const n = horiz < L ? (tz - stepLift + Math.sqrt(L * L - horiz * horiz) - HJ[2]) * onGround : -Infinity;
+        need = Math.min(need, n);
+        f.short = f.locked && n < -MAX_REACH_DROP - 0.15;
+      } else f.short = false;
+    }
+    // The pelvis's reach drop (bounded, smoothed; none in the air), applied to the whole body: the feet's targets stay
+    // where they are on the ground, airborne ones come down with the body.
+    const want = clamp(need, -MAX_REACH_DROP, 0);
+    this.reach = dt > 0 ? toward(this.reach, want, REACH_RATE, dt) : want;
+    this.reachDrop = this.reach;
+    if (this.reach !== 0) {
+      for (let i = 0; i < this.all; i++) S[i * 12 + 11] += this.reach;
+      this.pelvisDrop += this.reach;
+    }
+    for (let k = 0; k < 2; k++) {
+      const f = this.feet[k], o = k * 8;
+      if (f.foot < 0 || f.calf < 0 || f.thigh < 0) continue;
+      this.solveLeg(S, k, TGT[o], TGT[o + 1], TGT[o + 2] + this.reach * this.airW, TGT[o + 3], TGT[o + 4], TGT[o + 5], TGT[o + 6], TGT[o + 7]);
       this.joint(S, f.foot, R);
       this.feetWorld[k * 3] = this.toWorldX(R, s, cy, sy, cb, sb, h);
       this.feetWorld[k * 3 + 1] = this.toWorldY(R, s, cy, sy, cb, sb, h);
@@ -402,14 +497,69 @@ export class LegLayer {
 
   // --- Helpers --------------------------------------------------------------------------------
 
-  /** Ground z (Source world) at (x, y): the probe's, else the feet's plane. Relative to the feet origin's z. */
-  private ground(x: number, y: number, s: LegInput): number {
+  /**
+   * Ground z (Source world) at (x, y): the probe's within REACH_Z of the feet origin, else `fallback` (by default the
+   * feet's plane: over a ledge edge or a gap the hull is what holds the player up, so the foot stands at its level).
+   */
+  private groundZ(x: number, y: number, s: LegInput, fallback = s.pos[2]): number {
     if (this.probe) {
       const g = this.probe(x, y, s.pos[2] + 24);
-      // Within reach of the feet only (a ledge edge or a gap leaves the foot at the plane).
-      if (g !== null && Math.abs(g - s.pos[2]) < 14) return g - s.pos[2];
+      if (g !== null && Math.abs(g - s.pos[2]) <= REACH_Z) return g;
     }
-    return 0;
+    return fallback;
+  }
+
+  /**
+   * Where a foot whose animation has it at (x, y) can stand, into out = [x, y, z, supported]:
+   *   - the ground under it, within REACH_Z of the feet origin;
+   *   - else (a stair's edge, a ledge: the hull holds the player up on support the foot isn't over) the nearest support
+   *     on the line through the foot and the feet origin, either way, inside the hull's footprint (so always within
+   *     the leg's reach of the hip), STEP_IN further onto it;
+   *   - else unsupported (supported 0): z is the ground measured below (or REACH_Z under the feet if there's none), for
+   *     a foot hanging toward it, never locked.
+   * Without a probe: the feet's plane.
+   */
+  private support(x: number, y: number, s: LegInput, out: Float64Array): void {
+    const z0 = s.pos[2];
+    (out[0] = x), (out[1] = y), (out[2] = z0), (out[3] = 1);
+    if (!this.probe) return;
+    const under = this.probe(x, y, z0 + 24);
+    if (under !== null && Math.abs(under - z0) <= REACH_Z) {
+      out[2] = under;
+      return;
+    }
+    let dx = s.pos[0] - x, dy = s.pos[1] - y;
+    const L = Math.hypot(dx, dy);
+    if (L > 1e-3) (dx /= L), (dy /= L);
+    else (dx = 1), (dy = 0);
+    // Both ways along that line, nearest first, as long as the point is inside the hull's footprint.
+    const inHull = (px: number, py: number) => Math.abs(px - s.pos[0]) <= HULL_HALF && Math.abs(py - s.pos[1]) <= HULL_HALF;
+    for (let d = 1; d <= 2 * HULL_HALF + L; d += 1)
+      for (const sg of [1, -1]) {
+        const px = x + dx * d * sg, py = y + dy * d * sg;
+        if (!inHull(px, py)) continue;
+        const g = this.probe(px, py, z0 + 24);
+        if (g === null || Math.abs(g - z0) > REACH_Z) continue;
+        // STEP_IN further onto it when that's the same support (not the edge's lip).
+        const qx = px + dx * STEP_IN * sg, qy = py + dy * STEP_IN * sg;
+        const g2 = inHull(qx, qy) ? this.probe(qx, qy, z0 + 24) : null;
+        const ok = g2 !== null && Math.abs(g2 - g) < 0.5;
+        (out[0] = ok ? qx : px), (out[1] = ok ? qy : py), (out[2] = ok ? g2! : g);
+        return;
+      }
+    out[2] = under !== null && under < z0 ? Math.max(under, z0 - 40) : z0 - REACH_Z;
+    out[3] = 0;
+  }
+
+  /** The ground's gradient (dz/dx, dz/dy) at (x, y) whose ground is g, from two more probes; bounded to MAX_TILT. */
+  private slope(x: number, y: number, g: number, s: LegInput): [number, number] {
+    const gx = this.groundZ(x + TILT_SPAN, y, s, g), gy = this.groundZ(x, y + TILT_SPAN, s, g);
+    // A step edge (a jump of more than the steepest tilt over the span) isn't a slope.
+    const dx = (gx - g) / TILT_SPAN, dy = (gy - g) / TILT_SPAN;
+    const m = Math.hypot(dx, dy);
+    if (m > MAX_GRAD * 1.6) return [0, 0];
+    const k = m > MAX_GRAD ? MAX_GRAD / m : 1;
+    return [dx * k, dy * k];
   }
 
   private toWorldX(p: ArrayLike<number>, s: LegInput, cy: number, sy: number, cb: number, sb: number, h: number): number {
@@ -448,13 +598,13 @@ export class LegLayer {
    * hip and the calf about the knee in the leg's own plane (the knee keeps its side); the foot and toe keep the
    * animation's orientation, turned by `yaw` degrees about the vertical (a planted foot's lock).
    */
-  private solveLeg(S: Float32Array, k: number, tx: number, ty: number, tz: number, yaw: number): void {
+  private solveLeg(S: Float32Array, k: number, tx: number, ty: number, tz: number, yaw: number, nx = 0, ny = 0, nz = 1, tilt = 0): void {
     const f = this.feet[k];
     const H = HJ, K = KJ, F = FJ;
     this.joint(S, f.thigh, H);
     this.joint(S, f.calf, K);
     this.joint(S, f.foot, F);
-    if (Math.abs(tx - F[0]) + Math.abs(ty - F[1]) + Math.abs(tz - F[2]) < 1e-4 && Math.abs(yaw) < 1e-4) return;
+    if (Math.abs(tx - F[0]) + Math.abs(ty - F[1]) + Math.abs(tz - F[2]) < 1e-4 && Math.abs(yaw) < 1e-4 && tilt < 1e-4) return;
     FOOT0.set(S.subarray(f.foot * 12, f.foot * 12 + 12));
     const toe = f.toe >= 0;
     if (toe) TOE0.set(S.subarray(f.toe * 12, f.toe * 12 + 12));
@@ -491,6 +641,13 @@ export class LegLayer {
     yawAbout(yaw * D2R, U, F, M);
     concat(M, 0, FOOT0, 0, S, f.foot * 12);
     if (toe) concat(M, 0, TOE0, 0, S, f.toe * 12);
+    if (tilt > 1e-4) {
+      // The sole onto the ground's slope: up turned toward the normal (by `tilt`) about the ankle.
+      const bx = nx * tilt, by = ny * tilt, bz = 1 + (nz - 1) * tilt;
+      rotation(UP[0], UP[1], UP[2], bx, by, bz, F, M);
+      premul(M, S, f.foot);
+      if (toe) premul(M, S, f.toe);
+    }
   }
 
   private jointOf(Sb: Float32Array, i: number, out: Float64Array): void {

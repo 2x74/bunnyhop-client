@@ -212,7 +212,7 @@ function firstPerson(): void {
   }
   cells = specs.map((sp) => {
     const vm = new GunViewmodel({ loadout });
-    vm.debugHide = (q.get("hide") as "R" | "L" | null) ?? null;
+    vm.debugHide = (q.get("hide") as "R" | "L" | "RL" | null) ?? null;
     vms.push(vm);
     if (live) {
       vm.setGun(sp.gun);

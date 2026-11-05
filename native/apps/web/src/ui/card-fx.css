@@ -1,0 +1,79 @@
+/* Supporter card borders (.pc-sborder, in the frame band like the peak's .pc-aura) and effects (.pc-sfx, behind the
+   content like .pc-motes); ui/card-fx.ts cardLayers. --sx is the supporter's name colour (aqua without one). Every
+   layer moves by transform or opacity alone on its own compositor layer; .fx-off (off screen), reduced motion and
+   Potato hold them still, each with a still that still reads as the pick. */
+.pc-sborder, .pc-sfx { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+/* The hover card lifts its content with position: relative on every child but its own layers; these stay absolute. */
+.hc-inner > .pc-sfx.pc-sfx { position: absolute; }
+
+/* Borders: a square turning under the content box (the same geometry as .pc-aura), so only the frame shows it. */
+.pc-sborder::before { content: ""; position: absolute; left: 50%; top: 50%; width: 120%; aspect-ratio: 1; margin: -60% 0 0 -60%; will-change: transform; }
+.pc-sborder-comet::before { background: conic-gradient(from 0deg, transparent 0deg 200deg, color-mix(in srgb, var(--sx) 35%, transparent) 300deg, var(--sx) 352deg, #ffffff 357deg, transparent 360deg); animation: pc-sb-turn 7s linear infinite; }
+.pc-sborder-twin::before { background: conic-gradient(from 0deg, transparent 0deg 100deg, var(--sx) 170deg, transparent 180deg 280deg, #ffffff 350deg, transparent 360deg); animation: pc-sb-turn 10s linear infinite; }
+.pc-sborder-prism::before { background: conic-gradient(from 0deg, #ff8fc8, #ffd66b, #8cf5a6, #79d2ff, #b98cff, #ff8fc8); opacity: 0.9; animation: pc-sb-turn 18s linear infinite; }
+.pc-sborder-pulse::before { background: var(--sx); animation: pc-sb-pulse 3.2s ease-in-out infinite; }
+@keyframes pc-sb-turn { to { transform: rotate(1turn); } }
+@keyframes pc-sb-pulse { 0%, 100% { opacity: 0.12; } 50% { opacity: 0.85; } }
+
+/* Effects. Each is one tall or wide tile layer moved by transform, seamless over one tile. */
+.pc-sfx::before, .pc-sfx::after { content: ""; position: absolute; will-change: transform; }
+/* Hops: dotted jump arcs drifting left, like a run seen from the side. */
+.pc-sfx-hops { opacity: 0.32; }
+.pc-sfx-hops::before { left: 0; top: 0; bottom: 0; width: calc(100% + 240 * var(--u, 1px)); background: var(--sx);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='560' viewBox='0 0 240 560'%3E%3Cpath d='M0 470Q60 330 120 470Q180 330 240 470' fill='none' stroke='%23000' stroke-width='3' stroke-dasharray='2 9' stroke-linecap='round'/%3E%3Cpath d='M-60 250Q0 150 60 250Q120 150 180 250' fill='none' stroke='%23000' stroke-width='2' stroke-dasharray='2 10' stroke-linecap='round' opacity='.6'/%3E%3C/svg%3E") 0 0 / calc(240 * var(--u, 1px)) 100% repeat-x;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='560' viewBox='0 0 240 560'%3E%3Cpath d='M0 470Q60 330 120 470Q180 330 240 470' fill='none' stroke='%23000' stroke-width='3' stroke-dasharray='2 9' stroke-linecap='round'/%3E%3Cpath d='M-60 250Q0 150 60 250Q120 150 180 250' fill='none' stroke='%23000' stroke-width='2' stroke-dasharray='2 10' stroke-linecap='round' opacity='.6'/%3E%3C/svg%3E") 0 0 / calc(240 * var(--u, 1px)) 100% repeat-x;
+  animation: pc-sfx-left 9s linear infinite; }
+@keyframes pc-sfx-left { to { transform: translateX(calc(-240 * var(--u, 1px))); } }
+/* Embers: sparks in the colour and a warm white, rising and leaning a little. */
+.pc-sfx-embers { opacity: 0.85; }
+.pc-sfx-embers::before { left: -10%; right: -10%; top: 0; height: calc(100% + 200 * var(--u, 1px));
+  background:
+    radial-gradient(circle, var(--sx) 0 calc(2.4 * var(--u, 1px)), transparent calc(3.4 * var(--u, 1px))) calc(20 * var(--u, 1px)) calc(30 * var(--u, 1px)) / calc(96 * var(--u, 1px)) calc(100 * var(--u, 1px)),
+    radial-gradient(circle, #ffe2b0 0 calc(1.6 * var(--u, 1px)), transparent calc(2.4 * var(--u, 1px))) calc(70 * var(--u, 1px)) calc(80 * var(--u, 1px)) / calc(130 * var(--u, 1px)) calc(200 * var(--u, 1px)),
+    radial-gradient(circle, color-mix(in srgb, var(--sx) 70%, #ffffff) 0 calc(1.2 * var(--u, 1px)), transparent calc(1.9 * var(--u, 1px))) calc(45 * var(--u, 1px)) calc(10 * var(--u, 1px)) / calc(70 * var(--u, 1px)) calc(50 * var(--u, 1px));
+  -webkit-mask: linear-gradient(to top, #000 0%, #000 30%, transparent 92%); mask: linear-gradient(to top, #000 0%, #000 30%, transparent 92%);
+  animation: pc-sfx-rise 7s linear infinite; }
+@keyframes pc-sfx-rise { to { transform: translate(calc(-30 * var(--u, 1px)), calc(-200 * var(--u, 1px))); } }
+/* Stars: two scatters of small four-point stars, one fading in as the other fades out. */
+.pc-sfx-stars::before, .pc-sfx-stars::after { inset: 0;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='150'%3E%3Cpath d='M30 20q1 5 6 6q-5 1-6 6q-1-5-6-6q5-1 6-6zM120 90q.8 4 5 5q-4.2 1-5 5q-1-4-5-5q4-1 5-5zM160 30q.6 3 3.6 3.6q-3 .6-3.6 3.6q-.6-3-3.6-3.6q3-.6 3.6-3.6z'/%3E%3C/svg%3E") 0 0 / calc(180 * var(--u, 1px)) calc(150 * var(--u, 1px));
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='150'%3E%3Cpath d='M30 20q1 5 6 6q-5 1-6 6q-1-5-6-6q5-1 6-6zM120 90q.8 4 5 5q-4.2 1-5 5q-1-4-5-5q4-1 5-5zM160 30q.6 3 3.6 3.6q-3 .6-3.6 3.6q-.6-3-3.6-3.6q3-.6 3.6-3.6z'/%3E%3C/svg%3E") 0 0 / calc(180 * var(--u, 1px)) calc(150 * var(--u, 1px));
+  will-change: opacity; }
+.pc-sfx-stars::before { background: var(--sx); animation: pc-sfx-twinkle 4s ease-in-out infinite; }
+.pc-sfx-stars::after { background: #ffffff; -webkit-mask-position: calc(90 * var(--u, 1px)) calc(75 * var(--u, 1px)); mask-position: calc(90 * var(--u, 1px)) calc(75 * var(--u, 1px)); animation: pc-sfx-twinkle 4s ease-in-out -2s infinite; }
+@keyframes pc-sfx-twinkle { 0%, 100% { opacity: 0.55; } 50% { opacity: 0.05; } }
+/* Aurora: soft bands of the colour and a cool partner drifting along the top of the card. */
+.pc-sfx-aurora { opacity: 0.4; -webkit-mask: linear-gradient(to bottom, #000 0%, transparent 70%); mask: linear-gradient(to bottom, #000 0%, transparent 70%); }
+.pc-sfx-aurora::before { left: 0; top: -20%; height: 80%; width: 200%;
+  background:
+    radial-gradient(40% 60% at 25% 50%, var(--sx), transparent 70%),
+    radial-gradient(35% 50% at 55% 40%, #9a6bff, transparent 70%),
+    radial-gradient(40% 60% at 75% 50%, var(--sx), transparent 70%),
+    radial-gradient(35% 50% at 105% 40%, #9a6bff, transparent 70%);
+  animation: pc-sfx-drift 22s linear infinite; }
+@keyframes pc-sfx-drift { to { transform: translateX(-50%); } }
+
+/* At rest: off screen, reduced motion, Potato. The stills keep each look recognisable (Pulse half lit). */
+.fx-off .pc-sborder::before, .fx-off .pc-sfx::before, .fx-off .pc-sfx::after,
+.fx-off .pc-aura::before, .fx-off .pc-motes::before, .fx-off .pc-glint::before { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) {
+  .pc-sborder::before, .pc-sfx::before, .pc-sfx::after { animation: none; will-change: auto; }
+  .pc-sborder-comet::before, .pc-sborder-twin::before { transform: rotate(-40deg); }
+  .pc-sborder-pulse::before { opacity: 0.5; }
+}
+body.potato .pc-sborder::before, body.potato .pc-sfx::before, body.potato .pc-sfx::after { animation: none; will-change: auto; }
+body.potato .pc-sborder-comet::before, body.potato .pc-sborder-twin::before { transform: rotate(-40deg); }
+body.potato .pc-sborder-pulse::before { opacity: 0.5; }
+
+/* Edit card → Name / Avatar / Effects pickers (ui/card-editor.ts supporterPart). */
+.ce-support { margin: 0.1rem 0 0.4rem 0.45rem; font-size: var(--fs-sm); color: var(--dim); }
+.ce-support .link-btn { font-size: inherit; }
+.pf-sw-av { display: grid; place-items: center; width: 2.9rem; height: 2.4rem; }
+.pf-sw-av-img { width: 1.55rem; height: 1.55rem; border-radius: 50%; object-fit: cover; display: grid; place-items: center; font-size: 0.7rem; font-weight: 800; background: #262b36; color: var(--dim); }
+.ce-grid-deco .ce-item { min-height: 3rem; }
+/* A small card: the frame band 4 px (the border shows in it), the effect at about a fifth of card scale so its marks
+   stay visible at this size. */
+.pf-sw-fx { --u: 0.22px; position: relative; width: 2.9rem; height: 1.85rem; overflow: hidden; border-radius: 0.3rem; background: #3a4152; }
+.pf-sw-fx-in { position: absolute; inset: 4px; overflow: hidden; border-radius: 0.15rem; background: #12151c; }
+.pf-sw-fx .pc-sborder::before { width: 160%; margin: -80% 0 0 -80%; }
+.pf-sw-fx-in svg { display: block; width: 100%; height: 100%; }

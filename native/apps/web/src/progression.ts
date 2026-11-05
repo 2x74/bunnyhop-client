@@ -1162,9 +1162,13 @@ export const COSMETICS: CosmeticDef[] = [
   // Level 35 / 40: the card between Holo (30) and Four-Leaf (50).
   { id: "frame-brass", slot: "frame", name: "Brass", unlock: lvl(35), color: "#c9a24a" },
   { id: "bg-nightgarden", slot: "background", name: "Night Garden", unlock: lvl(40), color: "#102418" },
-  // v0.0.37: the top tiers (T8 Brutal pink, T9 Nightmare azure, T10 Impossible white: tiers.ts TIER_COLORS), a set each,
+  // v0.0.37: the top tiers (T7 Insane indigo, T8 Brutal pink, T9 Nightmare azure, T10 Impossible white: tiers.ts TIER_COLORS), a set each,
   // earned with the first clear and kept if the map is re-tiered later (achievements are permanent). The hat for T10
   // is player/bunny/hats.ts wreath; the card pieces are ui/profile.css .pc-frame-* / .pc-bg-* and og/cards.ts.
+  // Lapis (First T7, added in the second pass so T7 has a set too): deep lapis blue with the tier's indigo trim and a
+  // fleck of gold, and an indigo trail that settles into gold.
+  { id: "outfit-lapis", slot: "outfit", name: "Lapis", unlock: ach("tier_7"), color: "#26307a" },
+  { id: "trail-lapis", slot: "trail", name: "Lapis", unlock: ach("tier_7"), color: "#7c83ff", color2: "#d9b45a" },
   // Flare (First T8): a hot pink hoodie on black, and a pink trail that burns out orange.
   { id: "outfit-flare", slot: "outfit", name: "Flare", unlock: ach("tier_8"), color: "#e0479f" },
   { id: "trail-flare", slot: "trail", name: "Flare", unlock: ach("tier_8"), color: "#ff6ec7", color2: "#ff9a3c" },

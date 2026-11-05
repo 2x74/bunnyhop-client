@@ -62,6 +62,18 @@ for (let index = 0; index < styles.length; index++) {
     ),
   );
   for (const [path, data] of images) styles[index] = styles[index].replaceAll(path, data);
+  // Supporter name fonts (web ui/name-fonts.css): about 180 KB of WOFF2, embedded like the flags.
+  const fonts = [
+    ...new Set(
+      [...styles[index].matchAll(/url\(["']?(\.\.\/assets\/name-fonts\/[\w-]+\.woff2)["']?\)/g)].map(
+        (match) => match[1],
+      ),
+    ),
+  ];
+  for (const path of fonts) {
+    const bytes = await Bun.file(resolve(root, "apps/web/src/ui", path)).arrayBuffer();
+    styles[index] = styles[index].replaceAll(path, `data:font/woff2;base64,${Buffer.from(bytes).toString("base64")}`);
+  }
   for (const match of styles[index].matchAll(/url\(([^)]*)\)/g)) {
     const url = match[1].trim().replace(/^["']|["']$/g, "");
     if (!/^(?:data:|#|https:)/.test(url)) throw new Error(`Menu stylesheet contains an external asset: ${url}`);

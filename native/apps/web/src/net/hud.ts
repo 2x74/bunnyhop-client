@@ -2,6 +2,7 @@
 // menu (map votes, spectate list, nominations), a centre banner (map change countdown) and the spectator bar.
 // All text is set with textContent: chat from other players never becomes markup.
 
+import { releaseHeldCursor } from "../free-cursor";
 import "./net.css";
 import { clear, h } from "../ui/dom";
 import { formatTime } from "../timer";
@@ -9,10 +10,11 @@ import { styleLabel } from "../styles";
 import { clampTier, tierLabel } from "../tiers";
 import type { StaffRole } from "../progression";
 import type { RankTag } from "./protocol";
-import type { PlayerMarks } from "../creators";
+import type { NameLook, PlayerMarks } from "../creators";
 import { countryFlag } from "../ui/country-flag";
 import { bindLabel } from "../ui/settings";
 import { nameAttrs, nameMarks } from "../ui/marks";
+import { hoverCardFor } from "../ui/hover-card";
 import { hopKeyframes, hopOffKeyframes } from "../notify/spring";
 
 const MAX_LINES = 60;
@@ -31,6 +33,8 @@ export interface ChatLineOpts extends PlayerMarks {
   rich?: (string | Node)[];
   /** How long it stays up before fading (default LINE_MS). */
   ms?: number;
+  /** The speaker's account id (from the roster): their name shows the compact hover card while the cursor is free. */
+  id?: string;
 }
 
 /** Our own links in chat (a map, a replay, a profile, a lobby invite) become clickable; nothing else is ever a link. */
@@ -185,7 +189,8 @@ export class ChatBox {
     const line = h(`div.chat-line.${o.kind}${o.tone ? `.tone-${o.tone}` : ""}`);
     if (o.kind === "say" && o.name) {
       if (o.rank) line.append(h("span.chat-tag", { style: `--rc:${o.rank.color}` }, o.rank.name));
-      line.append(h("b.chat-name", nameAttrs(o, o.slotColor), o.name));
+      const nm = h("b.chat-name", nameAttrs(o, o.slotColor), o.name);
+      line.append(o.id ? hoverCardFor(nm, { ...o, id: o.id, name: o.name, avatarUrl: null }, { compact: true, quietWhileTyping: true, above: true }) : nm);
       // Staff shield / Verified check / creator icon / booster gem / supporter badge (compact), from the room: the
       // same marks as the boards and profiles, so staff read the same everywhere.
       const marks = nameMarks(o);
@@ -317,6 +322,22 @@ export class NumberMenu {
   }
 }
 
+/**
+ * A menu a chat command opened holds the chat's free cursor (free-cursor.ts holdFreeCursor) so its rows can be
+ * clicked. When it closes (a pick, 0, Esc, a click elsewhere) the game takes the lock back, unless a pick opened the
+ * next menu in its place (!race: the player, then the style). Rooms' menus (net/mp.ts) and !bright (look-menu.ts).
+ */
+export function releaseCursorOnClose(menu: NumberMenu, recapture: () => void): void {
+  menu.onHide = () => {
+    // A focused control in it (the !bright slider) would keep the game's keys once it's gone (input.ts isTextField).
+    const focused = document.activeElement;
+    if (focused instanceof HTMLElement && menu.el.contains(focused)) focused.blur();
+    setTimeout(() => {
+      if (!menu.open && releaseHeldCursor()) recapture();
+    });
+  };
+}
+
 // ---------------------------------------------------------------------------------------------
 
 export interface ScoreRow extends PlayerMarks {
@@ -336,6 +357,8 @@ export interface ScoreRow extends PlayerMarks {
   host?: boolean;
   /** Profile flag (countries.ts code), before the name as on the boards. */
   country?: string | null;
+  /** The player's account id (the roster's): their name shows the hover card while the cursor is free. */
+  id?: string;
 }
 
 export interface ScoreHead {
@@ -380,7 +403,7 @@ export class Scoreboard {
           h("i.sb-dot", { style: `background:${r.color}` }),
           r.rank ? h("span.chat-tag", { style: `--rc:${r.rank.color}` }, r.rank.name) : null,
           countryFlag(r.country),
-          h("span.sb-pname", nameAttrs(r), r.name),
+          r.id ? hoverCardFor(h("span.sb-pname", nameAttrs(r), r.name), { ...r, id: r.id, avatarUrl: null }) : h("span.sb-pname", nameAttrs(r), r.name),
           nameMarks(r),
           r.host ? h("span.sb-host", { title: "Lobby host" }, "host") : null,
         ),
@@ -462,8 +485,8 @@ export class SpecBar {
   }
 
   /** `hint`: one quiet line under it (the camera, and the way out). */
-  set(o: { name: string; color: string; waiting?: boolean; hint?: string } | null): void {
-    const key = o ? `${o.name}|${o.color}|${o.waiting ? 1 : 0}|${o.hint ?? ""}` : "";
+  set(o: { name: string; color: string; waiting?: boolean; hint?: string; look?: NameLook } | null): void {
+    const key = o ? `${o.name}|${o.color}|${o.waiting ? 1 : 0}|${o.hint ?? ""}|${o.look ? JSON.stringify(o.look) : ""}` : "";
     if (key === this.shown) return;
     this.shown = key;
     if (!o) {
@@ -471,6 +494,6 @@ export class SpecBar {
       return;
     }
     this.el.hidden = false;
-    clear(this.el, "Watching ", h("b", { style: `color:${o.color}` }, o.name), o.waiting ? h("span.dim", null, ", waiting for them") : null, o.hint ? h("div.spec-hint", null, o.hint) : null);
+    clear(this.el, "Watching ", h("b", nameAttrs(o.look, o.color, o.name), o.name), o.waiting ? h("span.dim", null, ", waiting for them") : null, o.hint ? h("div.spec-hint", null, o.hint) : null);
   }
 }

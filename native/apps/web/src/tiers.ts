@@ -67,3 +67,17 @@ export function tierColor(raw: number | null | undefined): string {
   const t = clampTier(raw);
   return t ? TIER_COLORS[t] : TIER_UNKNOWN_COLOR;
 }
+
+/**
+ * The player cards' "Clears by tier" bars (owner, v0.0.37): T1 to T6 as themselves and one last bar "T7+" holding T7
+ * and up, so the card doesn't grow to ten bars. Everywhere else (map browser, map pages, boards, Discord, peak marks)
+ * shows the real tier. Native clients show the same seven.
+ */
+export const CARD_TIERS = [1, 2, 3, 4, 5, 6, 7] as const;
+export const CARD_TOP_TIER = 7;
+/** A per-tier list (index = tier, 0 unrated) folded into the card's seven bars: [T1, ..., T6, T7+]. */
+export function cardTierCounts(byTier: readonly (number | undefined)[]): number[] {
+  return CARD_TIERS.map((t) => (t < CARD_TOP_TIER ? (byTier[t] ?? 0) : TIERS.filter((x) => x >= CARD_TOP_TIER).reduce((n, x) => n + (byTier[x] ?? 0), 0)));
+}
+/** A card bar's label: "T3", and "T7+" for the last. */
+export const cardTierLabel = (t: number): string => (t >= CARD_TOP_TIER ? `T${CARD_TOP_TIER}+` : tierLabel(t));

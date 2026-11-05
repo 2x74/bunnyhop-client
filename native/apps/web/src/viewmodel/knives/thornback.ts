@@ -1,8 +1,9 @@
 // Thornback (knife-thornback, Heirloom, a Supporter item): a big military-style clip-point bayonet. A broad steel blade
 // with a saber grind, a fuller on both faces and a row of slanted thorn teeth along the spine, a gunmetal crossguard
-// with a muzzle ring (accent) over the spine and a hooked quillon under the edge, a ribbed deep-teal grip and a flat
-// pommel cap with a release nub. Original design in the spirit of a sawback bayonet; built in code like every knife
-// here (shared pieces in bayonet.ts). Inspects: inspects/bayonets.ts (Thorn Toss -> Double Toss).
+// with a muzzle ring (accent) over the spine and a rose-thorn quillon under the edge (a smaller thorn on the pommel), a
+// ribbed deep-teal grip and a flat pommel cap with a release nub. Original design in the spirit of a sawback bayonet;
+// built in code like every knife here (shared pieces in bayonet.ts). Inspects: inspects/bayonets.ts (Thorn Toss ->
+// Double Toss).
 
 import { smoothstep } from "../../player/bunny/builder";
 import type { V3 } from "../../player/bunny/rig";
@@ -40,11 +41,12 @@ function build(k: KnifeCtx): void {
   {
     const path: V3[] = [];
     const n = fp ? 6 : 4;
+    // A rose thorn, not a bar: a broad base that sweeps forward toward the tip and tapers to a point.
     for (let i = 0; i <= n; i++) {
       const t = i / n;
-      path.push([0, -0.86 - 0.62 * t, 1.68 + 0.42 * t * t]);
+      path.push([0, -0.84 - 0.56 * t + 0.06 * t * t, 1.66 + 0.78 * t * t]);
     }
-    k.tube(path, (i) => 0.17 - 0.035 * (i / n), fp ? 8 : 6, [1, 0, 0], () => GUN, { part: PART.guard });
+    k.tube(path, (i) => 0.2 * (1 - i / n) ** 0.9 + 0.02, fp ? 8 : 6, [1, 0, 0], () => GUN, { part: PART.guard });
   }
   {
     const n = fp ? 18 : 10, R = 0.36;
@@ -60,6 +62,16 @@ function build(k: KnifeCtx): void {
   bayonetGrip(k, { z0: G0, z1: G1, rx: 0.37, ry: 0.5, cy: -0.04, ribs: 7, a: GRIP, b: GRIP_RIB });
   plate(k, [G0 - 0.53, G0 - 0.44, G0 - 0.04, G0], [0.3, 0.44, 0.44, 0.4], [0.42, 0.6, 0.6, 0.55], -0.04, GUN);
   if (fp) k.tube([[0, 0.5, G0 - 0.24], [0, 0.7, G0 - 0.24]], 0.11, 8, [0, 0, 1], () => ACCENT, { part: PART.guard });
+  // A second, smaller thorn on the pommel's edge side, curving back: the bramble motif at both ends of the grip.
+  {
+    const path: V3[] = [];
+    const n = fp ? 4 : 3;
+    for (let i = 0; i <= n; i++) {
+      const t = i / n;
+      path.push([0, -0.5 - 0.34 * t, G0 - 0.28 - 0.3 * t * t]);
+    }
+    k.tube(path, (i) => 0.13 * (1 - i / n) ** 0.9 + 0.015, fp ? 7 : 5, [1, 0, 0], () => GUN, { part: PART.guard });
+  }
 }
 
 export const thornback: KnifeDef = {

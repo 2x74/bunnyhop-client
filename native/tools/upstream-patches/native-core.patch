@@ -1,5 +1,5 @@
 diff --git a/crates/core/Cargo.toml b/crates/core/Cargo.toml
-index 01bc5f7..1066f48 100644
+index f79264a..b5993fd 100644
 --- a/crates/core/Cargo.toml
 +++ b/crates/core/Cargo.toml
 @@ -4,14 +4,17 @@ version = "0.1.0"
@@ -24,10 +24,10 @@ index 01bc5f7..1066f48 100644
  playsrc-collision = { path = "../vendor/collision" }
  playsrc-movement = { path = "../vendor/movement" }
 diff --git a/crates/core/src/game.rs b/crates/core/src/game.rs
-index b4a837c..d1f4cfb 100644
+index 5a55d9b..e272e6f 100644
 --- a/crates/core/src/game.rs
 +++ b/crates/core/src/game.rs
-@@ -1321,8 +1321,8 @@ impl Tracer for Scene<'_> {
+@@ -1338,8 +1338,8 @@ impl Tracer for Scene<'_> {
  }
  
  fn angle_vectors_forward(angles: [f32; 3]) -> [f32; 3] {
@@ -38,7 +38,7 @@ index b4a837c..d1f4cfb 100644
      [cp * cy, cp * sy, -sp]
  }
  
-@@ -2430,8 +2430,8 @@ impl Game {
+@@ -2455,8 +2455,8 @@ impl Game {
          let lo = [p[0] + hull.mins[0], p[1] + hull.mins[1], p[2] + hull.mins[2]];
          let hi = [p[0] + hull.maxs[0], p[1] + hull.maxs[1], p[2] + hull.maxs[2]];
          let center = [(lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5, (lo[2] + hi[2]) * 0.5];
@@ -240,10 +240,10 @@ index 28d151e..3ec0530 100644
          let up = [sp * cy, sp * sy, cp];
          let p = self.state.position;
 diff --git a/crates/core/src/game/weapons.rs b/crates/core/src/game/weapons.rs
-index c0713e0..776b014 100644
+index 3e5e27c..7cbc6eb 100644
 --- a/crates/core/src/game/weapons.rs
 +++ b/crates/core/src/game/weapons.rs
-@@ -508,8 +508,8 @@ impl Game {
+@@ -541,8 +541,8 @@ impl Game {
      }
  
      fn eye_and_forward(&self, cmd: Cmd) -> ([f32; 3], [f32; 3]) {
@@ -254,7 +254,7 @@ index c0713e0..776b014 100644
          let p = self.state.position;
          let o = self.state.view_offset;
          ([p[0] + o[0], p[1] + o[1], p[2] + o[2]], [cp * cy, cp * sy, -sp])
-@@ -716,7 +716,7 @@ impl Game {
+@@ -771,7 +771,7 @@ impl Game {
          self.weapon_event(WEAPON_EVENT_DROPPED);
          // The entity it came from, unless a point_template has respawned a new copy into it meanwhile.
          if let Some(e) = held.ent.filter(|&e| self.ents[e].removed) {
@@ -263,12 +263,12 @@ index c0713e0..776b014 100644
              let p = self.state.position;
              let from = [p[0], p[1], p[2] + 32.0];
              let to = [p[0] + cy * 48.0, p[1] + sy * 48.0, p[2] + 32.0];
-@@ -962,7 +962,7 @@ impl Game {
-         self.report_attack(gun.id, if silenced { 2 } else { 1 }, eye, end, hit);
-         // Damage falls off with distance: damage * rangeModifier ^ (distance / 500).
+@@ -1020,7 +1020,7 @@ impl Game {
          let distance = hit.map_or(gun.range, |t| t.fraction * gun.range);
--        let damage = gun.damage * f32::from(gun.pellets) * gun.range_modifier.powf(distance / 500.0);
-+        let damage = gun.damage * f32::from(gun.pellets) * playsrc_collision::math::pow(gun.range_modifier, distance / 500.0);
+         let secondary = self.arms.slot(slot).is_some_and(|h| h.silenced || h.burst);
+         let (base, range_modifier) = bullet_stats(gun, secondary, self.settings.physics_version);
+-        let damage = base * f32::from(gun.pellets) * range_modifier.powf(distance / 500.0);
++        let damage = base * f32::from(gun.pellets) * playsrc_collision::math::pow(range_modifier, distance / 500.0);
          self.damage_hit(hit, damage);
      }
  
@@ -385,10 +385,10 @@ index ec615e5..29b2181 100644
 +    }
 +}
 diff --git a/crates/core/src/physics.rs b/crates/core/src/physics.rs
-index f9e6dd6..7695fe3 100644
+index 702314f..718cf65 100644
 --- a/crates/core/src/physics.rs
 +++ b/crates/core/src/physics.rs
-@@ -429,9 +429,9 @@ impl DynamicHulls {
+@@ -446,9 +446,9 @@ impl DynamicHulls {
  
  /// Source AngleMatrix applied to a local point.
  pub fn rotate(v: [f32; 3], angles: [f32; 3]) -> [f32; 3] {
@@ -402,10 +402,10 @@ index f9e6dd6..7695fe3 100644
      let left = [sr * sp * cy - cr * sy, sr * sp * sy + cr * cy, sr * cp];
      let up = [cr * sp * cy + sr * sy, cr * sp * sy - sr * cy, cr * cp];
 diff --git a/crates/core/src/props.rs b/crates/core/src/props.rs
-index 2f689d4..2415fa5 100644
+index 61b3e57..8f82b8a 100644
 --- a/crates/core/src/props.rs
 +++ b/crates/core/src/props.rs
-@@ -315,9 +315,9 @@ pub struct PropMesh {
+@@ -336,9 +336,9 @@ pub struct PropMesh {
  
  /// Source `AngleMatrix` (pitch about Y, yaw about Z, roll about X), as rows applied to column vectors.
  fn angle_matrix([pitch, yaw, roll]: [f32; 3]) -> [[f32; 3]; 3] {
@@ -970,7 +970,7 @@ index c57a96a..5cb1ca1 100644
 +#[path = "../../native-web/core.rs"]
 +pub mod native_web;
 diff --git a/crates/core/src/wasm_content.rs b/crates/core/src/wasm_content.rs
-index e28797f..a176f48 100644
+index d1110a6..8062510 100644
 --- a/crates/core/src/wasm_content.rs
 +++ b/crates/core/src/wasm_content.rs
 @@ -43,7 +43,7 @@ unsafe fn owned_string(ptr: *mut u8, len: usize) -> String {
@@ -1142,7 +1142,7 @@ index e28797f..a176f48 100644
  pub unsafe extern "C" fn props_load(ptr: *mut u8, len: usize) -> usize {
      let bytes = unsafe { owned(ptr, len) };
      let bsp = crate::parse_bsp(&bytes).ok();
-@@ -376,7 +376,7 @@ pub unsafe extern "C" fn props_load(ptr: *mut u8, len: usize) -> usize {
+@@ -371,7 +371,7 @@ pub unsafe extern "C" fn props_load(ptr: *mut u8, len: usize) -> usize {
  
  /// Builds the prop mesh from the loaded props and the current VFS. Material names go to scratch_str
  /// (newline-separated); returns that text's length. Models whose files aren't loaded are skipped (and requested).
@@ -1151,7 +1151,7 @@ index e28797f..a176f48 100644
  pub extern "C" fn props_build() -> usize {
      with(|c| {
          PROPS.with(|p| {
-@@ -391,7 +391,7 @@ pub extern "C" fn props_build() -> usize {
+@@ -386,7 +386,7 @@ pub extern "C" fn props_build() -> usize {
  
  /// Prop mesh stats into scratch_u32: `[instances, built models, missing models, vertex floats, indices, groups]`;
  /// missing model paths in scratch_str.
@@ -1160,7 +1160,7 @@ index e28797f..a176f48 100644
  pub extern "C" fn props_info() -> usize {
      with(|c| {
          PROPS.with(|p| {
-@@ -412,7 +412,7 @@ pub extern "C" fn props_info() -> usize {
+@@ -407,7 +407,7 @@ pub extern "C" fn props_info() -> usize {
  
  /// Moving prop groups (prop_door_rotating) into scratch_u32 as `[entity, material, first_index, index_count]`
  /// quads; their vertices are in model space, placed every frame by `prop_transforms`.
@@ -1169,7 +1169,7 @@ index e28797f..a176f48 100644
  pub extern "C" fn props_dynamic_groups() -> usize {
      with(|c| {
          PROPS.with(|p| {
-@@ -423,7 +423,7 @@ pub extern "C" fn props_dynamic_groups() -> usize {
+@@ -418,7 +418,7 @@ pub extern "C" fn props_dynamic_groups() -> usize {
  }
  
  /// Prop groups into scratch_u32 as `[material, first_index, index_count]` triples.
@@ -1178,7 +1178,7 @@ index e28797f..a176f48 100644
  pub extern "C" fn props_groups() -> usize {
      with(|c| {
          PROPS.with(|p| {
-@@ -435,7 +435,7 @@ pub extern "C" fn props_groups() -> usize {
+@@ -430,7 +430,7 @@ pub extern "C" fn props_groups() -> usize {
  
  /// Per prop group (parallel to `props_groups`), 1 if it's in the 3D skybox set (drawn by the skybox pass, see
  /// `sky_camera`), into scratch_u32.
@@ -1187,7 +1187,7 @@ index e28797f..a176f48 100644
  pub extern "C" fn props_group_sky3d() -> usize {
      with(|c| {
          PROPS.with(|p| {
-@@ -445,23 +445,45 @@ pub extern "C" fn props_group_sky3d() -> usize {
+@@ -440,23 +440,45 @@ pub extern "C" fn props_group_sky3d() -> usize {
      })
  }
  

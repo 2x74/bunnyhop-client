@@ -15,6 +15,7 @@ import { FRAME_STRIDE } from "../sim";
 /** RunData bits (viewer/player.ts F_*), repeated here so this file needs no viewer import. */
 const F_CROUCHED = 1;
 const F_GROUNDED = 2;
+const F_LADDER = 64;
 const F_TELEPORTED = 4;
 const F_JUMPED = 8;
 
@@ -76,7 +77,7 @@ export function runFrames(d: Pick<RunPath, "n" | "pos" | "view" | "flags">): { f
     frames[o] = d.pos[t * 3];
     frames[o + 1] = d.pos[t * 3 + 1];
     frames[o + 2] = d.pos[t * 3 + 2];
-    frames[o + 3] = d.flags[t] & (F_CROUCHED | F_GROUNDED); // FRAME_CROUCHED / FRAME_GROUNDED are the same bits
+    frames[o + 3] = d.flags[t] & (F_CROUCHED | F_GROUNDED | F_LADDER); // FRAME_CROUCHED / _GROUNDED / _LADDER are the same bits
     frames[o + 4] = d.view[t * 2];
     frames[o + 5] = d.view[t * 2 + 1];
     events[t] = (d.flags[t] & F_TELEPORTED ? EVENT_TELEPORTED : 0) | (d.flags[t] & F_JUMPED ? EVENT_JUMPED : 0);

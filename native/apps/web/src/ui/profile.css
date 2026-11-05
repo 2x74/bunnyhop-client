@@ -59,7 +59,9 @@ body.potato .pc { transform: none; }
 .pc-nameline .nm-creator .nm-icon { width: 100%; height: 100%; }
 .pc-line .nm-creator.labelled { font-size: calc(17 * var(--u)); }
 .pc-line { display: flex; align-items: center; gap: calc(10 * var(--u)); font-size: calc(17 * var(--u)); color: var(--dim); white-space: nowrap; }
-.pc-title { color: var(--rank); font-weight: 800; padding: calc(2 * var(--u)) calc(10 * var(--u)); border-radius: calc(6 * var(--u)); background: color-mix(in srgb, var(--rank) 16%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--rank) 45%, transparent); }
+/* The title pill: the rank colour lifted toward white for the text, so a saturated pick (a Number One's pure red) stays
+   readable on its own tint; the hue keeps the meaning (UI audit, 11-05). */
+.pc-title { color: color-mix(in oklab, var(--rank) 55%, #ffffff); font-weight: 800; font-size: calc(18 * var(--u)); padding: calc(2 * var(--u)) calc(10 * var(--u)); border-radius: calc(6 * var(--u)); background: color-mix(in srgb, var(--rank) 14%, rgba(0, 0, 0, 0.35)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--rank) 50%, transparent); }
 .pc-prov { font-size: calc(16 * var(--u)); font-weight: 600; color: var(--faint); }
 .pc-since { color: var(--faint); }
 
@@ -72,15 +74,24 @@ body.potato .pc { transform: none; }
 .pc-group.long { font-size: calc(24 * var(--u)); }
 .pc-rank-line { font-size: calc(16 * var(--u)); color: var(--text); }
 .pc-points { font-size: calc(15 * var(--u)); color: var(--dim); }
-.pc-bars { display: grid; grid-template-columns: repeat(10, 1fr); gap: calc(5 * var(--u)); margin-top: calc(6 * var(--u)); }
+/* Seven bars, the last "T7+" (owner, v0.0.37: tiers.ts cardTierCounts). */
+.pc-bars { display: grid; grid-template-columns: repeat(7, 1fr); gap: calc(8 * var(--u)); margin-top: calc(6 * var(--u)); }
 .pc-bar { display: flex; flex-direction: column; align-items: center; gap: calc(3 * var(--u)); }
 .pc-bar-track { position: relative; width: 100%; height: calc(40 * var(--u)); border-radius: calc(4 * var(--u)); background: rgba(255, 255, 255, 0.07); overflow: hidden; }
 .pc-bar-fill { position: absolute; left: 0; right: 0; bottom: 0; height: calc(var(--f) * 100%); min-height: 0; background: var(--tc); opacity: calc(0.55 + var(--full) * 0.45); }
-.pc-bar b { font-size: calc(15 * var(--u)); line-height: 1; }
-.pc-bar small { font-size: calc(11 * var(--u)) !important; color: var(--tc) !important; }
-.pc-recs { display: grid; grid-template-columns: repeat(3, 1fr); align-items: center; text-align: center; }
-.pc-recs div { display: flex; flex-direction: column; }
-.pc-recs b { font-size: calc(32 * var(--u)); font-weight: 850; letter-spacing: -0.02em; }
+.pc-bar b { font-size: calc(17 * var(--u)); line-height: 1; }
+.pc-bar small { font-size: calc(12 * var(--u)) !important; font-weight: 750; color: var(--tc) !important; }
+/* Tiers without a clear step back, so the ones you have read first. */
+.pc-bar.none b { color: var(--faint); font-weight: 600; }
+.pc-bar.none small { opacity: 0.55; }
+/* Three counts, each in its own column split by a hairline, so they never read as one number; three digits and more
+   step down a size (UI audit, 11-05). */
+.pc-recs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: center; text-align: center; padding-left: 0 !important; padding-right: 0 !important; }
+.pc-recs div { display: flex; flex-direction: column; min-width: 0; padding: 0 calc(6 * var(--u)); }
+.pc-recs div + div { box-shadow: inset 1px 0 rgba(255, 255, 255, 0.09); }
+.pc-recs b { font-size: calc(32 * var(--u)); font-weight: 850; letter-spacing: -0.02em; line-height: 1.1; white-space: nowrap; }
+.pc-recs .l b { font-size: calc(26 * var(--u)); }
+.pc-recs .xl b { font-size: calc(21 * var(--u)); }
 .pc-recs b.wr { color: var(--accent); }
 
 .pc-feat { position: relative; display: grid; grid-template-columns: repeat(3, 1fr); gap: calc(12 * var(--u)); align-content: start; }
@@ -90,7 +101,15 @@ body.potato .pc { transform: none; }
 .pc-place { font-weight: 800; color: var(--dim); }
 .pc-place.wr { color: var(--accent-ink); background: var(--accent); padding: 0 calc(6 * var(--u)); border-radius: calc(4 * var(--u)); }
 .pc-feat-map { font-size: calc(17 * var(--u)); font-weight: 750; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: calc(2 * var(--u)); }
-.pc-feat-time { font-size: calc(26 * var(--u)); font-weight: 850; letter-spacing: -0.02em; line-height: 1.1; }
+/* On the profile the tiles play their replay (ui/profile.ts): a quiet lift on hover, the focus ring on keyboard focus. */
+.pf-card .pc-feat-tile[role="button"] { cursor: pointer; transition: background var(--t-fast); }
+.pf-card .pc-feat-tile[role="button"]:hover { background: rgba(0, 0, 0, 0.45); }
+.pf-card .pc-feat-tile[role="button"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.pc-feat-row { display: flex; align-items: baseline; justify-content: space-between; gap: calc(8 * var(--u)); min-width: 0; }
+.pc-feat-time { font-size: calc(26 * var(--u)); font-weight: 850; letter-spacing: -0.02em; line-height: 1.1; white-space: nowrap; }
+/* The record's points beside its time: the second thing read on the tile, so the number is bright and "pts" quiet. */
+.pc-feat-pts { font-size: calc(17 * var(--u)); font-weight: 800; color: var(--text); white-space: nowrap; }
+.pc-feat-pts small { font-size: calc(13 * var(--u)); font-weight: 650; color: var(--dim); }
 .pc-feat-tag { font-size: calc(12 * var(--u)); color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pc-feat-empty { grid-column: 1 / -1; color: var(--faint); font-size: calc(17 * var(--u)); padding: calc(10 * var(--u)) 0; }
 .pc-badges { position: relative; display: flex; gap: calc(12 * var(--u)); min-height: calc(36 * var(--u)); }
@@ -160,6 +179,51 @@ body.potato .pc { transform: none; }
 .pc-staff.developer { color: #ffc23d; }
 .pc-staff.admin { color: #79d2ff; }
 .pc-staff.moderator { color: #7fe0b0; }
+
+/* ------------------------------------------------------------------ peak treatment (ui/card.ts peakLayers)
+   Hardest clear T7+ (the peak mark). --peak is that tier's colour. Every layer moves by transform or opacity alone, on
+   its own compositor layer: nothing re-lays out or repaints per frame. Scales with the tier:
+     T7  a slow light sweep across the card (.pc-glint)
+     T8  + a light running round the frame (.pc-aura)
+     T9  + motes drifting up behind the content (.pc-motes)
+     T10 all three, brighter and quicker, two lights on the frame
+   Reduced motion and Potato: the same layers held still (the frame light parked on the top-left corner, the motes in
+   place, no sweep). The OG / Discord card draws that still version (apps/api/src/og/cards.ts peakStill). */
+.pc-peak { --peak: #ffffff; --sweep: 14s; --sweep-a: 0.1; --aura-t: 14s; --aura-a: 0.55; --motes-a: 0.28; }
+.pc-peak-8 { --sweep: 11s; --sweep-a: 0.13; }
+.pc-peak-9 { --sweep: 9s; --sweep-a: 0.15; --aura-t: 12s; --aura-a: 0.7; }
+.pc-peak-10 { --sweep: 7s; --sweep-a: 0.2; --aura-t: 10s; --aura-a: 0.95; --motes-a: 0.42; }
+/* The frame light: a cone of the peak colour turning under .pc-inner, so only the frame band shows it. */
+.pc-aura { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.pc-aura::before { content: ""; position: absolute; left: 50%; top: 50%; width: 120%; aspect-ratio: 1; margin: -60% 0 0 -60%;
+  background: conic-gradient(from 0deg, transparent 0deg 292deg, color-mix(in srgb, var(--peak) 60%, transparent) 326deg, var(--peak) 346deg, transparent 360deg);
+  opacity: var(--aura-a); animation: pc-aura var(--aura-t) linear infinite; will-change: transform; }
+.pc-peak-10 .pc-aura::before { background: conic-gradient(from 0deg, transparent 0deg 112deg, color-mix(in srgb, var(--peak) 55%, transparent) 146deg, var(--peak) 166deg, transparent 180deg 292deg, color-mix(in srgb, var(--peak) 55%, transparent) 326deg, var(--peak) 346deg, transparent 360deg); }
+@keyframes pc-aura { to { transform: rotate(1turn); } }
+/* The sweep: a soft band of the peak colour crossing the card once per cycle, resting between. */
+.pc-glint { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.pc-glint::before { content: ""; position: absolute; top: -10%; bottom: -10%; left: 0; width: 45%;
+  background: linear-gradient(100deg, transparent 0%, color-mix(in srgb, var(--peak) calc(var(--sweep-a) * 100%), transparent) 50%, transparent 100%);
+  transform: translateX(-110%); animation: pc-glint var(--sweep) var(--ease-glide, ease-in-out) infinite; will-change: transform; }
+@keyframes pc-glint { 0% { transform: translateX(-110%); } 22%, 100% { transform: translateX(330%); } }
+/* Motes: three dot grids of the peak colour on a tall layer that rises one tile height per cycle (seamless). */
+.pc-motes { position: absolute; inset: 0; overflow: hidden; pointer-events: none; opacity: var(--motes-a); }
+.pc-motes::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: calc(100% + 280 * var(--u));
+  background:
+    radial-gradient(circle, var(--peak) 0 calc(1.6 * var(--u)), transparent calc(2.2 * var(--u))) calc(30 * var(--u)) calc(12 * var(--u)) / calc(148 * var(--u)) calc(140 * var(--u)),
+    radial-gradient(circle, var(--peak) 0 calc(1.1 * var(--u)), transparent calc(1.7 * var(--u))) calc(96 * var(--u)) calc(60 * var(--u)) / calc(212 * var(--u)) calc(280 * var(--u)),
+    radial-gradient(circle, color-mix(in srgb, var(--peak) 70%, transparent) 0 calc(0.9 * var(--u)), transparent calc(1.4 * var(--u))) 0 0 / calc(74 * var(--u)) calc(70 * var(--u));
+  animation: pc-motes 36s linear infinite; will-change: transform; }
+.pc-peak-10 .pc-motes::before { animation-duration: 26s; }
+@keyframes pc-motes { to { transform: translateY(calc(-280 * var(--u))); } }
+@media (prefers-reduced-motion: reduce) {
+  .pc-aura::before, .pc-motes::before { animation: none; will-change: auto; }
+  .pc-aura::before { transform: rotate(-40deg); }
+  .pc-glint { display: none; }
+}
+body.potato .pc-aura::before, body.potato .pc-motes::before { animation: none; will-change: auto; }
+body.potato .pc-aura::before { transform: rotate(-40deg); }
+body.potato .pc-glint { display: none; }
 
 /* ------------------------------------------------------------------ badge tokens (hatchdle rings) */
 .tk { --ring: #c98a50; position: relative; display: inline-grid; place-items: center; flex: none; width: 2.6rem; height: 2.6rem; border-radius: 30%; color: var(--faint); background: rgba(255, 255, 255, 0.04); box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--ring) 30%, transparent); }
@@ -539,3 +603,10 @@ button.pf-count:focus-visible { outline: none; box-shadow: var(--ring); border-r
 .pf-pts-more[hidden] { display: none; }
 .pf-pts-row.pf-run-head, .pf-pts-row.pf-run-head:hover { position: static; background: none; }
 .pf-pts-row .pf-pts-counted { color: var(--cream); font-weight: 650; }
+
+/* Overview rows (Recent personal bests): the hover actions sit before the time, so the time and the place end at the
+   column's right edge and line up with the Ranks values below (UI audit, 11-05). The Runs tab keeps its own columns. */
+.pf-run.mini { --cols: minmax(0, 1fr) auto 5.4rem 3rem; }
+.pf-run.mini .pf-run-acts { order: 1; }
+.pf-run.mini .pf-run-time { order: 2; }
+.pf-run.mini .pf-run-place { order: 3; }

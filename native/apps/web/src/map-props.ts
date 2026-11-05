@@ -40,6 +40,8 @@ export interface AnimatedPropEntity {
   skin: number;
   defaultAnim: string;
   startDisabled: boolean;
+  /** RandomAnimation: switches between its ACT_IDLE sequences every MinAnimTime..MaxAnimTime s (`RandomAnimator`). */
+  random?: { min: number; max: number };
 }
 
 /** The animated props the map's entity lump asks for (what the core tracks, minus the I/O-only ones). */
@@ -53,7 +55,17 @@ export function animatedPropEntities(entities: Record<string, string>[]): Animat
     const cls = (kv("classname") ?? "").toLowerCase();
     const model = (kv("model") ?? "").replaceAll("\\", "/").toLowerCase();
     if (!cls.startsWith("prop_dynamic") || !model.endsWith(".mdl")) return;
-    out.push({ entity, model, skin: parseInt(kv("skin") ?? "0", 10) || 0, defaultAnim: (kv("defaultanim") ?? "").trim(), startDisabled: (parseInt(kv("startdisabled") ?? "0", 10) || 0) !== 0 });
+    const num = (k: string) => parseFloat(kv(k) ?? "") || 0;
+    const random = (parseInt(kv("randomanimation") ?? "0", 10) || 0) !== 0;
+    out.push({
+      entity,
+      model,
+      skin: parseInt(kv("skin") ?? "0", 10) || 0,
+      defaultAnim: (kv("defaultanim") ?? "").trim(),
+      startDisabled: (parseInt(kv("startdisabled") ?? "0", 10) || 0) !== 0,
+      // Unset keyvalues are 0 in the engine (Hammer writes its 5 / 10 defaults into the map).
+      ...(random ? { random: { min: num("minanimtime"), max: num("maxanimtime") } } : {}),
+    });
   });
   return out;
 }
@@ -104,6 +116,143 @@ export function sequenceAt(
   out[1] = Number.isFinite(cycle) ? cycle : 0;
 }
 
+/** mulberry32: a small seeded PRNG, so random animators pick the same times and sequences in every replay and export. */
+export function seededRandom(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** FNV-1a of a string, mixed with a number: seeds per map and entity. */
+export function hashSeed(text: string, n = 0): number {
+  let h = 2166136261 ^ n;
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619);
+  return Math.imul(h ^ (h >>> 16), 0x45d9f3b) >>> 0;
+}
+
+/** What `RandomAnimator` needs of a model. */
+export interface RandomSequenceSource {
+  cps(seq: number): number;
+  looping(seq: number): boolean;
+  /** The ACT_IDLE sequences in model order, with their activity weights (negative: keep it while it plays). */
+  idle(): readonly { seq: number; weight: number }[];
+}
+
+/** Server think interval of CDynamicProp::AnimThink. */
+const THINK = 0.1;
+/** Switches remembered per prop (a 0 s interval switches every think: about 10 hours of them). */
+const MAX_SWITCHES = 1 << 18;
+
+/**
+ * A `RandomAnimation 1` prop_dynamic over time (CDynamicProp, props.cpp; CS:S animates it client-side):
+ * - Spawn ignores DefaultAnim. The prop shows sequence 0 at cycle 0 and playback rate 0 (keyvalue default) until its
+ *   first think, at `MinAnimTime..MaxAnimTime + 0.1` s (Spawn schedules `curtime + m_flNextRandAnim + 0.1` with the map
+ *   starting at 0).
+ * - AnimThink runs every 0.1 s after that. When `m_flNextRandAnim < curtime`: ResetSequence(SelectWeightedSequence
+ *   (ACT_IDLE)), the next switch MinAnimTime..MaxAnimTime later.
+ * - ResetSequence keeps the cycle when the old sequence looped (else 0), and resets the playback rate to 1 only when the
+ *   sequence changed or didn't loop (ResetSequenceInfo).
+ * - SelectWeightedSequence is Source's weighted reservoir pick over ACT_IDLE sequences; no ACT_IDLE sequence gives
+ *   sequence 0 at rate 1.
+ * - Source draws the times and picks at random; here they come from a PRNG seeded by the map and the entity, on the
+ *   world's visual time, so live play, replays and exports agree. Segments are computed forward once and kept, so
+ *   seeking back is a binary search.
+ */
+export class RandomAnimator {
+  /** Segment k: from time t[k], sequence seq[k] from cycle c0[k] at playback rate r[k]. */
+  private t: number[] = [0];
+  private seq: number[] = [0];
+  private c0: number[] = [0];
+  private r: number[] = [0];
+  private loopsFlag = false;
+  private nextRand: number;
+  private nextThink: number;
+  private readonly rand: () => number;
+
+  constructor(
+    seed: number,
+    private readonly min: number,
+    private readonly max: number,
+    private readonly m: RandomSequenceSource,
+  ) {
+    this.rand = seededRandom(seed);
+    this.nextRand = this.draw();
+    this.nextThink = this.nextRand + THINK;
+  }
+
+  /** RandomFloat(min, max). */
+  private draw(): number {
+    return this.min + (this.max - this.min) * this.rand();
+  }
+
+  private cycleAt(k: number, time: number): number {
+    const c = this.c0[k] + (time - this.t[k]) * this.m.cps(this.seq[k]) * this.r[k];
+    if (c >= 0 && c < 1) return c;
+    return this.m.looping(this.seq[k]) ? c - Math.floor(c) : c < 0 ? 0 : 1;
+  }
+
+  /** SelectWeightedSequence(ACT_IDLE, current). */
+  private pick(cur: number): number {
+    let seq = -1;
+    let total = 0;
+    for (const c of this.m.idle()) {
+      if (c.seq === cur && c.weight < 0) return c.seq;
+      const w = Math.abs(c.weight);
+      total += w;
+      const r = total > 0 ? Math.floor(this.rand() * total) : 0;
+      if (!total || r < w) seq = c.seq;
+    }
+    return seq;
+  }
+
+  /** Runs the thinks up to `time`. */
+  private extend(time: number): void {
+    while (this.nextThink <= time && this.t.length < MAX_SWITCHES && Number.isFinite(this.nextThink)) {
+      const T = this.nextThink;
+      const k = this.t.length - 1;
+      let cycle = this.cycleAt(k, T);
+      let seq = this.seq[k];
+      let rate = this.r[k];
+      // ResetSequence(SelectWeightedSequence(ACT_IDLE)).
+      const next = this.pick(seq);
+      if (!this.loopsFlag) cycle = 0;
+      const changed = next !== seq;
+      seq = next < 0 ? 0 : next;
+      if (changed || !this.loopsFlag) {
+        this.loopsFlag = this.m.looping(seq);
+        rate = 1;
+      }
+      this.t.push(T);
+      this.seq.push(seq);
+      this.c0.push(cycle);
+      this.r.push(rate);
+      this.nextRand = T + this.draw();
+      // The first think after nextRand (thinks every 0.1 s from this one).
+      // (The epsilon keeps 2.9 / 0.1 from flooring to 28: the think at exactly nextRand doesn't switch, `<` in AnimThink.)
+      this.nextThink = T + THINK * (Math.floor((this.nextRand - T) / THINK + 1e-6) + 1);
+    }
+  }
+
+  /** Sequence and cycle at visual time `time` into `out`. */
+  at(time: number, out: [number, number]): void {
+    this.extend(time);
+    let lo = 0;
+    let hi = this.t.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (this.t[mid] <= time) lo = mid;
+      else hi = mid - 1;
+    }
+    out[0] = this.seq[lo];
+    out[1] = this.cycleAt(lo, Math.max(time, this.t[lo]));
+  }
+}
+
 /** Skinning matrices written straight into the bone texture (no Bone objects); the pose is computed on demand. */
 class PropSkeleton extends THREE.Skeleton {
   compute: (() => boolean) | null = null;
@@ -149,6 +298,8 @@ interface Instance {
   seq: number;
   /** Sequence the bounding sphere was sized for. */
   sizedFor: number;
+  /** RandomAnimation props (until the map's I/O sets a sequence). */
+  random: RandomAnimator | null;
 }
 
 export interface AnimatedProps {
@@ -175,6 +326,8 @@ export interface AnimatedPropsInput {
   };
   makeStudio: (handle: number) => StudioData;
   entities: AnimatedPropEntity[];
+  /** Map fingerprint for the random animators' seeds (`hashSeed`). */
+  mapSeed?: number;
   /** The core's moving prop meshes by entity (render.ts propsMesh). */
   fallbacks: Map<number, THREE.Mesh>;
   /** Prop materials and their names (parallel). */
@@ -276,6 +429,15 @@ export function animatedProps(o: AnimatedPropsInput): AnimatedProps | null {
     return m;
   };
 
+  /** A model's ACT_IDLE sequences and timing for its random animators (`cps` is defined below; called later). */
+  const randomSource = (m: Model): RandomSequenceSource => {
+    let idle: { seq: number; weight: number }[] | null = null;
+    return {
+      cps: (seq) => cps(m, seq),
+      looping: (seq) => m.data.seqs[seq]?.looping ?? false,
+      idle: () => (idle ??= m.data.seqs.filter((q) => q.activity.toUpperCase() === "ACT_IDLE").map((q) => ({ seq: q.index, weight: q.actWeight }))),
+    };
+  };
   const instances: Instance[] = [];
   /** Animated props drawn frozen (model not loadable here): they still hide and show as the map says. */
   const frozen: { entity: number; fallback: THREE.Mesh; info: AnimatedPropEntity; state: PropAnimState | null }[] = [];
@@ -305,7 +467,8 @@ export function animatedProps(o: AnimatedPropsInput): AnimatedProps | null {
     mesh.raycast = () => {};
     mesh.position.copy(fallback.position);
     mesh.rotation.copy(fallback.rotation);
-    const inst: Instance = { entity: info.entity, model, mesh, skeleton, fallback, info, state: null, stamp: NaN, stillAt: null, seq: -1, sizedFor: -2 };
+    const inst: Instance = { entity: info.entity, model, mesh, skeleton, fallback, info, state: null, stamp: NaN, stillAt: null, seq: -1, sizedFor: -2, random: null };
+    if (info.random) inst.random = new RandomAnimator(hashSeed(model.data.info.path, (o.mapSeed ?? 0) ^ Math.imul(info.entity + 1, 0x9e3779b1)), info.random.min, info.random.max, randomSource(model));
     skeleton.compute = () => pose(inst);
     instances.push(inst);
     fallback.visible = false;
@@ -372,6 +535,7 @@ export function animatedProps(o: AnimatedPropsInput): AnimatedProps | null {
   };
   /** Sequence and cycle of a prop at visual time `t`. */
   const at = (inst: Instance, t: number, out: [number, number]): void => {
+    if (inst.random && !inst.state?.set) return inst.random.at(t, out);
     cur = inst.model;
     const st = inst.state ?? { anim: inst.info.defaultAnim, defaultAnim: inst.info.defaultAnim, base: 0, since: 0, rate: 1 };
     sequenceAt(st, t, inst.entity, seqs, out);

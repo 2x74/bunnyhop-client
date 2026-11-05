@@ -9,7 +9,7 @@
 // frame (Z up, -Y forward, X left); arm bones get a rest correction from the A-pose to hanging arms.
 
 import * as THREE from "three";
-import type { PlayerPose } from "../model";
+import type { PlayerPose } from "../pose";
 import { rig, type Rig, type V3 } from "./rig";
 import { hypot2, hypot3 } from "../../hypot";
 

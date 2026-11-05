@@ -37,8 +37,19 @@ impl Game {
         false
     }
 
+    /// First physics version of this map's reviewed mechanics: 25 when they come from a v25 build
+    /// (`map_fixes::BUILDS_V25` with its own mechanics), else 19.
+    pub(super) fn mechanics_min_physics(&self) -> u32 {
+        if self.map_build_v25.is_some_and(|b| b.mechanics.is_some()) { PHYSICS_V25 } else { PHYSICS_V19 }
+    }
+
     pub(super) fn mechanics_on(&self) -> bool {
-        (PHYSICS_V19..=PHYSICS_LATEST).contains(&self.settings.physics_version) && self.map_mechanics.is_some()
+        self.map_mechanics.is_some() && (self.mechanics_min_physics()..=PHYSICS_LATEST).contains(&self.settings.physics_version)
+    }
+
+    /// Maker inputs run: a reviewed maker build (`MECHANICS_V19`), or a v25 build from v25 on.
+    fn makers_on(&self, m: &map_fixes::MapMechanics) -> bool {
+        m.makers || (self.map_build_v25.is_some_and(|b| b.makers) && (PHYSICS_V25..=PHYSICS_LATEST).contains(&self.settings.physics_version))
     }
 
     /// CEventAction's constructor maps a map-file fire count of zero to EVENT_FIRE_ALWAYS.
@@ -108,7 +119,7 @@ impl Game {
             }
             return true;
         }
-        if m.makers && self.ents[i].class == "env_entity_maker" {
+        if self.makers_on(m) && self.ents[i].class == "env_entity_maker" {
             match input {
                 "forcespawn" => {
                     self.maker_spawn(i, self.ents[i].origin, self.ents[i].angles);

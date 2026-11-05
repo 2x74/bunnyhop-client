@@ -170,6 +170,23 @@ export class EyeSmoother {
 export const CHASE_HOLD = 0.15;
 /** Cramped (pushed in to a fraction of its distance): it rises up to `rise` units and looks `ahead` units past. */
 export const CHASE_CRANE = { rise: 34, ahead: 26, up: 6 };
+/**
+ * The subject has to stay readable: a chase cam that ends up within `in` units of the body's axis (a corridor, a
+ * pipe, a low ceiling: all head or all torso) cuts to the player's eyes, and back once it has held more than `out` for
+ * `hold` seconds. The body fades out over CHASE_NEAR_FADE as the camera nears it, so the last frames before the cut
+ * show through it rather than fill the view.
+ */
+export const CHASE_EYE = { in: 24, out: 40, hold: 0.5 };
+/** The third-person bunny's near fade (PlayerModel.setNearFade: gone within the first, whole past the second, units). */
+export const CHASE_NEAR_FADE: readonly [number, number] = [20, 50];
+/** The body's axis the near fade measures from (above the feet origin, units: player/bunny/model.ts uAxisA / uAxisB). */
+const AXIS_LO = 8, AXIS_HI = 60;
+
+/** The camera's distance from the body's axis (the near fade's measure), Source space. */
+export function axisDistance(cam: ArrayLike<number>, pos: ArrayLike<number>): number {
+  const z = clamp(cam[2], pos[2] + AXIS_LO, pos[2] + AXIS_HI);
+  return Math.hypot(cam[0] - pos[0], cam[1] - pos[1], cam[2] - z);
+}
 
 /**
  * A collision-limited distance: in at once to `target`, out (eased) only after `target` has allowed more for CHASE_HOLD.
@@ -199,6 +216,11 @@ export class ChaseCam {
   private craneHold = 0;
   private height = NaN;
   private z = NaN;
+  /** In the eyes for want of room (CHASE_EYE), and how long the chase position has been clear of the body. */
+  private eyed = false;
+  private eyeHold = 0;
+  /** Debug / tests: this frame's chase position's distance from the body's axis. */
+  separation = Infinity;
   private o: Required<ChaseOptions>;
   private pivot = [0, 0, 0];
   private want = [0, 0, 0];
@@ -227,7 +249,11 @@ export class ChaseCam {
     this.zoom = clamp(this.zoom * f, 0.4, 5);
   }
 
-  update(camera: THREE.PerspectiveCamera, s: SpectatorTarget, dt: number, trace: TraceFn | null, eyeErr = 0): void {
+  /**
+   * Places the camera behind the target. Returns false when there's no room to show the subject (CHASE_EYE): the
+   * caller puts the camera in the target's eyes instead (SpectatorCamera does) and doesn't draw the model.
+   */
+  update(camera: THREE.PerspectiveCamera, s: SpectatorTarget, dt: number, trace: TraceFn | null, eyeErr = 0): boolean {
     const o = this.o;
     const snap = Number.isNaN(this.yaw);
     const eye = s.viewZ - o.eyeDrop + eyeErr;
@@ -280,10 +306,24 @@ export class ChaseCam {
       top[1] = p[1] + sy * CHASE_CRANE.ahead * c;
       top[2] = p[2] + CHASE_CRANE.up * c;
       lookFrom(camera, this.position, top);
-      return;
+      return this.room(s, snap, dt);
     }
     this.craneRise = NaN;
     lookFrom(camera, this.position, p);
+    return this.room(s, snap, dt);
+  }
+
+  /** CHASE_EYE: whether this frame's position leaves room to show the subject (in at once, out after the hold). */
+  private room(s: SpectatorTarget, snap: boolean, dt: number): boolean {
+    const sep = (this.separation = axisDistance(this.position, s.pos));
+    if (snap) (this.eyed = sep < CHASE_EYE.in), (this.eyeHold = 0);
+    else if (!this.eyed) {
+      if (sep < CHASE_EYE.in) (this.eyed = true), (this.eyeHold = 0);
+    } else {
+      this.eyeHold = sep > CHASE_EYE.out ? this.eyeHold + dt : 0;
+      if (this.eyeHold >= CHASE_EYE.hold) this.eyed = false;
+    }
+    return !this.eyed;
   }
   private look = [0, 0, 0];
 }
@@ -567,14 +607,16 @@ export class SpectatorCamera {
   /** Places the camera for this frame's target state. Returns true if the target's model should be drawn. */
   update(camera: THREE.PerspectiveCamera, s: SpectatorTarget, dt: number, mode: SpectatorMode = this.mode): boolean {
     const err = this.eyeSmooth.update(s, dt);
+    const eyes = () => {
+      const e = eyeOf(s, this.eyeTmp);
+      e[2] += err;
+      if (this.trace) e[2] = clearEyeZ(this.trace, e[0], e[1], s.pos[2] + hullTop(s.crouched), e[2]);
+      setEye(camera, e, s.yaw, s.pitch);
+      return false;
+    };
     switch (mode) {
-      case "eye": {
-        const e = eyeOf(s, this.eyeTmp);
-        e[2] += err;
-        if (this.trace) e[2] = clearEyeZ(this.trace, e[0], e[1], s.pos[2] + hullTop(s.crouched), e[2]);
-        setEye(camera, e, s.yaw, s.pitch);
-        return false;
-      }
+      case "eye":
+        return eyes();
       case "free":
         this.free.update(camera, dt);
         return true;
@@ -582,8 +624,8 @@ export class SpectatorCamera {
         this.flyby.update(camera, s, dt, this.trace);
         return true;
       default:
-        this.chase.update(camera, s, dt, this.trace, err);
-        return true;
+        // No room behind them for the subject to read (ChaseCam CHASE_EYE): their eyes until there is.
+        return this.chase.update(camera, s, dt, this.trace, err) ? true : eyes();
     }
   }
 }

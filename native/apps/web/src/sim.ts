@@ -154,7 +154,13 @@ export const FRAME_STRIDE = 6;
 /** Frame field 3 bit flags. */
 export const FRAME_CROUCHED = 1;
 export const FRAME_GROUNDED = 2;
-export const frameFlags = (s: Pick<PlayerState, "crouched" | "grounded">): number => (s.crouched ? FRAME_CROUCHED : 0) | (s.grounded ? FRAME_GROUNDED : 0);
+/**
+ * On a ladder (presentation only: ghosts climb, player/bunny/legs.ts). The same bit as the replay viewer's F_LADDER
+ * (viewer/player.ts), so frames built from viewer data (h2h/align.ts) carry it unchanged. Frames saved before it lack it.
+ */
+export const FRAME_LADDER = 64;
+export const frameFlags = (s: Pick<PlayerState, "crouched" | "grounded"> & { onLadder?: boolean }): number =>
+  (s.crouched ? FRAME_CROUCHED : 0) | (s.grounded ? FRAME_GROUNDED : 0) | (s.onLadder ? FRAME_LADDER : 0);
 
 /** Re-simulates a replay from core.reset() with the given zones. The map must already be loaded. */
 export function simulate(core: Core, replay: Replay, zones: readonly Zone[], opts: SimOptions = {}): SimResult {

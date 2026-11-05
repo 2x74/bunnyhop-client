@@ -13,7 +13,7 @@ import { appHref } from "./platform/navigation";
 import { API_URL } from "./api";
 import { myProfile } from "./ui/account-state";
 import type { StaffRole } from "./progression";
-import { STAFF_LABEL, STAFF_SVG, staffBadgeOf } from "./creators";
+import { STAFF_LABEL, STAFF_SHIELD, STAFF_SVG, staffBadgeOf } from "./creators";
 
 let role: Promise<StaffRole | null> | null = null;
 
@@ -27,9 +27,10 @@ export function staffRole(): Promise<StaffRole | null> {
 
 /**
  * An empty inline slot that becomes a small "Open in admin" link when the viewer is staff (not on their own card).
- * Costs nothing for players: the slot stays empty.
+ * Costs nothing for players: the slot stays empty. `icon`: a quiet outline shield instead of the word (leaderboard
+ * rows, where the word took the name's room), `label` then names it for screen readers and the tooltip.
  */
-export function adminLink(userId: string, cls = "staff-lens", label = "Open in admin"): HTMLElement {
+export function adminLink(userId: string, cls = "staff-lens", label = "Open in admin", o: { icon?: boolean } = {}): HTMLElement {
   const slot = document.createElement("span");
   slot.className = `${cls}-slot`;
   void staffRole().then(async (r) => {
@@ -46,8 +47,15 @@ export function adminLink(userId: string, cls = "staff-lens", label = "Open in a
     a.href = `/admin#/player/${encodeURIComponent(userId)}`;
     a.target = "_blank";
     a.rel = "noopener";
-    a.textContent = label;
-    a.title = "Open in the admin panel";
+    if (o.icon) {
+      a.style.cssText += ";display:inline-flex;vertical-align:middle;padding:0.15em 0.3em;margin-left:0.1em";
+      a.innerHTML = `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="${STAFF_SHIELD}" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>`;
+      a.setAttribute("aria-label", label);
+      a.title = label;
+    } else {
+      a.textContent = label;
+      a.title = "Open in the admin panel";
+    }
     a.addEventListener("click", (e) => e.stopPropagation());
     slot.replaceChildren(a);
   });

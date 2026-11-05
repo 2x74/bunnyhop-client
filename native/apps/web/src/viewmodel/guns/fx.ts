@@ -253,6 +253,18 @@ export class GunFx {
     this.flash.visible = false;
   }
 
+  /** Nothing in flight (a replay seek or an export's start): no flash, light, smoke or shells, no pending spawns. */
+  clear(): void {
+    this.pendingFlash = this.pendingSmoke = false;
+    this.pendingEject = 0;
+    this.flashAge = this.lightAge = Infinity;
+    this.flash.visible = false;
+    for (const p of this.smoke.puffs) p.age = Infinity;
+    this.smoke.next = 0;
+    for (const pool of this.pools) for (const s of pool.shells) s.alive = false;
+    this.rng.seed();
+  }
+
   /** A shot: the flash, and (`eject` 1) a shell now; the M3 ejects on its pump instead (eject()). `quiet`: silenced. */
   shot(eject: number, quiet = false): void {
     this.pendingFlash = true;

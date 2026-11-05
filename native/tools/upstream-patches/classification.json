@@ -2,7 +2,7 @@
   {
     "path": "apps/web/src/api.ts",
     "classification": "native patch",
-    "baseline": "793ab37f5afe3e415e5e4bc628e9b45a44482975"
+    "baseline": "d526eec0e87684103e99e4fbf447b391101be098"
   },
   {
     "path": "apps/web/src/assets/audio/manifest.json",
@@ -17,7 +17,7 @@
   {
     "path": "apps/web/src/core.ts",
     "classification": "native patch",
-    "baseline": "07a67b282f7cd778103033692a3870c883fe7ab7"
+    "baseline": "1a6341d9b002ea1dc579703a29057b328c97c7b2"
   },
   {
     "path": "apps/web/src/feedback/modal.ts",
@@ -42,7 +42,7 @@
   {
     "path": "apps/web/src/net/hud.ts",
     "classification": "dropped 042dca41: menu builds use the chat-hud adapter; take upstream",
-    "baseline": "7716e45b372a547761ff3112a40dad2cf340b25e"
+    "baseline": "ac9669bcca1d29fed693c8fbd04a4ec99a32b2ee"
   },
   {
     "path": "apps/web/src/net/scoreboard.ts",
@@ -57,12 +57,12 @@
   {
     "path": "apps/web/src/social/dock.ts",
     "classification": "native patch",
-    "baseline": "dd0a3f45dc3b0777f479dcf2fbcdc7bf1a425f39"
+    "baseline": "b056f483304a21411dc58aa5bef3a331ff639e46"
   },
   {
     "path": "apps/web/src/styles.ts",
     "classification": "native patch",
-    "baseline": "7d9a9136c13d695856b37630f9514a0f4d9ace96"
+    "baseline": "7824c8a54c76feb600b7b28878ce32c4e5581141"
   },
   {
     "path": "apps/web/src/ui/account-name.ts",
@@ -77,7 +77,7 @@
   {
     "path": "apps/web/src/ui/card-editor.ts",
     "classification": "native patch",
-    "baseline": "dc17f65fbb9696b4a1bc38a79b9c281d04657b1e"
+    "baseline": "a591c2b7952054b14628771b2aeb160f013779ff"
   },
   {
     "path": "apps/web/src/ui/country-picker.ts",
@@ -112,17 +112,17 @@
   {
     "path": "apps/web/src/ui/profile.ts",
     "classification": "native patch",
-    "baseline": "d900d5ca0f7f45bb9913ad0f86296e0b891a0467"
+    "baseline": "739d08d18c4676f7d54851fd312c4907d15bba67"
   },
   {
     "path": "apps/web/src/ui/run-stats.ts",
     "classification": "native patch",
-    "baseline": "7ea2f024d336add089dab35509d20cab814e1cf3"
+    "baseline": "7847cf5b866f73b2f0a29ed9e00a245eeabf741d"
   },
   {
     "path": "apps/web/src/ui/support.ts",
     "classification": "native patch",
-    "baseline": "a4adae0af2c18ff39ebb6fbf1e678ab6cfd3502b"
+    "baseline": "2cd323d89b122ddfb9afa5c9bfa8da82fe833ade"
   },
   {
     "path": "apps/web/src/viewmodel/inspects/third.ts",
@@ -137,12 +137,12 @@
   {
     "path": "crates/core/Cargo.toml",
     "classification": "native patch",
-    "baseline": "01bc5f743f2ccd878f3d777dc791619c0dc61c79"
+    "baseline": "f79264a03871477abed03d0cde26c7fe8839f5aa"
   },
   {
     "path": "crates/core/src/game.rs",
     "classification": "native patch",
-    "baseline": "b4a837ce4af862fade3602a551eebda4411c2e77"
+    "baseline": "5a55d9ba3943ee01c6bb6af0ae0df558b022ea42"
   },
   {
     "path": "crates/core/src/game/flight.rs",
@@ -177,7 +177,7 @@
   {
     "path": "crates/core/src/game/weapons.rs",
     "classification": "native patch",
-    "baseline": "c0713e0a068f99d5e33aec3542a701edb6392ec2"
+    "baseline": "3e5e27c8c24f24c1b865c5471cf63bdd70787afe"
   },
   {
     "path": "crates/core/src/lib.rs",
@@ -192,12 +192,12 @@
   {
     "path": "crates/core/src/physics.rs",
     "classification": "native patch",
-    "baseline": "f9e6dd6a3b01fef7aeeed7f21a94e19573a0f57a"
+    "baseline": "702314ffd35518bf484e7b78687509501efb5b3e"
   },
   {
     "path": "crates/core/src/props.rs",
     "classification": "native patch",
-    "baseline": "2f689d4250dd1f23394201aaaed8a651efc23687"
+    "baseline": "61b3e57545a394015d1bca4ab4a090500d86d44d"
   },
   {
     "path": "crates/core/src/wasm.rs",
@@ -207,7 +207,7 @@
   {
     "path": "crates/core/src/wasm_content.rs",
     "classification": "native patch",
-    "baseline": "e28797ff52f5c1f95e5e2230e7b6d3ee13ddc448"
+    "baseline": "d1110a6ee110d8f03cca57ebfcff09d46f59adac"
   },
   {
     "path": "crates/core/src/wasm_studio.rs",

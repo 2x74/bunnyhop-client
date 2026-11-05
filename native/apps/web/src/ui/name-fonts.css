@@ -1,0 +1,29 @@
+/* Supporter name fonts (supporter-looks.ts NAME_FONTS; files: tools/name-fonts/build.py). A browser only fetches a
+   face when text in it is on screen, so these rules cost nothing for players who never see a name in one.
+   - size-adjust: each face near Inter's width and cap height on average; each name is then fitted (ui/name-fit.ts).
+   - ascent / descent / line-gap overrides: Inter's line box (0.969 / 0.241 em, divided by size-adjust, which scales
+     them too), so a row with a name in any face is exactly as tall as with the default font.
+   - font-weight 100 900 on one file: the face is drawn as it is at any weight asked for, never faux-bolded.
+   - Letters a face lacks (most have no Cyrillic) fall back to the default font letter by letter (the --font-ui stack
+     after it). font-display swap: the default font until the file arrives. */
+@font-face { font-family: "bh-name-grotesk"; src: url("../assets/name-fonts/grotesk.woff2") format("woff2"); font-weight: 100 900; font-display: swap; size-adjust: 100%; ascent-override: 96.9%; descent-override: 24.1%; line-gap-override: 0%; }
+@font-face { font-family: "bh-name-round"; src: url("../assets/name-fonts/round.woff2") format("woff2"); font-weight: 100 900; font-display: swap; size-adjust: 100%; ascent-override: 96.9%; descent-override: 24.1%; line-gap-override: 0%; }
+@font-face { font-family: "bh-name-pixel"; src: url("../assets/name-fonts/pixel.woff2") format("woff2"); font-weight: 100 900; font-display: swap; size-adjust: 100%; ascent-override: 96.9%; descent-override: 24.1%; line-gap-override: 0%; }
+@font-face { font-family: "bh-name-mono"; src: url("../assets/name-fonts/mono.woff2") format("woff2"); font-weight: 100 900; font-display: swap; size-adjust: 96%; ascent-override: 100.9%; descent-override: 25.1%; line-gap-override: 0%; }
+@font-face { font-family: "bh-name-serif"; src: url("../assets/name-fonts/serif.woff2") format("woff2"); font-weight: 100 900; font-display: swap; size-adjust: 100%; ascent-override: 96.9%; descent-override: 24.1%; line-gap-override: 0%; }
+@font-face { font-family: "bh-name-wide"; src: url("../assets/name-fonts/wide.woff2") format("woff2"); font-weight: 100 900; font-display: swap; size-adjust: 86%; ascent-override: 112.7%; descent-override: 28.0%; line-gap-override: 0%; }
+@font-face { font-family: "bh-name-marker"; src: url("../assets/name-fonts/marker.woff2") format("woff2"); font-weight: 100 900; font-display: swap; size-adjust: 98%; ascent-override: 98.9%; descent-override: 24.6%; line-gap-override: 0%; }
+@font-face { font-family: "bh-name-block"; src: url("../assets/name-fonts/block.woff2") format("woff2"); font-weight: 100 900; font-display: swap; size-adjust: 98%; ascent-override: 98.9%; descent-override: 24.6%; line-gap-override: 0%; }
+@font-face { font-family: "bh-name-script"; src: url("../assets/name-fonts/script.woff2") format("woff2"); font-weight: 100 900; font-display: swap; size-adjust: 96%; ascent-override: 100.9%; descent-override: 25.1%; line-gap-override: 0%; }
+/* Doubled class: wins over the name elements' own font rules (board buttons, chat names). --nm-k is the name's own fit
+   (ui/name-fit.ts): zoom shrinks the layout box with the text, so the name is never wider than in the default font. */
+.nm-font { zoom: var(--nm-k, 1); }
+.nm-font.nm-font-grotesk { font-family: "bh-name-grotesk", var(--font-ui); font-synthesis: none; }
+.nm-font.nm-font-round { font-family: "bh-name-round", var(--font-ui); font-synthesis: none; }
+.nm-font.nm-font-pixel { font-family: "bh-name-pixel", var(--font-ui); font-synthesis: none; }
+.nm-font.nm-font-mono { font-family: "bh-name-mono", var(--font-ui); font-synthesis: none; }
+.nm-font.nm-font-serif { font-family: "bh-name-serif", var(--font-ui); font-synthesis: none; }
+.nm-font.nm-font-wide { font-family: "bh-name-wide", var(--font-ui); font-synthesis: none; }
+.nm-font.nm-font-marker { font-family: "bh-name-marker", var(--font-ui); font-synthesis: none; }
+.nm-font.nm-font-block { font-family: "bh-name-block", var(--font-ui); font-synthesis: none; }
+.nm-font.nm-font-script { font-family: "bh-name-script", var(--font-ui); font-synthesis: none; }

@@ -31,6 +31,8 @@ const UP: [number, number] = [Math.sin(RAKE), Math.cos(RAKE)];
 const FWD: [number, number] = [Math.cos(RAKE), -Math.sin(RAKE)];
 const BACK0: P2 = [-0.5, -0.3];
 const GRIP_LEN = 3.4, GRIP_DEPTH = 1.75;
+/** The stock's side profile (receiver end at the top, round to the butt; the buttplate caps x < -8.7). */
+const STOCK: P2[] = [[-0.85, 1.6], [-2.9, 1.2], [-6.2, 1.36], [-8.75, 1.12], [-8.82, -1.6], [-8.2, -1.86], [-4.4, -1.18], [-0.9, -0.4]];
 const along = (p: P2, t: number, d: number): P2 => [p[0] - UP[0] * t + FWD[0] * d, p[1] - UP[1] * t + FWD[1] * d];
 /** The carrot magazine: where it meets the receiver, its axis (down and a little forward), its length. */
 const MAG0: V3 = [4.35, 0, -0.3];
@@ -72,8 +74,10 @@ function build(k: KnifeCtx): void {
   slab(k, [along(b0, 0, -0.05), along(b0, -0.05, 0.35), [0.1, -0.45], [-0.08, -0.98], along(b0, 0.8, -0.05)], -0.6, 0.6, { paint: WOOD, part: PART.grip, round: 0.18, bevel: 0.14 });
   slab(k, [along(b0, 0.7, -0.05), [-0.12, -0.92], along(b0, 0.85, GRIP_DEPTH), along(b0, GRIP_LEN, GRIP_DEPTH - 0.1), along(b0, GRIP_LEN, 0.05), along(b0, 1.5, -0.05)], -0.6, 0.6, { paint: WOOD, part: PART.grip, round: 0.25, bevel: 0.15 });
   if (fp) for (const y of [-1, 1]) slab(k, [along(b0, 1.3, 0.3), along(b0, 1.3, GRIP_DEPTH - 0.4), along(b0, GRIP_LEN - 0.3, GRIP_DEPTH - 0.4), along(b0, GRIP_LEN - 0.3, 0.3)], y > 0 ? 0.58 : -0.62, y > 0 ? 0.62 : -0.58, { paint: WOOD_DARK, part: PART.grip, round: 0.15, bevel: 0.02 });
-  slab(k, [[-0.85, 1.6], [-8.6, 1.2], [-8.8, -1.7], [-7.6, -1.8], [-2.6, -0.9], [-0.9, -0.4]], -0.58, 0.58, { paint: WOOD, round: 0.3, bevel: 0.15 });
-  box(k, [-8.85, 0, -0.25], [0.22, 0.6, 1.5], { paint: RECV_DARK, round: 0.18 });
+  // The stock: a slim wrist behind the receiver, a gentle comb, a rounded heel and toe, the belly sweeping down to the
+  // butt (v0.0.37 polish: it was a straight-sided box).
+  slab(k, STOCK, -0.58, 0.58, { paint: WOOD, round: [0.3, 0.7, 1.2, 0.5, 0.3, 0.6, 1.2, 0.3], bevel: 0.17 });
+  slab(k, [[-8.72, 1.0], [-9.02, 0.95], [-9.08, -1.5], [-8.62, -1.78]], -0.6, 0.6, { paint: RECV_DARK, round: 0.16, bevel: 0.08 });
   // --- The carrot magazine (Mag bone): two slabs along its curve, darker ridges, a point at the bottom.
   slab(k, [magAt(0, -0.62), magAt(0, 0.62), magAt(2.3, 0.62), magAt(2.3, -0.62)], -0.42, 0.42, { paint: CARROT, bone: "Mag", round: 0.2, bevel: 0.12 });
   slab(k, [magAt(2.2, -0.62), magAt(2.2, 0.62), magAt(3.5, 0.75), magAt(4.45, 0.3), magAt(4.5, 0.05), magAt(3.6, -0.35)], -0.4, 0.4, { paint: CARROT, bone: "Mag", round: 0.25, bevel: 0.12 });

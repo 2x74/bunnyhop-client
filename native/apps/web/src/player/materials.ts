@@ -38,11 +38,25 @@ export interface PlayerUniforms extends FinishUniforms, PlayerLookUniforms {
   /** Near fade: fully hidden within x units of the body axis, fully visible beyond y (y <= x disables). */
   uNearFade: THREE.IUniform<THREE.Vector2>;
   /**
+   * The near fade on the solid body too (1), as a screen-door dither (whole fragments kept or discarded, so depth stays
+   * right): set by PlayerModel.setNearFade, for the chase-cam bunnies (viewer, head to head, live third person). 0 by
+   * default: other players in a room, previews and the first-person hands, which share the solid shader, never fade.
+   */
+  uSolidFade: THREE.IUniform<number>;
+  /**
    * Distance contour (0 = off: the first-person hands, which share the solid shader). On for world bunnies: from ~250
    * to ~650 units away (about 150 down to 60 px tall at 1080p) grazing edges darken and the bright rim fades, so arms,
    * knees and the hoodie's outline separate from the body and from bright skies (players, ghosts, spectating).
    */
   uContour: THREE.IUniform<number>;
+  /**
+   * Glow separation (0 = off: no glow, and the first-person hands). A glowing body's contour shell lights the body
+   * around every limb, inside its silhouette too, which flattens arms over the torso and a knee over a shin, worst with
+   * a pale glow on a pale outfit. At 1 the body itself darkens its grazing edges (an inner contour), its bright rim
+   * calms and the key gets a little more contrast, so overlapping parts keep an edge; the shell's contour softens
+   * close to the camera (glow.ts). PlayerGlowShell sets it with the shell's visibility.
+   */
+  uGlowEdge: THREE.IUniform<number>;
   /** Colourway palette (bunny: hoodie, trim, pants, pants trim, shoe, face, glove, detail), for accent codes >= 3. */
   uPalette: THREE.IUniform<THREE.Color[]>;
   /** Per-player rotor phase, integrated from horizontal movement speed. */
@@ -75,7 +89,9 @@ export function playerUniforms(): PlayerUniforms {
     uAxisA: { value: new THREE.Vector3() },
     uAxisB: { value: new THREE.Vector3(0, 64, 0) },
     uNearFade: { value: new THREE.Vector2(14, 60) },
+    uSolidFade: { value: 0 },
     uContour: { value: 0 },
+    uGlowEdge: { value: 0 },
     uPalette: { value: Array.from({ length: 8 }, () => new THREE.Color(0xffffff)) },
     uPropellerAngle: { value: 0 },
     uCapybara: { value: new THREE.Vector4() },
@@ -169,12 +185,19 @@ ${FABRIC_FRAGMENT_PARS}
 ${HAT_FX_FRAGMENT_PARS}
 ${HAT_DETAIL_FRAGMENT_PARS}
 ${common}
+uniform float uGlowEdge;
+uniform float uSolidFade;
 /** 0 near, 1 far (the distance contour, uContour): from the camera to the body's middle. */
 float farness() {
   if (uContour <= 0.0) return 0.0;
   return smoothstep(250.0, 650.0, length(cameraPosition - (uAxisA + uAxisB) * 0.5)) * uContour;
 }
 void main() {
+  // Near fade (uSolidFade): dithered out as the camera closes in, before the chase cam's cut to the eyes.
+  if (uSolidFade > 0.5) {
+    float nf = nearFade();
+    if (nf < 0.999 && nf <= bayer4(gl_FragCoord.xy)) discard;
+  }
   vec3 n = normalize(vNormalW);
   float back = gl_FrontFacing ? 1.0 : 0.0;
   if (!gl_FrontFacing) n = -n;
@@ -205,8 +228,16 @@ ${GLOVE_FRAGMENT_ALBEDO}
   vec3 col = albedo * (ambient * gm.aoA + key * vec3(0.78, 0.74, 0.68) * gm.aoK);
   float rim = pow(1.0 - max(dot(n, V), 0.0), 3.0);
   float far = farness();
-  col += rim * 0.22 * (1.0 - 0.8 * far) * mix(vec3(1.0), uAccent, 0.35) * gm.aoA;
+  // (A glowing body's own rim calms: the glow's contour is its bright edge.)
+  col += rim * 0.22 * (1.0 - 0.8 * far) * (1.0 - 0.6 * uGlowEdge) * mix(vec3(1.0), uAccent, 0.35) * gm.aoA;
   col += garmentLight(gm, n, V, L, key, ambient);
+  // Glow separation (uGlowEdge): an inner contour at grazing edges, at every distance, so a limb in front of the body
+  // keeps a darker edge under the glow; a little more key contrast. Off (0) leaves the shading exactly as it was.
+  if (uGlowEdge > 0.0) {
+    float ge = pow(1.0 - max(dot(n, V), 0.0), 1.5);
+    col *= 1.0 - uGlowEdge * 0.4 * ge;
+    col = mix(col, col * (0.8 + 0.34 * key), uGlowEdge * 0.4);
+  }
   // Distance contour: darker grazing edges and a little more key contrast, so limbs read against the body.
   if (far > 0.0) {
     float edge = pow(1.0 - max(dot(n, V), 0.0), 1.6);

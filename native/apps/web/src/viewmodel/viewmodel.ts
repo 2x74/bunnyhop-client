@@ -78,7 +78,7 @@ export const ATTACK_BLEND = 0.05;
  * Switching away from the knife (presentation only: the core has already switched): it lowers out of view over this
  * long while the gun comes up, instead of vanishing. The gun's draw starts below the screen, so the two overlap.
  */
-export const KNIFE_HOLSTER = 0.2;
+export const KNIFE_HOLSTER = 0.15;
 
 /** Sequence names per action (v_knife_t). */
 const SEQ: Record<VmAction, string> = { idle: "idle", draw: "draw", slash1: "midslash1", slash2: "midslash2", stab: "stab_miss" };
@@ -417,11 +417,21 @@ export class Viewmodel {
     this.inspects.cancel("switch");
   }
 
-  /** Straight to idle, no deploy (the replay viewer after a seek). */
+  /**
+   * Straight to idle, no deploy, and no history (the replay viewer after a seek, an export's start): the viewmodel
+   * clock (breathing, hand idle phases), the sequence (no crossfade from what was showing), the inspect, the movement
+   * feel, the attack timers. The same replay from the same tick then poses the same every time.
+   */
   idle(): void {
     this.holsterT = Infinity;
     this.handIdle.reset();
     this.feelState.reset();
+    this.inspects.reset();
+    this.now = 0;
+    this.nextPrimary = this.nextSecondary = 0;
+    this.slashSide = 0;
+    this.pressedPrimary = this.pressedSecondary = false;
+    this.play = { seq: -1, cycle: 0, prevSeq: -1, prevCycle: 0, fade: 0, fadeT: 0 };
     this.setAction("idle");
     this.inspects.cancel("draw");
   }
@@ -595,6 +605,7 @@ export class Viewmodel {
       this.proc.pose(this.action, this.actionT, W);
     }
     // Knife hold (non-carrot knives): fingers + knife follow the hand, per-action tweaks; extra bones after the inspect.
+    if (this.knifeHold) this.knifeHold.state.time = this.now;
     this.knifeHold?.apply(W, this.action, this.actionT, cs ? "cs" : "procedural");
     this.inspects.apply(W);
     this.knifeHold?.solve(W);
@@ -697,7 +708,8 @@ export class Viewmodel {
     angleMatrix(24 * k * m, 0, 12 * k * m, 0, 0, 0, this.L);
     const L = this.L;
     L[3] = px - (L[0] * px + L[1] * py + L[2] * pz) - 1.5 * k;
-    L[7] = py - (L[4] * px + L[5] * py + L[6] * pz) - 1 * k;
+    // (Out to the right as well as down: the incoming gun's draw comes up the middle.)
+    L[7] = py - (L[4] * px + L[5] * py + L[6] * pz) - 3.5 * k;
     L[11] = pz - (L[8] * px + L[9] * py + L[10] * pz) - 9 * k;
     concat(L, 0, this.V, 0, this.LV, 0);
     return this.LV;

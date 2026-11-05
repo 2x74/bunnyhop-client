@@ -219,6 +219,11 @@ export class BunnyModel implements PlayerModelImpl {
   private inv = inverseBind(this.r);
   /** Skinning matrices (bind model space -> posed model space), 3x4 per rig bone. */
   private S: Float32Array;
+  /**
+   * Tick presentation (present()): the outputs of the last two updates (bone matrices, the yaw / bank group, the root's
+   * world position, whether the update snapped), oldest first. null until present() is first used.
+   */
+  private ticks: { bm: Float32Array; p: THREE.Vector3; q: THREE.Quaternion; root: THREE.Vector3; snapped: boolean }[] | null = null;
   private style: PlayerStyle = "solid";
   private dither = false;
   /** Drawn as a "???" silhouette (setSilhouette): no colours at all. */
@@ -678,6 +683,8 @@ export class BunnyModel implements PlayerModelImpl {
 
   setNearFade(near: number, far: number): void {
     this.uniforms.uNearFade.value.set(near, far);
+    // The solid body fades too (materials.ts uSolidFade) wherever a fade is asked for.
+    this.uniforms.uSolidFade.value = far > near ? 1 : 0;
   }
 
   setRenderOrder(order: number): void {
@@ -841,6 +848,8 @@ export class BunnyModel implements PlayerModelImpl {
 
   update(dt: number): void {
     this.glow.sync([this.mesh, ...(this.crown ? [this.crown] : [])], this.style === "solid" && !this.silhouette, this.mesh.renderOrder);
+    // Glow separation on the body while its glow shows (materials.ts uGlowEdge); 0 otherwise: the plain look.
+    this.uniforms.uGlowEdge.value = this.glow.drawn ? 1 : 0;
     const s = this.pose;
     if (!s) return;
     const t0 = performance.now();
@@ -954,7 +963,49 @@ export class BunnyModel implements PlayerModelImpl {
       this.crown.material = this.mesh.material;
       this.crown.renderOrder = this.mesh.renderOrder;
     }
+    if (this.ticks) this.keepTick(snap);
     this.lastUpdateMs = performance.now() - t0;
+  }
+
+  private keepTick(snapped: boolean): void {
+    const k = this.ticks!;
+    const bm = this.skeleton.boneMatrices!;
+    // The skeleton changed (the CS:S content arrived, a rebuild): start over from this update.
+    if (k.length && k[0].bm.length !== bm.length) k.length = 0;
+    const cur = k.length < 2 ? { bm: new Float32Array(bm.length), p: new THREE.Vector3(), q: new THREE.Quaternion(), root: new THREE.Vector3(), snapped } : k.shift()!;
+    cur.bm.set(bm);
+    cur.p.copy(this.yawG.position);
+    cur.q.copy(this.yawG.quaternion);
+    cur.root.copy(this.root.position);
+    cur.snapped = snapped;
+    k.push(cur);
+    if (k.length < 2) k.unshift({ bm: Float32Array.from(bm), p: cur.p.clone(), q: cur.q.clone(), root: cur.root.clone(), snapped });
+  }
+
+  /**
+   * Shows the model `a` (0-1) of the way from the next-to-last update's output to the last one's: the replay viewer,
+   * head to head and ghosts update once per simulation tick and blend between ticks (viewer/player.ts TickStepper), so
+   * the pose at a replay time doesn't depend on playback speed or frame rate. `hold`: the last tick teleported (or the
+   * update snapped), so show the previous tick until a reaches 1, like sampleAt. Sets the root's world position
+   * (PlayerModel.present places it).
+   */
+  present(a: number, hold = false): void {
+    if (!this.ticks) {
+      this.ticks = [];
+      this.keepTick(false);
+      return;
+    }
+    const [p, c] = this.ticks;
+    if (!p || !c || p.bm.length !== this.skeleton.boneMatrices!.length) return;
+    a = clamp(a, 0, 1);
+    if (hold || c.snapped) a = a >= 1 ? 1 : 0;
+    const bm = this.skeleton.boneMatrices!, A = p.bm, B = c.bm;
+    for (let i = 0; i < bm.length; i++) bm[i] = A[i] + (B[i] - A[i]) * a;
+    this.yawG.position.lerpVectors(p.p, c.p, a);
+    this.yawG.quaternion.slerpQuaternions(p.q, c.q, a);
+    this.root.position.lerpVectors(p.root, c.root, a);
+    this.uniforms.uAxisA.value.copy(this.root.position).y += 8;
+    this.uniforms.uAxisB.value.copy(this.root.position).y += 60;
   }
 
   /**

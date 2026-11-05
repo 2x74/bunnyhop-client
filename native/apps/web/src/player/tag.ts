@@ -26,11 +26,35 @@ import {
   type PlayerMarks,
   type StaffBadge,
 } from "../creators";
+import { nameFontFamily, nameFontOf, type NameFontId } from "../supporter-looks";
+import "../ui/name-fonts.css";
+import { fitScale } from "../ui/name-fit";
 
 const W = 512;
 const H = 112;
 const FONT = '600 30px Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif';
 const MONO = '600 28px ui-monospace, "SF Mono", Menlo, Consolas, monospace';
+
+/**
+ * A supporter's name font on the tag (supporter-looks.ts, ui/name-fonts.css): the canvas only draws a face that has
+ * loaded, so the first ask starts the load and the tag draws in Inter until it lands; the tag's key carries "ready", so
+ * the next set() after that redraws it once in the font. Same size-adjust as the page, so the pill fits the same.
+ */
+const fontReady = new Set<NameFontId>();
+const fontAsked = new Set<NameFontId>();
+function tagFont(id: NameFontId | null): string | null {
+  if (!id) return null;
+  const css = `600 30px "${nameFontFamily(id)}", Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif`;
+  if (fontReady.has(id)) return css;
+  if (!fontAsked.has(id) && typeof document !== "undefined" && document.fonts) {
+    fontAsked.add(id);
+    document.fonts.load(`600 30px "${nameFontFamily(id)}"`, "Aa").then(
+      (faces) => void (faces.length && fontReady.add(id)),
+      () => {},
+    );
+  }
+  return null;
+}
 
 export class NameTag {
   readonly sprite: THREE.Sprite;
@@ -66,12 +90,23 @@ export class NameTag {
     const clock = motion && equipped.some(id => id === "gifter-prism" || id === "gifter-gold" || SPECIAL_BADGES[id]?.gold) ? Math.floor(performance.now() / 66) : 0;
     // Special badges draw from their SVG as an image: redraw once each has loaded.
     const loading = equipped.filter((id) => SPECIAL_BADGES[id] && !specialImage(id)).join(",");
-    const key = `${clock}|${loading}|${equipped.join(",")}|${marks?.gifterColors?.join(",") ?? ""}|${marks?.gifterAnimated ?? ""}|${name}|${time}|${delta}|${ahead}|${marks?.staff ?? ""}${marks?.verified ? 1 : 0}${marks?.creator ?? ""}${marks?.booster ? 1 : 0}${marks?.supporter ? 1 : 0}|${marks?.nameColor ?? ""}|${marks?.nameEffect ?? ""}|${marks?.nameColor2 ?? ""}`;
+    const nameFont = tagFont(nameFontOf(marks?.nameFont));
+    const key = `${nameFont ?? ""}|${clock}|${loading}|${equipped.join(",")}|${marks?.gifterColors?.join(",") ?? ""}|${marks?.gifterAnimated ?? ""}|${name}|${time}|${delta}|${ahead}|${marks?.staff ?? ""}${marks?.verified ? 1 : 0}${marks?.creator ?? ""}${marks?.booster ? 1 : 0}${marks?.supporter ? 1 : 0}|${marks?.nameColor ?? ""}|${marks?.nameEffect ?? ""}|${marks?.nameColor2 ?? ""}`;
     if (key === this.key) return;
     this.key = key;
     const g = this.g;
     g.clearRect(0, 0, W, H);
-    g.font = FONT;
+    // Never wider than in the default font (ui/name-fit.ts): measured here in this canvas, the face drawn smaller when
+    // it would be (a monospace "iiii", a marker "llll").
+    let faceFont = nameFont;
+    if (faceFont) {
+      g.font = FONT;
+      const wDefault = g.measureText(name).width;
+      g.font = faceFont;
+      const k = fitScale(wDefault, g.measureText(name).width, 0, 0);
+      if (k < 1) faceFont = faceFont.replace("30px", `${Math.floor(30 * k * 100) / 100}px`);
+    }
+    g.font = faceFont ?? FONT;
     const nameW = Math.min(g.measureText(name).width, W - 120);
     const marksW = equipped.length * (MARK + 6);
     g.font = MONO;
@@ -86,7 +121,7 @@ export class NameTag {
     g.arc(x0 + 24, 27, 8, 0, Math.PI * 2);
     g.fill();
     g.textBaseline = "middle";
-    g.font = FONT;
+    g.font = faceFont ?? FONT;
     const fx = nameEffectOf(marks?.nameEffect);
     const base = nameColorHex(marks?.nameColor) ?? "#eef1f6";
     g.fillStyle = base;

@@ -1,5 +1,5 @@
-// Golden Carrot (knife-golden, Golden: hold a WR): the carrot blade cast in polished gold. Bright gold growth rings
-// (they read as glowing bands), a gold guard with a crown of six little leaf points, gold pommel leaves, a deep green
+// Golden Carrot (knife-golden, Golden: hold a WR): the carrot blade cast in polished gold. Pale-gold growth rings
+// (calm, not white stripes), a gold guard with a crown of six little leaf points, gold pommel leaves, a deep green
 // grip. Same silhouette and hold as the carrot, so the carrot's v_knife_t / procedural motion fits it as is.
 
 import { ring } from "../../player/bunny/builder";
@@ -8,7 +8,7 @@ import { buildCarrotFp, buildCarrotTp, carrot, type CarrotPalette } from "./carr
 import { fixed, type KnifeCtx } from "./ctx";
 import { KMAT, PART, type KnifeDef } from "./types";
 
-const GOLD = fixed(0xffc23a, KMAT.polished), GOLD_RING = fixed(0xfff3b0, KMAT.veg), GOLD_DARK = fixed(0xd9901a, KMAT.polished), GRIP = fixed(0x1f4a2a, KMAT.grip);
+const GOLD = fixed(0xffc23a, KMAT.polished), GOLD_RING = fixed(0xf6d77a, KMAT.veg), GOLD_DARK = fixed(0xd9901a, KMAT.polished), GRIP = fixed(0x1f4a2a, KMAT.grip);
 const PALETTE: CarrotPalette = { blade: GOLD, ring: GOLD_RING, grip: GRIP, guard: GOLD_DARK, leaf: GOLD, leafDark: GOLD_DARK };
 
 function build(k: KnifeCtx): void {

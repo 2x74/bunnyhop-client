@@ -15,7 +15,9 @@
 import { freeState, hasStateSnapshots, restoreState, snapshotBytes, snapshotState, type Core, type PlayerState } from "../core";
 import { EVENT_JUMPED, EVENT_LANDED, EVENT_TELEPORTED, type BrushTransform } from "../core";
 import type { Replay } from "../replay";
-import type { PlayerPose } from "../player/model";
+import type { PlayerPose } from "../player/pose";
+import { waterLevelAt } from "../player/map-volumes";
+import type { TickSource } from "../player/tick-stepper";
 import { replayStep, simulate } from "../sim";
 import type { StyleFilter } from "../styles";
 import type { RunTimer, Split } from "../timer";
@@ -377,6 +379,29 @@ export function ladderAt(d: RunData, t: number): boolean {
   return (d.flags[i] & F_LADDER) !== 0;
 }
 
+/** FL_ONGROUND of the tick display tick t is based on (no look-ahead to the next tick, unlike sampleAt's `grounded`). */
+export function groundedAt(d: RunData, t: number): boolean {
+  const i = Math.max(0, Math.min(d.n, Math.floor(t)));
+  return (d.flags[i] & F_GROUNDED) !== 0;
+}
+
+/** The pose at simulation tick k exactly (its own ground flag), for advanceModel's steps. */
+export function tickPose(d: RunData, k: number): PlayerPose {
+  const s = sampleAt(d, k);
+  return { visualTime: k * d.interval, position: [...s.pos], velocity: [...s.vel], yaw: s.yaw, pitch: s.pitch, crouched: s.crouched, grounded: groundedAt(d, k), forwardmove: s.forward, sidemove: s.side, ladder: ladderAt(d, k), water: waterLevelAt(s.pos, s.viewZ, s.crouched) };
+}
+
+/** A replay as a TickSource. */
+export function replayTicks(d: RunData): TickSource {
+  return {
+    interval: d.interval,
+    n: d.n,
+    poseAt: (k) => tickPose(d, k),
+    prerollTo: (k) => prerollFrom(d, k),
+    teleported: (k) => k > 0 && k <= d.n && (d.flags[k] & F_TELEPORTED) !== 0,
+  };
+}
+
 /** Seconds of run the models pre-roll after a cut (PlayerModel.preroll), like the cameras (cameras.ts PREROLL). */
 export const MODEL_PREROLL = 0.6;
 
@@ -396,6 +421,6 @@ export function prerollFrom(d: RunData, t: number): (secondsAgo: number) => Play
     const tt = t - u * d.tickrate;
     if (tt < from) return null;
     const s = sampleAt(d, tt);
-    return { visualTime: tt * d.interval, position: [...s.pos], velocity: [...s.vel], yaw: s.yaw, pitch: s.pitch, crouched: s.crouched, grounded: s.grounded, forwardmove: s.forward, sidemove: s.side, ladder: ladderAt(d, tt) };
+    return { visualTime: tt * d.interval, position: [...s.pos], velocity: [...s.vel], yaw: s.yaw, pitch: s.pitch, crouched: s.crouched, grounded: groundedAt(d, tt), forwardmove: s.forward, sidemove: s.side, ladder: ladderAt(d, tt), water: waterLevelAt(s.pos, s.viewZ, s.crouched) };
   };
 }

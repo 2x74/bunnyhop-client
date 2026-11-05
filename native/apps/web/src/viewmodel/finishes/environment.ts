@@ -33,7 +33,11 @@ let faces = 0;
 let capturing = false;
 let usedAt = -Infinity;
 let capturedAt = -Infinity;
-const now = () => performance.now();
+/** Set by an export: the replay's clock (ms) instead of the wall clock, see setFinishEnvironmentClock. */
+let clock: (() => number) | null = null;
+/** The next capture starts a new cube whether or not a metal was drawn yet (an export's first frame). */
+let fresh = false;
+const now = () => (clock ? clock() : performance.now());
 const ready = () => !capturing && faces >= 6 && now() - capturedAt < STALE_MS;
 
 const sunDir = new THREE.Vector3(0.42, 0.78, 0.46).normalize();
@@ -83,10 +87,11 @@ export function captureFinishEnvironment(renderer: THREE.WebGLRenderer, scene: T
     const peak = Math.max(sun.color.r, sun.color.g, sun.color.b, 1e-6);
     sunColor.setRGB(sun.color.r / peak, sun.color.g / peak, sun.color.b / peak);
   }
-  if (now() - usedAt > IDLE_MS) {
+  if (!fresh && now() - usedAt > IDLE_MS) {
     faces = 0;
     return;
   }
+  fresh = false;
   if (!target) {
     target = new THREE.WebGLCubeRenderTarget(SIZE, { type: THREE.HalfFloatType, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter });
     // Near 16: the camera sits inside the player's own head in first person.
@@ -121,6 +126,22 @@ export function captureFinishEnvironment(renderer: THREE.WebGLRenderer, scene: T
   renderer.autoClear = prevAutoClear;
   renderer.setRenderTarget(prevTarget, prevFace, prevLevel);
   capturedAt = now();
+}
+
+/**
+ * Video export (viewer.ts beginExport / endExport): `ms` = the replay's clock in ms (null: back to the wall clock).
+ * Either way the cube's history starts over (no faces, face cursor 0, no use / capture times), so two exports of the same
+ * replay see the same reflections: the first capture draws all six faces from the export's own first frame (none left
+ * from wherever the camera was before), and the idle / stale gates count replay time, not how slow a frame was.
+ */
+export function setFinishEnvironmentClock(ms: (() => number) | null): void {
+  clock = ms;
+  face = 0;
+  faces = 0;
+  capturing = false;
+  usedAt = -Infinity;
+  capturedAt = -Infinity;
+  fresh = ms !== null;
 }
 
 /** Capture counters for perf checks (research/knife-finishes/ingame.cjs reads them as window.__finEnv in dev). */

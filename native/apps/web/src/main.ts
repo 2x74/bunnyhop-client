@@ -28,6 +28,7 @@ import type { SampledInput, SamplerSource } from "./input-sampler";
 import { InputDebug, summary as inputSummary } from "./input-debug";
 import { initPlayLock, resumePlay, setPlayAttempt, showStartPrompt } from "./play-lock";
 import { buildWorld, type WorldView } from "./render";
+import { setMapVolumes, volumesOf } from "./player/map-volumes";
 import { debugHookOptIn, RunSession } from "./session";
 import { fetchMapIndex, goToMainMenu, initMenu, revealGame, showError, showHome, showLoading, showReady } from "./menu";
 import { gameView, keyLabel, prefs, verticalFov } from "./ui/settings";
@@ -472,6 +473,7 @@ try {
   await afterPaint();
   content = contentLoading(loading, 0.82, 0.92);
   world = await buildWorld(core, renderer, { bsp, content: content.options });
+  setMapVolumes(volumesOf(bsp)); // water + ladders for the bunnies' swim / climb (player/map-volumes.ts)
   content.done();
   attract?.stop();
   attract = null;

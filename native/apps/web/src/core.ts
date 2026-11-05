@@ -213,6 +213,8 @@ export interface PropAnimState {
   hidden: boolean;
   /** Killed. */
   removed: boolean;
+  /** The map's I/O set a sequence (SetAnimation): RandomAnimation props follow it from then on. */
+  set: boolean;
 }
 
 /** `brushOrigins()` keys at or above this are moving entity props (prop_door_rotating): key - PROP_TRANSFORM_KEY = entity. */
@@ -792,7 +794,7 @@ export class Core {
     const states: PropAnimState[] = [];
     for (let i = 0, k = 0; i + 5 <= f.length; i += 5, k++) {
       const [anim, def] = (names[k] ?? "").split("\t");
-      states.push({ entity: f[i], hidden: (f[i + 1] & 1) !== 0, removed: (f[i + 1] & 2) !== 0, base: f[i + 2], since: f[i + 3], rate: f[i + 4], anim: anim ?? "", defaultAnim: def ?? "" });
+      states.push({ entity: f[i], hidden: (f[i + 1] & 1) !== 0, removed: (f[i + 1] & 2) !== 0, set: (f[i + 1] & 4) !== 0, base: f[i + 2], since: f[i + 3], rate: f[i + 4], anim: anim ?? "", defaultAnim: def ?? "" });
     }
     this.propAnimCache = { serial, states };
     return states;

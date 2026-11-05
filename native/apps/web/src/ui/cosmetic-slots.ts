@@ -35,13 +35,18 @@ export function loadoutCategories(listed: (slot: LoadoutCategory) => number): Lo
 export const EMPTYABLE: ReadonlySet<CosmeticSlot> = new Set(["hat", "title"]);
 
 /** The card's editable parts, in order. */
-export type CardPart = "background" | "frame" | "title" | "name" | "badges" | "links";
+export type CardPart = "background" | "frame" | "title" | "name" | "avatar" | "effects" | "badges" | "links";
 export const CARD_PARTS: readonly { part: CardPart; label: string }[] = [
   { part: "background", label: "Background" },
   { part: "frame", label: "Frame" },
   { part: "title", label: "Title" },
-  /** Supporters only (Edit card hides it for everyone else): the name colour and the About page listing. */
+  /**
+   * The supporter looks (supporter-looks.ts): the name's colour, effect and font; the avatar decoration; the card's
+   * border and effect. Shown to everyone since v0.0.37, locked for players who aren't supporters (one line about it).
+   */
   { part: "name", label: "Name" },
+  { part: "avatar", label: "Avatar" },
+  { part: "effects", label: "Effects" },
   { part: "badges", label: "Badges" },
   { part: "links", label: "Links" },
 ];

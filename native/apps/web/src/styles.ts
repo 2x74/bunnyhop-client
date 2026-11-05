@@ -47,7 +47,9 @@
 // picks the key, and from then on the other key is blocked like block_a / block_d. The lock clears whenever the run
 // isn't under way (idle in or out of the start zone, finished) and on reset(): bhoptimer clears its iKeyCombo in
 // StartTimer, which it calls on every armed start-zone tick, so in both the key is the first one used in the air after
-// the run's last start. Ground, ladders and the air after a ladder are free, as for every key block.
+// the run's last start. The ground and ladder ticks are free; unlike the other key blocks, the air after a ladder is not
+// (the filter reads the current ladder state, not the grace until landing). When the lock leaves no sidemove, both side
+// bits are cleared, so a recorded command always matches its keys.
 
 import { DEFAULT_SETTINGS, PHYSICS_V1, type Settings } from "./core";
 
@@ -273,10 +275,15 @@ export function filterCommand(style: StyleDef | null, cmd: TickCmd, ctx: StyleCo
   if (k.s && ((b & IN_BACK) !== 0 || f < 0)) (f = 0), (b &= ~IN_BACK);
   if (k.d && ((b & IN_MOVERIGHT) !== 0 || s > 0)) (s = 0), (b &= ~IN_MOVERIGHT);
   // A/D-Only: once the run's key is locked (StyleFilter.adOnly), the other key's sidemove is zeroed and its bit cleared.
-  // Unlike block_a / block_d, the other key's bit alone keeps the locked key's sidemove (null binds: D pressed over a
-  // held A sends +450 with both bits), as bhoptimer's a_or_d_only judges the sidemove sign with the bit.
-  if (lock > 0) (s = s < 0 ? 0 : s), (b &= ~IN_MOVELEFT);
-  if (lock < 0) (s = s > 0 ? 0 : s), (b &= ~IN_MOVERIGHT);
+  // Unlike block_a / block_d, the other key's bit alone keeps the locked key's sidemove (A over a held D with null
+  // binds), as bhoptimer's a_or_d_only judges the sidemove sign with the bit. When no sidemove is left (the other key
+  // alone, A and D held cancelling, D over a held A with null binds), both side bits go: the recorded command then
+  // matches its keys like a keyboard's (a side bit means that key's sidemove; input-analysis.ts badCommands).
+  if (lock !== 0) {
+    if (lock > 0 ? s < 0 : s > 0) s = 0;
+    b &= ~(lock > 0 ? IN_MOVELEFT : IN_MOVERIGHT);
+    if (s === 0) b &= ~(IN_MOVELEFT | IN_MOVERIGHT);
+  }
   if (style.hsw) {
     // bhoptimer force_hsw 1: W without A/D and A/D without W are blocked (S is blocked above).
     const fw = f > 0;
@@ -386,13 +393,15 @@ export class StyleFilter {
     if (this.style?.backwards) return this.backwards(cmd, state);
     // A v22 edge landing without a jump is an air tick: the core takes the landing back before it moves.
     const grounded = state.grounded && !(state.edgeLanding && !(cmd.buttons & IN_JUMP));
-    const ctx = { grounded, onLadder: state.onLadder || this.fromLadder };
-    if (this.style?.adOnly) return this.adOnly(cmd, ctx, running);
-    return filterCommand(this.style, cmd, ctx);
+    // A/D-Only exempts only the ladder itself (the current state), not the air after it: W, S and the other key are
+    // blocked again from the first airborne command off the ladder. Other styles keep the grace until the next landing.
+    if (this.style?.adOnly) return this.adOnly(cmd, { grounded, onLadder: !!state.onLadder }, running);
+    return filterCommand(this.style, cmd, { grounded, onLadder: state.onLadder || this.fromLadder });
   }
 
   /**
-   * A/D-Only (header): the lock clears while the run isn't under way. On a filtered (air, no ladder) command of a run,
+   * A/D-Only (header): the lock clears while the run isn't under way. `ctx.onLadder` is the current state only (no
+   * post-ladder grace); the lock is kept through ladder ticks. On a filtered (air, not on a ladder) command of a run,
    * the first sidemove sign picks the key; the command that locks keeps its sidemove. filterCommand then blocks W, S and
    * the other key. A command with sidemove 0 (no key, or A and D held cancelling) locks nothing. The lock is decided on
    * the incoming sidemove, which the filter never changes on the locking command (nor on any later one with the locked

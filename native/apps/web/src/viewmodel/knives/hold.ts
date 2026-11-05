@@ -663,7 +663,7 @@ export class KnifeHold {
       return { i, parent, local };
     });
     this.rest = this.joints.map(() => 0);
-    this.state = { arm: { o: [0, 0, 0], a: [0, 0, 0] }, wrist: [0, 0, 0], offset: [0, 0, 0], local: null, angles: [...this.rest], show: 0, loosen: 0 };
+    this.state = { arm: { o: [0, 0, 0], a: [0, 0, 0] }, wrist: [0, 0, 0], offset: [0, 0, 0], local: null, angles: [...this.rest], show: 0, loosen: 0, time: 0 };
     this.right = [...r.subtree(r.bone("Root36")), this.kp, this.kb];
     this.arm = r.bone("Right_Arm");
     this.helper = ["Root98", "R_wrist_helper"].map((n) => r.bone(n));

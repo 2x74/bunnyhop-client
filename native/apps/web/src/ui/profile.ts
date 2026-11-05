@@ -19,7 +19,7 @@ import { SIGN_IN_HELP } from "./account-copy";
 //     Edit card turns the hero into the card's editor (ui/card-editor.ts): the card stays, its parts (background,
 //     frame, title, badges, links) are picked right under it, or by clicking them on the card. Esc / Done leaves.
 //   - the tab (right), each one screen with internal scrolling only for long lists:
-//       Overview    one flowing list: featured runs (Watch / Race / Pin on the hovered row), next-map suggestions,
+//       Overview    one flowing list (the featured runs are the card's three tiles: each plays its replay), next-map suggestions,
 //                   recent PBs, a line per style you're ranked in, then the activity numbers
 //       Loadout     owner only, the whole width (no hero): every in-game look (ui/loadout-view.ts). The menus'
 //                   Loadout shortcuts (pause menu, Settings → Viewmodel, unlock cards) open the profile here.
@@ -48,7 +48,7 @@ import { focusEquipped, localModel, loadoutView, profileModel } from "./loadout-
 import { cardEditor, Loadout, NewTracker, type CardEditor } from "./card-editor";
 import { isCardPart, isLoadoutCategory, profileTarget, type CardPart, type ProfileTab } from "./cosmetic-slots";
 import { communityConfig } from "./community";
-import { playerCard, viewsLabel } from "./card";
+import { playerCard, viewsLabel, type SupporterLook } from "./card";
 import { topPoints } from "./profile-points";
 import { h } from "./dom";
 import { tierBadge } from "./maps";
@@ -208,12 +208,20 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
   /** A hovered card item (card editor): shown on the card until the pointer leaves. */
   let cardPreview: Partial<CosmeticChoice> | null = null;
   /** A supporter's name look hovered in Edit card → Name, over what's saved (undefined: what's saved). */
-  let namePreview: NameLook | undefined;
+  let namePreview: SupporterLook | undefined;
   let cardRaf = 0;
   let entered = false;
   const drawCard = () => {
     cardRaf = 0;
     cardSlot.replaceChildren(playerCard(p, { cosmetics: { ...lo.choice, ...cardPreview }, badges: lo.shownBadges(), featured, nameLook: namePreview, enter: !entered }));
+    // The card's three runs are the featured runs (no list repeating them below, UI audit 11-05): each plays its replay.
+    for (const tile of cardSlot.querySelectorAll<HTMLElement>(".pc-feat-tile[data-run]")) {
+      const run = known.get(tile.dataset.run!) ?? featured.find((r) => r.runId === tile.dataset.run);
+      if (!run) continue;
+      Object.assign(tile, { tabIndex: 0, title: "Watch this replay" });
+      tile.setAttribute("role", "button");
+      tile.setAttribute("aria-label", `Watch ${run.map}, ${formatTime(run.time)}`);
+    }
     entered = true;
   };
   drawCard();
@@ -346,6 +354,10 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
           p.player.nameColor = s.nameColor;
           p.player.nameEffect = s.nameEffect;
           p.player.nameColor2 = s.nameColor2;
+          p.player.nameFont = s.nameFont ?? null;
+          p.player.avatarDeco = s.avatarDeco ?? null;
+          p.player.cardBorder = s.cardBorder ?? null;
+          p.player.cardEffect = s.cardEffect ?? null;
           namePreview = undefined;
           drawCard();
         },
@@ -378,20 +390,21 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
     if (!editBtn) return;
     editBtn.replaceChildren("Edit card", news.pendingIn(cardIds) > 0 ? newDot("new card items") : "");
   }
+  /** A card run tile (outside Edit card): its replay. */
+  function watchTile(target: EventTarget | null): boolean {
+    const id = (target as Element | null)?.closest?.<HTMLElement>(".pc-feat-tile[data-run]")?.dataset.run;
+    const run = id ? (known.get(id) ?? featured.find((r) => r.runId === id)) : null;
+    if (!run) return false;
+    a.watch(run, p.player.name);
+    return true;
+  }
+  cardSlot.addEventListener("keydown", (e) => {
+    if (!editor && (e.key === "Enter" || e.key === " ") && watchTile(e.target)) e.preventDefault();
+  });
   // In edit mode the card's parts are clickable: the title, the badges, the frame band, the rest is the background.
   cardSlot.addEventListener("click", (e) => {
     if (!editor) {
-      // The card's featured tiles are the featured list's rows: a click takes you to the row.
-      const id = (e.target as Element).closest<HTMLElement>(".pc-feat-tile[data-run]")?.dataset.run;
-      if (!id) return;
-      if (tab !== "overview") select("overview");
-      const row = featBox.querySelector<HTMLElement>(`.pf-run[data-run="${CSS.escape(id)}"]`);
-      if (!row) return;
-      row.scrollIntoView({ block: "nearest", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
-      row.classList.remove("found");
-      void row.offsetWidth;
-      row.classList.add("found");
-      row.querySelector<HTMLElement>("button")?.focus({ preventScroll: true });
+      watchTile(e.target);
       return;
     }
     const t = e.target as Element;
@@ -487,7 +500,6 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
       else featured = (await api.profile(p.player.id)).featured;
       if(!writes.current())return;
       drawCard();
-      drawFeatured();
       runs?.refresh();
       whisper(featuredIds.includes(run.runId) ? "Pinned" : "Unpinned");
     } catch (e) {
@@ -497,16 +509,6 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
 
   // --- overview: one flowing list, headings and hairlines, no boxes. Rank overall is on the card; per style it's one
   // line each where there is one.
-  const featBox = h("section.pf-sec.pf-feat");
-  function drawFeatured(): void {
-    featBox.replaceChildren(
-      h("h3", null, "Featured runs", featuredIds.length ? h("small", null, `pinned by ${p.mine ? "you" : p.player.name}`) : null),
-      featured.length
-        ? h("div.pf-rows", null, ...landRows(featured.map((x) => runRow(x))))
-        : h("p.pf-empty", null, p.mine ? "Pin runs from Runs to feature them here." : "No ranked runs yet."),
-    );
-  }
-  drawFeatured();
 
   function overview(): HTMLElement {
     if (fresh) {
@@ -553,7 +555,7 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
       : null;
     const { points, gauntlets, stats } = early;
     Object.assign(early, { points: undefined, gauntlets: undefined, stats: undefined });
-    return h("div.pf-ov", null, featBox, next, h("div.pf-ov-row", null, recent, ranks), topPoints(p, points), profileMapper(p), profileGauntlets(p.player.id, gauntlets), playerStatsSection(p.player.id, { compact: true, early: stats }));
+    return h("div.pf-ov", null, next, h("div.pf-ov-row", null, recent, ranks), topPoints(p, points), profileMapper(p), profileGauntlets(p.player.id, gauntlets), playerStatsSection(p.player.id, { compact: true, early: stats }));
   }
 
   // --- runs (virtualised)

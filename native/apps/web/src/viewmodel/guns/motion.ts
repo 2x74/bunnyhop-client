@@ -61,10 +61,17 @@ export class GunMotion {
   private motion = reducedMotion() ? 0.45 : 1;
   private out = new Float64Array(6);
 
+  /** Back to rest with no history (a replay seek, an export's start): springs, the idle clock, contact and velocity. */
   reset(): void {
     this.x.fill(0);
     this.v.fill(0);
     this.u.fill(0);
+    this.out.fill(0);
+    this.t = 0;
+    this.wasGrounded = true;
+    this.groundT = 1;
+    this.sv.fill(0);
+    this.lastVel.fill(0);
     this.haveVel = false;
     this.latAcc = 0;
   }

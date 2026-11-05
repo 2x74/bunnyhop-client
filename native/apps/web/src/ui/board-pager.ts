@@ -13,6 +13,8 @@ import { h } from "./dom";
 import { landRows } from "./land";
 import { icon } from "./icons";
 import { nameAttrs, nameMarks } from "./marks";
+import { decorated } from "./avatar-deco";
+import { hoverCardFor } from "./hover-card";
 import type { PlayerMarks } from "../creators";
 
 export interface BoardPage<E> {
@@ -492,7 +494,9 @@ export function hueOf(id: string): number {
 export function playerCell(p: { id: string; name: string; avatarUrl: string | null; provider?: string; country?: string | null } & PlayerMarks, open: () => void, sub: string[] = [], href = `/u/${encodeURIComponent(p.id)}`): HTMLTableCellElement {
   const letter = () => h("span.rb-av", { "aria-hidden": "true", style: `--hue:${hueOf(p.id)}` }, (p.name.trim()[0] ?? "?").toUpperCase());
   const pic = pictureOf(p);
-  const av = pic ? avatarImg(pic, { cls: "rb-av", px: 24, letter }) : letter();
+  // The name and picture show the player's hover card (ui/hover-card.ts); the rest of the row keeps its run stats card.
+  // A supporter's avatar decoration, still on boards (ui/avatar-deco.ts): a page of them costs nothing per frame.
+  const av = hoverCardFor(decorated(pic ? avatarImg(pic, { cls: "rb-av", px: 24, letter }) : letter(), p), p);
   const tags = [...sub, p.provider === "guest" ? "guest" : ""].filter(Boolean);
   return h(
     "td.rb-player",
@@ -503,12 +507,12 @@ export function playerCell(p: { id: string; name: string; avatarUrl: string | nu
       av,
       countryFlag(p.country),
       // A real link to the profile's address (middle-click / Ctrl-click open it in a new tab); a plain click opens it in place.
-      h("a.rb-name", { href, title: `${p.name}'s profile`, onclick: (ev: Event) => {
+      hoverCardFor(h("a.rb-name", { href, onclick: (ev: Event) => {
         const e = ev as MouseEvent;
         if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
         e.preventDefault();
         open();
-      }, ...nameAttrs(p) }, p.name),
+      }, ...nameAttrs(p) }, p.name), p),
       nameMarks(p),
       tags.length ? h("span.rb-sub", { title: p.provider === "guest" ? "Guest players haven't linked an account" : null }, tags.join(" · ")) : null,
     ),

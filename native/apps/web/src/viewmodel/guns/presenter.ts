@@ -32,6 +32,7 @@ import { GunImpacts } from "./impacts";
 import { gunSound } from "./sounds";
 import type { GunDef } from "./types";
 import { GunViewmodel } from "./viewmodel";
+import { HOLSTER_TIME } from "./anim";
 import type { GunMotionInput } from "./motion";
 import { FloorGuns } from "./world";
 
@@ -42,7 +43,7 @@ const TICK = 0.01;
  * weapon's draw comes up from below. Presentation only: the core switched on its tick and the new weapon's equip /
  * fire timing is untouched (its draw starts at once; the outgoing gun is a second viewmodel, drawn underneath).
  */
-export const GUN_LOWER = 0.2;
+export const GUN_LOWER = HOLSTER_TIME;
 
 /** The model for a core weapon id (core.ts WEAPON_IDS index); undefined for none / the knife / unknown. */
 export function gunForWeapon(weapon: number): GunDef | undefined {
@@ -151,9 +152,13 @@ export class GunPresenter {
   reset(r: WeaponReport | null): void {
     this.impacts.clear();
     this.lowerT = Infinity;
-    this.vm.reseed();
-    // No movement feel carried across the jump (speed tuck, air trail, strafe lag, landing sink).
-    this.vm.motion.reset();
+    // Both gun viewmodels back to a clean state (which one is in hand depends on past switches; neither may carry
+    // clocks, contact history or effects across the jump), the outgoing one emptied.
+    this.vm.resetPresentation();
+    if (this.lowerVm) {
+      this.lowerVm.setGun(null);
+      this.lowerVm.resetPresentation();
+    }
     this.weapon = -1;
     this.shells = false;
     this.startLeft = 0;

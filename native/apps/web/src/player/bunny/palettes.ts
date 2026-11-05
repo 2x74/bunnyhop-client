@@ -62,7 +62,9 @@ export const COLOURWAYS: Record<string, Colourway> = {
   "outfit-devgrid": { hoodie: 0x8f9296, trim: 0xf08a24, pants: 0x4d5054, pantsTrim: 0xf08a24, shoe: 0xdadcdf, face: 0x151515, glove: 0xf08a24, detail: 0xffffff, accent: 0xffffff },
   // Trick or Treat (October): pumpkin hoodie, night-plum pants, vine-green gloves, a candle-glow visor.
   "outfit-pumpkin": { hoodie: 0xe0701c, trim: 0xb8550f, pants: 0x2a1f36, pantsTrim: 0x3d2a4a, shoe: 0x2e2622, face: 0x120904, glove: 0x3d6b2a, detail: 0xffe08a, accent: 0xffb43c },
-  // v0.0.37, the top tiers (progression.ts tier_8 / tier_9 / tier_10), in the tier colours.
+  // v0.0.37, the top tiers (progression.ts tier_7 / tier_8 / tier_9 / tier_10), in the tier colours.
+  // Lapis (First T7): deep lapis blue, indigo trim and stripes, gold flecks on the logo and visor line, an indigo glow.
+  "outfit-lapis": { hoodie: 0x26307a, trim: 0x7c83ff, pants: 0x161a40, pantsTrim: 0xd9b45a, shoe: 0xeef0ff, face: 0x080a1c, glove: 0x161a40, detail: 0xf0dca0, accent: 0x9aa0ff },
   // Flare (First T8): a hot pink hoodie, black trim, pants and gloves, pink stripes, a pale pink glow.
   "outfit-flare": { hoodie: 0xe0479f, trim: 0x1a1418, pants: 0x1a1418, pantsTrim: 0xff6ec7, shoe: 0xfff0f8, face: 0x12070e, glove: 0x1a1418, detail: 0xffffff, accent: 0xffc2e6 },
   // Riptide (First T9): deep-water navy, azure trim and stripes, foam-white shoes, an azure glow.

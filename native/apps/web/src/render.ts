@@ -41,7 +41,7 @@ import { averageColor, potatoGeometry, withGrid, type PotatoSlot } from "./potat
 import { ImposterSet, type ImposterKind } from "./imposter";
 import { CLIENT_DRAWN_SHADERS } from "./vmt";
 import { TextureScrolls } from "./texture-scroll";
-import { animatedPropEntities, animatedProps, type AnimatedProps } from "./map-props";
+import { animatedPropEntities, animatedProps, hashSeed, type AnimatedProps } from "./map-props";
 import { StudioData } from "./player/studio/data";
 
 export interface WorldView {
@@ -711,7 +711,7 @@ export async function buildWorld(
       return normals.get(path)!;
     };
     const water = core.materialWater();
-    // WindowImposter / Aftershock (imposter.ts): materials the core leaves missing by design. Only those materials (and a
+    // WindowImposter / Aftershock / Wireframe (imposter.ts): materials the core leaves missing by design. Only those materials (and a
     // sky whose faces are WindowImposters) touch this; `?noimposter` keeps the old fallback (before / after comparisons).
     const imposterOn = !appLocation().searchParams.has("noimposter");
     const imposterKinds = new Map<number, ImposterKind | null>();
@@ -945,6 +945,8 @@ export async function buildWorld(
           core,
           makeStudio: (h) => new StudioData(core, h),
           entities: animatedPropEntities(core.entities()),
+          // The map, for the random animators' seeds: every entity's class, name and origin.
+          mapSeed: hashSeed(core.entities().map((e) => `${e.classname ?? ""}|${e.targetname ?? ""}|${e.origin ?? ""}`).join("\n")),
           fallbacks: moving,
           materials: built.propMats,
           materialNames: content.propMaterials,
@@ -1061,6 +1063,7 @@ export async function buildWorld(
       const imp = built.imposterAt(i);
       // Imposters: their cube map's average colour, unlit (a translucent one as a tint); Aftershock is not drawn.
       if (imp?.kind === "aftershock") return null;
+      if (imp?.kind === "wireframe") return { key: `w${i}`, material: () => imp.material };
       if (imp?.kind === "window") {
         const c = colors[i];
         return imp.params.alpha < 1 || imp.params.fade

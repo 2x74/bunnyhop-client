@@ -105,6 +105,20 @@ export const thistle: KnifeDef = {
       s.wrist[0] += k * (-10 * hump(t, 0, 0.3) + 6 * hump(t, 0.46, 0.8));
       return;
     }
-    attackFlavour(action, t, s, { roll: 12, snap: 7, twist: 14 });
+    // Its own attack language: light and quick, all wrist. The slash whips through with the wrist alone (the arm stays
+    // quieter than the heavier bayonets) and flicks back past centre at the end; the stab is a straight fencer's lunge,
+    // edge level, the arm reaching forward instead of turning the blade.
+    const k = reducedMotion() ? 0.4 : 1;
+    if (action === "slash1" || action === "slash2") {
+      const side = action === "slash1" ? 1 : -1;
+      const whip = hump(t, 0.04, 0.3), back = hump(t, 0.28, 0.62);
+      s.wrist[1] += k * side * (14 * whip - 7 * back);
+      s.wrist[2] += k * side * (6 * whip - 3 * back);
+      s.wrist[0] += k * -4 * hump(t, 0, 0.12);
+    } else if (action === "stab") {
+      const lunge = hump(t, 0.1, 0.62);
+      s.arm.o[0] += k * 1.4 * lunge;
+      s.wrist[0] += k * (-3 * hump(t, 0.02, 0.2) + 4 * lunge);
+    } else attackFlavour(action, t, s, { roll: 12, snap: 7, twist: 14 });
   },
 };

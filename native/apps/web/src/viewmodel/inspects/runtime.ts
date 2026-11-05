@@ -151,6 +151,13 @@ export class VmInspect {
     this.publish();
   }
 
+  /** Nothing playing, no history (a replay seek, an export's start). No events. */
+  reset(): void {
+    this.combo.reset();
+    this.gapD = this.gapA = 0;
+    this.publish();
+  }
+
   /** Dev / screenshots: freeze trick `trick` at t. */
   seek(trick: number, t: number): void {
     this.combo.seek(trick, t);

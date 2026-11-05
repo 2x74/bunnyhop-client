@@ -1133,6 +1133,21 @@ table.fb-table .fb-c-msg .fb-open { display: -webkit-box; -webkit-line-clamp: 2;
   .case-actions .act-key { display: none; }
   .case-note { width: 6rem; }
   .case-actions { gap: 6px; }
+  /* Maps and tiers: no pictures, Finishers or Flags (the map's own page has them), so World record and Feedback stay
+     on screen at 900 px. */
+  table.maps-table .map-line .map-art, table.maps-table th:nth-child(4), table.maps-table td:nth-child(4), table.maps-table th:nth-child(6), table.maps-table td:nth-child(6) { display: none; }
+  table.maps-table td:first-child { max-width: 13rem; }
+  table.maps-table .map-line { display: flex; }
+  table.maps-table td:first-child .faint { overflow-wrap: anywhere; }
+  /* Retire / Play float over the row's end on hover, like the chat log's, instead of keeping a column of their own. */
+  table.maps-table tr { position: relative; }
+  table.maps-table td.acts, table.maps-table th:last-child { width: 0; padding: 0; }
+  table.maps-table .hover-acts { position: absolute; right: 0; top: 50%; transform: translateY(-50%); padding-left: 16px; background: linear-gradient(90deg, transparent, var(--ground) 16px); }
+  /* Staff: no Since column (Last action stays). */
+  table.staff-table th:nth-child(3), table.staff-table td:nth-child(3) { display: none; }
+  /* Row buttons may stack (Staff: "Remove moderator" ran off the edge). */
+  td.acts { white-space: normal; }
+  td.acts > * { margin-block: 2px; }
 }
 @media (max-width: 56rem) {
   .kboard { grid-template-columns: repeat(4, minmax(16rem, 82vw)); overflow-x: auto; scroll-snap-type: x mandatory; margin: 0 -18px; padding: 0 18px 8px; }

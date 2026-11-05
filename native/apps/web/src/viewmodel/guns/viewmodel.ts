@@ -51,8 +51,8 @@ export class GunViewmodel {
   lastUpdateMs = 0;
   /** Animation time scale (dev / screenshots: 0 freezes). */
   timeScale = 1;
-  /** Dev: hide one arm (its bones collapse) to look at the other's grip. */
-  debugHide: "R" | "L" | null = null;
+  /** Dev: hide one arm (its bones collapse) to look at the other's grip, or both ("RL": the gun alone, model sheets). */
+  debugHide: "R" | "L" | "RL" | null = null;
 
   private root = new THREE.Group();
   private skeleton: DirectSkeleton;
@@ -214,6 +214,19 @@ export class GunViewmodel {
     this.fxImpl?.rng.seed();
   }
 
+  /**
+   * A complete presentation reset (a replay seek, an export's start): the clip, recoil, follow-through and their clocks
+   * (anim settle), the movement feel and its clock and contact history, effects in flight, the seeded variation. Two
+   * exports of the same replay then draw the same frames whatever was watched before.
+   */
+  resetPresentation(): void {
+    if (this.def) this.anim.settle();
+    else this.anim.reseed();
+    this.motion.reset();
+    this.fxImpl?.clear();
+    this.lastPump = 0;
+  }
+
   /** The silencer's state with no animation (a draw, a restart): shown on the gun or not. */
   setSilenced(on: boolean): void {
     this.anim.silenced = on;
@@ -301,7 +314,7 @@ export class GunViewmodel {
     const W = this.poser.bonesW, S = this.S, r = this.rig;
     if (this.debugHide && !this.hidden) {
       const h = r.hands;
-      this.hidden = new Set(h.subtree(h.bone(this.debugHide === "R" ? "Root36" : "Root34")));
+      this.hidden = new Set([..."RL"].filter((a) => this.debugHide!.includes(a)).flatMap((a) => h.subtree(h.bone(a === "R" ? "Root36" : "Root34"))));
     } else if (!this.debugHide) this.hidden = null;
     const n = r.hands.names.length;
     const inv = r.hands.inv;

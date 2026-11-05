@@ -29,11 +29,12 @@ import { replayStyle } from "../replay";
 import { h } from "../ui/dom";
 import { prefs } from "../ui/settings";
 import type { ArmsLook } from "./arms";
-import { CameraRig, type CamMode, type TraceFn } from "./cameras";
+import { CameraRig, CHASE_NEAR_FADE, type CamMode, type TraceFn } from "./cameras";
 import { CanvasHud, drawBranding, type CanvasHudOptions } from "./canvas-hud";
 import { drawPanel, panelScale, type PanelScale } from "./h2h-panel";
 import { ViewerHud } from "./hud";
-import { ladderAt, prerollFrom, ReplayPlayer, sampleAt, type ViewSample } from "./player";
+import { replayTicks, ReplayPlayer, sampleAt, type RunData, type ViewSample } from "./player";
+import { TickStepper, type TickSource } from "../player/tick-stepper";
 import { probeFromTrace } from "../player/bunny/legs";
 import { replaySsj } from "./replay-ssj";
 
@@ -117,6 +118,9 @@ export class HeadToHead {
   private model: PlayerModel;
   private sample: ViewSample | undefined;
   private lastU = -1;
+  /** The other bunny on its run's clock (viewer/player.ts TickStepper). */
+  private stepper = new TickStepper();
+  private ticks: { data: RunData; src: TickSource } | null = null;
   /** One canvas per panel on screen, in the order of `sides` (each run keeps its panel when they swap places). */
   private panelEls: HTMLCanvasElement[];
   private drawn: string[] = ["", ""];
@@ -135,7 +139,7 @@ export class HeadToHead {
     this.scale = panelScale(sides);
     const o = this.other;
     this.model = new PlayerModel({ style: "solid", playerGlow: o.look.glow, outfit: o.look.outfit, loadout: o.look.loadout });
-    this.model.setNearFade(10, 34);
+    this.model.setNearFade(...CHASE_NEAR_FADE);
     this.model.root.visible = false;
     this.probeOther();
     host.scene.add(this.model.root);
@@ -293,8 +297,8 @@ export class HeadToHead {
     at(this.host.mainHud, hudOn ? rects.views[0] : undefined);
     at(this.hud.el, hudOn ? rects.views[1] : undefined);
     // The HUDs are laid out for a full window: in a shorter view they'd overlap, so they scale with its height.
-    const vh = rects.views[0].h;
-    this.host.root.style.setProperty("--h2h-hud", Math.max(0.5, Math.min(1, vh / 760)).toFixed(2));
+    const { w: vw, h: vh } = rects.views[0];
+    this.host.root.style.setProperty("--h2h-hud", Math.max(0.5, Math.min(1, vh / 760, vw / 1350)).toFixed(2));
     const order = [this.main, this.other];
     order.forEach((s, slot) => at(this.panelEls[this.sides.indexOf(s)], this.panelsOn ? rects.panels[slot] : undefined));
   }
@@ -343,18 +347,19 @@ export class HeadToHead {
     if (rig.mode !== m) (rig.mode = m), rig.snap();
     // A first frame or a jump: the camera and the bunny pre-roll the other run's last moments (seek-safe, like the
     // primary in viewer.ts).
-    if (this.lastU < 0 || Math.abs(u - this.lastU) > 30) {
-      rig.snap();
-      this.model.preroll(prerollFrom(d, u));
-    }
+    const prevU = this.lastU;
+    const cut = prevU < 0 || Math.abs(u - prevU) > 30;
+    if (cut) rig.snap();
     this.lastU = u;
     const trace: TraceFn = (a, b, rad) => traceRay(o.core, a, b, rad);
     const cam = this.host.camera;
     const showModel = rig.update(cam, d, u, dt, trace);
-    const s = (this.sample = sampleAt(d, u, this.sample));
+    this.sample = sampleAt(d, u, this.sample);
     this.model.root.visible = showModel;
-    this.model.setState({ visualTime: u * d.interval, position: s.pos, velocity: s.vel, yaw: s.yaw, pitch: s.pitch, crouched: s.crouched, grounded: s.grounded, forwardmove: s.forward, sidemove: s.side, ladder: ladderAt(d, u) });
-    this.model.update(dt);
+    // On its run's clock: each tick's own pose, blended between ticks (the pose at a replay time doesn't depend on the
+    // playback speed or frame rate); a cut pre-rolls.
+    if (this.ticks?.data !== d) this.ticks = { data: d, src: replayTicks(d) };
+    this.stepper.show(this.model, this.ticks.src, u, cut);
     // The primary's bunny and ghost aren't in the other run's view.
     const hidden = this.host.scene.children.filter((c) => c.visible && (c.name.startsWith("ghost:") || c.userData.h2hPrimary));
     for (const c of hidden) c.visible = false;

@@ -67,8 +67,10 @@
 .sb-table tr.you td { background: rgba(255, 180, 58, 0.08); }
 .sb-table tr.you td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 .sb-pos { color: var(--faint); width: 1.8em; }
-.sb-name { display: flex; align-items: center; gap: 0.15em; max-width: 22rem; }
-.sb-pname { overflow: hidden; text-overflow: ellipsis; font-weight: 650; }
+/* A table cell (not flex: a flex td dropped out of the table and split every row with a gap). */
+.sb-name { width: 100%; }
+.sb-name > * { vertical-align: middle; }
+.sb-pname { display: inline-block; max-width: 24em; overflow: hidden; text-overflow: ellipsis; font-weight: 650; }
 .sb-dot { display: inline-block; width: 0.55em; height: 0.55em; border-radius: 50%; margin-right: 0.45em; flex: none; }
 .sb-style { color: var(--dim); }
 .sb-time.running { color: #fff; }
@@ -78,6 +80,8 @@
 .sb-pb { color: var(--accent); }
 .sb-ping { color: var(--dim); text-align: right; }
 .sb-table th:last-child { text-align: right; }
+/* Phones: no Style or Ping (the table was wider than the screen), names cut sooner. */
+@media (max-width: 40rem) { .sb-table th:nth-child(3), .sb-table td.sb-style, .sb-table th:nth-child(6), .sb-table td.sb-ping { display: none; } .sb-pname { max-width: 9em; } .sb-table td, .sb-table th { padding-inline: 0.35em; } }
 .sb-spec { margin-top: 0.6em; font-size: 0.9em; }
 .sb-hint { margin-top: 0.7em; font-size: 0.8em; }
 
@@ -146,7 +150,7 @@ body.menu-open #mp-menu, body.menu-open #mp-scoreboard, body.menu-open #mp-specb
 .srv-lobby-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
 .srv-lobby-code { flex: 1 1 12rem; min-width: 10rem; padding: 0.45rem 0.6rem; font: inherit; }
 .srv-here { margin-left: 0.4rem; }
-.sb-name .sb-host { margin-left: 0.4em; padding: 0 0.35em; border-radius: 3px; font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.04em; color: var(--accent); border: 1px solid currentColor; }
+.sb-name .sb-host { margin-left: 0.5em; font-size: 0.85em; color: var(--accent); }
 /* Pause menu: room block */
 .menu-room { display: flex; flex-direction: column; gap: 0.15rem; padding: 0.55rem 0.9rem; border-radius: var(--radius-sm); background: rgba(255, 180, 58, 0.08); border: 1px solid rgba(255, 180, 58, 0.25); }
 .menu-room b { color: var(--accent); }
@@ -167,4 +171,7 @@ body.chat-cursor #mp-menu .mm-item:not(.off):hover { background: rgba(255, 255, 
 .mm-look .look-slider { flex: 1; min-width: 9em; }
 .mm-look .mm-detail { min-width: 3.2em; text-align: right; color: #fff; font-size: 0.95em; }
 .mm-item .look-switch { pointer-events: none; }
+/* (Centred, not on the text baseline: the switch made its row taller than the others and sat off the right edge.) */
+.mm-item:has(.look-switch) { align-items: center; }
+.mm-item .look-switch { margin: -0.15em 0 -0.15em auto; }
 .mm-item.quiet:not(.off) .mm-label { color: var(--dim); }

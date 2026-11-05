@@ -165,6 +165,23 @@ pub fn build_with_entities(bsp: &Bsp, content: Option<Source>, entities: &[crate
     Ok(MapPhysics { prop_sources, world, texinfo_surface, props, diagnostics, displacement_count })
 }
 
+/// `$surfaceprop` / `$surfaceprop2` surface-table indices per texdata, resolved through the map's own pakfile only (no
+/// hosted or stock content): what a packed material edit changes. The stripped physics BSP keeps every packed `.vmt`
+/// (apps/api/src/bsp-strip.ts), so it resolves the same. For `map_fixes::build_digest_v25`.
+pub(crate) fn packed_texdata_surfaces(bsp: &Bsp) -> Vec<(u16, u16)> {
+    let fs = map_vfs(bsp);
+    let texdata: &[TextureData] = lump!(bsp, playsrc_bsp::TEXDATA, TextureData);
+    let names = crate::mesh::texture_names(bsp);
+    texdata
+        .iter()
+        .map(|td| {
+            let name = names.get(td.name_string_table_index.max(0) as usize).map(String::as_str).unwrap_or("");
+            let prop = |key| materials::material_param(&fs, name, key).map(|s| surface_index(&s)).unwrap_or(0);
+            (prop("$surfaceprop"), prop("$surfaceprop2"))
+        })
+        .collect()
+}
+
 fn face_polygon(face: &Face, surfedges: &[i32], edges: &[Edge], vertices: &[Vertex]) -> Vec<[f32; 3]> {
     let first = face.first_surface_edge.max(0) as usize;
     let count = face.surface_edge_count.max(0) as usize;

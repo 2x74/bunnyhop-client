@@ -365,15 +365,19 @@ select option { background: var(--panel-solid); color: var(--text); }
 .pp-screen-foot .link-btn { padding-left: 0; color: var(--accent); }
 /* Help tab (menu.ts helpTab): !help's groups as the Controls screen's key tables, two columns. */
 .pp-help { display: flex; flex-direction: column; gap: var(--sp-4); }
-.pp-help-cols { columns: 2 18rem; column-gap: var(--sp-6); }
+.pp-help-cols { columns: 2 22rem; column-gap: var(--sp-6); }
 .pp-help-group { break-inside: avoid; margin-bottom: var(--sp-4); }
 .pp-help-group h3 { margin: 0 0 var(--sp-1); font-size: var(--fs-sm); font-weight: 700; color: var(--text); }
 .pp-help .keys-table td { padding-left: var(--sp-3); }
 .pp-help .keys-table td:last-child { width: 3.2rem; }
+.pp-help .keys-table.no-keys td:last-child { display: none; }
 /* The Shortcuts row's commands are the long ones: they wrap rather than pushing the key column out of the table. */
 .pp-help .keys-table { table-layout: fixed; }
-.pp-help .keys-table th { width: 46%; }
-.pp-help .keys-table .pp-help-cmd { width: auto; white-space: normal; overflow-wrap: anywhere; }
+.pp-help .keys-table th { width: 40%; }
+/* A command stays on one line ("!strafetrainer [on|off]" broke in two); only the long Shortcuts list wraps. */
+.pp-help .keys-table .pp-help-cmd { width: auto; white-space: nowrap; }
+.pp-help .keys-table .pp-help-cmd.many { white-space: normal; overflow-wrap: anywhere; }
+@media (max-width: 40rem) { .pp-help .keys-table .pp-help-cmd { white-space: normal; overflow-wrap: anywhere; } }
 .pp-help-cmd { font-family: var(--mono); font-size: var(--fs-sm); color: var(--dim); }
 .pp-help .pp-screen-foot { justify-content: space-between; font-size: var(--fs-sm); }
 /* server tab (in a room) */
@@ -387,8 +391,8 @@ select option { background: var(--panel-solid); color: var(--text); }
 .room-stats small { font-size: 0.7rem; font-weight: 600; letter-spacing: 0; color: var(--faint); }
 .room-stats b { font-size: var(--fs-lg); }
 @media (max-width: 52rem) { .pause { grid-template-columns: 1fr; height: auto; } .card-grid { grid-template-columns: 1fr; } }
-.style-list { display: flex; flex-direction: column; gap: 0.3rem; }
-.style-row { display: grid; grid-template-columns: 3.4rem minmax(0, 1fr) auto; align-items: center; gap: var(--sp-4); padding: 0.35rem 1rem 0.35rem 0.5rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--raise); color: var(--text); text-align: left; cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast), box-shadow var(--t-fast); }
+.style-list { display: flex; flex-direction: column; gap: 2px; }
+.style-row { display: grid; grid-template-columns: 3.4rem minmax(0, 1fr) auto; align-items: center; gap: var(--sp-4); padding: 0.35rem 1rem 0.35rem 0.5rem; border: 1px solid transparent; border-radius: var(--radius-sm); background: var(--raise); color: var(--text); text-align: left; cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast), box-shadow var(--t-fast); }
 .sr-short { display: grid; place-items: center; height: 2.1rem; border-radius: var(--radius-sm); background: var(--raise-2); font-weight: 850; font-size: var(--fs-md); letter-spacing: 0.02em; }
 .sr-text { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
 .sr-text b { font-size: var(--fs-md); }
@@ -397,7 +401,7 @@ select option { background: var(--panel-solid); color: var(--text); }
 .sr-pb small { font-size: var(--fs-2xs); font-weight: 750; letter-spacing: 0.08em; color: var(--faint); }
 .sr-pb b { font-size: var(--fs-md); }
 .sr-pb b.dim { color: var(--faint); font-weight: 500; }
-.style-row:hover { background: var(--raise-2); border-color: var(--line-2); }
+.style-row:hover { background: var(--raise-2); }
 .style-row:focus-visible { outline: none; box-shadow: var(--ring); }
 .style-row.on { border-color: color-mix(in srgb, var(--accent) 60%, transparent); background: var(--accent-soft); }
 .style-row.on .sr-short { background: var(--accent); color: var(--accent-ink); }
@@ -925,7 +929,14 @@ body.potato.arrive #hud .hud-el { animation: none; }
   #menu.screen-home { height: auto; min-height: 100%; }
   .home { grid-template-columns: 1fr; row-gap: 2rem; height: auto; min-height: 100%; }
   .home-right { grid-column: 1; grid-row: auto; }
+  .home-foot { width: auto; max-width: none; }
+  /* Stacked: smaller pictures three across, and room under the last row for the dock (music, bell, Friends), which
+     sat over the second row at 900 x 900. */
+  .home-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .home-right { padding-bottom: 5.5rem; }
+  #menu.screen-home::after { content: ""; position: fixed; left: 0; right: 0; bottom: 0; height: 6.5rem; background: linear-gradient(rgba(11, 11, 14, 0), rgba(11, 11, 14, 0.94) 55%); pointer-events: none; }
 }
+@media (max-width: 36rem) { .home-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
 /* bonus entries, style/track tabs on leaderboards (the map list's style control: ui/maps.css) */
 .style-locked { display: block; padding: 0.5rem 0.7rem; border-radius: var(--radius-sm); background: var(--raise); border: 1px dashed var(--line-2); font-weight: 700; font-size: 0.9rem; }

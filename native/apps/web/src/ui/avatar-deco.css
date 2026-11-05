@@ -1,0 +1,19 @@
+/* Supporter avatar decorations (ui/avatar-deco.ts, supporter-looks.ts AVATAR_DECOS). The wrapper is the avatar's own
+   size (it shrink-wraps the avatar); the layers sit on a box 1.5x that, centred, outside the layout. Animations move a
+   whole layer by transform or opacity, so they stay on the compositor; .fx-off (off screen), reduced motion and
+   Potato stop them at rest. */
+.av-deco { position: relative; display: inline-grid; flex: none; place-items: center; vertical-align: middle; line-height: 0; }
+.av-deco > :first-child { grid-area: 1 / 1; }
+.av-deco-l { position: absolute; inset: -25%; pointer-events: none; display: block; }
+.av-deco-l svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.av-spin { animation: av-spin 14s linear infinite; }
+.av-spin-back { animation: av-spin 14s linear infinite reverse; }
+.av-sway { animation: av-sway 3.6s ease-in-out infinite; transform-origin: 50% 60%; }
+.av-twinkle { animation: av-twinkle 2.8s ease-in-out infinite; }
+.av-twinkle-late { animation: av-twinkle 2.8s ease-in-out -1.4s infinite; }
+@keyframes av-spin { to { transform: rotate(1turn); } }
+@keyframes av-sway { 0%, 100% { transform: rotate(-4deg); } 50% { transform: rotate(4deg); } }
+@keyframes av-twinkle { 0%, 100% { opacity: 1; } 50% { opacity: 0.15; } }
+.fx-off .av-deco-l, .av-deco.fx-off .av-deco-l { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) { .av-deco-l { animation: none !important; } }
+body.potato .av-deco-l { animation: none !important; }

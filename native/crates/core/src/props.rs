@@ -29,10 +29,17 @@ pub struct Prop {
     /// `prop_dynamic` door01_left is shut in its idle pose, wide open in its bind pose (bhop_mirrorsedge_chpt1, feedback
     /// 2026-10-30). False for the static prop lump, which is drawn as baked.
     pub entity: bool,
-    /// An animated prop_dynamic (`Game::is_animated_prop`): its own groups like a moving prop (`owner`), which the
-    /// client replaces with the posed model; baked in the pose an unanimated entity prop gets, so a client that doesn't
-    /// animate it draws exactly what it drew before.
+    /// An animated prop_dynamic (`Game::is_animated_prop`) given its own groups (`owner`) for a client that poses it:
+    /// baked in the pose an unanimated entity prop gets (not a moving prop's root correction), so the frozen fallback
+    /// looks as before. Only `add_game_props(.., true)` sets it, together with the owner: false everywhere else by
+    /// construction (`add_props`, `static_props`, `Default`), which keeps the pre-0.0.37 look.
     pub animated: bool,
+}
+
+impl Default for Prop {
+    fn default() -> Self {
+        Self { model: 0, origin: [0.0; 3], angles: [0.0; 3], skin: 0, owner: 0, sky3d: false, scale: 1.0, entity: false, animated: false }
+    }
 }
 
 #[derive(Default, Clone)]
@@ -54,6 +61,20 @@ pub fn add_props(sp: &mut StaticProps, props: impl IntoIterator<Item = (String, 
             }
         };
         sp.props.push(Prop { model, origin, angles, skin, owner, sky3d: false, scale: 1.0, entity: true, animated: false });
+    }
+}
+
+/// The game's entity props appended to `sp` (call before `skybox::mark_props`, after the static lump). With `animate`,
+/// animated prop_dynamics (`Game::is_animated_prop`, not moving for another reason) get their own dynamic groups for the
+/// client to pose and `Prop::animated` set, so their baked fallback keeps the pose they had as static entity props; the
+/// web client does this. Without it they are baked like before v0.0.37 (`Game::render_props`).
+pub fn add_game_props(sp: &mut StaticProps, game: &crate::game::Game, animate: bool) {
+    let list = game.render_props_with(animate);
+    let animated: Vec<bool> = list.iter().map(|p| animate && p.4 != 0 && game.is_animated_prop(p.4 as usize - 1) && !game.prop_moves(p.4 as usize - 1)).collect();
+    let first = sp.props.len();
+    add_props(sp, list);
+    for (p, a) in sp.props[first..].iter_mut().zip(animated) {
+        p.animated = a;
     }
 }
 

@@ -31,7 +31,7 @@ mod overlay;
 mod map_sounds;
 pub use map_sounds::{MAP_SOUND_ACTIVE, MAP_SOUND_LAST_START, MAP_SOUND_REMOVED};
 mod prop_anims;
-pub use prop_anims::{PropAnim, PROP_ANIM_HIDDEN, PROP_ANIM_REMOVED};
+pub use prop_anims::{PropAnim, PROP_ANIM_HIDDEN, PROP_ANIM_REMOVED, PROP_ANIM_SET};
 pub use overlay::{
     OVERLAY_CLIP, OVERLAY_GRAVITY, OVERLAY_OTHER, OVERLAY_PUSH, OVERLAY_STATE_ACTIVE, OVERLAY_STATE_VISIBLE, OVERLAY_TELEPORT,
     OVERLAY_WALL, OVERLAY_WHEN_HIDDEN, OverlayBrush,
@@ -57,7 +57,7 @@ pub const IN_ATTACK2: u32 = 1 << 11;
 pub use weapons::{
     AttackReport, FLOOR_DROPPED, FLOOR_MOVED, FLOOR_PICKED_UP, FLOOR_PRESENT, FLOOR_REMOVED, FLOOR_SPAWNED, FloorItem, GUNS,
     Gun, IN_DROP, IN_GIVE_MASK, IN_GIVE_MODE, IN_GIVE_RESTORE, IN_GIVE_SHIFT, IN_RELOAD, IN_SLOT_MASK, IN_SLOT_SHIFT,
-    M4A1_SILENCER_TIME, USP_SILENCER_TIME, WEAPON_COMMAND_COOLDOWN, WEAPON_EVENT_DRY_FIRE, WEAPON_EVENT_GIVEN, WEAPON_EVENT_RESTORED,
+    GLOCK_BURST_DAMAGE, GLOCK_BURST_RANGE_MODIFIER, M4A1_SILENCED_RANGE_MODIFIER, M4A1_SILENCER_TIME, USP_SILENCED_DAMAGE, bullet_stats, USP_SILENCER_TIME, WEAPON_COMMAND_COOLDOWN, WEAPON_EVENT_DRY_FIRE, WEAPON_EVENT_GIVEN, WEAPON_EVENT_RESTORED,
     WEAPON_EVENT_SILENCER, WEAPON_EVENT_DROPPED, WEAPON_RESTORE_TICKS,
     WEAPON_EVENT_LOST, WEAPON_EVENT_MODE, WEAPON_EVENT_PICKED_UP, WEAPON_EVENT_RELOAD_FINISHED, WEAPON_EVENT_RELOAD_STARTED,
     WEAPON_EVENT_SWITCHED, WEAPON_KNIFE, WEAPON_PISTOL, WEAPON_SNIPER, gun_by_id, weapon_id,
@@ -424,6 +424,23 @@ pub fn map_nonlinear_objectives_table() -> Vec<&'static str> {
 /// Reviewed map mechanics build, selected by its entity fingerprint (tests/tools).
 pub fn map_mechanics_v19_for(entities: &[Entity]) -> Option<&'static str> {
     map_fixes::mechanics_v19(entities).map(|m| m.map)
+}
+
+/// The reviewed physics 25 build a parsed BSP is (`map_fixes::BUILDS_V25`, full digest), if any (tests, tools).
+pub fn map_build_v25_for(bsp: &Bsp, list: &EntityList) -> Option<&'static str> {
+    map_fixes::build_v25(bsp, &list.entities, &list.outputs).map(|b| b.map)
+}
+
+/// `map_fixes::build_digest_v25` of a parsed BSP, hex (tests, tools).
+pub fn map_build_digest_v25(bsp: &Bsp, list: &EntityList) -> String {
+    map_fixes::build_digest_v25(bsp, &list.entities, &list.outputs)
+}
+
+impl Game {
+    /// The reviewed physics 25 build this map was loaded as (`map_fixes::BUILDS_V25`), if any.
+    pub fn reviewed_build_v25(&self) -> Option<&'static str> {
+        self.map_build_v25.map(|b| b.map)
+    }
 }
 
 /// A parsed entity lump's fingerprint, as `MECHANICS_V19` and `PARENTED_DOORS_V21` pin it (tests, tools).
@@ -1492,6 +1509,8 @@ pub struct Game {
     script_triggers: Vec<(usize, vscript::ScriptRole)>,
     /// Exact reviewed entity build matched by map_fixes::MECHANICS_V19. Fixed at load.
     map_mechanics: Option<&'static map_fixes::MapMechanics>,
+    /// A reviewed physics 25 build (`map_fixes::BUILDS_V25`), matched on its full digest at load.
+    map_build_v25: Option<&'static map_fixes::BuildV25>,
     /// Exact reviewed entity build matched by map_fixes::PARENTED_DOORS_V21: from physics v21 its parented doors follow
     /// their parents (`door_follows_parent`). Fixed at load.
     map_parented_doors: bool,
@@ -1615,7 +1634,9 @@ impl Game {
         let map_signed_door_travel = map_fixes::signed_door_travel(&entities).is_some();
         let map_player_io = map_fixes::player_io(&entities).is_some();
         let script_triggers = vscript::script_triggers(&entities);
-        let map_mechanics = map_fixes::mechanics_v19(&entities);
+        // v25 exact builds (`map_fixes::BUILDS_V25`): entity CRC, then a digest of entities, outputs and brush collision.
+        let map_build_v25 = map_fixes::build_v25(bsp, &entities, &outputs);
+        let map_mechanics = map_fixes::mechanics_v19(&entities).or(map_build_v25.and_then(|b| b.mechanics.as_ref()));
         let map_parented_doors = map_fixes::parented_doors_v21(&entities).is_some();
         let map_parented_doors_v24 = map_fixes::parented_doors_v24(&entities).is_some();
         let map_fingerprint = map_fixes::entity_fingerprint(&entities);
@@ -1738,6 +1759,7 @@ impl Game {
             map_player_io,
             script_triggers,
             map_mechanics,
+            map_build_v25,
             map_parented_doors,
             map_parented_doors_v24,
             map_event_clock,
@@ -1777,7 +1799,10 @@ impl Game {
     }
 
     pub fn set_settings(&mut self, settings: Settings) {
-        let spawn_changed = (self.map_mechanics.is_some() && (PHYSICS_V19..=PHYSICS_LATEST).contains(&self.settings.physics_version) != (PHYSICS_V19..=PHYSICS_LATEST).contains(&settings.physics_version))
+        let min = self.mechanics_min_physics();
+        let spawn_changed = (self.map_mechanics.is_some() && (min..=PHYSICS_LATEST).contains(&self.settings.physics_version) != (min..=PHYSICS_LATEST).contains(&settings.physics_version))
+            || (self.map_build_v25.is_some()
+                && (PHYSICS_V25..=PHYSICS_LATEST).contains(&self.settings.physics_version) != (PHYSICS_V25..=PHYSICS_LATEST).contains(&settings.physics_version))
             || ((self.map_parented_doors || map_fixes::v21_spawn_edits(self.map_mechanics) || self.initial_ents.iter().any(|e| kin::rot_door_spawn_angles(e).is_some()))
                 && (PHYSICS_V21..=PHYSICS_LATEST).contains(&self.settings.physics_version) != (PHYSICS_V21..=PHYSICS_LATEST).contains(&settings.physics_version))
             || ((self.map_parented_doors_v24 || !self.end_touch_outputs.is_empty())
@@ -4188,8 +4213,16 @@ impl Game {
     /// Entity props to draw with the static props, at their (settled) pose: (model, origin, angles, skin, owner).
     /// prop_dynamic*, prop_physics*, prop_physics_multiplayer, prop_door_rotating; props following a parent
     /// and `rendermode 10` (don't render) / `disableshadows`-only helpers excluded. `owner` is 0, or entity index
-    /// + 1 for props that move or animate (drawn at `moving_prop_transforms`).
+    /// + 1 for props that move (drawn at `moving_prop_transforms`). Animated props are baked like any other entity
+    /// prop here, as before v0.0.37: a client that poses them uses `props::add_game_props(.., true)`, which also sets
+    /// `Prop::animated` (the two must go together).
     pub fn render_props(&self) -> Vec<(String, [f32; 3], [f32; 3], i32, u32)> {
+        self.render_props_with(false)
+    }
+
+    /// `render_props`; with `animated`, animated props (game/prop_anims.rs) get an owner too, so they come out of
+    /// `props::build` as their own dynamic groups. Use it through `props::add_game_props`.
+    pub fn render_props_with(&self, animated: bool) -> Vec<(String, [f32; 3], [f32; 3], i32, u32)> {
         let poses: std::collections::HashMap<u32, ([f32; 3], [f32; 3])> =
             self.props.poses.iter().map(|&(tag, o, a)| (tag, (o, a))).collect();
         let mut out = Vec::new();
@@ -4208,9 +4241,7 @@ impl Game {
                 continue;
             }
             let (origin, angles) = poses.get(&(physics::ENTITY_PROP | i as u32)).copied().unwrap_or((e.origin(), e.angles()));
-            // Animated props (game/prop_anims.rs) get their own groups too, so the client can pose them (a client that
-            // doesn't still draws them, frozen as before, at `moving_prop_transforms`).
-            let moving = class == "prop_door_rotating" || parented_prop || self.prop_anims.contains(i);
+            let moving = class == "prop_door_rotating" || parented_prop || (animated && self.prop_anims.contains(i));
             out.push((model.replace('\\', "/").to_ascii_lowercase(), origin, angles, e.int("skin") as i32, if moving { i as u32 + 1 } else { 0 }));
         }
         out

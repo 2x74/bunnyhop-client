@@ -24,16 +24,41 @@ const num = (v: string | undefined, fallback: number): number => {
   return Number.isFinite(n) ? n : fallback;
 };
 
-/** The material's base-texture scroll, or null. Proxy defaults as in Source: rate 1, angle 0. */
+/**
+ * A proxy's float input, as Source's CFloatInput::Init reads it: an absent key is the default; a value that scans as a
+ * number is that number; anything else names a material variable (`$var` or `$var[i]`, case-insensitive), read when the
+ * proxy binds. A variable the VMT sets and no proxy writes is a constant: its value. One that another proxy writes
+ * (`resultVar`: Sine, LinearRamp, ...) changes over time, which isn't evaluated here: undefined. A variable the VMT
+ * doesn't define fails the proxy's Init in Source (no proxy at all): also undefined.
+ */
+export function proxyFloat(vmt: Vmt, raw: string | undefined, fallback: number): number | undefined {
+  if (raw === undefined) return fallback;
+  const n = num(raw, NaN);
+  if (Number.isFinite(n)) return n;
+  const m = /^\s*(\$[^\s[\]]+)\s*(?:\[\s*(\d+)\s*\])?\s*$/.exec(raw);
+  if (!m) return undefined;
+  const name = m[1].toLowerCase();
+  if (vmt.proxies.some((p) => (p.params.resultvar ?? "").trim().toLowerCase().replace(/\[.*$/, "").trim() === name)) return undefined;
+  const value = vmt.params[name];
+  if (value === undefined) return undefined;
+  const parts = value.replace(/[[\]{}]/g, " ").trim().split(/\s+/).map(Number);
+  const v = parts[m[2] === undefined ? 0 : Number(m[2])];
+  return Number.isFinite(v) ? v : undefined;
+}
+
+/**
+ * The material's base-texture scroll, or null. Proxy defaults as in Source: rate 1, angle 0. A rate or angle that comes
+ * from another proxy's output (or from a variable the VMT doesn't set) leaves the texture still rather than guessing.
+ */
 export function textureScrollOf(vmt: Vmt | null): TextureScroll | null {
   if (!vmt) return null;
   for (const p of vmt.proxies) {
     if (p.name !== "texturescroll") continue;
     const target = (p.params.texturescrollvar ?? "").trim().toLowerCase();
     if (target !== "$basetexturetransform") continue;
-    const rate = num(p.params.texturescrollrate, 1);
-    const angle = num(p.params.texturescrollangle, 0);
-    if (rate === 0) return null;
+    const rate = proxyFloat(vmt, p.params.texturescrollrate, 1);
+    const angle = proxyFloat(vmt, p.params.texturescrollangle, 0);
+    if (rate === undefined || angle === undefined || rate === 0) return null;
     return { rate, angle };
   }
   return null;

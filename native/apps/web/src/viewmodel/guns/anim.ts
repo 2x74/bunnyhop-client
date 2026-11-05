@@ -323,7 +323,7 @@ export class GunAnimator {
   }
 
   /** Lowers out of view over `dur` (a switch away; presenter.ts GUN_LOWER), holding there. */
-  holster(dur = 0.2): void {
+  holster(dur = HOLSTER_TIME): void {
     this.play("holster", dur);
   }
 
@@ -590,10 +590,10 @@ export class GunAnimator {
         // Down, back and out to the right, the muzzle tipping down: clear of the screen by the end (a switch: the next
         // weapon comes up meanwhile, presenter.ts GUN_LOWER). The support hand drops away first.
         const k = HOLSTER(u);
-        p.o[2] -= 19 * k;
+        p.o[2] -= 24 * k;
         p.o[0] -= 3 * k;
         p.o[1] -= 3.5 * k;
-        p.a[0] += 42 * k * m;
+        p.a[0] += 48 * k * m;
         p.a[2] += 18 * k * m;
         p.leftW = 0;
         p.leftOff[2] = -10 * Math.min(1, k * 1.6);
@@ -992,6 +992,12 @@ const CV: ((t: number) => number)[] = [
   /* 44 */ track([[0, 0], [0.5, 1, E.io], [2.25, 1], [2.8, 0, E.io]]),
   /* 45 */ track([[0, 0], [0.5, -32, E.io], [1.4, -28], [1.8, 10, E.io], [2.25, 6], [2.8, 0, E.io]]),
 ];
+
+/**
+ * How long a gun takes to lower out of view after a switch (presenter.ts GUN_LOWER): short, so the outgoing hand is
+ * gone while the incoming weapon's draw is still below the frame (two firing hands never share the frame for long).
+ */
+export const HOLSTER_TIME = 0.15;
 
 /** The holster: down and away, quickly gathering speed (no anticipation: the next weapon is already coming up). */
 const HOLSTER = track([[0, 0], [1, 1, E.in2]]);
