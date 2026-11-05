@@ -48,6 +48,13 @@ Update from Settings → Updates: press Update, then Restart to update. Your set
   and Hard landing settle and Speed FOV are new, both off by default.
 - Viewmodel bob now defaults to 0.5. If you never changed it, it moves to 0.5 once; your own value stays.
 
+**Maps**
+- Animated map props move like in CS:S, such as bhop_ceaseless's butterflies and bhop_retrowave's blocks, and the
+  map's own triggers can hide them.
+- Frame-animated and scrolling textures animate, at the map's own speed and angle (bhop_umbra's moon clouds no longer
+  race), and bhop_4triedsame's wireframe shaft draws.
+- Maps with many props draw faster: on bhop_retrowave the world takes about a third less time per frame.
+
 **Replays**
 - Head-to-head links (`/h2h/…`) open in the replay viewer: the first run plays and the second rides along as the compare
   ghost, with the time ahead or behind.
