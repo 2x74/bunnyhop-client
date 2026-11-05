@@ -21,6 +21,8 @@
 #include "third_person_events.hpp"
 #include "knife_spinner.hpp"
 #include "inspect_cues.hpp"
+#include "map_props.hpp"
+#include "texture_motion.hpp"
 #include <span>
 #include "nlohmann/json.hpp"
 #include <filesystem>
@@ -102,6 +104,7 @@ namespace native {
     X(void, ActiveTexture, (GLenum)) \
     X(void, TexParameteri, (GLenum, GLenum, GLint)) \
     X(void, TexImage2D, (GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLenum, GLenum, const void *)) \
+    X(void, TexSubImage2D, (GLenum, GLint, GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, const void *)) \
     X(void, CopyTexSubImage2D, (GLenum, GLint, GLint, GLint, GLint, GLint, GLsizei, GLsizei)) \
     X(void, CopyTexImage2D, (GLenum, GLint, GLenum, GLint, GLint, GLsizei, GLsizei, GLint)) \
     X(void, GenerateMipmap, (GLenum)) \
@@ -206,6 +209,7 @@ inline GLuint link_program(Gl &gl, const char *vertex_source, const char *fragme
 #include "enhanced_look.hpp"
 #include "sun_shadows.hpp"
 #include "water_reflection.hpp"
+#include "map_prop_meshes.hpp"
 
 // The website's route guide (apps/web/src/ghost-route.ts): the path in the ghost's colour and a white wire box on
 // every takeoff, as screen-space lines of a fixed pixel width. Segments are expanded to quads once, at upload.
@@ -380,7 +384,8 @@ class Renderer {
         double lightmapRefresh = 0, lightmapUpload = 0, sky = 0, buildCull = 0, sort = 0, submit = 0, presentation = 0,
                hdrFinish = 0, waterReflection = 0;
         double floorReport = 0, floorDraw = 0, actorDraw = 0, presentationBuild = 0, presentationWaterUniforms = 0,
-               presentationSubmit = 0, viewmodel = 0;
+               presentationSubmit = 0, viewmodel = 0, mapProps = 0;
+        uint64_t mapPropPoses = 0;
         uint64_t groups = 0, survivors = 0, drawCalls = 0, triangles = 0, atlasUpdateBytes = 0, floorCount = 0;
         bool hdrAuthored = false, hdrEffective = false;
         size_t waterVolumes = 0;
@@ -570,6 +575,72 @@ class Renderer {
         return found == textures.end() ? checker : found->second;
     }
 
+    // A cut-out texture's colour spread into its transparent texels (texture_bleed.hpp), on a worker, into `pixels`.
+    ResourceLoading bleed_cutout(const BhImage &image, std::vector<uint8_t> &pixels) {
+        pixels.assign(image.rgba, image.rgba + image.byte_count);
+        const auto width = image.width, height = image.height;
+        std::packaged_task<std::vector<uint8_t>()> prepare([pixels = std::move(pixels), width, height]() mutable {
+            if (native_render::has_transparent_texels(pixels))
+                native_render::bleed_transparent_texels(pixels, width, height);
+            return std::move(pixels);
+        });
+        auto result = prepare.get_future();
+        std::thread(std::move(prepare)).detach();
+        while (result.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+            co_yield "cutout pixels";
+        pixels = result.get();
+    }
+
+    // The flipbook frames of the materials whose base texture animates (frame 0 is the texture itself).
+    ResourceLoading load_flipbooks() {
+        size_t count = 0;
+        const auto *motion = bh_material_motion(core, &count);
+        textureMotion.load(std::span<const BhMaterialMotion>(motion, motion ? count : 0));
+        std::vector<std::pair<uint32_t, uint32_t>> flipbooks;
+        textureMotion.each_flipbook([&](uint32_t material, uint32_t frames) {
+            flipbooks.push_back({material, frames});
+        });
+        std::unordered_map<int32_t, std::vector<GLuint>> books;
+        for (const auto &[material, frames] : flipbooks) {
+            const int32_t index = material < materials.size() ? materials[material].texture : -1;
+            if (index >= 0 && !books.count(index)) {
+                auto &book = books[index];
+                auto loading = load_flipbook(index, frames, book);
+                while (!loading.step())
+                    co_yield "flipbook frame";
+            }
+            const auto found = books.find(index);
+            if (found == books.end() || found->second.size() != frames) {
+                textureMotion.drop_flipbook(material);
+                continue;
+            }
+            for (uint32_t frame = 1; frame < frames; ++frame)
+                textureMotion.add_frame(material, frame, found->second[frame]);
+        }
+        std::cout << "Moving textures: " << textureMotion.moving_count() << " materials, "
+                  << textureMotion.flipbook_count() << " flipbooks\n";
+    }
+
+    // Frames 1.. of texture `index` into `book` (book[0] stays 0); `book` ends short when a frame is missing.
+    ResourceLoading load_flipbook(int32_t index, uint32_t frames, std::vector<GLuint> &book) {
+        book.push_back(0);
+        for (uint32_t frame = 1; frame < frames; ++frame) {
+            BhImage image{};
+            if (!bh_texture_frame(core, index, frame, &image)) co_return;
+            std::vector<uint8_t> pixels;
+            if (cutoutTextures.count(index)) {
+                auto bleeding = bleed_cutout(image, pixels);
+                while (!bleeding.step())
+                    co_yield "cutout pixels";
+            }
+            const BhImage prepared{
+                    pixels.empty() ? image.rgba : pixels.data(), image.byte_count, image.width, image.height
+            };
+            book.push_back(upload(prepared, true, true));
+            co_yield "flipbook frame";
+        }
+    }
+
     ResourceLoading cache_texture(int32_t index, bool raw = false) {
         if (index < 0) co_return;
         const uint64_t key = uint32_t(index) | (uint64_t(raw) << 32);
@@ -580,20 +651,9 @@ class Renderer {
             textureSizes[index] = {image.width, image.height};
             std::vector<uint8_t> pixels;
             if (!raw && cutoutTextures.count(index)) {
-                pixels.assign(image.rgba, image.rgba + image.byte_count);
-                const auto width = image.width, height = image.height;
-                std::packaged_task<std::vector<uint8_t>()> prepare(
-                        [pixels = std::move(pixels), width, height]() mutable {
-                            if (native_render::has_transparent_texels(pixels))
-                                native_render::bleed_transparent_texels(pixels, width, height);
-                            return std::move(pixels);
-                        }
-                );
-                auto result = prepare.get_future();
-                std::thread(std::move(prepare)).detach();
-                while (result.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+                auto bleeding = bleed_cutout(image, pixels);
+                while (!bleeding.step())
                     co_yield "cutout pixels";
-                pixels = result.get();
             }
             co_yield "upload texture";
             const BhImage prepared{
@@ -803,6 +863,7 @@ class Renderer {
         GLint model = -1, flatColor = -1, hasNormal = -1, hasSecondary = -1, hasDetail = -1, detailScale = -1;
         GLint detailBlend = -1, tint = -1, opacity = -1, cutoff = -1, unlit = -1, props = -1, kind = -1;
         GLint aboveWater = -1, captureReady = -1, waterFogEnd = -1, additive = -1;
+        GLint baseOffset = -1, skinned = -1, boneBase = -1;
 
         void read(Gl &gl, GLuint program) {
             const std::pair<GLint *, const char *> uniforms[] = {
@@ -823,6 +884,9 @@ class Renderer {
                     {&captureReady, "captureReady"},
                     {&waterFogEnd, "waterFogEnd"},
                     {&additive, "additive"},
+                    {&baseOffset, "baseOffset"},
+                    {&skinned, "skinned"},
+                    {&boneBase, "boneBase"},
             };
             for (const auto &[location, name] : uniforms)
                 *location = gl.GetUniformLocation(program, name);
@@ -843,8 +907,13 @@ class Renderer {
         }
         const BhMaterialExtra empty = {-1, -1, 4, 1, 0, 400, 1};
         const auto &e = index < extras.size() ? extras[index] : empty;
+        const auto &moving = textureMotion.shown(index);
         gl.ActiveTexture(GL_TEXTURE0);
-        gl.BindTexture(GL_TEXTURE_2D, m.texture < 0 ? (m.kind == 1 ? checker : white) : texture(m.texture));
+        if (moving.texture)
+            gl.BindTexture(GL_TEXTURE_2D, moving.texture);
+        else
+            gl.BindTexture(GL_TEXTURE_2D, m.texture < 0 ? (m.kind == 1 ? checker : white) : texture(m.texture));
+        gl.Uniform2f(materialUniforms.baseOffset, moving.offset[0], moving.offset[1]);
         gl.ActiveTexture(GL_TEXTURE2);
         gl.BindTexture(GL_TEXTURE_2D, texture(e.texture2));
         gl.ActiveTexture(GL_TEXTURE3);
@@ -978,6 +1047,129 @@ class Renderer {
         uint64_t scene = 0;
     };
 
+    // Moving textures and animated map props (texture_motion.hpp, map_prop_meshes.hpp), on the world's visual time.
+    static constexpr GLint map_prop_bone_unit = 12;
+    native_render::TextureMotion textureMotion;
+    std::unique_ptr<MapPropMeshes> mapPropMeshes;
+    double worldTime = -1, worldSeconds = 0;
+    // Every moving prop's transform this frame (one bh_prop_transforms call), indexed by entity.
+    std::vector<BhPropTransform> propTransforms;
+    std::vector<int32_t> propTransformAt;
+
+    const BhPropTransform *frame_prop_transform(int32_t entity) const {
+        if (entity < 0 || size_t(entity) >= propTransformAt.size() || propTransformAt[size_t(entity)] < 0)
+            return nullptr;
+        return &propTransforms[size_t(propTransformAt[size_t(entity)])];
+    }
+
+    void refresh_prop_transforms() {
+        for (const auto &t : propTransforms)
+            if (t.entity < propTransformAt.size()) propTransformAt[t.entity] = -1;
+        propTransforms.resize(propTransforms.capacity());
+        size_t count = bh_prop_transforms(core, propTransforms.data(), propTransforms.size());
+        propTransforms.resize(count);
+        for (size_t i = 0; i < count; ++i) {
+            const auto entity = propTransforms[i].entity;
+            if (entity >= propTransformAt.size()) continue;
+            propTransformAt[entity] = int32_t(i);
+        }
+    }
+
+    // Sizes the per-frame transform table: the moving props are fixed per map.
+    void prepare_prop_transforms() {
+        size_t capacity = 64, count = 0;
+        do {
+            capacity *= 2;
+            propTransforms.resize(capacity);
+            count = bh_prop_transforms(core, propTransforms.data(), capacity);
+        } while (count == capacity);
+        uint32_t last = 0;
+        for (size_t i = 0; i < count; ++i)
+            last = std::max(last, propTransforms[i].entity);
+        propTransformAt.assign(count ? size_t(last) + 1 : 0, -1);
+        propTransforms.clear();
+    }
+
+    void prepare_map_motion(const float eye[3], double seconds) {
+        auto start = profile_now();
+        worldSeconds = worldTime >= 0 ? worldTime : seconds;
+        worldTime = -1;
+        textureMotion.update(worldSeconds);
+        refresh_prop_transforms();
+        if (mapPropMeshes) {
+            mapPropMeshes->set_enabled(!graphics.potato);
+            mapPropMeshes->refresh(core);
+            mapPropMeshes->props.set_viewer(eye);
+        }
+        profile_elapsed(frameProfile.mapProps, start);
+    }
+
+    // The posed props' draws, one per material group, in place of their frozen groups.
+    void add_map_prop_draws() {
+        if (!mapPropMeshes || !mapPropMeshes->active()) return;
+        const auto instances = mapPropMeshes->props.instances();
+        for (size_t i = 0; i < instances.size(); ++i)
+            for (const auto &g : mapPropMeshes->groups(i)) {
+                native_render::SceneDraw draw{g.material, g.first, g.count, true, int32_t(instances[i].entity), 0};
+                draw.skinned = uint32_t(i + 1);
+                sceneDrawList.add(draw);
+            }
+    }
+
+    // Culls a posed prop by the sphere its sequence sweeps (map-props.ts sizes it the same way).
+    bool map_prop_in_view(
+            native_render::SceneDraw &d,
+            const BhTransform &t,
+            const native::Matrix &vp,
+            const float eye[3],
+            bool reflection
+    ) {
+        auto &instance = mapPropMeshes->props.instances()[d.skinned - 1];
+        const float radius = float(mapPropMeshes->props.radius(instance, worldSeconds));
+        native_render::Bounds bounds;
+        for (int k = 0; k < 3; k++) {
+            bounds.lo[k] = t.origin[k] - radius;
+            bounds.hi[k] = t.origin[k] + radius;
+        }
+        if (reflection && bounds.hi[2] < clipHeight) return false;
+        std::array<float, 4> rect;
+        if (!native_render::screen_rect(bounds, vp, rect)) return false;
+        for (int k = 0; k < 3; k++)
+            d.distance += (t.origin[k] - eye[k]) * (t.origin[k] - eye[k]);
+        return true;
+    }
+
+    // Poses the posed props that will draw (once per frame) and uploads the matrices that changed.
+    void pose_map_props(std::span<const native_render::SceneDraw> draws) {
+        if (!mapPropMeshes || !mapPropMeshes->active()) return;
+        auto start = profile_now();
+        auto instances = mapPropMeshes->props.instances();
+        for (const auto &d : draws)
+            if (d.skinned)
+                mapPropMeshes->props.pose(
+                        instances[d.skinned - 1], worldSeconds, scene_transform(true, d.entity, 0).origin
+                );
+        mapPropMeshes->upload(GL_TEXTURE0 + map_prop_bone_unit);
+        if (profiling) frameProfile.mapPropPoses += mapPropMeshes->props.take_pose_count();
+        profile_elapsed(frameProfile.mapProps, start);
+    }
+
+    // Switches the bound program between posed props and everything else; `skinned` is the draw's instance + 1.
+    void bind_skinning(GLint skinned_location, GLint base_location, uint32_t skinned, bool &bound) {
+        if (bool(skinned) != bound) {
+            gl.Uniform1i(skinned_location, skinned != 0);
+            bound = skinned != 0;
+        }
+        if (skinned) gl.Uniform1i(base_location, GLint(mapPropMeshes->props.instances()[skinned - 1].slot));
+    }
+
+    GLuint draw_vao(const native_render::SceneDraw &d) const {
+        if (d.skinned) return mapPropMeshes->vao(d.skinned - 1);
+        return d.prop ? propMesh.vao : worldMesh.vao;
+    }
+
+    bool frozen_prop_replaced(int32_t entity) const { return mapPropMeshes && mapPropMeshes->replaces(entity); }
+
     // Reused by every scene pass (3D sky, reflection, world) so drawing doesn't allocate each frame.
     native_render::SceneDrawList sceneDrawList;
     std::unordered_map<uint64_t, SceneTransform> sceneTransforms;
@@ -991,7 +1183,14 @@ class Renderer {
         if (cached.scene != sceneNumber) {
             cached.value = {};
             cached.value.visible = 1;
-            if (prop && entity >= 0)
+            const auto *moving = prop ? frame_prop_transform(entity) : nullptr;
+            if (moving)
+                cached.value = {
+                        {moving->origin[0], moving->origin[1], moving->origin[2]},
+                        {moving->angles[0], moving->angles[1], moving->angles[2]},
+                        moving->visible
+                };
+            else if (prop && entity >= 0)
                 bh_prop_transform(core, entity, &cached.value);
             else if (!prop && model)
                 bh_model_transform(core, model, &cached.value);
@@ -1057,7 +1256,9 @@ class Renderer {
         for (const auto &g : groups)
             if (bool(g.sky3d) == sky) sceneDrawList.add({g.material, g.first_index, g.index_count, false, -1, g.model});
         for (const auto &g : propGroups)
-            if (bool(g.sky3d) == sky) sceneDrawList.add({g.material, g.first_index, g.index_count, true, g.entity, 0});
+            if (bool(g.sky3d) == sky && !frozen_prop_replaced(g.entity))
+                sceneDrawList.add({g.material, g.first_index, g.index_count, true, g.entity, 0});
+        if (!sky) add_map_prop_draws();
         if (profiling) frameProfile.groups += draws.size();
         // Cull transformed bounds before submission; sort translucency from current, transformed centres.
         draws.erase(
@@ -1067,6 +1268,7 @@ class Renderer {
                         [&](native_render::SceneDraw &d) {
                             const auto &transform = scene_transform(d.prop, d.entity, d.model);
                             if (!transform.visible) return true;
+                            if (d.skinned) return !map_prop_in_view(d, transform, vp, eye, reflection);
                             const auto model = native::model_matrix(transform);
                             const uint64_t key = (uint64_t(d.prop) << 63) | d.first;
                             const auto at = groupBounds.find(key);
@@ -1088,6 +1290,8 @@ class Renderer {
         );
         if (profiling) frameProfile.survivors += draws.size();
         profile_elapsed(frameProfile.buildCull, phaseStart);
+        pose_map_props(draws);
+        bool skinnedBound = false;
         const bool visibleWater =
                 hasWaterMaterials && std::any_of(draws.begin(), draws.end(), [&](const native_render::SceneDraw &d) {
                     return d.material < materials.size() && materials[d.material].kind == 2;
@@ -1117,7 +1321,8 @@ class Renderer {
                 const auto model = native::model_matrix(transform);
                 gl.UniformMatrix4fv(materialUniforms.model, 1, GL_FALSE, model.data());
                 bind_material(d.material, d.prop);
-                gl.BindVertexArray(d.prop ? propMesh.vao : worldMesh.vao);
+                bind_skinning(materialUniforms.skinned, materialUniforms.boneBase, d.skinned, skinnedBound);
+                gl.BindVertexArray(draw_vao(d));
                 gl.DrawElements(
                         GL_TRIANGLES,
                         d.count,
@@ -1132,6 +1337,7 @@ class Renderer {
             profile_elapsed(frameProfile.submit, phaseStart);
             if (profiling) frameProfile.submit -= frameProfile.sort - sortBefore;
         }
+        if (skinnedBound) gl.Uniform1i(materialUniforms.skinned, 0);
         gl.DepthMask(GL_TRUE);
         gl.Disable(GL_POLYGON_OFFSET_FILL);
         gl.Disable(GL_BLEND);
@@ -1605,7 +1811,9 @@ public:
                 {"atlasUpdateBytes", p.atlasUpdateBytes},
                 {"hdrAuthored", p.hdrAuthored},
                 {"hdrEffective", p.hdrEffective},
-                {"waterVolumes", p.waterVolumes}};
+                {"waterVolumes", p.waterVolumes},
+                {"mapPropsMs", p.mapProps},
+                {"mapPropPoses", p.mapPropPoses}};
     }
 
     void set_actor_models(const std::string &player, const std::string &ghost) {
@@ -1792,6 +2000,20 @@ public:
             );
             co_yield "resource";
         }
+        prepare_prop_transforms();
+        auto animated = load_map_props();
+        while (!animated.step())
+            co_yield "animated prop";
+    }
+
+    ResourceLoading load_map_props() {
+        size_t count = 0;
+        const char *raw = bh_material_names_json(core, &count);
+        const auto names = raw && count ? nlohmann::json::parse(raw, raw + count) : nlohmann::json::array();
+        mapPropMeshes = std::make_unique<MapPropMeshes>(gl);
+        auto loading = mapPropMeshes->load(core, propGroups, names);
+        while (!loading.step())
+            co_yield "animated prop";
     }
 
     void prepare_sky() {
@@ -1829,6 +2051,9 @@ public:
             while (!detail_loading.step())
                 co_yield "detail texture";
         }
+        auto flipbooks = load_flipbooks();
+        while (!flipbooks.step())
+            co_yield "flipbook frame";
     }
 
     std::vector<native_render::WaterSurface> water_surfaces(const float *verts, const uint32_t *indices) {
@@ -1914,6 +2139,10 @@ public:
         gl.Uniform1i(loc(program, "sceneColor"), 4);
         gl.Uniform1i(loc(program, "sceneDepth"), 5);
         gl.Uniform1i(loc(program, "reflectionTexture"), 8);
+        gl.Uniform1i(loc(program, "boneMatrices"), map_prop_bone_unit);
+        gl.UseProgram(depthProgram);
+        gl.Uniform1i(loc(depthProgram, "boneMatrices"), map_prop_bone_unit);
+        gl.UseProgram(program);
         gl.Uniform2f(loc(program, "cameraNearFar"), native::camera_near_plane, native::camera_far_plane);
         gl.Uniform1f(loc(program, "lightmapScale"), lightmapInfo.scale);
     }
@@ -1948,11 +2177,11 @@ public:
 
     ResourceLoading prepare_resources(std::filesystem::path assetRoot) {
         measureLabel.reserve(100);
-        program = link_program(gl, native_render::world_vertex, native_render::world_fragment().c_str());
+        program = link_program(gl, native_render::world_vertex.c_str(), native_render::world_fragment().c_str());
         materialUniforms.read(gl, program);
         co_yield "world shader";
         skyProgram = link_program(gl, native_render::sky_vertex, native_render::sky_fragment().c_str());
-        depthProgram = link_program(gl, native_render::depth_vertex, native_render::depth_fragment);
+        depthProgram = link_program(gl, native_render::depth_vertex.c_str(), native_render::depth_fragment);
         co_yield "sky shader";
         auto scene = prepare_scene();
         while (!scene.step())
@@ -1966,7 +2195,10 @@ public:
         gl.Uniform1i(loc(program, "normalTexture"), 7);
         gl.Uniform3fv(loc(program, "sunDirection"), 1, sunDirection.data());
         sunShadows = std::make_unique<SunShadowMap>(gl);
-        cutoutDepthProgram = link_program(gl, native_render::cutout_depth_vertex, native_render::cutout_depth_fragment);
+        cutoutDepthProgram =
+                link_program(gl, native_render::cutout_depth_vertex.c_str(), native_render::cutout_depth_fragment);
+        gl.UseProgram(cutoutDepthProgram);
+        gl.Uniform1i(loc(cutoutDepthProgram, "boneMatrices"), map_prop_bone_unit);
         gl.UseProgram(program);
         gl.Uniform1i(loc(program, "sunShadowMap"), sun_shadow_unit);
         gl.Uniform1i(loc(program, "sunActive"), 0);
@@ -1994,6 +2226,7 @@ public:
         presentation.reset();
         hdr.reset();
         viewmodel.reset();
+        mapPropMeshes.reset();
         destroy(worldMesh);
         destroy(propMesh);
         destroy(skyMesh);
@@ -2327,6 +2560,10 @@ public:
         }
     }
 
+    // The world's visual time for the next frame, `(tick + alpha) * tick interval` of the simulation shown, as the
+    // website's: texture scrolls, flipbooks and animated props follow it. Without it a frame uses draw()'s seconds.
+    void set_world_time(double seconds) { worldTime = std::isfinite(seconds) ? std::max(0., seconds) : -1; }
+
     // Geometry/materials remain tied to the loaded map; playback may supply another context of that map.
     void set_simulation_context(BhContext *context) {
         if (!context) throw std::runtime_error("Null renderer simulation context");
@@ -2506,7 +2743,6 @@ public:
             float range,
             bool cutouts
     ) {
-        static constexpr float cutout_alpha = .5f;
         const auto kind = caster(material);
         if (kind == Caster::none || (kind == Caster::cutout) != cutouts) return;
         const auto &transform = scene_transform(prop, entity, model);
@@ -2515,15 +2751,68 @@ public:
         const auto bounds = groupBounds.find((uint64_t(prop) << 63) | first);
         if (bounds != groupBounds.end() && !native_render::in_light_box(bounds->second, matrix, lightVp, range)) return;
         const GLuint shader = cutouts ? cutoutDepthProgram : depthProgram;
-        if (cutouts) {
-            const auto &m = materials[material];
-            gl.BindTexture(GL_TEXTURE_2D, m.texture < 0 ? white : texture(m.texture));
-            gl.Uniform1f(loc(shader, "cutoff"), (m.flags & material_alpha_test) ? m.alpha_ref : cutout_alpha);
-        }
+        if (cutouts) bind_cutout_caster(material);
         gl.BindVertexArray(mesh.vao);
         gl.UniformMatrix4fv(loc(shader, "model"), 1, GL_FALSE, matrix.data());
         gl.DrawElements(GL_TRIANGLES, count, GL_UNSIGNED_INT, reinterpret_cast<void *>(uintptr_t(first) * 4));
     }
+
+    // A cut-out caster's texture as the scene shows it this frame (scrolled, flipbook frame) and its alpha cutoff.
+    void bind_cutout_caster(uint32_t material) {
+        static constexpr float cutout_alpha = .5f;
+        const auto &m = materials[material];
+        const auto &moving = textureMotion.shown(material);
+        gl.BindTexture(GL_TEXTURE_2D, moving.texture ? moving.texture : m.texture < 0 ? white : texture(m.texture));
+        gl.Uniform2f(loc(cutoutDepthProgram, "baseOffset"), moving.offset[0], moving.offset[1]);
+        gl.Uniform1f(loc(cutoutDepthProgram, "cutoff"), (m.flags & material_alpha_test) ? m.alpha_ref : cutout_alpha);
+    }
+
+    // Whether posed prop `instance` can cast into the sun's map; it is posed for the frame when it can.
+    bool map_prop_casts(size_t instance, const native::Matrix &lightVp, float range) {
+        auto &prop = mapPropMeshes->props.instances()[instance];
+        const auto &transform = scene_transform(true, int32_t(prop.entity), 0);
+        if (!transform.visible) return false;
+        const float radius = float(mapPropMeshes->props.radius(prop, worldSeconds));
+        native_render::Bounds bounds;
+        for (int k = 0; k < 3; k++) {
+            bounds.lo[k] = transform.origin[k] - radius;
+            bounds.hi[k] = transform.origin[k] + radius;
+        }
+        if (!native_render::in_light_box(bounds, native::identity(), lightVp, range)) return false;
+        mapPropMeshes->props.pose(prop, worldSeconds, transform.origin);
+        return true;
+    }
+
+    // Posed props into the sun's depth map, skinned like the scene draws them.
+    void cast_map_props(const native::Matrix &lightVp, float range, bool cutouts, GLuint shader) {
+        if (!mapPropMeshes || !mapPropMeshes->active()) return;
+        const size_t count = mapPropMeshes->props.instances().size();
+        castingProps.assign(count, false);
+        for (size_t i = 0; i < count; ++i)
+            castingProps[i] = map_prop_casts(i, lightVp, range);
+        mapPropMeshes->upload(GL_TEXTURE0 + map_prop_bone_unit);
+        gl.ActiveTexture(GL_TEXTURE0);
+        bool bound = false;
+        for (size_t i = 0; i < count; ++i) {
+            if (!castingProps[i]) continue;
+            const auto &prop = mapPropMeshes->props.instances()[i];
+            const auto model = native::model_matrix(scene_transform(true, int32_t(prop.entity), 0));
+            for (const auto &g : mapPropMeshes->groups(i)) {
+                const auto kind = caster(g.material);
+                if (kind == Caster::none || (kind == Caster::cutout) != cutouts) continue;
+                if (cutouts) bind_cutout_caster(g.material);
+                bind_skinning(loc(shader, "skinned"), loc(shader, "boneBase"), uint32_t(i + 1), bound);
+                gl.BindVertexArray(mapPropMeshes->vao(i));
+                gl.UniformMatrix4fv(loc(shader, "model"), 1, GL_FALSE, model.data());
+                gl.DrawElements(
+                        GL_TRIANGLES, g.count, GL_UNSIGNED_INT, reinterpret_cast<void *>(uintptr_t(g.first) * 4)
+                );
+            }
+        }
+        if (bound) gl.Uniform1i(loc(shader, "skinned"), 0);
+    }
+
+    std::vector<bool> castingProps;
 
     // World groups, props and players into the sun's depth map: solid surfaces, then cut-outs by their alpha.
     void draw_shadow_casters(const native::Matrix &lightVp, float range, const float eye[3], double seconds) {
@@ -2550,7 +2839,7 @@ public:
                             cutouts
                     );
             for (const auto &g : propGroups)
-                if (!g.sky3d)
+                if (!g.sky3d && !frozen_prop_replaced(g.entity))
                     cast_group(
                             propMesh,
                             true,
@@ -2563,6 +2852,7 @@ public:
                             range,
                             cutouts
                     );
+            cast_map_props(lightVp, range, cutouts, shader);
         }
         if (!viewmodel) return;
         for (const auto &actor : roomActors)
@@ -2764,6 +3054,7 @@ public:
         profile_elapsed(frameProfile.lightmapUpload, phaseStart);
         const double dt = lastSeconds < 0 ? 0 : std::max(0., seconds - lastSeconds);
         lastSeconds = seconds;
+        prepare_map_motion(eye, seconds);
         const float aspect = float(width) / height;
         const auto vp = camera(eye, lastYaw, lastPitch, aspect);
         resolve_look_lighting();

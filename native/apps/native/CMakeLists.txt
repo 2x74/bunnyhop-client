@@ -608,6 +608,13 @@ if(BUILD_TESTING)
             WORKING_DIRECTORY "${BUNNYHOP_ROOT}" FIXTURES_SETUP gun_hold_oracle TIMEOUT 120)
         add_test(NAME native_gun_hold COMMAND bunnyhop-native-gun-hold-tests "${GUN_HOLD_ORACLE}")
         set_tests_properties(native_gun_hold PROPERTIES FIXTURES_REQUIRED gun_hold_oracle)
+        set(MAP_PROPS_ORACLE "${CMAKE_CURRENT_BINARY_DIR}/map-props-oracle.json")
+        add_test(NAME native_map_props_oracle
+            COMMAND "${BUN_EXECUTABLE}" apps/native/src/map-props-oracle.ts "${MAP_PROPS_ORACLE}")
+        set_tests_properties(native_map_props_oracle PROPERTIES
+            WORKING_DIRECTORY "${BUNNYHOP_ROOT}" FIXTURES_SETUP map_props_oracle TIMEOUT 120)
+        add_test(NAME native_map_props COMMAND bunnyhop-native-map-props-tests "${MAP_PROPS_ORACLE}")
+        set_tests_properties(native_map_props PROPERTIES FIXTURES_REQUIRED map_props_oracle)
     endif()
     add_executable(bunnyhop-native-gun-hold-tests src/gun_hold_tests.cpp)
     target_include_directories(bunnyhop-native-gun-hold-tests PRIVATE vendor)
@@ -643,6 +650,9 @@ if(BUILD_TESTING)
     target_include_directories(bunnyhop-native-jhud-tests PRIVATE include vendor src)
     add_executable(bunnyhop-native-closest-pos-tests src/closest_pos_tests.cpp)
     target_include_directories(bunnyhop-native-closest-pos-tests PRIVATE include vendor src)
+    # Animated map props and moving textures against the website's bone setup, sequenceAt and texture-scroll.ts.
+    add_executable(bunnyhop-native-map-props-tests src/map_props_tests.cpp)
+    target_include_directories(bunnyhop-native-map-props-tests PRIVATE include vendor src)
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
         # The same exact arithmetic as the website: nothing may contract it into an FMA.
         target_compile_options(bunnyhop-native-jhud-tests PRIVATE -ffp-contract=off)

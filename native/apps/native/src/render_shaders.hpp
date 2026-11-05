@@ -60,30 +60,50 @@ vec3 waterFog(vec3 color,vec3 p){
  if(total<=0.)return color;range/=total;return mix(color,fog/total,clamp((total-range.x)/max(range.y-range.x,1.),0.,1.));
 }
 )";
+// Animated map props (map_prop_meshes.hpp) skin on the GPU: each bone's 3x4 matrix is three RGBA texels of
+// boneMatrices, 256 bones to a row, from boneBase. Other geometry leaves `skinned` off.
+inline const std::string skinning = R"(
+layout(location=5)in vec3 boneWeights;layout(location=6)in vec3 boneIndices;
+uniform bool skinned;uniform int boneBase;uniform sampler2D boneMatrices;
+mat4 boneMatrix(float bone){
+ int g=boneBase+int(bone);ivec2 at=ivec2((g%256)*3,g/256);
+ vec4 r0=texelFetch(boneMatrices,at,0),r1=texelFetch(boneMatrices,at+ivec2(1,0),0);
+ vec4 r2=texelFetch(boneMatrices,at+ivec2(2,0),0);
+ return mat4(r0.x,r1.x,r2.x,0.,r0.y,r1.y,r2.y,0.,r0.z,r1.z,r2.z,0.,r0.w,r1.w,r2.w,1.);
+}
+mat4 skinMatrix(){
+ return boneMatrix(boneIndices.x)*boneWeights.x+boneMatrix(boneIndices.y)*boneWeights.y
+  +boneMatrix(boneIndices.z)*boneWeights.z;
+}
+vec4 skinnedPosition(vec3 p){return skinned?skinMatrix()*vec4(p,1):vec4(p,1);}
+)";
+
 // clipHeight only takes effect while GL_CLIP_DISTANCE0 is on: the water reflection keeps what is above its plane.
-inline const char *depth_vertex = R"(#version 330 core
+inline const std::string depth_vertex = "#version 330 core\n" + skinning + R"(
 layout(location=0)in vec3 position;uniform mat4 viewProjection,model;uniform float clipHeight;
-void main(){vec4 w=model*vec4(position,1);gl_ClipDistance[0]=w.z-clipHeight;gl_Position=viewProjection*w;}
+void main(){vec4 w=model*skinnedPosition(position);gl_ClipDistance[0]=w.z-clipHeight;gl_Position=viewProjection*w;}
 )";
 inline const char *depth_fragment = R"(#version 330 core
 void main(){}
 )";
 // Cut-out surfaces (leaves, fences) in the sun's depth map: depth only where the texture is solid.
-inline const char *cutout_depth_vertex = R"(#version 330 core
+inline const std::string cutout_depth_vertex = "#version 330 core\n" + skinning + R"(
 layout(location=0)in vec3 position;layout(location=2)in vec2 baseUV;uniform mat4 viewProjection,model;out vec2 uv;
-void main(){uv=baseUV;gl_Position=viewProjection*model*vec4(position,1);}
+void main(){uv=baseUV;gl_Position=viewProjection*model*skinnedPosition(position);}
 )";
 inline const char *cutout_depth_fragment = R"(#version 330 core
-in vec2 uv;uniform sampler2D baseTexture;uniform float cutoff;
-void main(){if(texture(baseTexture,uv).a<cutoff)discard;}
+in vec2 uv;uniform sampler2D baseTexture;uniform float cutoff;uniform vec2 baseOffset;
+void main(){if(texture(baseTexture,uv+baseOffset).a<cutoff)discard;}
 )";
-inline const char *world_vertex = R"(#version 330 core
+inline const std::string world_vertex = "#version 330 core\n" + skinning + R"(
 layout(location=0) in vec3 position;layout(location=1) in vec3 normal;
 layout(location=2) in vec2 baseUV;layout(location=3) in vec2 lightUV;layout(location=4) in float blendAlpha;
 uniform mat4 viewProjection,model;uniform float clipHeight;
 out vec2 uv,lm;out vec3 world,normalWorld;out float blend,depth;
 void main(){
- vec4 w=model*vec4(position,1);world=w.xyz;normalWorld=mat3(model)*normal;uv=baseUV;lm=lightUV;blend=blendAlpha;
+ vec4 local=vec4(position,1);vec3 n=normal;
+ if(skinned){mat4 s=skinMatrix();local=s*local;n=mat3(s)*normal;}
+ vec4 w=model*local;world=w.xyz;normalWorld=mat3(model)*n;uv=baseUV;lm=lightUV;blend=blendAlpha;
  gl_ClipDistance[0]=w.z-clipHeight;gl_Position=viewProjection*w;depth=gl_Position.w;
 }
 )";
@@ -180,6 +200,7 @@ uniform sampler2D baseTexture,lightTexture,secondaryTexture,detailTexture,normal
 uniform sampler2D sceneColor,sceneDepth,reflectionTexture;uniform bool captureReady,reflectionReady;
 uniform float reflectionHeight,waterFogEnd;uniform vec2 cameraNearFar;
 uniform vec3 tint,flatColor;uniform float opacity,cutoff,lightmapScale,detailScale,detailBlend,timeSeconds;
+uniform vec2 baseOffset;
 uniform int kind;uniform bool unlit,props,hasSecondary,hasDetail,aboveWater,skyPass,additive;
 uniform bool flashlight;uniform vec3 flashDirection;
 uniform vec3 skyFogColor;uniform vec3 skyFogRange;
@@ -187,7 +208,7 @@ out vec4 color;
 )" + sun_light_shader
            + water_surface_shader + R"(
 void main(){
- vec3 n=normalize(normalWorld);vec3 v=normalize(cameraPosition-world);vec4 base=texture(baseTexture,uv);
+ vec3 n=normalize(normalWorld);vec3 v=normalize(cameraPosition-world);vec4 base=texture(baseTexture,uv+baseOffset);
  if(potato&&cutoff<=0.){
   base=vec4(flatColor,1);
   vec3 an=abs(n);
