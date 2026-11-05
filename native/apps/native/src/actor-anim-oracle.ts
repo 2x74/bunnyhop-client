@@ -19,10 +19,17 @@ const d = new StudioData(fake as any, 1),
   anim = new CsAnimState(d, bs),
   frames = [];
 let time = 0;
-for (let f = 0; f < 360; f++) {
+// Phases of 45 frames: standing and turning, walk, run, run back, crouch walk, airborne, run, then a ladder climb and a
+// swim (no hop, the climb speed and the slower legs).
+const CLIMB_FROM = 360,
+  SWIM_FROM = 450,
+  FRAMES = 540;
+for (let f = 0; f < FRAMES; f++) {
   const dt = 1 / 60;
   time += dt;
   const phase = Math.floor(f / 45);
+  const climbing = f >= CLIMB_FROM && f < SWIM_FROM,
+    swimming = f >= SWIM_FROM;
   const input = {
     vel: [
       phase === 0
@@ -44,11 +51,15 @@ for (let f = 0; f < 360; f++) {
     eyeYaw: phase === 0 ? f * 3 : phase === 3 ? -130 : phase === 6 ? 175 : 25,
     eyePitch: Math.sin(f * 0.04) * 65,
     ducking: phase === 4,
-    onGround: phase !== 5,
-    jumped: f === 225,
+    onGround: phase !== 5 && !climbing && !swimming,
+    jumped: f === 225 || f === CLIMB_FROM + 10 || f === SWIM_FROM + 10,
+    climbing,
+    swimming,
   };
+  if (climbing) input.vel = [0, 0, f < CLIMB_FROM + 45 ? 120 : -90];
+  if (swimming) input.vel = [60, 20, f < SWIM_FROM + 45 ? 40 : -30];
   const snap = f === 0 || f === 300,
-    shot = [65, 135, 220, 280, 325].includes(f);
+    shot = [65, 135, 220, 280, 325, 380, 470].includes(f);
   if (snap) {
     anim.reset(time);
     if (!input.onGround) {
@@ -67,7 +78,7 @@ for (let f = 0; f < 360; f++) {
     shot,
     feetYaw: anim.feetYaw,
     cycle: anim.cycle,
-    world: f % 15 === 0 || f === 359 ? Array.from(w) : null,
+    world: f % 15 === 0 || f === FRAMES - 1 ? Array.from(w) : null,
   });
 }
 await writeFile(`${root}/oracle.json`, JSON.stringify(frames));

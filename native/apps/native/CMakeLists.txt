@@ -801,6 +801,25 @@ if(BUILD_TESTING)
     set_tests_properties(native_actor_animation_web_oracle PROPERTIES SKIP_RETURN_CODE 77)
 endif()
 
+# The whole third-person bunny (animation, bank, legs, ears) against the website's own model.
+if(BUILD_TESTING)
+    add_executable(bunnyhop-native-actor-pose-tests src/actor_pose_tests.cpp)
+    target_include_directories(bunnyhop-native-actor-pose-tests PRIVATE vendor)
+    find_program(ACTOR_POSE_BUN bun)
+    if(ACTOR_POSE_BUN)
+        set(ACTOR_POSE_ASSETS "${CMAKE_CURRENT_SOURCE_DIR}/../../target/native-assets")
+        set(ACTOR_POSE_ORACLE "${CMAKE_CURRENT_BINARY_DIR}/actor-pose-oracle.json")
+        add_test(NAME native_actor_pose_oracle COMMAND "${ACTOR_POSE_BUN}" apps/native/src/actor-pose-oracle.ts
+            "${ACTOR_POSE_ASSETS}" "${ACTOR_POSE_ORACLE}")
+        set_tests_properties(native_actor_pose_oracle PROPERTIES
+            WORKING_DIRECTORY "${BUNNYHOP_ROOT}" FIXTURES_SETUP actor_pose_oracle TIMEOUT 120)
+        add_test(NAME native_actor_pose_web COMMAND bunnyhop-native-actor-pose-tests
+            "${ACTOR_POSE_ASSETS}" "${ACTOR_POSE_ORACLE}")
+        set_tests_properties(native_actor_pose_web PROPERTIES
+            FIXTURES_REQUIRED actor_pose_oracle SKIP_RETURN_CODE 77 TIMEOUT 60)
+    endif()
+endif()
+
 if(BUILD_TESTING)
     add_executable(bunnyhop-native-run-vault-tests src/run_vault_tests.cpp)
     target_include_directories(bunnyhop-native-run-vault-tests PRIVATE vendor)

@@ -8,6 +8,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     using namespace native_actor_anim;
+    constexpr double frame_seconds = 1. / 60, airborne_jump_speed = 301.993, gravity = 800, airborne_limit_seconds = 2;
     if (!std::filesystem::exists(std::string(argv[1]) + "/actor-animations.json")
         || !std::filesystem::exists(std::string(argv[1]) + "/actor-animations.bin")) {
         std::cout << "Hosted actor assets absent; run bun run models first\n";
@@ -28,8 +29,20 @@ int main(int argc, char **argv) {
         i.ducking = j["ducking"];
         i.grounded = j["onGround"];
         i.jumped = j["jumped"];
-        V out;
-        s.pose(i, frame["time"], frame["snap"], frame["shot"], out);
+        i.climbing = j.value("climbing", false);
+        i.swimming = j.value("swimming", false);
+        // The anim state alone, stepped as the oracle steps the website's (pose() adds the leg layer's verdict).
+        const double time = frame["time"];
+        const bool snap = frame["snap"];
+        if (snap) {
+            s.reset(time);
+            const double elapsed = (airborne_jump_speed - i.velocity[2]) / gravity;
+            if (!i.grounded && elapsed >= 0 && elapsed < airborne_limit_seconds) s.airborne(elapsed);
+        }
+        if (frame["shot"]) s.fire();
+        s.update(snap ? 0 : frame_seconds, i, snap, time);
+        s.apply();
+        s.bs.build();
         if (!frame["world"].is_null()) {
             auto expected = frame["world"].get<V>();
             for (size_t k = 0; k < expected.size(); k++)
