@@ -9,6 +9,7 @@ import {
   type HostScoreboard,
 } from "./host-decoration";
 import { NAME_COLORS } from "../../web/src/creators";
+import { NAME_FONTS } from "../../web/src/supporter-looks";
 import type { RoomView } from "./room-service";
 
 test("a supporter's name and marks come out in the web's order", () => {
@@ -24,13 +25,24 @@ test("a supporter's name and marks come out in the web's order", () => {
     gifterColors: ["#112233", "nope"],
   });
   // "shimmer" is the old name for paint (creators.ts nameEffectOf).
-  expect(hostNameLook(marks)).toEqual({ color: NAME_COLORS[1].hex, color2: NAME_COLORS[3].hex, effect: "paint" });
+  expect(hostNameLook(marks)).toEqual({
+    color: NAME_COLORS[1].hex,
+    color2: NAME_COLORS[3].hex,
+    effect: "paint",
+    font: null,
+  });
   // The shield first, then two more (creators.ts equippedNameBadges): staff wear three marks in all.
   expect(hostMarks(marks).map((mark) => mark.id)).toEqual(["staff", "verified", "booster"]);
   const gifter = hostMarks(readMarks({ giftsSent: 120, gifterColors: ["#112233"], nameBadges: ["gifter"] }));
   expect(gifter).toEqual([{ id: "gifter-prism", name: "Prism Gifter", colors: ["#112233"], animated: false }]);
   // Anything malformed is no mark at all.
   expect(hostMarks(readMarks({ staff: "god", creator: "myspace", verified: "yes" }))).toEqual([]);
+});
+
+test("a supporter's name font reaches the host; an unknown or missing one is the default font", () => {
+  for (const font of NAME_FONTS) expect(hostNameLook(readMarks({ nameFont: font.id })).font).toBe(font.id);
+  for (const nameFont of ["comic", "GROTESK", "", 7, {}, null, undefined])
+    expect(hostNameLook(readMarks({ nameFont })).font).toBeNull();
 });
 
 test("the Tab board is the room screen's rows; a running time ticking alone isn't sent again", () => {
@@ -47,6 +59,7 @@ test("the Tab board is the room screen's rows; a running time ticking alone isn'
         country: "US",
         supporter: true,
         nameColor: NAME_COLORS[0].id,
+        nameFont: "script",
       },
       { slot: 2, name: "oiwa", style: "autohop", spec: 1 },
     ],
@@ -63,11 +76,12 @@ test("the Tab board is the room screen's rows; a running time ticking alone isn'
     country: "us",
     statusKind: "running",
     ping: 25,
-    look: { color: NAME_COLORS[0].hex, color2: null, effect: null },
+    look: { color: NAME_COLORS[0].hex, color2: null, effect: null, font: "script" },
     marks: [{ id: "supporter", name: "Supporter" }],
   });
   expect(you.running).toEqual({ seconds: 13.34, at: 1_700_000_000_000 });
   expect(spectator).toMatchObject({ statusKind: "spec", status: "SPEC → Profile Hopper", running: null });
+  expect(spectator.look.font).toBeNull();
   expect(hostScoreboard({ ...view, id: "" } as RoomView, { now: 0, server: 0, ping: null, at: 0 })).toEqual({
     type: "scoreboard",
     head: null,

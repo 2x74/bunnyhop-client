@@ -14,6 +14,8 @@ struct TextBitmap {
     // advance after the text. They let callers line up separately rasterized runs.
     float origin_x = 0, origin_y = 0;
     float advance = 0;
+    // Pixel row of the first line's baseline from the bitmap's top; 0 when the platform didn't report it.
+    float baseline = 0;
 };
 
 struct TextCaret {

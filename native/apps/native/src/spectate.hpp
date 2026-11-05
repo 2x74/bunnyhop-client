@@ -111,13 +111,24 @@ private:
     }
 };
 
-// What the spectator bar shows this frame; |shown| is false while not watching.
+// What the spectator bar shows this frame; |shown| is false while not watching. |look|: the watched name's colour,
+// effect and font (watched_name_look); |seconds| runs the effect.
 struct SpectatorBar {
     bool shown = false;
     bool waiting = false;
     std::string_view name;
     std::string_view hint;
+    NameAppearance look;
+    double seconds = 0;
 };
+
+// The bar draws the name as the website does: the supporter's look, else the slot's colour, and no marks.
+inline NameAppearance watched_name_look(NameAppearance look, unsigned slot) {
+    if (look.color == NameAppearance{}.color) look.color = slot_color(slot);
+    look.marks = 0;
+    look.badge_count = 0;
+    return look;
+}
 
 // "Watching <name>" at the bottom of the screen with the hint under it (web net/hud.ts SpecBar).
 template <class Hud>
@@ -125,14 +136,22 @@ void draw_spectator_bar(Hud &hud, int width, int height, float percent, const Sp
     if (!bar.shown) return;
     constexpr float bar_from_bottom = 46;
     constexpr float hint_below_bar = 21;
+    constexpr float text_size = 16;
     constexpr NameColor cream = {.94f, .91f, .86f, 1};
     constexpr NameColor dim = {.63f, .65f, .70f, 1};
+    constexpr std::string_view lead = "Watching ";
+    const std::string_view waiting = bar.waiting ? ", waiting for them" : "";
     const HudGeometry geometry(width, height, percent);
-    HudLabel<192> label;
-    label.format("Watching %.*s%s", int(bar.name.size()), bar.name.data(), bar.waiting ? ", waiting for them" : "");
     hud.overlay_begin(width, height, percent);
-    hud.overlay_text(geometry.width / 2, geometry.height - bar_from_bottom, label.view(), 16, cream, true);
-    hud.overlay_text(geometry.width / 2, geometry.height - bar_from_bottom + hint_below_bar, bar.hint, 12, dim, true);
+    const float lead_width = hud.overlay_text_width(lead, text_size);
+    const float name_width = hud.overlay_name_width(bar.name, text_size, bar.look);
+    const float waiting_width = waiting.empty() ? 0 : hud.overlay_text_width(waiting, text_size);
+    const float left = (geometry.width - lead_width - name_width - waiting_width) / 2;
+    const float top = geometry.height - bar_from_bottom;
+    hud.overlay_text(left, top, lead, text_size, cream);
+    hud.overlay_name(left + lead_width, top, bar.name, text_size, bar.look, bar.seconds);
+    if (!waiting.empty()) hud.overlay_text(left + lead_width + name_width, top, waiting, text_size, dim);
+    hud.overlay_text(geometry.width / 2, top + hint_below_bar, bar.hint, 12, dim, true);
     hud.overlay_end(width, height);
 }
 

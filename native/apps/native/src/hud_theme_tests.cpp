@@ -90,6 +90,10 @@ struct DrawProbe {
 
     float overlay_text_width(std::string_view text, float size) const { return float(text.size()) * size * .6f; }
 
+    float overlay_name_width(std::string_view text, float size, const native::NameAppearance &) const {
+        return overlay_text_width(text, size);
+    }
+
     void overlay_name(float, float, std::string_view, float, const native::NameAppearance &, double, bool = false) {
         ++names;
     }

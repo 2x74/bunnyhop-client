@@ -1,6 +1,6 @@
 // How a player's name looks, for the host to draw in game the way the web does (net/hud.ts chat, net/scoreboard.ts
-// Tab board, ui/marks.ts): the supporter colour, its effect and second colour, the marks after the name in the web's
-// order (creators.ts equippedNameBadges), the rank tag and the flag. The menu works these out from the web's own rules
+// Tab board, ui/marks.ts): the supporter colour, its effect and second colour, the supporter font, the marks after the
+// name in the web's order (creators.ts equippedNameBadges), the rank tag and the flag. The menu works these out from the web's own rules
 // so the host only draws.
 //
 // Host contract:
@@ -29,15 +29,17 @@ import {
 } from "../../web/src/creators";
 import { isPrideFlag } from "../../web/src/countries";
 import type { ScoreHead, ScoreRow } from "../../web/src/net/scoreboard";
+import { nameFontOf, type NameFontId } from "../../web/src/supporter-looks";
 import { roomScoreboard, runningSeconds } from "./room-scoreboard";
 import type { RoomView } from "./room-service";
 
-/** Name colour and effect (web marks.ts nameAttrs). Null colour: the default white. */
+/** Name colour, effect and font (web marks.ts nameAttrs). Null colour: the default white; null font: the default. */
 export interface HostNameLook {
   color: string | null;
   /** The "paint" gradient's second colour; null: a paler shade of the first. */
   color2: string | null;
   effect: NameEffect | null;
+  font: NameFontId | null;
 }
 
 /**
@@ -99,6 +101,7 @@ export function readMarks(value: Record<string, unknown>): PlayerMarks {
     nameColor: isNameColor(value.nameColor) ? value.nameColor : null,
     nameEffect: nameEffectOf(value.nameEffect),
     nameColor2: isNameColor(value.nameColor2) ? value.nameColor2 : null,
+    nameFont: nameFontOf(value.nameFont),
     special: textList(value.special),
   };
 }
@@ -108,6 +111,7 @@ export function hostNameLook(marks: PlayerMarks): HostNameLook {
     color: nameColorHex(marks.nameColor),
     color2: nameColorHex(marks.nameColor2),
     effect: nameEffectOf(marks.nameEffect),
+    font: nameFontOf(marks.nameFont),
   };
 }
 

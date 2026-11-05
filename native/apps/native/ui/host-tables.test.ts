@@ -4,11 +4,12 @@
 import { test, expect } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { PRIDE_FLAGS } from "../../web/src/countries";
 import { PEAK_TIERS, peakMarkId } from "../../web/src/creators";
 import { MAX_TIER, TIER_COLORS, TIER_NAMES, TIER_UNKNOWN_COLOR, TIERS } from "../../web/src/tiers";
 import { exportHudGlyphs } from "../src/export-hud-glyphs";
+import { startResvg } from "../src/resvg";
 
 const source = (file: string) => Bun.file(new URL(`../src/${file}`, import.meta.url)).text();
 
@@ -38,9 +39,7 @@ test("hud_glyph_sheet.hpp places every peak mark and pride flag the exporter dra
   for (const id of ids.filter((id) => !drawn.includes(id))) expect(id).toMatch(/^peak-([1-9]|10)$/);
   expect(header).toContain(`std::array<std::string_view, ${ids.length}> sheet_glyph_ids`);
 
-  const resvgPath = Bun.resolveSync("@resvg/resvg-wasm", import.meta.dir);
-  const { initWasm, Resvg } = await import(resvgPath);
-  await initWasm(await readFile(join(dirname(resvgPath), "index_bg.wasm")));
+  const Resvg = await startResvg();
   const font = await readFile(new URL("../../../tools/hermes/fonts/JetBrainsMono-Bold.ttf", import.meta.url));
   const out = await mkdtemp(join(tmpdir(), "hud-glyphs-"));
   expect(await exportHudGlyphs(out, Resvg, font)).toBe(drawn.length);

@@ -69,6 +69,7 @@ export function roomScoreboard(
       nameColor: p.nameColor,
       nameEffect: p.nameEffect,
       nameColor2: p.nameColor2,
+      nameFont: p.nameFont,
       nameBadges: p.nameBadges,
       giftsSent: p.giftsSent,
       gifterColors: p.gifterColors,

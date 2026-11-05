@@ -5,6 +5,7 @@
 #undef NDEBUG
 #endif
 #include <cassert>
+#include <cmath>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -301,6 +302,56 @@ void test_chat_lines() {
     assert(chat.lines[1] == "Back in the run. N or !spec to watch again.");
 }
 
+// Records what the spectator bar draws.
+struct BarProbe {
+    std::vector<std::string> texts;
+    std::string name;
+    native::NameAppearance look;
+    float name_x = 0;
+
+    void overlay_begin(int, int, float) {}
+
+    void overlay_end(int, int) {}
+
+    void overlay_text(float, float, std::string_view text, float, native::NameColor, bool = false) {
+        texts.emplace_back(text);
+    }
+
+    float overlay_text_width(std::string_view text, float size) const { return float(text.size()) * size * .6f; }
+
+    // A supporter font draws this name narrower than the HUD font.
+    float overlay_name_width(std::string_view text, float size, const native::NameAppearance &) const {
+        return overlay_text_width(text, size) / 2;
+    }
+
+    void overlay_name(float x, float, std::string_view text, float, const native::NameAppearance &shown, double) {
+        name = text;
+        look = shown;
+        name_x = x;
+    }
+};
+
+void test_watched_name_has_its_look() {
+    native::NameAppearance plain;
+    plain.marks = 1;
+    const auto slot_look = native::watched_name_look(plain, 2);
+    assert(slot_look.color == native::slot_color(2) && slot_look.marks == 0);
+    native::NameAppearance supporter;
+    supporter.color = native::name_color("#ffa8cb");
+    supporter.font = native::NameFont::block;
+    supporter.badge_count = 1;
+    const auto styled = native::watched_name_look(supporter, 2);
+    assert(styled.color == supporter.color && styled.font == native::NameFont::block && styled.badge_count == 0);
+
+    BarProbe probe;
+    native::draw_spectator_bar(probe, 1280, 720, 100, {true, true, "goobert", "R stops watching.", styled, 1});
+    assert(probe.name == "goobert" && probe.look.font == native::NameFont::block);
+    assert((probe.texts == std::vector<std::string>{"Watching ", ", waiting for them", "R stops watching."}));
+    // The line is centred on its drawn width: "Watching " (86.4) + the name (33.6) + the rest (172.8).
+    const native::HudGeometry geometry(1280, 720, 100);
+    assert(std::abs(probe.name_x - ((geometry.width - 292.8f) / 2 + 86.4f)) < 1e-3f);
+}
+
 }  // namespace
 
 int main() {
@@ -314,5 +365,6 @@ int main() {
     test_every_way_out_of_freecam_gives_the_input_back();
     test_spectate_menu();
     test_chat_lines();
+    test_watched_name_has_its_look();
     std::puts("spectate passed");
 }
