@@ -461,10 +461,6 @@ int run(const native::Options &opt) {
             );
             renderer->set_inspect_style(preferences.at("viewmodelInspect") == "quiet");
             renderer->set_color_blind(preferences.value("colorBlind", std::string("off")));
-            renderer->set_actor_models(
-                    preferences.value("playerModel", std::string("bunny")),
-                    preferences.value("ghostModel", std::string("same"))
-            );
             renderer->set_zones_visible(preferences.value("zonesVisible", true));
             renderer->set_effects_visible(preferences.value("effectsVisible", true));
             renderer->set_triggers_visible(preferences.value("triggersVisible", false));
@@ -1160,7 +1156,11 @@ int run(const native::Options &opt) {
     auto seek_playback = [&](uint32_t tick) {
         if (!core || !viewer.active) return;
         native::ReplayPose pose;
+        std::vector<native::PrerollFrame> preroll;
         try {
+            preroll = native::gather_replay_preroll(
+                    core.get(), viewer.session.range.clamp(tick), viewer.session.range.tick_interval
+            );
             pose = viewer.session.seek(core.get(), tick);
         } catch (const std::exception &failure) {
             reset();
@@ -1174,6 +1174,8 @@ int run(const native::Options &opt) {
         audio.reset();
         hud.reset_history();
         if (viewer.camera.mode != "free") viewer.camera.reset();
+        viewer.camera.preroll(core.get(), preroll, viewer.session.range.tick_interval);
+        viewer.preroll = std::move(preroll);
         camera_controls.clear();
         reset_feedback(curr.tick != 0);
         reset_input_timing();
@@ -3700,6 +3702,7 @@ int run(const native::Options &opt) {
             renderer->set_viewmodel_weapon(std::nullopt);
             renderer->set_viewmodel_visible(prefs.viewmodel && !opt.camera && (!viewer.active || viewer.weapon_eye));
             renderer->set_source_look(prefs.source_look);
+            renderer->set_reduced_motion(menu_reduced_motion);
             if (spectator) {
                 spectated_actor = room.spectated(steady_seconds);
                 const auto &target = spectated_actor;
@@ -3809,11 +3812,17 @@ int run(const native::Options &opt) {
                 BhWeaponReport held{};
                 bh_weapon_report(core.get(), &held);
                 auto self = native_render::own_actor(state, input.pitch, input.yaw(), held.active);
+                BhCmd last_command{};
+                if (bh_last_command(core.get(), &last_command)) self.sidemove = last_command.side;
                 self.outfit = viewer.active ? viewer.runner_outfit : outfit;
                 self.loadout = viewer.active ? viewer.runner_loadout : held_knife.loadout();
                 self.emptyHand = viewer.active && !viewer.weapon_third;
                 self.playerGlow = player_glow;
                 third_person_events.apply(self);
+                if (viewer.active && !viewer.preroll.empty()) {
+                    renderer->preroll_actor(self, viewer.preroll, step_dt);
+                    self.snapped = false;
+                }
                 if (spectator) {
                     if (const auto target = room.spectated(steady_seconds)) {
                         self = *target;
@@ -3822,6 +3831,7 @@ int run(const native::Options &opt) {
                 }
                 actors.push_back(self);
             }
+            viewer.preroll.clear();
             if (opt.camera) {
                 for (int k = 0; k < 3; k++)
                     eye[k] = (*opt.camera)[k];

@@ -15,14 +15,6 @@ const files = {
     sha256: "b290f017e35b021cbef0e3cc64a37313dc3564c1c90204389c205632bcec3c13",
     size: 2065544,
   },
-  "models/player/ak_anims_ct.mdl": {
-    sha256: "db5653d3d05c4dd729a2e50899b7278841a9bd9a764ebfc539d414fd682f7a0e",
-    size: 99744,
-  },
-  "models/player/ak_anims_t.mdl": {
-    sha256: "d68e3409fc4393e22c3180b961b7593897b5086cafca7c6a3e8beda84d6519b7",
-    size: 99316,
-  },
 };
 const core = await Core.create(await readFile(wasm));
 core.contentMountListing("player", Object.keys(files));

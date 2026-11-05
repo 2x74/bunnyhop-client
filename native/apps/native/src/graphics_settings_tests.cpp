@@ -62,9 +62,9 @@ static void settings_validation() {
     bool flashlight = false;
     native::toggle_graphics_flashlight(document, flashlight);
     assert(flashlight && document.at("graphicsFlashlight") == true);
-    Json retired = {{"playerModel", "runner"}, {"ghostModel", "runner"}};
+    Json retired = {{"playerModel", "runner"}, {"ghostModel", "bunny"}, {"fov", 100}};
     native::migrate_retired_models(retired);
-    assert(retired.at("playerModel") == "bunny" && retired.at("ghostModel") == "bunny");
+    assert(retired == Json({{"fov", 100}}));
     const auto binds = native::default_graphics_binds();
     assert(binds.size() == 5 && binds.at("paint").empty());
     native_render::SurfaceToolBindings tools;

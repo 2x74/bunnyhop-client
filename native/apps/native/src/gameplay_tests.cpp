@@ -224,7 +224,13 @@ int main() {
     trace_fraction = .5;
     camera.sample(reinterpret_cast<BhContext *>(1), player, 0, 0, 0, eye, view);
     assert(std::abs(eye[0] - (50 - std::cos(14 * 3.141592653589793 / 180) * 46)) < .001);
-    assert(std::abs(eye[2] - (56 + std::sin(14 * 3.141592653589793 / 180) * 46)) < .001);
+    {
+        // Pulled in to 46 of its 96 units it's cramped, so it cranes up by the room above (half of 34, less 3), eased
+        // by how cramped it is, like the website's ChaseCam.
+        const double reach = 46. / 96, cramped = std::clamp((.72 - reach) / .45, 0., 1.);
+        const double crane = cramped * cramped * (3 - 2 * cramped), rise = 34 * .5 - 3;
+        assert(std::abs(eye[2] - (56 + std::sin(14 * 3.141592653589793 / 180) * 46 + rise * crane)) < .001);
+    }
     assert(!camera.set_mode("unknown"));
     assert(camera.mode == "chase");
     camera.set_mode("free");

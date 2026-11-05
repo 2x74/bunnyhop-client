@@ -592,9 +592,3 @@ const avatarExport = Bun.spawnSync([process.execPath, resolve(import.meta.dir, "
   stderr: "inherit",
 });
 if (avatarExport.exitCode) throw new Error("Avatar pose export failed");
-
-const runnerExport = Bun.spawnSync([process.execPath, resolve(import.meta.dir, "export-runner.ts"), directory], {
-  stdout: "inherit",
-  stderr: "inherit",
-});
-if (runnerExport.exitCode) throw new Error("Original runner export failed");

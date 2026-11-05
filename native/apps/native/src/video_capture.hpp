@@ -142,6 +142,8 @@ private:
     uint64_t frame_ = 0, collected_ = 0, submitted_ = 0;
     double last_sample_tick_ = -1;
     native_render::ThirdPersonEvents actor_events_;
+    // What came before the clip's first frame, played by the cameras and the bunny on it (replay_preroll.hpp).
+    std::vector<PrerollFrame> preroll_;
     bool done_ = false;
     BhSnapshot previous_{}, next_{};
     BhCmd prior_command_{}, next_command_{};

@@ -1,4 +1,5 @@
 #include "replay_camera.hpp"
+#include <algorithm>
 #include <nlohmann/json.hpp>
 #ifdef NDEBUG
 #undef NDEBUG
@@ -7,10 +8,21 @@
 #include <fstream>
 #include <iostream>
 static unsigned traces = 0;
+// The oracle's corridor (replay_camera_oracle.ts corridorTrace), on while `corridor_walls` is set.
+static bool corridor_walls = false;
+static double corridor_half_width = 0, corridor_ceiling = 0;
 
-extern "C" int bh_trace_camera(BhContext *, const float[3], const float[3], float, float *fraction) {
+extern "C" int bh_trace_camera(BhContext *, const float start[3], const float end[3], float radius, float *fraction) {
     ++traces;
-    *fraction = 1;
+    double clear = 1;
+    if (corridor_walls) {
+        const double wall = corridor_half_width - radius, roof = corridor_ceiling - radius;
+        const double dy = double(end[1]) - start[1], dz = double(end[2]) - start[2];
+        if (dy > 0 && end[1] > wall) clear = std::min(clear, (wall - start[1]) / dy);
+        if (dy < 0 && end[1] < -wall) clear = std::min(clear, (-wall - start[1]) / dy);
+        if (dz > 0 && end[2] > roof) clear = std::min(clear, (roof - start[2]) / dz);
+    }
+    *fraction = float(std::clamp(clear, 0., 1.));
     return 1;
 }
 
@@ -25,7 +37,14 @@ int main(int argc, char **argv) {
     native::Input view;
     float eye[3]{};
     double seconds = 0;
+    const auto &corridor = oracle.at("corridor");
+    corridor_half_width = corridor.at("halfWidth");
+    corridor_ceiling = corridor.at("ceiling");
+    auto *walls = reinterpret_cast<BhContext *>(1);
+    unsigned index = 0;
     for (const auto &frame : oracle.at("frames")) {
+        corridor_walls = index >= corridor.at("from").get<unsigned>() && index < corridor.at("to").get<unsigned>();
+        ++index;
         const auto &s = frame.at("state");
         BhState target{};
         for (int k = 0; k < 3; k++) {
@@ -36,9 +55,10 @@ int main(int argc, char **argv) {
         target.crouched = s["crouched"].get<bool>();
         target.grounded = s["grounded"].get<bool>();
         seconds += .01;
-        chase.sample(nullptr, target, s["yaw"], s["pitch"], seconds, eye, view, .01);
+        chase.sample(walls, target, s["yaw"], s["pitch"], seconds, eye, view, .01);
         for (int k = 0; k < 3; k++)
             assert(std::abs(eye[k] - frame["chase"][k].get<double>()) < .001);
+        corridor_walls = false;
         flyby.sample(nullptr, target, s["yaw"], s["pitch"], seconds, eye, view, .01);
         for (int k = 0; k < 3; k++)
             assert(std::abs(eye[k] - frame["flyby"][k].get<double>()) < .001);

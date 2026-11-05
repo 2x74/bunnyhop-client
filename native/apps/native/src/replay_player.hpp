@@ -35,6 +35,8 @@ struct ReplayPlayer {
     std::optional<Loop> loop;
     // "Runner's view": the replay drawn in the runner's shape, fit and FOV (replayControl runnerView).
     std::optional<RunnerView> runner_view;
+    // The run's last moments before a seek, for the third-person bunny to pre-roll on the next drawn frame.
+    std::vector<PrerollFrame> preroll;
 
     void begin(const std::filesystem::path &file);
     void action(ReplayControls::Action action, uint32_t tick, Input &camera_controls);

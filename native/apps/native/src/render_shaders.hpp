@@ -20,6 +20,9 @@ struct Actor {
     bool silenced = false, jumped = false, inspectHeld = false, snapped = false;
     // Nothing in the right hand (an avatar gesture): no knife or gun drawn.
     bool emptyHand = false;
+    // The strafe key (command units, +-450): the bunny banks into strafes. The Source water level (2+ swims).
+    float sidemove = 0;
+    uint32_t waterLevel = 0;
     // Since the last frame. With the knife 1 is a slash and 2 a stab; with a gun 1 is a shot and 2 a reload.
     unsigned attack = 0, inspect = 0;
     std::optional<GunReload> gunReload;

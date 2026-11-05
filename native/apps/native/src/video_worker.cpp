@@ -194,9 +194,6 @@ void configure_renderer(Renderer &renderer, const Json &player_settings, const V
             settings.at("viewmodelSway").get<float>()
     );
     renderer.set_color_blind(settings.value("colorBlind", std::string("off")));
-    renderer.set_actor_models(
-            settings.value("playerModel", std::string("bunny")), settings.value("ghostModel", std::string("same"))
-    );
     renderer.set_zones_visible(settings.value("zonesVisible", true));
     renderer.set_effects_visible(settings.value("effectsVisible", true));
     renderer.set_water_quality(settings.value("waterQuality", std::string("simple")) == "refracted" ? 1 : 0);

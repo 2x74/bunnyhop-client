@@ -403,6 +403,7 @@ class Renderer {
     float fieldOfView = 90;
     std::vector<native_render::Actor> roomActors;
     std::optional<native_render::Actor> replayActor, compareActor;
+    bool reducedMotion = false;
     std::string outfit, packedLoadout;
     GLuint refractColor = 0, refractDepth = 0;
     int refractWidth = 0, refractHeight = 0, waterQuality = 1;
@@ -1609,9 +1610,21 @@ public:
                 {"waterVolumes", p.waterVolumes}};
     }
 
-    void set_actor_models(const std::string &player, const std::string &ghost) {
-        if (viewmodel) viewmodel->actor_models(player, ghost);
+    // After a cut the bunny runs through the run's last moments (replay_preroll.hpp), like the cameras, so its legs,
+    // bank, ears and animation continue from where continuous playback would have them.
+    void preroll_actor(const native_render::Actor &model, std::span<const PrerollFrame> frames, double tick_seconds) {
+        if (!viewmodel) return;
+        bool first = true;
+        for (const auto &frame : frames) {
+            auto actor = native_render::prerolled_actor(model, frame);
+            actor.snapped = first;
+            viewmodel->pose_actor(actor, frame.snapshot.player.tick * tick_seconds);
+            first = false;
+        }
     }
+
+    // prefers-reduced-motion, as the menu reports it: the third-person bunny's bank, idle shift and jump poses at 45%.
+    void set_reduced_motion(bool reduced) { reducedMotion = reduced; }
 
     void set_player_glow(std::optional<native_render::Glow> glow) {
         if (viewmodel) viewmodel->player_glow(std::move(glow));
@@ -2754,6 +2767,7 @@ public:
         lastYaw = input.yaw();
         lastPitch = input.pitch;
         if (viewmodel) viewmodel->view_angles(float(lastYaw), float(lastPitch));
+        if (viewmodel) viewmodel->set_actor_context(core, reducedMotion);
         if (profiling) {
             frameProfile = {};
             frameProfile.hdrAuthored = lightmapInfo.hdr;

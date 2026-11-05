@@ -4,6 +4,8 @@
 #include "gun_hold.hpp"
 #include "third_person_events.hpp"
 #include "first_person_weapons.hpp"
+#include <charconv>
+#include <optional>
 #include <span>
 #ifndef BUNNYHOP_NATIVE_ASSET_ROOT
 #define BUNNYHOP_NATIVE_ASSET_ROOT "target/native-assets"
@@ -51,6 +53,10 @@ class NativeViewmodel {
     double gunFlashStarted = -100;
     std::shared_ptr<native_actor_anim::Data> actorAnimationData;
     std::unordered_map<std::string, std::unique_ptr<native_actor_anim::State>> actorAnimationStates;
+    // The website's reduced-motion policy (viewmodel/feel.ts REDUCED_MOTION): motion at 45%.
+    static constexpr double reduced_motion_scale = .45;
+    BhContext *groundCore = nullptr;
+    double actorMotion = 1;
     Gl &gl;
     using PlayerProgram = native_render::PlayerProgram;
     using PlayerMaterial = native_render::PlayerMaterial;
@@ -341,6 +347,7 @@ class NativeViewmodel {
         p.axisA = at("uAxisA");
         p.axisB = at("uAxisB");
         p.nearFade = at("uNearFade");
+        p.contour = at("uContour");
         return p;
     }
 
@@ -612,6 +619,8 @@ class NativeViewmodel {
         gl.Uniform1f(p.glowDistance, 1);
         gl.Uniform2f(p.glowNearFade, 0, 0);
         gl.Uniform2f(p.nearFade, 0, 0);
+        // The distance contour is for world bunnies only; the first-person hands share the solid program.
+        gl.Uniform1f(p.contour, 0);
     }
 
     void bind_look(const PlayerProgram &p, const Look &look) {
@@ -816,9 +825,6 @@ public:
             }
         return out;
     }
-
-    // Persisted retired model choices always resolve to the equipped bunny.
-    void actor_models(const std::string &, const std::string &) {}
 
     void ghost_cosmetics(const std::string &id) {
         const auto colors = cosmetic_colors(id);
@@ -1062,25 +1068,72 @@ public:
         gl.BindTexture(GL_TEXTURE_2D, bonesTexture);
     }
 
+    // A world bunny's body axis (the near fade measures to it, the distance contour from its middle) and its distance
+    // contour: grazing edges darken and the rim fades from ~250 to ~650 units away, so limbs read at 60-150 px.
+    void world_body_uniforms(const PlayerProgram &p, const float position[3]) {
+        constexpr float axis_bottom_units = 8, axis_top_units = 60;
+        const float bottom[3] = {position[0], position[1], position[2] + axis_bottom_units};
+        const float top[3] = {position[0], position[1], position[2] + axis_top_units};
+        const auto low = native_render::to_web_space(bottom), high = native_render::to_web_space(top);
+        gl.Uniform3fv(p.axisA, 1, low.data());
+        gl.Uniform3fv(p.axisB, 1, high.data());
+        gl.Uniform1f(p.contour, 1);
+    }
+
     // The website's ghost near fade (player/materials.ts nearFade): hidden within 14 units of the camera, measured to
-    // the body's feet-to-head axis, fully shown from 64.
+    // the body's axis, fully shown from 64.
     void ghost_uniforms(const PlayerProgram &p, const native_render::Actor &actor, native_render::GhostSource source) {
-        constexpr float hidden_units = 14, shown_units = 64, body_height_units = 64;
+        constexpr float hidden_units = 14, shown_units = 64;
         const auto color = source == native_render::GhostSource::pb
                                    ? ghostColor
                                    : native_render::linear_color(native_render::ghost_source_color(source));
         const auto rim = source == native_render::GhostSource::pb ? ghostRim : color;
         gl.Uniform3fv(p.ghost, 1, color.data());
         gl.Uniform3fv(p.ghostRim, 1, rim.data());
-        const auto &position = actor.frame.position;
-        const float top[3] = {position[0], position[1], position[2] + body_height_units};
-        const auto feet = native_render::to_web_space(position), head = native_render::to_web_space(top);
-        gl.Uniform3fv(p.axisA, 1, feet.data());
-        gl.Uniform3fv(p.axisB, 1, head.data());
         if (actor.near_fade)
             gl.Uniform2f(p.nearFade, hidden_units, shown_units);
         else
             gl.Uniform2f(p.nearFade, 0, 0);
+    }
+
+    native_actor_anim::State &actor_state(const std::string &id) {
+        auto &state = actorAnimationStates[id];
+        if (state) return *state;
+        state = std::make_unique<native_actor_anim::State>(*actorAnimationData);
+        state->legs.set_ground_probe([this](double x, double y, double z) { return ground_below(x, y, z); });
+        return *state;
+    }
+
+    double actor_bank(const std::string &id) const {
+        const auto found = actorAnimationStates.find(id);
+        return found == actorAnimationStates.end() ? 0 : found->second->bank;
+    }
+
+    // The ground under a point for the bunny's planted feet (web legs.ts probeFromTrace): a line straight down through
+    // the world, props and brushes.
+    std::optional<double> ground_below(double x, double y, double z) const {
+        constexpr float probe_depth_units = 48;
+        if (!groundCore) return std::nullopt;
+        const float from[3] = {float(x), float(y), float(z)};
+        const float to[3] = {float(x), float(y), float(z) - probe_depth_units};
+        float fraction = 1;
+        if (!bh_trace_camera(groundCore, from, to, 0, &fraction) || fraction >= 1) return std::nullopt;
+        return z - probe_depth_units * fraction;
+    }
+
+    // The website's per-model seed (idle shift, ear twitches) from the outfit, style, colour and hat. A ghost's colour
+    // is its tint, which the website passes as a number (0xRRGGBB, written in decimal).
+    static double actor_seed(const native_render::Actor &actor, const Look &look) {
+        const bool ghost = ghost_source_of(actor) != native_render::GhostSource::none;
+        char color[12] = {};
+        size_t length = 0;
+        if (ghost) {
+            uint32_t packed = 0;
+            for (float channel : actor.tint)
+                packed = packed << 8 | uint32_t(std::lround(std::clamp(channel, 0.f, 1.f) * 255));
+            length = size_t(std::to_chars(color, color + sizeof color, packed).ptr - color);
+        }
+        return native_actor_anim::model_seed(look.outfit, ghost ? "ghost" : "solid", {color, length}, look.hat);
     }
 
     static native_render::GhostSource ghost_source_of(const native_render::Actor &actor) {
@@ -1137,6 +1190,12 @@ public:
     }
 
     std::span<const float> actor_bind() const { return actorBind; }
+
+    // The world the bunnies' planted feet probe for ground (null: the feet's own plane), and prefers-reduced-motion.
+    void set_actor_context(BhContext *world, bool reduced_motion) {
+        groundCore = world;
+        actorMotion = reduced_motion ? reduced_motion_scale : 1;
+    }
 
     // Drops an actor's animation and gesture state, so its next pose starts from scratch.
     void forget_actor(const std::string &id) {
@@ -1196,8 +1255,7 @@ public:
                 gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, 3, entry.bones, 0, GL_RGBA, GL_FLOAT, pose.data());
             }
             if (actorAnimationData) {
-                auto &state = actorAnimationStates[actor.id];
-                if (!state) state = std::make_unique<native_actor_anim::State>(*actorAnimationData);
+                auto &state = actor_state(actor.id);
                 native_actor_anim::Input input;
                 std::copy(frame.position, frame.position + 3, input.position.begin());
                 std::copy(frame.velocity, frame.velocity + 3, input.velocity.begin());
@@ -1205,10 +1263,15 @@ public:
                 input.pitch = frame.pitch;
                 input.ducking = bool(frame.flags & 1);
                 input.grounded = bool(frame.flags & 2);
+                input.ladder = bool(frame.flags & 4);
+                input.water = int(actor.waterLevel);
+                input.sidemove = actor.sidemove;
                 input.jumped = actor.jumped;
-                state->hood(l.hoodDown);
-                state->pose(input, seconds, pulses.snapped, pulses.swing, pose, acting);
-                actorYaw = float(state->feetYaw);
+                state.hood(l.hoodDown);
+                state.set_seed(actor_seed(actor, l));
+                state.motion = actorMotion;
+                state.pose(input, seconds, pulses.snapped, pulses.swing, pose, acting);
+                actorYaw = float(state.feetYaw);
             }
             actor_actions(actor, pulses, l, seconds, actorYaw, acting);
         }
@@ -1230,7 +1293,12 @@ public:
         BhTransform t{};
         std::copy(frame.position, frame.position + 3, t.origin);
         t.angles[1] = actorYaw + spin;
+        // The bank into turns rolls the body about its hips, so the feet and head swing opposite ways by a few units.
+        t.angles[2] = float(actor_bank(actor.id));
         auto model = native::model_matrix(t);
+        for (int r = 0; r < 3; r++)
+            model[12 + r] -= float(native_actor_anim::bank_hip_units) * model[8 + r];
+        model[14] += float(native_actor_anim::bank_hip_units);
         for (int r = 0; r < 3; r++) {
             model[r] *= 1 - squash * .5f;
             model[4 + r] *= 1 - squash * .5f;
@@ -1249,6 +1317,7 @@ public:
         const auto &tail = actorActions[actor.id].ponytail;
         const float ponytail[4] = {float(tail.pitch), float(tail.side), l.hairLength, 0};
         gl.Uniform4fv(actorProgram.ponytail, 1, ponytail);
+        world_body_uniforms(actorProgram, frame.position);
         if (source != native_render::GhostSource::none) ghost_uniforms(actorProgram, actor, source);
         const auto visibleParts = parts_for(actor, l);
         gl.Enable(GL_DEPTH_TEST);

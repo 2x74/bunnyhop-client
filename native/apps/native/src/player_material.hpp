@@ -27,7 +27,7 @@ struct PlayerProgram {
           playerEnv = -1, gunFlash = -1, gunFlashPos = -1;
     GLint glowEnabled = -1, glowColor = -1, glowIntensity = -1, glowOpacity = -1, glowAxisA = -1, glowAxisB = -1,
           glowNearFade = -1, glowDistance = -1;
-    GLint ghost = -1, ghostRim = -1, opacity = -1, axisA = -1, axisB = -1, nearFade = -1;
+    GLint ghost = -1, ghostRim = -1, opacity = -1, axisA = -1, axisB = -1, nearFade = -1, contour = -1;
 };
 
 // Source (x, y, z) -> three.js (x, z, -y).
