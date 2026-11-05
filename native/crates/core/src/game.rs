@@ -30,6 +30,8 @@ mod momentary;
 mod overlay;
 mod map_sounds;
 pub use map_sounds::{MAP_SOUND_ACTIVE, MAP_SOUND_LAST_START, MAP_SOUND_REMOVED};
+mod prop_anims;
+pub use prop_anims::{PropAnim, PROP_ANIM_HIDDEN, PROP_ANIM_REMOVED, PROP_ANIM_SET};
 pub use overlay::{
     OVERLAY_CLIP, OVERLAY_GRAVITY, OVERLAY_OTHER, OVERLAY_PUSH, OVERLAY_STATE_ACTIVE, OVERLAY_STATE_VISIBLE, OVERLAY_TELEPORT,
     OVERLAY_WALL, OVERLAY_WHEN_HIDDEN, OverlayBrush,
@@ -55,7 +57,7 @@ pub const IN_ATTACK2: u32 = 1 << 11;
 pub use weapons::{
     AttackReport, FLOOR_DROPPED, FLOOR_MOVED, FLOOR_PICKED_UP, FLOOR_PRESENT, FLOOR_REMOVED, FLOOR_SPAWNED, FloorItem, GUNS,
     Gun, IN_DROP, IN_GIVE_MASK, IN_GIVE_MODE, IN_GIVE_RESTORE, IN_GIVE_SHIFT, IN_RELOAD, IN_SLOT_MASK, IN_SLOT_SHIFT,
-    USP_SILENCER_TIME, WEAPON_COMMAND_COOLDOWN, WEAPON_EVENT_DRY_FIRE, WEAPON_EVENT_GIVEN, WEAPON_EVENT_RESTORED,
+    GLOCK_BURST_DAMAGE, GLOCK_BURST_RANGE_MODIFIER, M4A1_SILENCED_RANGE_MODIFIER, M4A1_SILENCER_TIME, USP_SILENCED_DAMAGE, bullet_stats, USP_SILENCER_TIME, WEAPON_COMMAND_COOLDOWN, WEAPON_EVENT_DRY_FIRE, WEAPON_EVENT_GIVEN, WEAPON_EVENT_RESTORED,
     WEAPON_EVENT_SILENCER, WEAPON_EVENT_DROPPED, WEAPON_RESTORE_TICKS,
     WEAPON_EVENT_LOST, WEAPON_EVENT_MODE, WEAPON_EVENT_PICKED_UP, WEAPON_EVENT_RELOAD_FINISHED, WEAPON_EVENT_RELOAD_STARTED,
     WEAPON_EVENT_SWITCHED, WEAPON_KNIFE, WEAPON_PISTOL, WEAPON_SNIPER, gun_by_id, weapon_id,
@@ -184,7 +186,7 @@ pub const PHYSICS_V16: u32 = 16;
 /// slope or a ledge no longer depends on where inside a tick the player meets it.
 pub const PHYSICS_V17: u32 = 17;
 /// The version new recordings use.
-pub const PHYSICS_LATEST: u32 = PHYSICS_V24;
+pub const PHYSICS_LATEST: u32 = PHYSICS_V25;
 /// v18: ladder surface properties, preserving historical replay behavior.
 pub const PHYSICS_V18: u32 = 18;
 /// v19: scoped map mechanics (template instances and explicit velocity scripts). No new movement fix bits.
@@ -211,6 +213,20 @@ pub const PHYSICS_V23: u32 = 23;
 /// as on srcds; per-map changes in `game/map_fixes.rs` (`PARENTED_DOORS_V24`, `CS_DELETED_PROPS_V24`, `END_TOUCH_OUTPUTS_V24`: those two boosters fire on OnEndTouch, as their mapper meant);
 /// and Infinite flights (`IN_FLIGHT` commands fly in `game/flight.rs`, only with `air_jump`; speed capped at 3500, landing at 3510). No new fix bits.
 pub const PHYSICS_V24: u32 = 24;
+/// v25: Momentum Mod's `sv_jump_z_offset` 1.5 (`Policy::jump_z_offset`, research/NATIVE-JUMP-OFFSET-V25.md). Every ground
+/// jump starts exactly 1.5 above the floor (the hull traced 2.1 down, then 1.5 up from the floor if there is room), so it
+/// peaks 57.0 above the floor at 100 tick (55.5 + 1.5) and a crouch jump 65.5, whatever the landing phase left (stock:
+/// 0.03-2.0 above the floor, so 55.5-57.5 and 64.0-66.0). bhop_tranquility's +64 crouch-jump ledge (PonyTrap,
+/// 2026-11-04). Air jumps (Infinite), ladder and swim jumps are untouched.
+/// Also the ramp fix (research/NATIVE-RAMP-V25.md; Throwtop's bhop_badges_mini video, 2026-11-04): ramps and curves no
+/// longer stop the player dead or freeze them in mid-air. World traces use `playsrc_collision::TraceRules` (the BSP walk
+/// pads box traces by 1/32 so it never skips a ramp brush the box is inside or grazes, and at a seam of a curve built from
+/// brushes the segment's upward ramp face is reported instead of its bevel plane; `Settings::trace_rules`), and an
+/// airborne walking move that keeps hitting the world plane it slides along steps 1/32 off it instead of stopping
+/// (`MovementFixes::repeated_plane`). Ridges you land on, ceiling ridges and wall corners keep CS:S's bevels; a ramp's toe
+/// no longer stops you (bhop_bfur: strafing from rest now climbs that curve, as a jump already could on v24). No new fix
+/// bits (all 31 are used): gated on the version number, like v22.
+pub const PHYSICS_V25: u32 = 25;
 /// Diagnostic pseudo-versions (never valid in a replay, whose field is a u8): `PHYSICS_DIAG | fix bits` turns on only
 /// the listed fixes, to tell which fix changes a replay (tools: /tmp physics-v2 analysis). The fix bits are the low 31
 /// (`PHYSICS_DIAG_FIXES`); before v18 the base was 1 << 30 with 30 fix bits; before v17 the base was 1 << 26 with 26 fix bits, before v16 1 << 25 with 25, before v15
@@ -410,6 +426,23 @@ pub fn map_mechanics_v19_for(entities: &[Entity]) -> Option<&'static str> {
     map_fixes::mechanics_v19(entities).map(|m| m.map)
 }
 
+/// The reviewed physics 25 build a parsed BSP is (`map_fixes::BUILDS_V25`, full digest), if any (tests, tools).
+pub fn map_build_v25_for(bsp: &Bsp, list: &EntityList) -> Option<&'static str> {
+    map_fixes::build_v25(bsp, &list.entities, &list.outputs).map(|b| b.map)
+}
+
+/// `map_fixes::build_digest_v25` of a parsed BSP, hex (tests, tools).
+pub fn map_build_digest_v25(bsp: &Bsp, list: &EntityList) -> String {
+    map_fixes::build_digest_v25(bsp, &list.entities, &list.outputs)
+}
+
+impl Game {
+    /// The reviewed physics 25 build this map was loaded as (`map_fixes::BUILDS_V25`), if any.
+    pub fn reviewed_build_v25(&self) -> Option<&'static str> {
+        self.map_build_v25.map(|b| b.map)
+    }
+}
+
 /// A parsed entity lump's fingerprint, as `MECHANICS_V19` and `PARENTED_DOORS_V21` pin it (tests, tools).
 pub fn map_entity_fingerprint(entities: &[Entity]) -> u32 {
     map_fixes::entity_fingerprint(entities)
@@ -496,7 +529,7 @@ pub fn physics_fixes(version: u32) -> Option<u32> {
         PHYSICS_V15 => Some(PHYSICS_FIX_V15),
         PHYSICS_V16 => Some(PHYSICS_FIX_V16),
         PHYSICS_V17 => Some(PHYSICS_FIX_V17),
-        PHYSICS_V18 | PHYSICS_V19 | PHYSICS_V20 | PHYSICS_V21 | PHYSICS_V22 | PHYSICS_V23 | PHYSICS_V24 => Some(PHYSICS_FIX_ALL),
+        PHYSICS_V18 | PHYSICS_V19 | PHYSICS_V20 | PHYSICS_V21 | PHYSICS_V22 | PHYSICS_V23 | PHYSICS_V24 | PHYSICS_V25 => Some(PHYSICS_FIX_ALL),
         v if v & !PHYSICS_DIAG_FIXES == PHYSICS_DIAG && v & PHYSICS_DIAG_FIXES & !PHYSICS_FIX_ALL == 0 => Some(v & PHYSICS_DIAG_FIXES),
         _ => None,
     }
@@ -549,6 +582,12 @@ impl Settings {
     /// `PHYSICS_FIX_*` bits of this version (unknown versions: none, i.e. v1).
     pub fn physics_fixes(&self) -> u32 {
         physics_fixes(self.physics_version).unwrap_or(0)
+    }
+
+    /// World-trace collision rules: the engine's (`TraceRules::default()`) before v25, the v25 ramp fix after.
+    pub fn trace_rules(&self) -> playsrc_collision::TraceRules {
+        let v25 = (PHYSICS_V25..=PHYSICS_LATEST).contains(&self.physics_version);
+        playsrc_collision::TraceRules { stationary_margin: v25, swept_margin: v25, face_over_bevel: v25 }
     }
 
     pub fn configuration(&self) -> Configuration {
@@ -616,6 +655,8 @@ impl Settings {
             // v4: SDK WaterJump keeps the water-jump push on its last tick (tools/parity on bhop_lost_world's tank:
             // the engine leaves the water at 50 u/s toward the ledge, v1-v3 at 0 then 30).
             cs_ladders: self.physics_fixes() & PHYSICS_FIX_LADDER != 0,
+            // v25: Momentum's sv_jump_z_offset (ground jumps start at floor + 1.5). Version-gated: no fix bit left.
+            jump_z_offset: (PHYSICS_V25..=PHYSICS_LATEST).contains(&self.physics_version).then_some(1.5),
             water: movement::WaterPolicy {
                 keep_water_jump_velocity: self.physics_fixes() & PHYSICS_FIX_WATER_JUMP != 0,
                 ..movement::WaterPolicy::default()
@@ -685,13 +726,17 @@ impl Default for Rules {
 }
 
 impl Rules {
-    fn movement_fixes(&self, settings: Settings) -> movement::MovementFixes {
+    /// The movement fixes `Game` runs with for these settings (`Game::set_settings` / `set_rules` apply them). A custom
+    /// runner that calls `playsrc_movement::step` directly must use this, not `Settings::configuration()` alone.
+    pub fn movement_fixes(&self, settings: Settings) -> movement::MovementFixes {
         movement::MovementFixes {
             downhill: self.downhill_fix || settings.physics_fixes() & PHYSICS_FIX_DOWNHILL != 0,
             uphill: self.uphill_fix,
             rampbug: self.rampbug_fix,
             rngfix_incline: settings.physics_fixes() & PHYSICS_FIX_INCLINE != 0,
             rngfix_edge: settings.physics_fixes() & PHYSICS_FIX_EDGE != 0,
+            // v25 ramp fix (movement half; the collision half is `Settings::trace_rules`).
+            repeated_plane: (PHYSICS_V25..=PHYSICS_LATEST).contains(&settings.physics_version),
             ..Default::default()
         }
     }
@@ -1020,6 +1065,8 @@ struct Scene<'a> {
     time: f32,
     /// Physics v3 `PHYSICS_FIX_VPHYSICS_SEPARATION`.
     vphysics_separation: bool,
+    /// World-trace collision rules (physics v25 ramp fix, `Settings::trace_rules`).
+    trace_rules: playsrc_collision::TraceRules,
     /// Water volumes added to point contents (physics v4 `PHYSICS_FIX_WATER_ANALOG`; empty before v4).
     water: &'a [usize],
 }
@@ -1075,7 +1122,7 @@ impl Scene<'_> {
         skip: &[usize],
     ) -> Result<Trace, MoveError> {
         let malformed = |_| MoveError::new(movement::Operation::Trace, movement::FailureKind::Malformed, "collision");
-        let t = self.world.trace_hull(start, end, hull, mask).map_err(malformed)?;
+        let t = self.world.trace_hull_rules(start, end, hull, mask, self.trace_rules).map_err(malformed)?;
         let mut best = self.convert(t, t.brush.map(|b| b as u64));
         if best.start_solid {
             // The engine returns the world trace as-is when it starts solid: static props and entities are not
@@ -1350,6 +1397,9 @@ pub struct Game {
     map_sounds: map_sounds::MapSounds,
     map_sound_serial: u32,
     map_sound_commands: Vec<String>,
+    /// Display only: animated props and what the map's I/O asked them to play (game/prop_anims.rs).
+    prop_anims: prop_anims::PropAnims,
+    prop_anim_serial: u32,
     seq: u64,
     pub state: State,
     pub settings: Settings,
@@ -1459,6 +1509,8 @@ pub struct Game {
     script_triggers: Vec<(usize, vscript::ScriptRole)>,
     /// Exact reviewed entity build matched by map_fixes::MECHANICS_V19. Fixed at load.
     map_mechanics: Option<&'static map_fixes::MapMechanics>,
+    /// A reviewed physics 25 build (`map_fixes::BUILDS_V25`), matched on its full digest at load.
+    map_build_v25: Option<&'static map_fixes::BuildV25>,
     /// Exact reviewed entity build matched by map_fixes::PARENTED_DOORS_V21: from physics v21 its parented doors follow
     /// their parents (`door_follows_parent`). Fixed at load.
     map_parented_doors: bool,
@@ -1582,7 +1634,9 @@ impl Game {
         let map_signed_door_travel = map_fixes::signed_door_travel(&entities).is_some();
         let map_player_io = map_fixes::player_io(&entities).is_some();
         let script_triggers = vscript::script_triggers(&entities);
-        let map_mechanics = map_fixes::mechanics_v19(&entities);
+        // v25 exact builds (`map_fixes::BUILDS_V25`): entity CRC, then a digest of entities, outputs and brush collision.
+        let map_build_v25 = map_fixes::build_v25(bsp, &entities, &outputs);
+        let map_mechanics = map_fixes::mechanics_v19(&entities).or(map_build_v25.and_then(|b| b.mechanics.as_ref()));
         let map_parented_doors = map_fixes::parented_doors_v21(&entities).is_some();
         let map_parented_doors_v24 = map_fixes::parented_doors_v24(&entities).is_some();
         let map_fingerprint = map_fixes::entity_fingerprint(&entities);
@@ -1638,6 +1692,8 @@ impl Game {
             queue: std::collections::BinaryHeap::new(),
             map_sounds: map_sounds::MapSounds::default(),
             map_sound_serial: 0,
+            prop_anims: prop_anims::PropAnims::default(),
+            prop_anim_serial: 0,
             map_sound_commands: Vec::new(),
             seq: 0,
             state: State::from_player(
@@ -1703,6 +1759,7 @@ impl Game {
             map_player_io,
             script_triggers,
             map_mechanics,
+            map_build_v25,
             map_parented_doors,
             map_parented_doors_v24,
             map_event_clock,
@@ -1742,7 +1799,10 @@ impl Game {
     }
 
     pub fn set_settings(&mut self, settings: Settings) {
-        let spawn_changed = (self.map_mechanics.is_some() && (PHYSICS_V19..=PHYSICS_LATEST).contains(&self.settings.physics_version) != (PHYSICS_V19..=PHYSICS_LATEST).contains(&settings.physics_version))
+        let min = self.mechanics_min_physics();
+        let spawn_changed = (self.map_mechanics.is_some() && (min..=PHYSICS_LATEST).contains(&self.settings.physics_version) != (min..=PHYSICS_LATEST).contains(&settings.physics_version))
+            || (self.map_build_v25.is_some()
+                && (PHYSICS_V25..=PHYSICS_LATEST).contains(&self.settings.physics_version) != (PHYSICS_V25..=PHYSICS_LATEST).contains(&settings.physics_version))
             || ((self.map_parented_doors || map_fixes::v21_spawn_edits(self.map_mechanics) || self.initial_ents.iter().any(|e| kin::rot_door_spawn_angles(e).is_some()))
                 && (PHYSICS_V21..=PHYSICS_LATEST).contains(&self.settings.physics_version) != (PHYSICS_V21..=PHYSICS_LATEST).contains(&settings.physics_version))
             || ((self.map_parented_doors_v24 || !self.end_touch_outputs.is_empty())
@@ -1836,6 +1896,9 @@ impl Game {
         self.map_sounds = map_sounds::MapSounds::new(&self.entities);
         self.map_sound_serial = self.map_sound_serial.wrapping_add(1);
         self.map_sound_commands.clear();
+        let outputs: Vec<&[Output]> = self.ents.iter().map(|e| e.outputs.as_slice()).collect();
+        self.prop_anims = prop_anims::PropAnims::new(&self.entities[..self.ents.len().min(self.entities.len())], &outputs);
+        self.prop_anim_serial = self.prop_anim_serial.wrapping_add(1);
         self.seq = 0;
         self.tick = 0;
         self.last_buttons = 0;
@@ -2054,6 +2117,7 @@ impl Game {
             region: self.near_region,
             time,
             vphysics_separation: self.settings.physics_fixes() & PHYSICS_FIX_VPHYSICS_SEPARATION != 0,
+            trace_rules: self.settings.trace_rules(),
             water: if self.settings.physics_fixes() & PHYSICS_FIX_WATER_ANALOG != 0 { &self.water } else { &[] },
         }
     }
@@ -2853,6 +2917,7 @@ impl Game {
             return;
         }
         self.map_sound_input(i, input, param);
+        self.prop_anim_input(i, input, param);
         // v16 (`NONLINEAR_OBJECTIVES` maps): a scripted trigger's ConnectOutput action runs its script function.
         if input == "callscriptfunction" && self.objectives_on() && self.call_script_function(i, param, activator) {
             return;
@@ -4129,12 +4194,18 @@ impl Game {
         out
     }
 
-    /// Current transform of every moving entity prop (prop_door_rotating; `PARENTED_PROPS_V24` children): (entity, origin, angles).
+    /// A prop_door_rotating, or a prop following its parent (v24): drawn on its own because it moves.
+    pub fn prop_moves(&self, index: usize) -> bool {
+        self.ents.get(index).is_some_and(|e| matches!(&e.data, Data::Kin(k) if matches!(k.kind, kin::KinKind::PropDoor(_)))) || self.parented_props.contains(&index)
+    }
+
+    /// Current transform of every entity prop drawn on its own (prop_door_rotating; `PARENTED_PROPS_V24` children;
+    /// animated props, game/prop_anims.rs): (entity, origin, angles).
     pub fn moving_prop_transforms(&self) -> Vec<(usize, [f32; 3], [f32; 3])> {
         self.ents
             .iter()
             .enumerate()
-            .filter(|(i, e)| matches!(&e.data, Data::Kin(k) if matches!(k.kind, kin::KinKind::PropDoor(_))) || self.parented_props.contains(i))
+            .filter(|(i, _)| self.prop_moves(*i) || self.prop_anims.contains(*i))
             .map(|(i, e)| (i, e.origin, e.angles))
             .collect()
     }
@@ -4142,8 +4213,16 @@ impl Game {
     /// Entity props to draw with the static props, at their (settled) pose: (model, origin, angles, skin, owner).
     /// prop_dynamic*, prop_physics*, prop_physics_multiplayer, prop_door_rotating; props following a parent
     /// and `rendermode 10` (don't render) / `disableshadows`-only helpers excluded. `owner` is 0, or entity index
-    /// + 1 for props that move (drawn at `moving_prop_transforms`).
+    /// + 1 for props that move (drawn at `moving_prop_transforms`). Animated props are baked like any other entity
+    /// prop here, as before v0.0.37: a client that poses them uses `props::add_game_props(.., true)`, which also sets
+    /// `Prop::animated` (the two must go together).
     pub fn render_props(&self) -> Vec<(String, [f32; 3], [f32; 3], i32, u32)> {
+        self.render_props_with(false)
+    }
+
+    /// `render_props`; with `animated`, animated props (game/prop_anims.rs) get an owner too, so they come out of
+    /// `props::build` as their own dynamic groups. Use it through `props::add_game_props`.
+    pub fn render_props_with(&self, animated: bool) -> Vec<(String, [f32; 3], [f32; 3], i32, u32)> {
         let poses: std::collections::HashMap<u32, ([f32; 3], [f32; 3])> =
             self.props.poses.iter().map(|&(tag, o, a)| (tag, (o, a))).collect();
         let mut out = Vec::new();
@@ -4162,7 +4241,7 @@ impl Game {
                 continue;
             }
             let (origin, angles) = poses.get(&(physics::ENTITY_PROP | i as u32)).copied().unwrap_or((e.origin(), e.angles()));
-            let moving = class == "prop_door_rotating" || parented_prop;
+            let moving = class == "prop_door_rotating" || parented_prop || (animated && self.prop_anims.contains(i));
             out.push((model.replace('\\', "/").to_ascii_lowercase(), origin, angles, e.int("skin") as i32, if moving { i as u32 + 1 } else { 0 }));
         }
         out
@@ -4251,6 +4330,7 @@ impl Game {
             ents: self.ents.clone(),
             queue: self.queue.clone(),
             map_sounds: self.map_sounds.clone(),
+            prop_anims: self.prop_anims.clone(),
             seq: self.seq,
             state: self.state,
             settings: self.settings,
@@ -4300,6 +4380,8 @@ impl Game {
         self.map_sounds.clone_from(&s.map_sounds);
         self.map_sound_serial = self.map_sound_serial.wrapping_add(1);
         self.map_sound_commands.clear();
+        self.prop_anims.clone_from(&s.prop_anims);
+        self.prop_anim_serial = self.prop_anim_serial.wrapping_add(1);
         self.seq = s.seq;
         self.state = s.state;
         self.settings = s.settings;
@@ -4397,6 +4479,7 @@ pub struct GameState {
     ents: Vec<RtEnt>,
     queue: std::collections::BinaryHeap<QueuedEvent>,
     map_sounds: map_sounds::MapSounds,
+    prop_anims: prop_anims::PropAnims,
     seq: u64,
     state: State,
     settings: Settings,

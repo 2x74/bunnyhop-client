@@ -3,6 +3,9 @@
 #include "tp_inspect.hpp"
 #include "gun_hold.hpp"
 #include "third_person_events.hpp"
+#include "first_person_weapons.hpp"
+#include <charconv>
+#include <optional>
 #include <span>
 #ifndef BUNNYHOP_NATIVE_ASSET_ROOT
 #define BUNNYHOP_NATIVE_ASSET_ROOT "target/native-assets"
@@ -10,17 +13,8 @@
 // Original meshes/pose clips and cosmetic shader recipes are compiled to data at build time.
 // This runtime uses native OpenGL GPU skinning; it embeds no JavaScript or web renderer.
 class NativeViewmodel {
-    struct Clip {
-        std::string name;
-        double duration = 0;
-        size_t frames = 0, offset = 0;
-    };
-
-    struct Entry {
-        size_t bones = 0;
-        std::vector<std::string> meshes;
-        std::vector<Clip> clips;
-    };
+    using Clip = native_vm::PoseClip;
+    using Entry = native_vm::PoseEntry;
 
     struct Mesh {
         GLuint vao = 0, vbo = 0, ebo = 0;
@@ -59,6 +53,8 @@ class NativeViewmodel {
     double gunFlashStarted = -100;
     std::shared_ptr<native_actor_anim::Data> actorAnimationData;
     std::unordered_map<std::string, std::unique_ptr<native_actor_anim::State>> actorAnimationStates;
+    BhContext *groundCore = nullptr;
+    double motionScale = 1;
     Gl &gl;
     using PlayerProgram = native_render::PlayerProgram;
     using PlayerMaterial = native_render::PlayerMaterial;
@@ -76,10 +72,12 @@ class NativeViewmodel {
     std::vector<float> data, pose;
     nlohmann::json metadata;
     native_render::KnifeSpinner spinner;
-    std::unordered_map<std::string, std::vector<native_render::InspectTrickCues>> inspectCueTimes;
     native_render::InspectCueQueue inspectCueQueue;
-    int cueTrick = -1;
-    double cueTime = 0;
+    // The first-person weapons pass (first_person_weapons.hpp): what the knife or gun in hand shows each frame.
+    std::unique_ptr<native_vm::FirstPersonWeapons> firstPerson;
+    std::string firstPersonEntry;
+    uint32_t firstPersonWeapon = 0;
+    std::vector<float> layerPose;
     std::optional<native_render::Glow> localGlow;
     bool showGlow = true, firstPersonGlow = true;
     Look equipped;
@@ -164,18 +162,11 @@ class NativeViewmodel {
     std::unordered_map<std::string, ActorHold> actorHolds;
     std::vector<std::string> gunRigNames;
     float previewYaw = 0, previewPitch = 0;
-    float bobScale = 1, swayScale = 1, swayYaw = 0, swayPitch = 0, previousYaw = 0, previousPitch = 0;
-    bool viewInitialized = false;
+    float bobScale = .5f, swayScale = 1, viewYaw = 0, viewPitch = 0;
     float fov = 54, offsetX = .6f, offsetY = 1.5f, offsetZ = -.9f;
-    bool leftHand = false;
-    uint32_t previousClip = 0;
-    bool gunSilenced = false;
-    uint32_t previousWeapon = 0, previousTick = ~0u;
-    int inspectIndex = -1;
-    bool inspectQueued = false, inspectHeld = false;
-    uint32_t inspectPresses = 0, inspectLoops = 0;
-    std::string previousEntry, action = "idle";
-    double started = 0;
+    bool leftHand = false, quietInspect = false;
+    // Menu and export previews hold the weapon still (no movement feel).
+    bool previewing = false;
 
     const Clip *clip(const Entry &entry, const std::string &name) const {
         for (const auto &c : entry.clips)
@@ -354,6 +345,7 @@ class NativeViewmodel {
         p.axisA = at("uAxisA");
         p.axisB = at("uAxisB");
         p.nearFade = at("uNearFade");
+        p.contour = at("uContour");
         return p;
     }
 
@@ -526,13 +518,19 @@ class NativeViewmodel {
                                    || acting->gesture.arms[1].turn || acting->gesture.arms[1].reach);
         hold.apply(pose, input, arms_free);
         pose.insert(pose.end(), hold.skin.begin(), hold.skin.end());
-        const double yaw = feetYaw * native_gun::radians_per_degree;
+        // Where the drawn gun's muzzle is: the feet yaw and the bank, as draw_posed_actor places the model.
+        BhTransform t{};
+        const auto origin = actor_origin(actor);
+        std::copy(origin.begin(), origin.end(), t.origin);
+        t.angles[1] = feetYaw;
+        t.angles[2] = float(actor_bank(actor.id));
         const auto &m = hold.muzzle;
-        state.muzzle = std::array<float, 3>{
-                actor.frame.position[0] + float(m[0] * std::cos(yaw) - m[1] * std::sin(yaw)),
-                actor.frame.position[1] + float(m[0] * std::sin(yaw) + m[1] * std::cos(yaw)),
-                actor.frame.position[2] + float(m[2])
-        };
+        state.muzzle = native::transform_point(actor_model(t), {float(m[0]), float(m[1]), float(m[2])});
+    }
+
+    // The bunny's model matrix: its feet yaw, and the bank into turns rolling the body about its hips.
+    static native::Matrix actor_model(const BhTransform &t) {
+        return native::model_matrix_about(t, float(native_actor_anim::bank_hip_units));
     }
 
     void actor_actions(
@@ -625,6 +623,8 @@ class NativeViewmodel {
         gl.Uniform1f(p.glowDistance, 1);
         gl.Uniform2f(p.glowNearFade, 0, 0);
         gl.Uniform2f(p.nearFade, 0, 0);
+        // The distance contour is for world bunnies only; the first-person hands share the solid program.
+        gl.Uniform1f(p.contour, 0);
     }
 
     void bind_look(const PlayerProgram &p, const Look &look) {
@@ -721,7 +721,6 @@ public:
         }
         weapons = metadata.at("weapons").get<std::vector<std::string>>();
         spinner = native_render::parse_knife_spinner(metadata);
-        inspectCueTimes = native_render::parse_inspect_cues(metadata.at("inspects"));
         if (metadata.contains("actorRig")) {
             const auto &rig = metadata["actorRig"];
             actorNames = rig["names"].get<std::vector<std::string>>();
@@ -760,6 +759,9 @@ public:
             entries.emplace(name, std::move(e));
         }
 
+        firstPerson = std::make_unique<native_vm::FirstPersonWeapons>(
+                native_vm::FirstPersonConfig::from_metadata(metadata), data
+        );
         shaders = std::make_unique<native_render::PlayerShaderSources>(assetRoot);
         if (!cpu_only) prepare_graphics();
     }
@@ -828,9 +830,6 @@ public:
         return out;
     }
 
-    // Persisted retired model choices always resolve to the equipped bunny.
-    void actor_models(const std::string &, const std::string &) {}
-
     void ghost_cosmetics(const std::string &id) {
         const auto colors = cosmetic_colors(id);
         auto toLinear = [](float c) {
@@ -864,14 +863,16 @@ public:
     }
 
     void view_angles(float yaw, float pitch) {
-        if (viewInitialized) {
-            float dy = std::remainder(yaw - previousYaw, 360.f);
-            swayYaw = std::clamp(swayYaw * .72f + dy * .025f, -.45f, .45f);
-            swayPitch = std::clamp(swayPitch * .72f + (pitch - previousPitch) * .025f, -.45f, .45f);
-        }
-        previousYaw = yaw;
-        previousPitch = pitch;
-        viewInitialized = true;
+        viewYaw = yaw;
+        viewPitch = pitch;
+    }
+
+    // Settings, Viewmodel, Inspect: Quiet puts a blade check only you see before the knife's tricks.
+    void set_inspect_style(bool quiet) { quietInspect = quiet; }
+
+    // One simulation tick of the player in view: landings and the side move for the movement feel.
+    void simulation_tick(const BhState &player, float side_move) {
+        firstPerson->simulation_tick(player.grounded != 0, player.velocity[2], side_move);
     }
 
     void set_bob(float value) {
@@ -891,42 +892,22 @@ public:
         gunFlashStarted = -100;
         actorActions.clear();
         actorAnimationStates.clear();
-        viewInitialized = false;
-        swayYaw = swayPitch = 0;
-        previousWeapon = 0;
-        previousTick = ~0u;
-        previousEntry.clear();
-        action = "idle";
-        started = 0;
-        inspectIndex = -1;
-        inspectQueued = inspectHeld = false;
-        inspectPresses = inspectLoops = 0;
-    }
-
-    // The inspect's sound cues the trick passed this frame; the game plays them, then clears the queue.
-    void hear_inspect_cues(double seconds) {
-        const auto knife = inspectCueTimes.find(equipped.knife);
-        if (inspectIndex < 0 || knife == inspectCueTimes.end() || size_t(inspectIndex) >= knife->second.size()) {
-            cueTrick = -1;
-            return;
-        }
-        const double t = std::max(0., seconds - started);
-        if (cueTrick != inspectIndex) {
-            cueTrick = inspectIndex;
-            cueTime = t;
-            return;
-        }
-        native_render::collect_inspect_cues(knife->second[size_t(inspectIndex)], cueTime, t, inspectCueQueue);
-        cueTime = t;
+        firstPerson->reset();
+        firstPersonWeapon = 0;
+        firstPersonEntry.clear();
     }
 
     native_render::InspectCueQueue &inspect_cues() { return inspectCueQueue; }
 
     const native_render::InspectCueQueue &inspect_cues() const { return inspectCueQueue; }
 
-    void inspect_press() { inspectPresses = std::min(inspectPresses + 1, 4u); }
+    // Your inspect key. Returns whether the press is yours only (it starts the quiet check), so it isn't recorded.
+    bool inspect_press() { return firstPerson->press_inspect(true, quietInspect); }
 
-    void inspect_held(bool held) { inspectHeld = held; }
+    // A replay's or a spectated player's inspect: always the knife's own tricks.
+    void remote_inspect_press() { firstPerson->press_inspect(false, quietInspect); }
+
+    void inspect_held(bool held) { firstPerson->hold_inspect(held); }
 
     void draw_preview(
             int width,
@@ -957,11 +938,11 @@ public:
             const auto vp = native::camera_matrix(eye, 120, 9, float(width) / height);
             draw_actor(actor, vp, eye, seconds);
         } else {
+            const PreviewScope still(previewing);
             BhSnapshot state{};
             state.player.tick = 1;
             draw(width, height, state, weapon, 0, false, 0, 0);
-            action = previewAction;
-            started = 0;
+            firstPerson->preview_clip(previewAction, 0);
             gl.Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
             state.player.tick = 2;
             draw(width, height, state, weapon, 0, false, 0, seconds);
@@ -1019,8 +1000,9 @@ public:
             gunFx->draw(projection, eye);
         } else {
             settings(kind == "close" ? 50.f : 65.f, -4.f, 1.5f, 0.f, false);
+            const PreviewScope still(previewing);
             for (unsigned n = 0; n < std::min(presses, 4u); n++)
-                inspect_press();
+                remote_inspect_press();
             inspect_held(held);
             BhSnapshot state{};
             state.player.tick = uint32_t(seconds * 60) + 1;
@@ -1090,25 +1072,80 @@ public:
         gl.BindTexture(GL_TEXTURE_2D, bonesTexture);
     }
 
+    // A world bunny's body axis (the near fade measures to it, the distance contour from its middle) and its distance
+    // contour: grazing edges darken and the rim fades from ~250 to ~650 units away, so limbs read at 60-150 px.
+    void world_body_uniforms(const PlayerProgram &p, const float position[3]) {
+        constexpr float axis_bottom_units = 8, axis_top_units = 60;
+        const float bottom[3] = {position[0], position[1], position[2] + axis_bottom_units};
+        const float top[3] = {position[0], position[1], position[2] + axis_top_units};
+        const auto low = native_render::to_web_space(bottom), high = native_render::to_web_space(top);
+        gl.Uniform3fv(p.axisA, 1, low.data());
+        gl.Uniform3fv(p.axisB, 1, high.data());
+        gl.Uniform1f(p.contour, 1);
+    }
+
     // The website's ghost near fade (player/materials.ts nearFade): hidden within 14 units of the camera, measured to
-    // the body's feet-to-head axis, fully shown from 64.
+    // the body's axis, fully shown from 64.
     void ghost_uniforms(const PlayerProgram &p, const native_render::Actor &actor, native_render::GhostSource source) {
-        constexpr float hidden_units = 14, shown_units = 64, body_height_units = 64;
+        constexpr float hidden_units = 14, shown_units = 64;
         const auto color = source == native_render::GhostSource::pb
                                    ? ghostColor
                                    : native_render::linear_color(native_render::ghost_source_color(source));
         const auto rim = source == native_render::GhostSource::pb ? ghostRim : color;
         gl.Uniform3fv(p.ghost, 1, color.data());
         gl.Uniform3fv(p.ghostRim, 1, rim.data());
-        const auto &position = actor.frame.position;
-        const float top[3] = {position[0], position[1], position[2] + body_height_units};
-        const auto feet = native_render::to_web_space(position), head = native_render::to_web_space(top);
-        gl.Uniform3fv(p.axisA, 1, feet.data());
-        gl.Uniform3fv(p.axisB, 1, head.data());
         if (actor.near_fade)
             gl.Uniform2f(p.nearFade, hidden_units, shown_units);
         else
             gl.Uniform2f(p.nearFade, 0, 0);
+    }
+
+    native_actor_anim::State &actor_state(const std::string &id) {
+        auto &state = actorAnimationStates[id];
+        if (state) return *state;
+        state = std::make_unique<native_actor_anim::State>(*actorAnimationData);
+        state->legs.set_ground_probe([this](double x, double y, double z) { return ground_below(x, y, z); });
+        return *state;
+    }
+
+    double actor_bank(const std::string &id) const {
+        const auto found = actorAnimationStates.find(id);
+        return found == actorAnimationStates.end() ? 0 : found->second->shown.bank;
+    }
+
+    // Where the bunny's feet origin is drawn: between its last two ticks when it's tick-presented, else its frame's.
+    std::array<float, 3> actor_origin(const native_render::Actor &actor) const {
+        const auto &position = actor.frame.position;
+        const auto found = actor.tickBlend ? actorAnimationStates.find(actor.id) : actorAnimationStates.end();
+        if (found == actorAnimationStates.end()) return {position[0], position[1], position[2]};
+        return found->second->shown.root;
+    }
+
+    // The ground under a point for the bunny's planted feet (web legs.ts probeFromTrace): a line straight down through
+    // the world, props and brushes.
+    std::optional<double> ground_below(double x, double y, double z) const {
+        constexpr float probe_depth_units = 48;
+        if (!groundCore) return std::nullopt;
+        const float from[3] = {float(x), float(y), float(z)};
+        const float to[3] = {float(x), float(y), float(z) - probe_depth_units};
+        float fraction = 1;
+        if (!bh_trace_camera(groundCore, from, to, 0, &fraction) || fraction >= 1) return std::nullopt;
+        return z - probe_depth_units * fraction;
+    }
+
+    // The website's per-model seed (idle shift, ear twitches) from the outfit, style, colour and hat. A ghost's colour
+    // is its tint, which the website passes as a number (0xRRGGBB, written in decimal).
+    static double actor_seed(const native_render::Actor &actor, const Look &look) {
+        const bool ghost = ghost_source_of(actor) != native_render::GhostSource::none;
+        char color[12] = {};
+        size_t length = 0;
+        if (ghost) {
+            uint32_t packed = 0;
+            for (float channel : actor.tint)
+                packed = packed << 8 | uint32_t(std::lround(std::clamp(channel, 0.f, 1.f) * 255));
+            length = size_t(std::to_chars(color, color + sizeof color, packed).ptr - color);
+        }
+        return native_actor_anim::model_seed(look.outfit, ghost ? "ghost" : "solid", {color, length}, look.hat);
     }
 
     static native_render::GhostSource ghost_source_of(const native_render::Actor &actor) {
@@ -1165,6 +1202,13 @@ public:
     }
 
     std::span<const float> actor_bind() const { return actorBind; }
+
+    // The world the bunnies' planted feet probe for ground (null: the feet's own plane), and prefers-reduced-motion
+    // (the bunnies' and the first-person weapons' motion scale).
+    void set_actor_context(BhContext *world, bool reduced_motion) {
+        groundCore = world;
+        motionScale = native::motion_scale(reduced_motion);
+    }
 
     // Drops an actor's animation and gesture state, so its next pose starts from scratch.
     void forget_actor(const std::string &id) {
@@ -1224,8 +1268,7 @@ public:
                 gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, 3, entry.bones, 0, GL_RGBA, GL_FLOAT, pose.data());
             }
             if (actorAnimationData) {
-                auto &state = actorAnimationStates[actor.id];
-                if (!state) state = std::make_unique<native_actor_anim::State>(*actorAnimationData);
+                auto &state = actor_state(actor.id);
                 native_actor_anim::Input input;
                 std::copy(frame.position, frame.position + 3, input.position.begin());
                 std::copy(frame.velocity, frame.velocity + 3, input.velocity.begin());
@@ -1233,10 +1276,16 @@ public:
                 input.pitch = frame.pitch;
                 input.ducking = bool(frame.flags & 1);
                 input.grounded = bool(frame.flags & 2);
+                input.ladder = bool(frame.flags & 4);
+                input.water = int(actor.waterLevel);
+                input.sidemove = actor.sidemove;
                 input.jumped = actor.jumped;
-                state->hood(l.hoodDown);
-                state->pose(input, seconds, pulses.snapped, pulses.swing, pose, acting);
-                actorYaw = float(state->feetYaw);
+                state.hood(l.hoodDown);
+                state.set_seed(actor_seed(actor, l));
+                state.motion = motionScale;
+                state.pose(input, seconds, pulses.snapped, pulses.swing, pose, acting);
+                if (actor.tickBlend && !acting) state.present(*actor.tickBlend, pose);
+                actorYaw = float(state.shown.feet_yaw);
             }
             actor_actions(actor, pulses, l, seconds, actorYaw, acting);
         }
@@ -1254,11 +1303,12 @@ public:
             float spin = 0
     ) {
         const auto &l = look(actor.outfit, actor.loadout);
-        const auto &frame = actor.frame;
         BhTransform t{};
-        std::copy(frame.position, frame.position + 3, t.origin);
+        const auto origin = actor_origin(actor);
+        std::copy(origin.begin(), origin.end(), t.origin);
         t.angles[1] = actorYaw + spin;
-        auto model = native::model_matrix(t);
+        t.angles[2] = float(actor_bank(actor.id));
+        auto model = actor_model(t);
         for (int r = 0; r < 3; r++) {
             model[r] *= 1 - squash * .5f;
             model[4 + r] *= 1 - squash * .5f;
@@ -1277,19 +1327,18 @@ public:
         const auto &tail = actorActions[actor.id].ponytail;
         const float ponytail[4] = {float(tail.pitch), float(tail.side), l.hairLength, 0};
         gl.Uniform4fv(actorProgram.ponytail, 1, ponytail);
+        world_body_uniforms(actorProgram, origin.data());
         if (source != native_render::GhostSource::none) ghost_uniforms(actorProgram, actor, source);
         const auto visibleParts = parts_for(actor, l);
         gl.Enable(GL_DEPTH_TEST);
         gl.Disable(GL_CULL_FACE);
         gl.DepthFunc(GL_LEQUAL);
         if (showGlow && actor.playerGlow && actor.playerGlow->enabled && actor.opacity >= .999f) {
-            const float distance = std::hypot(
-                    std::hypot(eye[0] - frame.position[0], eye[1] - frame.position[1]), eye[2] - frame.position[2]
-            );
+            const float distance = std::hypot(std::hypot(eye[0] - origin[0], eye[1] - origin[1]), eye[2] - origin[2]);
             gl.Uniform2f(actorProgram.glowNearFade, 14, 60);
             gl.Uniform1f(actorProgram.glowDistance, native_render::glow_distance(distance));
-            const float top[3] = {frame.position[0], frame.position[1], frame.position[2] + 64};
-            const auto feet = native_render::to_web_space(frame.position), head = native_render::to_web_space(top);
+            const float top[3] = {origin[0], origin[1], origin[2] + 64};
+            const auto feet = native_render::to_web_space(origin.data()), head = native_render::to_web_space(top);
             gl.Uniform3fv(actorProgram.glowAxisA, 1, feet.data());
             gl.Uniform3fv(actorProgram.glowAxisB, 1, head.data());
             draw_glow(visibleParts, actorProgram, actor.playerGlow->aura && distance < 650, 1);
@@ -1326,177 +1375,181 @@ public:
          const BhWeaponReport *report = nullptr,
          bool presentationEvent = false) {
         if (active >= weapons.size() || !active) return;
-        const auto name = active == 1 ? "knife:" + equipped.knife + ":" + equipped.glove
-                                      : "gun:" + weapons[active] + ":" + equipped.glove;
-        const auto at = entries.find(name);
-        if (at == entries.end()) return;
-        const auto &entry = at->second;
-        if (active != previousWeapon || previousEntry != name) {
-            action = "draw";
-            started = seconds;
-            previousWeapon = active;
-            previousEntry = name;
-            inspectIndex = -1;
-            inspectQueued = false;
-        }
-        const bool shellGun = std::any_of(entry.clips.begin(), entry.clips.end(), [](const Clip &c) {
-            return c.name == "shellStart";
-        });
+        const Entry *entry = first_person_entry(active);
+        if (!entry) return;
         if (report) gunSilenced = report->silencer != 0;
-        if (snapshot.player.tick != previousTick || presentationEvent) {
-            if (active > 1 && report && (flags & 256)) {
-                action = gunSilenced ? "silencerOn" : "silencerOff";
-                started = seconds;
-            } else if (shot) {
-                if (active > 1) gunFlashStarted = seconds;
-                inspectIndex = -1;
-                inspectQueued = false;
-                action = active == 1 ? (mode == 2 ? "stab" : snapshot.player.tick % 2 ? "slash1" : "slash2") : "fire";
-                started = seconds;
-            } else if (flags & 4) {
-                inspectIndex = -1;
-                inspectQueued = false;
-                action = shellGun ? "shellStart" : report && report->clip == 0 ? "reloadEmpty" : "reload";
-                started = seconds;
-            } else if (active > 1 && shellGun && report) {
-                if (flags & 8) {
-                    action = "shellEnd";
-                    started = seconds;
-                } else if (report->reload_ticks && report->clip > previousClip) {
-                    action = "shellInsert";
-                    started = seconds;
-                }
-            }
-            if (report) previousClip = report->clip;
-            previousTick = snapshot.player.tick;
-        }
-        if (active == 1) {
-            const auto &chain = metadata.at("inspects").at(equipped.knife);
-            if (inspectPresses) {
-                if (inspectIndex < 0) {
-                    inspectIndex = 0;
-                    action = "inspect0";
-                    started = seconds;
-                    inspectLoops = 0;
-                } else if (size_t(inspectIndex + 1) < chain.size())
-                    inspectQueued = true;
-                inspectPresses = 0;
-            }
-            if (inspectIndex >= 0) {
-                const auto &spec = chain.at(inspectIndex);
-                double t = std::max(0., seconds - started);
-                if (inspectHeld && !inspectQueued && spec.contains("loop") && !spec["loop"].is_null()
-                    && inspectLoops < 6) {
-                    const double from = spec["loop"][0], to = spec["loop"][1];
-                    if (t >= to && to > from) {
-                        started += to - from;
-                        t -= to - from;
-                        inspectLoops++;
-                    }
-                }
-                if (inspectQueued && t >= spec.at("exit").get<double>() && size_t(inspectIndex + 1) < chain.size()) {
-                    inspectIndex++;
-                    action = "inspect" + std::to_string(inspectIndex);
-                    started = seconds - chain.at(inspectIndex).at("enter").get<double>();
-                    inspectLoops = 0;
-                    inspectQueued = false;
-                } else if (t >= spec.at("duration").get<double>()) {
-                    inspectIndex = -1;
-                    inspectQueued = false;
-                    action = "idle";
-                    started = seconds;
-                }
-            }
-            hear_inspect_cues(seconds);
-        } else {
-            inspectIndex = -1;
-            if (inspectPresses) {
-                action = "inspect";
-                started = seconds;
-            }
-            inspectPresses = 0;
-        }
-        std::string clipName = action;
-        if (active > 1 && gunSilenced) {
-            const auto named = action + ":silenced";
-            if (std::any_of(entry.clips.begin(), entry.clips.end(), [&](const Clip &c) { return c.name == named; }))
-                clipName = named;
-        }
-        const Clip *c = clip(entry, clipName);
-        if (!c) return;
-        double time = std::max(0., seconds - started);
-        if (c->duration > 0 && time >= c->duration) {
-            action = shellGun && report && report->reload_ticks && (action == "shellStart" || action == "shellInsert")
-                             ? "shellInsert"
-                             : "idle";
-            started = seconds;
-            c = clip(entry, action + (gunSilenced ? ":silenced" : ""));
-            time = 0;
-        }
-        const bool spins = active == 1 && spinner.spins(equipped.knife);
-        sample(entry, *c, time, false, spins ? native_render::whirl_idle_degrees(spinner, seconds) : 0);
-        gl.Clear(GL_DEPTH_BUFFER_BIT);
+        auto input = first_person_input(snapshot, active, seconds, report, *entry);
+        input.flags = flags;
+        input.shot = shot;
+        input.attack_mode = mode;
+        input.presentation_event = presentationEvent;
+        const auto &out = firstPerson->frame(input, inspectCueQueue);
+        if (shot && active > 1) gunFlashStarted = seconds;
         gl.Enable(GL_DEPTH_TEST);
         gl.DepthMask(GL_TRUE);
         gl.Disable(GL_BLEND);
         gl.Disable(GL_CULL_FACE);
-        const float cot = (4.f / 3.f) / std::tan(float(fov * native::radians * .5));
-        const native::Matrix
-                perspective =
-                        {cot / (float(width) / height), 0, 0, 0, 0, cot, 0, 0, 0, 0, -1.00376f, -1, 0, 0, -1.50282f, 0},
-                sourceView = {0, 0, -1, 0, -1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1};
-        const float speed = std::hypot(snapshot.player.velocity[0], snapshot.player.velocity[1]),
-                    bob = std::min(speed / 350.f, 1.f) * bobScale;
-        const float offset[3] =
-                {offsetY,
-                 -offsetX + swayYaw * swayScale + float(std::sin(seconds * 7)) * .15f * bob,
-                 offsetZ + swayPitch * swayScale + float(std::abs(std::sin(seconds * 7))) * .28f * bob},
-                    eye[3] = {};
+        for (size_t i = 0; i < out.count; i++)
+            draw_layer(out.layers[i], width, height, seconds, i + 1 == out.count && active > 1);
+    }
+
+private:
+    // Holds the weapon still for one preview draw.
+    struct PreviewScope {
+        bool &flag;
+
+        explicit PreviewScope(bool &value) : flag(value) { flag = true; }
+
+        ~PreviewScope() { flag = false; }
+    };
+
+    bool gunSilenced = false;
+    std::string firstPersonKnife, firstPersonGlove;
+
+    // The rig entry of the weapon in hand, its name rebuilt only when the weapon or the loadout changes.
+    const Entry *first_person_entry(uint32_t active) {
+        if (active != firstPersonWeapon || firstPersonKnife != equipped.knife || firstPersonGlove != equipped.glove) {
+            firstPersonWeapon = active;
+            firstPersonKnife = equipped.knife;
+            firstPersonGlove = equipped.glove;
+            firstPersonEntry = active == 1 ? "knife:" + equipped.knife + ":" + equipped.glove
+                                           : "gun:" + weapons[active] + ":" + equipped.glove;
+        }
+        const auto at = entries.find(firstPersonEntry);
+        return at == entries.end() ? nullptr : &at->second;
+    }
+
+    native_vm::FirstPersonInput first_person_input(
+            const BhSnapshot &snapshot,
+            uint32_t active,
+            double seconds,
+            const BhWeaponReport *report,
+            const Entry &entry
+    ) const {
+        native_vm::FirstPersonInput in;
+        in.seconds = seconds;
+        in.weapon = active;
+        in.entry = &entry;
+        in.entry_name = firstPersonEntry;
+        in.item = active == 1 ? std::string_view(equipped.knife) : std::string_view(weapons[active]);
+        in.tick = snapshot.player.tick;
+        if (report) {
+            in.has_report = true;
+            in.silenced = report->silencer != 0;
+            in.rounds = report->clip;
+            in.reload_ticks = report->reload_ticks;
+        }
+        const auto &player = snapshot.player;
+        in.movement.velocity = {player.velocity[0], player.velocity[1], player.velocity[2]};
+        in.movement.grounded = player.grounded != 0;
+        in.movement.view_offset_z = player.view_offset_z;
+        in.movement.yaw = viewYaw;
+        in.movement.pitch = viewPitch;
+        in.feel = !previewing;
+        in.bob = bobScale;
+        in.sway = swayScale;
+        in.motion = motionScale;
+        in.quiet_inspect = quietInspect;
+        return in;
+    }
+
+    // The viewmodel camera: its own FOV (horizontal at 4:3, Hor+), narrowed by a gun shot's kick.
+    native::Matrix viewmodel_projection(int width, int height, double fov_scale) const {
+        constexpr double four_by_three_height = .75;
+        constexpr float depth_scale = -1.00376f, depth_offset = -1.50282f;
+        const double half_horizontal = fov * native::radians * .5;
+        const double vertical = 2 * std::atan(std::tan(half_horizontal) * four_by_three_height) * fov_scale;
+        const float cot = float(1 / std::tan(vertical * .5));
+        const native::Matrix perspective = {
+                cot / (float(width) / height), 0, 0, 0, 0, cot, 0, 0, 0, 0, depth_scale, -1, 0, 0, depth_offset, 0
+        };
+        const native::Matrix source_view = {0, 0, -1, 0, -1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1};
+        return native::multiply(perspective, source_view);
+    }
+
+    // The layer's 3x4 with the viewmodel offset (CS:GO viewmodel_offset_x / y / z in view space, x outward for either
+    // hand), as the website's root matrix.
+    native_vm::Matrix34 placed(const native_vm::Matrix34 &view) const {
+        auto out = view;
+        out[3] += offsetY;
+        out[7] += leftHand ? offsetX : -offsetX;
+        out[11] += offsetZ;
+        return out;
+    }
+
+    static native::Matrix to_matrix(const native_vm::Matrix34 &m) {
+        return {m[0], m[4], m[8], 0, m[1], m[5], m[9], 0, m[2], m[6], m[10], 0, m[3], m[7], m[11], 1};
+    }
+
+    void upload_pose(size_t bones) {
+        gl.ActiveTexture(GL_TEXTURE0);
+        gl.BindTexture(GL_TEXTURE_2D, bonesTexture);
+        gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, 3, GLsizei(bones), 0, GL_RGBA, GL_FLOAT, layerPose.data());
+    }
+
+    void draw_layer(const native_vm::ViewmodelLayer &layer, int width, int height, double seconds, bool flash) {
+        layerPose.assign(layer.pose->begin(), layer.pose->end());
+        if (!layer.gun && spinner.spins(equipped.knife))
+            native_render::turn_spinner(layerPose, spinner, native_render::whirl_idle_degrees(spinner, seconds));
+        upload_pose(layer.entry->bones);
+        gl.Clear(GL_DEPTH_BUFFER_BIT);
+        const auto projection = viewmodel_projection(width, height, layer.fov_scale);
+        const auto view = placed(layer.view);
         BhTransform turn{};
         turn.angles[1] = previewYaw;
         turn.angles[0] = previewPitch;
+        const float eye[3] = {};
         BindOptions options;
-        options.material = active == 1 ? PlayerMaterial::solid : PlayerMaterial::gun;
+        options.material = layer.gun ? PlayerMaterial::gun : PlayerMaterial::solid;
         // First-person detail shading (finishes/detail.ts VM_DETAIL), as the website's viewmodels compile.
         options.detail = true;
-        options.offset = {offset[0], offset[1], offset[2]};
         options.mirror = leftHand ? -1.f : 1.f;
         options.glow = firstPersonGlow && localGlow ? &*localGlow : nullptr;
-        const auto &handsProgram = bind(
-                equipped, native::multiply(perspective, sourceView), native::model_matrix(turn), eye, seconds, options
-        );
+        const auto model = native::multiply(native::model_matrix(turn), to_matrix(view));
+        const auto &handsProgram = bind(equipped, projection, model, eye, seconds, options);
         gl.FrontFace(leftHand ? GL_CW : GL_CCW);
-        for (const auto &part : entry.meshes)
+        for (const auto &part : layer.entry->meshes)
             mesh(part);
-        if (showGlow && firstPersonGlow && localGlow && localGlow->enabled) {
-            draw_glow(entry.meshes, handsProgram, localGlow->aura, .2f);
-        }
+        if (showGlow && firstPersonGlow && localGlow && localGlow->enabled)
+            draw_glow(layer.entry->meshes, handsProgram, localGlow->aura, .2f);
         gl.FrontFace(GL_CCW);
+        if (flash) draw_muzzle_flash(projection, view, seconds);
+    }
+
+    // The shot's muzzle flash at the muzzle of the gun just drawn (its silencer's tip while it's on).
+    void draw_muzzle_flash(const native::Matrix &projection, const native_vm::Matrix34 &view, double seconds) {
+        constexpr double flash_seconds = .055;
         const double flashAge = seconds - gunFlashStarted;
-        if (active > 1 && flashAge >= 0 && flashAge < .055 && metadata.contains("gunMuzzles")
-            && metadata["gunMuzzles"].contains(weapons[active])) {
-            const auto &info = metadata["gunMuzzles"][weapons[active]];
-            const bool quiet = gunSilenced && info.contains("silPoint");
-            const auto &point = info[quiet ? "silPoint" : "point"];
-            const size_t bone = size_t(info[quiet ? "silPart" : "part"].get<unsigned>()) * 12;
-            if (bone + 11 < pose.size()) {
-                native_render::Vec3 muzzle{};
-                for (int r = 0; r < 3; r++)
-                    muzzle[r] = pose[bone + r * 4] * point[0].get<float>()
-                                + pose[bone + r * 4 + 1] * point[1].get<float>()
-                                + pose[bone + r * 4 + 2] * point[2].get<float>() + pose[bone + r * 4 + 3] + offset[r];
-                muzzle[1] *= leftHand ? -1.f : 1.f;
-                gunFx->clear();
-                gunFx->billboard(
-                        muzzle,
-                        quiet ? 1.2f : 2.2f,
-                        quiet ? std::array<float, 4>{.6f, .65f, .7f, float(1 - flashAge / .055) * .25f}
-                              : std::array<float, 4>{1, .64f, .15f, float(1 - flashAge / .055) * .95f},
-                        {0, 1, 0},
-                        {0, 0, 1}
-                );
-                gunFx->draw(native::multiply(perspective, sourceView), eye);
-            }
-        }
+        const auto &gun = weapons[firstPersonWeapon];
+        if (flashAge < 0 || flashAge >= flash_seconds || !metadata.contains("gunMuzzles")
+            || !metadata["gunMuzzles"].contains(gun))
+            return;
+        const auto &info = metadata["gunMuzzles"][gun];
+        const bool quiet = gunSilenced && info.contains("silPoint");
+        const auto &point = info[quiet ? "silPoint" : "point"];
+        const size_t bone = size_t(info[quiet ? "silPart" : "part"].get<unsigned>()) * 12;
+        if (bone + 11 >= layerPose.size()) return;
+        std::array<float, 3> local{};
+        for (int r = 0; r < 3; r++)
+            local[r] = layerPose[bone + r * 4] * point[0].get<float>()
+                       + layerPose[bone + r * 4 + 1] * point[1].get<float>()
+                       + layerPose[bone + r * 4 + 2] * point[2].get<float>() + layerPose[bone + r * 4 + 3];
+        local[1] *= leftHand ? -1.f : 1.f;
+        native_render::Vec3 muzzle{};
+        for (int r = 0; r < 3; r++)
+            muzzle[r] =
+                    view[r * 4] * local[0] + view[r * 4 + 1] * local[1] + view[r * 4 + 2] * local[2] + view[r * 4 + 3];
+        const float fade = float(1 - flashAge / flash_seconds);
+        gunFx->clear();
+        gunFx->billboard(
+                muzzle,
+                quiet ? 1.2f : 2.2f,
+                quiet ? std::array<float, 4>{.6f, .65f, .7f, fade * .25f}
+                      : std::array<float, 4>{1, .64f, .15f, fade * .95f},
+                {0, 1, 0},
+                {0, 0, 1}
+        );
+        const float eye[3] = {};
+        gunFx->draw(projection, eye);
     }
 };

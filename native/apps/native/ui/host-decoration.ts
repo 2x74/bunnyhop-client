@@ -1,6 +1,6 @@
 // How a player's name looks, for the host to draw in game the way the web does (net/hud.ts chat, net/scoreboard.ts
-// Tab board, ui/marks.ts): the supporter colour, its effect and second colour, the marks after the name in the web's
-// order (creators.ts equippedNameBadges), the rank tag and the flag. The menu works these out from the web's own rules
+// Tab board, ui/marks.ts): the supporter colour, its effect and second colour, the supporter font, the marks after the
+// name in the web's order (creators.ts equippedNameBadges), the rank tag and the flag. The menu works these out from the web's own rules
 // so the host only draws.
 //
 // Host contract:
@@ -27,16 +27,19 @@ import {
   type NameEffect,
   type PlayerMarks,
 } from "../../web/src/creators";
+import { isPrideFlag } from "../../web/src/countries";
 import type { ScoreHead, ScoreRow } from "../../web/src/net/scoreboard";
+import { nameFontOf, type NameFontId } from "../../web/src/supporter-looks";
 import { roomScoreboard, runningSeconds } from "./room-scoreboard";
 import type { RoomView } from "./room-service";
 
-/** Name colour and effect (web marks.ts nameAttrs). Null colour: the default white. */
+/** Name colour, effect and font (web marks.ts nameAttrs). Null colour: the default white; null font: the default. */
 export interface HostNameLook {
   color: string | null;
   /** The "paint" gradient's second colour; null: a paler shade of the first. */
   color2: string | null;
   effect: NameEffect | null;
+  font: NameFontId | null;
 }
 
 /**
@@ -59,7 +62,7 @@ export interface HostScoreRow {
   look: HostNameLook;
   marks: HostMark[];
   rank: { name: string; color: string } | null;
-  /** Lower-case ISO 3166 code for the flag, or null. */
+  /** Lower-case ISO 3166 code for the flag, a pride flag ("PRIDE-TRANS", countries.ts PRIDE_FLAGS), or null. */
   country: string | null;
   style: string;
   status: string;
@@ -98,6 +101,7 @@ export function readMarks(value: Record<string, unknown>): PlayerMarks {
     nameColor: isNameColor(value.nameColor) ? value.nameColor : null,
     nameEffect: nameEffectOf(value.nameEffect),
     nameColor2: isNameColor(value.nameColor2) ? value.nameColor2 : null,
+    nameFont: nameFontOf(value.nameFont),
     special: textList(value.special),
   };
 }
@@ -107,6 +111,7 @@ export function hostNameLook(marks: PlayerMarks): HostNameLook {
     color: nameColorHex(marks.nameColor),
     color2: nameColorHex(marks.nameColor2),
     effect: nameEffectOf(marks.nameEffect),
+    font: nameFontOf(marks.nameFont),
   };
 }
 
@@ -136,6 +141,16 @@ export function hostMarks(marks: PlayerMarks): HostMark[] {
     .filter((mark): mark is HostMark => mark !== null);
 }
 
+/**
+ * The flag the host draws for a profile flag: a country as its lower-case code, a pride flag as its own code, or null
+ * for anything else (an unknown code shows no flag).
+ */
+export function hostFlag(code: unknown): string | null {
+  if (typeof code !== "string") return null;
+  if (isPrideFlag(code)) return code;
+  return /^[a-z]{2}$/i.test(code) ? code.toLowerCase() : null;
+}
+
 /** `seconds`: the run time while it runs; `at`: when that was (Unix ms). */
 export function hostScoreRow(row: ScoreRow, seconds: number | null, at: number, afk = false): HostScoreRow {
   return {
@@ -145,7 +160,7 @@ export function hostScoreRow(row: ScoreRow, seconds: number | null, at: number, 
     look: hostNameLook(row),
     marks: hostMarks(row),
     rank: row.rank ? { name: row.rank.name, color: row.rank.color } : null,
-    country: typeof row.country === "string" && /^[a-z]{2}$/i.test(row.country) ? row.country.toLowerCase() : null,
+    country: hostFlag(row.country),
     style: row.style,
     status: row.status,
     statusKind: row.statusKind,

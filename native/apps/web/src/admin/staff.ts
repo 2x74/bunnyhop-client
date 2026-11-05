@@ -197,6 +197,9 @@ export function staffButtons(_id: string, name: string, role: StaffRole | null, 
   return out;
 }
 
+/** The team tables get a class for admin.css (narrow windows drop Since). */
+const staffTable = (wrap: HTMLElement) => (wrap.querySelector("table")?.classList.add("staff-table"), wrap);
+
 export const teamView: View = async (root) => {
   const r = await api<{ staff: StaffRow[]; changes: ModRow[]; recent: ModRow[] }>("/admin/staff");
   const who = h("input", { type: "text", placeholder: "Name or player id", required: true, autocomplete: "off", spellcheck: "false" });
@@ -219,7 +222,7 @@ export const teamView: View = async (root) => {
       h("td", { class: "acts" }, ...staffButtons(s.user_id, s.name ?? s.user_id, s.role, s.source === "config", post(s.user_id))),
     );
   const group = (title: string, list: StaffRow[], empty: string) =>
-    h("section", { class: "card" }, h("h2", null, title, h("small", null, list.length ? String(list.length) : "")), list.length ? table(["Player", "Note", "Since", ["This week", "num"], "Last action", ""], list.map(row)) : emptyLine(empty));
+    h("section", { class: "card" }, h("h2", null, title, h("small", null, list.length ? String(list.length) : "")), list.length ? staffTable(table(["Player", "Note", "Since", ["This week", "num"], "Last action", ""], list.map(row))) : emptyLine(empty));
   const of = (x: StaffRole) => r.staff.filter((s) => s.role === x);
   fill(root, 
     ...(!may("staff.moderators")

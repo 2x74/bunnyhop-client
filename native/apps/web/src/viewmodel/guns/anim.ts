@@ -21,8 +21,10 @@
 // goes to a named target on the gun (GunDef places, leftW 1), plus a view-space offset for trips off screen.
 
 import { bump, E, hop, track } from "../inspects/kit";
-import { silencerClip, silencerCues } from "./silencer";
+import { silencerClip, silencerCues, silencerLength } from "./silencer";
 import type { GunDef } from "./types";
+import { saltOf, VmRandom } from "../rand";
+import { springRamp, springStep } from "../feel";
 
 export type V3 = [number, number, number];
 
@@ -79,10 +81,16 @@ export interface GunPose {
   handLift: number;
   /** Left fingers opened toward the open preset, on top of the preset (re-grips). */
   leftOpen: number;
+  /**
+   * 0..1: the left hand is away from the gun (carrying the can below the screen, fetching a magazine), so its wrist
+   * may bend toward the elbow (guns/pose.ts arm: FREE_WRIST instead of ARM.bendL). Without it a hand rolled far over
+   * keeps its forearm on its own line, which then stands up through the middle of the screen.
+   */
+  leftArm: number;
 }
 
 export function newPose(): GunPose {
-  return { o: [0, 0, 0], a: [0, 0, 0], slide: 0, pump: 0, bolt: 0, magSpin: 0, trigger: 0, indexOff: 0, mag: 0, magHand: 0, magDrop: [0, 0, 0], magHide: false, aux: 0, auxIn: 0, rightW: 0, leftW: 0, leftT: "", leftOff: [0, 0, 0], leftCurl: "support", leftCurlW: 0, thumb: 0, tail: 0, sil: 0, silX: 0, silSpin: 0, silPitch: 0, silYaw: 0, silOff: [0, 0, 0], handRoll: 0, handLift: 0, leftOpen: 0 };
+  return { o: [0, 0, 0], a: [0, 0, 0], slide: 0, pump: 0, bolt: 0, magSpin: 0, trigger: 0, indexOff: 0, mag: 0, magHand: 0, magDrop: [0, 0, 0], magHide: false, aux: 0, auxIn: 0, rightW: 0, leftW: 0, leftT: "", leftOff: [0, 0, 0], leftCurl: "support", leftCurlW: 0, thumb: 0, tail: 0, sil: 0, silX: 0, silSpin: 0, silPitch: 0, silYaw: 0, silOff: [0, 0, 0], handRoll: 0, handLift: 0, leftOpen: 0, leftArm: 0 };
 }
 
 function resetPose(p: GunPose): void {
@@ -102,7 +110,7 @@ function resetPose(p: GunPose): void {
   p.tail = 0;
   p.sil = p.silX = p.silSpin = p.silPitch = p.silYaw = 0;
   p.silOff[0] = p.silOff[1] = p.silOff[2] = 0;
-  p.handRoll = p.handLift = p.leftOpen = 0;
+  p.handRoll = p.handLift = p.leftOpen = p.leftArm = 0;
 }
 
 /** Numeric blend a -> b by w into out (strings / flags from b when w > 0.5). */
@@ -144,6 +152,7 @@ function blendPose(a: GunPose, b: GunPose, w: number, out: GunPose): void {
   for (let k = 0; k < 3; k++) out.leftOff[k] = b.leftOff[k];
   out.leftCurl = b.leftCurl;
   out.leftCurlW = b.leftCurlW;
+  out.leftArm = l(a.leftArm, b.leftArm);
 }
 
 /** prefers-reduced-motion (through globalThis: the API's tests typecheck this without the DOM lib). */
@@ -179,6 +188,10 @@ export class GunAnimator {
   private base: Playing = { clip: "idle", t: 0, dur: 1, empty: false };
   private from = newPose();
   private cur = newPose();
+  /** The clips' pose as shown last frame (the crossfade applied, before follow-through and recoil): a new clip fades from it. */
+  private shown = newPose();
+  /** Bumped whenever a clip starts a crossfade: the viewmodel captures the left hand as shown then (guns/pose.ts). */
+  leftFadeGen = 0;
   private fade = 0;
   private fadeT = 0;
   /** The left hand's crossfade (0..1 remaining weight of its previous final matrix), read by the viewmodel. */
@@ -188,6 +201,11 @@ export class GunAnimator {
   private shotT = Infinity;
   private dryT = Infinity;
   private modeT = Infinity;
+  /** Grip idle: seconds the gun has been idle and untouched (no clip, shot or click), the clock it runs on. */
+  private quietT = 0;
+  private clock = 0;
+  /** Seconds since a clip handed back to idle (the support hand's re-grip), Infinity: none. */
+  private settleT = Infinity;
   // Recoil spring state: pitch, back, roll, yaw, sink (value, velocity).
   private rx = new Float64Array(5);
   private rv = new Float64Array(5);
@@ -196,6 +214,8 @@ export class GunAnimator {
   // Follow-through spring on the clips' gun pose (o, a): value, velocity; snapped (no history) when `followSnap`.
   private fx = new Float64Array(6);
   private fv = new Float64Array(6);
+  /** The follow-through's targets at the last update (each step ramps from these to this frame's: exact for a clip). */
+  private fu = new Float64Array(6);
   private followSnap = true;
   /** Rounds left after the last event (the slide locks back on the last one of a pistol). */
   empty = false;
@@ -205,6 +225,8 @@ export class GunAnimator {
    */
   silenced = false;
   private motion = 1;
+  /** The recoil's roll / yaw variation (seeded per gun: the same shots look the same in every export; settle reseeds). */
+  private rng = new VmRandom(0x3243f6a8);
   /** Shells: the current insert's index (alternates the hand's path a little). */
   private shellN = 0;
   /** Sound cues as clips pass them (guns/sounds.ts). */
@@ -241,29 +263,49 @@ export class GunAnimator {
 
   setGun(def: GunDef): void {
     this.def = def;
+    this.settle();
+    this.silenced = false;
+  }
+
+  /**
+   * Straight to idle with nothing in flight (no clip, recoil, follow-through lag, overlays or queued pump): a replay
+   * seek or a restart that keeps the same gun in hand. The silencer state is left as it is.
+   */
+  settle(): void {
+    this.reseed();
     this.rx.fill(0);
     this.rv.fill(0);
     this.followSnap = true;
     this.shotT = this.dryT = this.modeT = Infinity;
+    this.pumpIn = Infinity;
     this.empty = false;
-    this.silenced = false;
+    this.quietT = this.clock = 0;
+    this.settleT = Infinity;
     this.play("idle", 1, true);
+  }
+
+  /** Back to the start of the recoil's seeded variation (a restart, a replay seek, an export's start). */
+  reseed(): void {
+    this.rng.seed(this.def ? saltOf(this.def.id) : 0);
+    this.rollSide = 1;
   }
 
   /** Starts a base clip (crossfades from the current pose unless `snap`). */
   play(clip: BaseClip, dur: number, snap = false, empty = false, on = false): void {
     if (!snap) {
-      blendPose(this.cur, this.cur, 1, this.from);
-      this.from.leftW = this.cur.leftW;
-      this.fade = clip === "inspect" || clip === "idle" ? 0.22 : 0.12;
+      // From what's on screen (an interrupted crossfade continues from where it got to, not from its target).
+      blendPose(this.shown, this.shown, 1, this.from);
+      this.fade = clip === "inspect" || clip === "idle" ? 0.22 : clip === "holster" ? 0.06 : 0.12;
       this.fadeT = 0;
       this.leftFade = 1;
       this.leftFadeDur = this.fade + 0.05;
+      this.leftFadeGen++;
     } else {
       this.fade = 0;
       this.leftFade = 0;
     }
     if (clip === "shellInsert") this.shellN++;
+    if (clip !== "idle") this.quietT = 0;
     this.base = { clip, t: 0, dur: Math.max(0.05, dur), empty, on };
     this.cues = cuesFor(this.def, clip, this.base.dur, empty, on);
     this.cueI = 0;
@@ -280,8 +322,9 @@ export class GunAnimator {
     return Math.min(this.def.timing.draw, 1.0) * 0.85;
   }
 
-  holster(): void {
-    this.play("holster", 0.22);
+  /** Lowers out of view over `dur` (a switch away; presenter.ts GUN_LOWER), holding there. */
+  holster(dur = HOLSTER_TIME): void {
+    this.play("holster", dur);
   }
 
   /** A shot: recoil kick, slide / bolt, trigger; the M3 queues its pump. */
@@ -294,11 +337,12 @@ export class GunAnimator {
     this.rv[0] += r.kick * w * 1.47 * m;
     this.rv[1] += r.back * w * 1.57 * m;
     this.rollSide = -this.rollSide;
-    this.rv[2] += this.rollSide * (0.55 + 0.45 * Math.random()) * r.roll * w * 1.42 * m;
-    this.rv[3] += (Math.random() * 2 - 1) * r.roll * 0.5 * w * 1.42 * m;
+    this.rv[2] += this.rollSide * (0.55 + 0.45 * this.rng.next()) * r.roll * w * 1.42 * m;
+    this.rv[3] += (this.rng.next() * 2 - 1) * r.roll * 0.5 * w * 1.42 * m;
     // The sink: a fraction of the push back, slower (the arms absorbing the shot after the muzzle has risen).
     this.rv[4] -= r.back * 0.3 * w * SINK_K * 2.6 * m;
     this.shotT = 0;
+    this.quietT = 0;
     // A shot cancels an inspect (CS:GO style) and a shotgun reload (the core interrupts it).
     const c = this.base.clip;
     // (A shot out of the silencer clip: impossible in the sim, which locks attacks through it; a replay / lag only.)
@@ -314,6 +358,7 @@ export class GunAnimator {
 
   dryFire(): void {
     this.dryT = 0;
+    this.quietT = 0;
     this.rv[0] += 0.6 * Math.sqrt(this.def.recoil.settle) * this.motion;
   }
 
@@ -331,6 +376,8 @@ export class GunAnimator {
     this.pumpIn = Infinity;
     this.play("silencer", dur, at > 0, false, on);
     if (at > 0) {
+      // Jumped in part-way (a restart / seek): the gun is where the clip has it, not swinging there from the old pose.
+      this.followSnap = true;
       this.base.t = Math.min(at, this.base.dur);
       while (this.cueI < this.cues.length && this.cues[this.cueI][0] <= this.base.t) this.cueI++;
     }
@@ -360,7 +407,7 @@ export class GunAnimator {
 
   inspect(): void {
     if (this.base.clip !== "idle") return;
-    this.play("inspect", INSPECT_DUR[this.def.id] ?? 2.4);
+    this.play("inspect", INSPECT_DUR[motionId(this.def)] ?? 2.4);
   }
 
   /** Dev / screenshots: holds `clip` at time t (s) frozen (`on`: the silencer clip screws it on). */
@@ -378,22 +425,18 @@ export class GunAnimator {
       this.fire();
       this.pumpIn = Infinity;
       this.base = { clip: "idle", t: 0, dur: 1, empty: false };
-      for (let s = 0; s < t; s += 1 / 240) this.stepSpring(1 / 240);
+      this.stepSpring(t);
       this.shotT = t;
       return;
     }
-    this.base = { clip, t, dur: dur ?? (clip === "draw" ? this.drawDur() : clip === "inspect" ? (INSPECT_DUR[this.def.id] ?? 2.4) : clip === "reload" ? (this.def.timing.reload ?? 2) : clip === "silencer" ? SILENCER_DUR : 0.5), empty, on };
+    this.base = { clip, t, dur: dur ?? (clip === "draw" ? this.drawDur() : clip === "inspect" ? (INSPECT_DUR[motionId(this.def)] ?? 2.4) : clip === "reload" ? (this.def.timing.reload ?? 2) : clip === "silencer" ? silencerLength(this.def) : 0.5), empty, on };
     if (clip === "silencer") this.silenced = on;
   }
 
-  private stepSpring(h: number): void {
-    const k0 = this.def.recoil.settle;
-    for (let i = 0; i < 5; i++) {
-      const k = i === 4 ? k0 * SINK_K * SINK_K : k0;
-      const c = 2 * Math.sqrt(k) * RECOIL_DAMP[i];
-      this.rv[i] += (-k * this.rx[i] - c * this.rv[i]) * h;
-      this.rx[i] += this.rv[i] * h;
-    }
+  /** The recoil springs over dt, solved exactly (feel.ts springStep: the same kick and settle at any frame rate). */
+  private stepSpring(dt: number): void {
+    const w0 = Math.sqrt(this.def.recoil.settle);
+    for (let i = 0; i < 5; i++) springStep(this.rx, this.rv, i, 0, i === 4 ? w0 * SINK_K : w0, RECOIL_DAMP[i], dt);
   }
 
   /**
@@ -403,37 +446,58 @@ export class GunAnimator {
   private follow(p: GunPose, dt: number): void {
     const x = this.fx, v = this.fv;
     if (this.followSnap) {
-      for (let i = 0; i < 3; i++) (x[i] = p.o[i]), (x[i + 3] = p.a[i]);
+      for (let i = 0; i < 3; i++) (x[i] = this.fu[i] = p.o[i]), (x[i + 3] = this.fu[i + 3] = p.a[i]);
       v.fill(0);
       this.followSnap = false;
       return;
     }
-    const k = FOLLOW[this.def.cls], c = 2 * Math.sqrt(k) * FOLLOW_DAMP;
-    const steps = Math.ceil(dt / (1 / 240));
-    const h = steps ? dt / steps : 0;
-    for (let s = 0; s < steps; s++)
+    // (A holster leaves at once: the next weapon is already coming up, so no weighty lag behind it.)
+    const w = Math.sqrt(FOLLOW[this.def.cls] * (this.base.clip === "holster" ? 4 : 1));
+    // Exact steps with the clip's pose ramping from last frame's to this frame's (feel.ts springRamp).
+    if (dt > 0)
       for (let i = 0; i < 6; i++) {
         const target = i < 3 ? p.o[i] : p.a[i - 3];
-        v[i] += (-k * (x[i] - target) - c * v[i]) * h;
-        x[i] += v[i] * h;
+        springRamp(x, v, i, this.fu[i], target, w, FOLLOW_DAMP, dt);
+        this.fu[i] = target;
       }
     for (let i = 0; i < 3; i++) (p.o[i] = x[i]), (p.a[i] = x[i + 3]);
   }
 
+  /**
+   * Snaps the follow-through to the clips' pose at the current time (before this frame advances it): a draw / seek /
+   * gun change starts from the clip's time-zero pose, whatever the first frame's length.
+   */
+  private snapFollow(): void {
+    resetPose(this.cur);
+    if (this.silenced && this.def.silencer) this.cur.sil = 1;
+    this.sampleBase(this.cur, this.base);
+    this.overlays(this.cur);
+    for (let i = 0; i < 3; i++) (this.fx[i] = this.fu[i] = this.cur.o[i]), (this.fx[i + 3] = this.fu[i + 3] = this.cur.a[i]);
+    this.fv.fill(0);
+    this.followSnap = false;
+  }
+
   /** Advances by dt and writes `pose`. */
   update(dt: number): void {
-    // Recoil spring, sub-stepped (stable at any frame rate).
-    const steps = Math.ceil(dt / (1 / 240));
-    const h = steps ? dt / steps : 0;
-    for (let s = 0; s < steps; s++) this.stepSpring(h);
+    if (this.followSnap) this.snapFollow();
+    // Recoil springs (exact).
+    this.stepSpring(dt);
     this.shotT += dt;
     this.dryT += dt;
     this.modeT += dt;
+    this.quietT += dt;
+    this.clock += dt;
+    this.settleT += dt;
     if (this.pumpIn !== Infinity) {
       this.pumpIn -= dt;
       if (this.pumpIn <= 0) {
+        // Started where it was due inside this frame (the overshoot carries into the clip, at any frame rate).
+        const over = -this.pumpIn;
         this.pumpIn = Infinity;
-        if (!this.busy) this.play("pump", this.def.timing.pump!.dur, this.base.clip === "idle");
+        if (!this.busy) {
+          this.play("pump", this.def.timing.pump!.dur, this.base.clip === "idle");
+          this.base.t = over - dt;
+        }
       }
     }
     const b = this.base;
@@ -443,8 +507,14 @@ export class GunAnimator {
       this.onCue?.(c[1], c[2]);
     }
     if (b.clip !== "idle" && b.t >= b.dur) {
-      const next: BaseClip = b.clip === "shellStart" || b.clip === "shellInsert" ? b.clip : "idle";
-      if (next === "idle") this.play("idle", 1, b.clip === "draw" || b.clip === "pump" || b.clip === "reload" || b.clip === "shellEnd" || b.clip === "silencer");
+      // (A holster holds where it ended, out of view: it's only drawn while the gun lowers after a switch.)
+      const next: BaseClip = b.clip === "shellStart" || b.clip === "shellInsert" || b.clip === "holster" ? b.clip : "idle";
+      if (next === "idle") {
+        // The support hand takes the grip again after a clip that had it working (the settle; overlays).
+        if (b.clip === "reload" || b.clip === "shellEnd" || b.clip === "silencer" || b.clip === "draw" || b.clip === "inspect") this.settleT = 0;
+        this.quietT = 0;
+        this.play("idle", 1, b.clip === "draw" || b.clip === "pump" || b.clip === "reload" || b.clip === "shellEnd" || b.clip === "silencer");
+      }
       else b.t = b.dur; // hold the last frame until the next shell / the end
     }
     resetPose(this.cur);
@@ -455,10 +525,11 @@ export class GunAnimator {
     if (this.fade > 0 && this.fadeT < this.fade) {
       this.fadeT += dt;
       const f = Math.min(1, this.fadeT / this.fade);
-      blendPose(this.from, this.cur, f * f * (3 - 2 * f), p);
+      blendPose(this.from, this.cur, f * f * (3 - 2 * f), this.shown);
     } else {
-      blendPose(this.cur, this.cur, 1, p);
+      blendPose(this.cur, this.cur, 1, this.shown);
     }
+    blendPose(this.shown, this.shown, 1, p);
     if (this.leftFade > 0) this.leftFade = Math.max(0, this.leftFade - dt / this.leftFadeDur);
     this.follow(p, dt);
     // Recoil on top (pitch up = negative pitch in Source angles; back = -forward; the sink is down).
@@ -488,6 +559,20 @@ export class GunAnimator {
     const id = this.def.id;
     if (this.shotT < 0.7 && (id === "usp" || id === "fiveseven" || id === "p90")) p.tail += Math.sin(this.shotT * 30) * Math.exp(-this.shotT * 7) * (id === "p90" ? 0.35 : 0.6) * this.motion;
     if (this.modeT < 0.35) p.thumb = Math.max(p.thumb, hop(this.modeT, 0, 0.35, 1));
+    // Grip idle (the hands, not the screen; deterministic, on the animator's clock): after a quiet second or two the
+    // trigger finger eases a little off the trigger and back, the support fingers relax and take the grip again on
+    // their own slower period; a clip handing back to idle ends with the support hand settling its grip. A shot or a
+    // clip puts everything back at once.
+    if (this.base.clip === "idle") {
+      const q = Math.min(1, Math.max(0, (this.quietT - 1.2) / 1.5));
+      const w = q * q * (3 - 2 * q) * this.motion;
+      const ease = (r: number, ph: number) => Math.max(0, Math.sin(this.clock * r + ph)) ** 2;
+      if (w > 0) {
+        p.indexOff = Math.max(p.indexOff, 0.28 * w * ease(0.83, 0.6));
+        p.leftOpen = Math.max(p.leftOpen, 0.16 * w * ease(0.61, 2.4));
+      }
+      if (this.settleT < 0.5) p.leftOpen = Math.max(p.leftOpen, 0.3 * bump(this.settleT, 0.02, 0.45) * this.motion);
+    }
   }
 
   // -------------------------------------------------------------------------------------------
@@ -502,13 +587,18 @@ export class GunAnimator {
       case "draw":
         return this.drawClip(p, u, m);
       case "holster": {
+        // Down, back and out to the right, the muzzle tipping down: clear of the screen by the end (a switch: the next
+        // weapon comes up meanwhile, presenter.ts GUN_LOWER). The support hand drops away first.
         const k = HOLSTER(u);
-        p.o[2] -= 7 * k;
-        p.o[1] -= 1.5 * k;
-        p.a[0] += 30 * k * m;
-        p.a[2] += 15 * k * m;
+        p.o[2] -= 24 * k;
+        p.o[0] -= 3 * k;
+        p.o[1] -= 3.5 * k;
+        p.a[0] += 48 * k * m;
+        p.a[2] += 18 * k * m;
         p.leftW = 0;
-        p.leftOff[2] = -8 * k;
+        p.leftOff[2] = -10 * Math.min(1, k * 1.6);
+        p.leftArm = 1;
+        p.indexOff = Math.min(1, k * 2);
         return;
       }
       case "reload":
@@ -657,15 +747,17 @@ export class GunAnimator {
     p.a[1] += 6 * tilt * m;
     // Pushed out and kept low: the left hand works on top of the gun, and a raised gun brought that forearm up across
     // the middle of the screen.
-    p.o[0] += 2.5 * tilt;
-    p.o[1] += 0.8 * tilt;
-    p.o[2] -= 0.6 * tilt;
+    p.o[0] += 3.6 * tilt;
+    p.o[1] += 0.2 * tilt;
+    p.o[2] -= 1.4 * tilt;
     p.indexOff = Math.max(0, Math.min(1, tilt));
     const away = CV[7](u);
     p.leftW = away;
     p.leftT = "mag";
     p.leftCurl = "mag";
     p.leftCurlW = away;
+    // Working on top of the gun: the forearm comes up from below (the working elbow), not across the view.
+    p.leftArm = away;
     if (u < 0.5) {
       // Grab the old pod (0.16-0.22), lift it off and away (gone by 0.42).
       const lift = CV[8](u);
@@ -798,7 +890,7 @@ export class GunAnimator {
 
   private inspectClip(p: GunPose, t: number, m: number): void {
     const id = this.def.id;
-    const ins = INSPECTS[id];
+    const ins = INSPECTS[motionId(this.def)];
     if (ins) ins(p, t, m);
   }
 }
@@ -828,7 +920,7 @@ function cuesFor(def: GunDef | null, clip: BaseClip, dur: number, empty: boolean
       // A bolt action: the cue on the lift (the clip's own time, stretched like the clip).
       return def.bolt ? [[(BOLT_LIFT * dur) / BOLT_DUR, "pump", 1]] : [[0, "pump", 1]];
     case "silencer":
-      return def.silencer ? silencerCues(dur, on) : [];
+      return def.silencer ? silencerCues(dur, on, def) : [];
     case "inspect":
       return (
         ({
@@ -841,14 +933,12 @@ function cuesFor(def: GunDef | null, clip: BaseClip, dur: number, empty: boolean
           ak47: [[1.05, "mode", 0.35], [1.35, "mode", 0.35]],
           awp: [[1.95, "pump", 0.55]],
         }) as Record<string, [number, Cue, number][]>
-      )[id] ?? [];
+      )[motionId(def)] ?? [];
     default:
       return [];
   }
 }
 
-/** The silencer clip's default length (s): CS:S add_silencer / detach_silencer (the core's lock-out is its tick count). */
-const SILENCER_DUR = 114 / 37;
 
 /**
  * The clips' and inspects' curves (keys in fractions of a clip or in seconds), built once at load: nothing is
@@ -903,8 +993,14 @@ const CV: ((t: number) => number)[] = [
   /* 45 */ track([[0, 0], [0.5, -32, E.io], [1.4, -28], [1.8, 10, E.io], [2.25, 6], [2.8, 0, E.io]]),
 ];
 
-/** The holster: a small lift (anticipation), then down and away accelerating. */
-const HOLSTER = track([[0, 0], [0.22, -0.07, E.io], [1, 1, E.in2]]);
+/**
+ * How long a gun takes to lower out of view after a switch (presenter.ts GUN_LOWER): short, so the outgoing hand is
+ * gone while the incoming weapon's draw is still below the frame (two firing hands never share the frame for long).
+ */
+export const HOLSTER_TIME = 0.15;
+
+/** The holster: down and away, quickly gathering speed (no anticipation: the next weapon is already coming up). */
+const HOLSTER = track([[0, 0], [1, 1, E.in2]]);
 
 /** Recoil springs' damping ratio: pitch, back, roll, yaw, sink (< 1: each overshoots its rest a little). */
 const RECOIL_DAMP = [0.5, 0.62, 0.55, 0.6, 0.8];
@@ -961,6 +1057,9 @@ const AWP_INSPECT = {
   turn: track([[1.8, 0], [1.88, 1, E.out], [2.36, 1], [2.44, 0, E.in2]]),
   travel: track([[1.9, 0], [2.05, 1, E.out], [2.15, 1], [2.35, 0, E.io]]),
 };
+
+/** The gun whose inspect a variant plays (the M4A1 is the Furrow with a suppressor). */
+const motionId = (def: GunDef): GunDef["id"] => (def.id === "m4a1" ? "ak47" : def.id);
 
 /** Inspect lengths (s). */
 const INSPECT_DUR: Partial<Record<GunDef["id"], number>> = { glock: 2.3, usp: 2.6, fiveseven: 2.6, m3: 2.8, xm1014: 2.6, p90: 2.7, ak47: 2.6, awp: 2.8 };
@@ -1069,14 +1168,15 @@ const INSPECTS: Partial<Record<GunDef["id"], InspectFn>> = {
     p.a[0] -= 16 * k * m;
     p.a[1] += 12 * k * m;
     // Out and low, like the reload: the drumming hand's forearm stays short on screen.
-    p.o[0] += 2.5 * k;
-    p.o[1] += 1.2 * k;
-    p.o[2] -= 0.4 * k;
+    p.o[0] += 3.6 * k;
+    p.o[1] += 0.6 * k;
+    p.o[2] -= 1.2 * k;
     const g = CV[41](t);
     p.leftW = g;
     p.leftT = "mag";
     p.leftCurl = "flat";
     p.leftCurlW = g;
+    p.leftArm = g;
     p.leftOff[2] = 0.5 * (bump(t, 1.0, 1.2) + bump(t, 1.25, 1.45) + bump(t, 1.5, 1.7));
     p.tail = bump(t, 1.05, 1.25) + bump(t, 1.3, 1.5) + bump(t, 1.55, 1.75);
   },

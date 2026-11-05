@@ -186,6 +186,9 @@ pub struct AnimDesc {
     /// Model (0 = main, 1.. = include models) the data lives in.
     group: usize,
     desc_offset: usize,
+    /// `animblock`: 0 = the data is in the MDL, k > 0 = block k of the model's `.ani` file (unsectioned animations;
+    /// sectioned ones carry a block per section).
+    block: i32,
     data_offset: i32,
     section_frames: usize,
     sections: Vec<(i32, i32)>,
@@ -227,6 +230,31 @@ struct Group {
     /// Group bone -> main bone (-1 = not in the main model).
     bone_map: Vec<i32>,
     bones: Vec<Bone>,
+    /// The group's external animation file (`.ani`, HL2-style models keep most frames there), when it has blocks and
+    /// the file was available, and its blocks `[datastart, dataend)` (index 0 unused: block 0 is the MDL).
+    ani: Option<Vec<u8>>,
+    blocks: Vec<(usize, usize)>,
+}
+
+/// `studiohdr_t::szanimblocknameindex` of a model that has external animation blocks (`numanimblocks > 1`): the `.ani`
+/// path (normalised), or None.
+pub fn ani_path(mdl: &[u8]) -> Option<String> {
+    if mdl.get(..4)? != b"IDST" || i32_at(mdl, 352)? <= 1 {
+        return None;
+    }
+    let name = rstr(mdl, 0, i32_at(mdl, 348)?)?;
+    let name = name.trim();
+    (!name.is_empty()).then(|| normalize(name))
+}
+
+/// `mstudioanimblock_t` table: `[datastart, dataend)` per block.
+fn anim_blocks(mdl: &[u8]) -> Vec<(usize, usize)> {
+    (|| {
+        let (n, at) = (count(mdl, 352)?, count(mdl, 356)?);
+        // Entry 0 is unused (block 0 is the MDL; compilers leave garbage there): invalid entries read as empty.
+        Some((0..n.min(4096)).map(|i| (|| Some((count(mdl, at + i * 8)?, count(mdl, at + i * 8 + 4)?)))().unwrap_or((0, 0))).collect::<Vec<_>>())
+    })()
+    .unwrap_or_default()
 }
 
 pub struct StudioModel {
@@ -243,6 +271,8 @@ pub struct StudioModel {
     pub includes: Vec<String>,
     pub mesh: SkinnedMesh,
     pub materials: Vec<StudioMaterial>,
+    /// Skin families (`MdlTextures::skins`): per family, the texture of each skin reference. Mesh groups use family 0.
+    pub skins: Vec<Vec<u16>>,
     groups: Vec<Group>,
 }
 
@@ -344,6 +374,7 @@ fn parse_anim_descs(b: &[u8], group: usize) -> Option<Vec<AnimDesc>> {
             frames,
             group,
             desc_offset: o,
+            block: i32_at(b, o + 52)?,
             data_offset: i32_at(b, o + 56)?,
             section_frames,
             sections,
@@ -549,6 +580,12 @@ pub fn load(vfs: &Vfs, path: &str) -> Load {
     }
     let includes = mdl_includes(&mdl);
     let inc_bytes: Vec<Option<Vec<u8>>> = includes.iter().map(|p| vfs.read(p).map(<[u8]>::to_vec)).collect();
+    // External animation blocks (`.ani`) of the model and its includes: requested with the rest, decoded lazily per
+    // animation (`decode_anim`). A missing one isn't an error: those animations hold the rest pose.
+    let anis: Vec<Option<Vec<u8>>> = std::iter::once(Some(mdl.as_slice()))
+        .chain(inc_bytes.iter().map(|b| b.as_deref()))
+        .map(|b| b.and_then(ani_path).and_then(|p| vfs.read(&p).map(<[u8]>::to_vec)))
+        .collect();
     let tex = mdl_textures(&mdl);
     let mat_names = tex.as_ref().map(|t| model_material_names(vfs, t)).unwrap_or_default();
     let materials: Vec<StudioMaterial> = mat_names.iter().map(|n| material(vfs, n)).collect();
@@ -570,7 +607,12 @@ pub fn load(vfs: &Vfs, path: &str) -> Load {
         }
     }
     match build(&path, groups, includes, materials, mesh_files.as_ref().map(|(a, b)| (a.as_slice(), b.as_slice())), tex.as_ref()) {
-        Some(m) => Load::Ready(Box::new(m)),
+        Some(mut m) => {
+            for (g, ani) in m.groups.iter_mut().zip(anis) {
+                g.ani = ani;
+            }
+            Load::Ready(Box::new(m))
+        }
         None => Load::Error(format!("{path}: malformed studio model")),
     }
 }
@@ -730,7 +772,8 @@ fn build(path: &str, group_bytes: Vec<Vec<u8>>, includes: Vec<String>, materials
                 l.pose = if lp >= 0 { local_pose.get(lp as usize).copied().unwrap_or(-1) } else { -1 };
             }
         }
-        groups.push(Group { bytes, bone_map, bones: gbones });
+        let blocks = anim_blocks(&bytes);
+        groups.push(Group { bytes, bone_map, bones: gbones, ani: None, blocks });
     }
     let main = &groups[0].bytes;
     let tex_default = MdlTextures::default();
@@ -752,6 +795,7 @@ fn build(path: &str, group_bytes: Vec<Vec<u8>>, includes: Vec<String>, materials
         includes,
         mesh,
         materials,
+        skins: tex.map(|t| t.skins.clone()).unwrap_or_default(),
         groups,
     })
 }
@@ -877,8 +921,7 @@ impl StudioModel {
             if desc.flags & STUDIO_ALLZEROS != 0 {
                 continue;
             }
-            let (start, local) = self.anim_data(desc, f)?;
-            let b = &g.bytes;
+            let (b, start, local) = self.anim_data(desc, f)?;
             let mut cursor = start;
             for _ in 0..=g.bones.len() {
                 let gb = *b.get(cursor)? as usize;
@@ -948,22 +991,36 @@ impl StudioModel {
         Some(out)
     }
 
-    /// Start of the `mstudioanim_t` chain for `frame` and the frame index within its section.
-    fn anim_data(&self, d: &AnimDesc, frame: usize) -> Option<(usize, usize)> {
-        if d.section_frames == 0 {
-            if d.data_offset == 0 {
-                return None;
+    /// The bytes holding the `mstudioanim_t` chain for `frame`, its start, and the frame index within its section
+    /// (`mstudioanimdesc_t::pAnim` / `pAnimBlock`). Block 0 is the MDL (offsets from the anim desc); block k > 0 is
+    /// `ani[datastart_k + index]`. None when the data is in a `.ani` that isn't loaded (the caller holds the rest pose).
+    fn anim_data(&self, d: &AnimDesc, frame: usize) -> Option<(&[u8], usize, usize)> {
+        let g = self.groups.get(d.group)?;
+        let (block, index, local) = if d.section_frames == 0 {
+            (d.block, d.data_offset, frame)
+        } else {
+            let sf = d.section_frames;
+            // The last frame of a long animation is stored on its own, after the sections.
+            let (section, local) = if d.frames > sf && frame == d.frames - 1 { (d.frames / sf + 1, 0) } else { (frame / sf, frame % sf) };
+            let (block, index) = *d.sections.get(section)?;
+            (block, index, local)
+        };
+        match block {
+            0 if index != 0 || d.section_frames != 0 => Some((&g.bytes, d.desc_offset.checked_add_signed(index as isize)?, local)),
+            0 => None,
+            k if k > 0 => {
+                let ani = g.ani.as_deref()?;
+                let &(start, end) = g.blocks.get(k as usize)?;
+                let at = start.checked_add(usize::try_from(index).ok()?)?;
+                (at < end.min(ani.len())).then_some((ani, at, local))
             }
-            return Some((d.desc_offset.checked_add_signed(d.data_offset as isize)?, frame));
+            _ => None, // -1: "model needs to be recompiled"
         }
-        let sf = d.section_frames;
-        let section = if d.frames > sf && frame == d.frames - 1 { frame / sf + 1 } else { frame / sf };
-        let (block, rel) = *d.sections.get(section)?;
-        if block != 0 {
-            return None; // .ani animation blocks: not used by CS:S models
-        }
-        let local = if d.frames > sf && frame == d.frames - 1 { 0 } else { frame % sf };
-        Some((d.desc_offset.checked_add_signed(rel as isize)?, local))
+    }
+
+    /// Whether any animation reads from a `.ani` block that isn't loaded.
+    pub fn missing_anim_blocks(&self) -> bool {
+        self.groups.iter().any(|g| g.ani.is_none() && g.blocks.len() > 1)
     }
 
     /// Metadata as JSON (bones, attachments, pose parameters, sequences, animations, materials, mesh groups).
@@ -1076,6 +1133,13 @@ impl StudioModel {
             }
             let _ = write!(s, "[{},{},{}]", g[0], g[1], g[2]);
         }
+        s.push_str("],\"skins\":[");
+        for (i, f) in self.skins.iter().enumerate() {
+            if i > 0 {
+                s.push(',');
+            }
+            let _ = write!(s, "[{}]", f.iter().map(|t| t.to_string()).collect::<Vec<_>>().join(","));
+        }
         let _ = write!(s, "],\"vertexCount\":{},\"indexCount\":{}}}", self.mesh.vertices.len() / STUDIO_VERTEX_FLOATS, self.mesh.indices.len());
         s
     }
@@ -1086,6 +1150,80 @@ mod tests {
     use super::*;
     use crate::vfs::Source;
     use std::rc::Rc;
+
+    /// External animation blocks (`.ani`): which bytes each animation's frames come from.
+    #[test]
+    fn ani_blocks_and_sections() {
+        // A track for bone 0 with a raw position (half floats).
+        let track = |p: [u16; 3]| {
+            let mut t = vec![0u8, ANIM_RAWPOS];
+            t.extend_from_slice(&0i16.to_le_bytes());
+            for v in p {
+                t.extend_from_slice(&v.to_le_bytes());
+            }
+            t
+        };
+        let (h1, h2, h3, h4, h5, h6, h7, h8, h9) = (0x3c00, 0x4000, 0x4200, 0x4400, 0x4500, 0x4600, 0x4700, 0x4800, 0x4880);
+        let mut mdl = vec![0u8; 400];
+        mdl[100..110].copy_from_slice(&track([h1, h2, h3]));
+        mdl[300..310].copy_from_slice(&track([h7, h7, h7]));
+        let mut ani = vec![0u8; 256];
+        ani[74..84].copy_from_slice(&track([h4, h5, h6]));
+        ani[120..130].copy_from_slice(&track([h8, h8, h8]));
+        ani[140..150].copy_from_slice(&track([h9, h9, h9]));
+        let bone = Bone {
+            name: "root".into(), parent: -1, pos: [0.0; 3], quat: [0.0, 0.0, 0.0, 1.0], rot: [0.0; 3], pos_scale: [1.0; 3], rot_scale: [1.0; 3],
+            pose_to_bone: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0], alignment: [0.0, 0.0, 0.0, 1.0], flags: 0, quat_interp: None,
+        };
+        let desc = |name: &str, frames: usize, block: i32, data_offset: i32, section_frames: usize, sections: Vec<(i32, i32)>| AnimDesc {
+            name: name.into(), fps: 30.0, flags: 0, frames, group: 0, desc_offset: 0, block, data_offset, section_frames, sections,
+        };
+        let mut m = StudioModel {
+            path: "t.mdl".into(), name: "t".into(), version: 48, eye_position: [0.0; 3], hull: [[0.0; 3]; 2], bones: vec![bone.clone()],
+            attachments: Vec::new(), pose_params: Vec::new(), seqs: Vec::new(),
+            anims: vec![
+                desc("in_mdl", 1, 0, 100, 0, Vec::new()),
+                desc("in_ani", 1, 1, 10, 0, Vec::new()),
+                desc("no_block", 1, 2, 0, 0, Vec::new()),
+                // 4 frames in sections of 2: frames 0-1 in the MDL, 2 in block 1, the last frame stored after them.
+                desc("sections", 4, 0, 0, 2, vec![(0, 300), (1, 56), (1, 0), (1, 76)]),
+            ],
+            includes: Vec::new(), mesh: SkinnedMesh::default(), materials: Vec::new(), skins: Vec::new(),
+            groups: vec![Group { bytes: mdl, bone_map: vec![0], bones: vec![bone], ani: None, blocks: vec![(0, 0), (64, 200)] }],
+        };
+        let pos = |m: &StudioModel, a: usize, f: usize| m.decode_anim(a).map(|v| v[f * 7 + 4..f * 7 + 7].to_vec());
+        assert_eq!(pos(&m, 0, 0), Some(vec![1.0, 2.0, 3.0]));
+        // Not loaded: the animation is undecodable (the client holds the rest pose), not read from the MDL's bytes.
+        assert_eq!(pos(&m, 1, 0), None);
+        assert!(m.missing_anim_blocks());
+        m.groups[0].ani = Some(ani);
+        assert!(!m.missing_anim_blocks());
+        assert_eq!(pos(&m, 1, 0), Some(vec![4.0, 5.0, 6.0]));
+        assert_eq!(pos(&m, 2, 0), None, "block 2 doesn't exist");
+        assert_eq!(pos(&m, 3, 0), Some(vec![7.0; 3]));
+        assert_eq!(pos(&m, 3, 2), Some(vec![8.0; 3]));
+        // Last frame: section frames / section_frames + 1 = 3 (mstudioanimdesc_t::pAnim), not (frames - 1) / 2 + 1 = 2.
+        assert_eq!(pos(&m, 3, 3), Some(vec![9.0; 3]));
+    }
+
+    #[test]
+    fn ani_path_and_block_table() {
+        let mut mdl = vec![0u8; 420];
+        mdl[..4].copy_from_slice(b"IDST");
+        mdl[348..352].copy_from_slice(&380i32.to_le_bytes());
+        mdl[380..409].copy_from_slice(b"models\\Humans\\male_shared.ani");
+        mdl[352..356].copy_from_slice(&1i32.to_le_bytes());
+        assert_eq!(ani_path(&mdl), None, "one block = only the MDL's own");
+        mdl[352..356].copy_from_slice(&2i32.to_le_bytes());
+        assert_eq!(ani_path(&mdl).as_deref(), Some("models/humans/male_shared.ani"));
+        // Block table at 260: entry 0 is garbage in shipped models (male_shared.mdl: -57671712).
+        mdl[356..360].copy_from_slice(&260i32.to_le_bytes());
+        mdl[260..264].copy_from_slice(&(-57671712i32).to_le_bytes());
+        mdl[264..268].copy_from_slice(&(-57671712i32).to_le_bytes());
+        mdl[268..272].copy_from_slice(&408i32.to_le_bytes());
+        mdl[272..276].copy_from_slice(&31092i32.to_le_bytes());
+        assert_eq!(anim_blocks(&mdl), vec![(0, 0), (408, 31092)]);
+    }
 
     #[test]
     fn rle_values() {

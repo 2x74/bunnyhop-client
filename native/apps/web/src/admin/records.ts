@@ -54,6 +54,8 @@ interface Settings {
   minImproveSec: number;
   classicOnly: boolean;
   bonuses: boolean;
+  maxTimeSec: number;
+  hardTier: number;
   cooldownMin: number;
   coalesceSec: number;
 }
@@ -173,6 +175,8 @@ export function recordsView(d: RecordsDeps): View {
       numIn("minImproveSec", "or min improvement s", "0.001"),
       check("classicOnly", "Classic styles only (no Auto-strafe, Low Gravity, Segmented or Infinite)"),
       check("bonuses", "Include bonuses"),
+      numIn("maxTimeSec", "Max run time (s, 0 = any)"),
+      numIn("hardTier", "From this tier every WR posts: first clears, any length (0 = off)"),
       numIn("cooldownMin", "Map cooldown (min)"),
       numIn("coalesceSec", "Batch window (s)"),
       numIn("dailyCap", "Posts per day (0 = no cap)"),

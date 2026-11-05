@@ -178,6 +178,7 @@ TextBitmap raster_text(const std::string &text, float size, bool tabular) {
         out.origin_x = float(pad - left);
         out.origin_y = float(height - pad - descent - ascent);
         out.advance = float(advance);
+        out.baseline = float(height - pad - descent);
     } else
         out = {};
     CGColorSpaceRelease(space);
@@ -276,6 +277,9 @@ TextBitmap raster_text(const std::string &text, float size, bool tabular) {
     out.origin_x = float(pad) + std::max(0.f, overhang.left);
     out.origin_y = float(pad) + std::max(0.f, overhang.top);
     out.advance = metrics.widthIncludingTrailingWhitespace;
+    DWRITE_LINE_METRICS line{};
+    UINT32 lines = 0;
+    if (SUCCEEDED(layout->GetLineMetrics(&line, 1, &lines)) && lines == 1) out.baseline = out.origin_y + line.baseline;
     return out;
 #else
     if (!g_utf8_validate(text.data(), gssize(text.size()), nullptr)) return {};
@@ -320,6 +324,7 @@ TextBitmap raster_text(const std::string &text, float size, bool tabular) {
             out.origin_x = float(pad - left);
             out.origin_y = float(pad - top);
             out.advance = float(logical.x + logical.width);
+            out.baseline = out.origin_y + float(pango_layout_get_baseline(layout)) / PANGO_SCALE;
         } else
             out = {};
         cairo_destroy(context);

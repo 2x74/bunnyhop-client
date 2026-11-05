@@ -14,7 +14,7 @@ import { concat, invert34, type V3 } from "../../player/bunny/rig";
 import type { GloveStyleId } from "../../loadout";
 import { fromAxes, identity, rotAbout } from "../math";
 import type { VmRig } from "../rig";
-import { GRIP_ALONG, seatKnife, wrapFingers, type HandFrame } from "../knives/hold";
+import { GRIP_ALONG, GRIP_SKIN, seatKnife, wrapFingers, type HandFrame } from "../knives/hold";
 import { KnifeCtx } from "../knives/ctx";
 import { PART, type Curl, type HoldSpec, type KnifeDef } from "../knives/types";
 import { gunRig } from "./rig";
@@ -212,6 +212,12 @@ export function solveHand(def: GunDef, side: Side, glove: GloveStyleId = "knit")
     const res = wrapFingers(h, spec, gunToBind, spec.wrap!, sd, glove);
     for (const [f, c] of res) out[f.toLowerCase() as "index"] = { c: [c[0], c[1], c[2]], spread: curls[f.toLowerCase() as "index"].spread };
   }
+  // The firing index on the trigger (its own target, not the wrap: the wrap closes fingers onto the grip).
+  if (side === "R" && def.trigger && grip.triggerRest && !grip.wrap.includes("Index")) {
+    const down = typeof grip.triggerRest === "number" ? grip.triggerRest : TRIGGER_DOWN;
+    const { c } = solveTriggerIndex(def.trigger, gunToBind, out, GRIP_SKIN[glove].finger, undefined, down);
+    out.index = { c, spread: curls.index.spread };
+  }
   const s = sideBind(side);
   const inv = new Float32Array(12), handInGun = new Float32Array(12);
   invert34(gunToBind, 0, inv, 0);
@@ -219,6 +225,69 @@ export function solveHand(def: GunDef, side: Side, glove: GloveStyleId = "knit")
   const res: SolvedHand = { side, gunToBind, handInGun, curls: out };
   solved.set(key, res);
   return res;
+}
+
+/** The index's pad (centre of the finger, partway along its last segment) sits this far in front of the trigger blade. */
+const PAD_R = 0.3;
+/** How far down the trigger blade from its pivot the pad rests (gun-local units). */
+const TRIGGER_DOWN = 0.3;
+
+/**
+ * The firing index's curls (MCP, PIP, DIP) that bring its pad as close as it reaches to the trigger's front face, `skin`
+ * (the glove's) clear of it, within the joints' natural range (no hyperextension): a coarse search, then a fine one,
+ * preferring the least curl among near ties. Once per gun + glove (cached with the hold). With the bunny's short
+ * fingers on the long guns' deep grips the pad reaches into the guard toward the trigger, not onto it (about a unit
+ * short): owner decision in the v0.0.38 viewmodel report.
+ */
+export function solveTriggerIndex(trigger: V3, gunToBind: Float32Array, curls: Curls, skin: number, debug?: { pad?: V3; mcp?: V3 }, down = TRIGGER_DOWN): { c: [number, number, number]; residual: number } {
+  const r = gunRig().hands;
+  const W = new Float32Array(r.bind);
+  const poser = new FingerPoser("R", r);
+  const b = [1, 2, 3].map((k) => r.bone(fingerBone("R", `Index0${k}`)));
+  const g = trigger, tl: V3 = [g[0] + 0.08 + PAD_R + skin, 0, g[2] - down];
+  const T: V3 = [
+    gunToBind[0] * tl[0] + gunToBind[1] * tl[1] + gunToBind[2] * tl[2] + gunToBind[3],
+    gunToBind[4] * tl[0] + gunToBind[5] * tl[1] + gunToBind[6] * tl[2] + gunToBind[7],
+    gunToBind[8] * tl[0] + gunToBind[9] * tl[1] + gunToBind[10] * tl[2] + gunToBind[11],
+  ];
+  const flat = flatCurls(curls);
+  const at = (i: number): V3 => [W[i * 12 + 3], W[i * 12 + 7], W[i * 12 + 11]];
+  const cost = (c: number[]): number => {
+    poser.pose(W, (i, k) => (i === 0 ? c[k] : flat[i * 4 + k]), (i) => flat[i * 4 + 3]);
+    const p2 = at(b[1]), p3 = at(b[2]);
+    const d = sub(p3, p2);
+    const pad = add(p3, scale(d, 0.55));
+    return len(sub(pad, T)) + 0.0015 * (c[0] + c[1] + c[2]);
+  };
+  let best = [0, 0, 0], bestC = Infinity;
+  for (let a = -5; a <= 80; a += 5)
+    for (let p = 0; p <= 95; p += 5)
+      for (let d = 0; d <= 70; d += 5) {
+        const v = cost([a, p, d]);
+        if (v < bestC) (bestC = v), (best = [a, p, d]);
+      }
+  for (let step = 2; step >= 0.5; step /= 2)
+    for (let it = 0; it < 12; it++) {
+      let moved = false;
+      for (let k = 0; k < 3; k++)
+        for (const sgn of [-1, 1]) {
+          const c = [...best];
+          c[k] = Math.max(k === 0 ? -5 : 0, Math.min(k === 0 ? 80 : k === 1 ? 95 : 70, c[k] + sgn * step));
+          const v = cost(c);
+          if (v < bestC) (bestC = v), (best = c), (moved = true);
+        }
+      if (!moved) break;
+    }
+  if (debug) {
+    cost(best);
+    const inv = new Float32Array(12);
+    invert34(gunToBind, 0, inv, 0);
+    const loc = (q: V3): V3 => [0, 1, 2].map((r) => inv[r * 4] * q[0] + inv[r * 4 + 1] * q[1] + inv[r * 4 + 2] * q[2] + inv[r * 4 + 3]) as V3;
+    const p2 = at(b[1]), p3 = at(b[2]);
+    debug.pad = loc(add(p3, scale(sub(p3, p2), 0.55)));
+    debug.mcp = loc(at(b[0]));
+  }
+  return { c: [best[0], best[1], best[2]], residual: bestC - 0.0015 * (best[0] + best[1] + best[2]) };
 }
 
 /** The silencer alone as a "knife" for the grip solver (the can seated, its body and collar are grip). */

@@ -5,6 +5,7 @@
 #include "bunnyhop_native.h"
 #include "ghost_playback.hpp"
 #include "render_shaders.hpp"
+#include "replay_preroll.hpp"
 #include <algorithm>
 #include <cstdint>
 #include <optional>
@@ -42,18 +43,41 @@ inline ActorPulses actor_pulses(const Actor &actor, bool posed_this_frame, bool 
 
 // The model a third-person camera follows, yours or a replay's runner, where the player stands and looks.
 inline Actor own_actor(const BhSnapshot &state, float pitch, float yaw, uint32_t weapon) {
-    constexpr uint32_t crouched_flag = 1, grounded_flag = 2;
+    constexpr uint32_t crouched_flag = 1, grounded_flag = 2, ladder_flag = 4;
     Actor actor;
     actor.id = own_actor_id;
     actor.opacity = 1;
     std::copy_n(state.player.position, 3, actor.frame.position);
     std::copy_n(state.player.velocity, 3, actor.frame.velocity);
     actor.frame.tick = state.player.tick;
-    actor.frame.flags = (state.player.crouched ? crouched_flag : 0) | (state.player.grounded ? grounded_flag : 0);
+    actor.frame.flags = (state.player.crouched ? crouched_flag : 0) | (state.player.grounded ? grounded_flag : 0)
+                        | (state.player.on_ladder ? ladder_flag : 0);
+    actor.waterLevel = state.water_level;
     actor.frame.view_offset_z = state.player.view_offset_z;
     actor.frame.pitch = pitch;
     actor.frame.yaw = yaw;
     actor.frame.weapon = weapon;
+    return actor;
+}
+
+// A snapshot with its player at a whole tick (the replay viewer shows a smoothed one between ticks).
+inline BhSnapshot at_tick(const BhSnapshot &shown, const BhState &tick) {
+    BhSnapshot out = shown;
+    out.player = tick;
+    return out;
+}
+
+// The bunny at one of the frames before a cut (replay_preroll.hpp): `model`'s look and weapon with the frame's state,
+// view and strafe key, and none of `model`'s gestures.
+inline Actor prerolled_actor(const Actor &model, const native::PrerollFrame &frame) {
+    auto actor = own_actor(frame.snapshot, frame.view.pitch, frame.view.yaw, model.frame.weapon);
+    actor.id = model.id;
+    actor.outfit = model.outfit;
+    actor.loadout = model.loadout;
+    actor.opacity = model.opacity;
+    actor.emptyHand = model.emptyHand;
+    actor.playerGlow = model.playerGlow;
+    actor.sidemove = frame.view.side;
     return actor;
 }
 

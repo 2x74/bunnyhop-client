@@ -1,11 +1,11 @@
 import { normalizeGlowColor, DEFAULT_PLAYER_GLOW } from "./glow-config";
 // Dev preview for the player models: /player.html (vite dev server only).
-//   ?model=bunny|runner|ct|t|<skin>|side (side = ?side=bunny,ct models next to each other)   ?style=solid|ghost|both
+//   ?style=solid|ghost|both (the bunny is the only player model since v0.0.38)
 //   ?rowx=<units> (rows side by side)   ?outfits=outfit-cream,outfit-neon,... (one bunny column per colourway)   ?procedural (bunny without CS:S animations)
 //   ?hats=none,crown1,hat-founder-crown,... (one bunny column per headwear: a hat id, crown1-3, or none; ?crown=1 adds the
 //   rank crown under every hat, to check the hat wins)
 //   ?poses=neutral,run,walk,hop,air,strafe,crouch,crouchwalk,crouchjump,look,turn   ?t=<seconds> (freeze at a time)
-//   ?yaw=<deg> model facing (default 3/4 view)   ?cam=x,y,z&look=x,y,z&fov=deg close-ups   ?still=1 animated cosmetics held still   ?bench=N (time update() for N CS:S models)   ?map=<name> (content source)
+//   ?yaw=<deg> model facing (default 3/4 view)   ?cam=x,y,z&look=x,y,z&fov=deg close-ups   ?still=1 animated cosmetics held still   ?bench=N (time update() for N bunnies)   ?map=<name> (content source)
 //   ?gun=<id> every bunny holds that gun (a core weapon id: glock, usp, fiveseven, m3, xm1014, p90, ak47, awp)
 //   ?guns=<id,id,...> one bunny column per gun (poses cycled)   ?pitch=<deg> overrides the poses' view pitch
 //   ?body=feminine Model B for every column   ?potato=1 cosmetic motion held still (Potato)
@@ -14,13 +14,12 @@ import { normalizeGlowColor, DEFAULT_PLAYER_GLOW } from "./glow-config";
 
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { PlayerModel, type PlayerModelKind, type PlayerPose } from "./model";
+import { PlayerModel, type PlayerPose } from "./model";
 import { GHOST_COLORS } from "./colors";
 import { discoverPlayerContent, sha256Hex } from "../content";
-import { hasSkin, loadAnimRig, loadCsAsset, SKIN_LABEL, type CsSkin } from "./studio/loader";
+import { loadAnimRig } from "./studio/loader";
 import { cosmetic } from "../progression";
 import { loadoutFor } from "../loadout";
-import { resolveSkin } from "./model";
 import { gunById } from "../viewmodel/guns/index";
 import { setCosmeticsStill } from "../viewmodel/finishes/shader";
 
@@ -92,7 +91,6 @@ const DRIVERS: Record<string, [string, (x: number) => Driver]> = {
 };
 const poseNames = (q.get("poses") ?? "neutral,run,hop,strafe,crouch").split(",").filter((p) => DRIVERS[p]);
 const style = q.get("style") ?? "solid";
-const modelParam = q.get("model") ?? "bunny";
 const ghostColors = [GHOST_COLORS.pb, GHOST_COLORS.wr, GHOST_COLORS.custom, GHOST_COLORS.pb];
 
 interface Entry {
@@ -102,14 +100,9 @@ interface Entry {
 }
 const entries: Entry[] = [];
 const spacing = Number(q.get("spacing") ?? 72);
-const rows: { style: string; model: string }[] = [];
-for (const s of style === "both" ? ["solid", "ghost"] : [style]) {
-  if (modelParam === "side") for (const m of (q.get("side") ?? "bunny,ct").split(",")) rows.push({ style: s, model: m });
-  else rows.push({ style: s, model: modelParam });
-}
+const rows: { style: string }[] = (style === "both" ? ["solid", "ghost"] : [style]).map((s) => ({ style: s }));
 
-/** Columns: one per pose, or with ?models=<skin,skin,...> one per model (poses cycled). */
-const modelList = q.get("models")?.split(",").filter(Boolean) ?? null;
+/** Columns: one per pose, or one per outfit / hat / body / gun (poses cycled). */
 const outfitList = q.get("outfits")?.split(",").filter(Boolean) ?? null;
 const bodyList = q.get("bodies")?.split(",").filter(b => b === "classic" || b === "feminine") ?? null;
 const hatList = q.get("hats")?.split(",").filter(Boolean) ?? null;
@@ -121,17 +114,15 @@ const headwear = (w: string) => {
   return loadoutFor({ hat, hairLength: len ? Number(len) : undefined }, crown);
 };
 const gunList = q.get("guns")?.split(",").filter(Boolean) ?? null;
-const columns: { pose: string; model?: string; outfit?: string; hat?: string; body?: string; gun?: string; label: string }[] = gunList
-  ? gunList.map((g, i) => ({ pose: poseNames[i % poseNames.length], model: "bunny", gun: g, body: q.get("body") ?? undefined, label: gunById(g)?.name ?? g }))
+const columns: { pose: string; outfit?: string; hat?: string; body?: string; gun?: string; label: string }[] = gunList
+  ? gunList.map((g, i) => ({ pose: poseNames[i % poseNames.length], gun: g, body: q.get("body") ?? undefined, label: gunById(g)?.name ?? g }))
   : bodyList
-  ? bodyList.map((body, i) => ({ pose: poseNames[i % poseNames.length], model: "bunny", body, label: body === "feminine" ? "Model B" : "Model A" }))
+  ? bodyList.map((body, i) => ({ pose: poseNames[i % poseNames.length], body, label: body === "feminine" ? "Model B" : "Model A" }))
   : hatList
-  ? hatList.map((w, i) => ({ pose: poseNames[i % poseNames.length], model: "bunny", hat: w, label: cosmetic(w)?.name ?? w }))
+  ? hatList.map((w, i) => ({ pose: poseNames[i % poseNames.length], hat: w, label: cosmetic(w)?.name ?? w }))
   : outfitList
-  ? outfitList.map((o, i) => ({ pose: poseNames[i % poseNames.length], model: "bunny", outfit: o, body: q.get("body") === "feminine" ? "feminine" : undefined, label: o === "outfit-plush" ? "Plush Bunny" : o === "outfit-bune" ? "Bun-E" : cosmetic(o)?.name ?? o }))
-  : modelList
-    ? modelList.map((m, i) => ({ pose: poseNames[i % poseNames.length], model: m, label: SKIN_LABEL[m as CsSkin] ?? m }))
-    : poseNames.map((p) => ({ pose: p, label: DRIVERS[p][0] }));
+  ? outfitList.map((o, i) => ({ pose: poseNames[i % poseNames.length], outfit: o, body: q.get("body") === "feminine" ? "feminine" : undefined, label: o === "outfit-plush" ? "Plush Bunny" : o === "outfit-bune" ? "Bun-E" : cosmetic(o)?.name ?? o }))
+  : poseNames.map((p) => ({ pose: p, label: DRIVERS[p][0] }));
 
 async function setup(): Promise<void> {
   if (q.has("world")) {
@@ -148,25 +139,22 @@ async function setup(): Promise<void> {
   // Player content comes from a map manifest (any map's carries it).
   const map = q.get("map") ?? "bhop_eazy";
   try {
-    // ?procedural: no hosted content at all (the bunny's fallback animation; CS:S models fall back to the bunny).
+    // ?procedural: no hosted content at all (the bunny's fallback animation).
     if (q.has("procedural")) throw new Error("content disabled (?procedural)");
     const bsp = new Uint8Array(await (await fetch(`/${map}.bsp`)).arrayBuffer());
     if (!(await discoverPlayerContent(await sha256Hex(bsp)))) console.warn("preview: no player content in the manifest (run tools/content/extract.ts)");
   } catch (e) {
     console.warn("preview: content discovery failed", e);
   }
-  // Wait for the CS:S models so screenshots never catch the runner fallback.
-  const wanted = rows.flatMap((r) => columns.map((c) => resolveSkin({ model: (c.model ?? r.model) as PlayerModelKind, style: r.style as "solid" | "ghost" })));
-  const skins = new Set(wanted.filter((s) => s !== "runner" && hasSkin(s)));
-  await Promise.all([...skins].map((s) => loadCsAsset(s).catch(() => null)));
-  if (!q.has("procedural") && wanted.some((s) => s === "bunny" || !hasSkin(s))) await loadAnimRig().catch(() => null);
+  // Wait for the CS:S animations so screenshots never catch the procedural fallback (unless ?procedural).
+  if (!q.has("procedural")) await loadAnimRig().catch(() => null);
 
   rows.forEach((row, r) => {
     columns.forEach((col, i) => {
       const name = col.pose;
       const x = (i - (columns.length - 1) / 2) * spacing;
       const ghost = row.style === "ghost";
-      const model = new PlayerModel({ playerGlow: normalizeGlowColor(q.get("glow")) ? { ...DEFAULT_PLAYER_GLOW, enabled: true, color: normalizeGlowColor(q.get("glow"))! } : null, previewGlow: true, style: ghost ? "ghost" : "solid", color: ghost ? ghostColors[i % 4] : undefined, model: (col.model ?? row.model) as PlayerModelKind, outfit: col.outfit ?? q.get("outfit") ?? undefined, ...(col.body ? { loadout: loadoutFor({ body: col.body === "feminine" ? "body-b" : "body-a" }), knife: null, outfit: col.outfit ?? q.get("outfit") ?? "outfit-cream" } : col.hat ? { loadout: headwear(col.hat) } : {}) });
+      const model = new PlayerModel({ playerGlow: normalizeGlowColor(q.get("glow")) ? { ...DEFAULT_PLAYER_GLOW, enabled: true, color: normalizeGlowColor(q.get("glow"))! } : null, previewGlow: true, style: ghost ? "ghost" : "solid", color: ghost ? ghostColors[i % 4] : undefined, outfit: col.outfit ?? q.get("outfit") ?? undefined, ...(col.body ? { loadout: loadoutFor({ body: col.body === "feminine" ? "body-b" : "body-a" }), knife: null, outfit: col.outfit ?? q.get("outfit") ?? "outfit-cream" } : col.hat ? { loadout: headwear(col.hat) } : {}) });
       const gun = col.gun ?? q.get("gun");
       if (gun) model.setGun(gun);
       model.setOpacity(0.7);
@@ -269,9 +257,8 @@ function frame(now: number) {
 }
 
 function bench(n: number): void {
-  const skin = resolveSkin({ model: (modelParam === "side" ? "ct" : modelParam) as PlayerModelKind });
   const models = Array.from({ length: n }, (_, i) => {
-    const m = new PlayerModel({ style: "solid", model: skin as PlayerModelKind });
+    const m = new PlayerModel({ style: "solid" });
     m.root.position.x = i * 40;
     return m;
   });

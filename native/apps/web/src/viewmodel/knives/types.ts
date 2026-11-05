@@ -108,6 +108,11 @@ export interface KnifeState {
   show: number;
   /** 0..1: the fingers let go of the handle (KnifeHold: middle, ring and little finger open, the index a third), e.g. while a balisong's handle swings round in the draw. Reset every frame. */
   loosen: number;
+  /**
+   * The viewmodel's clock (s) for idle motion (idleSway): set by its owner before the hold poses, never the wall clock,
+   * so a replay or an export shows the same idle every time (the viewer resets it on a seek).
+   */
+  time: number;
 }
 
 export interface KnifeDef {

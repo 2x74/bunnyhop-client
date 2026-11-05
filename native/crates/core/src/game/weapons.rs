@@ -60,10 +60,25 @@
 //! fps, 3.08 s). It needs both attack times passed and no reload (`DefaultReload` and `DefaultDeploy` set both). Held
 //! +attack2 toggles again when the lock-out ends, like CS:S. The state belongs to the weapon: a dropped USP keeps it.
 //! Silenced shots use CS:S's Secondary_Mode (attack report mode 2: the quiet sound); the weapon script's damage, range
-//! and range modifier are the same either way (only the spread, not simulated, has *Alt values).
+//! and range modifier are the same either way (only the spread, not simulated, has *Alt values), but from v25 the
+//! engine's silenced-USP damage of 30 applies (`bullet_stats`).
 //!
-//! Not simulated: the knife's draw time after a (re)spawn, the CT spawn pistol, grenades, the M4A1's silencer, scopes
-//! (client zoom only), weapon speeds, throwing a dropped weapon, reserve ammo.
+//! The M4A1's silencer (v25): the same, with `CWeaponM4A1::SecondaryAttack`'s own sequence (v_rif_m4a1.mdl
+//! add_silencer / detach_silencer: 61 frames at 30 fps, 2.0 s). Its weapon script keeps damage 33, range 8192, range
+//! modifier 0.97 and cycle 0.09 for both modes, but the engine's FX_FireBullets gives a silenced M4A1 range modifier 0.95.
+//! Before v25 +attack2 does nothing on the M4A1, as it always did.
+//!
+//! Secondary_Mode bullets (v25, `bullet_stats`): FX_FireBullets overrides the weapon script for three guns: a Glock burst
+//! round does 18 damage at range modifier 0.9 (script 25, 0.75), a silenced M4A1 falls off at 0.95, a silenced USP does
+//! 30 (script 34). The FAMAS burst and everything else use the script; v1-v24 always did.
+//!
+//! Interrupted changes (v25, both guns): CWeaponUSP / CWeaponM4A1::Holster and ::Drop put the silencer back when the
+//! attach / detach hasn't finished (`curtime < m_flDoneSwitchingSilencer`), so a switch or drop mid-change keeps the old
+//! state. v7-v24 keep the new state (unchanged). A restart's restore isn't a holster (CS:S keeps the gun drawn over
+//! `!r`): it gives back whatever mode the client remembered from the weapon report.
+//!
+//! Not simulated: the knife's draw time after a (re)spawn, the CT spawn pistol, grenades, the M4A1's silencer before
+//! v25, scopes (client zoom only), weapon speeds, throwing a dropped weapon, reserve ammo.
 
 use super::*;
 use std::sync::Arc;
@@ -127,6 +142,32 @@ pub const WEAPON_RESTORE_TICKS: u32 = 2 * WEAPON_COMMAND_COOLDOWN;
 /// The USP's silencer attach / detach time, s: v_pist_usp.mdl `add_silencer` / `detach_silencer` are 115 frames at 37 fps
 /// (`SequenceDuration()` = 114 / 37), read from the CS:S dedicated server's model (research/WEAPONS.md).
 pub const USP_SILENCER_TIME: f32 = 114.0 / 37.0;
+/// The M4A1's silencer attach / detach time (v25), s: v_rif_m4a1.mdl `add_silencer` / `detach_silencer` are 61 frames
+/// at 30 fps (60 / 30; read from the CS:S client's cstrike_pak_dir.vpk, 2026-11-04).
+pub const M4A1_SILENCER_TIME: f32 = 60.0 / 30.0;
+/// v25: a silenced M4A1's range modifier (CS:S FX_FireBullets: weapon 21 in Secondary_Mode; its script says 0.97).
+pub const M4A1_SILENCED_RANGE_MODIFIER: f32 = 0.95;
+/// v25: a Glock burst round's damage and range modifier (FX_FireBullets: weapon 2 in Secondary_Mode; script 25, 0.75).
+pub const GLOCK_BURST_DAMAGE: f32 = 18.0;
+pub const GLOCK_BURST_RANGE_MODIFIER: f32 = 0.9;
+/// v25: a silenced USP's damage (FX_FireBullets: weapon 16 in Secondary_Mode; script 34).
+pub const USP_SILENCED_DAMAGE: f32 = 30.0;
+
+/// A shot's damage and the range modifier it falls off by (damage * modifier ^ (distance / 500)). `secondary`: CS:S's
+/// Secondary_Mode (a silenced USP / M4A1, a Glock / FAMAS burst). From v25 the engine's FX_FireBullets overrides the
+/// weapon script for three of them (server.dylib, cs_fx_shared): a Glock burst round 18 damage at 0.9, a silenced M4A1
+/// 0.95, a silenced USP 30 damage. Every other gun and mode, and v1-v24, use the script's.
+pub fn bullet_stats(gun: &Gun, secondary: bool, physics_version: u32) -> (f32, f32) {
+    if !secondary || !(PHYSICS_V25..=PHYSICS_LATEST).contains(&physics_version) {
+        return (gun.damage, gun.range_modifier);
+    }
+    match gun.id {
+        GLOCK => (GLOCK_BURST_DAMAGE, GLOCK_BURST_RANGE_MODIFIER),
+        M4A1 => (gun.damage, M4A1_SILENCED_RANGE_MODIFIER),
+        USP => (USP_SILENCED_DAMAGE, gun.range_modifier),
+        _ => (gun.damage, gun.range_modifier),
+    }
+}
 
 /// `weapon_report` flags (`EVENT_WEAPON`).
 pub const WEAPON_EVENT_SWITCHED: u32 = 1;
@@ -231,6 +272,8 @@ const fn gun(
 const GLOCK: u8 = 2;
 /// Weapon id of the USP (`GUNS`).
 const USP: u8 = 3;
+/// Weapon id of the M4A1 (`GUNS`).
+const M4A1: u8 = 18;
 /// v6: ticks between a burst-mode Glock's rounds at 100 tick, measured on srcds (tools/parity, 2026-10-07: rounds on
 /// commands n, n + 6, n + 12 wherever the burst starts; the next burst 50 ticks after the first round).
 const GLOCK_BURST_ROUND_TICKS: u32 = 6;
@@ -525,6 +568,13 @@ impl Game {
     /// Weapon_Switch -> Deploy: the new weapon is ready after its draw; a reload or burst stops.
     fn switch_weapon(&mut self, slot: u8) {
         if self.arms.active != slot {
+            // v25: the outgoing gun's unfinished silencer change goes back (CWeaponUSP / CWeaponM4A1::Holster). Only
+            // when the active slot changes: a weapon command that re-gives the active slot has already replaced it.
+            if self.silencer_interrupted() {
+                if let Some(h) = self.arms.slot_mut(self.arms.active) {
+                    h.silenced = !h.silenced;
+                }
+            }
             self.arms.last = self.arms.active;
         }
         self.arms.active = slot;
@@ -533,6 +583,16 @@ impl Game {
         self.arms.burst_left = 0;
         self.cancel_silencer();
         self.weapon_event(WEAPON_EVENT_SWITCHED);
+    }
+
+    /// v25: the held gun's silencer change is still under way (CS:S `curtime < m_flDoneSwitchingSilencer`), so holstering
+    /// or dropping it now puts the silencer back as it was: CWeaponUSP / CWeaponM4A1::Holster and ::Drop flip
+    /// m_bSilencerOn back (server.dylib, research/WEAPONS.md). Before v25 the new state is kept (v7-v24 unchanged). The
+    /// exact completion tick counts as done: the gun tick that clears `silencer_tick` runs after the switch / drop.
+    fn silencer_interrupted(&self) -> bool {
+        (PHYSICS_V25..=PHYSICS_LATEST).contains(&self.settings.physics_version)
+            && self.arms.silencer_tick != 0
+            && self.tick < self.arms.silencer_tick
     }
 
     /// A silencer attach / detach stops with its weapon (switched away, dropped): its lock-out was the USP's own
@@ -574,7 +634,7 @@ impl Game {
             burst: mode && gun.is_some_and(|g| g.burst),
             ent: None,
             name: None,
-            silenced: mode && id == USP,
+            silenced: mode && self.silencer_time(id).is_some(),
         };
         match slot {
             1 => self.arms.primary = Some(fresh()),
@@ -692,13 +752,18 @@ impl Game {
     /// CCSPlayer::DropWeapon for the active gun: its entity goes back on the floor in front of the player.
     fn drop_active(&mut self, cmd: Cmd) {
         let slot = self.arms.active;
-        let Some(held) = (match slot {
+        let interrupted = self.silencer_interrupted();
+        let Some(mut held) = (match slot {
             1 => self.arms.primary.take(),
             2 => self.arms.secondary.take(),
             _ => None,
         }) else {
             return;
         };
+        // v25: an unfinished silencer change goes back before it hits the floor (CWeaponUSP / CWeaponM4A1::Drop).
+        if interrupted {
+            held.silenced = !held.silenced;
+        }
         self.arms.active = 0;
         self.arms.reload_tick = 0;
         self.arms.burst_left = 0;
@@ -827,15 +892,13 @@ impl Game {
         if self.arms.silencer_tick != 0 && self.tick >= self.arms.silencer_tick {
             self.arms.silencer_tick = 0;
         }
-        if cmd.buttons & IN_ATTACK2 != 0
-            && gun.id == USP
-            && self.settings.physics_fixes() & PHYSICS_FIX_USP_SILENCER != 0
-            && self.tick >= self.arms.next_attack_tick.max(self.arms.next_secondary_tick)
-            && self.arms.reload_tick == 0
-        {
+        let silencer_time = self.silencer_time(gun.id);
+        if let Some(time) = silencer_time.filter(|_| {
+            cmd.buttons & IN_ATTACK2 != 0 && self.tick >= self.arms.next_attack_tick.max(self.arms.next_secondary_tick) && self.arms.reload_tick == 0
+        }) {
             let h = self.arms.slot_mut(slot).expect("active gun");
             h.silenced = !h.silenced;
-            let done = self.tick + self.delay_ticks(USP_SILENCER_TIME);
+            let done = self.tick + self.delay_ticks(time);
             self.arms.next_attack_tick = done;
             self.arms.next_secondary_tick = done;
             self.arms.silencer_tick = done;
@@ -880,6 +943,16 @@ impl Game {
             };
             self.arms.reload_tick = self.tick + self.delay_ticks(first).max(1);
             self.weapon_event(WEAPON_EVENT_RELOAD_STARTED);
+        }
+    }
+
+    /// The attach / detach time of weapon `id`'s silencer, None if it has none in this physics version: the USP's from
+    /// v7 (`PHYSICS_FIX_USP_SILENCER`), the M4A1's from v25.
+    pub(super) fn silencer_time(&self, id: u8) -> Option<f32> {
+        match id {
+            USP if self.settings.physics_fixes() & PHYSICS_FIX_USP_SILENCER != 0 => Some(USP_SILENCER_TIME),
+            M4A1 if (PHYSICS_V25..=PHYSICS_LATEST).contains(&self.settings.physics_version) => Some(M4A1_SILENCER_TIME),
+            _ => None,
         }
     }
 
@@ -939,12 +1012,15 @@ impl Game {
                 }
             }
         }
-        // A silenced USP fires in CS:S's Secondary_Mode (its quiet sound); the damage is the same.
+        // A silenced USP (v7) or M4A1 (v25) fires in CS:S's Secondary_Mode (its quiet sound); the damage is the same.
         let silenced = self.arms.slot(slot).is_some_and(|h| h.silenced);
         self.report_attack(gun.id, if silenced { 2 } else { 1 }, eye, end, hit);
-        // Damage falls off with distance: damage * rangeModifier ^ (distance / 500).
+        // Damage falls off with distance: damage * rangeModifier ^ (distance / 500). v25: Secondary_Mode shots take the
+        // engine's overrides (`bullet_stats`: Glock burst, silenced M4A1, silenced USP).
         let distance = hit.map_or(gun.range, |t| t.fraction * gun.range);
-        let damage = gun.damage * f32::from(gun.pellets) * playsrc_collision::math::pow(gun.range_modifier, distance / 500.0);
+        let secondary = self.arms.slot(slot).is_some_and(|h| h.silenced || h.burst);
+        let (base, range_modifier) = bullet_stats(gun, secondary, self.settings.physics_version);
+        let damage = base * f32::from(gun.pellets) * playsrc_collision::math::pow(range_modifier, distance / 500.0);
         self.damage_hit(hit, damage);
     }
 

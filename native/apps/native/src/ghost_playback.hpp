@@ -62,13 +62,33 @@ inline bool pose_ghost(const GhostPath &path, std::optional<double> elapsed, Gho
     return sample_ghost_path(path, out.tick, out.moving, out.frame);
 }
 
+// The whole ticks a ghost's bunny pre-rolls through after a cut, [from, to): `seconds` of its path before `tick`, from
+// just after the last teleport in them (ghost.ts tickSource prerollTo).
+inline std::pair<uint32_t, uint32_t> ghost_preroll_ticks(const GhostPath &path, uint32_t tick, double seconds) {
+    if (path.frames.empty() || !(path.interval > 0)) return {0, 0};
+    const uint32_t to = std::min(tick, uint32_t(path.frames.size() - 1));
+    const auto span = uint32_t(std::lround(seconds / path.interval));
+    uint32_t from = to > span ? to - span : 0;
+    for (uint32_t later = to; later > from; --later)
+        if (later < path.teleports.size() && path.teleports[later]) {
+            from = later;
+            break;
+        }
+    return {from, to};
+}
+
 // Recorded knife swings and inspects between the ticks shown on consecutive frames.
 struct GhostEventCursor {
     double shown = -1, live_ticks = ghost_live_event_ticks;
+    // This frame starts the bunny over from the run's last moments (ghost.ts showAt): the ghost moves after being shown
+    // for the first time, a seek or a restart, or after being parked on its start.
+    bool cut = false, was_moving = false;
 
     // Returns the tick range whose events belong to this frame, or nullopt when nothing new was played.
     std::optional<std::pair<uint32_t, uint32_t>> advance(double tick, bool moving, bool &snapped) {
         snapped = shown >= 0 && (tick < shown - 1 || tick - shown > ghost_snap_ticks);
+        cut = moving && (snapped || shown < 0 || !was_moving);
+        was_moving = moving;
         const bool live = moving && shown >= 0 && tick > shown && tick - shown < live_ticks;
         const double previous = shown;
         shown = tick;
@@ -76,7 +96,10 @@ struct GhostEventCursor {
         return std::pair{uint32_t(previous), uint32_t(tick)};
     }
 
-    void reset() { shown = -1; }
+    void reset() {
+        shown = -1;
+        cut = was_moving = false;
+    }
 };
 
 }  // namespace native_render

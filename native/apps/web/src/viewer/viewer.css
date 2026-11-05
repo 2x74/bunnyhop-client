@@ -48,9 +48,14 @@ body.viewer-open #nt-toasts:has(> .nt-toast) ~ #nt-whispers .nt-whisper:not(.at)
 
 /* Bottom panel */
 #rv .rv-panel { position: absolute; left: 0; right: 0; bottom: 0; padding: 0.6rem 1rem 0.75rem; background: linear-gradient(180deg, rgba(8, 9, 13, 0), rgba(8, 9, 13, 0.82) 22%, rgba(8, 9, 13, 0.92)); display: flex; flex-direction: column; gap: 0.5rem; }
-#rv .rv-timeline { position: relative; height: 3.2rem; border-radius: var(--r-2); background: rgba(12, 12, 15, 0.55); overflow: visible; }
-#rv .rv-tl-canvas { display: block; width: 100%; height: 100%; border-radius: inherit; cursor: ew-resize; touch-action: none; }
-#rv .rv-tl-tip { position: absolute; bottom: calc(100% + 0.35rem); transform: translateX(-50%); white-space: nowrap; font-size: 0.72rem; font-variant-numeric: tabular-nums; padding: 0.2rem 0.5rem; border-radius: var(--r-1); background: var(--ink-1); pointer-events: none; }
+/* Scrubber (viewer/timeline.ts): a clean bar with a handle that grows on hover and drag. */
+#rv .rv-timeline { position: relative; overflow: visible; }
+#rv .rv-timeline { height: 2.1rem; }
+#rv .rv-tl-canvas { display: block; width: 100%; height: 100%; cursor: pointer; touch-action: none; }
+#rv .rv-timeline.dragging .rv-tl-canvas { cursor: grabbing; }
+#rv .rv-tl-tip { position: absolute; bottom: calc(100% + 0.2rem); transform: translateX(-50%); display: flex; gap: 0.5rem; align-items: baseline; white-space: nowrap; font-size: 0.74rem; font-variant-numeric: tabular-nums; padding: 0.25rem 0.55rem; border-radius: var(--r-2); background: var(--ink-1); box-shadow: var(--shadow); pointer-events: none; }
+#rv .rv-tl-tip b { font-size: 0.86rem; font-weight: 800; color: #fff; }
+#rv .rv-tl-tip span { color: var(--dim); }
 #rv .rv-controls { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; flex-wrap: wrap; }
 #rv .rv-group { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
 #rv .rv-right { justify-content: flex-end; }
@@ -185,3 +190,44 @@ body.viewer-open #nt-toasts:has(> .nt-toast) ~ #nt-whispers .nt-whisper:not(.at)
 #rv .rv-gx-next b { font-size: 2.2rem; font-weight: 800; font-stretch: 90%; color: #fff; }
 #rv.rv-clean .rv-gx-next { display: none; }
 @media (max-width: 52rem) { #rv .rv-gx { grid-template-columns: minmax(0, 1fr) auto; } #rv .rv-gx-bar { grid-column: 1 / -1; grid-row: 2; } }
+
+/* Control bar: grouped transport, one control for speed and one for the camera, the rest in small menus. */
+#rv .rv-controls-a { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; }
+#rv .rv-left { gap: 0.9rem; }
+#rv .rv-transport { display: flex; align-items: center; gap: 0.15rem; }
+#rv .rv-tbtn { width: 2.2rem; height: 2.2rem; min-width: 0; padding: 0; background: transparent; color: var(--cream-2); font-size: 0.92rem; border-radius: var(--r-round); }
+#rv .rv-tbtn:hover { background: var(--ink-2); color: #fff; }
+#rv .rv-play svg { width: 1.05rem; height: 1.05rem; }
+#rv .rv-quiet { background: transparent; color: var(--cream); }
+#rv .rv-quiet:hover { background: var(--ink-2); }
+#rv .rv-speed { min-width: 3rem; font-variant-numeric: tabular-nums; }
+#rv .rv-more svg { width: 1.1rem; height: 1.1rem; }
+#rv .rv-pop { position: absolute; bottom: calc(100% + 0.45rem); left: 0; min-width: 11rem; padding: 0.3rem; border-radius: var(--r-3); background: var(--ink-1); box-shadow: var(--shadow); display: flex; flex-direction: column; z-index: 2; transform-origin: bottom left; animation: rv-pop 120ms var(--ease-glide, ease-out); }
+#rv .rv-pop[hidden] { display: none; }
+#rv .rv-pop-right { left: auto; right: 0; transform-origin: bottom right; }
+@keyframes rv-pop { from { opacity: 0; transform: translateY(4px) scale(0.98); } }
+#rv .rv-pop .rv-pop-item { justify-content: flex-start; width: 100%; height: 2.1rem; padding: 0 0.7rem; background: transparent; color: var(--cream); font-weight: 600; border-radius: var(--r-2); }
+#rv .rv-pop .rv-pop-item:hover { background: var(--ink-3); color: #fff; }
+#rv .rv-pop .rv-pop-item.on { color: #fff; box-shadow: inset 3px 0 0 var(--amber); }
+#rv .rv-pop .rv-pop-item[hidden] { display: none; }
+/* Keyboard focus: the site ring on every control, kept with a selected row's amber bar; the scrubber outlined. */
+#rv .rv-tbtn:focus-visible, #rv .rv-quiet:focus-visible, #rv .rv-play:focus-visible { outline: none; box-shadow: var(--ring); }
+#rv .rv-pop .rv-pop-item:focus-visible { outline: none; box-shadow: var(--ring); }
+#rv .rv-pop .rv-pop-item.on:focus-visible { box-shadow: inset 3px 0 0 var(--amber), var(--ring); }
+#rv .rv-timeline:focus-visible { outline: 2px solid var(--amber); outline-offset: 3px; border-radius: var(--r-2); }
+#rv .rv-timeline:focus:not(:focus-visible) { outline: none; }
+/* Touch: a taller bar to grab, and bigger transport targets. */
+@media (pointer: coarse) {
+  #rv .rv-timeline { height: 2.9rem; }
+  #rv .rv-tbtn { width: 2.6rem; height: 2.6rem; }
+  #rv .rv-pop .rv-pop-item { height: 2.6rem; }
+}
+
+/* Narrow windows and phones: the bar wraps, transport first and centred. */
+@media (max-width: 760px) {
+  #rv .rv-controls-a { flex-wrap: wrap; justify-content: center; row-gap: 0.4rem; }
+  #rv .rv-controls-a .rv-left { flex: 1 0 100%; justify-content: center; }
+  #rv .rv-right { flex: 1 0 100%; justify-content: center; }
+  #rv .rv-tick { display: none; }
+  #rv .rv-timeline { height: 2.6rem; }
+}

@@ -352,9 +352,12 @@ pub unsafe extern "C" fn props_load(ptr: *mut u8, len: usize) -> usize {
     let mut sp = bsp.as_ref().map(crate::props::static_props).unwrap_or_default();
     let n_static = sp.props.len();
     // Entity props (physics props at their settled pose, prop_dynamic, prop_door_rotating) render with them.
-    if let Some(list) = with(|c| c.game.as_ref().map(|g| g.render_props())) {
-        crate::props::add_props(&mut sp, list);
-    }
+    // The web client poses animated props (apps/web/src/map-props.ts): their own groups, `Prop::animated` set.
+    with(|c| {
+        if let Some(g) = c.game.as_ref() {
+            crate::props::add_game_props(&mut sp, g, true);
+        }
+    });
     if let Some(bsp) = &bsp {
         crate::skybox::mark_props(bsp, &mut sp, n_static);
     }

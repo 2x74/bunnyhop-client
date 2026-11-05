@@ -5,9 +5,9 @@ import { h } from "../../web/src/ui/dom";
 import { formatTime } from "../../web/src/timer";
 import { styleLabel } from "../../web/src/styles";
 import { loadPBReplay } from "../../web/src/pb";
-import type { ViewerRequest } from "../../web/src/viewer/request";
+import { h2hUrl, type ViewerRequest } from "../../web/src/viewer/request";
 import type { RaceRequest } from "../../web/src/player/race";
-import { runSeconds, send, state, type NativeReplay } from "./bridge";
+import { LIVE_ORIGIN, openExternal, runSeconds, send, state, type NativeReplay } from "./bridge";
 import { setWatchedRun } from "./report";
 import { fetchMapIndex } from "../../web/src/ui/maps";
 import {
@@ -90,9 +90,43 @@ export function playLocalReplay(id: string): void {
   playing();
   send({ type: "replay", action: "play", id });
 }
+/**
+ * Head to head (/h2h/<a>/<b>, viewer/request.ts): run A plays and run B rides along as the compare ghost, the nearest the
+ * native viewer has to the website's side-by-side view. The host compares only while a replay plays, so B is sent once
+ * a replay other than the one before (`before`) is up. Without B, the website's page opens instead.
+ */
+let headToHead: { a: string; b: string; before: string } | null = null;
+
+async function attachHeadToHead(): Promise<void> {
+  const pending = headToHead;
+  if (!pending || !state.playback.active || state.playback.id === pending.before) return;
+  headToHead = null;
+  try {
+    const bytes = await serverReplays.get(pending.b);
+    const name = await api.runPlayer(pending.b).then(
+      (player) => player.name,
+      () => "Run B",
+    );
+    send({
+      type: "replayCompare",
+      action: "set",
+      kind: "custom",
+      name: name.slice(0, 128),
+      replayBase64: base64Bytes(bytes),
+    });
+  } catch {
+    openExternal(new URL(h2hUrl(pending.a, pending.b), LIVE_ORIGIN).href);
+  }
+}
+addEventListener("bunnyhop:host-state", () => void attachHeadToHead());
+
 export async function watchRequest(request: ViewerRequest): Promise<void> {
   const target = request.target;
   stopWatchingSplit();
+  headToHead =
+    "runId" in target && request.h2h
+      ? { a: target.runId, b: request.h2h.runId, before: state.playback.active ? state.playback.id : "" }
+      : null;
   // (Only a server run has a player to report: set after sendReplay, which clears the last one.)
   if ("runId" in target) {
     const bytes = await serverReplays.get(target.runId);

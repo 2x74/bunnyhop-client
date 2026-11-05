@@ -121,10 +121,19 @@ export function setCosmeticsStudio(on: boolean): void {
 }
 export const cosmeticsStudio = (): boolean => studio;
 
+/**
+ * A clock that replaces the wall clock for the finishes (the replay exporter: the replay's own time, so two exports of
+ * the same replay draw the same twinkle / glitter / shimmer); null = the wall clock.
+ */
+let clock: (() => number) | null = null;
+export function setFinishClock(fn: (() => number) | null): void {
+  clock = fn;
+}
+
 /** One clock for every finish (twinkle, glitter, the Founder's shimmer) and hat, read by three.js at upload time. */
 const FIN_TIME: THREE.IUniform<number> = {
   get value() {
-    return still || studio ? STILL_T : (performance.now() / 1000) % 3600;
+    return still || studio ? STILL_T : ((clock ? clock() : performance.now() / 1000) % 3600 + 3600) % 3600;
   },
   set value(_: number) {
     /* read-only */

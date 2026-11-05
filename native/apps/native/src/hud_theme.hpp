@@ -1,4 +1,5 @@
 #pragma once
+#include "hud_glyph_sheet.hpp"
 #include "semantic_palette.hpp"
 #include <nlohmann/json.hpp>
 #include <algorithm>
@@ -105,12 +106,15 @@ inline HudTheme parse_hud_theme(const nlohmann::json &value) {
 }  // namespace native
 
 namespace native {
-// A shared, fixed atlas: fifteen marks followed by the ISO regional-indicator flags.
-// Rasterization happens at GL startup, never while drawing a row or chat line.
+// A shared, fixed atlas: fifteen marks, the ISO regional-indicator flags, then the peak marks and pride flags
+// (hud_glyph_sheet.hpp). Rasterization happens at GL startup, never while drawing a row or chat line.
 inline constexpr unsigned hud_glyph_cell = 32;
 inline constexpr unsigned hud_glyph_columns = 32;
+inline constexpr unsigned hud_glyph_rows = 23;
 inline constexpr unsigned hud_glyph_width = hud_glyph_cell * hud_glyph_columns;
-inline constexpr unsigned hud_glyph_height = hud_glyph_cell * 22;
+inline constexpr unsigned hud_glyph_height = hud_glyph_cell * hud_glyph_rows;
+static_assert(sheet_glyph_cell == hud_glyph_cell);
+static_assert(sheet_glyph_first + sheet_glyph_ids.size() <= hud_glyph_columns * hud_glyph_rows);
 inline constexpr std::array<std::string_view, 15> hud_mark_text = {
         "owner",
         "staff",
@@ -128,14 +132,6 @@ inline constexpr std::array<std::string_view, 15> hud_mark_text = {
         "tiktok",
         "x"
 };
-
-inline unsigned flag_glyph(std::string_view code) {
-    if (code.size() != 2) return 0;
-    const unsigned first = unsigned(std::toupper(static_cast<unsigned char>(code[0])));
-    const unsigned second = unsigned(std::toupper(static_cast<unsigned char>(code[1])));
-    if (first < 'A' || first > 'Z' || second < 'A' || second > 'Z') return 0;
-    return 16 + (first - 'A') * 26 + second - 'A';
-}
 
 inline std::string flag_text(unsigned index) {
     std::string text;

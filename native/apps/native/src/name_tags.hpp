@@ -1,7 +1,9 @@
 #pragma once
 #include "graphics_settings.hpp"
+#include "hud_glyph_sheet.hpp"
 #include "hud_text.hpp"
 #include "hud_geometry.hpp"
+#include "name_fonts.hpp"
 #include <nlohmann/json.hpp>
 #include <algorithm>
 #include <array>
@@ -49,6 +51,8 @@ enum class NameMark : unsigned {
 
 struct NameBadge {
     NameMark glyph = NameMark::badge;
+    // A peak mark's own picture in the glyph atlas (hud_glyph_sheet.hpp), drawn instead of `glyph`; 0 for none.
+    unsigned sheet = 0;
     std::array<NameColor, 3> colors = {NameColor{1, 1, 1, 1}, NameColor{1, 1, 1, 1}, NameColor{1, 1, 1, 1}};
     unsigned color_count = 0;
     bool animated = false;
@@ -58,6 +62,7 @@ struct NameAppearance {
     NameColor color = {.94f, .91f, .86f, 1};
     NameColor second = {1, 1, 1, 1};
     NameEffect effect = NameEffect::plain;
+    NameFont font = NameFont::none;
     unsigned marks = 0;
     std::array<NameBadge, 16> badges;
     size_t badge_count = 0;
@@ -85,6 +90,7 @@ inline NameAppearance name_appearance(const nlohmann::json &value) {
                   : effect == "paint" || effect == "shimmer" ? NameEffect::paint
                   : effect == "sparkle"                      ? NameEffect::sparkle
                                                              : NameEffect::plain;
+    look.font = name_font_of(json_text(value, "nameFont"));
     const auto staff = json_text(value, "staff");
     const auto role = json_text(value, "role");
     const auto add = [&](NameMark mark) {
@@ -122,6 +128,7 @@ host_name_appearance(const nlohmann::json &value, const nlohmann::json &marks, N
                       : effect == "paint"   ? NameEffect::paint
                       : effect == "sparkle" ? NameEffect::sparkle
                                             : NameEffect::plain;
+        look.font = name_font_of(json_text(value, "font"));
     }
     if (!marks.is_array()) return look;
     look.badge_count = 0;
@@ -146,6 +153,7 @@ host_name_appearance(const nlohmann::json &value, const nlohmann::json &marks, N
                                                      : kind == "x"      ? NameMark::x
                                                                         : NameMark::creator)
                                                   : NameMark::badge;
+        badge.sheet = id.starts_with("peak-") ? sheet_glyph(id) : 0;
         look.marks |= 1u << unsigned(badge.glyph);
         badge.animated = json_flag(mark, "animated");
         const auto colors = mark.find("colors");
@@ -357,7 +365,8 @@ void draw_player_tag(
         double seconds
 ) {
     using namespace name_tag_look;
-    const float name_width = hud.overlay_text_width(name, name_size) + float(name_badge_count(look)) * badge_width;
+    const float name_width =
+            hud.overlay_name_width(name, name_size, look) + float(name_badge_count(look)) * badge_width;
     const float detail_width = detail.empty() ? 0 : hud.overlay_text_width(detail, detail_size) + 10;
     const float width = dot_size + 10 + name_width + detail_width + 16;
     const float left = x - width / 2;

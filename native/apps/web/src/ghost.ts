@@ -18,11 +18,14 @@ import { getGhostCosmetics, onGhostCosmetics } from "./player/cosmetics";
 import { PlayerModel, type PlayerPose } from "./player/model";
 import { onRaceRequest, type RaceRequest } from "./player/race";
 import { NameTag, TagSight, type SightTrace } from "./player/tag";
+import { probeFromTrace } from "./player/bunny/legs";
 import { Trail } from "./player/trail";
 import { DEFAULT_LOADOUT, type CosmeticLoadout } from "./loadout";
 import { cosmeticBetween, decodeReplay, inspectBetween, replayStyle, type CosmeticEvent, type Replay } from "./replay";
 import { styleForTrack, type StyleId } from "./styles";
-import { FRAME_CROUCHED, FRAME_GROUNDED, FRAME_STRIDE, simulate } from "./sim";
+import { FRAME_CROUCHED, FRAME_GROUNDED, FRAME_LADDER, FRAME_STRIDE, simulate } from "./sim";
+import { TickStepper, type TickSource } from "./player/tick-stepper";
+import { mapVolumes, recordedModes, type MapVolumes } from "./player/map-volumes";
 import { formatTime, type RunTimer } from "./timer";
 import { uiHidden } from "./ui/hide-ui";
 import { prefs } from "./ui/settings";
@@ -106,7 +109,15 @@ export class Ghost {
    * World line of sight for the tag (core traceRay). Null = no occlusion (menu background). The tag hides behind walls
    * like other players' tags unless Settings -> Ghost -> Names through walls.
    */
-  trace: SightTrace | null = null;
+  private sightTrace: SightTrace | null = null;
+  /** World line of sight (tags) and the ground under the feet (planting on slopes, player/bunny/legs.ts). */
+  get trace(): SightTrace | null {
+    return this.sightTrace;
+  }
+  set trace(t: SightTrace | null) {
+    this.sightTrace = t;
+    this.model.setGroundProbe(t ? probeFromTrace(t) : null);
+  }
   /** Player time minus ghost time at the same point on its path (seconds; negative = you're ahead). */
   delta: number | null = null;
   /** The ghost's horizontal speed at the last match of split() (u/s); NaN: no match, or its route teleports there. */
@@ -176,6 +187,37 @@ export class Ghost {
     return out;
   }
 
+  /** The map's water for the swim mode (player/map-volumes.ts); null = the loaded map's (the menu background sets its own). */
+  volumes: MapVolumes | null = null;
+  private stepper = new TickStepper();
+  private wasMoving = false;
+  private tickSrc: TickSource | null = null;
+
+  /** The ghost's frames as a TickSource (the TickStepper's whole-tick poses, pre-roll, teleports). */
+  private tickSource(): TickSource {
+    return (this.tickSrc ??= {
+      interval: this.d.tickInterval,
+      n: this.frameCount - 1,
+      poseAt: (k) => {
+        const q = this.sample(k, true);
+        return { ...q, position: [...this.pose.position], velocity: [...this.pose.velocity] };
+      },
+      prerollTo: (k) => {
+        // The ghost's last 0.6 s before tick k, stopping at a teleport.
+        const ticks = 1 / this.d.tickInterval;
+        let from = Math.max(0, k - 0.6 * ticks);
+        for (let j = k; j > from && j > 0; j--) if (this.teleportBetween(j - 1, j)) from = j;
+        return (u) => {
+          const tt = k - u * ticks;
+          if (tt < from) return null;
+          const q = this.sample(tt, true);
+          return { ...q, position: [...this.pose.position], velocity: [...this.pose.velocity] };
+        };
+      },
+      teleported: (k) => k > 0 && this.teleportBetween(k - 1, k),
+    });
+  }
+
   /** Fills the model pose at fractional ghost tick t. `moving` false = parked (before start / after finish). */
   private sample(t: number, moving: boolean): PlayerPose {
     const d = this.d;
@@ -196,12 +238,13 @@ export class Ghost {
     p.pitch = f[i * S + 5] + (f[j * S + 5] - f[i * S + 5]) * a;
     const flags = f[i * S + 3];
     p.crouched = (flags & FRAME_CROUCHED) !== 0;
-    // Grounded if any tick since the last sample touched the ground (bhop lands for a single tick).
-    let grounded = (flags & FRAME_GROUNDED) !== 0;
-    if (!grounded && moving && this.lastT >= 0 && t > this.lastT && t - this.lastT < 30) {
-      for (let k = Math.floor(this.lastT) + 1; k <= i && !grounded; k++) grounded = (f[k * S + 3] & FRAME_GROUNDED) !== 0;
-    }
-    p.grounded = grounded;
+    // Climbing from the frames (FRAME_LADDER), swimming from the map's water (player/map-volumes.ts).
+    const modes = recordedModes((flags & FRAME_LADDER) !== 0, p.position, p.crouched, this.volumes ?? mapVolumes());
+    p.ladder = modes.ladder;
+    p.water = modes.water;
+    // The tick's own ground flag: showAt steps the model through every tick crossed (advanceModel), so it sees a bhop's
+    // one-tick contact at any frame rate.
+    p.grounded = (flags & FRAME_GROUNDED) !== 0;
     if (moving && !jump && j > i) {
       for (let k = 0; k < 3; k++) p.velocity[k] = (f[j * S + k] - f[i * S + k]) / d.tickInterval;
     } else p.velocity[0] = p.velocity[1] = p.velocity[2] = 0;
@@ -228,24 +271,34 @@ export class Ghost {
     const d = this.d;
     const elapsed = running ? t - d.startTick : null;
     const snapped = this.lastT >= 0 && (t < this.lastT - 1 || t - this.lastT > 200);
-    if (snapped) {
-      this.model.snap();
-      this.sight.reset();
-    }
-    const pose = this.sample(t, moving);
+    if (snapped) this.sight.reset();
     const live = moving && this.lastT >= 0 && t > this.lastT && t - this.lastT < 50;
-    pose.attack = live ? cosmeticBetween(d.cosmetic, Math.floor(this.lastT), Math.floor(t)) : 0;
-    const ins = live ? inspectBetween(d.inspect, Math.floor(this.lastT), Math.floor(t)) : null;
-    pose.inspect = ins?.sig ?? 0;
-    pose.inspectHeld = ins?.held ?? false;
-    this.model.setState(pose);
-    if (this.audible && moving && prefs.get().audio.ghosts) (this.sound ??= new SpatialMover(0.45)).update(dt, this.pose.position, this.pose.velocity, pose.grounded, pose.crouched, false, snapped || this.lastT < 0);
+    // touched: any frame tick since the last frame on the ground (footsteps: a bhop's contact lasts one tick).
+    let touched = false;
+    if (live) for (let k = Math.floor(this.lastT) + 1; k <= Math.floor(t) && !touched; k++) touched = (d.frames[k * FRAME_STRIDE + 3] & FRAME_GROUNDED) !== 0;
+    this.model.setOpacity(o.opacity);
+    this.model.setNearFade(o.nearFade ? 14 : 0, o.nearFade ? 64 : 0);
+    if (moving) {
+      // On the ghost's clock (viewer/player.ts TickStepper): the model updates on each frame tick's own pose and blends
+      // between ticks, so its pose at a ghost time doesn't depend on the frame rate; a seek or a start pre-rolls.
+      const ins = live ? inspectBetween(d.inspect, Math.floor(this.lastT), Math.floor(t)) : null;
+      const events = { attack: live ? cosmeticBetween(d.cosmetic, Math.floor(this.lastT), Math.floor(t)) : 0, inspect: ins?.sig ?? 0, inspectHeld: ins?.held ?? false };
+      this.stepper.show(this.model, this.tickSource(), t, snapped || this.lastT < 0 || !this.wasMoving, events);
+    } else {
+      if (snapped) this.model.snap();
+      this.stepper.reset();
+    }
+    this.wasMoving = moving;
+    const pose = this.sample(t, moving);
+    touched ||= pose.grounded;
+    if (!moving) {
+      this.model.setState(pose);
+      this.model.update(dt);
+    }
+    if (this.audible && moving && prefs.get().audio.ghosts) (this.sound ??= new SpatialMover(0.45)).update(dt, this.pose.position, this.pose.velocity, touched, pose.crouched, false, snapped || this.lastT < 0);
     else this.sound?.moves.reset();
     this.lastT = t;
     this.tick = Math.floor(t);
-    this.model.setOpacity(o.opacity);
-    this.model.setNearFade(o.nearFade ? 14 : 0, o.nearFade ? 64 : 0);
-    this.model.update(dt);
 
     if (o.route) {
       const mode = o.routeMode === "path" ? "path" : "jumps";

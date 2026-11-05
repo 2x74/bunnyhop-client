@@ -95,7 +95,11 @@ export const bladeCheck: InspectClip = {
     const level = track([[0.36, 0], [0.7, 1, E.out], [2.25, 1], [2.6, 0, E.io]])(t);
     const look = track([[0.75, 0], [1.4, 1, E.io], [1.5, 1], [2.2, 0, E.io]])(t);
     const over = track([[1.42, 0], [1.72, 1, E.whip], [2.05, 1], [2.3, 0, E.io]])(t);
-    arm(W, ctx, p, -40 * level + 170 * over, 8 * level, 18 * level + 6 * look, [-0.8 * look, 1.2 * look, 0.6 * level], 0, -55 * level);
+    // v0.0.37: the long blade laid forward along the forearm (the wrist deviates it toward the line of sight, the fist
+    // a little lower), so the whole blade stays in view for the look and, after the forearm turns it over, the other
+    // face too, at the default and Minimal framing with either hand (tools/viewmodel/knife-frame-probe.ts; fitted by a
+    // search over the pose for the largest worst-case margin of the tip, three-quarter and half points).
+    arm(W, ctx, p, 170 * over, 10 * level, 10 * level + 4 * look, [-1.2 * level - 0.3 * look, 0.5 * level + 0.4 * look, -1.5 * level], 0, 60 * level);
   },
 };
 

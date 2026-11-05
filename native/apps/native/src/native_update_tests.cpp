@@ -127,6 +127,15 @@ void service_against_local_releases(const Json &fixture) {
     assert(ready.at("status") == "ready" && ready.at("packageSaved").get<bool>());  // no install layout: manual
     assert(!ready.at("inPlace").get<bool>());
 
+    // The launch check finds the release by itself, and a later automatic check leaves the found one alone.
+    native::updates::CheckSchedule overdue;
+    overdue.save(folder / "automatic" / "schedule.json");
+    native::updates::Service automatic(trust, folder / "automatic", "0.6.2", "bunnyhop-native/" + std::string(24, 'a'));
+    automatic.check_if_due();
+    assert(settle(automatic).at("status") == "available");
+    automatic.check_if_due();
+    assert(automatic.state().at("status") == "available");
+
     native::updates::Transfer transfer{{}, nullptr, 1024, 0, nullptr, nullptr};
     std::atomic_bool cancel{false};
     transfer.cancel = &cancel;

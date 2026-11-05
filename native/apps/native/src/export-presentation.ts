@@ -4,15 +4,17 @@ import { SFX } from "../../web/src/audio/catalog";
 import { supporterGiftWave } from "../../web/src/audio/gift";
 import { GunAnimator, type BaseClip, type Cue } from "../../web/src/viewmodel/guns/anim";
 import { gunById } from "../../web/src/viewmodel/guns/index";
+import { silencerLength } from "../../web/src/viewmodel/guns/silencer";
 import { mkdir, readFile, writeFile, stat } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { bundledMusic, exportMusic } from "./export-music";
+import { exportHudGlyphs } from "./export-hud-glyphs";
+import { exportNameFonts } from "./export-name-fonts";
+import { startResvg } from "./resvg";
 const root = resolve(import.meta.dir, "../../..");
 const out = resolve(Bun.argv[2] ?? join(root, "target/native-assets"));
 await mkdir(join(out, "audio"), { recursive: true });
-const resvgPath = Bun.resolveSync("@resvg/resvg-wasm", root);
-const { initWasm, Resvg } = await import(resvgPath);
-await initWasm(await readFile(join(dirname(resvgPath), "index_bg.wasm")));
+const Resvg = await startResvg();
 const font = await readFile(join(root, "tools/hermes/fonts/JetBrainsMono-Bold.ttf"));
 const escape = (s: string) => s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 const texts = Array.from(
@@ -28,6 +30,8 @@ const image = r.render();
 await writeFile(join(out, "hud.rgba"), image.pixels);
 image.free();
 r.free();
+const hudGlyphs = await exportHudGlyphs(out, Resvg, font);
+const nameFonts = await exportNameFonts(out, Resvg, join(root, "apps/web/src/assets/name-fonts"));
 const source = join(root, "apps/web/src/assets/audio");
 const manifest = JSON.parse(await readFile(join(source, "manifest.json"), "utf8"));
 const nativeAudio = join(root, "apps/native/assets/audio");
@@ -104,6 +108,8 @@ manifest.weaponAudio = weaponIds.map((id) => {
   };
   const reload = def.timing.reload ?? 2.4,
     shells = def.timing.shells;
+  // The USP's attach and detach run 3.08 s, the M4A1's 2.0 s (physics v25); the audio scales them to the lock-out.
+  const silencer = def.silencer ? silencerLength(def) : 114 / 37;
   return {
     timing: def.timing,
     draw: cues("draw", Math.min(def.timing.draw, 1) * 0.85),
@@ -111,8 +117,9 @@ manifest.weaponAudio = weaponIds.map((id) => {
     reloadEmpty: cues("reload", reload, true),
     shellInsert: cues("shellInsert", shells?.each ?? 0.5),
     shellEnd: cues("shellEnd", shells?.end ?? 0.5),
-    silencerOn: cues("silencer", 114 / 37, false, true),
-    silencerOff: cues("silencer", 114 / 37, false, false),
+    silencerSeconds: silencer,
+    silencerOn: cues("silencer", silencer, false, true),
+    silencerOff: cues("silencer", silencer, false, false),
   };
 });
 const gift = supporterGiftWave(22050);
@@ -123,7 +130,9 @@ manifest.music = bundledMusic(manifest.music);
 exportMusic(out, manifest.music);
 await writeFile(join(out, "audio.json"), JSON.stringify(manifest));
 console.log(
-  `Native presentation assets: 95 font glyphs, ${tasks.length} sound variants, ${manifest.music.length} bundled OST tracks`,
+  `Native presentation assets: 95 font glyphs, ${hudGlyphs} marks and flags, ${nameFonts} name fonts, ` +
+    `${tasks.length} sound variants, ` +
+    `${manifest.music.length} bundled OST tracks`,
 );
 
 // Keep lesson geometry, BSP identity and original deterministic demonstration recordings together.

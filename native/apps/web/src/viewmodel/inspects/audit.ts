@@ -22,6 +22,8 @@ import { viewmodelGeometry } from "../mesh";
 import { PROC_DURATION, VmProcedural, type VmAction } from "../procedural";
 import { vmRig, type VmRig } from "../rig";
 import { VmInspect } from "./runtime";
+import { inspectSetFor } from "./index";
+import { quietSet } from "./quiet";
 import { gloveCapsules } from "../gloves/caps";
 import type { GloveStyleId } from "../../loadout";
 import { GRIP_SKIN } from "../knives/hold";
@@ -44,6 +46,8 @@ export interface AuditOptions {
   durations?: Record<VmAction, number>;
   /** Restrict to these scenario names. */
   only?: string[];
+  /** The quiet inspect style (inspects/quiet.ts): the chain starts with the quiet check. */
+  quiet?: boolean;
   /**
    * Glove style: its extra parts (gloves/caps.ts: straps, gauntlet cuffs, the moto knuckle plate, wrap tails) join the
    * finger segments in the knife check, so a knife may not newly sink into them either. Default knit (none).
@@ -228,6 +232,7 @@ class Pipe {
     this.hold = new KnifeHold(knife ?? carrot, this.r, o.glove ?? "knit");
     this.insp = new VmInspect(this.r);
     this.insp.setKnife(knife, knife ? this.hold.state : null);
+    if (o.quiet) this.insp.setOverride(quietSet(inspectSetFor(knife)));
   }
   pose(action: VmAction, t: number): Float32Array {
     const W = this.W;

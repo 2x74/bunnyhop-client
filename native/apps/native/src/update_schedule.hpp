@@ -9,7 +9,8 @@
 #include <string>
 
 namespace native::updates {
-inline constexpr int64_t automatic_check_interval_seconds = 24 * 60 * 60;
+// Often enough that a release reaches players who keep the game open: the channel is one small signed file.
+inline constexpr int64_t automatic_check_interval_seconds = 3 * 60 * 60;
 
 // Settings → Updates → "Check automatically": stored with the downloaded packages, not in game settings.
 struct CheckSchedule {

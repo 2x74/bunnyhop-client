@@ -91,12 +91,9 @@ test("settings: HUD scale in whole percents 50–175, keep speed, practice binds
   expect(state.settings.binds.thirdPerson).toEqual(["KeyT"]);
   expect(state.settings.binds.showTriggers).toEqual(["Mouse3"]);
   expect(state.settings.binds.showClips).toEqual([]);
-  // The runner model is retired: the menu can't send it, even from an old settings file or another device.
+  // Everyone is the bunny, as on the website: the retired model choices never reach the host.
   expect(settingsPatch({ playerModel: "runner", ghostModel: "runner" })).toEqual({});
-  expect(settingsPatch({ playerModel: "bunny", ghostModel: "same" })).toEqual({
-    playerModel: "bunny",
-    ghostModel: "same",
-  });
+  expect(settingsPatch({ playerModel: "bunny", ghostModel: "same" })).toEqual({});
   expect(state.settings.clipsVisible).toBe(false);
   expect(state.settings.weaponSounds).toBe(true);
   expect(

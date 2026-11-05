@@ -509,7 +509,8 @@ impl Timer {
                     }
                 }
             }
-            let value = if self.options.strafe_keys == 0 {
+            let keys = self.options.strafe_keys;
+            let value = if keys == crate::styles::STRAFE_KEYS_AD || keys == crate::styles::STRAFE_KEYS_PRESS {
                 cmd.side
             } else {
                 cmd.forward
@@ -521,8 +522,14 @@ impl Timer {
             } else {
                 0
             };
-            if self.options.strafe_keys == 2 {
+            if keys == crate::styles::STRAFE_KEYS_W {
                 if axis > 0 && self.last_side <= 0 {
+                    self.state.strafes += 1;
+                }
+                self.last_side = axis;
+            } else if keys == crate::styles::STRAFE_KEYS_PRESS {
+                // Every fresh press: releasing and pressing A again counts too.
+                if axis != 0 && axis != self.last_side {
                     self.state.strafes += 1;
                 }
                 self.last_side = axis;

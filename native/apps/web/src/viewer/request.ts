@@ -8,6 +8,7 @@
 //   ?map=<m>&replay=pb[&style=<s>][&track=<n>]   your local PB
 //   ?map=<m>&replay=pending      bytes stashed in sessionStorage (local files)
 //   ?replay=<url>                a .bhr URL
+//   /h2h/<runA>/<runB>           two leaderboard runs of one map, head to head (viewer/h2h.ts)
 
 import { appHref, appLocation } from "../platform/navigation";
 
@@ -25,6 +26,8 @@ export interface ViewerRequest {
   sourceRunId?: string;
   /** Optional second replay to overlay as a ghost (compare mode), e.g. WR vs PB. */
   compare?: ReplayTarget;
+  /** Head to head (/h2h/<a>/<b>): `target` is run A (left), this is run B (right). Both are leaderboard runs. */
+  h2h?: { runId: string };
   /** Watching a whole gauntlet attempt (gauntlet/watch.ts): this replay is split `idx` of `plan`. */
   gauntlet?: { plan: import("../api").GauntletWatchPlan; idx: number };
 }
@@ -105,6 +108,44 @@ export function openReplayViewer(target: ReplayTarget, opts: { compare?: ReplayT
   location.href = viewerUrl(target);
 }
 
+/** The head-to-head link of two leaderboard runs (the Worker serves it with both players' preview card). */
+export function h2hUrl(a: string, b: string): string {
+  return `/h2h/${encodeURIComponent(a)}/${encodeURIComponent(b)}`;
+}
+
+/** Two runs from a head-to-head path, or null. */
+export function h2hFromPath(pathname: string): { a: string; b: string } | null {
+  const m = /^\/h2h\/([^/?#]+)\/([^/?#]+)\/?$/.exec(pathname);
+  return m ? { a: decodeURIComponent(m[1]), b: decodeURIComponent(m[2]) } : null;
+}
+
+/** A run id from a pasted link or id: /replay/<id>, /h2h/<a>/<b> (its first run), ?replay=run:<id>, or the bare id. */
+export function runIdFromText(text: string): string | null {
+  const s = text.trim();
+  if (/^[\w-]{6,64}$/.test(s)) return s;
+  try {
+    const u = new URL(s, "https://bunnyhop.lol");
+    const r = /^\/replay\/([\w-]{6,64})\/?$/.exec(u.pathname);
+    if (r) return r[1];
+    const hh = h2hFromPath(u.pathname);
+    if (hh) return hh.a;
+    const q = u.searchParams.get("replay");
+    if (q?.startsWith("run:")) return q.slice(4) || null;
+  } catch {
+    /* not a link */
+  }
+  return null;
+}
+
+/** Head to head: in game over the current map (main.ts switches maps when needed), else a page load of /h2h/<a>/<b>. */
+export function openHeadToHead(a: string, b: string): void {
+  if (listener) {
+    listener({ target: { runId: a }, h2h: { runId: b } });
+    return;
+  }
+  location.href = h2hUrl(a, b);
+}
+
 /** main.ts: handle viewer requests while a map is loaded (returns an unsubscribe). */
 export function onViewerRequest(l: Listener): () => void {
   listener = l;
@@ -114,9 +155,11 @@ export function onViewerRequest(l: Listener): () => void {
 }
 
 /** Viewer target encoded in the page URL, if any (see the header comment). */
-export function viewerTargetFromUrl(loc: Location = location): { target: ReplayTarget | "pending" | { url: string }; style?: string; track?: number } | null {
+export function viewerTargetFromUrl(loc: Location = location): { target: ReplayTarget | "pending" | { url: string }; style?: string; track?: number; h2h?: { runId: string } } | null {
   const m = /^\/replay\/([^/?#]+)\/?$/.exec(loc.pathname);
   if (m) return { target: { runId: decodeURIComponent(m[1]) } };
+  const hh = h2hFromPath(loc.pathname);
+  if (hh) return { target: { runId: hh.a }, h2h: { runId: hh.b } };
   const q = new URLSearchParams(loc.search);
   const r = q.get("replay");
   if (!r) return null;

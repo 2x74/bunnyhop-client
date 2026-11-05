@@ -66,6 +66,13 @@ pub const SURF_SKY: u16 = 0x0004;
 pub const TEXINFO_SURFACE_REGISTRY: [u8; 32] = [0; 32];
 pub const SURF_HITBOX: u16 = 0x8000;
 
+/// The engine's DIST_EPSILON (1/32): how far a trace stops short of a plane.
+const DIST_EPSILON: f32 = 0.03125;
+/// The lowest normal z a player can stand on (Source's 0.7); `TraceRules::face_over_bevel` leaves floors alone.
+const FLOOR_NORMAL_Z: f32 = 0.7;
+/// `TraceRules::face_over_bevel`: a face this close to vertical (normal z below it) is a wall, not a ramp.
+const RAMP_MIN_NORMAL_Z: f32 = 0.05;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Plane {
     pub normal: [f32; 3],
@@ -259,6 +266,31 @@ pub struct Hull {
     pub mins: [f32; 3],
     pub maxs: [f32; 3],
 }
+/// bunnyhop patch: optional collision rules a caller can turn on per trace (bunnyhop physics v25, the ramp fix;
+/// research/NATIVE-RAMP-V25.md). `TraceRules::default()` is the engine's behaviour, bit for bit: every older physics
+/// version traces with it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TraceRules {
+    /// Pad the BSP walk of a stationary box test (`start == end`) by DIST_EPSILON (1/32) on every node plane, so a
+    /// brush the box overlaps right next to a node plane is always tested. Without it the walk can skip a ramp brush
+    /// the box is inside, a sweep's end check then accepts an embedded position and every later move starts all-solid
+    /// (bhop_kotodama's 1-3 s mid-air freezes).
+    pub stationary_margin: bool,
+    /// Pad the BSP walk of a swept box the same way, so a box grazing a ramp brush that lies across a node plane
+    /// still clips against it (bhop_aux_a9's kicker: the sweep missed the ramp, the next tick started inside it).
+    pub swept_margin: bool,
+    /// A brush's bevel planes (the extra axial / edge planes the map compiler adds so boxes collide with edges
+    /// properly) never become the reported hit plane while the box also rests on one of that brush's real faces at the
+    /// stop point, when that face is an upward-facing ramp (0.05 <= normal z < 0.7) and the bevel is neither a floor nor
+    /// a flat ceiling (|normal z| < 0.7): the face is reported. Floors, ceilings, walls and downward-facing faces are left
+    /// alone, so landing on an exposed edge (a wedge's ridge, a block's lip), hitting an overhead wedge's tip and running
+    /// into a wall's corner play as in CS:S. On a curve built from many brushes, the box sliding along one segment meets
+    /// the next segment exactly at its front edge, where the edge's axial bevel ties with the face and wins the
+    /// "latest entering plane" pick, so the slide was clipped against a vertical or flat plane that isn't the surface
+    /// (bhop_badges_mini's quarter-pipe: all horizontal speed gone at a seam).
+    pub face_over_bevel: bool,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Trace {
     pub world: [u8; 32],
@@ -715,6 +747,18 @@ impl World {
         self.trace_hull_with_scratch(start, end, hull, mask, &mut BrushTraceScratch::default())
     }
 
+    /// `trace_hull` with optional collision rules (`TraceRules`); `TraceRules::default()` is `trace_hull`.
+    pub fn trace_hull_rules(
+        &self,
+        start: [f32; 3],
+        end: [f32; 3],
+        hull: Hull,
+        mask: u32,
+        rules: TraceRules,
+    ) -> Result<Trace, Error> {
+        self.trace_hull_with_rules(start, end, hull, mask, &mut BrushTraceScratch::default(), rules)
+    }
+
     fn trace_hull_with_scratch(
         &self,
         start: [f32; 3],
@@ -723,14 +767,29 @@ impl World {
         mask: u32,
         scratch: &mut BrushTraceScratch,
     ) -> Result<Trace, Error> {
+        self.trace_hull_with_rules(start, end, hull, mask, scratch, TraceRules::default())
+    }
+
+    fn trace_hull_with_rules(
+        &self,
+        start: [f32; 3],
+        end: [f32; 3],
+        hull: Hull,
+        mask: u32,
+        scratch: &mut BrushTraceScratch,
+        rules: TraceRules,
+    ) -> Result<Trace, Error> {
+        // Margins apply to box traces only: point traces (contents, ladders, rays) keep the engine's walk.
+        let point = hull.mins == hull.maxs;
+        let margin = !point && if start == end { rules.stationary_margin } else { rules.swept_margin };
         let mut trace = if let Some(model) = self.models.first() {
-            self.order_brushes(model.head_node, start, end, hull, scratch)?;
+            self.order_brushes(model.head_node, start, end, hull, if margin { DIST_EPSILON } else { 0.0 }, scratch)?;
             // bunnyhop patch: world leaves can list brushes that belong to brush entities (func_wall on bhop_eazy);
             // the engine's world trace ignores them (tools/parity trace oracle), the entity trace handles them.
             if self.world_brushes.len() < self.brushes.len() {
                 scratch.ordered.retain(|b| self.world_brushes.binary_search(b).is_ok());
             }
-            self.trace_brushes(start, end, sub(end, start), hull, mask, &scratch.ordered, BrushOwner::World, 0.0, false)?
+            self.trace_brushes_rules(start, end, sub(end, start), hull, mask, &scratch.ordered, BrushOwner::World, 0.0, false, rules.face_over_bevel)?
         } else {
             self.trace_brushes(start, end, sub(end, start), hull, mask, &[], BrushOwner::World, 0.0, false)?
         };
@@ -867,7 +926,7 @@ impl World {
         separate: bool,
     ) -> Result<Trace, Error> {
         let mut scratch = BrushTraceScratch::default();
-        self.order_brushes(head_node, start, end, hull, &mut scratch)?;
+        self.order_brushes(head_node, start, end, hull, 0.0, &mut scratch)?;
         self.trace_brushes(start, end, delta, hull, mask, &scratch.ordered, owner, inset, separate)
     }
 
@@ -880,16 +939,18 @@ impl World {
         hull: Hull,
     ) -> Result<Vec<usize>, Error> {
         let mut scratch = BrushTraceScratch::default();
-        self.order_brushes(head_node, start, end, hull, &mut scratch)?;
+        self.order_brushes(head_node, start, end, hull, 0.0, &mut scratch)?;
         Ok(scratch.ordered)
     }
 
+    /// `margin`: extra distance added to every node-plane offset (0 = the engine's walk; `TraceRules`).
     fn order_brushes(
         &self,
         head_node: i32,
         start: [f32; 3],
         end: [f32; 3],
         hull: Hull,
+        margin: f32,
         scratch: &mut BrushTraceScratch,
     ) -> Result<(), Error> {
         // Storage only: every query still traverses the current BSP and builds
@@ -943,6 +1004,8 @@ impl World {
                 } else {
                     dot_abs(extents, plane.normal)
                 };
+                // `TraceRules` margin: 0.0 for the engine's walk, where adding it changes no bit.
+                let offset = if margin > 0.0 { offset + margin } else { offset };
                 if first_distance > offset && second_distance > offset {
                     child = node.children[0];
                     continue;
@@ -1013,6 +1076,25 @@ impl World {
         inset: f32,
         separate: bool,
     ) -> Result<Trace, Error> {
+        self.trace_brushes_rules(start, end, delta, hull, mask, brushes, owner, inset, separate, false)
+    }
+
+    /// `face_over_bevel`: `TraceRules::face_over_bevel` (box traces against general brushes only; axial box brushes
+    /// have no bevels).
+    #[allow(clippy::too_many_arguments)]
+    fn trace_brushes_rules(
+        &self,
+        start: [f32; 3],
+        end: [f32; 3],
+        delta: [f32; 3],
+        hull: Hull,
+        mask: u32,
+        brushes: &[usize],
+        owner: BrushOwner,
+        inset: f32,
+        separate: bool,
+        face_over_bevel: bool,
+    ) -> Result<Trace, Error> {
         if start
             .iter()
             .chain(end.iter())
@@ -1080,6 +1162,9 @@ impl World {
             let mut gets_out = false;
             let mut clip = None;
             let mut rejected = false;
+            // `face_over_bevel`: the latest entering real (non-bevel) face and its distances.
+            let mut face_enter = -1.0_f32;
+            let mut face_clip: Option<(Plane, Side, f32, f32)> = None;
             for side in &self.sides[brush.first_side..brush.first_side + brush.side_count] {
                 if point && side.bevel != 0 {
                     continue;
@@ -1116,6 +1201,10 @@ impl World {
                     if f > enter {
                         enter = f;
                         clip = Some((p, *side));
+                    }
+                    if face_over_bevel && side.bevel == 0 && f > face_enter {
+                        face_enter = f;
+                        face_clip = Some((p, *side, d1, d2));
                     }
                 } else {
                     leave = leave.min((d1 + 0.03125) / (d1 - d2));
@@ -1154,7 +1243,24 @@ impl World {
                 result.fraction = enter.max(0.0);
                 result.brush = Some(index);
                 result.contents = brush.contents;
-                let (plane, side) = clip.expect("an entering brush plane is selected");
+                let (mut plane, mut side) = clip.expect("an entering brush plane is selected");
+                // `TraceRules::face_over_bevel`: a bevel won, but the box also rests on a real face of this brush at the
+                // stop point (within DIST_EPSILON, not past it): report that face. The fraction stays the bevel's.
+                // Only for an upward-facing ramp face (0.05 <= normal z < 0.7) and a bevel that is neither a floor nor a
+                // flat ceiling (|normal z| < 0.7). Anything else keeps the engine's pick, as in CS:S: a bevel the player
+                // lands on (a wedge's ridge, a block's lip) or hits from below (an overhead wedge's tip), a wall's corner
+                // (vertical face) and every downward-facing face (no ceiling ridge turns upward speed into horizontal).
+                if side.bevel != 0
+                    && plane.normal[2].abs() < FLOOR_NORMAL_Z
+                    && let Some((face, face_side, d1, d2)) = face_clip
+                    && (RAMP_MIN_NORMAL_Z..FLOOR_NORMAL_Z).contains(&face.normal[2])
+                {
+                    let at_stop = d1 + (d2 - d1) * enter.max(0.0);
+                    if (0.0..=DIST_EPSILON).contains(&at_stop) {
+                        plane = face;
+                        side = face_side;
+                    }
+                }
                 result.plane = Some(plane);
                 result.surface_flags = self.surface_flags(side);
                 // bunnyhop patch: expose the clipping side's texinfo so callers can resolve the

@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { rankedLine, rankedState, readUpdateStatus } from "./update-status";
+import { rankedLine, rankedState, readUpdateStatus, updatePromptView, type UpdateStatus } from "./update-status";
 
 test("update state only accepts known phases and bounded values", () => {
   expect(readUpdateStatus(null)).toBeNull();
@@ -39,4 +39,47 @@ test("the ranked line says whether the server lists the new build", () => {
   expect(rankedState(null, build, wasm, now)).toBe("unknown");
   expect(rankedState(listed, build, undefined, now)).toBe("unknown");
   expect(rankedLine("waiting")).toContain("not ranked");
+});
+
+const status = (fields: Record<string, unknown>): UpdateStatus => readUpdateStatus(fields)!;
+
+test("the home screen offers a found version with one press, then the restart", () => {
+  expect(updatePromptView(null, null, null)).toBeNull();
+  expect(updatePromptView(status({ status: "current", version: "0.7.1" }), null, null)).toBeNull();
+  expect(updatePromptView(status({ status: "idle" }), null, null)).toBeNull();
+  const found = updatePromptView(status({ status: "available", version: "0.7.2", inPlace: true }), null, null);
+  expect(found).toEqual({ text: "Version 0.7.2 is out.", action: "download", label: "Update", dismissible: true });
+  // A copy that can't replace itself downloads the package for a manual install.
+  expect(updatePromptView(status({ status: "available", version: "0.7.2" }), null, null)?.label).toBe("Download");
+  const downloading = status({ status: "downloading", version: "0.7.2", received: 25, bytes: 100 });
+  expect(updatePromptView(downloading, null, "0.7.2")).toMatchObject({ text: "Downloading version 0.7.2… 25%" });
+  expect(updatePromptView(downloading, null, "0.7.2")).toMatchObject({ action: "cancel", dismissible: false });
+  expect(updatePromptView(status({ status: "staged", version: "0.7.2" }), null, null)).toMatchObject({
+    text: "Version 0.7.2 is ready.",
+    action: "restart",
+    label: "Restart to update",
+  });
+  expect(updatePromptView(status({ status: "ready", version: "0.7.2" }), null, null)?.action).toBe("reveal");
+});
+
+test("Not now hides a version until a newer one", () => {
+  const found = status({ status: "available", version: "0.7.2", inPlace: true });
+  expect(updatePromptView(found, "0.7.2", null)).toBeNull();
+  expect(updatePromptView(status({ status: "staged", version: "0.7.2" }), "0.7.2", null)).toBeNull();
+  expect(updatePromptView(status({ status: "available", version: "0.7.3" }), "0.7.2", null)?.text).toBe(
+    "Version 0.7.3 is out.",
+  );
+});
+
+test("a download started from the home screen says when it fails", () => {
+  const failed = status({ status: "error", message: "The package hash doesn't match." });
+  expect(updatePromptView(failed, null, "0.7.2")).toEqual({
+    text: "The update didn't finish. The package hash doesn't match.",
+    action: "check",
+    label: "Try again",
+    dismissible: true,
+  });
+  expect(updatePromptView(status({ status: "cancelled" }), null, "0.7.2")?.text).toBe("The update was cancelled.");
+  // A quiet automatic check that failed shows nothing.
+  expect(updatePromptView(failed, null, null)).toBeNull();
 });

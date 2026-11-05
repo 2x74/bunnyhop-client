@@ -5,6 +5,7 @@
 import { add, ring, scale, type Paint } from "../../player/bunny/builder";
 import type { V3 } from "../../player/bunny/rig";
 import { ACCENT, CARROT, CARROT_DARK, fixed, LEAF, LEAF_DARK, type KnifeCtx } from "./ctx";
+import { hump, reducedMotion } from "./bayonet";
 import { straightHold } from "./hold";
 import { KMAT, PART, type KnifeDef } from "./types";
 
@@ -94,4 +95,24 @@ export const cleaver: KnifeDef = {
   pivots: { hole: { p: HOLE_C, axis: [1, 0, 0] } },
   tp: { o: [3.16, -1.24, 1.34], z: [0.53, 0.1, -0.84], y: [1, 0, 0], s: 1.6 },
   hold: straightHold([0, 0, 0.2]),
+  // A heavy chopper, not a slicer: the same action timing as every knife, but the wrist cocks further back in the
+  // wind-up, the arm drops through the cut behind the weight (the broad face turned toward you, not the edge), and the
+  // recovery sags and lifts back late, as if the slab had to be hauled up again. Stab: a short downward chop.
+  pose(action, t, s) {
+    const k = reducedMotion() ? 0.4 : 1;
+    if (action === "slash1" || action === "slash2") {
+      const side = action === "slash1" ? 1 : -1;
+      const cock = hump(t, 0, 0.2), cut = hump(t, 0.1, 0.44), sag = hump(t, 0.3, 0.9);
+      s.wrist[0] += k * (-13 * cock + 12 * cut + 4 * sag);
+      s.wrist[2] += k * side * (6 * cut - 10 * cock);
+      // The flat shows through the cut: the forearm rolls the face toward the camera.
+      s.arm.a[2] += k * side * -9 * cut;
+      s.arm.a[0] += k * (3 * cock - 5 * cut);
+      s.arm.o[2] += k * (0.5 * cock - 0.7 * cut - 0.5 * sag);
+    } else if (action === "stab") {
+      const lift = hump(t, 0, 0.3), chop = hump(t, 0.18, 0.6), sag = hump(t, 0.45, 1.0);
+      s.wrist[0] += k * (-14 * lift + 16 * chop + 3 * sag);
+      s.arm.o[2] += k * (0.6 * lift - 0.9 * chop - 0.3 * sag);
+    }
+  },
 };

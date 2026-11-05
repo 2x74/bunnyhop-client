@@ -404,6 +404,9 @@ if(BUNNYHOP_BUILD_CLIENT)
         src/avatar_smoke.cpp src/avatar_picture.cpp src/webp_lossless.cpp)
     target_include_directories(bunnyhop-native-avatar-smoke PRIVATE include vendor src)
     target_link_libraries(bunnyhop-native-avatar-smoke PRIVATE bunnyhop_core_native SDL3::SDL3 OpenGL::GL ZLIB::ZLIB Threads::Threads)
+    add_executable(bunnyhop-native-actor-motion-smoke EXCLUDE_FROM_ALL src/actor_motion_smoke.cpp)
+    target_include_directories(bunnyhop-native-actor-motion-smoke PRIVATE include vendor src)
+    target_link_libraries(bunnyhop-native-actor-motion-smoke PRIVATE bunnyhop_core_native SDL3::SDL3 OpenGL::GL ZLIB::ZLIB)
     add_executable(bunnyhop-native-floor-pose-smoke EXCLUDE_FROM_ALL src/floor_pose_smoke.cpp)
     target_include_directories(bunnyhop-native-floor-pose-smoke PRIVATE vendor)
     target_link_libraries(bunnyhop-native-floor-pose-smoke PRIVATE bunnyhop_core_native SDL3::SDL3 OpenGL::GL ZLIB::ZLIB)
@@ -452,7 +455,7 @@ if(BUNNYHOP_BUILD_CLIENT)
     endif()
 endif()
 if(BUILD_TESTING)
-    foreach(parity_test IN ITEMS scene_draw_list graphics_settings zone_effects native_chat render_math water_capture texture_bleed room_state gameplay data_location sniper_zoom music_envelope weapon_menu ghost_trails activity cosmetics window_settings window_modes display_modes hud_theme replay_controls ghost_compare)
+    foreach(parity_test IN ITEMS scene_draw_list graphics_settings zone_effects native_chat render_math water_capture texture_bleed room_state gameplay data_location sniper_zoom music_envelope weapon_menu ghost_trails actor_ticks activity cosmetics window_settings window_modes display_modes hud_theme replay_controls ghost_compare)
         add_executable(bunnyhop-native-${parity_test}-tests src/${parity_test}_tests.cpp)
         target_include_directories(bunnyhop-native-${parity_test}-tests PRIVATE include vendor src)
         target_compile_options(bunnyhop-native-${parity_test}-tests PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
@@ -477,6 +480,12 @@ if(BUILD_TESTING)
     # hud_theme.hpp inflates gzip data; Windows finds zlib.h only through the vcpkg target.
     find_package(ZLIB REQUIRED)
     target_link_libraries(bunnyhop-native-hud_theme-tests PRIVATE ZLIB::ZLIB)
+    # Supporter name fonts: the exported sheet, read and laid out as the HUD draws names.
+    add_executable(bunnyhop-native-name-font-tests src/name_font_sheet_tests.cpp)
+    target_include_directories(bunnyhop-native-name-font-tests PRIVATE include vendor src)
+    target_compile_options(bunnyhop-native-name-font-tests PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
+    target_link_libraries(bunnyhop-native-name-font-tests PRIVATE ZLIB::ZLIB)
+    add_test(NAME native_name_fonts COMMAND bunnyhop-native-name-font-tests "${CMAKE_CURRENT_SOURCE_DIR}/../../target/native-assets")
     add_executable(bunnyhop-native-grapheme-tests src/grapheme_tests.cpp)
     target_include_directories(bunnyhop-native-grapheme-tests PRIVATE src)
     target_compile_options(bunnyhop-native-grapheme-tests PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
@@ -506,6 +515,13 @@ if(BUILD_TESTING)
             $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
         add_test(NAME native_file_dialogs COMMAND bunnyhop-native-file-dialog-tests)
         set_tests_properties(native_file_dialogs PROPERTIES TIMEOUT 20)
+        # Display recovery around the window mode driver; SDL only for its headers.
+        add_executable(bunnyhop-native-display-check-tests src/display_check_tests.cpp)
+        target_include_directories(bunnyhop-native-display-check-tests PRIVATE vendor src)
+        target_link_libraries(bunnyhop-native-display-check-tests PRIVATE SDL3::SDL3)
+        target_compile_options(bunnyhop-native-display-check-tests PRIVATE
+            $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
+        add_test(NAME native_display_check COMMAND bunnyhop-native-display-check-tests)
         add_executable(bunnyhop-native-video-tests
             src/video_export_tests.cpp src/video_export.cpp src/video_codecs.cpp src/audio_pack.cpp)
         target_include_directories(bunnyhop-native-video-tests PRIVATE include vendor src)
@@ -601,7 +617,53 @@ if(BUILD_TESTING)
             WORKING_DIRECTORY "${BUNNYHOP_ROOT}" FIXTURES_SETUP gun_hold_oracle TIMEOUT 120)
         add_test(NAME native_gun_hold COMMAND bunnyhop-native-gun-hold-tests "${GUN_HOLD_ORACLE}")
         set_tests_properties(native_gun_hold PROPERTIES FIXTURES_REQUIRED gun_hold_oracle)
+        set(VIEWMODEL_FEEL_ORACLE "${CMAKE_CURRENT_BINARY_DIR}/viewmodel-feel-oracle.json")
+        add_test(NAME native_viewmodel_feel_oracle
+            COMMAND "${BUN_EXECUTABLE}" apps/native/src/viewmodel-feel-oracle.ts "${VIEWMODEL_FEEL_ORACLE}")
+        set_tests_properties(native_viewmodel_feel_oracle PROPERTIES
+            WORKING_DIRECTORY "${BUNNYHOP_ROOT}" FIXTURES_SETUP viewmodel_feel_oracle TIMEOUT 120)
+        add_test(NAME native_viewmodel_feel COMMAND bunnyhop-native-viewmodel-feel-tests "${VIEWMODEL_FEEL_ORACLE}")
+        set_tests_properties(native_viewmodel_feel PROPERTIES FIXTURES_REQUIRED viewmodel_feel_oracle)
+        set(VIEWMODEL_POSE_ORACLE "${CMAKE_CURRENT_BINARY_DIR}/viewmodel-pose-oracle.json")
+        add_test(NAME native_viewmodel_pose_oracle
+            COMMAND "${BUN_EXECUTABLE}" apps/native/src/viewmodel-pose-oracle.ts "${VIEWMODEL_POSE_ORACLE}")
+        set_tests_properties(native_viewmodel_pose_oracle PROPERTIES
+            WORKING_DIRECTORY "${BUNNYHOP_ROOT}" FIXTURES_SETUP viewmodel_pose_oracle TIMEOUT 120)
+        add_test(NAME native_viewmodel_pose COMMAND bunnyhop-native-viewmodel-pose-tests "${VIEWMODEL_POSE_ORACLE}")
+        set_tests_properties(native_viewmodel_pose PROPERTIES FIXTURES_REQUIRED viewmodel_pose_oracle)
+        set(GUN_RECOIL_ORACLE "${CMAKE_CURRENT_BINARY_DIR}/gun-recoil-oracle.json")
+        add_test(NAME native_gun_recoil_oracle
+            COMMAND "${BUN_EXECUTABLE}" apps/native/src/gun-recoil-oracle.ts "${GUN_RECOIL_ORACLE}")
+        set_tests_properties(native_gun_recoil_oracle PROPERTIES
+            WORKING_DIRECTORY "${BUNNYHOP_ROOT}" FIXTURES_SETUP gun_recoil_oracle TIMEOUT 120)
+        add_test(NAME native_gun_recoil COMMAND bunnyhop-native-gun-recoil-tests "${GUN_RECOIL_ORACLE}")
+        set_tests_properties(native_gun_recoil PROPERTIES FIXTURES_REQUIRED gun_recoil_oracle)
+        set(MAP_PROPS_ORACLE "${CMAKE_CURRENT_BINARY_DIR}/map-props-oracle.json")
+        add_test(NAME native_map_props_oracle
+            COMMAND "${BUN_EXECUTABLE}" apps/native/src/map-props-oracle.ts "${MAP_PROPS_ORACLE}")
+        set_tests_properties(native_map_props_oracle PROPERTIES
+            WORKING_DIRECTORY "${BUNNYHOP_ROOT}" FIXTURES_SETUP map_props_oracle TIMEOUT 120)
+        add_test(NAME native_map_props COMMAND bunnyhop-native-map-props-tests "${MAP_PROPS_ORACLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/map_props_vectors.json")
+        set_tests_properties(native_map_props PROPERTIES FIXTURES_REQUIRED map_props_oracle)
     endif()
+    add_executable(bunnyhop-native-first-person-tests src/first_person_weapons_tests.cpp)
+    target_include_directories(bunnyhop-native-first-person-tests PRIVATE vendor)
+    target_compile_options(bunnyhop-native-first-person-tests PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
+    add_test(NAME native_first_person_weapons COMMAND bunnyhop-native-first-person-tests)
+    add_executable(bunnyhop-native-viewmodel-pose-tests src/viewmodel_pose_tests.cpp)
+    target_include_directories(bunnyhop-native-viewmodel-pose-tests PRIVATE vendor)
+    target_compile_options(bunnyhop-native-viewmodel-pose-tests PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
+    add_executable(bunnyhop-native-viewmodel-feel-tests src/viewmodel_feel_tests.cpp)
+    target_include_directories(bunnyhop-native-viewmodel-feel-tests PRIVATE vendor)
+    target_compile_options(bunnyhop-native-viewmodel-feel-tests PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
+    add_executable(bunnyhop-native-gun-recoil-tests src/gun_recoil_tests.cpp)
+    target_include_directories(bunnyhop-native-gun-recoil-tests PRIVATE vendor)
+    target_compile_options(bunnyhop-native-gun-recoil-tests PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
     add_executable(bunnyhop-native-gun-hold-tests src/gun_hold_tests.cpp)
     target_include_directories(bunnyhop-native-gun-hold-tests PRIVATE vendor)
     target_compile_options(bunnyhop-native-gun-hold-tests PRIVATE
@@ -636,10 +698,14 @@ if(BUILD_TESTING)
     target_include_directories(bunnyhop-native-jhud-tests PRIVATE include vendor src)
     add_executable(bunnyhop-native-closest-pos-tests src/closest_pos_tests.cpp)
     target_include_directories(bunnyhop-native-closest-pos-tests PRIVATE include vendor src)
+    # Animated map props and moving textures against the website's bone setup, sequenceAt and texture-scroll.ts.
+    add_executable(bunnyhop-native-map-props-tests src/map_props_tests.cpp)
+    target_include_directories(bunnyhop-native-map-props-tests PRIVATE include vendor src)
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
         # The same exact arithmetic as the website: nothing may contract it into an FMA.
         target_compile_options(bunnyhop-native-jhud-tests PRIVATE -ffp-contract=off)
         target_compile_options(bunnyhop-native-closest-pos-tests PRIVATE -ffp-contract=off)
+        target_compile_options(bunnyhop-native-map-props-tests PRIVATE -ffp-contract=off)
     endif()
     add_test(NAME native_runner_help COMMAND bunnyhop-native-runner --help)
     # Decoding and pack scanning need no SDL, so these run everywhere.
@@ -768,6 +834,10 @@ if(BUILD_TESTING)
     target_include_directories(bunnyhop-native-numbered-menus-tests PRIVATE include vendor src)
     target_link_libraries(bunnyhop-native-numbered-menus-tests PRIVATE bunnyhop_core_native)
     add_test(NAME native_numbered_menus COMMAND bunnyhop-native-numbered-menus-tests)
+    add_executable(bunnyhop-native-look-menu-tests src/look_menu_tests.cpp)
+    target_include_directories(bunnyhop-native-look-menu-tests PRIVATE include vendor src)
+    target_link_libraries(bunnyhop-native-look-menu-tests PRIVATE SDL3::SDL3)
+    add_test(NAME native_look_menu COMMAND bunnyhop-native-look-menu-tests)
     add_executable(bunnyhop-native-runtime-tests src/runtime_tests.cpp)
     target_include_directories(bunnyhop-native-runtime-tests PRIVATE include vendor src)
     target_link_libraries(bunnyhop-native-runtime-tests PRIVATE bunnyhop_core_native)
@@ -792,6 +862,56 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/../../target/native-assets"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/actor_anim_fixture.json")
     set_tests_properties(native_actor_animation_web_oracle PROPERTIES SKIP_RETURN_CODE 77)
+endif()
+
+# The whole third-person bunny (animation, bank, legs, ears) against the website's own model.
+if(BUILD_TESTING)
+    add_executable(bunnyhop-native-actor-pose-tests src/actor_pose_tests.cpp)
+    target_include_directories(bunnyhop-native-actor-pose-tests PRIVATE vendor)
+    find_program(ACTOR_POSE_BUN bun)
+    if(ACTOR_POSE_BUN)
+        set(ACTOR_POSE_ASSETS "${CMAKE_CURRENT_SOURCE_DIR}/../../target/native-assets")
+        set(ACTOR_POSE_ORACLE "${CMAKE_CURRENT_BINARY_DIR}/actor-pose-oracle.json")
+        add_test(NAME native_actor_pose_oracle COMMAND "${ACTOR_POSE_BUN}" apps/native/src/actor-pose-oracle.ts
+            "${ACTOR_POSE_ASSETS}" "${ACTOR_POSE_ORACLE}")
+        set_tests_properties(native_actor_pose_oracle PROPERTIES
+            WORKING_DIRECTORY "${BUNNYHOP_ROOT}" FIXTURES_SETUP actor_pose_oracle TIMEOUT 120)
+        add_test(NAME native_actor_pose_web COMMAND bunnyhop-native-actor-pose-tests
+            "${ACTOR_POSE_ASSETS}" "${ACTOR_POSE_ORACLE}")
+        set_tests_properties(native_actor_pose_web PROPERTIES
+            FIXTURES_REQUIRED actor_pose_oracle SKIP_RETURN_CODE 77 TIMEOUT 60)
+    endif()
+endif()
+
+# The water and ladders ghosts and other players swim and climb from: a synthetic BSP, then the website's own code on
+# the BSPs in native/maps (skipped without any).
+if(BUILD_TESTING)
+    add_executable(bunnyhop-native-map-volumes-tests src/map_volumes_tests.cpp)
+    target_include_directories(bunnyhop-native-map-volumes-tests PRIVATE vendor src)
+    target_compile_options(bunnyhop-native-map-volumes-tests PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
+    add_test(NAME native_map_volumes COMMAND bunnyhop-native-map-volumes-tests)
+    find_program(MAP_VOLUMES_BUN bun)
+    if(MAP_VOLUMES_BUN)
+        set(MAP_VOLUMES_ORACLE "${CMAKE_CURRENT_BINARY_DIR}/map-volumes-oracle.json")
+        add_test(NAME native_map_volumes_oracle COMMAND "${MAP_VOLUMES_BUN}" apps/native/src/map-volumes-oracle.ts
+            "${BUNNYHOP_ROOT}/maps" "${MAP_VOLUMES_ORACLE}")
+        set_tests_properties(native_map_volumes_oracle PROPERTIES
+            WORKING_DIRECTORY "${BUNNYHOP_ROOT}" FIXTURES_SETUP map_volumes_oracle TIMEOUT 120)
+        add_test(NAME native_map_volumes_web COMMAND bunnyhop-native-map-volumes-tests "${MAP_VOLUMES_ORACLE}")
+        set_tests_properties(native_map_volumes_web PROPERTIES
+            FIXTURES_REQUIRED map_volumes_oracle SKIP_RETURN_CODE 77 TIMEOUT 120)
+    endif()
+endif()
+
+# A replay seek pre-rolls the cameras and the bunny from the replay's own frames before the cut.
+if(BUILD_TESTING)
+    add_executable(bunnyhop-native-replay-preroll-tests src/replay_preroll_tests.cpp)
+    target_include_directories(bunnyhop-native-replay-preroll-tests PRIVATE include vendor src)
+    target_link_libraries(bunnyhop-native-replay-preroll-tests PRIVATE bunnyhop_core_native)
+    add_test(NAME native_replay_preroll COMMAND bunnyhop-native-replay-preroll-tests
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../target/native-assets")
+    set_tests_properties(native_replay_preroll PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60)
 endif()
 
 if(BUILD_TESTING)
@@ -837,24 +957,6 @@ if(BUILD_TESTING)
         set_tests_properties(native_third_person_swing PROPERTIES
             FIXTURES_REQUIRED third_person_swing_oracle SKIP_RETURN_CODE 77 TIMEOUT 60)
     endif()
-endif()
-
-if(BUILD_TESTING)
-    add_executable(bunnyhop-native-runner-animation-tests src/runner_anim_tests.cpp)
-    target_include_directories(bunnyhop-native-runner-animation-tests PRIVATE vendor)
-    find_program(RUNNER_ANIM_BUN bun)
-    if(RUNNER_ANIM_BUN)
-        set(RUNNER_ANIM_ORACLE "${CMAKE_CURRENT_BINARY_DIR}/runner-anim-oracle.json")
-        add_test(NAME native_runner_animation_oracle COMMAND "${RUNNER_ANIM_BUN}" apps/native/src/runner-anim-oracle.ts "${RUNNER_ANIM_ORACLE}")
-        set_tests_properties(native_runner_animation_oracle PROPERTIES WORKING_DIRECTORY "${BUNNYHOP_ROOT}" FIXTURES_SETUP runner_anim_oracle TIMEOUT 60)
-        add_test(NAME native_runner_animation_web COMMAND bunnyhop-native-runner-animation-tests "${RUNNER_ANIM_ORACLE}")
-        set_tests_properties(native_runner_animation_web PROPERTIES FIXTURES_REQUIRED runner_anim_oracle)
-    endif()
-endif()
-if(BUNNYHOP_BUILD_CLIENT)
-    add_executable(bunnyhop-native-runner-render-smoke EXCLUDE_FROM_ALL src/runner_render_smoke.cpp)
-    target_include_directories(bunnyhop-native-runner-render-smoke PRIVATE include vendor src)
-    target_link_libraries(bunnyhop-native-runner-render-smoke PRIVATE bunnyhop_core_native SDL3::SDL3 OpenGL::GL ZLIB::ZLIB)
 endif()
 
 if(BUILD_TESTING)

@@ -94,8 +94,13 @@ inline nlohmann::json presentation_smoke(
                 break;
             }
         }
-        if (!fired || attack.weapon != id || weapon.clip + 1 != clip_before)
-            throw std::runtime_error(name + " did not produce authoritative shot/ammo debit");
+        // Physics v24 made the clip infinite on every map (core weapons.rs infinite_clip): a shot keeps it full, and a
+        // full clip has nothing to reload.
+        constexpr uint32_t infinite_clip_physics = 24;
+        const bool infinite_clip = settings.physics >= infinite_clip_physics;
+        const auto clip_expected = infinite_clip ? clip_before : clip_before - 1;
+        if (!fired || attack.weapon != id || weapon.clip != clip_expected)
+            throw std::runtime_error(name + " did not produce an authoritative shot with the expected clip");
         nlohmann::json item = {
                 {"weapon", id},
                 {"name", name},
@@ -111,6 +116,11 @@ inline nlohmann::json presentation_smoke(
         for (int i = 0; i < 5; i++)
             step(0);
         item["recoilImage"] = save(name + "-recoil");
+        if (infinite_clip) {
+            item["reload"] = "the clip is infinite";
+            evidence["weapons"].push_back(item);
+            continue;
+        }
         for (int i = 0; i < 155; i++)
             step(0);
         step(1u << 13);

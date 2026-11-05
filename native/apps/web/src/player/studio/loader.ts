@@ -1,55 +1,22 @@
 import { fetchBytes } from "../../content/fetch";
-// Loads CS:S player models on demand from the hosted player content (content/player.ts): a dedicated, map-less core
-// instance mounts the content group's file list as a listing, `core.studioLoad` asks for exactly the files a model
-// needs (MDL, its $includemodel animation models, VVD, VTX, VMTs, base + bump VTFs) and the content resolve loop
-// fetches them from content/<sha256> (immutable, HTTP-cached, hash-checked). One asset per model path per session,
-// shared by every instance; animations are decoded lazily (data.ts).
+// Loads the two CS:S animation sources the game uses, on demand, from the hosted player content (content/player.ts):
+//   models/player/cs_player_shared.mdl   the player skeleton, pose parameters and sequences the bunny is animated by
+//   models/weapons/v_knife_t.mdl         the knife viewmodel's skeleton and sequences (the first-person hands)
+// No meshes or materials: the CS:S player models (models/player/{ct,t}_*) and the knife world models were dropped in
+// v0.0.38 (owner: bunny player models only), so nothing here asks for them. A dedicated, map-less core instance mounts
+// the content group's file list as a listing, `core.studioLoad` asks for exactly the files a model needs and the
+// content resolve loop fetches them from content/<sha256> (immutable, HTTP-cached, hash-checked). Shared by every
+// instance; animations are decoded lazily (data.ts).
 
 import wasmUrl from "../../wasm/bunnyhop_core.wasm?url";
-import { Core, type TexturePayload } from "../../core";
+import { Core } from "../../core";
 import { contentKey } from "../../content/manifest";
 import { playerContent, type PlayerContent } from "../../content/player";
 import { resolveContent, type ContentReader } from "../../content/resolve";
 import { StudioData } from "./data";
 
-/** Player models in the content (team -> skins), in the order Settings lists them. */
-export const CT_SKINS = ["ct_urban", "ct_gsg9", "ct_sas", "ct_gign"] as const;
-export const T_SKINS = ["t_phoenix", "t_leet", "t_arctic", "t_guerilla"] as const;
-export type CsSkin = (typeof CT_SKINS)[number] | (typeof T_SKINS)[number];
-export const SKIN_LABEL: Record<CsSkin, string> = {
-  ct_urban: "SEAL Team 6",
-  ct_gsg9: "GSG-9",
-  ct_sas: "SAS",
-  ct_gign: "GIGN",
-  t_phoenix: "Phoenix Connexion",
-  t_leet: "Elite Crew",
-  t_arctic: "Arctic Avengers",
-  t_guerilla: "Guerilla Warfare",
-};
-
-export const modelPath = (skin: string) => `models/player/${skin}.mdl`;
-export const knifePath = (skin: string) => (skin.startsWith("t_") ? "models/weapons/w_knife_t.mdl" : "models/weapons/w_knife_ct.mdl");
-
-export interface StudioTextures {
-  /** Texture payloads by VTF path (uploaded by the model once it knows the renderer). */
-  get(path: string, allowS3tc: boolean, needAlpha: boolean): TexturePayload | null;
-}
-
-export interface CsAsset {
-  skin: string;
-  data: StudioData;
-  /** Bone-merged weapon (knife world model), if available. */
-  weapon: StudioData | null;
-  textures: StudioTextures;
-  /** Load time (ms) and bytes fetched (first load of the shared files included). */
-  ms: number;
-  bytes: number;
-}
-
 let corePromise: Promise<Core> | null = null;
 let coreFor: PlayerContent | null = null;
-const assets = new Map<string, Promise<CsAsset>>();
-const ready = new Map<string, CsAsset>();
 let fetchedBytes = 0;
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
@@ -99,51 +66,6 @@ async function loadModelNow(core: Core, c: PlayerContent, path: string): Promise
   if (!h) h = core.studioLoad(path);
   if (!h) throw new Error(`${path}: ${core.lastError()}`);
   return h;
-}
-
-/** True when hosted player content is known (a map manifest carried it) and has this skin. */
-export function hasSkin(skin: string): boolean {
-  const c = playerContent();
-  return !!c && modelPath(skin) in c.group.files;
-}
-
-/** The CS:S player model `skin` (e.g. "ct_urban") with its knife. Cached per skin; rejects without content. */
-export function loadCsAsset(skin: string): Promise<CsAsset> {
-  const c = playerContent();
-  if (!c) return Promise.reject(new Error("no player content"));
-  let p = assets.get(skin);
-  if (!p) {
-    p = (async () => {
-      const t0 = performance.now();
-      const b0 = fetchedBytes;
-      const core = await contentCore(c);
-      const data = new StudioData(core, await loadModel(core, c, modelPath(skin)));
-      let weapon: StudioData | null = null;
-      const wp = knifePath(skin);
-      if (wp in c.group.files) {
-        try {
-          weapon = new StudioData(core, await loadModel(core, c, wp));
-        } catch (e) {
-          console.warn("player model: knife unavailable", e);
-        }
-      }
-      const cache = new Map<string, TexturePayload | null>();
-      const textures: StudioTextures = {
-        get: (path, s3tc, alpha) => {
-          const k = `${path}|${s3tc}|${alpha}`;
-          if (!cache.has(k)) cache.set(k, core.texturePath(path, s3tc, alpha));
-          return cache.get(k) ?? null;
-        },
-      };
-      const asset: CsAsset = { skin, data, weapon, textures, ms: performance.now() - t0, bytes: fetchedBytes - b0 };
-      ready.set(skin, asset);
-      console.info(`player model: ${skin} loaded in ${asset.ms.toFixed(0)} ms (${(fetchedBytes / 1e6).toFixed(1)} MB of player content fetched so far; ${data.info.bones.length} bones, ${data.info.seqs.length} sequences, ${data.info.vertexCount} vertices)`);
-      return asset;
-    })();
-    p.catch(() => assets.delete(skin));
-    assets.set(skin, p);
-  }
-  return p;
 }
 
 /**
@@ -218,9 +140,4 @@ export function loadViewmodelAnims(): Promise<StudioData> {
 
 export function readyViewmodelAnims(): StudioData | null {
   return vmAnimsReady;
-}
-
-/** Already-loaded asset (synchronous), or null. */
-export function readyAsset(skin: string): CsAsset | null {
-  return ready.get(skin) ?? null;
 }

@@ -2,7 +2,27 @@
 #include <cassert>
 #include <iostream>
 
+// The third-person bunny's model rolls about its hips: they stay put, the head swings to the side it leans to, and
+// with no bank a point only turns with the feet yaw (the gun's muzzle uses the same matrix as the drawn model).
+static void test_banked_model() {
+    BhTransform banked{};
+    banked.origin[0] = 10;
+    banked.angles[1] = 90;
+    banked.angles[2] = 8;
+    const auto model = native::model_matrix_about(banked, 36);
+    const auto hips = native::transform_point(model, {0, 0, 36});
+    assert(std::abs(hips[0] - 10) < 1e-4f && std::abs(hips[1]) < 1e-4f && std::abs(hips[2] - 36) < 1e-4f);
+    const auto head = native::transform_point(model, {0, 0, 66});
+    const float lean = float(8 * native::radians);
+    assert(std::abs(head[0] - (10 + 30 * std::sin(lean))) < 1e-3f && std::abs(head[1]) < 1e-3f);
+    assert(std::abs(head[2] - (36 + 30 * std::cos(lean))) < 1e-3f);
+    banked.angles[2] = 0;
+    const auto muzzle = native::transform_point(native::model_matrix_about(banked, 36), {20, 5, 50});
+    assert(std::abs(muzzle[0] - 5) < 1e-3f && std::abs(muzzle[1] - 20) < 1e-3f && std::abs(muzzle[2] - 50) < 1e-3f);
+}
+
 int main() {
+    test_banked_model();
     const float eye[3] = {0, 0, 32};
     const auto vp = native::camera_matrix(eye, 0, 0, 16.f / 9);
     std::array<float, 4> rect;

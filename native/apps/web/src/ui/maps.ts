@@ -71,7 +71,7 @@ export interface MapEntry {
   added?: string | null;
   /** maps/<name>.zones.json exists locally (not shown in the UI). */
   zones?: boolean;
-  /** Community difficulty tier (raw upstream value; T7 and up show as T7+, tiers.ts; null = unrated). */
+  /** Community difficulty tier (raw upstream value, 1..10; null = unrated). */
   tier?: number | null;
   /** Track count: number of tracks, or { main, bonus } counts. */
   tracks?: number | { main?: number; bonus?: number } | null;
@@ -133,7 +133,7 @@ export function tierOf(m: MapEntry, online?: MapSummary | null): number | null {
   return clampTier(online?.tier ?? m.tier ?? null);
 }
 
-/** Tier pill (T1–T6, T7+; "T?" = unrated, unranked for points). `long` adds the tier name ("T5 · Very hard"). */
+/** Tier pill (T1–T10; "T?" = unrated, unranked for points). `long` adds the tier name ("T5 · Very hard"). */
 export function tierBadge(tier: number | null, o: { long?: boolean } = {}): HTMLElement {
   const t = clampTier(tier);
   return h(

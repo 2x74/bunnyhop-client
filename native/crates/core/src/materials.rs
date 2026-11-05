@@ -440,16 +440,26 @@ pub struct Payload {
     pub bytes: Vec<u8>,
 }
 
-fn high(mip: u8, s: &playsrc_vtf::Subresource) -> bool {
-    matches!(s.identity, SubresourceIdentity::HighResolution { mip: m, frame: 0, slice: 0, .. } if m == mip)
+fn high(mip: u8, frame: u16, s: &playsrc_vtf::Subresource) -> bool {
+    matches!(s.identity, SubresourceIdentity::HighResolution { mip: m, frame: f, slice: 0, .. } if m == mip && f == frame)
 }
 
 /// Extracts mip 0 (and the full mip chain for S3TC uploads) of a VTF.
 /// With `allow_s3tc`, DXT data is passed through untouched; otherwise everything is decoded to RGBA8.
 pub fn texture_payload(bytes: &[u8], allow_s3tc: bool, need_alpha: bool) -> Result<Payload, String> {
+    texture_payload_frame(bytes, 0, allow_s3tc, need_alpha)
+}
+
+/// Animation frames in a VTF (1 for a still texture), 0 if it doesn't parse.
+pub fn texture_frame_count(bytes: &[u8]) -> u16 {
+    playsrc_vtf::Decoder::new(bytes, Dialect::Source2013Pc, Limits::default()).map_or(0, |d| d.metadata().frame_count.max(1))
+}
+
+/// `texture_payload` of animation frame `frame` (the AnimatedTexture material proxy's `$frame`).
+pub fn texture_payload_frame(bytes: &[u8], frame: u16, allow_s3tc: bool, need_alpha: bool) -> Result<Payload, String> {
     let decoder = playsrc_vtf::Decoder::new(bytes, Dialect::Source2013Pc, Limits::default()).map_err(|e| e.to_string())?;
     let meta = decoder.metadata();
-    let base = meta.subresources.iter().find(|s| high(0, s)).ok_or("vtf: no mip 0")?;
+    let base = meta.subresources.iter().find(|s| high(0, frame, s)).ok_or("vtf: no mip 0")?;
     let (w, h) = (base.width, base.height);
     let s3tc = match meta.high_format {
         ImageFormat::Dxt1 if need_alpha => Some(TEX_DXT1A),
@@ -464,7 +474,7 @@ pub fn texture_payload(bytes: &[u8], allow_s3tc: bool, need_alpha: bool) -> Resu
         let mips = if meta.mip_count as u32 == full_chain { full_chain } else { 1 };
         let mut payload = Payload { format, levels: Vec::new(), bytes: Vec::new() };
         for mip in 0..mips {
-            let Some(s) = meta.subresources.iter().find(|s| high(mip as u8, s)) else { break };
+            let Some(s) = meta.subresources.iter().find(|s| high(mip as u8, frame, s)) else { break };
             let data = bytes.get(s.encoded_range.clone()).ok_or("vtf: truncated")?;
             payload.levels.push(Level {
                 width: s.width,

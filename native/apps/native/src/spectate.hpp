@@ -7,6 +7,7 @@
 #include "hud_scoreboard.hpp"
 #include "hud_text.hpp"
 #include "input_timeline.hpp"
+#include "menu_rows.hpp"
 #include <array>
 #include <optional>
 #include <set>
@@ -110,13 +111,24 @@ private:
     }
 };
 
-// What the spectator bar shows this frame; |shown| is false while not watching.
+// What the spectator bar shows this frame; |shown| is false while not watching. |look|: the watched name's colour,
+// effect and font (watched_name_look); |seconds| runs the effect.
 struct SpectatorBar {
     bool shown = false;
     bool waiting = false;
     std::string_view name;
     std::string_view hint;
+    NameAppearance look;
+    double seconds = 0;
 };
+
+// The bar draws the name as the website does: the supporter's look, else the slot's colour, and no marks.
+inline NameAppearance watched_name_look(NameAppearance look, unsigned slot) {
+    if (look.color == NameAppearance{}.color) look.color = slot_color(slot);
+    look.marks = 0;
+    look.badge_count = 0;
+    return look;
+}
 
 // "Watching <name>" at the bottom of the screen with the hint under it (web net/hud.ts SpecBar).
 template <class Hud>
@@ -124,14 +136,22 @@ void draw_spectator_bar(Hud &hud, int width, int height, float percent, const Sp
     if (!bar.shown) return;
     constexpr float bar_from_bottom = 46;
     constexpr float hint_below_bar = 21;
+    constexpr float text_size = 16;
     constexpr NameColor cream = {.94f, .91f, .86f, 1};
     constexpr NameColor dim = {.63f, .65f, .70f, 1};
+    constexpr std::string_view lead = "Watching ";
+    const std::string_view waiting = bar.waiting ? ", waiting for them" : "";
     const HudGeometry geometry(width, height, percent);
-    HudLabel<192> label;
-    label.format("Watching %.*s%s", int(bar.name.size()), bar.name.data(), bar.waiting ? ", waiting for them" : "");
     hud.overlay_begin(width, height, percent);
-    hud.overlay_text(geometry.width / 2, geometry.height - bar_from_bottom, label.view(), 16, cream, true);
-    hud.overlay_text(geometry.width / 2, geometry.height - bar_from_bottom + hint_below_bar, bar.hint, 12, dim, true);
+    const float lead_width = hud.overlay_text_width(lead, text_size);
+    const float name_width = hud.overlay_name_width(bar.name, text_size, bar.look);
+    const float waiting_width = waiting.empty() ? 0 : hud.overlay_text_width(waiting, text_size);
+    const float left = (geometry.width - lead_width - name_width - waiting_width) / 2;
+    const float top = geometry.height - bar_from_bottom;
+    hud.overlay_text(left, top, lead, text_size, cream);
+    hud.overlay_name(left + lead_width, top, bar.name, text_size, bar.look, bar.seconds);
+    if (!waiting.empty()) hud.overlay_text(left + lead_width + name_width, top, waiting, text_size, dim);
+    hud.overlay_text(geometry.width / 2, top + hint_below_bar, bar.hint, 12, dim, true);
     hud.overlay_end(width, height);
 }
 
@@ -224,33 +244,50 @@ public:
         return pick;
     }
 
+    // The panel and its rows: the players, the way back while watching, and Close.
+    MenuRows rows(int width, int height, float percent) const {
+        constexpr float panel_width = 440, row_height = 28, first_row = 52, frame_height = 104;
+        constexpr float exit_from_bottom = 22, exit_height = 22;
+        const size_t lines = count_ + (spectating_ ? 1 : 0);
+        const HudGeometry geometry(width, height, percent);
+        MenuRows out;
+        out.width = panel_width;
+        out.height = frame_height + float(lines) * row_height;
+        out.left = geometry.width / 2 - panel_width / 2;
+        out.top = geometry.height / 2 - out.height / 2;
+        for (size_t i = 0; i < lines; ++i)
+            out.add(unsigned(i + 1), out.top + first_row + float(i) * row_height, row_height);
+        out.add(0, out.top + out.height - exit_from_bottom, exit_height);
+        return out;
+    }
+
+    // `pointer`: the cursor in HUD units while a chat line holds it out, for the row it is on.
     template <class Hud>
-    void draw(Hud &hud, int width, int height, float percent) const {
+    void draw(
+            Hud &hud, int width, int height, float percent, std::optional<std::array<float, 2>> pointer = std::nullopt
+    ) const {
         if (!open_) return;
-        constexpr float panel_width = 440;
-        constexpr float row_height = 28;
+        constexpr float text_inset = 6;
         constexpr NameColor cream = {.94f, .91f, .86f, 1};
         constexpr NameColor dim = {.63f, .65f, .70f, 1};
         constexpr NameColor amber = {1, .71f, .24f, 1};
-        const size_t rows = count_ + (spectating_ ? 1 : 0);
-        const float panel_height = 104 + float(rows) * row_height;
-        const HudGeometry geometry(width, height, percent);
-        const float x = geometry.width / 2 - panel_width / 2;
-        const float y = geometry.height / 2 - panel_height / 2;
+        const auto layout = rows(width, height, percent);
+        const float x = layout.left, y = layout.top;
         hud.overlay_begin(width, height, percent);
-        hud.overlay_rect(x, y, panel_width, panel_height, {.025f, .027f, .04f, .96f});
+        hud.overlay_rect(x, y, layout.width, layout.height, {.025f, .027f, .04f, .96f});
+        draw_menu_hover(hud, layout, layout.hovered(pointer));
         hud.overlay_text(x + 18, y + 16, "Spectate", 20, amber);
         HudLabel<160> label;
         for (size_t i = 0; i < count_; ++i) {
             const auto shown = names_[i].view();
             label.format("%zu. %.*s", i + 1, int(shown.size()), shown.data());
-            hud.overlay_text(x + 18, y + 58 + float(i) * row_height, label.view(), 14, watched_[i] ? amber : cream);
+            hud.overlay_text(x + 18, layout.rows[i].top + text_inset, label.view(), 14, watched_[i] ? amber : cream);
         }
         if (spectating_) {
             label.format("%zu. Stop spectating (respawn)", count_ + 1);
-            hud.overlay_text(x + 18, y + 58 + float(count_) * row_height, label.view(), 14, cream);
+            hud.overlay_text(x + 18, layout.rows[count_].top + text_inset, label.view(), 14, cream);
         }
-        const float footer = y + panel_height - 36;
+        const float footer = y + layout.height - 36;
         hud.overlay_text(x + 18, footer, "Mouse 1 and 2 switch players. Space changes the camera.", 12, dim);
         hud.overlay_text(x + 18, footer + 18, "0. Close", 12, dim);
         hud.overlay_end(width, height);

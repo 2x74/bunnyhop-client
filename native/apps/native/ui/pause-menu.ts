@@ -18,6 +18,7 @@ import { icon, type IconName } from "../../web/src/ui/icons";
 import { hopIndicator } from "../../web/src/ui/hop";
 import { arrowNav, h } from "../../web/src/ui/dom";
 import { mapTier, tierBadge } from "../../web/src/ui/maps";
+import { mapLookRows } from "../../web/src/ui/map-look-rows";
 import { leaderboardPanel } from "../../web/src/ui/leaderboard";
 import { versionButton } from "../../web/src/ui/changelog";
 import { supportLink } from "../../web/src/ui/community";
@@ -210,6 +211,8 @@ function screenTab(a: PauseActions): HTMLElement | null {
         icon("chevronRight", { size: "0.95em" }),
       ),
     ),
+    // This map's Brightness / Fullbright: the !bright menu's choices (web ui/map-look-rows.ts).
+    a.map ? mapLookRows(a.map) : null,
   );
 }
 

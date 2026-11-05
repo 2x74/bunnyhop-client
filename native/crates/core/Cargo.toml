@@ -22,5 +22,7 @@ playsrc-phy = { path = "../vendor/phy" }
 playsrc-vtf = { path = "../vendor/vtf" }
 playsrc-vpk = { path = "../vendor/vpk", default-features = false }
 crc32fast = "1.5.0"
+# Exact-build digests of the physics 25 maps (map_fixes.rs BUILDS_V25); already in the tree via playsrc-bsp.
+sha2 = "0.10.9"
 # Same version/features as playsrc-bsp: decodes LZMA (method 14) pakfile entries (bspzip -repack).
 zip = { version = "8.6.0", default-features = false, features = ["lzma"] }

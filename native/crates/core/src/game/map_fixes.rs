@@ -383,6 +383,103 @@ pub(crate) fn mechanics_v19(entities: &[Entity]) -> Option<&'static MapMechanics
     MECHANICS_V19.iter().find(|m| m.fingerprint == fingerprint)
 }
 
+/// Physics v25: exact builds first imported in v0.0.37, both with the 1-hop block teleporter prefab already live on
+/// bhop_cutekittenz2 / bhop_vandora / bhop_ponpon_fix (platform OnStartTouch `filter_*` TestActivator -> the filter
+/// matching the player's name spawns `teleporter_N` at the player for 4 s and renames them; landing in a live one
+/// renames them `tele` and the map's teleport_filter triggers send them back). research/maps-v37/hard-maps.md.
+///
+/// Matched on `build_digest_v25`, not only the entity CRC: a rebuild that changes any entity key/value, any output
+/// (delays included), the brush/displacement collision, a packed physics material or the solid props gets none of this. Nothing here is active before v25, and nothing in
+/// `MECHANICS_V19` changes: v1..24 simulate these BSPs exactly as before.
+pub(crate) struct BuildV25 {
+    pub map: &'static str,
+    /// `entity_fingerprint` (cheap pre-check before the digest).
+    pub fingerprint: u32,
+    /// `build_digest_v25`, hex.
+    pub digest: &'static str,
+    /// Mechanics for a build outside `MECHANICS_V19`, active from v25 (player I/O + makers).
+    pub mechanics: Option<MapMechanics>,
+    /// Maker inputs run from v25 (for a `MECHANICS_V19` build whose makers were reviewed later).
+    pub makers: bool,
+}
+
+pub(crate) static BUILDS_V25: [BuildV25; 2] = [
+    // BSP sha256 a0bab77ede3315fbaea70bb79c4b7f7b01cd9aa136964d12817bf85b1b20ddad (main.fastdl.me), 38 prefab blocks.
+    BuildV25 {
+        map: "bhop_hellopro2",
+        fingerprint: 0x86b9ed90,
+        digest: "c1540e42cc024891369a408a805d2c1702818c7bd66282f80f69b56d18cecd3f",
+        mechanics: Some(MapMechanics { map: "bhop_hellopro2", fingerprint: 0x86b9ed90, makers: true, velocity_scripts: false }),
+        makers: true,
+    },
+    // BSP sha256 f17561e687ea79f2598153f1ba068f3a77148e1624cd60b36e4a0682546993f0: its MECHANICS_V19 player I/O stays
+    // v19; the eight maker templates (48 prefab blocks) run from v25.
+    BuildV25 { map: "bhop_4triedsame", fingerprint: 0x0c832785, digest: "22d835bab00b5c0d082db2e05f648906a5607680abdc90d0a7415b30565c6e5d", mechanics: None, makers: true },
+];
+
+/// SHA-256 over the physics inputs of a build: every retained entity key/value (output pairs skipped, so the full and
+/// the verifier's parse agree), every parsed output with its delay and fire count, the decoded collision lumps (planes,
+/// nodes, leafs, models, leafbrushes, brushes, brushsides, texinfo, texdata, dispinfo, disp verts, disp tris), the
+/// `$surfaceprop`/`$surfaceprop2` the packed materials give each texdata (`physics::packed_texdata_surfaces`), and the
+/// prop collision sources (model, solidity, pose, flags). apps/api/src/bsp-strip.ts copies those lumps byte for byte
+/// (it only drops non-solid displacements, which neither v25 build has: a build where it did would fail closed in the
+/// verifier, so test its stripped BSP) and keeps every packed `.vmt`, so the full BSP and the stripped physics BSP give
+/// the same digest (tested). Not covered: the bytes of prop collision models (`.phy`), which the client may also
+/// receive later from hosted content; a build is still pinned by its full BSP sha256 in completeness and admission.
+pub(crate) fn build_digest_v25(bsp: &playsrc_bsp::Bsp, entities: &[Entity], outputs: &[Vec<crate::entities::Output>]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(b"bunnyhop build v25\0");
+    for e in entities {
+        for (k, v) in &e.pairs {
+            if crate::entities::Output::parse(k, v).is_some() { continue; }
+            h.update(k.as_bytes()); h.update([0]);
+            h.update(v.as_bytes()); h.update([0]);
+        }
+        h.update([255]);
+    }
+    for (i, list) in outputs.iter().enumerate() {
+        for o in list {
+            h.update((i as u32).to_le_bytes());
+            for s in [&o.event, &o.target, &o.input, &o.param] { h.update(s.as_bytes()); h.update([0]); }
+            h.update(o.delay.to_le_bytes());
+            h.update(o.times.to_le_bytes());
+        }
+    }
+    // Brush collision, its contents flags (brushes, leafs) and surfaces (brushsides -> texinfo -> texdata), and the
+    // displacement collision (dispinfo, vertices, triangle tags).
+    for index in [playsrc_bsp::PLANES, playsrc_bsp::NODES, playsrc_bsp::LEAFS, playsrc_bsp::MODELS,
+        playsrc_bsp::LEAFBRUSHES, playsrc_bsp::BRUSHES, playsrc_bsp::BRUSHSIDES, playsrc_bsp::TEXINFO,
+        playsrc_bsp::TEXDATA, playsrc_bsp::DISPINFO, playsrc_bsp::DISP_VERTS, playsrc_bsp::DISP_TRIS] {
+        let bytes = bsp.lump(index).map(|l| l.bytes(bsp)).unwrap_or(&[]);
+        h.update((index as u32).to_le_bytes());
+        h.update((bytes.len() as u64).to_le_bytes());
+        h.update(bytes);
+    }
+    // Physics materials: the surface properties the packed `.vmt` files give each texdata (friction, surface type).
+    h.update(b"surfaces\0");
+    for (primary, secondary) in crate::physics::packed_texdata_surfaces(bsp) {
+        h.update(primary.to_le_bytes());
+        h.update(secondary.to_le_bytes());
+    }
+    // Prop collision sources: which props are solid, where, and how (static prop lump + prop entities).
+    h.update(b"props\0");
+    for p in crate::physics::prop_sources(bsp, entities, &mut Vec::new()) {
+        h.update(p.name.as_bytes()); h.update([0, p.solidity, u8::from(p.settle), u8::from(p.dynamic)]);
+        for v in p.origin.iter().chain(&p.angles).chain(std::iter::once(&p.scale)) { h.update(v.to_le_bytes()); }
+        h.update(p.tag.to_le_bytes());
+        if let Some((mode, mass, force)) = p.pushaway { h.update(mode.to_le_bytes()); h.update(mass.to_le_bytes()); h.update([u8::from(force)]); }
+    }
+    h.finalize().iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// The reviewed v25 build this map is, if any: the entity CRC first, then the full digest.
+pub(crate) fn build_v25(bsp: &playsrc_bsp::Bsp, entities: &[Entity], outputs: &[Vec<crate::entities::Output>]) -> Option<&'static BuildV25> {
+    let fingerprint = entity_fingerprint(entities);
+    let candidate = BUILDS_V25.iter().find(|b| b.fingerprint == fingerprint)?;
+    (build_digest_v25(bsp, entities, outputs) == candidate.digest).then_some(candidate)
+}
+
 /// CRC of every retained key/value in order, without outputs, which the verifier stores separately.
 pub(crate) fn entity_fingerprint(entities: &[Entity]) -> u32 {
     let mut hash = crc32fast::Hasher::new();

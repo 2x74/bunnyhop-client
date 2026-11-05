@@ -1,5 +1,6 @@
 #pragma once
 #include "hud_geometry.hpp"
+#include "map_tiers.hpp"
 #include "name_tags.hpp"
 #include "room_styles.hpp"
 #include <algorithm>
@@ -115,7 +116,7 @@ public:
             row.look = host_name_appearance(
                     player.value("look", nlohmann::json()), player.value("marks", nlohmann::json()), row.look
             );
-        row.country = json_text(player, "country", 2);
+        row.country = flag_code(json_text(player, "country", flag_code_max_bytes));
         row.host = json_flag(player, "host");
         const auto rank = player.find("rank");
         if (rank != player.end() && rank->is_object()) {
@@ -251,16 +252,6 @@ constexpr NameColor panel = {.039f, .047f, .063f, .9f};
 constexpr NameColor line = {.937f, .914f, .867f, .08f};
 constexpr NameColor row_rule = {1, 1, 1, .05f};
 constexpr NameColor you_wash = {1, .706f, .235f, .08f};
-constexpr std::array<NameColor, 7> tiers = {
-        {{.369f, .878f, .541f, 1},
-         {.247f, .816f, .788f, 1},
-         {1, .847f, .302f, 1},
-         {1, .604f, .235f, 1},
-         {1, .329f, .408f, 1},
-         {.769f, .467f, 1, 1},
-         {.486f, .514f, 1, 1}}
-};
-constexpr NameColor tier_unknown = {.541f, .576f, .651f, 1};
 constexpr float max_width = 860;
 constexpr float screen_share = .92f;
 constexpr float top_share = .12f;
@@ -325,16 +316,16 @@ void draw_score_head(Hud &hud, const ScoreboardFrame &frame, const HudScoreboard
         right_text.append(head.next_map);
     }
     HudLabel<8> tier;
-    tier.format(head.tier >= 7 ? "T7+" : head.tier > 0 ? "T%d" : "T?", head.tier);
-    const NameColor tier_color = head.tier > 0 ? tiers[size_t(std::min(head.tier, 7) - 1)] : tier_unknown;
+    format_tier_label(tier, head.tier);
+    const NameColor tier_ink = tier_color(head.tier);
     const float rest_width = hud.overlay_text_width(right_text.view(), text_size);
     const float tier_width = hud.overlay_text_width(tier.view(), small_size) + 10;
     const float map_width = hud.overlay_text_width(head.map, text_size + 1);
     float x = right - rest_width - tier_width - 6 - map_width;
     hud.overlay_text(x, y + 2, head.map, text_size + 1, cream);
     x += map_width + 6;
-    hud.overlay_rect(x, y + 2, tier_width, 18, {tier_color[0], tier_color[1], tier_color[2], .14f});
-    hud.overlay_text(x + 5, y + 4, tier.view(), small_size, tier_color);
+    hud.overlay_rect(x, y + 2, tier_width, 18, {tier_ink[0], tier_ink[1], tier_ink[2], .14f});
+    hud.overlay_text(x + 5, y + 4, tier.view(), small_size, tier_ink);
     hud.overlay_text(x + tier_width, y + 3, right_text.view(), text_size, dim);
     hud.overlay_rect(left, frame.y + padding + head_height - 10, frame.width - padding * 2, 1, line);
 }
@@ -420,7 +411,7 @@ void draw_score_player(Hud &hud, float x, float right, float y, const ScoreRow &
     const auto name = utf8_prefix(row.name, glyphs);
     hud.overlay_name(x, y, name, text_size + 1, row.look, now);
     if (row.host) {
-        const float name_end = x + hud.overlay_text_width(name, text_size + 1) + 6;
+        const float name_end = x + hud.overlay_name_width(name, text_size + 1, row.look) + 6;
         draw_host_tag(hud, name_end + float(name_badge_count(row.look)) * badge_width, y);
     }
 }

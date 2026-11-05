@@ -19,6 +19,7 @@
 //   room scoreboard, name tags and their card, and how the name wears it (NAME_EFFECTS: plain, a glow, a gradient
 //   to a second colour, that gradient drifting, or a bright shine sweeping across the name). Off (plain white)
 //   unless picked. Like the badge, both only show while the player is a supporter (gated on write and on every read).
+// - Name font and avatar decoration (v0.0.37): supporter-looks.ts NAME_FONTS / AVATAR_DECOS, gated the same way.
 // - Special badges (users.special_badges, 0.0.21): staff-granted for events (SPECIAL_BADGES). The first: Clipper, for
 //   taking part in the clip campaign, and a gold Creator mark per platform for its top creator. Contributor (2026-10-25):
 //   worked on the game or the client; no permissions (the Discord role of the same name sits between Admin and Moderator).
@@ -28,6 +29,7 @@
 // Booster, Supporter, special badges.
 
 import type { StaffRole } from "./progression";
+import { avatarDecoOf, nameFontOf, type AvatarDecoId, type NameFontId } from "./supporter-looks";
 
 export type CreatorKind = "youtube" | "twitch" | "tiktok" | "x";
 export const CREATOR_KINDS: readonly CreatorKind[] = ["youtube", "twitch", "tiktok", "x"];
@@ -54,12 +56,16 @@ export interface PlayerMarks {
   nameEffect?: NameEffect | null;
   /** The gradient's second colour (NAME_COLORS id) for "paint"; null / absent = a paler shade of the first. */
   nameColor2?: NameColorId | null;
+  /** A supporter's name font (supporter-looks.ts NAME_FONTS); null / absent = the default font. v0.0.37. */
+  nameFont?: NameFontId | null;
+  /** A supporter's avatar decoration (supporter-looks.ts AVATAR_DECOS); null / absent = none. v0.0.37. */
+  avatarDeco?: AvatarDecoId | null;
   /** Special badges the player holds (SPECIAL_BADGES ids, staff-granted). Absent from older APIs / servers. */
   special?: string[];
 }
 
 /** How a supporter's name looks: colour, effect, second colour (PlayerMarks' name fields). */
-export type NameLook = Pick<PlayerMarks, "nameColor" | "nameEffect" | "nameColor2">;
+export type NameLook = Pick<PlayerMarks, "nameColor" | "nameEffect" | "nameColor2" | "nameFont">;
 
 // ---------------------------------------------------------------------------------------------
 // Supporter name colours. Six, picked to read on every surface a name shows on (board rows, chat over the game, the
@@ -133,6 +139,8 @@ export function marksOf(
     name_color?: string | null;
     name_effect?: string | null;
     name_color2?: string | null;
+    name_font?: string | null;
+    avatar_deco?: string | null;
     special_badges?: string | null;
   },
   now = Date.now(),
@@ -154,7 +162,10 @@ export function marksOf(
     nameColor: isNameColor(row.name_color) ? row.name_color : null,
     nameEffect: nameEffectOf(row.name_effect),
     nameColor2: isNameColor(row.name_color2) ? row.name_color2 : null,
-    ...(row.special_badges !== undefined ? { special: oneWeeklyPerMedal(parseBadgeList(row.special_badges).filter(isSpecialBadge)) } : {}),
+    // name_font / avatar_deco: SUPPORTER_COLS too (v0.0.37, supporter-looks.ts); absent from older rows / queries.
+    ...(row.name_font !== undefined ? { nameFont: nameFontOf(row.name_font) } : {}),
+    ...(row.avatar_deco !== undefined ? { avatarDeco: avatarDecoOf(row.avatar_deco) } : {}),
+    ...(row.special_badges !== undefined ? { special: onePeak(oneWeeklyPerMedal(parseBadgeList(row.special_badges).filter(isSpecialBadge))) } : {}),
   };
 }
 
@@ -417,6 +428,58 @@ export const MAPPER_SVG =
   `<circle cx="12" cy="12" r="11" fill="${MAPPER_CORAL}"/><path d="M12 5 18.2 8.5v7L12 19l-6.2-3.5v-7z" fill="${MAPPER_INK}"/>` +
   `<path d="M5.8 8.5 12 12l6.2-3.5M12 12v7" fill="none" stroke="${MAPPER_CORAL}" stroke-width="1.5" stroke-linejoin="round"/>`;
 
+/**
+ * Peak marks (v0.0.37): the hardest tier the player has cleared, for T7 to T10 (tiers.ts TIER_COLORS: Insane indigo,
+ * Brutal pink, Nightmare azure, Impossible white). A pointed hexagon in the tier's colour, cut light to dark, with the tier
+ * engraved. One per player, the highest: a database trigger keeps it in users.special_badges as the First T7 to T10
+ * achievements are recorded (migrations/0088_peak_mark_t7.sql), so it follows the achievements: permanent, kept when
+ * a map is re-tiered later. A pick of any peak mark (Edit card → Badges) wears the one held (equippedNameBadges).
+ */
+export const PEAK_TIERS = [7, 8, 9, 10] as const;
+export type PeakTier = (typeof PEAK_TIERS)[number];
+const PEAK_FILL: Record<PeakTier, { light: string; mid: string; dark: string; ink: string }> = {
+  // T7 (v0.0.37, the second pass): the tier's own indigo, calmer than the three above it.
+  7: { light: "#c9ccff", mid: "#7c83ff", dark: "#474db8", ink: "#0d0f2a" },
+  8: { light: "#ffc2e6", mid: "#ff6ec7", dark: "#b8337f", ink: "#2a0a1c" },
+  9: { light: "#c4e6ff", mid: "#4fb8ff", dark: "#1f6fc0", ink: "#06182c" },
+  10: { light: "#ffffff", mid: "#f2f4ff", dark: "#aab3c8", ink: "#141a28" },
+};
+export const peakMarkId = (t: PeakTier) => `peak-${t}`;
+/** The tier of a peak mark id, or null. */
+export function peakMarkOf(id: string): PeakTier | null {
+  const m = /^peak-(\d{1,2})$/.exec(id);
+  const t = m ? Number(m[1]) : NaN;
+  return (PEAK_TIERS as readonly number[]).includes(t) ? (t as PeakTier) : null;
+}
+const PEAK_HEX = "M12 1.3 21.2 6.6v10.8L12 22.7 2.8 17.4V6.6z";
+const peakSvg = (t: PeakTier) => {
+  const c = PEAK_FILL[t];
+  const id = `pk-${t}`;
+  return (
+    `<defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${c.light}"/><stop offset=".5" stop-color="${c.mid}"/><stop offset="1" stop-color="${c.dark}"/></linearGradient></defs>` +
+    `<path d="${PEAK_HEX}" fill="url(#${id})" stroke="${c.dark}" stroke-width=".8" stroke-linejoin="round"/>` +
+    engraved(String(t), t >= 10 ? 15.6 : 16.6, t >= 10 ? 10 : 12.5, c.ink)
+  );
+};
+const PEAK_MARKS = Object.fromEntries(PEAK_TIERS.map((t) => [peakMarkId(t), { name: `Cleared a T${t} map`, svg: peakSvg(t), earned: true }]));
+/** The hardest tier a player has cleared, from their special badges (their peak mark), or null below T7. */
+export function peakOf(special: readonly string[] | null | undefined): PeakTier | null {
+  let top: PeakTier | null = null;
+  for (const id of special ?? []) {
+    const t = peakMarkOf(id);
+    if (t && (!top || t > top)) top = t;
+  }
+  return top;
+}
+/** A list of special badges with one peak mark, the highest (an account merge can bring two), in the list's order. */
+export function onePeak(ids: string[]): string[] {
+  const top = Math.max(0, ...ids.map((id) => peakMarkOf(id) ?? 0));
+  return ids.filter((id, i) => {
+    const t = peakMarkOf(id);
+    return t === null || (t === top && ids.findIndex((x) => peakMarkOf(x) === top) === i);
+  });
+}
+
 /** earned: awarded by play (never staff-granted). quiet: worn only when the player picks it (a common mark). */
 export const SPECIAL_BADGES: Record<string, { name: string; svg: string; gold?: boolean; earned?: boolean; quiet?: boolean }> = {
   clipper: { name: "Clipper", svg: CLIPPER_SVG },
@@ -425,6 +488,7 @@ export const SPECIAL_BADGES: Record<string, { name: string; svg: string; gold?: 
   gauntlet: { name: "Gauntlet clear", svg: GAUNTLET_SVG, earned: true, quiet: true },
   ...WEEKLY_MARKS,
   "gauntlet-classic": { name: "Bunny Hop Map Gauntlet", svg: GAUNTLET_CLASSIC_SVG, gold: true, earned: true },
+  ...PEAK_MARKS,
   ...Object.fromEntries(
     CREATOR_KINDS.map((k) => [`creator-gold-${k}`, { name: `Top ${({ youtube: "YouTube", twitch: "Twitch", tiktok: "TikTok", x: "X" } as const)[k]} creator`, svg: CREATOR_GOLD_SVG[k], gold: true }]),
   ),
@@ -569,7 +633,8 @@ function nameBadgesOf(saved: string | null | undefined): { nameBadges?: string[]
 }
 export const gifterTier = (n = 0) => [...GIFTER_TIERS].reverse().find((t) => n >= t.goal);
 export function equippedNameBadges(m: PlayerMarks): string[] {
-  const legacy = [m.verified && "verified", m.creator && "creator", m.booster && "booster", m.supporter && "supporter", ...(m.special ?? []).filter((id) => !SPECIAL_BADGES[id]?.quiet)].filter(
+  const special = onePeak(m.special ?? []);
+  const legacy = [m.verified && "verified", m.creator && "creator", m.booster && "booster", m.supporter && "supporter", ...special.filter((id) => !SPECIAL_BADGES[id]?.quiet)].filter(
     (x): x is string => typeof x === "string",
   );
   const tier = gifterTier(m.giftsSent);
@@ -588,15 +653,19 @@ export function equippedNameBadges(m: PlayerMarks): string[] {
               ? !!tier
               : weeklyMarkOf(id)
                 ? !!heldWeekly(id)
-                : isSpecialBadge(id) && !!m.special?.includes(id);
+                : peakMarkOf(id)
+                  ? !!heldPeak()
+                  : isSpecialBadge(id) && special.includes(id);
+  // A picked peak mark follows the player's hardest clear (a pick of "peak-8" wears "peak-9" once they clear a T9).
+  const heldPeak = () => special.find((x) => peakMarkOf(x) !== null) ?? null;
   // A picked weekly podium mark follows its medal's count (a pick of "weekly-winner" wears "weekly-winner-3").
   const heldWeekly = (id: string) => {
     const medal = weeklyMarkOf(id)?.medal;
-    return m.special?.find((x) => weeklyMarkOf(x)?.medal === medal) ?? null;
+    return special.find((x) => weeklyMarkOf(x)?.medal === medal) ?? null;
   };
   const picked = m.nameBadges?.filter(owned);
   const selected = picked && (picked.length || !m.nameBadges!.length) ? picked : legacy;
-  const ids = [...new Set(selected.map((id) => (id === "gifter" || id.startsWith("gifter-") ? tier!.id : weeklyMarkOf(id) ? heldWeekly(id)! : id)))];
+  const ids = [...new Set(selected.map((id) => (id === "gifter" || id.startsWith("gifter-") ? tier!.id : weeklyMarkOf(id) ? heldWeekly(id)! : peakMarkOf(id) ? heldPeak()! : id)))];
   // A moderator who picked Contributor wears it in the shield's place (wearsContributorForStaff).
   if (wearsContributorForStaff(m)) return ["contributor", ...ids.filter((id) => id !== "staff" && id !== "contributor").slice(0, 2)];
   return [...(m.staff ? ["staff"] : []), ...ids.filter((id) => id !== "staff").slice(0, m.staff ? 2 : 3)];

@@ -12,6 +12,9 @@ use playsrc_collision::Hull;
 
 const MAX_BUMPS: usize = 4;
 const MAX_CLIP_PLANES: usize = 5;
+/// `MovementFixes::repeated_plane`: planes this close (cosine) are the same plane; how far the player steps off it.
+const REPEATED_PLANE_DOT: f32 = 0.9999;
+const REPEATED_PLANE_STEP: f32 = 0.03125;
 const STUCK_OFFSETS: usize = 54;
 /// How many ticks `edge_landing_kind` follows a fall through the 2-unit probe (from rest at sv_gravity 800 and 100 tick it
 /// takes 7; a gravity of 100 takes 20).
@@ -88,6 +91,7 @@ pub(super) fn step(
         move_collided: false,
         prevented_collision: None,
         edge_landing_kind: None,
+        jump_offset: None,
     };
 
     if mode_checks_stuck(result.state.mode)
@@ -236,6 +240,12 @@ pub(super) fn step(
     finish_step(&mut result, input, configuration, policy)?;
     if observe {
         let path = result.accepted_path.as_mut().unwrap();
+        // `Policy::jump_z_offset`: the jump's lift is an instant at the start of the move (phase 0), like a hull change.
+        if let Some(lift) = result.jump_offset
+            && path.segments.first().is_some_and(|s| s.from == lift.to)
+        {
+            path.phase_change(lift.from, lift.to, lift.hull, 0.0, true);
+        }
         if path.segments.first().is_some_and(|s| s.from == movement_origin)
             && (initial_state.position != movement_origin || initial_state.active_hull(policy) != movement_hull) {
             path.phase_change(initial_state.position, movement_origin, movement_hull, 0.0, true);
@@ -1630,7 +1640,7 @@ fn add_gravity(state: &mut State, configuration: Configuration, tick: f32) {
 }
 
 fn check_jump(
-    context: &QueryContext<'_, impl Tracer>,
+    context: &mut QueryContext<'_, impl Tracer>,
     result: &mut StepResult,
     input: StepInput,
     command: PreparedCommand,
@@ -1733,6 +1743,25 @@ fn check_jump(
         result.state.stamina_ms = (25.0 / 19.0) * 1000.0;
     }
     finish_gravity(&mut result.state, configuration, tick);
+    // bunnyhop patch: Momentum Mod's `sv_jump_z_offset` (mom_gamemovement.cpp CheckJumpButton, CS-based modes, after
+    // FinishGravity): find the floor under the player and start the jump exactly `offset` above it, if the hull fits
+    // there. Momentum traces `sv_considered_on_ground + 0.1` down; ours is `ground_probe + 0.1` (2.1), so every grounded
+    // jump starts at floor + offset, also one that landed 1.5-2 above the floor (lowered). Every ground jump then
+    // peaks at the same height above the floor, as on CS:S landfix servers.
+    if let Some(offset) = policy.jump_z_offset {
+        let hull = result.state.active_hull(policy);
+        let from = result.state.position;
+        let below = [from[0], from[1], from[2] - (configuration.ground_probe + 0.1)];
+        let down = context.trace(QueryPurpose::JumpOffset, from, below, hull, configuration.solid_mask)?;
+        if down.fraction < 1.0 && !down.start_solid && !down.all_solid {
+            let lifted = [down.end[0], down.end[1], down.end[2] + offset];
+            let up = context.trace(QueryPurpose::JumpOffset, down.end, lifted, hull, configuration.solid_mask)?;
+            if up.fraction >= 1.0 && !up.start_solid && !up.all_solid {
+                result.state.position = lifted;
+                result.jump_offset = Some(crate::JumpOffset { from, to: lifted, hull });
+            }
+        }
+    }
     result.jump_velocity[2] += result.state.velocity[2] - starting_z;
     result.climbed_step += 0.15;
     result.state.jump_latched = true;
@@ -2795,6 +2824,28 @@ fn slide(
         {
             velocity = add(velocity, normal);
             continue;
+        }
+        // bunnyhop patch (physics v25 ramp fix, `MovementFixes::repeated_plane`): the plane this move already hit,
+        // again, with no progress: step 1/32 off it and retrace with the same velocity instead of creasing into it (or
+        // spending every bump at fraction 0, which ends the move with velocity zeroed). Airborne walking against world
+        // geometry only (`Tracer::is_world`): ladders, swimming, moving brush entities and moving props keep the engine's
+        // slide. Static props and fixed entity props from the cached prop pass count as world.
+        if configuration.fixes.repeated_plane
+            && walk_mode
+            && airborne
+            && trace.fraction == 0.0
+            && trace.hit.is_none_or(|hit| context.tracer.is_world(hit))
+            && planes.iter().any(|plane| dot(*plane, normal) > REPEATED_PLANE_DOT)
+        {
+            let off = add(position, scale(normal, REPEATED_PLANE_STEP));
+            let free = context.trace(QueryPurpose::StuckRecovery, off, off, hull, configuration.solid_mask)?;
+            if !free.start_solid && !free.all_solid {
+                if let Some(p) = &mut path {
+                    p.phase_change(position, off, hull, 1.0 - f64::from(remaining) / f64::from(tick), false);
+                }
+                position = off;
+                continue;
+            }
         }
         if planes.len() >= MAX_CLIP_PLANES {
             velocity = [0.0; 3];

@@ -13,7 +13,7 @@ import { h } from "../../web/src/ui/dom";
 import { fetchMapIndex, mapBrowser, closeMapPanel } from "../../web/src/ui/maps";
 import { MapZoneWarning } from "./map-zone-warning";
 import { onNavigate } from "../../web/src/ui/nav";
-import { onViewerRequest } from "../../web/src/viewer/request";
+import { h2hFromPath, onViewerRequest } from "../../web/src/viewer/request";
 import { onRaceRequest } from "../../web/src/player/race";
 import { applyState, openAuth, openExternal, runSeconds, send, state, onBeforeSend, LIVE_ORIGIN } from "./bridge";
 import { NativeActivityService } from "./activity-service";
@@ -46,11 +46,11 @@ import { installMuteButton } from "./mute-button";
 import { installTutorialProgress } from "./tutorial-entry";
 import { watchGauntletSplit } from "./gauntlet-watch";
 import { NativeRoomService } from "./room-service";
-import { announceRoomWireStyles } from "./room-styles";
 import { RoomConnection } from "../../web/src/net/room";
 import { setRoomPresence, setRaceTag, currentRoom, currentRace } from "../../web/src/net/presence";
 import { serverBrowser } from "../../web/src/ui/servers";
 import { keyLabel } from "../../web/src/ui/settings";
+import { setLookMapNow } from "../../web/src/map-look";
 import { roomPanel } from "./rooms-panel";
 import { safeNativeChatUrl } from "./chat-links";
 import { NativeChatService } from "./chat-service";
@@ -746,6 +746,8 @@ function receive(value: unknown): void {
   const pauseBefore = paused();
   const applied = applyState(value);
   mapZoneWarning.mapChanged(state.map);
+  // The vendored Settings and pause rows for this map's own look read it from here (web main.ts sets it per page).
+  setLookMapNow(state.map);
   applyReplayHostState(value);
   applyVideoQueueState(value);
   applyHostSkies(value);
@@ -775,7 +777,6 @@ function chatKeyLabel(): string | null {
   const code = state.settings.binds.chat?.[0];
   return code ? keyLabel(code) : null;
 }
-announceRoomWireStyles(api);
 const roomService = new NativeRoomService({
   chatKey: chatKeyLabel,
   heldKnife: getHeldLoadout,
@@ -1110,6 +1111,12 @@ window.addEventListener("bunnyhop:navigate", (event) => {
   }
   if (url.pathname === "/gauntlets") {
     show("gauntlets");
+    return;
+  }
+  // Head to head: run A in the native viewer with run B as its compare ghost (replays.ts).
+  const pair = h2hFromPath(url.pathname);
+  if (pair) {
+    void watchRequest({ target: { runId: pair.a }, h2h: { runId: pair.b } }).catch(() => openWeb(url.pathname));
     return;
   }
   const replay = /^\/replay\/([\w-]+)$/.exec(url.pathname);

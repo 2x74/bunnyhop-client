@@ -41,7 +41,11 @@ function build(k: KnifeCtx): void {
       // A machined step along the foot of each flank, three short cocking slots at the front, the brake's side vents.
       groove(k, 0.25, 6.3, 0.42, y * 0.56, { paint: SLIDE_DARK, lip: LIP, h: 0.04, bone: "Slide" });
       for (let i = 0; i < 2; i++) plate(k, [5.55 + i * 0.32, y * 0.566, 0.98], [0.06, 0.012, 0.34], { paint: SLIDE_DARK, bone: "Slide" });
-      for (let i = 0; i < 2; i++) plate(k, [6.85 + i * 0.42, y * 0.566, 1.02], [0.12, 0.012, 0.2], { paint: BORE, bone: "Slide" });
+      // (Slanted, tapered vents, v0.0.37 polish: they were two flat black squares.)
+      for (let i = 0; i < 2; i++) {
+        const x = 6.85 + i * 0.42;
+        k.leaf([[x - 0.14, y * 0.567, 0.86], [x, y * 0.57, 1.02], [x + 0.14, y * 0.567, 1.18]], (j) => [0.035, 0.1, 0.035][j] ?? 0.035, 0.02, [0, y, 0], () => BORE, { bone: boneOf("Slide") });
+      }
     }
     // The barrel's hood in the port, the extractor.
     plate(k, [2.95, -0.2, 1.585], [0.45, 0.17, 0.012], { paint: STEEL });

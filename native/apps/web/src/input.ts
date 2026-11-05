@@ -11,7 +11,7 @@ import { validateMotion } from "./input-motion";
 import { TIMED_KEY_BITS, TimedInput } from "./timed-input";
 import type { Action } from "./ui/settings";
 import { DEFAULT_BINDS, guardSideMouseButtons, isWeaponAction, mouseCode, type BindAction } from "./binds";
-import { cursorFree, endFreeCursorAsPause, setCursorFree } from "./free-cursor";
+import { cursorFree, cursorHeld, endFreeCursorAsPause, setCursorFree } from "./free-cursor";
 import { MouseFilter, type MotionSample } from "./mouse-filter";
 import { IN_GIVE_SHIFT, IN_WEAPON_COMMAND_MASK } from "./weapon-rules";
 import { noteInputEvent } from "./input-trust";
@@ -797,9 +797,9 @@ export class Input {
    * next task, so a command the chat line ran first can take the release over (!ssj, takeFreeCursor).
    */
   recapture(): void {
-    if (!cursorFree()) return;
+    if (!cursorFree() || cursorHeld()) return;
     setTimeout(async () => {
-      if (!cursorFree()) return;
+      if (!cursorFree() || cursorHeld()) return;
       setCursorFree(false);
       if (!(await this.lock())) endFreeCursorAsPause();
     });

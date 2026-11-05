@@ -1,8 +1,10 @@
 #pragma once
 #include "hud.hpp"
 #include "hud_editor_layout.hpp"
+#include "look_menu.hpp"
 #include "room_state.hpp"
 #include "room_modes.hpp"
+#include "spectate.hpp"
 #include "weapon_menu.hpp"
 #include <filesystem>
 #include <fstream>
@@ -312,6 +314,85 @@ inline void draw_trainer_bar_colors(NativeHud &hud, int width, int height) {
     hud.overlay_end(width, height);
 }
 
+// A supporter's look in each name font: colours and effects in turn, and one name the font can't draw ("Сова": the
+// fonts have no Cyrillic in the HUD, so it keeps the default font).
+inline Json supporter_font_look(size_t index) {
+    constexpr std::array<const char *, 6> colors = {"#ffa8cb", "#ffab8f", "#d2c2a5", "#c4ee6a", "#6ff0f0", "#a8b8ff"};
+    constexpr std::array<const char *, 4> effects = {"", "glow", "paint", "sparkle"};
+    return {{"color", colors[index % colors.size()]},
+            {"color2", "#6ff0f0"},
+            {"effect", effects[index % effects.size()]},
+            {"font", name_font_ids[index % name_font_ids.size()]}};
+}
+
+constexpr std::array<std::string_view, name_font_ids.size() + 1> supporter_font_names = {
+        "Grotesk Hopper",
+        "Rounded_Bun",
+        "PixelPerfect",
+        "mono.strafe",
+        "Serif Runner",
+        "WideOrbit",
+        "Marker Mike",
+        "BlockParty",
+        "Script Kiddo",
+        "Сова"
+};
+
+// Supporter name fonts where the host draws names: the Tab board, chat, a player's tag and the spectator bar.
+template <class Clear, class Save>
+void supporter_names_smoke(NativeHud &hud, int width, int height, Clear clear, Save save) {
+    const Json marks = Json::array({{{"id", "supporter"}, {"name", "Supporter"}}, {{"id", "peak-7"}, {"name", "T7"}}});
+    Json rows = Json::array();
+    Chat chat;
+    chat.active = true;
+    for (size_t i = 0; i < supporter_font_names.size(); ++i) {
+        const auto name = std::string(supporter_font_names[i]);
+        rows.push_back(
+                {{"slot", i},
+                 {"name", name},
+                 {"style", "autohop"},
+                 {"status", "00:16.731"},
+                 {"statusKind", "finished"},
+                 {"pb", 16.731 + double(i)},
+                 {"look", supporter_font_look(i)},
+                 {"marks", marks}}
+        );
+        chat.push(
+                "gg",
+                name,
+                "player",
+                1,
+                60,
+                chat_decoration({{"nativeName", supporter_font_look(i)}, {"nativeMarks", marks}})
+        );
+    }
+    HudScoreboard board;
+    board.contract(
+            {{"head", {{"room", "Supporters"}, {"map", "bhop_lol_tutorial"}, {"tier", 7}, {"max", 16}}}, {"rows", rows}}
+    );
+    clear();
+    draw_scoreboard(hud, width, height, 100, board, 1, 0);
+    save("hud-supporter-fonts-board");
+    clear();
+    hud.draw_chat_overlay(width, height, chat.visible(2), "", "", {}, true, 0, 100, &chat, chat.viewport(2));
+    save("hud-supporter-fonts-chat");
+    clear();
+    hud.overlay_begin(width, height, 100);
+    for (size_t i = 0; i < name_font_ids.size(); ++i) {
+        const auto look = host_name_appearance(supporter_font_look(i), marks);
+        draw_player_tag(hud, 640, 80 + float(i) * 34, supporter_font_names[i], "00:16.731", look, slot_color(i), 1, .5);
+    }
+    hud.overlay_end(width, height);
+    SpectatorBar bar;
+    bar.shown = true;
+    bar.waiting = true;
+    bar.name = supporter_font_names[8];
+    bar.hint = "Mouse 1 and 2 switch players";
+    bar.look = watched_name_look(host_name_appearance(supporter_font_look(8), marks), 8);
+    draw_spectator_bar(hud, width, height, 100, bar);
+    save("hud-supporter-fonts-tags");
+}
+
 // Uses the existing presentation-smoke context. Fixtures never connect to a room or submit a run.
 template <class Save>
 void hud_parity_smoke(Gl &gl, NativeHud &hud, int width, int height, Save save) {
@@ -324,7 +405,7 @@ void hud_parity_smoke(Gl &gl, NativeHud &hud, int width, int height, Save save) 
             {{"head",
               {{"room", "Bunnyhop community"},
                {"map", "bhop_lol_tutorial"},
-               {"tier", 7},
+               {"tier", 10},
                {"timeLeft", "12:34 left"},
                {"max", 16}}},
              {"rows",
@@ -348,7 +429,7 @@ void hud_parity_smoke(Gl &gl, NativeHud &hud, int width, int height, Save save) 
                         {"special", {"mapper"}}},
                        {{"slot", 1},
                         {"name", "Runner"},
-                        {"country", "GB"},
+                        {"country", "PRIDE-PROGRESS"},
                         {"style", "scroll"},
                         {"status", "00:20.170"},
                         {"statusKind", "running"},
@@ -367,6 +448,7 @@ void hud_parity_smoke(Gl &gl, NativeHud &hud, int width, int height, Save save) 
     );
     const Json host_marks = Json::array(
             {{{"id", "contributor"}, {"name", "Contributor"}},
+             {{"id", "peak-9"}, {"name", "Cleared a T9 map"}},
              {{"id", "verified"}, {"name", "Verified"}},
              {{"id", "supporter"}, {"name", "Supporter"}},
              {{"id", "gifter-prism"},
@@ -393,7 +475,7 @@ void hud_parity_smoke(Gl &gl, NativeHud &hud, int width, int height, Save save) 
                  {"nativeBadge", "Verified Supporter Mapper"}},
             Json{{"nativeNameColor", "#6ff0f0"},
                  {"nativeNameEffect", "glow"},
-                 {"nativeCountry", "GB"},
+                 {"nativeCountry", "PRIDE-TRANS"},
                  {"nativeBadge", "Booster"}},
             Json{{"nativeNameColor", "#a8b8ff"}, {"nativeNameEffect", "sparkle"}, {"nativeCountry", "JP"}}
     };
@@ -423,6 +505,7 @@ void hud_parity_smoke(Gl &gl, NativeHud &hud, int width, int height, Save save) 
     clear();
     hud.draw_chat_overlay(width, height, chat.visible(2), "", "", {}, true, 0, 100, &chat, chat.viewport(2));
     save("hud-chat");
+    supporter_names_smoke(hud, width, height, clear, save);
     HudResult result;
     result.restart_bind("KeyR");
     result.finish(1, 16.731, 1, 17.421, true);
@@ -495,6 +578,16 @@ void hud_parity_smoke(Gl &gl, NativeHud &hud, int width, int height, Save save) 
     clear();
     trigger_menu.draw(hud, width, height, 100, true, false);
     save("hud-trigger-menu");
+    // !bright over the game with its cursor on Brighter, after Brighter twice on this map.
+    LookMenu look_menu;
+    auto look_settings = default_settings();
+    look_settings[std::string(map_looks_key)] = {{"bhop_lol_tutorial", {{"brightness", 1.1}}}};
+    look_menu.toggle("bhop_lol_tutorial", look_settings);
+    const auto look_rows = look_menu.rows(width, height, 100);
+    const auto brighter = look_rows.rows[LookMenu::brighter - 1];
+    clear();
+    look_menu.draw(hud, width, height, 100, std::array<float, 2>{look_rows.left + 60, brighter.top + 4});
+    save("hud-look-menu");
     auto preferences = default_settings();
     preferences["hudMovementLj"] = true;
     for (const char *id : {"startPre", "strafeOffsets", "firstJump", "longJump", "sync", "ghostKeys"})

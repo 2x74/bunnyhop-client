@@ -17,6 +17,7 @@
 //     - Circlet: a band of dark amethyst glass round the hood with one angular crest over the forehead and a small
 //       chevron at the back; a light sweeps to and fro along the aqua line across its front.
 //
+//   - Silver Wreath (First T10, v0.0.37): the first hat earned by playing; static silver leaves (wreath below).
 //   - More Supporter hats, asked for by supporters: Propeller Cap, Capybara and Maxwell (moving, accent -1..-8); the
 //     Space Buns and Ponytail wigs (wigs.ts: the player's hair colour; the ponytail swings) and the Half Oni Mask
 //     (oni-mask.ts). On the standard bunny a wig is built for the bare head (the hood is down: mesh.ts), on Plush and
@@ -638,7 +639,72 @@ function maxwell(): THREE.BufferGeometry {
   g.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 70), 60);
   return g;
 }
+/**
+ * Silver Wreath (First T10, v0.0.37): two branches of small silver leaves round the hood, from a join at the back to
+ * a gap over the brow, lower at the front than at the back like a worn wreath. Leaves alternate above and below a thin
+ * stem and shrink towards the front. Two tones (light face out, a cooler shade in); static, no hat-fx.
+ */
+function wreath(): THREE.BufferGeometry {
+  const W = headWeight();
+  const b = new Builder();
+  const SILVER = 0xeef2f9, SILVER2 = 0xb9c2d4, SHADE = 0x7f899e, STEM = 0x6b7489;
+  // Where the Circlet sits: high at the front, low at the nape; the branches stop short of the face opening. a: 90 deg = the back, 270 = the face.
+  const Z = (a: number) => 72.9 - 0.85 * Math.sin(a);
+  /** On the hood (HOOD_C / HOOD_R) at the wreath's height, a little proud of it. */
+  const pos = (a: number): V3 => {
+    const z = Z(a);
+    const f = Math.sqrt(Math.max(0.04, 1 - ((z - HOOD_C[2]) / HOOD_R[2]) ** 2));
+    return [(HOOD_R[0] * f + 0.18) * Math.cos(a), HOOD_C[1] + (HOOD_R[1] * f + 0.18) * Math.sin(a), z];
+  };
+  /** The hood's outward normal there (the ellipsoid's gradient), so the leaves lie along it. */
+  const outAt = (a: number): V3 => {
+    const p = pos(a);
+    return norm([p[0] / HOOD_R[0] ** 2, (p[1] - HOOD_C[1]) / HOOD_R[1] ** 2, (p[2] - HOOD_C[2]) / HOOD_R[2] ** 2]);
+  };
+  const rad = (d: number) => (d * Math.PI) / 180;
+  const BACK = 90, GAP = 52, STEPS = 11;
+  for (const dir of [1, -1]) {
+    const end = BACK + dir * (180 - GAP);
+    // The stem.
+    const path: V3[] = [];
+    for (let i = 0; i <= 24; i++) path.push(pos(rad(BACK + ((end - BACK) * i) / 24)));
+    b.tube(path, 0.15, 6, [0, 0, 1], () => fixed(STEM), () => W);
+    // The leaves, base on the stem, pointing the way the branch grows.
+    for (let i = 0; i < STEPS; i++) {
+      const s = (i + 0.5) / STEPS;
+      const a = rad(BACK + (end - BACK) * s);
+      const base = pos(a);
+      const grow = norm(sub(pos(a + dir * 0.02), pos(a - dir * 0.02)));
+      const out = outAt(a);
+      let up = norm(cross(out, grow));
+      if (up[2] < 0) up = scale(up, -1);
+      const side = i % 2 ? -1 : 1;
+      const tilt = rad(44);
+      const d = norm(add(scale(grow, Math.cos(tilt)), scale(up, side * Math.sin(tilt))));
+      // Slim and pointed (widest a third of the way up), folded along the midrib so the two halves catch light apart.
+      const L = 2.5 - 0.9 * s, Wd = 0.3 * L, T = 0.07, FOLD = 0.35;
+      const across = norm(cross(out, d));
+      const SEG = 8;
+      const rows: V3[][] = [];
+      for (let r = 0; r <= 7; r++) {
+        const t = r / 7;
+        const q = add(add(base, scale(d, L * t)), scale(out, 0.14 * Math.sin(Math.PI * t)));
+        const w = Wd * Math.pow(Math.sin(Math.PI * Math.pow(t, 0.75)), 0.9);
+        rows.push([...Array(SEG)].map((_, k) => {
+          const th = (k / SEG) * Math.PI * 2, c = Math.cos(th), sn = Math.sin(th);
+          return add(q, add(scale(across, w * c), scale(out, T * sn + FOLD * w * (1 - Math.abs(c)) * (sn > 0 ? 1 : 0.6))));
+        }));
+      }
+      b.surface(rows, { flat: true, paint: (_, k) => fixed(k < SEG / 2 ? (k === 1 || k === 2 ? SILVER : SILVER2) : SHADE), weight: () => W });
+    }
+  }
+  const g = b.geometry();
+  g.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 70), 60);
+  return g;
+}
+
 const BUILD: Record<string, () => THREE.BufferGeometry> = {
+  "hat-wreath": wreath,
   "hat-propeller": propellerCap,
   "hat-capybara": capybara,
   "hat-maxwell": maxwell,

@@ -1,5 +1,5 @@
 diff --git a/crates/core/Cargo.toml b/crates/core/Cargo.toml
-index 01bc5f7..1066f48 100644
+index f79264a..b5993fd 100644
 --- a/crates/core/Cargo.toml
 +++ b/crates/core/Cargo.toml
 @@ -4,14 +4,17 @@ version = "0.1.0"
@@ -24,10 +24,10 @@ index 01bc5f7..1066f48 100644
  playsrc-collision = { path = "../vendor/collision" }
  playsrc-movement = { path = "../vendor/movement" }
 diff --git a/crates/core/src/game.rs b/crates/core/src/game.rs
-index 9fcf4c5..bc6d874 100644
+index 5a55d9b..e272e6f 100644
 --- a/crates/core/src/game.rs
 +++ b/crates/core/src/game.rs
-@@ -1291,8 +1291,8 @@ impl Tracer for Scene<'_> {
+@@ -1338,8 +1338,8 @@ impl Tracer for Scene<'_> {
  }
  
  fn angle_vectors_forward(angles: [f32; 3]) -> [f32; 3] {
@@ -38,7 +38,7 @@ index 9fcf4c5..bc6d874 100644
      [cp * cy, cp * sy, -sp]
  }
  
-@@ -2391,8 +2391,8 @@ impl Game {
+@@ -2455,8 +2455,8 @@ impl Game {
          let lo = [p[0] + hull.mins[0], p[1] + hull.mins[1], p[2] + hull.mins[2]];
          let hi = [p[0] + hull.maxs[0], p[1] + hull.maxs[1], p[2] + hull.maxs[2]];
          let center = [(lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5, (lo[2] + hi[2]) * 0.5];
@@ -240,10 +240,10 @@ index 28d151e..3ec0530 100644
          let up = [sp * cy, sp * sy, cp];
          let p = self.state.position;
 diff --git a/crates/core/src/game/weapons.rs b/crates/core/src/game/weapons.rs
-index 8097ba0..70e6e9d 100644
+index 3e5e27c..7cbc6eb 100644
 --- a/crates/core/src/game/weapons.rs
 +++ b/crates/core/src/game/weapons.rs
-@@ -498,8 +498,8 @@ impl Game {
+@@ -541,8 +541,8 @@ impl Game {
      }
  
      fn eye_and_forward(&self, cmd: Cmd) -> ([f32; 3], [f32; 3]) {
@@ -254,7 +254,7 @@ index 8097ba0..70e6e9d 100644
          let p = self.state.position;
          let o = self.state.view_offset;
          ([p[0] + o[0], p[1] + o[1], p[2] + o[2]], [cp * cy, cp * sy, -sp])
-@@ -706,7 +706,7 @@ impl Game {
+@@ -771,7 +771,7 @@ impl Game {
          self.weapon_event(WEAPON_EVENT_DROPPED);
          // The entity it came from, unless a point_template has respawned a new copy into it meanwhile.
          if let Some(e) = held.ent.filter(|&e| self.ents[e].removed) {
@@ -263,12 +263,12 @@ index 8097ba0..70e6e9d 100644
              let p = self.state.position;
              let from = [p[0], p[1], p[2] + 32.0];
              let to = [p[0] + cy * 48.0, p[1] + sy * 48.0, p[2] + 32.0];
-@@ -944,7 +944,7 @@ impl Game {
-         self.report_attack(gun.id, if silenced { 2 } else { 1 }, eye, end, hit);
-         // Damage falls off with distance: damage * rangeModifier ^ (distance / 500).
+@@ -1020,7 +1020,7 @@ impl Game {
          let distance = hit.map_or(gun.range, |t| t.fraction * gun.range);
--        let damage = gun.damage * f32::from(gun.pellets) * gun.range_modifier.powf(distance / 500.0);
-+        let damage = gun.damage * f32::from(gun.pellets) * playsrc_collision::math::pow(gun.range_modifier, distance / 500.0);
+         let secondary = self.arms.slot(slot).is_some_and(|h| h.silenced || h.burst);
+         let (base, range_modifier) = bullet_stats(gun, secondary, self.settings.physics_version);
+-        let damage = base * f32::from(gun.pellets) * range_modifier.powf(distance / 500.0);
++        let damage = base * f32::from(gun.pellets) * playsrc_collision::math::pow(range_modifier, distance / 500.0);
          self.damage_hit(hit, damage);
      }
  
@@ -385,10 +385,10 @@ index ec615e5..29b2181 100644
 +    }
 +}
 diff --git a/crates/core/src/physics.rs b/crates/core/src/physics.rs
-index f9e6dd6..7695fe3 100644
+index 702314f..718cf65 100644
 --- a/crates/core/src/physics.rs
 +++ b/crates/core/src/physics.rs
-@@ -429,9 +429,9 @@ impl DynamicHulls {
+@@ -446,9 +446,9 @@ impl DynamicHulls {
  
  /// Source AngleMatrix applied to a local point.
  pub fn rotate(v: [f32; 3], angles: [f32; 3]) -> [f32; 3] {
@@ -402,10 +402,10 @@ index f9e6dd6..7695fe3 100644
      let left = [sr * sp * cy - cr * sy, sr * sp * sy + cr * cy, sr * cp];
      let up = [cr * sp * cy + sr * sy, cr * sp * sy - sr * cy, cr * cp];
 diff --git a/crates/core/src/props.rs b/crates/core/src/props.rs
-index 305ca34..3e0bec3 100644
+index 61b3e57..8f82b8a 100644
 --- a/crates/core/src/props.rs
 +++ b/crates/core/src/props.rs
-@@ -311,9 +311,9 @@ pub struct PropMesh {
+@@ -336,9 +336,9 @@ pub struct PropMesh {
  
  /// Source `AngleMatrix` (pitch about Y, yaw about Z, roll about X), as rows applied to column vectors.
  fn angle_matrix([pitch, yaw, roll]: [f32; 3]) -> [[f32; 3]; 3] {
@@ -419,7 +419,7 @@ index 305ca34..3e0bec3 100644
          [cp * cy, sr * sp * cy - cr * sy, cr * sp * cy + sr * sy],
          [cp * sy, sr * sp * sy + cr * cy, cr * sp * sy - sr * cy],
 diff --git a/crates/core/src/wasm.rs b/crates/core/src/wasm.rs
-index f934683..5d51537 100644
+index c57a96a..5cb1ca1 100644
 --- a/crates/core/src/wasm.rs
 +++ b/crates/core/src/wasm.rs
 @@ -31,7 +31,7 @@ fn with<R>(f: impl FnOnce(&mut Ctx) -> R) -> R {
@@ -930,7 +930,7 @@ index f934683..5d51537 100644
  pub extern "C" fn overlay_states() -> usize {
      with(|c| {
          c.scratch_u32.clear();
-@@ -926,15 +926,15 @@ pub extern "C" fn edge_observed() -> u32 {
+@@ -960,15 +960,15 @@ pub extern "C" fn edge_observed() -> u32 {
  }
  
  // Optional observational ABI v2. Does not change commands, snapshots or ranked timing.
@@ -949,7 +949,7 @@ index f934683..5d51537 100644
  pub extern "C" fn timing_path() -> usize {
      with(|c| {
          c.timing_f64.clear();
-@@ -952,9 +952,9 @@ pub extern "C" fn timing_path() -> usize {
+@@ -986,9 +986,9 @@ pub extern "C" fn timing_path() -> usize {
          c.timing_f64.len()
      })
  }
@@ -961,7 +961,7 @@ index f934683..5d51537 100644
  pub extern "C" fn timing_path_reason() -> usize {
      with(|c| {
          c.scratch_str = c.game.as_ref().and_then(|g| g.timing_path.as_ref())
-@@ -962,3 +962,7 @@ pub extern "C" fn timing_path_reason() -> usize {
+@@ -996,3 +996,7 @@ pub extern "C" fn timing_path_reason() -> usize {
          c.scratch_str.len()
      })
  }
@@ -970,7 +970,7 @@ index f934683..5d51537 100644
 +#[path = "../../native-web/core.rs"]
 +pub mod native_web;
 diff --git a/crates/core/src/wasm_content.rs b/crates/core/src/wasm_content.rs
-index 00ba3ca..5975707 100644
+index d1110a6..8062510 100644
 --- a/crates/core/src/wasm_content.rs
 +++ b/crates/core/src/wasm_content.rs
 @@ -43,7 +43,7 @@ unsafe fn owned_string(ptr: *mut u8, len: usize) -> String {
@@ -1142,7 +1142,7 @@ index 00ba3ca..5975707 100644
  pub unsafe extern "C" fn props_load(ptr: *mut u8, len: usize) -> usize {
      let bytes = unsafe { owned(ptr, len) };
      let bsp = crate::parse_bsp(&bytes).ok();
-@@ -368,7 +368,7 @@ pub unsafe extern "C" fn props_load(ptr: *mut u8, len: usize) -> usize {
+@@ -371,7 +371,7 @@ pub unsafe extern "C" fn props_load(ptr: *mut u8, len: usize) -> usize {
  
  /// Builds the prop mesh from the loaded props and the current VFS. Material names go to scratch_str
  /// (newline-separated); returns that text's length. Models whose files aren't loaded are skipped (and requested).
@@ -1151,7 +1151,7 @@ index 00ba3ca..5975707 100644
  pub extern "C" fn props_build() -> usize {
      with(|c| {
          PROPS.with(|p| {
-@@ -383,7 +383,7 @@ pub extern "C" fn props_build() -> usize {
+@@ -386,7 +386,7 @@ pub extern "C" fn props_build() -> usize {
  
  /// Prop mesh stats into scratch_u32: `[instances, built models, missing models, vertex floats, indices, groups]`;
  /// missing model paths in scratch_str.
@@ -1160,7 +1160,7 @@ index 00ba3ca..5975707 100644
  pub extern "C" fn props_info() -> usize {
      with(|c| {
          PROPS.with(|p| {
-@@ -404,7 +404,7 @@ pub extern "C" fn props_info() -> usize {
+@@ -407,7 +407,7 @@ pub extern "C" fn props_info() -> usize {
  
  /// Moving prop groups (prop_door_rotating) into scratch_u32 as `[entity, material, first_index, index_count]`
  /// quads; their vertices are in model space, placed every frame by `prop_transforms`.
@@ -1169,7 +1169,7 @@ index 00ba3ca..5975707 100644
  pub extern "C" fn props_dynamic_groups() -> usize {
      with(|c| {
          PROPS.with(|p| {
-@@ -415,7 +415,7 @@ pub extern "C" fn props_dynamic_groups() -> usize {
+@@ -418,7 +418,7 @@ pub extern "C" fn props_dynamic_groups() -> usize {
  }
  
  /// Prop groups into scratch_u32 as `[material, first_index, index_count]` triples.
@@ -1178,7 +1178,7 @@ index 00ba3ca..5975707 100644
  pub extern "C" fn props_groups() -> usize {
      with(|c| {
          PROPS.with(|p| {
-@@ -427,7 +427,7 @@ pub extern "C" fn props_groups() -> usize {
+@@ -430,7 +430,7 @@ pub extern "C" fn props_groups() -> usize {
  
  /// Per prop group (parallel to `props_groups`), 1 if it's in the 3D skybox set (drawn by the skybox pass, see
  /// `sky_camera`), into scratch_u32.
@@ -1187,7 +1187,7 @@ index 00ba3ca..5975707 100644
  pub extern "C" fn props_group_sky3d() -> usize {
      with(|c| {
          PROPS.with(|p| {
-@@ -437,23 +437,45 @@ pub extern "C" fn props_group_sky3d() -> usize {
+@@ -440,23 +440,45 @@ pub extern "C" fn props_group_sky3d() -> usize {
      })
  }
  
@@ -1238,7 +1238,7 @@ index 00ba3ca..5975707 100644
 +    CONTENT.with(|c| *c.borrow_mut() = Content::default());
 +}
 diff --git a/crates/core/src/wasm_studio.rs b/crates/core/src/wasm_studio.rs
-index 8bcd394..495853c 100644
+index e019b6f..dfc869b 100644
 --- a/crates/core/src/wasm_studio.rs
 +++ b/crates/core/src/wasm_studio.rs
 @@ -21,7 +21,7 @@ unsafe fn owned_string(ptr: *mut u8, len: usize) -> String {
@@ -1250,7 +1250,7 @@ index 8bcd394..495853c 100644
  pub unsafe extern "C" fn studio_load(path_ptr: *mut u8, path_len: usize) -> u32 {
      let path = crate::vfs::normalize(&unsafe { owned_string(path_ptr, path_len) });
      if let Some(h) = MODELS.with(|m| m.borrow().iter().position(|x| x.path == path)) {
-@@ -49,7 +49,7 @@ fn model<R>(h: u32, f: impl FnOnce(&StudioModel) -> R) -> Option<R> {
+@@ -56,7 +56,7 @@ fn model<R>(h: u32, f: impl FnOnce(&StudioModel) -> R) -> Option<R> {
  }
  
  /// Model metadata JSON into scratch_str; returns its length (0 = bad handle).
@@ -1259,7 +1259,7 @@ index 8bcd394..495853c 100644
  pub extern "C" fn studio_info(h: u32) -> usize {
      let json = model(h, |m| m.info_json()).unwrap_or_default();
      with(|c| {
-@@ -59,7 +59,7 @@ pub extern "C" fn studio_info(h: u32) -> usize {
+@@ -66,7 +66,7 @@ pub extern "C" fn studio_info(h: u32) -> usize {
  }
  
  /// Skinned mesh vertices into scratch_f32 (`STUDIO_VERTEX_FLOATS` per vertex); returns the float count.
@@ -1268,7 +1268,7 @@ index 8bcd394..495853c 100644
  pub extern "C" fn studio_vertices(h: u32) -> usize {
      let v = model(h, |m| m.mesh.vertices.clone()).unwrap_or_default();
      with(|c| {
-@@ -69,7 +69,7 @@ pub extern "C" fn studio_vertices(h: u32) -> usize {
+@@ -76,7 +76,7 @@ pub extern "C" fn studio_vertices(h: u32) -> usize {
  }
  
  /// Triangle indices into scratch_u32 (groups are in the info JSON); returns the count.
@@ -1277,7 +1277,7 @@ index 8bcd394..495853c 100644
  pub extern "C" fn studio_indices(h: u32) -> usize {
      let v = model(h, |m| m.mesh.indices.clone()).unwrap_or_default();
      with(|c| {
-@@ -79,7 +79,7 @@ pub extern "C" fn studio_indices(h: u32) -> usize {
+@@ -86,7 +86,7 @@ pub extern "C" fn studio_indices(h: u32) -> usize {
  }
  
  /// Decoded animation `anim` (all frames, `frames * bones * 7` floats: quat xyzw + pos) into scratch_f32.
@@ -1286,16 +1286,16 @@ index 8bcd394..495853c 100644
  pub extern "C" fn studio_anim(h: u32, anim: u32) -> usize {
      let v = model(h, |m| m.decode_anim(anim as usize)).flatten().unwrap_or_default();
      with(|c| {
-@@ -89,7 +89,7 @@ pub extern "C" fn studio_anim(h: u32, anim: u32) -> usize {
+@@ -96,7 +96,7 @@ pub extern "C" fn studio_anim(h: u32, anim: u32) -> usize {
  }
  
  /// Texture payload of a VTF by game path (takes ownership of the path): same output as `texture_payload`.
 -#[unsafe(no_mangle)]
 +#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
  pub unsafe extern "C" fn texture_payload_path(path_ptr: *mut u8, path_len: usize, allow_s3tc: u32, need_alpha: u32) -> usize {
-     let path = unsafe { owned_string(path_ptr, path_len) };
-     with(|c| {
-@@ -115,3 +115,8 @@ pub unsafe extern "C" fn texture_payload_path(path_ptr: *mut u8, path_len: usize
+     unsafe { texture_payload_path_frame(path_ptr, path_len, 0, allow_s3tc, need_alpha) }
+ }
+@@ -135,3 +135,8 @@ pub unsafe extern "C" fn texture_payload_path_frame(path_ptr: *mut u8, path_len:
          }
      })
  }
@@ -1413,10 +1413,10 @@ index 9538c83..72c1d0b 100644
  [lib]
  path = "src/lib.rs"
 diff --git a/crates/vendor/collision/src/lib.rs b/crates/vendor/collision/src/lib.rs
-index e589d58..ad50e36 100644
+index 67fdadf..e1626d1 100644
 --- a/crates/vendor/collision/src/lib.rs
 +++ b/crates/vendor/collision/src/lib.rs
-@@ -2742,3 +2742,6 @@ mod tests {
+@@ -2848,3 +2848,6 @@ mod tests {
          assert!(overlap.start_solid && overlap.all_solid);
      }
  }
@@ -1602,10 +1602,10 @@ index 6584a8f..73b95c0 100644
  playsrc-collision = { path = "../collision" }
  
 diff --git a/crates/vendor/movement/src/movement.rs b/crates/vendor/movement/src/movement.rs
-index 0246d2c..9ac7a0d 100644
+index 720dd53..704e1f8 100644
 --- a/crates/vendor/movement/src/movement.rs
 +++ b/crates/vendor/movement/src/movement.rs
-@@ -1118,7 +1118,7 @@ fn full_walk(
+@@ -1128,7 +1128,7 @@ fn full_walk(
      result.wish_state = wish;
      if result.state.ground.is_some() {
          if configuration.css_stamina && result.state.stamina_ms > 0.0 {
@@ -1614,7 +1614,7 @@ index 0246d2c..9ac7a0d 100644
              result.state.velocity[0] *= ratio;
              result.state.velocity[1] *= ratio;
          }
-@@ -3616,9 +3616,9 @@ fn angle_basis(
+@@ -3667,9 +3667,9 @@ fn angle_basis(
      yaw_degrees: f32,
      roll_degrees: f32,
  ) -> ([f32; 3], [f32; 3], [f32; 3]) {

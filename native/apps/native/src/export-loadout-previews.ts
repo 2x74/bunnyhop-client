@@ -1,14 +1,21 @@
 // Explicit regeneration tool. Uses the native OpenGL renderer offline; the generated PNG catalog is browser-safe.
+// --missing renders only the items the catalog lacks (new cosmetics after a re-sync) and keeps every other picture
+// byte for byte; without it, everything is rendered again.
+import { existsSync } from "node:fs";
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { deflateSync } from "node:zlib";
 import { COSMETICS } from "../../web/src/progression";
-const executable = process.argv[2] ?? "/tmp/bunnyhop-export-previews",
-  assets = resolve(process.argv[3] ?? "target/native-assets"),
-  output = resolve(process.argv[4] ?? "apps/native/ui/authored-previews.json"),
-  temp = resolve(process.argv[5] ?? "target/preview-export");
+const missingOnly = process.argv.includes("--missing");
+const args = process.argv.slice(2).filter((arg) => arg !== "--missing");
+const executable = args[0] ?? "/tmp/bunnyhop-export-previews",
+  assets = resolve(args[1] ?? "target/native-assets"),
+  output = resolve(args[2] ?? "apps/native/ui/authored-previews.json"),
+  temp = resolve(args[3] ?? "target/preview-export");
 await mkdir(temp, { recursive: true });
 const metadata = JSON.parse(await readFile(resolve(assets, "viewmodels.json"), "utf8"));
+const kept: Record<string, string> =
+  missingOnly && existsSync(output) ? JSON.parse(await readFile(output, "utf8")).images : {};
 const jobs: CJob[] = [];
 interface CJob {
   id: string;
@@ -20,6 +27,7 @@ for (const c of COSMETICS) {
   if (!["knife", "finish", "glove", "outfit", "hat", "body", "ghost"].includes(c.slot)) continue;
   if (c.slot === "knife" && !metadata.meshes["fpknife:" + c.id.replace(/^knife-/, "")]) continue;
   if (c.slot === "hat" && !metadata.hats[c.id]) continue;
+  if (Object.hasOwn(kept, c.id)) continue;
   const outfit = c.slot === "outfit" ? c.id : "outfit-cream",
     knife = c.slot === "knife" ? c.id : "knife-carrot",
     finish = c.slot === "finish" ? c.id : "fin-garden",
@@ -106,6 +114,13 @@ function filterRows(pixels: Buffer, width: number, height: number): Buffer {
 
 const images: Record<string, string> = {};
 let pngBytes = 0;
+// Kept pictures stay in the catalog's order, still for items the website has; new ones follow.
+const shipped = new Set(COSMETICS.map((c) => c.id));
+for (const [id, image] of Object.entries(kept)) {
+  if (!shipped.has(id)) continue;
+  images[id] = image;
+  pngBytes += Buffer.from(image.split(",")[1], "base64").length;
+}
 for (const job of jobs) {
   let raw = await readFile(resolve(temp, job.id + ".rgba"));
   let w = 1024,
@@ -174,4 +189,7 @@ await writeFile(
     images,
   }),
 );
-console.log(`Authored preview catalog: ${jobs.length} images, ${(pngBytes / 1024).toFixed(1)} KiB PNG -> ${output}`);
+console.log(
+  `Authored preview catalog: ${Object.keys(images).length} images (${jobs.length} rendered), ` +
+    `${(pngBytes / 1024).toFixed(1)} KiB PNG -> ${output}`,
+);

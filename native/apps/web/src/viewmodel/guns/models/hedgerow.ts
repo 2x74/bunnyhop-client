@@ -16,7 +16,11 @@ const RECV = fixed(0x34383f, "dark"), RECV_DARK = fixed(0x24272c, "dark"), GREEN
 const STEEL = fixed(0x3a3f47, "dark"), STEEL_LIGHT = fixed(0x707782, "metal"), BORE = fixed(0x101114), LEAF = fixed(0x7fd36a), HULL = fixed(0xc43c2c), BRASS = fixed(0xd8a640, "metal");
 const GRIP = fixed(0x3c5c33, "grip"), PAD = fixed(0x26282b, "grip"), SLOT = fixed(0x17191c), LIP = fixed(0x5d636d, "metal");
 /** The trigger's pivot (top of its blade, gun-local). */
-const TRIGGER: [number, number, number] = [2.55, 0, -0.35];
+/**
+ * The trigger's pivot (top of its blade, gun-local): tight in front of the grip's thin upper part, where the firing
+ * index's pad rests on it (v0.0.37, as the Furrow's; guns/hold.ts solveTriggerIndex).
+ */
+const TRIGGER: [number, number, number] = [0.3, 0, -0.42];
 
 const BZ = 1.35, TZ = 0.3;
 const RAKE = (22 * Math.PI) / 180;
@@ -53,17 +57,22 @@ function build(k: KnifeCtx): void {
   lathe(k, [[6.2, 0.4], [19.3, 0.4], [19.6, 0.32], [19.7, 0]], { c: [0, TZ], paint: STEEL, sides: 12 });
   box(k, [21.2, 0, BZ + 0.55], [0.18, 0.06, 0.2], { paint: LEAF, round: 0.05 });
   // --- Handguard: a green sleeve around barrel and tube, leaf vents along its sides.
-  slab(k, [[6.3, -0.55], [15.5, -0.45], [15.7, 1.0], [15.4, 1.95], [6.3, 1.95]], -0.82, 0.82, { paint: (i) => (i === 0 || i === 3 ? GREEN_DARK : GREEN), part: PART.grip, round: 0.3, bevel: 0.16 });
+  // (Its belly lifts past the support hand into a rounded nose, v0.0.37 polish: it was a plain block.)
+  slab(k, [[6.3, -0.55], [12.6, -0.5], [15.3, -0.25], [15.7, 0.85], [15.4, 1.95], [6.3, 1.95]], -0.82, 0.82, { paint: (i) => (i === 0 || i === 3 ? GREEN_DARK : GREEN), part: PART.grip, round: [0.3, 0.8, 0.5, 0.5, 0.3, 0.3], bevel: 0.16 });
   if (fp) for (const y of [-1, 1]) for (let i = 0; i < 5; i++) {
     const x = 7.6 + i * 1.6;
     k.leaf([[x - 0.45, y * 0.83, 0.75], [x, y * 0.84, 0.95], [x + 0.45, y * 0.83, 1.15]], (j) => [0.06, 0.2, 0.06][j] ?? 0.06, 0.03, [0, y, 0], () => VENT);
   }
   // --- Guard, trigger, the polymer grip, the looped skeleton stock.
-  guard(k, [[3.5, -0.35], [3.4, -1.3], [2.2, -1.45], [1.4, -1.2], [1.35, -0.65]], 0.14, { paint: RECV, open: true });
-  trigger(k, TRIGGER, 0.67, { paint: STEEL_LIGHT });
+  // A short guard round the trigger, open at the back where it meets the grip's swell.
+  guard(k, [[1.65, -0.35], [1.58, -1.26], [0.85, -1.42], [0.3, -1.36]], 0.14, { paint: RECV, open: true });
+  trigger(k, TRIGGER, 0.55, { paint: STEEL_LIGHT });
   const b0 = BACK0;
-  slab(k, [along(b0, 0, -0.05), along(b0, -0.05, 1.0), [1.25, -0.5], along(b0, 1.1, GRIP_DEPTH), along(b0, GRIP_LEN, GRIP_DEPTH - 0.1), along(b0, GRIP_LEN, 0.05), along(b0, 1.5, -0.05)], -0.6, 0.6, { paint: RECV, part: PART.grip, round: 0.25, bevel: 0.15 });
-  if (fp) for (const y of [-1, 1]) slab(k, [along(b0, 0.6, 0.3), along(b0, 0.6, GRIP_DEPTH - 0.3), along(b0, GRIP_LEN - 0.3, GRIP_DEPTH - 0.4), along(b0, GRIP_LEN - 0.3, 0.3)], y > 0 ? 0.58 : -0.62, y > 0 ? 0.62 : -0.58, { paint: GRIP, part: PART.grip, round: 0.15, bevel: 0.02 });
+  // The grip: thin at the top (the firing index runs along it to the trigger), full depth below the guard where the
+  // other three fingers wrap it (a palm swell), as two slabs (a notched outline doesn't cap as one).
+  slab(k, [along(b0, 0, -0.05), along(b0, -0.05, 0.35), [0.1, -0.45], [-0.08, -0.98], along(b0, 0.8, -0.05)], -0.6, 0.6, { paint: RECV, part: PART.grip, round: 0.18, bevel: 0.14 });
+  slab(k, [along(b0, 0.7, -0.05), [-0.12, -0.92], along(b0, 0.85, GRIP_DEPTH), along(b0, GRIP_LEN, GRIP_DEPTH - 0.1), along(b0, GRIP_LEN, 0.05), along(b0, 1.5, -0.05)], -0.6, 0.6, { paint: RECV, part: PART.grip, round: 0.25, bevel: 0.15 });
+  if (fp) for (const y of [-1, 1]) slab(k, [along(b0, 1.3, 0.3), along(b0, 1.3, GRIP_DEPTH - 0.4), along(b0, GRIP_LEN - 0.3, GRIP_DEPTH - 0.4), along(b0, GRIP_LEN - 0.3, 0.3)], y > 0 ? 0.58 : -0.62, y > 0 ? 0.62 : -0.58, { paint: GRIP, part: PART.grip, round: 0.15, bevel: 0.02 });
   guard(k, [[-0.85, 1.55], [-6.5, 1.25], [-6.6, -1.6], [-2.2, -1.0], [-0.9, -0.5]], 0.22, { paint: RECV });
   box(k, [-6.6, 0, -0.15], [0.35, 0.55, 1.75], { paint: PAD, round: 0.25 });
   // --- The shell the left hand loads (Aux, hidden until a reload): red hull, brass base.
@@ -77,16 +86,19 @@ export const hedgerow: GunDef = {
   blurb: "A self-loading shotgun with a leafy green handguard.",
   cls: "shotgun",
   build,
+  // v0.0.38 (Astra QA): the palm on the pistol grip (it sat up at the receiver, the fingers came out through it and
+  // the stock); fitted with tools/viewmodel/gun-grip-fit.ts. The index rests toward the trigger (guns/hold.ts).
   right: {
-    o: [-1.03, 0.0, -0.49],
-    up: [-0.2, 0, 0.98],
-    fwd: [0.965, 0.174, 0.197],
+    o: [-0.56, 0.0, -2.55],
+    up: [-0.375, 0, 0.927],
+    fwd: [0.927, 0.0, 0.375],
     index: { c: [16, 34, 20], spread: -4 },
     middle: { c: [84, 98, 75] },
     ring: { c: [88, 98, 75] },
     pinky: { c: [92, 96, 75] },
     thumb: { c: [12, 10, 6], spread: -10 },
     wrap: ["Middle", "Ring", "Pinky", "Thumb"],
+    triggerRest: true,
     seat: -0.02,
   },
   // The support hand under the handguard, palm up, fingers over its right side (placement from

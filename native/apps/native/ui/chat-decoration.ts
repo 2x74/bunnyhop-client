@@ -1,7 +1,8 @@
 import { nameColorHex, staffBadgeOf, STAFF_LABEL, isCreatorKind, CREATOR_LABEL } from "../../web/src/creators";
-import { hostMarks, hostNameLook, readMarks, type HostMark, type HostNameLook } from "./host-decoration";
+import { isPrideFlag } from "../../web/src/countries";
+import { hostFlag, hostMarks, hostNameLook, readMarks, type HostMark, type HostNameLook } from "./host-decoration";
 /**
- * The chat line's name as the web draws it (net/hud.ts): `nativeName` (colour, effect, second colour) and
+ * The chat line's name as the web draws it (net/hud.ts): `nativeName` (colour, effect, second colour, font) and
  * `nativeMarks` (host-decoration.ts). The text fields before them stay for hosts that draw words.
  */
 interface ChatDecoration {
@@ -23,7 +24,7 @@ export function nativeChatDecoration(value: Record<string, unknown>): ChatDecora
     staff: value.staff ?? staffBadgeOf(value.role as Parameters<typeof staffBadgeOf>[0]),
   });
   const look = hostNameLook(marks);
-  if (look.color || look.effect) out.nativeName = look;
+  if (look.color || look.effect || look.font) out.nativeName = look;
   // Always sent, empty too: the host otherwise falls back to the older badge words and shows marks the player didn't
   // equip (a supporter without the badge equipped shows none on the website).
   out.nativeMarks = hostMarks(marks);
@@ -46,7 +47,7 @@ export function nativeChatDecoration(value: Record<string, unknown>): ChatDecora
     if (typeof rankColor === "string" && /^#[0-9a-f]{6}$/i.test(rankColor)) out.nativeRankColor = rankColor;
   }
   if (typeof value.id === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(value.id)) out.nativeProfileId = value.id;
-  if (typeof value.country === "string" && /^[a-z]{2}$/i.test(value.country))
-    out.nativeCountry = value.country.toUpperCase();
+  const flag = hostFlag(value.country);
+  if (flag) out.nativeCountry = isPrideFlag(flag) ? flag : flag.toUpperCase();
   return out;
 }

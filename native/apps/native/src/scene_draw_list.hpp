@@ -12,6 +12,8 @@ struct SceneDraw {
     uint32_t model;
     float distance = 0;
     size_t order = 0;
+    // An animated map prop's posed mesh (map_prop_meshes.hpp): its instance + 1, or 0.
+    uint32_t skinned = 0;
 };
 
 // Scene lists keep their allocation across frames. Order breaks distance ties exactly like stable_sort,

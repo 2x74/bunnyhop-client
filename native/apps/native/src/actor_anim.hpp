@@ -2,15 +2,21 @@
 // Runtime Source animation evaluator. Mirrors web player/studio/{pose,animstate}.ts.
 // Original decoded animations are shared; every actor keeps independent transition/feet/fire state.
 #include "nlohmann/json.hpp"
+#include "actor_bank.hpp"
 #include "actor_gestures.hpp"
+#include "actor_legs.hpp"
+#include "actor_ticks.hpp"
+#include "actor_springs.hpp"
 #include <vector>
 #include <array>
 #include <string>
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <cstdint>
 #include <memory>
 #include <optional>
+#include <string_view>
 #include <unordered_map>
 
 namespace native_actor_anim {
@@ -26,18 +32,71 @@ inline double angle(double a) {
     return a > 180 ? a - 360 : a < -180 ? a + 360 : a;
 }
 
+// The knife attack layer fades in over this much of its cycle and out over the last fire_fade_out instead of snapping
+// onto the upper body at full weight (web animstate.ts FIRE_IN / FIRE_OUT).
+constexpr double fire_fade_in = .06, fire_fade_out = .2;
+// The SDK's feet turn (ConvergeAngles): mp_feetyawrate, the angle inside which it slows down, the most the body twists.
+constexpr double feet_yaw_rate = 720, feet_fade_degrees = 45, max_body_yaw = 90;
+constexpr double swim_playback_rate = .6;
+// The bank's pivot height above the feet (about the hips, units).
+constexpr double bank_hip_units = 36;
+// Seconds per idle ear twitch slot: one twitch at a seeded moment in each.
+constexpr double twitch_slot_seconds = 7;
+
+inline double smooth01(double x) {
+    const double t = std::clamp(x, 0., 1.);
+    return t * t * (3 - 2 * t);
+}
+
+// A stable 0..1 seed from a model's description (FNV-1a over its characters, the web's seedOf). Cosmetic ids are ASCII,
+// so bytes and UTF-16 code units agree.
+inline uint32_t seed_hash(uint32_t hash, std::string_view text) {
+    constexpr uint32_t fnv_prime = 16777619;
+    for (unsigned char c : text)
+        hash = (hash ^ c) * fnv_prime;
+    return hash;
+}
+
+constexpr uint32_t seed_hash_start = 2166136261u;
+
+// The web bunny's seed: `${outfit}|${style}|${color}|${hat}`.
+inline double
+model_seed(std::string_view outfit, std::string_view style, std::string_view color, std::string_view hat) {
+    uint32_t hash = seed_hash_start;
+    for (auto part : {outfit, std::string_view("|"), style, std::string_view("|"), color, std::string_view("|"), hat})
+        hash = seed_hash(hash, part);
+    return hash / 4294967296.;
+}
+
+// A deterministic 0..1 from a seed and an integer (the web's hash01).
+inline double seeded_unit(double seed, int64_t slot) {
+    const uint32_t s = uint32_t(uint64_t(std::trunc(seed * 4294967296.)) & 0xffffffffu);
+    uint32_t h = (s ^ 0x9e3779b9u) * 0x85ebca6bu ^ uint32_t(slot) * 0xc2b2ae35u;
+    h ^= h >> 15;
+    h *= 0x2c1b3c6du;
+    h ^= h >> 12;
+    h *= 0x297a2d39u;
+    h ^= h >> 15;
+    return h / 4294967296.;
+}
+
+// out = a * b for 3x4 transforms. Summed in double and stored in float, as the website's Float32Arrays are.
 inline void concat(const float *a, const float *b, float *out) {
     float v[12];
     for (int r = 0; r < 3; r++)
         for (int c = 0; c < 4; c++)
             v[r * 4 + c] =
-                    a[r * 4] * b[c] + a[r * 4 + 1] * b[4 + c] + a[r * 4 + 2] * b[8 + c] + (c == 3 ? a[r * 4 + 3] : 0);
+                    float(double(a[r * 4]) * b[c] + double(a[r * 4 + 1]) * b[4 + c] + double(a[r * 4 + 2]) * b[8 + c]
+                          + (c == 3 ? double(a[r * 4 + 3]) : 0));
     std::copy(v, v + 12, out);
 }
 
 struct Data {
     J info, rig;
-    V bytes, restQ, restP, inverse;
+    V bytes, restQ, restP, inverse, bind;
+    std::vector<std::string> names;
+    std::vector<int> rigParents;
+    int csBones = 0;
     std::vector<int> offsets, parent, map;
     size_t bones = 0;
 
@@ -74,6 +133,11 @@ struct Data {
         }
         inverse = rig["inverse"].get<V>();
         map = rig["map"].get<std::vector<int>>();
+        names = rig["names"].get<std::vector<std::string>>();
+        rigParents = rig["parent"].get<std::vector<int>>();
+        csBones = rig["csBones"];
+        if (rig.contains("bind")) bind = rig["bind"].get<V>();
+        if (names.size() != map.size() || rigParents.size() != map.size()) throw std::runtime_error("actor rig names");
         if (inverse.size() != map.size() * 12) throw std::runtime_error("actor rig range");
     }
 
@@ -405,7 +469,15 @@ struct Transition {
 struct Input {
     std::array<float, 3> position{}, velocity{};
     double yaw = 0, pitch = 0;
+    // The strafe key (command units, +-450): the bank into turns.
+    double sidemove = 0;
+    // Source water level (0 dry, 1 feet, 2 waist: swimming, 3 eyes). Presentation only.
+    int water = 0;
     bool ducking = false, grounded = true, jumped = false;
+    // On a ladder. Presentation only.
+    bool ladder = false;
+    // The anim state's view of it (pose() fills these from the leg layer): no hop while climbing or swimming.
+    bool climbing = false, swimming = false;
 };
 
 // Acting for the onboarding scenes and avatar pictures, in degrees. Gameplay callers leave it null.
@@ -419,7 +491,8 @@ struct Ear {
     double side = 1;
     // Hanging from the lowered hood (a wig on): stiffer, swings less and never acts.
     bool hang = false;
-    std::array<double, 3> base{}, mid{}, dir{}, p{}, v{}, wb{};
+    // The tip proxy, its velocity, the spring's rest point at the last update (a ramp from it) and the carried base.
+    std::array<double, 3> base{}, mid{}, dir{}, p{}, v{}, eq{}, wb{};
     bool has = false;
 };
 
@@ -471,8 +544,6 @@ struct State {
     V bind;
     int head = -1, upperSpine = -1;
     bool hoodDown = false;
-    double earTwitch = 3;
-    unsigned randomState = 0x12345678;
     const Data &d;
     Pose bs;
     double now = 0, cycle = 0, feetYaw = 0, goalFeetYaw = 0, bodyYaw = 0, gaitYaw = 0, eyeYaw = 0, eyePitch = 0,
@@ -481,6 +552,19 @@ struct State {
     int seq = -1, parity = 0, prevParity = 0, fireSeq = -1;
     std::string activity = "ACT_IDLE";
     bool jumping = false, firstJump = false, feetInit = false;
+    // fire() since the last update: its gesture starts on this frame at cycle 0, not a frame's worth in.
+    bool fireFresh = false;
+    double playbackRate = 1;
+    // The bunny on top of the animation: the bank into turns, the legs, and this frame's bank angle (degrees).
+    BodyBank bodyBank;
+    LegLayer legs;
+    double bank = 0;
+    // The last two posed ticks, and what's shown this frame: the last pose, or a blend of the two (present()).
+    TickPresentation ticks;
+    ShownPose shown;
+    // Per-model 0..1 seed (idle shift phase, ear twitch schedule), the reduced-motion scale, and the visual clock at
+    // the last ear update.
+    double seed = 0, motion = 1, twitchAt = 0;
     Transition main, idle, run;
     std::array<Blend, 4> layers;
     std::optional<native_gestures::Rig> gestureRig;
@@ -489,6 +573,7 @@ struct State {
     explicit State(const Data &d)
         : d(d)
         , bs(d)
+        , legs(d.names, d.bind)
         , px(d.param("move_x"))
         , py(d.param("move_y"))
         , pYaw(d.param("body_yaw"))
@@ -536,7 +621,7 @@ struct State {
         now = time;
         groundTime = cycle = 0;
         fireSeq = seq = -1;
-        feetInit = jumping = firstJump = false;
+        feetInit = jumping = firstJump = fireFresh = false;
         main.queue.clear();
         idle.queue.clear();
         run.queue.clear();
@@ -561,6 +646,12 @@ struct State {
                                                        : "Idle";
         fireSeq = d.seq(n + "_Shoot_KNIFE");
         fireCycle = 0;
+        fireFresh = true;
+    }
+
+    void set_seed(double value) {
+        seed = value;
+        legs.set_seed(value);
     }
 
     double movement() const { return speed <= .5 ? 1 : maxSpeed < .001 ? .01 : clamp(speed / maxSpeed, .01, 10); }
@@ -579,7 +670,7 @@ struct State {
         int s = aim(force);
         if (s < 0) s = 0;
         t.check(d, s, false);
-        t.update(s, cycle, 1, now);
+        t.update(s, cycle, playbackRate, now);
         auto &a = layers[first];
         auto &b = layers[first + 1];
         a.seq = t.queue[0].seq;
@@ -597,7 +688,13 @@ struct State {
         vy = s.velocity[1];
         speed = std::hypot(vx, vy);
         groundTime = s.grounded ? groundTime + dt : 0;
-        if (s.jumped) {
+        // Climbing or swimming: a ladder's take-off or a stroke upwards isn't a jump. Climbing runs the legs with the
+        // climb speed, swimming plays them slower.
+        const bool floating = s.climbing || s.swimming;
+        if (floating) jumping = firstJump = false;
+        if (s.climbing) speed = std::max(speed, std::abs(double(s.velocity[2])));
+        playbackRate = s.swimming ? swim_playback_rate : 1;
+        if (s.jumped && !floating) {
             jumping = firstJump = true;
             jumpStart = now;
         }
@@ -643,9 +740,8 @@ struct State {
         }
         goalFeetYaw = angle(goalFeetYaw);
         if (feetYaw != goalFeetYaw) {
-            double diff = angle(goalFeetYaw - feetYaw), abs = std::abs(diff),
-                   scale = abs <= 45 ? clamp(abs / 45, .01, 1) : 1, maxmove = 720 * dt * scale;
-            if (abs > 90) maxmove = abs - 90;
+            double diff = angle(goalFeetYaw - feetYaw), abs = std::abs(diff), maxmove = feet_turn(abs, dt);
+            if (abs > max_body_yaw) maxmove = abs - max_body_yaw;
             if (abs < maxmove)
                 feetYaw = goalFeetYaw;
             else
@@ -664,12 +760,13 @@ struct State {
         bs.set(px, speed > .5 ? std::cos(yaw * 3.141592653589793 / 180) * movement() : 0);
         bs.set(py, speed > .5 ? -std::sin(yaw * 3.141592653589793 / 180) * movement() : 0);
         bool loop = d.info["seqs"][seq]["flags"].get<int>() & 1;
-        double c = sampled && s.grounded && loop ? sampleTime * bs.rate(seq) : cycle + dt * bs.rate(seq);
+        double c = sampled && s.grounded && loop ? sampleTime * bs.rate(seq) * playbackRate
+                                                 : cycle + dt * bs.rate(seq) * playbackRate;
         if (c < 0 || c >= 1) c = loop ? c - std::floor(c) : clamp(c, 0, 1);
         cycle = c;
         main.check(d, seq, parity != prevParity);
         prevParity = parity;
-        main.update(seq, cycle, 1, now);
+        main.update(seq, cycle, playbackRate, now);
         for (auto &l : layers)
             l.weight = 0;
         aimLayers(0, true, idle, 1);
@@ -686,10 +783,24 @@ struct State {
             if (layers[i].weight > .99) final = i;
         for (int i = final - 1; i >= 0; i--)
             layers[i].weight = 0;
-        if (fireSeq >= 0) {
+        if (fireSeq >= 0 && fireFresh)
+            fireFresh = false;
+        else if (fireSeq >= 0) {
             fireCycle += dt * bs.rate(fireSeq);
             if (fireCycle > 1) fireSeq = -1;
         }
+    }
+
+    // How far the feet turn toward their goal this frame. Outside feet_fade_degrees at feet_yaw_rate; inside, the SDK
+    // scales the rate with the distance left (at least 1%): an exponential approach, taken exactly with the step split
+    // where it crosses feet_fade_degrees (the SDK steps it per frame, so it depended on the frame rate).
+    static double feet_turn(double abs, double dt) {
+        constexpr double slowest_share = .01;
+        const double k = feet_yaw_rate / feet_fade_degrees;
+        const double linear = std::max(0., (abs - feet_fade_degrees) / feet_yaw_rate);
+        if (dt <= linear) return feet_yaw_rate * dt;
+        const double from = std::min(abs, feet_fade_degrees), rest = dt - linear;
+        return abs - from + std::max(from * (1 - std::exp(-k * rest)), feet_yaw_rate * slowest_share * rest);
     }
 
     void apply() {
@@ -705,7 +816,11 @@ struct State {
         }
         for (const auto &l : layers)
             if (l.weight > 0 && l.seq >= 0) bs.accumulate(l.seq, l.cycle, l.weight);
-        if (fireSeq >= 0) bs.accumulate(fireSeq, fireCycle, 1);
+        if (fireSeq >= 0) {
+            constexpr double unseen_weight = .001;
+            const double weight = smooth01(fireCycle / fire_fade_in) * smooth01((1 - fireCycle) / fire_fade_out);
+            if (weight > unseen_weight) bs.accumulate(fireSeq, fireCycle, weight);
+        }
     }
 
     void actingPose(const Acting &a, V &out) {
@@ -719,18 +834,29 @@ struct State {
         native_gestures::pose_arms(rig, a.gesture, lookYaw, out);
     }
 
-    void earPose(const Input &s, double dt, bool snap, V &out, const Acting *acting = nullptr) {
-        const double cy = std::cos(feetYaw * 3.141592653589793 / 180), sy = std::sin(feetYaw * 3.141592653589793 / 180);
-        earTwitch -= dt;
+    // Idle twitches on a schedule of the visual clock and the model's seed (one per slot, at a seeded moment, to a
+    // seeded side): the same in every replay and export, and not in step between bunnies. Standing, full motion only.
+    double earTwitch(double seconds, bool snap, double horizontal_speed) {
+        constexpr double twitch_speed = 40, twitch_gap_limit = 1, twitch_earliest = 1.5, twitch_window = 4;
+        constexpr double side_seed_offset = .5;
+        const double t0 = twitchAt, t1 = seconds;
+        twitchAt = t1;
         double twitch = 0;
-        auto random = [&]() {
-            randomState = 1664525 * randomState + 1013904223;
-            return double(randomState) / 4294967296.;
-        };
-        if (earTwitch < 0) {
-            earTwitch = 2.5 + random() * 4.5;
-            if (speed < 40) twitch = random() < .5 ? 1 : -1;
+        if (snap || t1 <= t0 || t1 - t0 >= twitch_gap_limit || horizontal_speed >= twitch_speed || motion != 1)
+            return 0;
+        for (auto slot = int64_t(std::floor(t0 / twitch_slot_seconds));
+             slot <= int64_t(std::floor(t1 / twitch_slot_seconds));
+             slot++) {
+            const double at =
+                    double(slot) * twitch_slot_seconds + twitch_earliest + twitch_window * seeded_unit(seed, slot);
+            if (at > t0 && at <= t1) twitch = seeded_unit(seed + side_seed_offset, slot) < .5 ? 1 : -1;
         }
+        return twitch;
+    }
+
+    void earPose(const Input &s, double dt, double seconds, bool snap, V &out, const Acting *acting = nullptr) {
+        const double cy = std::cos(feetYaw * 3.141592653589793 / 180), sy = std::sin(feetYaw * 3.141592653589793 / 180);
+        const double twitch = earTwitch(seconds, snap, std::hypot(s.velocity[0], s.velocity[1]));
         for (auto &e : ears) {
             if (e.bone < 0 || e.carrier < 0) continue;
             const float *H = out.data() + e.carrier * 12;
@@ -764,25 +890,7 @@ struct State {
                 target[k] = wb[k] + wd[k] * 6.5;
                 if (e.has && dt > 0 && !snap) bv[k] = (wb[k] - e.wb[k]) / dt;
             }
-            if (snap || !e.has) {
-                e.p = target;
-                e.v = bv;
-            } else {
-                int steps = std::max(1, int(std::ceil(dt * 120)));
-                double h = dt / steps;
-                if (twitch) {
-                    e.v[0] += -wd[1] * 70 * twitch * e.side;
-                    e.v[1] += wd[0] * 70 * twitch * e.side;
-                }
-                const double stiffness = e.hang ? 640 : 320, damping = e.hang ? 34 : 21;
-                for (int it = 0; it < steps; it++)
-                    for (int k = 0; k < 3; k++) {
-                        double a = stiffness * (target[k] - e.p[k]) - damping * (e.v[k] - bv[k]) - e.v[k]
-                                   - (k == 2 ? 30 : 0);
-                        e.v[k] += a * h;
-                        e.p[k] += e.v[k] * h;
-                    }
-            }
+            earSpring(e, target, bv, wd, dt, snap, twitch);
             double dx = e.p[0] - wb[0], dy = e.p[1] - wb[1], dz = e.p[2] - wb[2],
                    len = std::sqrt(dx * dx + dy * dy + dz * dz);
             if (!len) len = 1;
@@ -810,9 +918,53 @@ struct State {
         }
     }
 
+    // The ear's spring a = K (target - p) - Crel (v - bv) - Cabs v - G rests at p = target + (Crel bv - G) / K: a
+    // damped spring toward that rest point (omega = sqrt K, zeta = (Crel + Cabs) / (2 sqrt K)), stepped exactly with
+    // the rest point ramping from last frame's. Hanging from a lowered hood the ears are stiffer.
+    static void earSpring(
+            Ear &e,
+            const std::array<double, 3> &target,
+            const std::array<double, 3> &bv,
+            const std::array<double, 3> &wd,
+            double dt,
+            bool snap,
+            double twitch
+    ) {
+        constexpr double absolute_damping = 1, ear_gravity = 30, twitch_kick = 70;
+        const double stiffness = e.hang ? 640 : 320, damping = e.hang ? 34 : 21;
+        const double omega = std::sqrt(stiffness), zeta = (damping + absolute_damping) / (2 * omega);
+        auto rest = [&](size_t k) {
+            return target[k] + (damping * bv[k] - (k == 2 ? ear_gravity : 0)) / stiffness;
+        };
+        if (snap || !e.has) {
+            for (size_t k = 0; k < 3; k++) {
+                e.p[k] = target[k];
+                e.v[k] = bv[k];
+                e.eq[k] = rest(k);
+            }
+            return;
+        }
+        for (size_t k = 0; k < 3; k++) {
+            const double eq = rest(k);
+            spring_ramp(e.p[k], e.v[k], e.eq[k], eq, omega, zeta, dt);
+            e.eq[k] = eq;
+        }
+        // A little sideways flick, perpendicular to the ear in the horizontal plane, at the frame's end.
+        if (twitch) {
+            e.v[0] += -wd[1] * twitch_kick * twitch * e.side;
+            e.v[1] += wd[0] * twitch_kick * twitch * e.side;
+        }
+    }
+
     bool pose(const Input &s, double seconds, bool snap, bool shot, V &out, const Acting *acting = nullptr) {
         if (!std::isfinite(seconds)) return false;
         const bool resetNow = snap || last < 0 || seconds < last;
+        // The shadow and mirror passes pose an actor again at the same moment: they get this frame's pose, so the
+        // leg layer's contact history steps once per frame.
+        if (!resetNow && !acting && seconds == last && !framePose.empty()) {
+            out = framePose;
+            return true;
+        }
         double dt = resetNow ? 0 : clamp(seconds - last, 0, .1);
         last = seconds;
         if (resetNow) {
@@ -823,6 +975,9 @@ struct State {
             }
         }
         Input input = s;
+        // The leg layer's verdict from the last frame, as on the website (it runs after the animation).
+        input.climbing = legs.mode == LegMode::climb;
+        input.swimming = legs.mode == LegMode::swim;
         if (resetNow) {
             velocityHistory.clear();
             lastJump = -1;
@@ -843,27 +998,68 @@ struct State {
         if (shot) fire();
         update(dt, input, resetNow, seconds);
         apply();
+        skin(out);
+        // The bank and legs come after the body animation, so planted feet stay put in the world whatever the body
+        // does. Not on acting poses (avatar pictures and the onboarding scenes pose the body by hand).
+        bank = bodyBank.update(
+                dt, s.yaw, s.grounded, std::hypot(s.velocity[0], s.velocity[1]), s.sidemove, true, resetNow, motion
+        );
+        if (!acting) legs.apply(out, leg_input(s, dt, resetNow, seconds));
+        if (acting) {
+            actingPose(*acting, out);
+            for (size_t i = 0; i < d.map.size(); i++)
+                if (d.names[i] == "bunny.Knife" && d.rigParents[i] >= 0)
+                    std::copy_n(out.data() + d.rigParents[i] * 12, 12, out.data() + i * 12);
+        }
+        earPose(s, dt, seconds, resetNow, out, acting);
+        shown = {feetYaw, bank, s.position};
+        if (!acting) {
+            framePose = out;
+            ticks.keep(out, feetYaw, bank, s.position, resetNow);
+        }
+        return true;
+    }
+
+    // Shows the bunny `amount` of the way from the tick before to the last pose (the replay viewer poses it once per
+    // tick; actor_ticks.hpp), into `out` and `shown`.
+    void present(double amount, V &out) { shown = ticks.present(amount, out); }
+
+private:
+    V framePose;
+
+    // The CS:S skeleton through the rig's inverse binds; the bunny's own bones follow their parents.
+    void skin(V &out) {
         const auto &w = bs.build();
         out.assign(d.map.size() * 12, 0);
-        int count = d.rig["csBones"];
-        auto parents = d.rig["parent"].get<std::vector<int>>();
         for (size_t i = 0; i < d.map.size(); i++) {
-            if (int(i) < count && d.map[i] >= 0)
+            if (int(i) < d.csBones && d.map[i] >= 0)
                 concat(w.data() + d.map[i] * 12, d.inverse.data() + i * 12, out.data() + i * 12);
-            else if (parents[i] >= 0)
-                std::copy_n(out.data() + parents[i] * 12, 12, out.data() + i * 12);
+            else if (d.rigParents[i] >= 0)
+                std::copy_n(out.data() + d.rigParents[i] * 12, 12, out.data() + i * 12);
             else {
                 out[i * 12] = out[i * 12 + 5] = out[i * 12 + 10] = 1;
             }
         }
-        if (acting) {
-            actingPose(*acting, out);
-            for (size_t i = 0; i < d.map.size(); i++)
-                if (d.rig["names"][i] == "bunny.Knife" && parents[i] >= 0)
-                    std::copy_n(out.data() + parents[i] * 12, 12, out.data() + i * 12);
+    }
+
+    LegInput leg_input(const Input &s, double dt, bool snap, double seconds) const {
+        LegInput in;
+        in.dt = dt;
+        in.snap = snap;
+        in.grounded = s.grounded;
+        in.crouched = s.ducking;
+        for (size_t k = 0; k < 3; k++) {
+            in.velocity[k] = s.velocity[k];
+            in.position[k] = s.position[k];
         }
-        earPose(s, dt, resetNow, out, acting);
-        return true;
+        in.yaw = feetYaw;
+        in.bank = bank;
+        in.bank_hip = bank_hip_units;
+        in.time = seconds;
+        in.ladder = s.ladder;
+        in.water = s.water;
+        in.motion = motion;
+        return in;
     }
 };
 }  // namespace native_actor_anim

@@ -90,6 +90,10 @@ struct DrawProbe {
 
     float overlay_text_width(std::string_view text, float size) const { return float(text.size()) * size * .6f; }
 
+    float overlay_name_width(std::string_view text, float size, const native::NameAppearance &) const {
+        return overlay_text_width(text, size);
+    }
+
     void overlay_name(float, float, std::string_view, float, const native::NameAppearance &, double, bool = false) {
         ++names;
     }
@@ -321,8 +325,110 @@ void test_layouts_and_options() {
     }
 }
 
+// Pride flags draw from the glyph sheet, and an unknown code draws no flag and leaves no gap; a pride code is never
+// cut to two letters (that would be Puerto Rico's flag).
+void test_pride_flags() {
+    const unsigned trans = native::flag_glyph("PRIDE-TRANS");
+    assert(trans && trans == native::sheet_glyph("PRIDE-TRANS") && trans != native::flag_glyph("PR"));
+    assert(native::flag_glyph("PRIDE-PROGRESS") != trans);
+    for (const auto code : {"PRIDE-XX", "PRIDE-", "pride-trans", "PRIDE-TRANS2", "peak-9"})
+        assert(!native::flag_glyph(code));
+    assert(native::flag_code("PRIDE-TRANS") == "PRIDE-TRANS" && native::flag_code("PRIDE-XX").empty());
+    const auto board = std::make_unique<native::HudScoreboard>();
+    board->contract(
+            {{"head", {{"room", "Flags"}, {"map", "bhop_test"}, {"tier", 2}, {"max", 8}}},
+             {"rows",
+              native::Json::array(
+                      {{{"slot", 1}, {"name", "Proud"}, {"country", "PRIDE-TRANS"}},
+                       {{"slot", 2}, {"name", "Newer"}, {"country", "PRIDE-XX"}},
+                       {{"slot", 3}, {"name", "Country"}, {"country", "us"}}}
+              )}}
+    );
+    std::set<std::string> flags;
+    for (size_t i = 0; i < board->count; ++i)
+        flags.insert(board->rows[i].country);
+    assert(flags == std::set<std::string>({"PRIDE-TRANS", "", "us"}));
+    DrawProbe probe;
+    native::draw_scoreboard(probe, 1280, 720, 100, *board, 0, 0);
+    assert(probe.flags == 3);
+    const auto line = native::chat_decoration({{"nativeCountry", "PRIDE-NONBINARY"}});
+    assert(line.country == "PRIDE-NONBINARY");
+    assert(native::chat_decoration({{"country", "PRIDE-TRANS"}}).country == "PRIDE-TRANS");
+    assert(native::chat_decoration({{"nativeCountry", "PRIDE-XX"}}).country.empty());
+}
+
+// The peak mark after a name is drawn from its own picture; an unknown peak keeps the plain badge.
+void test_peak_marks() {
+    const auto look = native::host_name_appearance(
+            nullptr,
+            native::Json::array(
+                    {{{"id", "verified"}, {"name", "Verified"}},
+                     {{"id", "peak-10"}, {"name", "Cleared a T10 map"}},
+                     {{"id", "peak-12"}, {"name", "Cleared a T12 map"}}}
+            )
+    );
+    assert(look.badge_count == 3);
+    assert(look.badges[0].glyph == native::NameMark::verified && !look.badges[0].sheet);
+    assert(look.badges[1].sheet == native::sheet_glyph("peak-10") && look.badges[1].sheet);
+    assert(look.badges[2].glyph == native::NameMark::badge && !look.badges[2].sheet);
+    assert(native::name_badge_color(look.badges[1], 0) == native::NameColor({1, 1, 1, 1}));
+}
+
+// hud-glyphs.json as the build writes it; anything this build doesn't place, or of the wrong size, is skipped.
+void test_glyph_sheet() {
+    const std::string cell(native::sheet_glyph_bytes, '\x7f');
+    const auto encoded = native::base64(cell);
+    const auto glyphs = native::read_glyph_sheet(
+            {{"cell", 32},
+             {"glyphs",
+              {{"peak-9", encoded},
+               {"PRIDE-OMNI", encoded},
+               {"PRIDE-NEW", encoded},
+               {"peak-8", native::base64("short")},
+               {"PRIDE-ACE", 7}}}}
+    );
+    assert(glyphs.size() == 2);
+    std::set<unsigned> cells;
+    for (const auto &glyph : glyphs) {
+        cells.insert(glyph.cell);
+        assert(glyph.rgba.size() == native::sheet_glyph_bytes && glyph.rgba[5] == 0x7f);
+    }
+    assert(cells == std::set<unsigned>({native::sheet_glyph("peak-9"), native::sheet_glyph("PRIDE-OMNI")}));
+    assert(native::read_glyph_sheet({{"cell", 16}, {"glyphs", {{"peak-9", encoded}}}}).empty());
+    assert(native::read_glyph_sheet("not a sheet").empty());
+    assert(native::load_glyph_sheet("missing-hud-glyphs.json").empty());
+}
+
+// The Tab board's tier tag reads T1–T10 like the website, and a tier the scale doesn't have never breaks it.
+void test_scoreboard_tiers() {
+    const auto board = std::make_unique<native::HudScoreboard>();
+    for (const auto &[raw, label] :
+         {std::pair{8, "T8"},
+          std::pair{9, "T9"},
+          std::pair{10, "T10"},
+          std::pair{11, "T10"},
+          std::pair{0, "T?"},
+          std::pair{-3, "T?"}}) {
+        board->contract(
+                {{"head", {{"room", "Tiers"}, {"map", "bhop_tomb2"}, {"tier", raw}, {"max", 8}}},
+                 {"rows", native::Json::array()}}
+        );
+        DrawProbe probe;
+        native::draw_scoreboard(probe, 1280, 720, 100, *board, 0, 0);
+        assert(probe.has(label));
+        assert(!probe.has("T7+"));
+    }
+    assert(native::tier_name(8) == "Brutal" && native::tier_name(9) == "Nightmare");
+    assert(native::tier_name(10) == "Impossible" && native::tier_name(0) == "Unrated");
+    const auto pink = native::tier_color(8), white = native::tier_color(10), unrated = native::tier_color(0);
+    assert(pink[0] == 1 && std::abs(pink[1] - 110 / 255.f) < 1e-6f && std::abs(pink[2] - 199 / 255.f) < 1e-6f);
+    assert(std::abs(white[0] - 242 / 255.f) < 1e-6f && white[2] == 1);
+    assert(native::tier_color(42) == white && unrated == native::tier_color(-1));
+}
+
 void test_scoreboard_and_names() {
-    native::HudScoreboard board;
+    const auto board_owner = std::make_unique<native::HudScoreboard>();
+    auto &board = *board_owner;
     board.contract(
             {{"head", {{"room", "Test room"}, {"map", "bhop_test"}, {"tier", 8}, {"max", 16}}},
              {"rows",
@@ -358,7 +464,7 @@ void test_scoreboard_and_names() {
             NoAllocations no_allocations;
             native::draw_scoreboard(probe, size.first, size.second, 100, board, 1, 0);
         }
-        assert(probe.has("Test room") && probe.has("T7+") && probe.has("00:12.345") && probe.has("Normal"));
+        assert(probe.has("Test room") && probe.has("T8") && probe.has("00:12.345") && probe.has("Normal"));
         // Spectators are listed under the table, as on the website.
         assert(probe.has("Spectating: ") && probe.has("Spectator -> First"));
         assert(probe.flags == 1 && probe.names == 1 && probe.avatars == 1);
@@ -403,7 +509,8 @@ void test_merged_menu_contracts() {
     assert(decoration.appearance.badges[1].glyph == native::NameMark::verified);
     assert(decoration.appearance.badges[2].glyph == native::NameMark::gift);
     assert(decoration.appearance.effect == native::NameEffect::paint);
-    native::RoomState room;
+    const auto room_owner = std::make_unique<native::RoomState>();
+    auto &room = *room_owner;
     room.display_contract(
             {{"type", "scoreboard"},
              {"head", {{"room", "Decorated"}, {"map", "bhop_test"}, {"max", 16}}},
@@ -490,7 +597,8 @@ void test_tag_sight_fades() {
 }
 
 void test_room_tag_detail() {
-    native::RoomState room;
+    const auto room_owner = std::make_unique<native::RoomState>();
+    auto &room = *room_owner;
     room.event(
             {{"generation", 1},
              {"id", "easy"},
@@ -552,8 +660,11 @@ void test_room_wire_styles() {
     auto &board = *board_owner;
     board.add({{"slot", 1}, {"name", "Back"}, {"style", "autohop"}}, {{"style", 10u}}, 0, 0);
     assert(board.rows[0].style == "backwards");
-    board.add({{"slot", 2}, {"name", "Later"}, {"style", "zigzag"}}, {{"style", 11u}}, 0, 0);
-    assert(board.rows[1].style == "zigzag");
+    board.add({{"slot", 2}, {"name", "Ad"}, {"style", "autohop"}}, {{"style", 11u}}, 0, 0);
+    assert(board.rows[1].style == "adonly");
+    board.add({{"slot", 3}, {"name", "Later"}, {"style", "zigzag"}}, {{"style", 12u}}, 0, 0);
+    assert(board.rows[2].style == "zigzag");
+    assert(native::score_style_label("adonly") == "A/D-Only");
     assert(native::score_style_label("backwards") == "Backwards");
     assert(native::score_style_label("infinite") == "Infinite");
     assert(native::score_style_label("zigzag") == "zigzag");
@@ -562,7 +673,8 @@ void test_room_wire_styles() {
 void test_tags_and_race_picker() {
     test_room_tag_detail();
     test_room_wire_styles();
-    native::RoomState room;
+    const auto room_owner = std::make_unique<native::RoomState>();
+    auto &room = *room_owner;
     std::array<native_render::Actor, 1> actors;
     actors[0].id = "1";
     actors[0].name = "Bunny";
@@ -615,7 +727,8 @@ void test_tags_and_race_picker() {
             }
     );
     assert(visible.has("16.731s | -0.020s"));
-    native::HudScoreboard board;
+    const auto board_owner = std::make_unique<native::HudScoreboard>();
+    auto &board = *board_owner;
     board.count = 1;
     board.rows[0].name = "Opponent";
     board.rows[0].slot = 3;
@@ -629,7 +742,8 @@ void test_tags_and_race_picker() {
     assert(picker.step == native::RacePicker::Step::style);
     assert(picker.key("Digit2", true, false));
     assert(picker.command.view() == "/race #3 legit 0");
-    // Ten styles (all but Segmented) take two pages: Backwards on the first, Infinite and Auto-strafe on the second.
+    // Eleven styles (all but Segmented) take two pages: Backwards and A/D-Only on the first, Low Gravity, Infinite and
+    // Auto-strafe on the second.
     const auto race_style = [&](const char *page_key, const char *pick) {
         picker.open(board, zones);
         picker.key("Digit1", true, false);
@@ -639,14 +753,17 @@ void test_tags_and_race_picker() {
         return std::string(picker.command.view());
     };
     assert(race_style(nullptr, "Digit7") == "/race #3 backwards 0");
-    assert(race_style("Digit9", "Digit1") == "/race #3 infinite 0");
-    assert(race_style("Digit9", "Digit2") == "/race #3 autostrafe 0");
-    assert(race_style("Digit9", "Digit3").empty());
+    assert(race_style(nullptr, "Digit8") == "/race #3 adonly 0");
+    assert(race_style("Digit9", "Digit1") == "/race #3 lowgrav 0");
+    assert(race_style("Digit9", "Digit2") == "/race #3 infinite 0");
+    assert(race_style("Digit9", "Digit3") == "/race #3 autostrafe 0");
+    assert(race_style("Digit9", "Digit4").empty());
     assert(std::find(native::race_styles.begin(), native::race_styles.end(), "segmented") == native::race_styles.end());
 }
 
 void test_ghost_progress() {
-    native::HudExtras extras;
+    const auto extras_owner = std::make_unique<native::HudExtras>();
+    auto &extras = *extras_owner;
     extras.ghost(
             {{"map", "test"},
              {"style", "autohop"},
@@ -691,7 +808,8 @@ void test_ghost_progress() {
 }
 
 void test_results_toasts_and_room_widgets() {
-    native::HudResult result;
+    const auto result_owner = std::make_unique<native::HudResult>();
+    auto &result = *result_owner;
     result.finish(4, 12.345, 1, 13, true);
     assert(result.delta && *result.delta < 0 && result.stamp == native::ResultStamp::pending);
     assert(result.status_line.view() == "Submitting…");
@@ -750,7 +868,8 @@ void test_results_toasts_and_room_widgets() {
     DrawProbe toast_probe;
     native::draw_toasts(toast_probe, 1280, 720, 100, toasts, 2);
     assert(toast_probe.texts == 5);
-    native::RoomState room;
+    const auto room_owner = std::make_unique<native::RoomState>();
+    auto &room = *room_owner;
     room.vote = {
             {"options", {{{"map", "bhop_a"}}, {{"extend", true}, {"minutes", 10}}}},
             {"counts", native::Json::array({3u, 1u})},
@@ -782,7 +901,8 @@ void test_movement_widgets_and_restart() {
     movement.offset.assign("Offset -1");
     movement.first_jump.assign("FJT 0 ticks");
     movement.long_jump.assign("LJ 275.50");
-    native::HudExtras extras;
+    const auto extras_owner = std::make_unique<native::HudExtras>();
+    auto &extras = *extras_owner;
     extras.contract({{"pb", 12.345}, {"spectators", {"Watcher"}}, {"ghostButtons", native::left}});
     BhRunState run{};
     run.track = 1;
@@ -1103,6 +1223,10 @@ int main() {
     test_ssj_gain_filter();
     test_layouts_and_options();
     test_scoreboard_and_names();
+    test_scoreboard_tiers();
+    test_pride_flags();
+    test_peak_marks();
+    test_glyph_sheet();
     test_merged_menu_contracts();
     test_tags_and_race_picker();
     test_ghost_progress();

@@ -462,7 +462,7 @@ impl Map {
             "map":self.map_name,"mapSha256":self.map_sha256,"settings":settings_json(settings),"style":style,"player":player,
             "recordedAt":recorded_at,"checkpointInterval":checkpoint_interval,"timerRules":timer.options.rules,
             "prespeedCap":if timer.options.cap_enabled!=0 {Some(timer.options.prespeed_cap)} else {None},
-            "blockPrehops":timer.options.block_prehops!=0,"strafeKeys":match crate::styles::strafe_keys(style){1=>"ws",2=>"w",_=>"ad"},"spawn":spawn,
+            "blockPrehops":timer.options.block_prehops!=0,"strafeKeys":crate::styles::strafe_keys_name(crate::styles::strafe_keys(style)),"spawn":spawn,
             "zones":timer.zones.iter().map(|z|z.json()).collect::<Vec<_>>(),
             "clientBuild":client_build,"maxCommands":MAX_COMMANDS,
             "initialState":run::snapshot_json(BhSnapshot::from(&self.game)),"initialSnapshotSha256":sha(&self.game.snapshot_bytes())});

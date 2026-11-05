@@ -1,7 +1,7 @@
 import { appHref } from "../platform/navigation";
 import { getHeldLoadout, onHeldLoadout, setPlayerGlow } from "../player/cosmetics";
 import { lastKnownMe } from "../api";
-import { takeFreeCursor } from "../free-cursor";
+import { cursorHeld, holdFreeCursor, takeFreeCursor } from "../free-cursor";
 import { openFeedback } from "../feedback/state";
 import { openGiftDialog } from "../ui/gifting";
 import { resolveGiftTarget } from "./gift-target";
@@ -29,7 +29,8 @@ import { styleLabel } from "../styles";
 import { tierLabel } from "../tiers";
 import { trackName } from "../zones";
 import { FREE_SPEED, freeSpeedStep, SpectatorCamera, type SpectatorMode, type SpectatorTarget } from "../viewer/cameras";
-import { Banner, ChatBox, localLine, NumberMenu, Scoreboard, SpecBar, type ScoreRow } from "./hud";
+import { Banner, ChatBox, localLine, NumberMenu, releaseCursorOnClose, Scoreboard, SpecBar, type ScoreRow } from "./hud";
+import { forgetHoverCard } from "../ui/hover-card";
 import { RemotePlayers, remoteTime, slotColor } from "./players";
 import { registerRoomActions, roomLineShown, roomUrl, setRoomPresence } from "./presence";
 import { copyLobbyInvite, lobbyInviteUrl } from "./lobby";
@@ -73,7 +74,7 @@ import { celebrateRun, openCustomise, runRewards } from "../ui/unlocks";
 import type { StaffRole } from "../progression";
 import { staffBadgeOf, type PlayerMarks } from "../creators";
 import { banner as notifyBanner } from "../notify";
-import { runChatLine, suggestChat, type ChatContext, type ChatGame, type ReplyOpts } from "../chat-commands";
+import { normalizeChatLine, runChatLine, suggestChat, type ChatContext, type ChatGame, type ReplyOpts } from "../chat-commands";
 
 export interface MultiplayerInit {
   serverId: string;
@@ -216,8 +217,15 @@ export class Multiplayer {
     this.chat.suggest = (t) => suggestChat(t, "room");
     this.chat.onClose = () => {
       o.input.releaseAll();
-      o.input.recapture();
+      // A command that opened a pick menu (!spec, !nominate, !race) keeps the cursor out until the menu closes, so its
+      // rows can be clicked as well as picked with the number keys (guest-1349 clicked a name and nothing happened).
+      // After the line ran (the chat closes before its onSend); a click anywhere else takes the lock back.
+      const before = this.menu.open ? this.menu.id.current : "";
+      setTimeout(() => {
+        if (!(this.menu.open && this.menu.id.current !== before && holdFreeCursor())) o.input.recapture();
+      });
     };
+    releaseCursorOnClose(this.menu, () => o.input.recapture());
     this.conn = new RoomConnection(o.serverId, () => o.session.selectedStyle, {
       message: (m) => this.onMessage(m),
       snapshot: (s, now) => {
@@ -231,6 +239,7 @@ export class Multiplayer {
       if (e.code === "Tab") this.board.show(false);
     });
     document.addEventListener("mousedown", (e) => {
+      if (cursorHeld() && this.menu.open && !(e.target instanceof Element && e.target.closest("#mp-menu"))) this.menu.hide();
       if (this.spectating === null || !o.input.pointerLocked) return;
       if (e.button === 0) this.cycleSpectate(1);
       else if (e.button === 2) this.cycleSpectate(-1);
@@ -536,6 +545,8 @@ export class Multiplayer {
       case "player": {
         const p = this.players.players.get(m.slot);
         if (p) this.players.upsert({ ...p.info, ...m.patch });
+        // Their marks or rank changed live (a shadow, a staff edit): their hover card is read again (ui/hover-card.ts).
+        if (p && ("special" in m.patch || "rank" in m.patch)) forgetHoverCard(p.info.id);
         if (m.slot === this.you && p?.info.id === lastKnownMe()?.id && "playerGlow" in m.patch) setPlayerGlow(m.patch.playerGlow ?? null);
         if (m.patch.spec !== undefined && m.slot === this.spectating && m.patch.spec !== null) this.cycleSpectate(1, true);
         break;
@@ -562,11 +573,12 @@ export class Multiplayer {
           // Staff / Verified / Creator / Booster / Supporter marks and the name colour stamped by the room on the line
           // (older servers: from the roster).
           ...(m.verified !== undefined || m.creator !== undefined
-            ? { verified: m.verified, creator: m.creator, special: m.special, booster: m.booster, supporter: m.supporter, nameColor: m.nameColor, nameEffect: m.nameEffect, nameColor2: m.nameColor2, nameBadges: m.nameBadges, giftsSent: m.giftsSent, gifterColors: m.gifterColors, gifterAnimated: m.gifterAnimated }
+            ? { verified: m.verified, creator: m.creator, special: m.special, booster: m.booster, supporter: m.supporter, nameColor: m.nameColor, nameEffect: m.nameEffect, nameColor2: m.nameColor2, nameFont: m.nameFont, nameBadges: m.nameBadges, giftsSent: m.giftsSent, gifterColors: m.gifterColors, gifterAnimated: m.gifterAnimated }
             : m.slot !== undefined
               ? this.marksOf(m.slot)
               : {}),
           staff: m.staff !== undefined ? m.staff : staffBadgeOf(role),
+          id: m.slot !== undefined ? this.players.players.get(m.slot)?.info.id : undefined,
         });
         break;
       }
@@ -631,7 +643,7 @@ export class Multiplayer {
   private marksOf(slot: number): PlayerMarks {
     const info = this.players.players.get(slot)?.info;
     return info
-      ? { verified: info.verified, creator: info.creator, special: info.special, booster: info.booster, supporter: info.supporter, nameColor: info.nameColor, nameEffect: info.nameEffect, nameColor2: info.nameColor2, nameBadges: info.nameBadges, giftsSent: info.giftsSent, gifterColors: info.gifterColors, gifterAnimated: info.gifterAnimated, staff: info.staff !== undefined ? info.staff : staffBadgeOf(this.roleOf(slot)) }
+      ? { verified: info.verified, creator: info.creator, special: info.special, booster: info.booster, supporter: info.supporter, nameColor: info.nameColor, nameEffect: info.nameEffect, nameColor2: info.nameColor2, nameFont: info.nameFont, nameBadges: info.nameBadges, giftsSent: info.giftsSent, gifterColors: info.gifterColors, gifterAnimated: info.gifterAnimated, staff: info.staff !== undefined ? info.staff : staffBadgeOf(this.roleOf(slot)) }
       : {};
   }
 
@@ -751,7 +763,9 @@ export class Multiplayer {
     },
   };
 
-  private onChat(text: string): void {
+  private onChat(typed: string): void {
+    // ".spec" or a Russian layout's "!ызус": the room gets "/spec", as its server parses (chat-commands.ts).
+    const text = normalizeChatLine(typed);
     const r = runChatLine(text, this.chatCtx);
     // "log": answered here (!help, an unknown command); the room only logs it (and adds staff help for staff).
     if (r !== "done") this.conn.send(r === "log" ? { t: "chat", text, local: true } : { t: "chat", text });
@@ -771,6 +785,7 @@ export class Multiplayer {
 
   private keydown(e: KeyboardEvent): void {
     if (this.chat.isOpen || !this.o.input.locked || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (cursorHeld() && this.menu.open && e.code === "Escape") return this.menu.hide();
     if (e.code === "Tab") {
       e.preventDefault();
       if (!e.repeat) {
@@ -960,7 +975,7 @@ export class Multiplayer {
     const out = `${this.stopKey()} stops watching.`;
     const back = this.o.input.isMovementCode("KeyF") ? "!freecam" : "F";
     const hint = this.specMode === "free" ? `Free look. ${back} goes back in-eye, ${out}` : `Space changes the camera, ${out}`;
-    this.specBar.set(p && st ? { name: p.info.name, color: slotColor(p.slot), hint } : { name: this.name(this.spectating), color: "#fff", waiting: true, hint });
+    this.specBar.set(p && st ? { name: p.info.name, color: slotColor(p.slot), hint, look: { nameColor: p.info.nameColor, nameEffect: p.info.nameEffect, nameColor2: p.info.nameColor2, nameFont: p.info.nameFont } } : { name: this.name(this.spectating), color: "#fff", waiting: true, hint });
   }
 
   // -------------------------------------------------------------------------------------------
@@ -1038,6 +1053,7 @@ export class Multiplayer {
         ping: you ? Math.round(this.conn.rtt) || null : (p.meta?.ping ?? null),
         host: !!this.room?.private && p.slot === this.host,
         country: p.info.country ?? null,
+        id: p.info.id,
       });
     }
     rows.sort((a, b) => (a.pb ?? Infinity) - (b.pb ?? Infinity) || a.name.localeCompare(b.name));

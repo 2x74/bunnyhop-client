@@ -18,6 +18,7 @@ import {
   type MaterialInfo,
   type TexturePayload,
   type BrushTransform,
+  type PropAnimState,
   MAT_ADDITIVE,
   PROP_TRANSFORM_KEY,
   MAT_ALPHATEST,
@@ -39,6 +40,9 @@ import { applyLightStyles } from "./lightstyles";
 import { averageColor, potatoGeometry, withGrid, type PotatoSlot } from "./potato";
 import { ImposterSet, type ImposterKind } from "./imposter";
 import { CLIENT_DRAWN_SHADERS } from "./vmt";
+import { TextureScrolls } from "./texture-scroll";
+import { animatedPropEntities, animatedProps, hashSeed, type AnimatedProps } from "./map-props";
+import { StudioData } from "./player/studio/data";
 
 export interface WorldView {
   readonly texturePacks: { id: string; version: string }[];
@@ -51,7 +55,7 @@ export interface WorldView {
    */
   sky3d: { camera: SkyCamera; root: THREE.Group; enabled: boolean } | null;
   /** Moves brush entity models (doors, platforms, rotators) to their current transforms. */
-  update(transforms: Map<number, BrushTransform>, visualTime?: number, effectStates?: Map<number, boolean>): void;
+  update(transforms: Map<number, BrushTransform>, visualTime?: number, effectStates?: Map<number, boolean>, propAnims?: readonly PropAnimState[] | null): void;
   /**
    * What reconstructTrails samples, or null when there is nothing to rebuild (no trails on moving brushes, or Potato):
    * `span` seconds of history, of only these brush models' transforms and these entities' states. The replay viewer
@@ -246,6 +250,8 @@ function addSecondaryMaps(m: THREE.MeshBasicMaterial, map2: THREE.Texture | null
 }
 
 // --- Static props ----------------------------------------------------------------------------
+
+const viewerPos = new THREE.Vector3();
 
 /** Fixed light direction (Source space) for the props' simple ambient + diffuse term. */
 const PROP_LIGHT = new THREE.Vector3(0.35, 0.45, 0.82).normalize();
@@ -655,6 +661,15 @@ export async function buildWorld(
   const lightMapIntensity = Math.PI / lm.scale;
 
   const imposters = new ImposterSet((path) => core.contentRead(path));
+  // TextureScroll and AnimatedTexture proxies (texture-scroll.ts): materials whose base texture slides or flips over time.
+  // `?texanim=0` keeps the flipbooks on their first frame (before / after comparisons).
+  const scrolls = new TextureScrolls((path) => core.contentRead(path), appLocation().searchParams.get("texanim") === "0" ? null : {
+    count: (path) => core.textureFrames(path),
+    frame: (path, frame, needAlpha) => {
+      const p = core.texturePath(path, support.s3tc, needAlpha, frame);
+      return p ? textureFromPayload(p, support) : null;
+    },
+  });
   /** Materials (parallel to `materials`) and the sky. */
   const buildMaterials = () => {
     const descs = core.materials();
@@ -663,6 +678,12 @@ export async function buildWorld(
     const needAlpha = new Set<number>();
     for (const d of descs) if (d.texture >= 0 && d.flags & (MAT_ALPHATEST | MAT_TRANSLUCENT)) needAlpha.add(d.texture);
     const textures = new Map<string, THREE.Texture | null>();
+    /** Base texture `i` as decoded from the map's VTF (no texture pack replacement): its path for flipbook frames. */
+    const framesOf = (i: number): { path: string; needAlpha: boolean } | undefined => {
+      const path = texturePaths[i];
+      if (!path || overrides.get(tryTexturePath(path) ?? "")) return undefined;
+      return { path, needAlpha: needAlpha.has(i) };
+    };
     const texture = (i: number, colorSpace: string = THREE.SRGBColorSpace): THREE.Texture | null => {
       const key = `${i}:${colorSpace}`;
       if (!textures.has(key)) {
@@ -690,7 +711,7 @@ export async function buildWorld(
       return normals.get(path)!;
     };
     const water = core.materialWater();
-    // WindowImposter / Aftershock (imposter.ts): materials the core leaves missing by design. Only those materials (and a
+    // WindowImposter / Aftershock / Wireframe (imposter.ts): materials the core leaves missing by design. Only those materials (and a
     // sky whose faces are WindowImposters) touch this; `?noimposter` keeps the old fallback (before / after comparisons).
     const imposterOn = !appLocation().searchParams.has("noimposter");
     const imposterKinds = new Map<number, ImposterKind | null>();
@@ -727,6 +748,7 @@ export async function buildWorld(
       }
       if (!(desc.flags & MAT_UNLIT)) withMaterialDetail(m as THREE.MeshBasicMaterial, overrides.materials.get(tryTexturePath(texturePaths[desc.texture] ?? "") ?? ""), 0.9, texturePaths[desc.texture] ?? "");
       withShowcaseAlbedo(m as THREE.MeshBasicMaterial, texturePaths[desc.texture] ?? "");
+      scrolls.attach(m, info.name, framesOf(desc.texture));
       return fog(m);
     };
     const mats = materials.map((_, i) => worldMaterial(i, fogged));
@@ -746,6 +768,7 @@ export async function buildWorld(
       const m = sourceFlags(propMaterial(desc, map, content.propMaterials[k]), desc);
       if (m instanceof THREE.MeshBasicMaterial && desc && !(desc.flags & MAT_UNLIT)) withMaterialDetail(m, overrides.materials.get(tryTexturePath(texturePaths[desc.texture] ?? "") ?? ""), 0.9, texturePaths[desc.texture] ?? "");
       if (m instanceof THREE.MeshBasicMaterial && desc) withShowcaseAlbedo(m, texturePaths[desc.texture] ?? "");
+      if (m instanceof THREE.MeshBasicMaterial) scrolls.attach(m, content.propMaterials[k], desc && desc.texture >= 0 ? framesOf(desc.texture) : undefined);
       return m instanceof THREE.ShaderMaterial ? m : fog(m);
     };
     const propMats = content.propMaterials.map((_, k) => propMaterialAt(k, fogged));
@@ -894,6 +917,7 @@ export async function buildWorld(
   // Static props (one mesh, Source space, under the Z-up root).
   let propTris = 0;
   let props: { pm: ReturnType<Core["propsMesh"]>; meshes: THREE.Mesh[] } | null = null;
+  let animProps: AnimatedProps | null = null;
   if (built.propMats.length) {
     const pm = core.propsMesh();
     if (pm.indices.length) {
@@ -914,6 +938,20 @@ export async function buildWorld(
       propTris = pm.indices.length / 3;
       props = { pm, meshes: [mesh, ...moving.values()] };
       for (const m of props.meshes) cullMesh(m);
+      // Animated prop_dynamics (map-props.ts): posed models in place of their frozen groups. `?animprops=0` keeps them
+      // frozen (before / after comparisons).
+      if (moving.size && params.get("animprops") !== "0")
+        animProps = animatedProps({
+          core,
+          makeStudio: (h) => new StudioData(core, h),
+          entities: animatedPropEntities(core.entities()),
+          // The map, for the random animators' seeds: every entity's class, name and origin.
+          mapSeed: hashSeed(core.entities().map((e) => `${e.classname ?? ""}|${e.targetname ?? ""}|${e.origin ?? ""}`).join("\n")),
+          fallbacks: moving,
+          materials: built.propMats,
+          materialNames: content.propMaterials,
+          parent: root,
+        });
     }
   }
 
@@ -1025,6 +1063,7 @@ export async function buildWorld(
       const imp = built.imposterAt(i);
       // Imposters: their cube map's average colour, unlit (a translucent one as a tint); Aftershock is not drawn.
       if (imp?.kind === "aftershock") return null;
+      if (imp?.kind === "wireframe") return { key: `w${i}`, material: () => imp.material };
       if (imp?.kind === "window") {
         const c = colors[i];
         return imp.params.alpha < 1 || imp.params.fade
@@ -1155,6 +1194,9 @@ export async function buildWorld(
       ` sky faces ${[...skyMeshes.values()].reduce((n, m) => n + m.geometry.groups[0].count / 3, 0)} tris,` +
       (trails ? ` ${trails.count} sprite trails,` : "") +
       (smoke ? ` ${smoke.count} smoke stacks,` : "") +
+      (scrolls.size ? ` ${scrolls.size} scrolling materials,` : "") +
+      (scrolls.animatedCount ? ` ${scrolls.animatedCount} flipbook materials,` : "") +
+      (animProps ? ` ${animProps.count} animated props,` : "") +
       (smokeVolumes ? ` ${smokeVolumes.count} smoke volumes,` : "") +
       (sky3dState && sky3d ? ` 3D skybox (scale ${sky3d.scale}${fog ? ", fog" : ""}) ≤${sky3dDraws(sky3dRoot)} draws,` : "") +
       ` lightmap ${lm.width}x${lm.height}${styles?.faces ? ` (+light styles on ${styles.faces} faces)` : ""}, built in ${(performance.now() - t0).toFixed(0)} ms`,
@@ -1167,8 +1209,9 @@ export async function buildWorld(
     texturePacks: overrides.packs,
     skyFaces: [...skyMeshes.values()],
     sky3d: sky3dState,
-    update(transforms, visualTime = 0, effectStates) {
+    update(transforms, visualTime = 0, effectStates, propAnims) {
       setWaterVisualTime(visualTime);
+      scrolls.update(visualTime);
       localLights.update(transforms, effectStates, visualTime);
       const D = Math.PI / 180;
       for (const [model, t] of transforms) {
@@ -1187,6 +1230,8 @@ export async function buildWorld(
       if (trails && potatoOn) trails.root.visible = false;
       smoke?.update(transforms, visualTime, effectStates);
       smokeVolumes?.update(visualTime, transforms, effectStates);
+      // After the transforms: animated props follow their frozen group's place.
+      animProps?.update(visualTime, propAnims);
     },
     trailHistory() {
       return trails && !potatoOn ? { span: trails.maxLifetime, models: trails.models, entities: trails.entities } : null;
@@ -1205,13 +1250,17 @@ export async function buildWorld(
     },
     setFlashlight(on) { flashlight.set(on); },
     setFullbright(on) { fullbright.set(on); },
-    cull(camera) { culler.cull(camera); },
+    cull(camera) {
+      culler.cull(camera);
+      animProps?.setViewer(camera.getWorldPosition(viewerPos));
+    },
     setPotato(on) {
       if (on === potatoOn) return;
       potatoOn = on;
       // Potato geometry is built from all of a mesh's triangles, not the last cull's.
       if (!potato) culler.uncull();
       (potato ??= buildPotato()).set(on);
+      animProps?.setEnabled(!on);
       flashlight.apply(container);
       fullbright.apply(container);
     },

@@ -101,6 +101,8 @@ export class WeaponPresenter {
   }
 
   private switched(to: number): void {
+    // The knife lowers out of view while the gun comes up (presentation only; viewmodel.ts holster).
+    if (this.active === WEAPON_KNIFE && to !== WEAPON_KNIFE) this.h.vm.holster();
     if (this.active) this.previous = this.active;
     this.active = to;
     this.setZoom(0);

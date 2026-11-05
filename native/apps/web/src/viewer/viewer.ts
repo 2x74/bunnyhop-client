@@ -37,10 +37,12 @@ import { fetchExportLeaderboard } from "./export-leaderboard";
 import { Core, floorWeapons, traceRay, WEAPON_IDS, weaponReport, type BrushTransform } from "../core";
 import { Ghost } from "../ghost";
 import { GHOST_CSS, type GhostKind } from "../player/colors";
-import { PlayerModel, type PlayerPose } from "../player/model";
+import { PlayerModel } from "../player/model";
 import { download, loadPBReplay } from "../pb";
 import { cosmeticBetween, decodeReplay, inspectBetween, replayFileName, replayStyle, type Replay } from "../replay";
 import { emitWeaponEvent } from "../viewmodel/events";
+import { setFinishClock } from "../viewmodel/finishes/shader";
+import { setFinishEnvironmentClock } from "../viewmodel/finishes/environment";
 import { FloorGuns } from "../viewmodel/guns/world";
 import type { WorldView } from "../render";
 import { simulate } from "../sim";
@@ -50,20 +52,28 @@ import { afterPaint, h } from "../ui/dom";
 import { hideUiKey, isHideUiKey, setUiHidden } from "../ui/hide-ui";
 import { prefs } from "../ui/settings";
 import { trackName } from "../zones";
-import { CameraRig, CAM_MODES, directShots, freeSpeedStep, type CamMode, type TraceFn } from "./cameras";
+import { CameraRig, CAM_MODES, CHASE_NEAR_FADE, directShots, freeSpeedStep, type CamMode, type TraceFn } from "./cameras";
 import { freeIntentFromCodes } from "../freecam";
 import type { CardInfo } from "./canvas-hud";
 import { openExportDialog, type ExportCam, type ExportSource } from "./export";
 import { runUrl, shareButton } from "../ui/share";
 import { ViewerHud } from "./hud";
-import { F_GROUNDED, F_LANDED, F_TELEPORTED, finalRunTime, ReplayPlayer, sampleAt, type RunData, type ViewSample } from "./player";
+import { F_LANDED, F_TELEPORTED, finalRunTime, replayTicks, ReplayPlayer, sampleAt, type RunData, type ViewSample } from "./player";
+import { TickStepper, type TickSource } from "../player/tick-stepper";
+import { probeFromTrace } from "../player/bunny/legs";
 import { viewerRequestRunId, viewerUrl, type ReplayTarget, type ViewerRequest } from "./request";
+import { publicOrigin } from "../platform/env";
 import { Timeline } from "./timeline";
 import { ReplayAudio } from "../audio/replay";
 import { InputStats } from "../mouse-filter";
 import { frameNumbers } from "../input-debug";
 import { evidenceTicks, jumpTick, replayDeepLink } from "../staff-lens";
 import { GauntletLayer } from "./gauntlet-layer";
+import { H2H_COLORS, HeadToHead, makeSide, sideCore, slowGraphics, type H2HLayout } from "./h2h";
+import { defaultLayout, layoutParam } from "../h2h/layout";
+import { h2hUrl, openHeadToHead, runIdFromText } from "./request";
+import { ApiError, type RunInfo } from "../api";
+import "./h2h.css";
 
 export interface ViewerHost {
   renderer: THREE.WebGLRenderer;
@@ -92,6 +102,40 @@ export interface ViewerHost {
 }
 
 const SPEEDS = [0.1, 0.25, 0.5, 1, 2, 4];
+
+/** Head to head's "early" number (viewer/h2h-panel.ts), off unless turned on. */
+const EARLY_KEY = "bunnyhop:h2h-early";
+export const earlyShown = (): boolean => {
+  try {
+    return localStorage.getItem(EARLY_KEY) === "1";
+  } catch {
+    return false;
+  }
+};
+
+/** Filled transport glyphs on a 20-unit grid (ui/icons.ts is stroke-only). */
+const GLYPHS: Record<string, string> = {
+  play: "M6 3.5 16.5 10 6 16.5Z",
+  pause: "M5 4h3.6v12H5ZM11.4 4H15v12h-3.6Z",
+  stepBack: "M4 4h2.2v12H4ZM16 4v12L7.5 10Z",
+  stepFwd: "M13.8 4H16v12h-2.2ZM4 4v12l8.5-6Z",
+  prevJump: "M10 4v12L2.5 10ZM17.5 4v12L10 10Z",
+  nextJump: "M10 4v12l7.5-6ZM2.5 4v12L10 10Z",
+  more: "M4 8.4h3.2v3.2H4ZM8.4 8.4h3.2v3.2H8.4ZM12.8 8.4H16v3.2h-3.2Z",
+};
+function glyph(name: string): SVGSVGElement {
+  const NS = "http://www.w3.org/2000/svg";
+  const s = document.createElementNS(NS, "svg");
+  s.setAttribute("viewBox", "0 0 20 20");
+  s.setAttribute("width", "1em");
+  s.setAttribute("height", "1em");
+  s.setAttribute("aria-hidden", "true");
+  s.setAttribute("fill", "currentColor");
+  const p = document.createElementNS(NS, "path");
+  p.setAttribute("d", GLYPHS[name] ?? GLYPHS.play);
+  s.append(p);
+  return s;
+}
 /** The compare ghost's speed difference changes every this many ticks: readable, about the live HUD's rate. */
 const SPEED_DIFF_STEP = 10;
 
@@ -178,6 +222,9 @@ export class ReplayViewer implements ExportSource {
   private lastNow = performance.now();
   private lastShown = -1;
   private lastRenderedTick = NaN;
+  /** The bunny on the simulation's clock (viewer/player.ts TickStepper), for the model and run it was made for. */
+  private stepper = new TickStepper();
+  private stepperFor: { model: PlayerModel; data: RunData; src: TickSource } | null = null;
   private sample: ViewSample | undefined;
   private camPos = new THREE.Vector3();
   private exporting = false;
@@ -189,6 +236,17 @@ export class ReplayViewer implements ExportSource {
   private seq = 0;
   /** Watching a whole gauntlet attempt: its layer (viewer/gauntlet-layer.ts), else null. */
   private gauntlet: GauntletLayer | null = null;
+  /** Head to head (/h2h/<a>/<b>): the second run and the layout (viewer/h2h.ts), else null. */
+  h2h: HeadToHead | null = null;
+  /** Head to head's short note (different builds, styles or tracks), over the views. */
+  private h2hNote = h("div.h2h-note", { hidden: true });
+  private h2hBtns: { side: HTMLButtonElement; stacked: HTMLButtonElement; ghost: HTMLButtonElement; swap: HTMLButtonElement; stats: HTMLButtonElement; early: HTMLButtonElement } | null = null;
+  private h2hGroup: HTMLElement;
+  private h2hOnly: HTMLElement[] = [];
+  private speedTrigger!: HTMLButtonElement;
+  private camTrigger!: HTMLButtonElement;
+  private layoutTrigger!: HTMLButtonElement;
+  private soloOnly: HTMLElement[] = [];
   /** The runner's look on the bunny and the first-person arms (applyLook). */
   private look: ArmsLook = { loadout: { ...DEFAULT_LOADOUT }, outfit: DEFAULT_COSMETICS.outfit!, glow: null };
   /** Weapon in hand shown, per view (V). */
@@ -244,7 +302,10 @@ export class ReplayViewer implements ExportSource {
   constructor(private host: ViewerHost) {
     this.playerShadow = new PlayerShadowProxy(host.scene, this.drawModel.root);
     this.model.root.visible = false;
-    this.model.setNearFade(10, 34);
+    this.model.root.userData.h2hPrimary = true; // hidden in head to head's other view (viewer/h2h.ts)
+    this.model.setNearFade(...CHASE_NEAR_FADE);
+    // The legs plant on slopes with the world under the feet (player/bunny/legs.ts).
+    this.model.setGroundProbe(probeFromTrace((a, b) => this.trace(a, b, 0)));
     this.timeline = new Timeline({ seek: (t, final) => this.seekTo(t, final) });
     this.stage = h("div.rv-stage", { "aria-hidden": "true" });
     this.loading = h("div.rv-loading", { role: "status", "aria-live": "polite" });
@@ -254,7 +315,11 @@ export class ReplayViewer implements ExportSource {
     const btn = (label: string, title: string, fn: () => void, cls = "") => h(`button.rv-btn${cls}`, { type: "button", title, "aria-label": title, onclick: fn }, label) as HTMLButtonElement;
     this.playBtn = btn("▶", "Play / pause (Space)", () => this.togglePlay(), ".rv-play");
     // Leaderboard runs have a page (/replay/<id>) that unfurls with the run's card.
-    this.shareBtn = shareButton("rv-btn rv-chip", () => ({ url: runUrl(this.runId ?? ""), title: `${this.playerName() || "Replay"} · ${this.host.map} · bunnyhop.lol` }), "Replay link copied");
+    this.shareBtn = shareButton("rv-btn rv-chip", () => {
+      const hh = this.h2h;
+      if (hh) return { url: `${publicOrigin()}${h2hUrl(hh.sides[0].runId, hh.sides[1].runId)}`, title: `${hh.sides[0].name} vs ${hh.sides[1].name} · ${this.host.map} · bunnyhop.lol` };
+      return { url: runUrl(this.runId ?? ""), title: `${this.playerName() || "Replay"} · ${this.host.map} · bunnyhop.lol` };
+    }, "Link copied");
     this.shareBtn.hidden = true;
     this.reportBtn = btn("Report", "Report this player", () => this.report(), ".rv-chip.rv-report");
     this.reportBtn.hidden = true;
@@ -262,28 +327,13 @@ export class ReplayViewer implements ExportSource {
     this.weaponBtn = btn("Weapon", "Weapon in hand (V)", () => this.toggleWeapon(), ".rv-chip");
     this.cleanBtn = btn("Hide UI", "Hide UI", () => this.setClean(true), ".rv-chip");
     this.compareMenu = h("div.rv-menu", { hidden: true, role: "menu" });
-    this.compareBtn = btn("Compare", "Overlay a second replay as a ghost (C)", () => this.toggleCompareMenu(), ".rv-chip");
+    this.compareBtn = btn("Compare", "Watch this run head to head with another (C)", () => this.toggleCompareMenu(), ".rv-chip");
     this.practiceBtn = btn("Practice from here", "Take over from this moment, in practice (P)", () => this.practiceFromHere(), ".rv-chip");
     this.practiceBtn.hidden = !host.practiceFrom;
     this.freeHint = h("div.rv-freehint", { hidden: true }, "Click to fly with your movement keys. Shift is faster, Alt slower, the wheel sets the speed. Esc lets go.");
-    const speeds = h(
-      "div.rv-seg",
-      { role: "group", "aria-label": "Playback speed" },
-      ...SPEEDS.map((s) => {
-        const b = btn(`${s}×`, `Playback speed ${s}× ([ / ])`, () => this.setSpeed(s), ".rv-seg-btn");
-        this.speedBtns.push(b);
-        return b;
-      }),
-    );
-    const cams = h(
-      "div.rv-seg",
-      { role: "group", "aria-label": "Camera" },
-      ...CAM_MODES.map((m) => {
-        const b = btn(m.label, `${m.title} (${m.key})`, () => this.setCam(m.id), ".rv-seg-btn");
-        this.camBtns.set(m.id, b);
-        return b;
-      }),
-    );
+    // Speed and camera: one control each, their choices in a small menu (the same buttons the keys update).
+    for (const sp of SPEEDS) this.speedBtns.push(btn(`${sp}×`, `Playback speed ${sp}× ([ / ])`, () => this.setSpeed(sp), ".rv-pop-item"));
+    for (const m of CAM_MODES) this.camBtns.set(m.id, btn(m.label, `${m.title} (${m.key})`, () => this.setCam(m.id), ".rv-pop-item"));
     this.helpEl = h(
       "div.rv-help",
       { hidden: true },
@@ -303,10 +353,14 @@ export class ReplayViewer implements ExportSource {
             ["H", "HUD on / off"],
             ["V", "weapon in hand on / off (in-eye and third person each remember theirs)"],
             [this.cleanKey, "hide the UI (Esc shows it)"],
-            ["C", "compare with another replay"],
+            ["C", "compare: head to head with another run"],
             ["E", "export MP4"],
             ["P", "practice from this moment"],
             ["N / P", "next / previous map (watching a gauntlet)"],
+            ["G", "side by side, stacked or ghost (head to head)"],
+            ["X", "swap the runs (head to head)"],
+            ["S", "panels on / off (head to head)"],
+            ["J", "next jump (Shift: previous)"],
             ["Esc", "close"],
           ] as const
         ).flatMap(([k, v]) => [h("dt", null, typeof k === "string" ? h("kbd", null, k) : k), h("dd", null, v)]),
@@ -323,30 +377,76 @@ export class ReplayViewer implements ExportSource {
         btn("✕", "Close replay viewer (Esc)", () => this.close(), ".rv-icon"),
       ),
     );
+    const tb = (glyphName: string, title: string, fn: () => void, cls = "") => {
+      const b = btn("", title, fn, `.rv-tbtn${cls}`);
+      b.append(glyph(glyphName));
+      return b;
+    };
+    this.playBtn.textContent = "";
+    this.playBtn.append(glyph("play"));
     const transport = h(
-      "div.rv-group",
-      null,
-      btn("⏮", "Run start (Home)", () => this.jumpStart()),
-      btn("‹", "Previous tick (,)", () => this.step(-1)),
+      "div.rv-transport",
+      { role: "group", "aria-label": "Playback" },
+      tb("prevJump", "Previous jump (Shift+J)", () => this.stepJump(-1)),
+      tb("stepBack", "Previous tick (,)", () => this.step(-1)),
       this.playBtn,
-      btn("›", "Next tick (.)", () => this.step(1)),
-      btn("⏭", "Finish (End)", () => this.jumpEnd()),
-      h("div.rv-clock", null, h("span.rv-time", null, this.timeText), h("span.rv-tick", null, this.tickText)),
+      tb("stepFwd", "Next tick (.)", () => this.step(1)),
+      tb("nextJump", "Next jump (J)", () => this.stepJump(1)),
     );
-    const right = h(
-      "div.rv-group.rv-right",
-      null,
-      this.hudBtn,
-      this.weaponBtn,
-      this.cleanBtn,
-      h("div.rv-menu-wrap", null, this.compareBtn, this.compareMenu),
-      this.practiceBtn,
-      btn("Export MP4", "Render this replay to an MP4 video (E)", () => this.openExport(), ".rv-chip.rv-accent"),
-      btn("⤓ .bhr", "Download the replay file", () => this.downloadBhr(), ".rv-chip"),
-      this.shareBtn,
-      this.reportBtn,
-    );
-    const panel = h("footer.rv-panel", null, this.timeline.el, h("div.rv-controls", null, transport, h("div.rv-group", null, speeds, cams), right));
+    const clock = h("div.rv-clock", null, h("span.rv-time", null, this.timeText), h("span.rv-tick", null, this.tickText));
+    const h2hBtns = {
+      side: btn("Side by side", "The two views left and right (G)", () => this.setH2HLayout("side"), ".rv-pop-item"),
+      stacked: btn("Stacked", "The two views top and bottom (G)", () => this.setH2HLayout("stacked"), ".rv-pop-item"),
+      ghost: btn("Ghost", "One view, the other run as a ghost (G)", () => this.setH2HLayout("ghost"), ".rv-pop-item"),
+      swap: btn("Swap", "Swap the runs (X)", () => this.swapH2H(), ".rv-chip.rv-quiet"),
+      stats: btn("Stats", "The panels under the views (S)", () => this.toggleStats(), ".rv-pop-item.rv-toggle"),
+      early: btn("Early switches", "In each panel, the share of key switches made before the mouse turns", () => this.toggleEarly(), ".rv-pop-item.rv-toggle"),
+    };
+    this.h2hBtns = h2hBtns;
+    // Small menus: a trigger and its list, one open at a time; a click outside or on a choice closes it.
+    const pop = (trigger: HTMLButtonElement, items: HTMLElement[], cls = "") => {
+      const list = h(`div.rv-pop${cls}`, { hidden: true, role: "menu" }, ...items);
+      trigger.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const open = list.hidden;
+        for (const o of this.root.querySelectorAll<HTMLElement>(".rv-pop")) o.hidden = true;
+        this.compareMenu.hidden = true;
+        list.hidden = !open;
+      });
+      list.addEventListener("click", (e) => {
+        if ((e.target as HTMLElement).closest(".rv-pop-item:not(.rv-toggle)")) list.hidden = true;
+      });
+      return h("div.rv-menu-wrap", null, trigger, list);
+    };
+    addEventListener("pointerdown", (e) => {
+      if (!(e.target as HTMLElement).closest?.(".rv-menu-wrap")) for (const o of this.root.querySelectorAll<HTMLElement>(".rv-pop")) o.hidden = true;
+    });
+    this.speedTrigger = btn("1×", "Playback speed ([ / ])", () => {}, ".rv-chip.rv-quiet.rv-speed");
+    this.camTrigger = btn("In-eye", "Camera (1–5, F)", () => {}, ".rv-chip.rv-quiet");
+    this.layoutTrigger = btn("Side by side", "Layout (G)", () => {}, ".rv-chip.rv-quiet");
+    const moreTrigger = btn("", "More", () => {}, ".rv-chip.rv-quiet.rv-more");
+    moreTrigger.append(glyph("more"));
+    const helpItem = btn("Keyboard shortcuts", "Keyboard shortcuts (?)", () => (this.helpEl.hidden = !this.helpEl.hidden), ".rv-pop-item");
+    const exportBtn = btn("Export MP4", "Render this replay to an MP4 video (E)", () => this.openExport(), ".rv-chip.rv-accent");
+    const bhrBtn = btn("Download .bhr", "Download the replay file", () => this.downloadBhr(), ".rv-pop-item");
+    for (const b of [this.hudBtn, this.weaponBtn, this.cleanBtn, this.practiceBtn, this.reportBtn]) b.classList.replace("rv-chip", "rv-pop-item");
+    this.hudBtn.classList.add("rv-toggle");
+    this.weaponBtn.classList.add("rv-toggle");
+    this.weaponBtn.textContent = "Weapon in hand";
+    this.reportBtn.textContent = "Report player";
+    this.h2hGroup = h("div.rv-group.h2h-ctl", { hidden: true }, pop(this.layoutTrigger, [h2hBtns.side, h2hBtns.stacked, h2hBtns.ghost]), h2hBtns.swap);
+    const compareWrap = h("div.rv-menu-wrap", null, this.compareBtn, this.compareMenu);
+    this.compareBtn.classList.add("rv-quiet");
+    // Not in head to head (one run's tools): compare, practice, the file, report.
+    this.soloOnly = [compareWrap, bhrBtn];
+    this.h2hOnly = [h2hBtns.stats, h2hBtns.early];
+    const more = pop(moreTrigger, [this.hudBtn, this.weaponBtn, h2hBtns.stats, h2hBtns.early, this.cleanBtn, this.practiceBtn, bhrBtn, this.reportBtn, helpItem], ".rv-pop-right");
+    for (const e of this.h2hOnly) e.hidden = true;
+    const views = h("div.rv-group.rv-views", null, pop(this.speedTrigger, this.speedBtns), pop(this.camTrigger, [...this.camBtns.values()]), this.h2hGroup);
+    const actions = h("div.rv-group.rv-right", null, compareWrap, more, exportBtn, this.shareBtn);
+    // Transport and clock on the left, everything else on the right.
+    const controls = h("div.rv-controls.rv-controls-a", null, h("div.rv-group.rv-left", null, transport, clock), h("div.rv-group.rv-right", null, views, actions));
+    const panel = h("footer.rv-panel", null, this.timeline.el, controls);
     this.panel = panel;
     this.root = h("div#rv", { hidden: true, role: "dialog", "aria-label": "Replay viewer" }, this.stage, this.hud.el, top, this.freeHint, this.loading, this.helpEl, panel);
     // The HUD and whispers sit above the controls (viewer.css --rv-panel-h), not under them; 0 while Hide UI hides the panel.
@@ -403,6 +503,8 @@ export class ReplayViewer implements ExportSource {
     const my = ++this.seq;
     // ?t=<tick> / ?jump=<n> (staff-lens.ts): read before the URL is rewritten below.
     const deep = replayDeepLink();
+    // Head to head's ?view=side|stacked|ghost (else by the window and the GPU): read before the URL is rewritten.
+    const view = new URLSearchParams(location.search).get("view");
     this.model.setPlayerGlow(null);
     this.drawModel?.setPlayerGlow(null);
     this.watchCount = null;
@@ -418,7 +520,7 @@ export class ReplayViewer implements ExportSource {
       if (replay.header.map !== this.host.map) {
         this.setLoading(`Loading ${replay.header.map}…`);
         const sourceRunId = viewerRequestRunId(req);
-        const next = new URL(sourceRunId ? viewerUrl({ runId: sourceRunId }) : viewerUrl({ bytes }, replay.header.map), appHref());
+        const next = new URL(sourceRunId ? (req.h2h ? h2hUrl(sourceRunId, req.h2h.runId) : viewerUrl({ runId: sourceRunId })) : viewerUrl({ bytes }, replay.header.map), appHref());
         if (deep.tick !== null) next.searchParams.set("t", String(deep.tick));
         if (deep.jump !== null) next.searchParams.set("jump", String(deep.jump));
         location.href = next.pathname + next.search;
@@ -426,6 +528,7 @@ export class ReplayViewer implements ExportSource {
       }
       await this.viewerCore();
       if (my !== this.seq) return;
+      this.clearH2H();
       this.setLoading("Preparing replay…");
       await afterPaint();
       // Your own PB replays: your colourway when the trailer has none.
@@ -457,7 +560,11 @@ export class ReplayViewer implements ExportSource {
       // Not on your own runs (the name the replay was recorded under; the server refuses them anyway).
       this.reportBtn.hidden = !this.runId || !api.available() || replay.header.player === lastKnownMe()?.name;
       // (A gauntlet's map keeps its watch address.)
-      if (this.runId && !this.gauntlet) history.replaceState(null, "", viewerUrl({ runId: this.runId }));
+      if (this.runId && !this.gauntlet) history.replaceState(null, "", req.h2h ? h2hUrl(this.runId, req.h2h.runId) : viewerUrl({ runId: this.runId }));
+      if (req.h2h) {
+        await this.openH2H(req.h2h.runId, my, layoutParam(view));
+        return;
+      }
       // A deep link starts paused at that tick (?t=) or half a second before that jump (?jump=, from the admin).
       const data = this.player!.data;
       const at = deep.tick ?? (deep.jump ? jumpTick(data, deep.jump) : null);
@@ -472,7 +579,7 @@ export class ReplayViewer implements ExportSource {
     } catch (e) {
       if (my !== this.seq) return;
       console.error(e);
-      this.setLoading(String((e as Error)?.message ?? e), true);
+      this.setLoading(String((e as Error)?.message ?? e), true, req.h2h ? "Can't open head to head" : undefined);
     }
   }
 
@@ -492,13 +599,13 @@ export class ReplayViewer implements ExportSource {
     this.statSkip = true;
   }
 
-  private setLoading(text: string | null, error = false): void {
+  private setLoading(text: string | null, error = false, title = "Can't open this replay"): void {
     this.loading.hidden = text === null;
     this.loading.classList.toggle("error", error);
     if (text === null) return;
     this.loading.replaceChildren(
       ...[
-      error ? h("strong", null, "Can't open this replay") : h("div.rv-spinner"),
+      error ? h("strong", null, title) : h("div.rv-spinner"),
       h("span", null, text),
       error ? h("button.rv-btn.rv-chip", { type: "button", onclick: () => this.close() }, "Close") : null,
       ].filter((x): x is HTMLElement => !!x),
@@ -610,6 +717,7 @@ export class ReplayViewer implements ExportSource {
     this.floor.clear();
     this.arms?.dispose();
     this.arms = null;
+    this.clearH2H();
     this.clearCompare();
     this.player?.dispose();
     this.trailHistory.clear();
@@ -620,7 +728,7 @@ export class ReplayViewer implements ExportSource {
     cam.rotation.order = "YXZ";
     cam.rotation.set(0, 0, 0);
     const url = new URL(appHref());
-    if (url.pathname.startsWith("/replay/") || url.searchParams.has("replay")) {
+    if (url.pathname.startsWith("/replay/") || url.pathname.startsWith("/h2h/") || url.searchParams.has("replay")) {
       url.pathname = "/";
       url.searchParams.delete("replay");
       url.searchParams.delete("style");
@@ -642,7 +750,7 @@ export class ReplayViewer implements ExportSource {
     const d = this.data;
     if (!d) return;
     // Played to the end: again from just before the run, as on load (not the wait in the spawn).
-    if (!this.playing && this.t >= d.n) this.seekTo(d.startTick ? Math.max(0, d.startTick - d.tickrate) : 0, true);
+    if (!this.playing && this.t >= this.tEnd) this.seekTo(d.startTick ? Math.max(0, d.startTick - d.tickrate) : 0, true);
     this.playing = !this.playing;
     this.updateControls();
   }
@@ -654,7 +762,7 @@ export class ReplayViewer implements ExportSource {
 
   private nudgeSpeed(dir: number): void {
     const i = SPEEDS.indexOf(this.speed);
-    this.setSpeed(SPEEDS[Math.max(0, Math.min(SPEEDS.length - 1, (i < 0 ? 3 : i) + dir))]);
+    this.setSpeed(SPEEDS[Math.max(0, Math.min(SPEEDS.length - (this.h2h ? 2 : 1), (i < 0 ? 3 : i) + dir))]);
   }
 
   step(ticks: number): void {
@@ -669,7 +777,7 @@ export class ReplayViewer implements ExportSource {
     this.watchCount?.seek();
     const d = this.data;
     if (!d) return;
-    const nt = Math.max(0, Math.min(d.n, t));
+    const nt = Math.max(0, Math.min(this.tEnd, t));
     if (Math.abs(nt - this.t) > 30) {
       if (this.rig.mode !== "free") this.rig.snap();
       this.model.snap();
@@ -684,7 +792,7 @@ export class ReplayViewer implements ExportSource {
 
   private jumpEnd(): void {
     const d = this.data;
-    if (d) this.seekTo(d.endTick || d.n, true);
+    if (d) this.seekTo(this.h2h ? this.h2h.lastFinish : d.endTick || d.n, true);
   }
 
   setCam(mode: CamMode): void {
@@ -785,7 +893,9 @@ export class ReplayViewer implements ExportSource {
 
   private updateControls(): void {
     const d = this.data;
-    this.playBtn.textContent = this.playing ? "❚❚" : "▶";
+    this.playBtn.replaceChildren(glyph(this.playing ? "pause" : "play"));
+    this.speedTrigger.textContent = `${this.speed}×`;
+    this.camTrigger.textContent = CAM_MODES.find((m) => m.id === this.rig.mode)?.label ?? "Camera";
     this.playBtn.classList.toggle("playing", this.playing);
     SPEEDS.forEach((s, i) => this.speedBtns[i].classList.toggle("on", s === this.speed));
     for (const [m, b] of this.camBtns) b.classList.toggle("on", m === this.rig.mode);
@@ -793,12 +903,227 @@ export class ReplayViewer implements ExportSource {
     this.weaponBtn.classList.toggle("on", this.firstPerson ? this.weapon.eye : this.weapon.third);
     this.weaponBtn.title = `Weapon in hand, ${this.firstPerson ? "in-eye" : "third person"} (V)`;
     this.freeHint.hidden = this.rig.mode !== "free" || document.pointerLockElement === this.stage;
+    const hb = this.h2hBtns;
+    if (hb && this.h2h) {
+      for (const l of ["side", "stacked", "ghost"] as const) hb[l].classList.toggle("on", this.h2h.layout === l);
+      hb.stats.classList.toggle("on", this.h2h.panelsOn);
+      hb.early.classList.toggle("on", this.h2h.showEarly);
+      this.layoutTrigger.textContent = { side: "Side by side", stacked: "Stacked", ghost: "Ghost" }[this.h2h.layout];
+    }
     const c = this.compare;
     this.compareBtn.textContent = c ? `vs ${c.label}` : "Compare";
     this.compareBtn.classList.toggle("on", !!c);
     if (c) this.compareBtn.style.setProperty("--chip", GHOST_CSS[c.kind]);
     else this.compareBtn.style.removeProperty("--chip");
     if (!d) return;
+  }
+
+  // -------------------------------------------------------------------------------------------
+  // Head to head (viewer/h2h.ts)
+
+  /** The last display tick: the replay's, or in head to head the later of the two replays' ends. */
+  private get tEnd(): number {
+    const d = this.data;
+    return !d ? 0 : this.h2h ? this.h2h.end : d.n;
+  }
+
+  /** After the primary run (`this.runId`) loaded: loads run B, checks the pair and sets head to head up. */
+  private async openH2H(bId: string, my: number, layout: H2HLayout | null): Promise<void> {
+    const aId = this.runId;
+    const a = this.replay;
+    if (!aId || !a || !this.player || !this.core || !this.bytes) throw new Error("Head to head needs two leaderboard runs.");
+    if (bId === aId) throw new Error("Pick two different runs.");
+    if (!api.available()) throw new Error("Leaderboards are offline, so these runs can't be loaded.");
+    this.setLoading("Loading the second run…");
+    const info = async (id: string): Promise<RunInfo> => {
+      try {
+        return await api.runInfo(id);
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 404) throw new Error("One of these runs doesn't exist or isn't public.");
+        throw e;
+      }
+    };
+    const [ia, ib] = await Promise.all([info(aId), info(bId)]);
+    if (ia.status !== "verified" || ib.status !== "verified") throw new Error("Only verified runs can go head to head.");
+    if (ia.map !== ib.map) throw new Error(`These runs are on different maps (${ia.map} and ${ib.map}).`);
+    const bBytes = await api.replay(bId);
+    const b = await decodeReplay(bBytes);
+    if (b.header.map !== this.host.map) throw new Error(`These runs are on different maps (${this.host.map} and ${b.header.map}).`);
+    const core = await sideCore(this.host.wasmBytes, this.host.bsp);
+    if (my !== this.seq) return;
+    this.setLoading("Preparing both runs…");
+    await afterPaint();
+    if (my !== this.seq) return;
+    const bp = new ReplayPlayer(core, b);
+    const lookB: ArmsLook = { loadout: b.loadout ?? { ...DEFAULT_LOADOUT }, outfit: b.loadout?.outfit ?? DEFAULT_COSMETICS.outfit!, glow: ib.player.playerGlow ?? null };
+    // The faster run goes left (top) in the faster run's colour; as the URL gives them when level.
+    const bFaster = (ib.time ?? Infinity) < (ia.time ?? Infinity);
+    const sides = [
+      makeSide({ runId: aId, info: ia, replay: a, bytes: this.bytes, core: this.core, player: this.player, look: this.look, color: H2H_COLORS[bFaster ? 1 : 0] }),
+      makeSide({ runId: bId, info: ib, replay: b, bytes: bBytes, core, player: bp, look: lookB, color: H2H_COLORS[bFaster ? 0 : 1] }),
+    ] as const;
+    const host = this.host;
+    this.h2h = new HeadToHead([sides[0], sides[1]], {
+      renderer: host.renderer,
+      scene: host.scene,
+      camera: host.camera,
+      root: this.root,
+      mainHud: this.hud.el,
+      render: (scene, cam, sec) => host.graphicsPipeline.render(scene, cam, sec),
+      worldUpdate: (origins, sec, fx, anims) => host.world.update(origins, sec, fx, anims),
+    }, layout ?? defaultLayout(innerWidth, innerHeight, slowGraphics()));
+    // Small notes: builds, zones, styles and tracks may differ.
+    const ha = a.header;
+    const hb = b.header;
+    const notes: string[] = [];
+    if (ha.mapSha256 !== hb.mapSha256) notes.push("Different map builds");
+    else if (JSON.stringify(ha.zones) !== JSON.stringify(hb.zones)) notes.push("Different zones");
+    if (replayStyle(ha) !== replayStyle(hb)) notes.push(`${styleLabel(replayStyle(ha))} vs ${styleLabel(replayStyle(hb))}`);
+    const ta = this.player.data.runTrack;
+    const tb = bp.data.runTrack;
+    if (ta !== tb) notes.push(`${trackName(ta)} vs ${trackName(tb)}`);
+    this.h2hNote.textContent = notes.join(", ");
+    this.h2hNote.hidden = !notes.length;
+    this.root.append(this.h2hNote);
+    this.owner = ia.player.name;
+    this.h2h.showEarly = earlyShown();
+    this.applyH2H();
+    this.setH2HLayout(this.h2h.layout);
+    if (bFaster) this.swapH2H();
+    this.setLoading(null);
+    this.statSkip = true;
+    this.statFrom = performance.now();
+  }
+
+  /** Back to one run: the second run's sim and the stats go. */
+  private clearH2H(): void {
+    const hh = this.h2h;
+    if (!hh) return;
+    hh.dispose();
+    this.h2h = null;
+    this.h2hNote.remove();
+    this.clearCompare();
+    this.timeline.setEnd(null);
+    this.root.classList.remove("rv-h2h", "rv-h2h-side", "rv-h2h-stacked", "rv-h2h-ghost");
+    this.root.style.removeProperty("--h2h-hud");
+    this.h2hGroup.hidden = true;
+    for (const e of this.soloOnly) e.hidden = false;
+    for (const e of this.h2hOnly) e.hidden = true;
+    this.speedBtns[SPEEDS.length - 1].hidden = false;
+    this.host.resize();
+  }
+
+  /** The compare ghost, the timeline's gap and end, and the controls for the current primary. */
+  private applyH2H(): void {
+    const hh = this.h2h;
+    const d = this.data;
+    if (!hh || !d) return;
+    const o = hh.other;
+    const od = o.player.data;
+    const ghost = hh.makeGhost();
+    ghost.trace = (x, y) => this.trace(x, y, 0);
+    this.compare?.ghost.dispose();
+    this.host.scene.add(ghost.root);
+    const g = hh.mainGap;
+    const kind = hh.primary === 0 ? "wr" : "custom";
+    this.compare = { ghost, kind, label: o.name, replay: o.replay, startTick: od.startTick, endTick: od.endTick, delta: g.delta, speedDiff: g.speedDiff };
+    const end = od.endTick ? d.startTick + ((od.endTick - od.startTick) * od.interval) / d.interval : null;
+    this.timeline.setCompare(end, o.color, g.delta);
+    this.timeline.setEnd(hh.end);
+    this.root.classList.add("rv-h2h");
+    this.root.style.setProperty("--run-main", hh.main.color);
+    this.h2hGroup.hidden = false;
+    for (const e of this.soloOnly) e.hidden = true;
+    for (const e of this.h2hOnly) e.hidden = false;
+    this.practiceBtn.hidden = true;
+    this.reportBtn.hidden = true;
+    this.shareBtn.hidden = false;
+    // 0.1x to 2x.
+    this.speedBtns[SPEEDS.length - 1].hidden = true;
+    if (this.speed > 2) this.setSpeed(2);
+    this.updateControls();
+  }
+
+  setH2HLayout(l: H2HLayout): void {
+    const hh = this.h2h;
+    if (!hh) return;
+    hh.setLayout(l);
+    for (const k of ["side", "stacked", "ghost"] as const) this.root.classList.toggle(`rv-h2h-${k}`, l === k);
+    this.compare?.ghost.setVisible(l === "ghost");
+    this.rig.snap();
+    this.statSkip = true;
+    this.updateControls();
+  }
+
+  /** The other run becomes the primary: left view, the camera in ghost view, the timeline and the HUD's split. */
+  swapH2H(): void {
+    const hh = this.h2h;
+    const d0 = this.data;
+    if (!hh || !d0) return;
+    const tau = (this.t - d0.startTick) * d0.interval;
+    hh.main.look = this.look;
+    hh.swap();
+    const m = hh.main;
+    this.player = m.player;
+    this.core = m.core;
+    this.corePromise = Promise.resolve(m.core);
+    this.replay = m.replay;
+    this.bytes = m.bytes;
+    this.runId = m.runId;
+    this.owner = m.name;
+    const d = m.player.data;
+    this.trailHistory.clear();
+    this.hud.reset();
+    this.hud.setTickRate(d.tickrate);
+    this.timeline.setData(d);
+    this.timeline.setSegments((m.replay.segments ?? []).map((l) => l.tick));
+    this.arms?.dispose();
+    this.arms = null;
+    this.armsTick = -1;
+    if (this.weapon.eye) this.ensureArms();
+    this.floorStale = true;
+    this.lastShown = -1;
+    this.applyLook(m.look);
+    this.t = Math.max(0, Math.min(hh.end, d.startTick + tau / d.interval));
+    this.rig.snap();
+    this.model.snap();
+    this.applyH2H();
+    this.updateTitle();
+  }
+
+  /** Closes an open speed / camera / layout / More menu; whether one was open (Esc closes it before the viewer). */
+  private closePops(): boolean {
+    let open = false;
+    for (const o of this.root.querySelectorAll<HTMLElement>(".rv-pop")) (open ||= !o.hidden), (o.hidden = true);
+    return open;
+  }
+
+  /** Head to head's "early" number in each panel: off unless the player turns it on (remembered). */
+  private toggleEarly(): void {
+    if (!this.h2h) return;
+    this.h2h.showEarly = !this.h2h.showEarly;
+    try {
+      localStorage.setItem(EARLY_KEY, this.h2h.showEarly ? "1" : "0");
+    } catch {
+      /* private mode */
+    }
+    this.updateControls();
+  }
+
+  private toggleStats(): void {
+    if (!this.h2h) return;
+    this.h2h.panelsOn = !this.h2h.panelsOn;
+    this.updateControls();
+  }
+
+  /** J / Shift+J: the primary's next / previous jump in the timed run. */
+  private stepJump(dir: 1 | -1): void {
+    const d = this.data;
+    if (!d) return;
+    const now = Math.floor(this.t);
+    const jumps = d.jumpTicks.filter((k) => k >= d.startTick && (!d.endTick || k <= d.endTick));
+    const next = dir > 0 ? jumps.find((k) => k > now + 2) : [...jumps].reverse().find((k) => k < now - 2);
+    if (next !== undefined) this.seekTo(next - 2, true);
   }
 
   // -------------------------------------------------------------------------------------------
@@ -823,12 +1148,26 @@ export class ReplayViewer implements ExportSource {
     const track = this.data?.runTrack ?? hd.track ?? 0;
     const style = replayStyle(hd);
     const item = (label: string, sub: string, fn: () => void, disabled = false) =>
-      h("button.rv-menu-item", { type: "button", role: "menuitem", disabled, onclick: () => ((m.hidden = true), fn()) }, h("span", null, label), h("small", null, sub));
+      h("button.rv-menu-item", { type: "button", role: "menuitem", disabled, onclick: () => ((m.hidden = true), fn()) }, h("span", null, label), sub ? h("small", null, sub) : null);
     const file = h("input", { type: "file", accept: ".bhr,application/octet-stream", hidden: true });
     file.addEventListener("change", () => {
       const f = file.files?.[0];
       if (f) void f.arrayBuffer().then((b) => this.setCompare({ bytes: new Uint8Array(b), name: f.name.replace(/\.bhr$/, "") }, "custom"));
     });
+    // A leaderboard run: head to head with another run of its board (a page of its own, /h2h/<a>/<b>). A local replay
+    // (your PB file, a .bhr) can't go head to head: it gets a ghost to race, as before.
+    const runId = this.runId;
+    if (api.available() && runId) {
+      m.replaceChildren(
+        item("World record", "", () => void this.h2hWith("wr", style, track)),
+        item("Your PB", "", () => void this.h2hWith("pb", style, track)),
+        item("Run above", "", () => void this.h2hWith("above", style, track)),
+        item("Run below", "", () => void this.h2hWith("below", style, track)),
+        h("button.rv-menu-item", { type: "button", role: "menuitem", onclick: () => this.h2hPaste() }, h("span", null, "Run link…")),
+      );
+      m.hidden = false;
+      return;
+    }
     m.replaceChildren(
       item("Your PB", `${trackName(track)} · ${styleLabel(style)}`, () => void this.setCompare({ pb: { map: hd.map, style, track } }, "pb")),
       item("World record", api.available() ? "Top of the leaderboard" : "Leaderboards offline", () => void this.compareWR(style, track), !api.available()),
@@ -837,6 +1176,57 @@ export class ReplayViewer implements ExportSource {
       file,
     );
     m.hidden = false;
+  }
+
+  /** Head to head with a run picked from this run's board: the WR, your PB, the run above or below. */
+  private async h2hWith(which: "wr" | "pb" | "above" | "below", style: string, track: number): Promise<void> {
+    const runId = this.runId;
+    if (!runId) return;
+    try {
+      const map = this.host.map;
+      let other: string | null = null;
+      if (which === "wr" || which === "pb") {
+        const lb = await api.leaderboard(map, style, { track, limit: 1 });
+        other = which === "wr" ? (lb.wr ?? lb.entries[0])?.runId ?? null : lb.me?.runId ?? null;
+        if (!other) throw new Error(which === "wr" ? "No world record on this board yet." : "You have no run on this board yet.");
+      } else {
+        const rank = (await api.runInfo(runId)).rank;
+        if (!rank) throw new Error("This run isn't on the current board.");
+        const want = which === "above" ? rank - 1 : rank + 1;
+        if (want < 1) throw new Error("This run is the world record.");
+        const lb = await api.leaderboard(map, style, { track, offset: want - 1, limit: 1 });
+        other = lb.entries.find((e) => e.rank === want)?.runId ?? null;
+        if (!other) throw new Error("There's no run below this one.");
+      }
+      if (other === runId) throw new Error(which === "wr" ? "This run is the world record." : "That's this run.");
+      openHeadToHead(runId, other);
+    } catch (e) {
+      this.flash(String((e as Error)?.message ?? e));
+    }
+  }
+
+  /** Head to head with a pasted replay link (or run id): the menu becomes one field. */
+  private h2hPaste(): void {
+    const runId = this.runId;
+    const m = this.compareMenu;
+    if (!runId) return;
+    const input = h("input.rv-menu-input", { type: "text", placeholder: "bunnyhop.lol/replay/…", spellcheck: "false", "aria-label": "Replay link or run id" }) as HTMLInputElement;
+    const msg = h("small.rv-menu-msg");
+    const go = () => {
+      const other = runIdFromText(input.value);
+      if (!other) return void (msg.textContent = "That isn't a replay link.");
+      if (other === runId) return void (msg.textContent = "That's this run.");
+      m.hidden = true;
+      openHeadToHead(runId, other);
+    };
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") go();
+      else if (e.key === "Escape") m.hidden = true;
+      e.stopPropagation();
+    });
+    m.replaceChildren(input, msg, h("button.rv-btn.rv-chip.rv-menu-go", { type: "button", onclick: go }, "Open"));
+    m.hidden = false;
+    input.focus();
   }
 
   private async compareWR(style: string, track: number): Promise<void> {
@@ -949,9 +1339,12 @@ export class ReplayViewer implements ExportSource {
     const p = this.player!;
     const d = p.data;
     const i = Math.max(0, Math.min(d.n, Math.floor(t)));
-    // Direct replay/export sampling also performs seeks; reset animation/camera history at those cuts.
+    // Direct replay/export sampling also performs seeks; reset animation/camera history at those cuts. Both pre-roll the
+    // run before the cut (cameras.ts, PlayerModel.preroll), so a seek lands where continuous playback would be.
+    let cut = false;
     if (this.lastShown < 0 || (Number.isFinite(this.lastRenderedTick) && (t < this.lastRenderedTick || (dt <= 0 && t !== this.lastRenderedTick)))) {
-      rig.snap(); this.drawModel.snap();
+      rig.snap();
+      cut = true;
     }
     this.lastRenderedTick = t;
     // Moving sprite trails are rebuilt from the brush history every frame (render.ts reconstructTrails). Playing (and
@@ -1006,7 +1399,7 @@ export class ReplayViewer implements ExportSource {
     }
     p.seek(i, record);
     const origins = p.brushOrigins();
-    this.host.world.update(origins, t * d.interval, this.core?.effectStates());
+    this.host.world.update(origins, t * d.interval, this.core?.effectStates(), this.core?.propAnims());
     if (this.core) this.host.onWorldUpdate?.(this.core, origins);
     // Map-given guns (physics v5): the items on the floor and the gun in the bunny's hand at this tick.
     const weapons = this.core ? weaponReport(this.core) : null;
@@ -1029,9 +1422,6 @@ export class ReplayViewer implements ExportSource {
     model.setHeldHidden(!shown.third);
     this.playerShadow.update(s.pos, s.crouched, !showModel);
     {
-      // Grounded if any tick since the last frame touched the ground (bhop lands for a single tick).
-      let grounded = s.grounded;
-      if (!grounded && this.lastShown >= 0 && i > this.lastShown && i - this.lastShown < 30) for (let k = this.lastShown + 1; k <= i && !grounded; k++) grounded = (d.flags[k] & F_GROUNDED) !== 0;
       // Carrot swings recorded in the replay (cosmetic trailer), during normal playback.
       const playing = contiguous;
       const attack = playing ? cosmeticBetween(d.replay.cosmetic, this.lastShown, i) : 0;
@@ -1041,11 +1431,15 @@ export class ReplayViewer implements ExportSource {
       if (showModel && ins.sig && !this.exporting) emitWeaponEvent({ type: "inspect", source: "replay", position: [s.pos[0], s.pos[1], s.pos[2]] });
       // An empty hand (weapon off) doesn't swing or inspect.
       const tpHeld = shown.third;
-      const pose: PlayerPose = { visualTime: t * d.interval, position: s.pos, velocity: s.vel, yaw: s.yaw, pitch: s.pitch, crouched: s.crouched, grounded, forwardmove: s.forward, sidemove: s.side, attack: tpHeld ? attack : 0, inspect: tpHeld ? ins.sig : 0, inspectHeld: tpHeld && ins.held };
       model.setGun(weapons && weapons.active >= 2 ? WEAPON_IDS[weapons.active] : null);
       model.setGunSilencer(!!weapons && weapons.active >= 2 && weapons.silencer);
-      model.setState(pose);
-      model.update(dt);
+      // On the simulation's clock (viewer/player.ts TickStepper): the model updates on each tick's own pose and blends
+      // between ticks, so the pose at a replay time is the same at any playback speed and frame rate. A cut pre-rolls.
+      if (this.stepperFor?.model !== model || this.stepperFor.data !== d) {
+        this.stepperFor = { model, data: d, src: replayTicks(d) };
+        this.stepper.reset();
+      }
+      this.stepper.show(model, this.stepperFor.src, t, cut, { attack: tpHeld ? attack : 0, inspect: tpHeld ? ins.sig : 0, inspectHeld: tpHeld && ins.held });
       if (arms) {
         if (attack) arms.swing(attack);
         if (ins.sig) arms.inspect(ins.sig);
@@ -1058,7 +1452,8 @@ export class ReplayViewer implements ExportSource {
     }
     this.lastShown = i;
     const c = this.compare;
-    if (c) {
+    if (c && this.h2h && this.h2h.viewLayout !== "ghost") (c.ghost.setVisible(false), this.drawGhost?.setVisible(false));
+    else if (c) {
       cam.getWorldPosition(this.camPos);
       const g = prefs.get().ghost;
       const running = d.startTick > 0 && t >= d.startTick;
@@ -1128,17 +1523,22 @@ export class ReplayViewer implements ExportSource {
     if (this.playing && !this.timeline.scrubbing) {
       const before=this.t;
       this.t += dt * this.speed * d.tickrate;
-      if (this.t >= d.n) {
-        this.t = d.n;
+      if (this.t >= this.tEnd) {
+        this.t = this.tEnd;
         this.playing = false;
         this.updateControls();
         this.gauntlet?.ended();
       }
       this.watchCount?.advance(dt, Math.max(0,Math.min(this.t,d.n)-before)*d.interval, document.visibilityState === "visible");
     }
-    this.render(this.t, this.playing ? dt * this.speed : dt, this.rig);
-    this.sound.frame(d, this.t, this.playing && !this.timeline.scrubbing, this.speed);
-    if (this.hudOn) this.hud.update(d, this.t, this.deltaAt(this.t), this.speedDiffAt(this.t));
+    const vdt = this.playing ? dt * this.speed : dt;
+    if (this.h2h) {
+      // Head to head: the views over the area the panel leaves (viewer/h2h.ts), then the stats.
+      const below = this.clean ? 0 : this.panel.offsetHeight;
+      this.h2h.draw(this.t, vdt, below, this.rig.mode, (t, s) => this.render(t, s, this.rig), this.hudOn);
+    } else this.render(this.t, vdt, this.rig);
+    this.sound.frame(d, Math.min(this.t, d.n), this.playing && !this.timeline.scrubbing, this.speed);
+    if (this.hudOn) this.hud.update(d, Math.min(this.t, d.n), this.deltaAt(Math.min(this.t, d.n)), this.speedDiffAt(Math.min(this.t, d.n)));
     this.timeline.setHead(this.t);
     this.timeline.render();
     this.gauntlet?.frame(d, this.t);
@@ -1202,6 +1602,12 @@ export class ReplayViewer implements ExportSource {
   beginExport(): void {
     this.watchCount?.seek();
     this.exporting = true;
+    // The in-eye arms start from a clean presentation too (clocks, feel, both gun viewmodels): arms.reset at the next
+    // frame (ReplayArms.reset: Viewmodel.idle, GunPresenter.reset); animated finishes run on the replay's time.
+    this.armsTick = -1;
+    const replayTime = () => (Number.isFinite(this.lastRenderedTick) ? this.lastRenderedTick : 0) * (this.data?.interval ?? 0.01);
+    setFinishClock(replayTime);
+    setFinishEnvironmentClock(() => replayTime() * 1000);
     this.sound.stop();
     this.playing = false;
     this.updateControls();
@@ -1209,8 +1615,10 @@ export class ReplayViewer implements ExportSource {
     // seeds Math.random first, so their construction is deterministic too).
     this.model.root.visible = false;
     this.drawModel = new PlayerModel({ style: "solid", playerGlow: this.look.glow, outfit: this.look.outfit, loadout: this.look.loadout });
+    this.drawModel.root.userData.h2hPrimary = true;
     this.playerShadow.bind(this.drawModel.root);
-    this.drawModel.setNearFade(10, 34);
+    this.drawModel.setNearFade(...CHASE_NEAR_FADE);
+    this.drawModel.setGroundProbe(probeFromTrace((a, b) => this.trace(a, b, 0)));
     this.host.scene.add(this.drawModel.root);
     if (this.compare) {
       this.compare.ghost.setVisible(false);
@@ -1259,6 +1667,8 @@ export class ReplayViewer implements ExportSource {
 
   endExport(): void {
     this.exporting = false;
+    setFinishClock(null);
+    setFinishEnvironmentClock(null);
     this.exportWeapon = null;
     if (this.arms) this.arms.deployOnShow = true;
     if (this.drawModel !== this.model) {
@@ -1329,7 +1739,43 @@ export class ReplayViewer implements ExportSource {
     this.setClean(false);
     this.playing = false;
     this.updateControls();
-    openExportDialog(this, this.root);
+    // Head to head: both runs in the frame, side by side in 16:9 and stacked in 9:16 (the dialog's format).
+    if (this.h2h) openExportDialog(this.h2hExportSource(), this.root, { format: this.h2h.layout === "stacked" ? "portrait" : "landscape" });
+    else openExportDialog(this, this.root);
+  }
+
+  /** The exporter's source for head to head (viewer/h2h.ts draws both views, their HUDs and panels). */
+  private h2hExportSource(): ExportSource {
+    const v = this;
+    const hh = this.h2h!;
+    return {
+      get data() { return v.data; },
+      get renderer() { return v.renderer; },
+      get graphicsPipeline() { return v.graphicsPipeline; },
+      get texturePacks() { return v.texturePacks; },
+      get graphicsIdentity() { return v.graphicsIdentity; },
+      get camera() { return v.camera; },
+      trace: this.trace,
+      get compareLabel() { return v.compareLabel; },
+      deltaAt: (t) => v.deltaAt(t),
+      speedDiffAt: (t) => v.speedDiffAt(t),
+      render: (t, dt, rig) => hh.exportRender(t, dt, rig, (tt, dd) => v.render(tt, dd, rig)),
+      // No first-person weapon: it would be drawn over the whole frame, not one view.
+      weaponFor: () => false,
+      beginExport: () => (v.beginExport(), hh.beginExport()),
+      syncSim: (t) => v.syncSim(t),
+      endExport: () => (hh.endExport(), v.endExport()),
+      cardInfo: (lb) => v.cardInfo(lb),
+      fileName: () => {
+        const clean = (x: string) => x.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "") || "x";
+        return `${clean(v.host.map)}_${clean(hh.sides[0].name)}_vs_${clean(hh.sides[1].name)}.mp4`;
+      },
+      overlay: (g, w, hgt, t, o, branding) => hh.exportOverlay(g, w, hgt, t, o, branding),
+      exportSpan: () => {
+        const d = v.data!;
+        return { n: hh.end, tickrate: d.tickrate, startTick: d.startTick, endTick: hh.lastFinish };
+      },
+    };
   }
 
   // -------------------------------------------------------------------------------------------
@@ -1416,6 +1862,7 @@ export class ReplayViewer implements ExportSource {
         if (document.pointerLockElement === this.stage) return document.exitPointerLock(), true;
         if (performance.now() - this.lockReleasedAt < 300) return true;
         if (this.clean) this.setClean(false);
+        else if (this.closePops()) return true;
         else if (!this.helpEl.hidden) this.helpEl.hidden = true;
         else if (!this.compareMenu.hidden) this.compareMenu.hidden = true;
         else this.close();
@@ -1458,6 +1905,7 @@ export class ReplayViewer implements ExportSource {
         this.toggleWeapon();
         return true;
       case "KeyC":
+        if (this.h2h) return false;
         this.setClean(false);
         this.toggleCompareMenu();
         return true;
@@ -1465,7 +1913,23 @@ export class ReplayViewer implements ExportSource {
         this.openExport();
         return true;
       case "KeyP":
+        if (this.h2h) return false;
         this.practiceFromHere();
+        return true;
+      case "KeyG":
+        if (!this.h2h) return false;
+        this.setH2HLayout(this.h2h.layout === "side" ? "stacked" : this.h2h.layout === "stacked" ? "ghost" : "side");
+        return true;
+      case "KeyX":
+        if (!this.h2h) return false;
+        this.swapH2H();
+        return true;
+      case "KeyS":
+        if (!this.h2h) return false;
+        this.toggleStats();
+        return true;
+      case "KeyJ":
+        this.stepJump(e.shiftKey ? -1 : 1);
         return true;
       case "Slash":
         this.setClean(false);

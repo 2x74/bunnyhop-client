@@ -1,5 +1,93 @@
 # Changelog
 
+## v0.7.2 — Native
+
+Update from Settings → Updates: press Update, then Restart to update. Your settings, replays and maps are kept.
+
+**Ranked**
+- Physics v25 and timer rules 4, matching website v0.0.37. Your existing runs don't change.
+- Every jump starts 1.5 units above the floor, as on Momentum and on CS:S servers with a landfix, so a jump goes the
+  same height every time. Crouch jumps onto ledges right at the height limit, like the long platform on
+  bhop_tranquility, now work every time instead of depending on how you landed.
+- Ramps and curves no longer stop you dead or freeze you in mid-air: the quarter-pipe on bhop_badges_mini, the drop
+  shaft on bhop_kotodama and the last stage of bhop_aux_a9 play smoothly now.
+
+**A/D-Only**
+- New style: A/D-Only (`!ad`, also `!a`, `!d`, `!aonly`, `!donly` and `!adonly`). Strafe with only A or only D in the
+  air: the first one you use in a run is the only one that works, and W and S do nothing. It has its own boards, like on
+  the website.
+
+**Tiers and rewards**
+- Map tiers go up to T10: T8 Brutal, T9 Nightmare, T10 Impossible, on the Tab board too.
+- A mark after your name shows the hardest tier you've cleared, in game as well as in the menu.
+- New tier rewards: the Flare, Riptide and Whiteout colourways, their trails, the Riptide ghost, card frames and
+  backgrounds, and the Silver Wreath, plus the Lapis set for T7. The achievements Deep End, Sleepless and True Architect
+  are in too.
+
+**Supporter looks**
+- Supporters' name fonts show in game as on the website: on the Tab board, name tags, chat and the spectating bar. The
+  spectating bar also shows the watched player's name colour and effect.
+- Edit card has the new supporter choices: name font, avatar decoration, card border and effects.
+
+**Chat**
+- Profile flags can be pride flags, shown on the Tab board, name tags and chat.
+- Chat commands work with a Russian layout on (`!ызус` is `!spec`) and with a dot in front (`.rtv`).
+- After a style command, chat says how to get back to Normal.
+- Menus you open from chat (`!spec`, `!race`, `!bright`) can be clicked.
+- `!bright` opens a quick menu for this map's brightness and Fullbright, and `!fb` switches Fullbright. Both are kept
+  per map; Settings → Graphics keeps the value for every other map.
+
+**Third person**
+- Everyone is the bunny, as on the website: the classic runner and the player and ghost model settings are gone.
+- Feet plant and step when you stop and turn, legs tuck and reach in the air, landings sink with how hard they were,
+  and the bunny leans into strafes, climbs ladders and swims. Its ears twitch the same way in every replay.
+- Feet stay planted on slopes and stairs and tilt with the ground, and the bunny steps up and down ledges instead of
+  standing in the air.
+- Ghosts and other players swim in water and climb ladders, ghosts lean into strafes and pick up their motion when a
+  run restarts, and replays show the bunny moving smoothly on high refresh rate screens.
+- Distant players and ghosts keep a readable outline.
+- The chase camera rises over your shoulder in tight corridors and no longer pumps against walls. Seeking in a replay
+  or starting a video export puts the camera and the bunny where playback would have them.
+
+**First person**
+- The website's weapons pass: the knife and gun move like on the website (CS:S bob, lag, strafe tilt, landing dip), the
+  old weapon lowers out while the new one draws, attacks blend an inspect out instead of cutting it, and your hand
+  idles between actions. The USP's suppressor arm, rifle grips and gloves are fixed too.
+- Shots kick the gun on recoil springs like on the website, so rapid fire and the Glock's burst climb and rock, gun
+  animations blend into each other instead of snapping, and an empty gun's click shows.
+- The M4A1 has its own suppressor, with its own attach and detach timing and sounds. Switching away before a suppressor
+  is on or off puts it back as it was, for the USP too, and silenced shots and the Glock's burst do CS:S's damage.
+- Settings → Viewmodel: Inspect can be Quiet (your first press only checks the knife; replays always show the tricks),
+  and Hard landing settle and Speed FOV are new, both off by default.
+- With your system's reduce motion setting on, the hands and guns move less, like on the website.
+- Viewmodel bob now defaults to 0.5. If you never changed it, it moves to 0.5 once; your own value stays.
+
+**Maps**
+- Animated map props move like in CS:S, such as bhop_ceaseless's butterflies and bhop_retrowave's blocks, and the
+  map's own triggers can hide them. Props that switch idle animations at random (bhop_shrubhop, bhop_hive's thumpers)
+  animate like on the website.
+- New hard maps bhop_hellopro2 (T8) and bhop_4triedsame (T10): stay on a one-hop block, or land on the same spot again
+  within 4 seconds, and you're sent back, as on CS:S.
+- Frame-animated and scrolling textures animate, at the map's own speed and angle (bhop_umbra's moon clouds no longer
+  race), and bhop_4triedsame's wireframe shaft draws.
+- Maps with many props draw faster: on bhop_retrowave the world takes about a third less time per frame.
+
+**Replays**
+- Head-to-head links (`/h2h/…`) open in the replay viewer: the first run plays and the second rides along as the compare
+  ghost, with the time ahead or behind.
+
+**Fullscreen**
+- If fullscreen or borderless doesn't show, the game goes back to windowed by itself and keeps that. A game that froze
+  or was closed while switching starts windowed next time and tells you why.
+- Windows: Fullscreen at your desktop's resolution no longer switches the monitor's mode, so Esc no longer turns the
+  screen black for a moment. Coming back to the menu from another resolution, the window fills the screen again instead
+  of looking windowed. We haven't seen this on a real PC yet, so tell us if Esc still goes black.
+- Start the game with `--windowed` to force windowed and keep it. The README says how on Windows, macOS and Linux.
+
+**Updates**
+- The game checks for a new version when it starts and every few hours while it runs. When one is out, the home screen
+  says so: Update downloads it, then Restart to update installs it. Not now hides it until the next version.
+
 ## v0.7.1 — Native
 
 Update from Settings → Updates: press Update, then Restart to update. Your settings, replays and maps are kept.

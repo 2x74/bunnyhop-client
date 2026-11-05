@@ -45,7 +45,7 @@
    two words, and VERSION stays below 0.1.0 while STAGE is alpha.
    ============================================================ */
 
-export const VERSION = "0.0.36";
+export const VERSION = "0.0.37";
 
 /** Release stage, printed after the number ("v0.0.4 alpha"). */
 export const STAGE = "alpha";
@@ -67,8 +67,8 @@ export interface ChangelogEntry {
 
 /** Notes for the next release, unpublished until promoted into CHANGELOG. */
 export const UPCOMING: ChangelogEntry = {
-  version: "0.0.37",
-  date: "2026-11-04",
+  version: "0.0.38",
+  date: "2026-11-05",
   kind: "minor",
   title: "Next update",
   notes: [],
@@ -76,6 +76,39 @@ export const UPCOMING: ChangelogEntry = {
 
 /** Newest first. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "0.0.37",
+    date: "2026-11-05",
+    kind: "minor",
+    title: "Head to head, tiers up to T10 and new animations",
+    notes: [
+      "Head to head: watch two runs of the same map at once, side by side, stacked or as a ghost, with each run's sync, gain and strafes underneath. Open it with Compare on any replay, share the link, or export it as a video in 16:9 or 9:16.",
+      "Replays have a new scrubber and control bar, and you can drag it on a phone.",
+      "Every jump now starts 1.5 units above the floor, as on Momentum and on CS:S servers with a landfix, so a jump goes the same height every time. Crouch jumps onto ledges right at the height limit, like the long platform on bhop_tranquility, now work every time instead of depending on how you landed. Thanks to PonyTrap.",
+      "Ramps and curves no longer stop you dead or freeze you in mid-air. You slide on, as on Momentum: the quarter-pipe on bhop_badges_mini, the drop shaft on bhop_kotodama and the last stage of bhop_aux_a9 all play smoothly now. Thanks to Throwtop.",
+      "Tiers now go up to T10, the same scale as SourceJump. T8, T9 and T10 show as their own tiers on maps and boards and pay more points. bhop_4tele is now T10 and bhop_lust T9. Player cards keep seven bars, with T8 and up counted in T7+.",
+      "New maps: bhop_hangtime2, bhop_tomb2, bhop_pain_rw and bhop_hellopro2 (T8), and bhop_astras_hell and bhop_4triedsame (T10). The one-hop blocks on bhop_hellopro2 and bhop_4triedsame work like CS:S: stay on a block or land on the same spot again within 4 seconds and you go back. The zones for bhop_hangtime2 and bhop_astras_hell come from ddyfad's zone collection, credited on the Credits page.",
+      "Your first clear of a T7, T8, T9 and T10 map each unlocks a colourway, Lapis, Flare, Riptide and Whiteout, with a trail, ghost or card frame to match. A first T10 clear also gives the Silver Wreath hat. A small mark after your name shows the hardest tier you've beaten.",
+      "New achievements: Deep End for finishing five maps of T8 or higher, and Sleepless for three of T9 or higher. ┃levels on Discord announces them, and first T8, T9 and T10 clears too.",
+      "Player cards come alive from T7 up: a slow light in the colour of your hardest tier that grows with the tier. It holds still with reduced motion or the Potato preset.",
+      "Hover a player's name on boards, ranks, the scoreboard, chat or your friends list to see their card. Cards show the points of your top three runs, the record counts are easier to read, and your profile shows each featured run once. Click it to watch.",
+      "Supporters can pick a name font (nine to choose from), an avatar decoration, an animated card border and a card effect, under Edit card. The font shows everywhere your name does, in game too.",
+      "New style: A/D-Only (!ad). W and S do nothing in the air, and the first of A or D you use in the air locks the run to that key. It has its own boards and counts towards your overall rank like W-Only. Stylist now needs A/D-Only too; if you already have it, you keep it. Thanks to Luna and daf.",
+      "The bunny got a full animation pass. Feet plant on the ground and on slopes, jumps stretch, tuck and reach for the floor, landings take weight, and climbing, swimming and crouching each look right. Other players read better at a distance and in glowing outfits. The chase camera fades the bunny out and switches to the player's view in spots too tight to show them. Replays and head to head look the same at any playback speed. Everyone shows as the bunny now.",
+      "Weapon bob is gentler by default (50%). If you never changed it, it moves to the new default. Guns are held properly, with the trigger finger on the trigger, and got a shaping pass. Switching weapons hands over instead of cutting. Knife inspects can be set to Quiet, and cancelling one brings the knife back to your hand. Gloves and several knives got polish too.",
+      "The M4A1 takes its suppressor on and off with right click, like the USP. Switching away before it's on or off puts it back as it was, as in CS:S, and silenced and burst shots do the same damage as in CS:S, which matters for breakables and buttons you shoot.",
+      "Map props move like in CS:S, such as the butterflies on bhop_ceaseless and props that switch between idle animations, and animated and scrolling textures move again. Thanks to weedgotmefunky33.",
+      "!bright opens a quick menu to make the current map brighter or turn on Fullbright for just that map, and !fb toggles Fullbright for it. It's also in the pause menu under On screen. Thanks to melthy and weedgotmefunky33.",
+      "You can pick a pride flag in place of your country flag. Thanks to Luna.",
+      "New achievement: True Architect, for finishing bhop_lol_backrooms. Thanks to Luna.",
+      "Chat commands work with a Russian keyboard layout on (!ызус is !spec) and with a dot in front (.spec). Clicking a name in the !spec, !nominate and !race menus works, and after a style command chat says how to get back to Normal (!n). Thanks to hcykrt and JollyGain9.",
+      "Leaderboards give names more room. A pass over the menus also fixed split scoreboard rows, one-letter map names in mid-size windows, the head to head timer overlap and tables running off phone screens.",
+      "┃world-records on Discord posts one world record per message, each with its own video. World records on T5 and harder maps always post, first clears and long runs included. A card in ┃world-records or ┃snipes keeps saying WR after the record is beaten, and ┃snipes links the world record post once it's out.",
+      "Infinite runs are scored as T3 at most, since air jumps flatten a hard map. Infinite still counts a fifth towards your overall rank.",
+      "Verified players get a Verified role on Discord, with the blue check as its icon.",
+      "Your existing runs don't change. The desktop client gets all of this in v0.7.2; until you update, its runs count as before.",
+    ],
+  },
   {
     version: "0.0.36",
     date: "2026-11-04",

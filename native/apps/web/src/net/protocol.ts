@@ -53,6 +53,7 @@ import type { StyleId } from "../styles";
 import type { CosmeticLoadout } from "../loadout";
 import type { StaffRole } from "../progression";
 import type { CreatorKind, NameColorId, NameEffect, StaffBadge } from "../creators";
+import type { NameFontId } from "../supporter-looks";
 
 export const PROTOCOL_VERSION = 1;
 
@@ -159,7 +160,7 @@ export const LEGACY_META_STYLES = 8;
 export const LEGACY_ROSTER_STYLES = 9;
 
 /** Wire order of styles (frozen: never reorder, only append). */
-export const WIRE_STYLES: readonly StyleId[] = ["autohop", "legit", "wonly", "sideways", "hsw", "autostrafe", "scroll", "lowgrav", "segmented", "infinite", "backwards"];
+export const WIRE_STYLES: readonly StyleId[] = ["autohop", "legit", "wonly", "sideways", "hsw", "autostrafe", "scroll", "lowgrav", "segmented", "infinite", "backwards", "adonly"];
 export const styleIndex = (s: string): number => Math.max(0, WIRE_STYLES.indexOf(s as StyleId));
 
 export const styleAt = (i: number): StyleId | null => WIRE_STYLES[i] ?? null;
@@ -502,6 +503,8 @@ export interface RosterPlayer {
   nameColor?: NameColorId | null;
   nameEffect?: NameEffect | null;
   nameColor2?: NameColorId | null;
+  /** v0.0.37: a supporter's name font (supporter-looks.ts NAME_FONTS id). Absent = the default font; older clients ignore it. */
+  nameFont?: NameFontId | null;
   nameBadges?: string[]; giftsSent?: number; gifterColors?: string[]; gifterAnimated?: boolean;
   /** Staff-granted special badges (creators.ts SPECIAL_BADGES, 0.0.21). Absent from older servers. */
   special?: string[];
@@ -657,10 +660,10 @@ export type ServerMsg =
   | { t: "player"; slot: number; patch: Partial<Omit<RosterPlayer, "slot" | "id">> }
   /**
    * `role` (say lines): the speaker's staff role; `staff` / `verified` / `creator` / `booster` / `supporter`: their
-   * marks; `nameColor` / `nameEffect` / `nameColor2`: a supporter's name look. Set by the room (never by the client);
+   * marks; `nameColor` / `nameEffect` / `nameColor2` / `nameFont`: a supporter's name look. Set by the room (never by the client);
    * absent from older servers.
    */
-  | { t: "chat"; kind: ChatKind; text: string; slot?: number; name?: string; rank?: RankTag | null; role?: StaffRole | null; staff?: StaffBadge | null; verified?: boolean; creator?: CreatorKind | null; special?: string[]; booster?: boolean; supporter?: boolean; nameColor?: NameColorId | null; nameEffect?: NameEffect | null; nameColor2?: NameColorId | null; nameBadges?: string[]; giftsSent?: number; gifterColors?: string[]; gifterAnimated?: boolean; at: number }
+  | { t: "chat"; kind: ChatKind; text: string; slot?: number; name?: string; rank?: RankTag | null; role?: StaffRole | null; staff?: StaffBadge | null; verified?: boolean; creator?: CreatorKind | null; special?: string[]; booster?: boolean; supporter?: boolean; nameColor?: NameColorId | null; nameEffect?: NameEffect | null; nameColor2?: NameColorId | null; nameFont?: NameFontId | null; nameBadges?: string[]; giftsSent?: number; gifterColors?: string[]; gifterAnimated?: boolean; at: number }
   | { t: "gift"; batchId: string; count: number; names: string[]; sender: { id: string; name: string }; recipients: { id: string; name: string }[] }
   | { t: "vote"; vote: VoteView; myVote?: number | null }
   | { t: "voteEnd"; id: number; winner: VoteOption | null }

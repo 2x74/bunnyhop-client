@@ -1,7 +1,7 @@
 //! Backwards against the website's oracle, pinned from release-0.0.36 tools/verify/fixtures/backwards-vectors.json
 //! (written by tools/verify/backwards-vectors.ts). Until the vendored website has Backwards, this file is the only
 //! check; after that, shared_style_filter_oracle in styles.rs also runs it.
-use super::styles::{bw_dir, faces_backwards, Filter};
+use super::styles::{Filter, bw_dir, faces_backwards};
 use super::{BhCmd, BhState};
 use serde_json::Value;
 
@@ -67,7 +67,7 @@ fn check_filter_rows(rows: &[Value]) {
             ],
             ..BhState::default()
         };
-        let got = filter.apply(command(&row["cmd"]), state, false);
+        let got = filter.apply(command(&row["cmd"]), state, false, false);
         assert_eq!(
             command_bits(got),
             command_bits(command(&row["out"])),

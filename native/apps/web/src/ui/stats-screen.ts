@@ -227,7 +227,7 @@ function personalView(p: Profile, s: PlayerStats | null, play: (() => void) | nu
     return h(
       "div.st-page.st-fresh",
       null,
-      h("div.st-who-name", { style: look.style, class: look.class }, p.player.name),
+      h("div.st-who-name", look, p.player.name),
       h("p.st-fresh-line", null, "Finish a map and your numbers start here."),
       play ? h("button.btn.primary", { type: "button", onclick: play }, "Play") : null,
     );
@@ -241,7 +241,7 @@ function personalView(p: Profile, s: PlayerStats | null, play: (() => void) | nu
       h(
         "div",
         null,
-        h("div.st-who-name", { style: look.style, class: look.class }, p.player.name),
+        h("div.st-who-name", look, p.player.name),
         h(
           "p.st-who-meta",
           null,

@@ -13,6 +13,7 @@ import { avatar } from "./avatar";
 import { staffButton } from "../staff-lens";
 import { dismissOutside } from "../ui/dismiss";
 import { nameAttrs, nameMarks } from "../ui/marks";
+import { hoverCardFor } from "../ui/hover-card";
 import { navigate } from "../ui/nav";
 import { roomActions, roomUrl } from "../net/presence";
 import { spectateHow } from "./spectate";
@@ -92,7 +93,8 @@ export function whereText(w: FriendWhere | null, lastSeen: number | null): strin
 /** Three dots: "more" (a friend row's menu, the profile's overflow). */
 export const DOTS = '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="4.5" cy="10" r="1.6"/><circle cx="10" cy="10" r="1.6"/><circle cx="15.5" cy="10" r="1.6"/></svg>';
 
-const name = (p: ApiPlayer) => h("span.fd-name", null, h("b", nameAttrs(p), p.name), nameMarks(p));
+// The name shows the compact hover card (ui/hover-card.ts), quiet while the dock's search has focus.
+const name = (p: ApiPlayer) => h("span.fd-name", null, hoverCardFor(h("b", nameAttrs(p), p.name), p, { compact: true, quietWhileTyping: true }), nameMarks(p));
 
 /**
  * A person as a link to their profile (avatar and name, and whatever line goes with them): a click or Enter opens it

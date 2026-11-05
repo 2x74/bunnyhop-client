@@ -157,8 +157,11 @@ export class InspectCombo {
     return out;
   }
 
-  /** Attack or draw: blends out (attack: CANCEL_BLEND) or stops at once (draw). */
-  cancel(reason: "attack" | "draw"): ComboEvent[] {
+  /**
+   * Attack or draw: blends out (attack: over `blend`, CANCEL_BLEND by default; the first-person runtime lengthens it
+   * when the knife is far from the fist) or stops at once (draw).
+   */
+  cancel(reason: "attack" | "draw", blend = CANCEL_BLEND): ComboEvent[] {
     const out: ComboEvent[] = [];
     if (!this.cur) return out;
     const wasActive = this.active;
@@ -167,8 +170,9 @@ export class InspectCombo {
       this.cur = this.prev = null;
       this.fadeLen = 0;
     } else if (wasActive) {
-      // Freeze the pose and fade it out (prev crossfade is dropped: the frozen mix stays as it was).
-      this.fadeLen = CANCEL_BLEND;
+      // Freeze the pose and fade it out: both tricks of a chain crossfade stay at their frozen mix (update() no longer
+      // advances them), so what was on screen is what fades (dropping `prev` here jumped to the next trick first).
+      this.fadeLen = Math.max(1e-3, blend);
       this.fade = 0;
     }
     if (wasActive) out.push({ type: "cancel", reason });
@@ -281,7 +285,7 @@ export class InspectCombo {
   /** The pose to show (see ComboPose). */
   pose(out: ComboPose = { cur: null, prev: null, mix: 1, weight: 0 }): ComboPose {
     out.cur = this.cur;
-    out.prev = this.fadeLen > 0 ? null : this.prev;
+    out.prev = this.prev;
     out.mix = out.prev ? smooth(this.prevT / CHAIN_BLEND) : 1;
     out.weight = !this.cur ? 0 : this.fadeLen > 0 ? 1 - smooth(this.fade / this.fadeLen) : 1;
     return out;

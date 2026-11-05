@@ -6,7 +6,7 @@
  * Shaders the core resolves as missing (no `$basetexture` by design) that the renderer draws itself (imposter.ts). Not
  * counted as missing materials (content status, thumbnails, the load log).
  */
-export const CLIENT_DRAWN_SHADERS: ReadonlySet<string> = new Set(["windowimposter", "aftershock"]);
+export const CLIENT_DRAWN_SHADERS: ReadonlySet<string> = new Set(["windowimposter", "aftershock", "wireframe"]);
 
 export type KvValue = string | KvPair[];
 export type KvPair = [string, KvValue];

@@ -43,6 +43,24 @@ inline Matrix model_matrix(const BhTransform &t) {
             1};
 }
 
+// A model turned by `t`'s angles about a pivot `pivot_height` above its origin instead of the origin itself: the
+// third-person bunny banks (rolls) about its hips, so its feet and head swing opposite ways.
+inline Matrix model_matrix_about(const BhTransform &t, float pivot_height) {
+    auto model = model_matrix(t);
+    for (int r = 0; r < 3; r++)
+        model[12 + r] -= pivot_height * model[8 + r];
+    model[14] += pivot_height;
+    return model;
+}
+
+// A model-space point through a model matrix (column-major), into world space.
+inline std::array<float, 3> transform_point(const Matrix &m, const std::array<float, 3> &p) {
+    std::array<float, 3> out{};
+    for (int r = 0; r < 3; r++)
+        out[size_t(r)] = m[size_t(r)] * p[0] + m[size_t(4 + r)] * p[1] + m[size_t(8 + r)] * p[2] + m[size_t(12 + r)];
+    return out;
+}
+
 inline Matrix camera_matrix(const float eye[3], double yaw, double pitch, float aspect) {
     const float cy = std::cos(yaw * radians), sy = std::sin(yaw * radians);
     const float cp = std::cos(pitch * radians), sp = std::sin(pitch * radians);

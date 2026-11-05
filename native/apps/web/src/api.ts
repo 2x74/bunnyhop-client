@@ -14,6 +14,7 @@ import { cleanLoadout, type CosmeticLoadout } from "./loadout";
 // network / device bans and ban-evasion checks, apps/api src/network.ts). Reads carry the device id in its cookie.
 
 import type { NameColorId, NameEffect, PlayerMarks, ProfileLink, ProfileLinks } from "./creators";
+import type { AvatarDecoId, CardBorderId, CardEffectId, NameFontId } from "./supporter-looks";
 import { deviceHeaders } from "./device";
 import { GUEST_REFUSED_MS, resolveMe } from "./me-rules";
 import { WAVEDASH } from "./platform/env";
@@ -65,6 +66,11 @@ export interface SupporterSettings {
   nameEffect: NameEffect | null;
   /** The gradient's second colour, null = automatic. */
   nameColor2: NameColorId | null;
+  /** v0.0.37 (supporter-looks.ts): name font, avatar decoration, card border and card effect; null = off. Absent from older APIs. */
+  nameFont?: NameFontId | null;
+  avatarDeco?: AvatarDecoId | null;
+  cardBorder?: CardBorderId | null;
+  cardEffect?: CardEffectId | null;
   showBadge: boolean;
   /** On Top supporters and the About page's thank-you list (shown by default). */
   showOnBoard: boolean;
@@ -81,6 +87,8 @@ export interface TopSupporter {
   nameColor: NameColorId | null;
   nameEffect: NameEffect | null;
   nameColor2: NameColorId | null;
+  /** v0.0.37; absent from older APIs. */
+  nameFont?: NameFontId | null;
   /** The supporter badge shows (not hidden by the player). */
   badge: boolean;
 }
@@ -172,6 +180,23 @@ export interface EmailStart {
   /** Local dev only: the API logs instead of sending and hands these back. */
   devCode?: string;
   devLink?: string;
+}
+
+/** GET /runs/:id (apps/api runs.ts runView): a run's public facts. 404 for runs that don't exist or aren't public. */
+export interface RunInfo {
+  id: string;
+  map: string;
+  style: string;
+  track: number;
+  status: string;
+  player: { id: string; name: string; playerGlow?: PlayerGlow | null };
+  ticks: number | null;
+  time: number | null;
+  jumps: number | null;
+  sync: number | null;
+  physics: number;
+  date: string;
+  rank: number | null;
 }
 
 export interface LeaderboardEntry {
@@ -436,6 +461,19 @@ export interface RankView {
   group: { id: string; name: string; color: string };
 }
 
+/** GET /players/:id/card: what the hover card adds to a board row's name, picture and marks (ui/hover-card.ts). */
+export interface PlayerCardView {
+  id: string;
+  cosmetics: { frame: string | null; background: string | null; title: string | null };
+  level: LevelView;
+  rank: RankView;
+  /** Top 3 records by points (distinct maps when possible), with `points` each. */
+  top: RunCard[];
+  /** v0.0.37: a supporter's card border and effect (supporter-looks.ts); null / absent otherwise. */
+  cardBorder?: CardBorderId | null;
+  cardEffect?: CardEffectId | null;
+}
+
 /** A verified run on a profile (featured, recent PBs, replay list). */
 export interface RunCard {
   runId: string;
@@ -511,7 +549,7 @@ export type ApiStaffRole = "owner" | "admin" | "moderator";
 
 export interface Profile {
   nameBadgeSettings?: NameBadgeSettings | null;
-  player: ApiPlayer & { provider: string; since: string; mouse?: import("./mouse-settings").MouseSettings & { updatedAt?: number } | null };
+  player: ApiPlayer & { provider: string; since: string; cardBorder?: CardBorderId | null; cardEffect?: CardEffectId | null; mouse?: import("./mouse-settings").MouseSettings & { updatedAt?: number } | null };
   /**
    * Your own profile while you boost the Discord server: the "Show booster badge" switch (Edit card → Badges). null /
    * absent otherwise (older APIs too).
@@ -1072,7 +1110,7 @@ export const api = {
     return json("/me/name-badges", post(settings), dispatch);
   },
   /** A supporter's name look, badge switch, About listing (403 not_supporter for everyone else). */
-  async saveSupporter(s: Partial<Pick<SupporterSettings, "nameColor" | "nameEffect" | "nameColor2" | "showBadge" | "showOnBoard" | "playerGlow">>, dispatch?: RequestDispatch): Promise<SupporterSettings> {
+  async saveSupporter(s: Partial<Pick<SupporterSettings, "nameColor" | "nameEffect" | "nameColor2" | "nameFont" | "avatarDeco" | "cardBorder" | "cardEffect" | "showBadge" | "showOnBoard" | "playerGlow">>, dispatch?: RequestDispatch): Promise<SupporterSettings> {
     return json("/me/supporter", post(s), dispatch);
   },
   /**
@@ -1406,11 +1444,19 @@ export const api = {
   },
   /** Gzip .bhr bytes of a verified run, for ghosts and watch mode. */
   /** A run's player as the server knows them (a replay's own player name is whatever its client wrote). */
+  /** A run as the server shows it (GET /runs/:id): head to head checks both runs are verified and on one map. */
+  async runInfo(id: string): Promise<RunInfo> {
+    return json<RunInfo>(`/runs/${encodeURIComponent(id)}`);
+  },
   /** The run's player; `look`: also their bunny as it is now (colourway + loadout, for replays that don't record it). */
   async runPlayer(id: string, look = false): Promise<{ id: string; name: string; playerGlow: PlayerGlow | null; look: { outfit: string; loadout: CosmeticLoadout } | null }> {
     const p = (await json<{ player: { id: string; name: string; playerGlow?: PlayerGlow | null; look?: { outfit?: unknown; loadout?: unknown } } }>(`/runs/${encodeURIComponent(id)}${look ? "?look=1" : ""}`)).player;
     const l = p.look && typeof p.look.outfit === "string" ? { outfit: p.look.outfit, loadout: cleanLoadout(p.look.loadout) } : null;
     return { id: p.id, name: p.name, playerGlow: p.playerGlow ?? null, look: l?.loadout ? { outfit: l.outfit, loadout: l.loadout } : null };
+  },
+  /** The hover card's data (the server shares the public body a minute); revalidated like the profile. */
+  async playerCard(id: string): Promise<PlayerCardView> {
+    return json(`/players/${encodeURIComponent(id)}/card`, { cache: "no-cache" });
   },
   async playerPoints(id: string, scope = "all", page: { offset?: number; limit?: number } = {}): Promise<PointsPage> {
     const q = `${page.offset ? `&offset=${page.offset}` : ""}${page.limit ? `&limit=${page.limit}` : ""}`;

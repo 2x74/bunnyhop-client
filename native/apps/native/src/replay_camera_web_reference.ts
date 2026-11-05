@@ -1,4 +1,5 @@
-// Test-only camera reference copied from apps/web/src/viewer/cameras.ts; runtime stays native.
+// Test-only camera reference copied from apps/web/src/viewer/cameras.ts; runtime stays native. The chase camera is
+// tested against the vendored website module itself (replay_camera_oracle.ts).
 // Spectator cameras (CS:S observer modes) for the replay viewer, the MP4 export and live third person.
 //
 //   eye    OBS_MODE_IN_EYE: the player's exact view, interpolated between ticks.
@@ -99,29 +100,6 @@ export function eyeOf(s: SpectatorTarget, out: number[] = [0, 0, 0]): number[] {
 
 // ---------------------------------------------------------------------------------------------
 
-export interface ChaseOptions {
-  /** Ideal distance behind the pivot (CS:S CHASE_CAM_DISTANCE_MAX 96). */
-  distance?: number;
-  /** Camera pitch in degrees (down is positive), before orbit. */
-  pitch?: number;
-  /** Pivot = eye height minus this (CS:S chase cams orbit a point a little below the eyes). */
-  eyeDrop?: number;
-  /** How fast the camera yaw follows the player's view yaw (1/s): the slight lag of a spectator chase cam. */
-  followRate?: number;
-  /** How fast the pivot height follows eye height changes (crouch / uncrouch), 1/s. */
-  heightRate?: number;
-  /**
-   * How fast the pivot follows the player's vertical position (1/s; 0 = rigid). A little vertical lag lets each hop
-   * read as a rise and fall in frame instead of the whole view bobbing with the player.
-   */
-  zRate?: number;
-}
-
-/**
- * Eases eye-height steps the way a CS:S spectator's interpolated view of another player does: an airborne duck or
- * unduck shifts the origin and the view offset within one tick, which would pop the camera. The step becomes an
- * offset that decays over ~0.1 s (cl_interp). Ground ducks already ease in the sim (0.4 s) and pass through untouched.
- */
 export class EyeSmoother {
   private lastZ = NaN;
   private lastView = 0;
@@ -154,86 +132,6 @@ export class EyeSmoother {
 }
 
 /** OBS_MODE_CHASE: behind the player's view yaw, slightly above, collision-aware. */
-export class ChaseCam {
-  orbitYaw = 0;
-  orbitPitch = 0;
-  zoom = 1;
-  private yaw = NaN;
-  private pitchS = NaN;
-  private dist = NaN;
-  private height = NaN;
-  private z = NaN;
-  private o: Required<ChaseOptions>;
-  private pivot = [0, 0, 0];
-  private want = [0, 0, 0];
-  readonly position = [0, 0, 0];
-
-  constructor(o: ChaseOptions = {}) {
-    this.o = { distance: 96, pitch: 14, eyeDrop: 8, followRate: 7, heightRate: 9, zRate: 10, ...o };
-  }
-
-  /** Forget smoothing (after seeks/cuts). */
-  snap(): void {
-    this.yaw = NaN;
-  }
-
-  resetOrbit(): void {
-    this.orbitYaw = this.orbitPitch = 0;
-    this.zoom = 1;
-  }
-
-  orbit(dx: number, dy: number): void {
-    this.orbitYaw = wrap180(this.orbitYaw - dx * 0.3);
-    this.orbitPitch = clamp(this.orbitPitch + dy * 0.25, -40, 70);
-  }
-
-  zoomBy(f: number): void {
-    this.zoom = clamp(this.zoom * f, 0.4, 5);
-  }
-
-  update(camera: THREE.PerspectiveCamera, s: SpectatorTarget, dt: number, trace: TraceFn | null, eyeErr = 0): void {
-    const o = this.o;
-    const snap = Number.isNaN(this.yaw);
-    const eye = s.viewZ - o.eyeDrop + eyeErr;
-    // Vertical follow: lags a little (zRate), snaps across teleports.
-    if (snap || Number.isNaN(this.z) || o.zRate <= 0 || Math.abs(s.pos[2] - this.z) > 160) this.z = s.pos[2];
-    else this.z += (s.pos[2] - this.z) * damp(o.zRate, dt);
-    if (snap) {
-      this.yaw = s.yaw;
-      this.pitchS = s.pitch;
-      this.height = eye;
-    } else {
-      // Spectator feel: the yaw trails the player's view slightly; crouch / uncrouch eases the pivot height.
-      this.yaw += wrap180(s.yaw - this.yaw) * damp(o.followRate, dt);
-      this.pitchS += (s.pitch - this.pitchS) * damp(o.followRate * 0.5, dt);
-      this.height += (eye - this.height) * damp(o.heightRate, dt);
-    }
-    const yaw = (this.yaw + this.orbitYaw) * D2R;
-    // Mostly level, with a little of the player's own pitch so looking down at a jump tilts the view a bit.
-    const pitch = clamp(o.pitch + this.orbitPitch + this.pitchS * 0.15, -60, 80) * D2R;
-    const p = this.pivot;
-    p[0] = s.pos[0];
-    p[1] = s.pos[1];
-    p[2] = this.z + this.height;
-    const ideal = o.distance * this.zoom;
-    const w = this.want;
-    w[0] = p[0] - Math.cos(yaw) * Math.cos(pitch) * ideal;
-    w[1] = p[1] - Math.sin(yaw) * Math.cos(pitch) * ideal;
-    w[2] = p[2] + Math.sin(pitch) * ideal;
-    // CS:S: a WALL_OFFSET hull trace pulls the camera in instantly; it eases back out when the way clears.
-    const frac = trace ? trace(p, w, 6) : 1;
-    const target = Math.max(4, ideal * frac - 2);
-    if (snap || Number.isNaN(this.dist) || target < this.dist) this.dist = target;
-    else this.dist += (target - this.dist) * damp(3, dt);
-    const k = this.dist / ideal;
-    for (let i = 0; i < 3; i++) this.position[i] = p[i] + (w[i] - p[i]) * k;
-    lookFrom(camera, this.position, p);
-  }
-}
-
-// ---------------------------------------------------------------------------------------------
-
-/** OBS_MODE_ROAMING noclip camera. Interactive only: the viewer feeds mouse deltas and held keys. */
 export class FreeCam {
   pos = [0, 0, 0];
   yaw = 0;

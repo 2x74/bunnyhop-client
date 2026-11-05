@@ -13,7 +13,7 @@ test("native decorations map trusted structured marks without coercing objects",
     }),
   ).toEqual({
     nativeNameColor: color.hex,
-    nativeName: { color: color.hex, color2: null, effect: null },
+    nativeName: { color: color.hex, color2: null, effect: null, font: null },
     nativeMarks: [
       { id: "staff", name: "Admin", kind: "admin" },
       { id: "verified", name: "Verified" },
@@ -43,4 +43,20 @@ test("a supporter with no equipped badges shows no marks, as on the website", ()
   const decoration = nativeChatDecoration({ supporter: true, nameColor: "lime", nameEffect: "glow", nameBadges: [] });
   expect(decoration.nativeMarks).toEqual([]);
   expect(decoration.nativeBadge).toBe("Supporter");
+});
+
+test("chat lines carry a pride flag as its code and drop unknown ones", () => {
+  expect(nativeChatDecoration({ country: "PRIDE-NONBINARY" }).nativeCountry).toBe("PRIDE-NONBINARY");
+  expect(nativeChatDecoration({ country: "PRIDE-XX" }).nativeCountry).toBeUndefined();
+  expect(nativeChatDecoration({ country: "de" }).nativeCountry).toBe("DE");
+});
+
+test("a chat name in a supporter font carries the font, with or without a colour", () => {
+  expect(nativeChatDecoration({ supporter: true, nameFont: "pixel" }).nativeName).toEqual({
+    color: null,
+    color2: null,
+    effect: null,
+    font: "pixel",
+  });
+  expect(nativeChatDecoration({ nameFont: "papyrus" }).nativeName).toBeUndefined();
 });

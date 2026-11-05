@@ -48,6 +48,7 @@ export const ACTION_WORDS: Record<string, [string, string]> = {
   "integrity-auto-close": ["Closed a shadowed player's flags", ""],
   "integrity-reopen": ["Reopened a flag", ""],
   "integrity-rule-clear": ["Stopped a rule re-flagging", ""],
+  "shadow-held": ["Held an automatic shadowban (trusted player)", "warn"],
   "integrity-rule-unclear": ["Turned a rule back on", ""],
   "integrity-approve": ["Approved a rejected run", "warn"],
   "feedback-status": ["Changed a ticket", ""],

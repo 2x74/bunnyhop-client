@@ -84,6 +84,7 @@
 #include "window_sdl.hpp"
 #include "window_mode_driver.hpp"
 #include "display_catalog.hpp"
+#include "display_check.hpp"
 #include "display_mode_tryout.hpp"
 #include "hud_area.hpp"
 #include "console_host.hpp"
@@ -94,6 +95,7 @@
 #include "sky_library.hpp"
 #include "menu_messages.hpp"
 #include "free_cameras.hpp"
+#include "menu_cursor.hpp"
 #include "numbered_menus.hpp"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_opengl.h>
@@ -270,17 +272,17 @@ int run(const native::Options &opt) {
         std::cerr << "Settings: " << startup_data.error << '\n';
     }
     if (opt.sensitivity_set) preferences["sensitivity"] = opt.sensitivity;
-    // Recovery: --windowed resets a display mode the player cannot leave and keeps it.
-    if (opt.windowed && preferences.value("windowMode", std::string()) != "windowed") {
-        preferences["windowMode"] = "windowed";
+    native::WindowController window_controller(window.get());
+    const bool persist_window = !opt.hidden && !opt.frames && opt.menu_smoke.empty() && opt.runtime_smoke.empty();
+    // Recovery: --windowed, or a switch the last session never saw present, starts windowed and keeps it.
+    native::DisplayGuard<native::WindowModeDriver> display_guard(cache);
+    if (persist_window && display_guard.launch(preferences, opt.windowed)) {
         try {
             native::save_settings(cache / "settings.json", preferences);
         } catch (const std::exception &e) {
             std::cerr << "Settings: " << e.what() << '\n';
         }
     }
-    native::WindowController window_controller(window.get());
-    const bool persist_window = !opt.hidden && !opt.frames && opt.menu_smoke.empty() && opt.runtime_smoke.empty();
     // Keep the display defaults this launch chose (display_defaults.hpp), so the next launch reads the same ones.
     if (first_settings && persist_window) {
         try {
@@ -300,9 +302,9 @@ int run(const native::Options &opt) {
     // Exclusive fullscreen is borderless while the menu is open, and nothing
     // changes while the window is minimized (window_modes.hpp).
     native::WindowModeDriver window_modes(window_controller, preferences.value("windowMode", std::string("windowed")));
-    if (persist_window && !window_modes.launch(preferences, bool(menu), saved_window)) {
-        std::cerr << "Window: " << window_controller.error() << '\n';
-        preferences["windowMode"] = window_controller.mode();
+    if (persist_window) {
+        display_guard.watch(window_modes, SDL_GetTicksNS);
+        window_modes.launch(preferences, bool(menu), saved_window);
     }
     // Monitors and their modes for Settings → Display, and the ten-second trial of a new exclusive mode.
     native::DisplayCatalog display_catalog;
@@ -391,6 +393,7 @@ int run(const native::Options &opt) {
     native::Input camera_controls;
     native::SniperZoom scope;
     native::NativeWeaponMenu gun_menu;
+    native::LookMenu look_menu;
     native::NativeTriggerMenu trigger_menu;
     native::FreeCameras free_cameras;
     const native::FreeLookInput free_look_input{input_timeline, input, held_codes};
@@ -402,8 +405,13 @@ int run(const native::Options &opt) {
     } catch (const std::exception &e) {
         std::cerr << "Start points: " << e.what() << '\n';
     }
+    // Settings, Viewmodel, Movement feel: the optional hard-landing camera settle and speed FOV (live play only).
+    native_vm::EyeCamera eye_camera;
     auto apply_preferences = [&]() {
         prefs = native::Preferences::from_settings(preferences);
+        eye_camera.configure(
+                preferences.at("viewmodelLandSettle").get<bool>(), preferences.at("viewmodelSpeedFov").get<bool>()
+        );
         discord_settings = native::discord::settings_from(preferences);
         menu_state.settings_changed();
         graphics_menu_pacer.settings(preferences);
@@ -424,6 +432,7 @@ int run(const native::Options &opt) {
         camera_controls.separate_vertical = input.separate_vertical;
         camera_controls.invert_y = input.invert_y;
         hud.preferences(preferences);
+        look_menu.refresh(preferences);
         audio.preferences(preferences);
         map_audio.preferences(preferences.at("mapVolume").get<float>(), preferences.at("muteMap").get<bool>());
         SDL_GL_SetSwapInterval(opt.frames ? 0 : prefs.vsync ? 1 : 0);
@@ -450,11 +459,8 @@ int run(const native::Options &opt) {
                     preferences.at("viewmodelBob").get<float>(),
                     preferences.at("viewmodelSway").get<float>()
             );
+            renderer->set_inspect_style(preferences.at("viewmodelInspect") == "quiet");
             renderer->set_color_blind(preferences.value("colorBlind", std::string("off")));
-            renderer->set_actor_models(
-                    preferences.value("playerModel", std::string("bunny")),
-                    preferences.value("ghostModel", std::string("same"))
-            );
             renderer->set_zones_visible(preferences.value("zonesVisible", true));
             renderer->set_effects_visible(preferences.value("effectsVisible", true));
             renderer->set_triggers_visible(preferences.value("triggersVisible", false));
@@ -481,7 +487,10 @@ int run(const native::Options &opt) {
     native::MovementFeedback feedback;
     native::TurnAdmission turn_admission;
     native::PracticeController practice;
-    native::NumberedMenus numbered_menus{gun_menu, trigger_menu, race_picker, free_cameras.picker, practice.menu_open};
+    native::NumberedMenus numbered_menus{
+            gun_menu, trigger_menu, race_picker, free_cameras.picker, practice.menu_open, look_menu
+    };
+    native::MenuCursor menu_cursor;
     native::LeaveHold leave_hold;
     std::string gauntlet_id, gauntlet_map;
     nlohmann::json gauntlet_progress;
@@ -491,7 +500,12 @@ int run(const native::Options &opt) {
     }
     if (const auto update_notice = updater.startup_notice(); !update_notice.empty())
         hud.toasts.push(update_notice, double(SDL_GetTicksNS()) / 1e9, 8);
-    if (!opt.frames && opt.menu_smoke.empty() && opt.runtime_smoke.empty()) updater.check_if_due();
+    constexpr unsigned display_notice_ms = 10000;
+    if (const auto display_notice = display_guard.notice(); !display_notice.empty())
+        hud.toasts.push(display_notice, double(SDL_GetTicksNS()) / 1e9, display_notice_ms / 1000.);
+    // Smoke and benchmark runs never check for updates.
+    const bool automatic_updates = !opt.frames && opt.menu_smoke.empty() && opt.runtime_smoke.empty();
+    if (automatic_updates) updater.check_if_due();
 
     auto reset_feedback = [&](bool incomplete_history = false, bool keep_jump_stats = false) {
         hud.reset_history(keep_jump_stats);
@@ -618,7 +632,7 @@ int run(const native::Options &opt) {
         chat_drag = false;
         chat.close();
         SDL_StopTextInput(window.get());
-        if (captured && focused && (!menu || !menu->visible())) {
+        if (captured && focused && (!menu || !menu->visible()) && !menu_cursor.held()) {
             SDL_SetWindowRelativeMouseMode(window.get(), true);
             native::set_raw_keyboard(true);
         }
@@ -682,6 +696,7 @@ int run(const native::Options &opt) {
         if (pending_action != "play") cancel_prefetch();
         gun_menu.close();
         trigger_menu.close();
+        eye_camera.reset();
         bh_record_end(core.get());
         room_events |= 8;
         practice.restart();
@@ -955,6 +970,7 @@ int run(const native::Options &opt) {
         auto next_renderer = map_preparation.renderer ? std::move(map_preparation.renderer)
                                                       : std::make_unique<native::Renderer>(gl, next.core.get(), assets);
         next_renderer->set_map_identity(id, detail.is_object() ? detail.value("sha256", std::string()) : std::string());
+        next_renderer->load_map_volumes(data_location::from_utf8(path));
         game.install(std::move(next.core), std::move(next_renderer), practice, audio);
         map_audio.start(core.get(), data_location::from_utf8(path), data_location::from_utf8(content));
         // The pause screen shows this map itself, never the home tour.
@@ -1141,7 +1157,11 @@ int run(const native::Options &opt) {
     auto seek_playback = [&](uint32_t tick) {
         if (!core || !viewer.active) return;
         native::ReplayPose pose;
+        std::vector<native::PrerollFrame> preroll;
         try {
+            preroll = native::gather_replay_preroll(
+                    core.get(), viewer.session.range.clamp(tick), viewer.session.range.tick_interval
+            );
             pose = viewer.session.seek(core.get(), tick);
         } catch (const std::exception &failure) {
             reset();
@@ -1155,6 +1175,8 @@ int run(const native::Options &opt) {
         audio.reset();
         hud.reset_history();
         if (viewer.camera.mode != "free") viewer.camera.reset();
+        viewer.camera.preroll(core.get(), preroll, viewer.session.range.tick_interval);
+        viewer.preroll = std::move(preroll);
         camera_controls.clear();
         reset_feedback(curr.tick != 0);
         reset_input_timing();
@@ -1488,8 +1510,9 @@ int run(const native::Options &opt) {
                 else if (action == "lastWeapon")
                     input.pulse = (input.pulse & ~(3u << 14)) | (last_slot << 14);
                 else if (action == "inspect") {
-                    if (renderer) renderer->inspect_press();
-                    if (core) bh_record_inspect(core.get(), 1);
+                    // The quiet check is yours only: a replay starts with the press that carries on into the tricks.
+                    const bool private_press = renderer && renderer->inspect_press();
+                    if (core && !private_press) bh_record_inspect(core.get(), 1);
                 } else if (action == "drop")
                     input.pulse |= 1u << 12;
                 else if (action == "reload")
@@ -1560,6 +1583,14 @@ int run(const native::Options &opt) {
                         practice_action(actions[pick - 1]);
                         return;
                     }
+                }
+                if (const auto look = look_menu.key(code, down, repeat, preferences); look.handled) {
+                    if (look.patch) {
+                        preferences = native::patch_settings(preferences, *look.patch);
+                        json_writer.write(cache / "settings.json", preferences);
+                        apply_preferences();
+                    }
+                    return;
                 }
                 if (numbered_menus.owns(code, down, room.vote_display.count != 0)) return;
                 if (room.spectator_target && down && !repeat
@@ -1729,7 +1760,9 @@ int run(const native::Options &opt) {
         low_latency.frame_start();
         const uint64_t mouse_pump_start = SDL_GetTicksNS();
         if (input_backend.begin(
-                    prefs.input_backend, captured && focused && !chat.active && !viewer.active && !room.spectator_target
+                    prefs.input_backend,
+                    captured && focused && !chat.active && !menu_cursor.held() && !viewer.active
+                            && !room.spectator_target
             )) {
             SDL_FlushEvent(SDL_EVENT_MOUSE_MOTION);
         }
@@ -1740,7 +1773,8 @@ int run(const native::Options &opt) {
         pump_schedule.frame(mouse_pump_start, true, pump_tick_ns);
         input_timeline.begin_pump(input, mouse_pump_start, pump_schedule, pump_tick_ns);
         mouse_diagnostics.begin(
-                mouse_pump_start, prefs.mouse_diagnostics && captured && focused && !chat.active && !viewer.active
+                mouse_pump_start,
+                prefs.mouse_diagnostics && captured && focused && !chat.active && !menu_cursor.held() && !viewer.active
         );
         bool had_input_activity = false;
         SDL_Event event;
@@ -1874,6 +1908,8 @@ int run(const native::Options &opt) {
                                         race_picker.open(room.display(), zones);
                                         numbered_menus.opened(native::NumberedMenus::Menu::race);
                                         if (!race_picker.count) toast("No other players to race.");
+                                        if (menu_cursor.hold(numbered_menus.chat_menu_open(), captured && focused))
+                                            native::show_menu_cursor(window.get(), true);
                                     } else if (!text.empty() && menu && menu_ready)
                                         menu->evaluate_js(
                                                 "window.bunnyhopNativeMenu?.onChatSubmit?.("
@@ -1950,6 +1986,11 @@ int run(const native::Options &opt) {
                             viewer.controls.pending = viewer.session.range.clamp(target);
                             break;
                         }
+                        if (event.key.scancode == SDL_SCANCODE_ESCAPE && (menu_cursor.held() || look_menu.open())) {
+                            // A menu from chat, and !bright's, close first and the game takes the mouse back.
+                            numbered_menus.close_all();
+                            break;
+                        }
                         if (event.key.scancode == SDL_SCANCODE_ESCAPE) {
                             // Esc pauses, and the guns menu doesn't wait behind the pause (web weapon-commands.ts).
                             gun_menu.close();
@@ -1977,11 +2018,12 @@ int run(const native::Options &opt) {
                     const bool trusted_stamp =
                             native_motion || input_timeline.stamps().source(native::EventStamps::kMotion).trusted;
                     const uint64_t motion_stamp = trusted_stamp ? event.motion.timestamp : received;
-                    if (captured && focused && !chat.active && !viewer.active && !room.spectator_target
+                    const bool pointer_out = chat.active || menu_cursor.held();
+                    if (captured && focused && !pointer_out && !viewer.active && !room.spectator_target
                         && !input_timeline.diverted()) {
                         recorder.diagnostics.motion(motion_stamp, received, event.motion.xrel, event.motion.yrel);
                     }
-                    if (mouse_diagnostics.active && captured && focused && !chat.active) {
+                    if (mouse_diagnostics.active && captured && focused && !pointer_out) {
                         mouse_diagnostics.motion(motion_stamp, received);
                     }
                     if (video.preparing()) {
@@ -2008,7 +2050,14 @@ int run(const native::Options &opt) {
                                     hud.chat_input_byte(event.motion.x * scale, event.motion.y * scale, chat.input))
                             chat.position(*byte, true);
                     }
-                    if (captured && focused && !chat.active) {
+                    if (menu_cursor.held()) {
+                        const auto area = native::window_hud_area(window.get(), renderer.get());
+                        const float density = SDL_GetWindowPixelDensity(window.get());
+                        menu_cursor.point(
+                                native::hud_point(event.motion.x, event.motion.y, area, density, prefs.hud_scale)
+                        );
+                    }
+                    if (captured && focused && !pointer_out) {
                         if (viewer.active && viewer.camera.mode == "free")
                             camera_controls.accumulate(event.motion.xrel, event.motion.yrel);
                         else if (viewer.active && viewer.camera.mode == "chase")
@@ -2079,6 +2128,26 @@ int run(const native::Options &opt) {
                         }
                         break;
                     }
+                    if (menu_cursor.held()) {
+                        // The held menu's rows take the click as their digits; a click away closes the menu.
+                        if (!down || event.button.button != SDL_BUTTON_LEFT) break;
+                        const auto area = native::window_hud_area(window.get(), renderer.get());
+                        const float density = SDL_GetWindowPixelDensity(window.get());
+                        const auto at =
+                                native::hud_point(event.button.x, event.button.y, area, density, prefs.hud_scale);
+                        const auto click = numbered_menus.click(area.width, area.height, prefs.hud_scale, at);
+                        const auto patch = click.brightness ? look_menu.brightness_patch(*click.brightness, preferences)
+                                                            : std::nullopt;
+                        if (click.code)
+                            handle_code(*click.code, true);
+                        else if (patch) {
+                            preferences = native::patch_settings(preferences, *patch);
+                            json_writer.write(cache / "settings.json", preferences);
+                            apply_preferences();
+                        } else if (click.outside)
+                            numbered_menus.close_all();
+                        break;
+                    }
                     if (!captured && down && focused && (!menu || !menu->visible()) && core) {
                         capture(true);
                         break;
@@ -2119,6 +2188,16 @@ int run(const native::Options &opt) {
         }
         mouse_diagnostics.end(SDL_GetTicksNS(), mouse_pump_start);
         frame_diagnostics.mark(native::FrameDiagnostics::kPump, SDL_GetTicksNS());
+        switch (menu_cursor.step(numbered_menus.chat_menu_open(), !focused || (menu && menu->visible()))) {
+            case native::MenuCursor::Step::recapture:
+                if (captured && !chat.active) native::show_menu_cursor(window.get(), false);
+                break;
+            case native::MenuCursor::Step::close_menus:
+                numbered_menus.close_all();
+                break;
+            case native::MenuCursor::Step::keep:
+                break;
+        }
         if (auto layout = hud_editor.take_patch()) {
             try {
                 preferences = native::patch_settings(preferences, *layout, false);
@@ -2318,14 +2397,24 @@ int run(const native::Options &opt) {
                             preferences = native::patch_settings(preferences, native::ssj_chat_patch(message));
                             json_writer.write(cache / "settings.json", preferences);
                             apply_preferences();
-                        } else if (action == "raceMenu") {
-                            race_picker.open(room.display(), zones);
-                            numbered_menus.opened(native::NumberedMenus::Menu::race);
+                        } else if (action == "raceMenu" || action == "spectateMenu" || action == "lookMenu") {
+                            // Opened from chat: the cursor stays out for the menu's rows (menu_cursor.hpp).
+                            if (action == "raceMenu") {
+                                race_picker.open(room.display(), zones);
+                                numbered_menus.opened(native::NumberedMenus::Menu::race);
+                                if (!race_picker.count) toast("No other players to race.");
+                            } else if (action == "lookMenu" && !viewer.active) {
+                                look_menu.toggle(map_id, preferences);
+                                numbered_menus.opened(native::NumberedMenus::Menu::look);
+                            } else if (action == "spectateMenu" && !free_cameras.picker.open())
+                                act("spectatorMode");
+                            if (menu_cursor.hold(
+                                        numbered_menus.chat_menu_open(), captured && focused && !viewer.active
+                                ))
+                                native::show_menu_cursor(window.get(), true);
                         } else if (action == "freecam")
                             act("freecam");
-                        else if (action == "spectateMenu") {
-                            if (!free_cameras.picker.open()) act("spectatorMode");
-                        } else if (action == "lastLj")
+                        else if (action == "lastLj")
                             hud.repeat_long_jump(chat, epoch_ms() / 1000.);
                         else if (action == "jumpStats") {
                             show_menu(true);
@@ -3263,6 +3352,7 @@ int run(const native::Options &opt) {
                 break;
             }
             renderer->simulation_tick();
+            eye_camera.tick(curr.grounded != 0, curr.velocity[2]);
             // Infinite's flight ticks feed no jump stats, SSJ, sync or announcer, as practice noclip.
             const bool flight_tick = (curr.events & native::event_flight) != 0;
             if (flight_tick)
@@ -3294,7 +3384,7 @@ int run(const native::Options &opt) {
             if (viewer.active) {
                 BhReplayEvents e{};
                 if (bh_replay_events(core.get(), prev.tick, curr.tick, &e)) {
-                    if (e.inspect_signal) renderer->inspect_press();
+                    if (e.inspect_signal) renderer->remote_inspect_press();
                     renderer->inspect_held(e.inspect_held != 0);
                 }
             }
@@ -3613,6 +3703,7 @@ int run(const native::Options &opt) {
             renderer->set_viewmodel_weapon(std::nullopt);
             renderer->set_viewmodel_visible(prefs.viewmodel && !opt.camera && (!viewer.active || viewer.weapon_eye));
             renderer->set_source_look(prefs.source_look);
+            renderer->set_reduced_motion(menu_reduced_motion);
             if (spectator) {
                 spectated_actor = room.spectated(steady_seconds);
                 const auto &target = spectated_actor;
@@ -3688,6 +3779,15 @@ int run(const native::Options &opt) {
             // The replay camera does this itself for its in-eye view; flying in noclip there is nothing to stay under.
             if (!viewer.active && !external_camera && (spectator || !practice.noclip))
                 eye[2] = native::clear_eye_z(core.get(), eye[0], eye[1], eye_hull_top, eye[2]);
+            // Only ever down from the eye, so it can't lift the camera into a ceiling.
+            const bool own_eyes = !viewer.active && !external_camera && !spectator && !opt.camera;
+            if (own_eyes) {
+                const bool flying = practice.noclip || practice.infinite_flight.on();
+                const double motion = native::motion_scale(menu_reduced_motion);
+                eye_camera.frame(frame_seconds, std::hypot(curr.velocity[0], curr.velocity[1]), flying, motion);
+                eye[2] += float(eye_camera.height());
+            } else
+                eye_camera.skip_frame();
             if (spectator) room.spectator_run(display_run, display_style, *spectator, steady_seconds, epoch_ms());
             if (hide_players) actors.clear();
             native::PrimaryGhost primary_ghost;
@@ -3713,12 +3813,25 @@ int run(const native::Options &opt) {
                 renderer->set_viewmodel_visible(false);
                 BhWeaponReport held{};
                 bh_weapon_report(core.get(), &held);
-                auto self = native_render::own_actor(state, input.pitch, input.yaw(), held.active);
+                // A replay's bunny poses on each tick's own state and blends between ticks (actor_ticks.hpp).
+                auto self = native_render::own_actor(
+                        viewer.active ? native_render::at_tick(state, curr) : state,
+                        input.pitch,
+                        input.yaw(),
+                        held.active
+                );
+                if (viewer.active) self.tickBlend = blend;
+                BhCmd last_command{};
+                if (bh_last_command(core.get(), &last_command)) self.sidemove = last_command.side;
                 self.outfit = viewer.active ? viewer.runner_outfit : outfit;
                 self.loadout = viewer.active ? viewer.runner_loadout : held_knife.loadout();
                 self.emptyHand = viewer.active && !viewer.weapon_third;
                 self.playerGlow = player_glow;
                 third_person_events.apply(self);
+                if (viewer.active && !viewer.preroll.empty()) {
+                    renderer->preroll_actor(self, viewer.preroll, step_dt);
+                    self.snapped = false;
+                }
                 if (spectator) {
                     if (const auto target = room.spectated(steady_seconds)) {
                         self = *target;
@@ -3727,6 +3840,7 @@ int run(const native::Options &opt) {
                 }
                 actors.push_back(self);
             }
+            viewer.preroll.clear();
             if (opt.camera) {
                 for (int k = 0; k < 3; k++)
                     eye[k] = (*opt.camera)[k];
@@ -3736,7 +3850,8 @@ int run(const native::Options &opt) {
             if (local_scope && simulation_active) scope.frame(frame_seconds);
             renderer->use_runner_view(viewer.active ? viewer.runner_view : std::nullopt);
             const float view_fov = viewer.active && viewer.runner_view ? float(viewer.runner_view->fov) : prefs.fov;
-            renderer->set_camera_fov(local_scope ? scope.fov(prefs.fov) : view_fov);
+            const float own_fov = prefs.fov + float(eye_camera.fov());
+            renderer->set_camera_fov(local_scope ? scope.fov(own_fov) : view_fov);
             if (local_scope && scope.scoped()) renderer->set_viewmodel_visible(false);
             const bool world_record_finish =
                     !viewer.active && !spectator && !practice.active && !turn_admission.local_only
@@ -3768,6 +3883,7 @@ int run(const native::Options &opt) {
                     curr, input, simulation_active && captured && !viewer.active && !spectator, spectator.has_value()
             );
             renderer->set_room_actors(actors);
+            renderer->set_world_time(native::world_visual_seconds(prev.tick, curr.tick, blend, step_dt, viewer.active));
             renderer->draw(
                     width,
                     height,
@@ -3844,7 +3960,7 @@ int run(const native::Options &opt) {
             hud.extras.flight_line.assign(
                     practice.infinite_flight.flying() ? native::InfiniteFlight::hud_line : std::string_view()
             );
-            const auto spectator_bar = free_cameras.hud(
+            auto spectator_bar = free_cameras.hud(
                     hud.extras,
                     spectator.has_value(),
                     spectated_actor.has_value(),
@@ -3853,6 +3969,8 @@ int run(const native::Options &opt) {
                                     : std::string_view(),
                     input_timeline.binds()
             );
+            if (spectator) spectator_bar.look = native::watched_name_look(room.appearance(*spectator), *spectator);
+            spectator_bar.seconds = steady_seconds;
             // The crosshair is sized in CSS pixels, like the website's: the display's scale, not the HUD's.
             hud.set_display_scale(SDL_GetWindowDisplayScale(window.get()));
             const auto area = viewer.hud_area(
@@ -3903,7 +4021,9 @@ int run(const native::Options &opt) {
                     hud_editor_bind.empty() ? std::string() : native::hud_key_label(hud_editor_bind.front()),
                     free_cameras.picker,
                     spectator_bar,
-                    free_cameras.flying(spectator.has_value())
+                    free_cameras.flying(spectator.has_value()),
+                    &look_menu,
+                    menu_cursor.pointer()
             }
                     .draw();
         }
@@ -3989,12 +4109,35 @@ int run(const native::Options &opt) {
         display_tryout.draw(hud, width, height, SDL_GetTicksNS());
         const GLenum gl_error = gl.GetError();
         if (gl_error != GL_NO_ERROR) throw std::runtime_error("OpenGL error " + std::to_string(gl_error));
-        frame_diagnostics.mark(native::FrameDiagnostics::kRender, SDL_GetTicksNS());
+        const uint64_t swap_start_ns = SDL_GetTicksNS();
+        frame_diagnostics.mark(native::FrameDiagnostics::kRender, swap_start_ns);
+        bool swapped = true;
         if (low_latency.active())
             low_latency.present(prefs.vsync);
-        else if (!SDL_GL_SwapWindow(window.get()))
+        else
+            swapped = SDL_GL_SwapWindow(window.get());
+        const uint64_t swap_end_ns = SDL_GetTicksNS();
+        // Right after a display mode switch a failed swap means the mode doesn't show: windowed instead (below).
+        if (!swapped && !display_guard.checking())
             throw std::runtime_error(std::string("Swapping framebuffer failed: ") + SDL_GetError());
-        frame_diagnostics.mark(native::FrameDiagnostics::kSwap, SDL_GetTicksNS());
+        frame_diagnostics.mark(native::FrameDiagnostics::kSwap, swap_end_ns);
+        window_controller.settle(swap_end_ns);
+        const bool window_visible = focused && native::window_can_show(window.get());
+        switch (display_guard.after_swap(
+                preferences, swap_end_ns, swap_end_ns - swap_start_ns, window_visible, swapped, display_tryout.active()
+        )) {
+            case native::DisplayOutcome::windowed:
+                json_writer.write(cache / "settings.json", preferences);
+                apply_preferences();
+                menu_state.settings_changed();
+                toast(display_guard.notice(), display_notice_ms);
+                break;
+            case native::DisplayOutcome::revert_trial:
+                display_tryout.revert();
+                break;
+            case native::DisplayOutcome::none:
+                break;
+        }
         frame_pacer.after_swap(gl, prefs.limit_queued_frames && !opt.frames);
         frame_diagnostics.mark(native::FrameDiagnostics::kGpuWait, SDL_GetTicksNS());
         sky_library.frame(menu && menu->visible());
@@ -4173,6 +4316,7 @@ int run(const native::Options &opt) {
                 const std::string diagnostics_event =
                         "new CustomEvent('bunnyhop:mouse-diagnostics',{detail:" + diagnostics_state.dump() + "})";
                 menu->evaluate_js("window.dispatchEvent(" + diagnostics_event + ")");
+                if (automatic_updates) updater.poll_schedule(SDL_GetTicksNS());
                 if (const auto update_script = updater.state_script()) menu->evaluate_js(*update_script);
                 {  // Settings -> Game data
                     std::optional<std::string> picked;

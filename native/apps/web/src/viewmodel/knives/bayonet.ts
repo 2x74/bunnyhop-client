@@ -274,8 +274,8 @@ export function attackFlavour(action: VmAction, t: number, s: KnifeState, k: { r
 
 /** Tiny idle sway (a slow figure-eight of the wrist): wall-clock driven so the idle's restarts never pop it. */
 export function idleSway(s: KnifeState, amp: number): void {
-  const perf = (globalThis as { performance?: { now(): number } }).performance;
-  const now = ((perf?.now() ?? 0) / 1000) % 3600;
+  // The viewmodel's clock (KnifeState.time), not the wall clock: replays and exports repeat exactly.
+  const now = s.time % 3600;
   const a = amp * (reducedMotion() ? 0.4 : 1);
   s.wrist[0] += a * Math.sin(now * 1.3);
   s.wrist[1] += a * 0.6 * Math.sin(now * 0.65 + 0.8);

@@ -1,4 +1,4 @@
-// The website's /credits page, verbatim from upstream apps/web/credits.html at 042dca41. Refresh it with the vendored
+// The website's /credits page, verbatim from upstream apps/web/credits.html at 4816744a. Refresh it with the vendored
 // web sources; credits.ts renders it.
 export const CREDITS_PAGE = `<!doctype html>
 <html lang="en">
@@ -71,7 +71,7 @@ export const CREDITS_PAGE = `<!doctype html>
     </section>
     <section aria-labelledby="zones">
       <h2 id="zones">Zones and tiers</h2>
-      <p><a href="https://github.com/srcwr/zones-cstrike">srcwr/zones-cstrike</a> supplies standardized bhoptimer zones and community tiers: the cutehops dump courtesy of may/lilac, with the sourcejump dump courtesy of Eric merged on top.</p>
+      <p><a href="https://github.com/srcwr/zones-cstrike">srcwr/zones-cstrike</a> supplies standardized bhoptimer zones and community tiers: the cutehops dump courtesy of may/lilac, with the sourcejump dump courtesy of Eric merged on top. Zones for more maps come from ddyfad’s fork, <a href="https://github.com/ddyfad/zones-cstrike">ddyfad/zones-cstrike</a>, which adds community server zone dumps. Neither repository has a licence file, so both are used with attribution.</p>
       <p>Additional zones come from Prestige Gaming’s GMod bhop database, released by Gravious in <a href="https://github.com/GMSpeedruns/Flow-Release">GMSpeedruns/Flow-Release</a>. Thank you to these communities for preserving the timing data.</p>
     </section>
     <section aria-labelledby="code">
@@ -102,6 +102,18 @@ export const CREDITS_PAGE = `<!doctype html>
         <li><a href="https://fonts.google.com/specimen/VT323">VT323</a> — the VT323 Project Authors; <a href="/custom-css/themes/dex-vt323-OFL.txt">notice</a>.</li>
         <li><a href="https://fonts.google.com/specimen/Press+Start+2P">Press Start 2P</a> — the Press Start 2P Project Authors; <a href="/custom-css/press-start-2p-OFL.txt">notice</a>.</li>
         <li><a href="https://github.com/theleagueof/league-gothic">League Gothic</a> and <a href="https://github.com/JetBrains/JetBrainsMono">JetBrains Mono Bold</a> — the League Gothic and JetBrains Mono Project Authors; used in the Hermes map’s baked lettering.</li>
+        <li><a href="https://github.com/floriankarsten/space-grotesk">Space Grotesk</a> — the Space Grotesk Project Authors; a supporter name font; <a href="/name-fonts/SpaceGrotesk-OFL.txt">notice</a>.</li>
+        <li><a href="https://github.com/hafontia/Fredoka-One">Fredoka</a> — the Fredoka Project Authors; a supporter name font; <a href="/name-fonts/Fredoka-OFL.txt">notice</a>.</li>
+        <li><a href="https://github.com/eifetx/Pixelify-Sans">Pixelify Sans</a> — the Pixelify Sans Project Authors; a supporter name font; <a href="/name-fonts/PixelifySans-OFL.txt">notice</a>.</li>
+        <li><a href="https://github.com/JetBrains/JetBrainsMono">JetBrains Mono</a> — the JetBrains Mono Project Authors; a supporter name font; <a href="/name-fonts/JetBrainsMono-OFL.txt">notice</a>.</li>
+        <li><a href="https://github.com/clauseggers/Playfair-Display">Playfair Display</a> — the Playfair Project Authors; a supporter name font; <a href="/name-fonts/PlayfairDisplay-OFL.txt">notice</a>.</li>
+        <li><a href="https://github.com/theleagueof/orbitron">Orbitron</a> — the Orbitron Project Authors; a supporter name font; <a href="/name-fonts/Orbitron-OFL.txt">notice</a>.</li>
+        <li><a href="https://fonts.google.com/specimen/Russo+One">Russo One</a> — Jovanny Lemonad; a supporter name font; <a href="/name-fonts/RussoOne-OFL.txt">notice</a>.</li>
+        <li><a href="https://github.com/googlefonts/Pacifico">Pacifico</a> — the Pacifico Project Authors; a supporter name font; <a href="/name-fonts/Pacifico-OFL.txt">notice</a>.</li>
+      </ul>
+      <p>The supporter name fonts above are pinned to one weight, cut down to the letters names use and renamed (bh-name-…), as the licence asks of modified versions. One more is licensed under the <a href="https://www.apache.org/licenses/LICENSE-2.0">Apache License 2.0</a>:</p>
+      <ul>
+        <li><a href="https://fonts.google.com/specimen/Permanent+Marker">Permanent Marker</a> — Font Diner; a supporter name font; <a href="/name-fonts/PermanentMarker-LICENSE.txt">licence</a>.</li>
       </ul>
     </section>
     <section aria-labelledby="art">

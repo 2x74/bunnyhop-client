@@ -120,7 +120,7 @@ function bounds(pts: P2[]): { x0: number; x1: number; z0: number; z1: number } {
  * A side profile (x, z; star-shaped from its centroid, corners already rounded or rounded here with `round`) extruded
  * across y from y0 to y1, its edges bevelled by `bevel`. Returns nothing; emits through k.
  */
-export function slab(k: KnifeCtx, prof: P2[], y0: number, y1: number, o: ShapeOpts & { bevel?: number; round?: number; seg?: number; edge?: boolean; dense?: boolean }): void {
+export function slab(k: KnifeCtx, prof: P2[], y0: number, y1: number, o: ShapeOpts & { bevel?: number; round?: number | number[]; seg?: number; edge?: boolean; dense?: boolean }): void {
   const rounded = o.round === 0 ? prof : roundPoly(prof, o.round ?? 0.1, k.view === "fp" ? (o.seg ?? 2) : 1);
   // First person: no straight edge of a grip longer than ~0.35 units (0.6 on other big parts), so the grip solver and
   // the audits (which test fingers against the mesh's vertices) see every face a finger can rest on. Third person keeps

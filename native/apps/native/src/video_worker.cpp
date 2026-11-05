@@ -168,8 +168,10 @@ Json export_hud_settings(Json settings, const VideoOptions &options) {
     return settings;
 }
 
-// The export's look over the player's graphics settings: Plain is the website's "classic" preset.
+// The export's look over the player's graphics settings: Plain is the website's "classic" preset. A map's own
+// Brightness and Fullbright stay out of videos, as on the website.
 Json export_graphics_settings(Json settings, const VideoOptions &options) {
+    settings.erase(std::string(map_looks_key));
     if (options.look == "settings") return settings;
     settings["graphicsPreset"] = options.look == "plain" ? "classic" : options.look;
     settings["sourceLook"] = options.look != "plain";
@@ -192,9 +194,6 @@ void configure_renderer(Renderer &renderer, const Json &player_settings, const V
             settings.at("viewmodelSway").get<float>()
     );
     renderer.set_color_blind(settings.value("colorBlind", std::string("off")));
-    renderer.set_actor_models(
-            settings.value("playerModel", std::string("bunny")), settings.value("ghostModel", std::string("same"))
-    );
     renderer.set_zones_visible(settings.value("zonesVisible", true));
     renderer.set_effects_visible(settings.value("effectsVisible", true));
     renderer.set_water_quality(settings.value("waterQuality", std::string("simple")) == "refracted" ? 1 : 0);

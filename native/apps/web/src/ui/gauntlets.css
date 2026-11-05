@@ -101,3 +101,9 @@
 .gx-split-wrap { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sp-4); }
 .gx-buttons .gx-watch { align-self: center; margin-left: var(--sp-2); }
 .pfg-table td.pfg-watch { width: 1%; padding-left: 0.4rem; }
+/* Phones: the list keeps Gauntlet, Fastest and Record (Maps, Finishers, Your best and the chevron ran the table off
+   the screen; the gauntlet's own page has them, and the row is the link). Long titles wrap. */
+@media (max-width: 40rem) {
+  .gx-list th:nth-child(2), .gx-list td:nth-child(2), .gx-list th:nth-child(3), .gx-list td:nth-child(3), .gx-list th:nth-child(6), .gx-list td:nth-child(6), .gx-list th.gx-go, .gx-list td.gx-go { display: none; }
+  .gx-list td.gx-title { white-space: normal; }
+}

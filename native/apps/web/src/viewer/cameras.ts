@@ -4,6 +4,9 @@
 //   chase  OBS_MODE_CHASE / `thirdperson`: behind and above the player's eye, following their view yaw (smoothed),
 //          optional mouse orbit locked to the player. CS:S baseline: CHASE_CAM_DISTANCE 96 units, the hull trace
 //          (WALL_OFFSET 6) pulls the camera in when blocked and it eases back out (C_BasePlayer::CalcChaseCamView).
+//          v0.0.38: the way out waits CHASE_HOLD before easing (a wall flickering in and out of the trace doesn't pump
+//          the camera), and when a wall pushes it in close (a corridor) it cranes straight up (as far as the space above
+//          allows) and looks a little past the player (CHASE_CRANE), so the body doesn't fill the frame; both eased.
 //   free   OBS_MODE_ROAMING: noclip fly on the player's movement binds + mouse, Shift faster, Alt slower, wheel speed
 //          (FreeCam; the live freecam, freecam.ts, and room free look use it too).
 //   flyby  "free path": a deterministic drone that trails the run beside and above the player, looking at them.
@@ -163,6 +166,40 @@ export class EyeSmoother {
   }
 }
 
+/** The chase cam waits this long (s) once the way back out clears before easing out (collision hysteresis). */
+export const CHASE_HOLD = 0.15;
+/** Cramped (pushed in to a fraction of its distance): it rises up to `rise` units and looks `ahead` units past. */
+export const CHASE_CRANE = { rise: 34, ahead: 26, up: 6 };
+/**
+ * The subject has to stay readable: a chase cam that ends up within `in` units of the body's axis (a corridor, a
+ * pipe, a low ceiling: all head or all torso) cuts to the player's eyes, and back once it has held more than `out` for
+ * `hold` seconds. The body fades out over CHASE_NEAR_FADE as the camera nears it, so the last frames before the cut
+ * show through it rather than fill the view.
+ */
+export const CHASE_EYE = { in: 24, out: 40, hold: 0.5 };
+/** The third-person bunny's near fade (PlayerModel.setNearFade: gone within the first, whole past the second, units). */
+export const CHASE_NEAR_FADE: readonly [number, number] = [20, 50];
+/** The body's axis the near fade measures from (above the feet origin, units: player/bunny/model.ts uAxisA / uAxisB). */
+const AXIS_LO = 8, AXIS_HI = 60;
+
+/** The camera's distance from the body's axis (the near fade's measure), Source space. */
+export function axisDistance(cam: ArrayLike<number>, pos: ArrayLike<number>): number {
+  const z = clamp(cam[2], pos[2] + AXIS_LO, pos[2] + AXIS_HI);
+  return Math.hypot(cam[0] - pos[0], cam[1] - pos[1], cam[2] - z);
+}
+
+/**
+ * A collision-limited distance: in at once to `target`, out (eased) only after `target` has allowed more for CHASE_HOLD.
+ * Returns [distance, hold].
+ */
+function hysteresis(dist: number, hold: number, target: number, snap: boolean, dt: number): [number, number] {
+  if (snap || Number.isNaN(dist) || target < dist) return [target, 0];
+  // The hold counts only while the way out is actually clearer than where the camera is.
+  if (target < dist + 0.5) return [dist, 0];
+  hold += dt;
+  return hold < CHASE_HOLD ? [dist, hold] : [dist + (target - dist) * damp(3.5, dt), hold];
+}
+
 /** OBS_MODE_CHASE: behind the player's view yaw, slightly above, collision-aware. */
 export class ChaseCam {
   orbitYaw = 0;
@@ -171,8 +208,19 @@ export class ChaseCam {
   private yaw = NaN;
   private pitchS = NaN;
   private dist = NaN;
+  /** Seconds the trace has allowed a longer distance (CHASE_HOLD), and the eased crane (0..1) with its own distance. */
+  private hold = 0;
+  private crane = 0;
+  /** Clearance above the pulled-in camera (eased like a distance: down at once, up after the hold). */
+  private craneRise = NaN;
+  private craneHold = 0;
   private height = NaN;
   private z = NaN;
+  /** In the eyes for want of room (CHASE_EYE), and how long the chase position has been clear of the body. */
+  private eyed = false;
+  private eyeHold = 0;
+  /** Debug / tests: this frame's chase position's distance from the body's axis. */
+  separation = Infinity;
   private o: Required<ChaseOptions>;
   private pivot = [0, 0, 0];
   private want = [0, 0, 0];
@@ -201,7 +249,11 @@ export class ChaseCam {
     this.zoom = clamp(this.zoom * f, 0.4, 5);
   }
 
-  update(camera: THREE.PerspectiveCamera, s: SpectatorTarget, dt: number, trace: TraceFn | null, eyeErr = 0): void {
+  /**
+   * Places the camera behind the target. Returns false when there's no room to show the subject (CHASE_EYE): the
+   * caller puts the camera in the target's eyes instead (SpectatorCamera does) and doesn't draw the model.
+   */
+  update(camera: THREE.PerspectiveCamera, s: SpectatorTarget, dt: number, trace: TraceFn | null, eyeErr = 0): boolean {
     const o = this.o;
     const snap = Number.isNaN(this.yaw);
     const eye = s.viewZ - o.eyeDrop + eyeErr;
@@ -233,12 +285,47 @@ export class ChaseCam {
     // CS:S: a WALL_OFFSET hull trace pulls the camera in instantly; it eases back out when the way clears.
     const frac = trace ? trace(p, w, 6) : 1;
     const target = Math.max(4, ideal * frac - 2);
-    if (snap || Number.isNaN(this.dist) || target < this.dist) this.dist = target;
-    else this.dist += (target - this.dist) * damp(3, dt);
+    // In at once (never through the wall); out only after the way has stayed clear for CHASE_HOLD.
+    [this.dist, this.hold] = hysteresis(this.dist, this.hold, target, snap, dt);
     const k = this.dist / ideal;
     for (let i = 0; i < 3; i++) this.position[i] = p[i] + (w[i] - p[i]) * k;
+    // Cramped: crane up over the shoulder and look past the player (eased; its own trace and distance).
+    const cramped = clamp((0.72 - k) / 0.45, 0, 1);
+    const want = cramped * cramped * (3 - 2 * cramped);
+    this.crane = snap ? want : this.crane + (want - this.crane) * damp(want > this.crane ? 7 : 2.2, dt);
+    if (this.crane > 0.002) {
+      const c = this.crane, cy = Math.cos(yaw), sy = Math.sin(yaw);
+      // Straight up from where the collision put the camera, as far as the space above allows.
+      const top = this.look;
+      (top[0] = this.position[0]), (top[1] = this.position[1]), (top[2] = this.position[2] + CHASE_CRANE.rise);
+      const rise = trace ? Math.max(0, CHASE_CRANE.rise * trace(this.position, top, 6) - 3) : CHASE_CRANE.rise;
+      [this.craneRise, this.craneHold] = hysteresis(this.craneRise, this.craneHold, rise, snap || Number.isNaN(this.craneRise), dt);
+      this.position[2] += this.craneRise * c;
+      // Looking a little past the player and down at them.
+      top[0] = p[0] + cy * CHASE_CRANE.ahead * c;
+      top[1] = p[1] + sy * CHASE_CRANE.ahead * c;
+      top[2] = p[2] + CHASE_CRANE.up * c;
+      lookFrom(camera, this.position, top);
+      return this.room(s, snap, dt);
+    }
+    this.craneRise = NaN;
     lookFrom(camera, this.position, p);
+    return this.room(s, snap, dt);
   }
+
+  /** CHASE_EYE: whether this frame's position leaves room to show the subject (in at once, out after the hold). */
+  private room(s: SpectatorTarget, snap: boolean, dt: number): boolean {
+    const sep = (this.separation = axisDistance(this.position, s.pos));
+    if (snap) (this.eyed = sep < CHASE_EYE.in), (this.eyeHold = 0);
+    else if (!this.eyed) {
+      if (sep < CHASE_EYE.in) (this.eyed = true), (this.eyeHold = 0);
+    } else {
+      this.eyeHold = sep > CHASE_EYE.out ? this.eyeHold + dt : 0;
+      if (this.eyeHold >= CHASE_EYE.hold) this.eyed = false;
+    }
+    return !this.eyed;
+  }
+  private look = [0, 0, 0];
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -520,14 +607,16 @@ export class SpectatorCamera {
   /** Places the camera for this frame's target state. Returns true if the target's model should be drawn. */
   update(camera: THREE.PerspectiveCamera, s: SpectatorTarget, dt: number, mode: SpectatorMode = this.mode): boolean {
     const err = this.eyeSmooth.update(s, dt);
+    const eyes = () => {
+      const e = eyeOf(s, this.eyeTmp);
+      e[2] += err;
+      if (this.trace) e[2] = clearEyeZ(this.trace, e[0], e[1], s.pos[2] + hullTop(s.crouched), e[2]);
+      setEye(camera, e, s.yaw, s.pitch);
+      return false;
+    };
     switch (mode) {
-      case "eye": {
-        const e = eyeOf(s, this.eyeTmp);
-        e[2] += err;
-        if (this.trace) e[2] = clearEyeZ(this.trace, e[0], e[1], s.pos[2] + hullTop(s.crouched), e[2]);
-        setEye(camera, e, s.yaw, s.pitch);
-        return false;
-      }
+      case "eye":
+        return eyes();
       case "free":
         this.free.update(camera, dt);
         return true;
@@ -535,8 +624,8 @@ export class SpectatorCamera {
         this.flyby.update(camera, s, dt, this.trace);
         return true;
       default:
-        this.chase.update(camera, s, dt, this.trace, err);
-        return true;
+        // No room behind them for the subject to read (ChaseCam CHASE_EYE): their eyes until there is.
+        return this.chase.update(camera, s, dt, this.trace, err) ? true : eyes();
     }
   }
 }
@@ -574,7 +663,14 @@ export class CameraRig {
   snap(): void {
     this.spec.snap();
     this.shotIdx = -1;
+    this.prerollNext = true;
   }
+  /**
+   * After a snap (a seek, an export's first frame, a jump in the timeline), the next update pre-rolls a smoothed camera
+   * (chase, flyby) over the PREROLL seconds of the run before it, so it arrives settled where continuous playback would
+   * have it, instead of snapping to the player's view and easing from there. Deterministic: run data only.
+   */
+  private prerollNext = false;
 
   startFree(camera: THREE.PerspectiveCamera): void {
     this.spec.startFree(camera);
@@ -602,8 +698,12 @@ export class CameraRig {
   }
 
   private place(camera: THREE.PerspectiveCamera, d: RunData, t: number, dt: number, trace: TraceFn | null): boolean {
-    const s = (this.tmp = sampleAt(d, t, this.tmp));
     this.spec.trace = trace;
+    if (this.prerollNext) {
+      this.prerollNext = false;
+      if (this.mode === "chase" || this.mode === "flyby") this.preroll(camera, d, t, this.mode);
+    }
+    const s = (this.tmp = sampleAt(d, t, this.tmp));
     if (this.mode !== "auto") return this.spec.update(camera, s, dt, this.mode);
     const i = this.findShot(t);
     if (i !== this.shotIdx) {
@@ -625,4 +725,20 @@ export class CameraRig {
     }
     return this.spec.update(camera, s, dt, shot?.kind === "eye" ? "eye" : shot?.kind === "flyby" ? "flyby" : "chase");
   }
+
+  /** Runs the smoothed camera over [t - PREROLL, t) at 60 Hz (stopping at a teleport: the camera snaps across those). */
+  private preroll(camera: THREE.PerspectiveCamera, d: RunData, t: number, mode: SpectatorMode): void {
+    const step = d.tickrate / 60;
+    let from = Math.max(0, t - PREROLL * d.tickrate);
+    for (let k = Math.floor(t); k > from; k--) if (d.flags[k] & F_TELEPORTED) (from = k), (k = 0);
+    if (t - from < step) return;
+    let s: ViewSample | undefined;
+    for (let u = from, first = true; u < t - 1e-6; u += step, first = false) {
+      s = sampleAt(d, u, s);
+      this.spec.update(camera, s, first ? 0 : step / d.tickrate, mode);
+    }
+  }
 }
+
+/** Seconds of run the smoothed cameras pre-roll after a snap (CameraRig.snap). */
+export const PREROLL = 0.6;

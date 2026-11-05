@@ -1293,6 +1293,8 @@ mod tests {
                 .bytes,
             b"psegment-data"
         );
+        // verify_self is behind the signature-verification feature (bunnyhop patch: off by default).
+        #[cfg(feature = "signature-verification")]
         assert_eq!(
             archive.verify_self(),
             SelfIntegrity {

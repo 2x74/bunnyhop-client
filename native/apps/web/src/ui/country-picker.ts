@@ -1,20 +1,21 @@
 import {profileWriteGuard} from "./profile-write";
 import { api,lastKnownMe } from "../api";
-import { COUNTRIES, countryCode } from "../countries";
+import { COUNTRIES, countryCode, flagName, PRIDE_FLAGS } from "../countries";
 import { countryFlag } from "./country-flag";
 import { arrowNav, h } from "./dom";
 import { dismissOutside } from "./dismiss";
 
-/** Detection is a shortcut only; nothing is published until Save. */
+/** Detection is a shortcut only; nothing is published until Save. A pride flag is picked instead of a country. */
 export function countryPicker(current: string | null | undefined, saved: (code: string | null) => void): void {
   const writes=profileWriteGuard(lastKnownMe()?.id??"");
   let selected = countryCode(current);
   let busy = false;
   const countries = Object.entries(COUNTRIES).sort((a, b) => a[1].localeCompare(b[1]));
+  const pride = Object.entries(PRIDE_FLAGS);
   const dialog = h("dialog.acct-dialog.country-dialog", { "aria-labelledby": "country-title" });
   const close = () => { if (!busy) dialog.close(); };
-  const search = h<"input">("input.nf-input.country-search#profile-country-search", { type: "search", placeholder: "Search countries and regions…", "aria-label": "Search flags", autocomplete: "off" });
-  const grid = h("div.country-grid", { role: "group", "aria-label": "Country and region flags" });
+  const search = h<"input">("input.nf-input.country-search#profile-country-search", { type: "search", placeholder: "Search countries, regions and pride flags…", "aria-label": "Search flags", autocomplete: "off" });
+  const grid = h("div.country-grid", { role: "group", "aria-label": "Pride, country and region flags" });
   const preview = h("div.country-selected", { "aria-live": "polite" });
   const status = h("p.dim.country-status", { role: "status" });
   const suggestion = h("div.country-suggestion");
@@ -22,7 +23,7 @@ export function countryPicker(current: string | null | undefined, saved: (code: 
   const none = h("button.btn.country-none", { type: "button", onclick: () => choose(null) }, "No flag");
   const controls = h("fieldset.country-controls");
   const mark = () => {
-    preview.replaceChildren(countryFlag(selected) ?? h("span.country-empty", { "aria-hidden": "true" }, "∅"), h("span", null, selected ? COUNTRIES[selected] : "No flag"));
+    preview.replaceChildren(countryFlag(selected) ?? h("span.country-empty", { "aria-hidden": "true" }, "∅"), h("span", null, selected ? flagName(selected) : "No flag"));
     none.setAttribute("aria-pressed", String(selected === null));
     for (const b of grid.querySelectorAll<HTMLButtonElement>("button")) b.setAttribute("aria-pressed", String(b.dataset.country === selected));
   };
@@ -33,15 +34,21 @@ export function countryPicker(current: string | null | undefined, saved: (code: 
     mark();
   }
   const normalize = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const option = ([code, name]: [string, string]) => {
+    const button = h("button.country-option", { type: "button", "aria-pressed": String(code === selected), onclick: () => choose(code) }, countryFlag(code), h("span.country-name", null, name), h("span.country-check", { "aria-hidden": "true" }, "✓"));
+    button.dataset.country = code;
+    return button;
+  };
   const draw = () => {
     const query = normalize(search.value.trim());
+    const prideMatches = pride.filter(([, name]) => normalize(`${name} pride lgbt lgbtq queer`).includes(query));
     const matches = countries.filter(([code, name]) => normalize(`${name} ${code} ${code.startsWith("GB") ? "UK United Kingdom Britain" : ""}`).includes(query));
-    grid.replaceChildren(...matches.map(([code, name]) => {
-      const button = h("button.country-option", { type: "button", "aria-pressed": String(code === selected), onclick: () => choose(code) }, countryFlag(code), h("span.country-name", null, name), h("span.country-check", { "aria-hidden": "true" }, "✓"));
-      button.dataset.country = code;
-      return button;
-    }));
-    if (!matches.length) grid.append(h("p.country-no-results.dim", null, "No flags found. Try another name or country code."));
+    grid.replaceChildren(
+      ...(prideMatches.length ? [h("p.country-group.dim", null, "Pride flags"), ...prideMatches.map(option)] : []),
+      ...(matches.length && prideMatches.length ? [h("p.country-group.dim", null, "Countries and regions")] : []),
+      ...matches.map(option),
+    );
+    if (!matches.length && !prideMatches.length) grid.append(h("p.country-no-results.dim", null, "No flags found. Try another name or country code."));
     grid.scrollTop = 0;
   };
   search.addEventListener("input", draw);
@@ -68,7 +75,7 @@ export function countryPicker(current: string | null | undefined, saved: (code: 
       busy = false;
       controls.disabled = save.disabled = false;
     }
-  } }, h("p.dim.country-intro", null, "Shown before your name on leaderboards, your player card and the server scoreboard. Pick any flag, or leave it off."), controls, status,
+  } }, h("p.dim.country-intro", null, "Shown before your name on leaderboards, your player card and the server scoreboard. Pick a country or a pride flag, or leave it off."), controls, status,
   h("div.country-footer", null, preview, h("div.country-actions", null, h("button.btn", { type: "button", onclick: close }, "Cancel"), save)));
   dialog.append(h("header.acct-head", null, h("h2#country-title", null, "Profile flag"), h("button.acct-close", { type: "button", "aria-label": "Close", onclick: close }, "×")), form);
   dialog.addEventListener("close", () => dialog.remove());

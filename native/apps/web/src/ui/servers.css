@@ -29,3 +29,5 @@
 .srv-foot { margin-top: 1.6rem; padding: 0 0.6rem; justify-content: flex-start; }
 .srv-solo { padding-left: 0; color: var(--cream-2); }
 @media (prefers-reduced-motion: reduce) { .srv-table tbody.fresh .srv-bar i { animation: none; } }
+/* Phones: Server, Map and Players only (the table ran off the screen); the row itself joins. */
+@media (max-width: 40rem) { .srv-table th:nth-child(n+4), .srv-table td.srv-left, .srv-table td[class*="srv-ping"], .srv-table td.srv-actions { display: none; } }

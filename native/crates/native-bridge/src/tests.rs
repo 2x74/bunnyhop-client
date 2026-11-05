@@ -15,6 +15,10 @@ mod segmented;
 mod map_audio;
 #[path = "flight_tests.rs"]
 mod flight;
+#[path = "map_props_tests.rs"]
+mod map_props;
+#[path = "hard_maps_tests.rs"]
+mod hard_maps;
 
 struct Fixture(PathBuf);
 impl Fixture {
@@ -168,6 +172,12 @@ fn c_layouts_are_stable() {
     assert_eq!(size_of::<BhSkyInfo>(), 76);
     assert_eq!(size_of::<BhMaterialExtra>(), 28);
     assert_eq!(size_of::<BhPropGroup>(), 20);
+    assert_eq!(size_of::<BhPropTransform>(), 32);
+    assert_eq!(size_of::<BhAnimatedProp>(), 40);
+    assert_eq!(offset_of!(BhAnimatedProp, min_anim_time), 24);
+    assert_eq!(size_of::<BhPropAnimState>(), 20);
+    assert_eq!(size_of::<BhMaterialMotion>(), 32);
+    assert_eq!(size_of::<BhMaterialWireframe>(), 20);
     assert_eq!(size_of::<BhWeaponReport>(), 48);
     assert_eq!(size_of::<BhAttackReport>(), 52);
     assert_eq!(size_of::<BhFloorWeapon>(), 36);

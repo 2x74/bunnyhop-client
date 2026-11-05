@@ -28,8 +28,8 @@ registerSettingsSection(
           }),
       api.available()
         ? ui.actions("Profile flag", [ui.button("Choose flag", () => void Promise.all([myProfile(), import("./country-picker")]).then(([p, m]) => m.countryPicker(p?.player.country, () => (refreshMyProfile(), toast("Profile flag saved")))))], {
-            desc: "A country flag before your name on leaderboards, your player card and the server scoreboard.",
-            keywords: "flag country region nationality profile flag",
+            desc: "A country or pride flag before your name on leaderboards, your player card and the server scoreboard.",
+            keywords: "flag country region nationality profile flag pride lgbt lgbtq queer rainbow trans",
           })
         : null,
       ui.actions("Privacy & data", [ui.button("Request data or deletion", () => void import("./privacy").then((m) => m.openPrivacyDialog()))], {

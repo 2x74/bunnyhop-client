@@ -56,6 +56,8 @@ export function clampFeel(feel: ArrayLike<number>, out: Float32Array): Float32Ar
 export const ARM = { anchor: 0.9, bendR: 14, bendL: 24 };
 /** The firing wrist's limit while the hand is on a bolt (GunPose.rightW). */
 const BOLT_WRIST = 55;
+/** The support wrist's limit while the hand is away from the gun (GunPose.leftArm): the forearm aims at its elbow as it did before the wrist limits (10-28). */
+const FREE_WRIST = 180;
 /**
  * Elbow anchors (view space): forearms aim from the wrists back toward these. The pistols' (and the default): out to
  * each side and down, so the two forearms open into a V below the gun and leave the screen at its bottom edge instead
@@ -63,6 +65,13 @@ const BOLT_WRIST = 55;
  * so that sleeve drops out of view behind it right below the hand rather than crossing the screen.
  */
 export const ELBOW: Record<"R" | "L", V3> = { R: [10, -20, -24], L: [10, 10, -24] };
+/**
+ * The support arm's working elbow (view space) while its hand is away from the grip (GunPose.leftArm: carrying the
+ * silencer, on the Seed Drill's pod): low and a little in, so the forearm keeps coming up from the bottom of the
+ * screen whatever the hand is doing (Astra, v0.0.38 QA: hand contact and a reachable arm as separate constraints).
+ * GunDef.workElbow overrides it.
+ */
+export const WORK_ELBOW: V3 = [9, 3, -32];
 
 export class GunPoser {
   readonly anim = new GunAnimator(null as unknown as GunDef);
@@ -97,6 +106,9 @@ export class GunPoser {
   private pivot = new Float32Array(3);
   private H = new Float32Array(12);
   private prevLeft = new Float32Array(12);
+  /** The left hand's final matrix as shown last frame, and the animator's crossfade count it was captured at. */
+  private shownLeft = new Float32Array(12);
+  private leftGen = -1;
   private hadLeft = false;
   private bones: { R: ArmBones; L: ArmBones };
 
@@ -229,10 +241,14 @@ export class GunPoser {
     this.H[3] += p.leftOff[0];
     this.H[7] += p.leftOff[1];
     this.H[11] += p.leftOff[2];
-    // Crossfade from the previous clip's final left hand (a target can't be blended by name).
+    // Crossfade from the left hand as it was shown when the new clip started (a target can't be blended by name; a
+    // crossfade interrupted by another starts from where the hand had got to, not from the older clip's hand).
+    if (this.anim.leftFadeGen !== this.leftGen) {
+      this.leftGen = this.anim.leftFadeGen;
+      this.prevLeft.set(this.hadLeft ? this.shownLeft : this.H);
+    }
     if (this.anim.leftFade > 0 && this.hadLeft) lerpRigid(this.H, this.prevLeft, this.anim.leftFade * this.anim.leftFade * (3 - 2 * this.anim.leftFade), this.H);
-    else this.prevLeft.set(this.H);
-    if (this.anim.leftFade <= 0) this.prevLeft.set(this.H);
+    this.shownLeft.set(this.H);
     this.hadLeft = true;
     W.set(this.H, hL);
     const cL = this.cL;
@@ -355,12 +371,19 @@ export class GunPoser {
     // Bind forearm direction (elbow -> wrist), carried by the hand's move.
     const d = b.dir;
     const cur: V3 = [T[0] * d[0] + T[1] * d[1] + T[2] * d[2], T[4] * d[0] + T[5] * d[1] + T[6] * d[2], T[8] * d[0] + T[9] * d[1] + T[10] * d[2]];
-    const e = this.def?.elbows?.[side] ?? ELBOW[side];
+    let e = this.def?.elbows?.[side] ?? ELBOW[side];
+    let k = ARM.anchor;
+    // A support hand away from its grip: toward the working elbow, fully (the hand's own line says nothing then).
+    const la = side === "L" ? Math.max(0, Math.min(1, this.anim.pose.leftArm)) : 0;
+    if (la > 0) {
+      const we = this.def?.workElbow ?? WORK_ELBOW;
+      e = [e[0] + (we[0] - e[0]) * la, e[1] + (we[1] - e[1]) * la, e[2] + (we[2] - e[2]) * la];
+      k += (1 - k) * la;
+    }
     let want: V3 = [wrist[0] - e[0], wrist[1] - e[1], wrist[2] - e[2]];
     const wl = Math.hypot(want[0], want[1], want[2]) || 1;
-    // Halfway between a straight wrist (the forearm continuing the hand) and the elbow anchor.
+    // Mostly toward the elbow anchor, a little of a straight wrist (the forearm continuing the hand).
     const cl = Math.hypot(cur[0], cur[1], cur[2]) || 1;
-    const k = ARM.anchor;
     want = [(want[0] / wl) * k + (cur[0] / cl) * (1 - k), (want[1] / wl) * k + (cur[1] / cl) * (1 - k), (want[2] / wl) * k + (cur[2] / cl) * (1 - k)];
     const hl = Math.hypot(want[0], want[1], want[2]) || 1;
     want = [want[0] / hl, want[1] / hl, want[2] / hl];
@@ -370,6 +393,8 @@ export class GunPoser {
     let limDeg = this.def?.wrist?.[side] ?? (side === "R" ? ARM.bendR : ARM.bendL);
     // Working a bolt, the firing wrist turns (its forearm drops toward the elbow below the screen, not across it).
     if (side === "R") limDeg += (BOLT_WRIST - limDeg) * Math.max(0, Math.min(1, this.anim.pose.rightW));
+    // Away from the gun (the can carried below the screen, a magazine fetched), the support wrist bends freely.
+    else limDeg += (FREE_WRIST - limDeg) * Math.max(0, Math.min(1, this.anim.pose.leftArm));
     const lim = (limDeg * Math.PI) / 180;
     if (th > lim && th > 1e-4) {
       const sn = Math.sin(th), a = Math.sin(th - lim) / sn, b = Math.sin(lim) / sn;

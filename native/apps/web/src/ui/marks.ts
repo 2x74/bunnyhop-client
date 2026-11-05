@@ -3,6 +3,9 @@
 // file just draws them. Styles: ./marks.css.
 
 import "./marks.css";
+import "./name-fonts.css";
+import { nameFontOf } from "../supporter-looks";
+import { nameFit } from "./name-fit";
 import {
   equippedNameBadges, GIFTER_TIERS, GIFTER_SVG, isGifterColor, SPECIAL_BADGES,
   BOOSTER_LABEL,
@@ -58,17 +61,33 @@ const NAME_WHITE = "#eef1f6";
  * so nothing from the server reaches a style unchecked. `fallback`: a colour for names without a look (chat's slot
  * colour). Spread into h(): h("b.name", nameAttrs(p), p.name).
  */
-export function nameAttrs(m: NameLook | null | undefined, fallback?: string): { style?: string; class?: string } {
+export function nameAttrs(m: (NameLook & { name?: unknown }) | null | undefined, fallback?: string, name?: string): NameAttrs {
   const c = nameColorHex(m?.nameColor);
   const fx = nameEffectOf(m?.nameEffect);
-  if (!c && !fx) return fallback ? { style: `color:${fallback}` } : {};
+  // The name font (v0.0.37, name-fonts.css): a class of its own, so it goes with any colour and effect, fitted to the
+  // name (ui/name-fit.ts) so it is never wider than the default font. Before the face loads: the default font, marked
+  // to be upgraded when it arrives. `name`: the text drawn (default: m.name).
+  const font = nameFontOf(m?.nameFont);
+  const text = name ?? (typeof m?.name === "string" ? m.name : null);
+  const k = font && text !== null ? nameFit(font, text) : null;
+  const fontCls = font && k !== null ? `nm-font nm-font-${font}` : undefined;
+  const wait = font && text !== null && k === null ? { "data-nm-font": font } : {};
+  const fit = k !== null ? `--nm-k:${k}` : "";
+  if (!c && !fx) {
+    const style = [fallback ? `color:${fallback}` : "", fit].filter(Boolean).join(";");
+    return { ...(style ? { style } : {}), ...(fontCls ? { class: fontCls } : {}), ...wait };
+  }
   const base = c ?? NAME_WHITE;
   const c2 = nameColorHex(m?.nameColor2);
-  return { style: `color:${base};--nm-c:${base}${c2 ? `;--nm-c2:${c2}` : ""}`, class: fx ? `nm-fx nm-fx-${fx}` : undefined };
+  const cls = [fx ? `nm-fx nm-fx-${fx}` : "", fontCls ?? ""].filter(Boolean).join(" ");
+  return { style: `color:${base};--nm-c:${base}${c2 ? `;--nm-c2:${c2}` : ""}${fit ? `;${fit}` : ""}`, class: cls || undefined, ...wait };
 }
 
+/** What nameAttrs gives a name element: spread all of it into h() (the data attribute marks a name waiting for its font). */
+export type NameAttrs = { style?: string; class?: string; "data-nm-font"?: string };
+
 /** The colour part of nameAttrs alone, for a style list (undefined: the default white). */
-export const nameStyle = (m: NameLook | null | undefined): string | undefined => nameAttrs(m).style;
+export const nameStyle = (m: NameLook | null | undefined): string | undefined => nameAttrs({ ...m, nameFont: null }).style;
 
 /**
  * Staff shield + check + creator icon + booster gem + supporter badge after a name, in that order (null when

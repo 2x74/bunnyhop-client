@@ -8,6 +8,13 @@
 import { buildSettingsDoc, stringifySettings } from "../../web/src/ui/settings-io";
 import { prefs, type Prefs } from "../../web/src/ui/settings";
 import { VERSION } from "../../web/src/version";
+import {
+  VIEWMODEL_BOB,
+  VIEWMODEL_BOB_V3,
+  VIEWMODEL_POS,
+  VIEWMODEL_POS_V2,
+  VIEWMODEL_REV,
+} from "../../web/src/viewmodel/defaults";
 import { settingsPatch } from "./bridge";
 import { openFile, saveFile } from "./native-files";
 import { hostSettings, pullHost, type HostSettings } from "./prefs-bridge";
@@ -16,11 +23,32 @@ import { migrateTurnSpeed } from "./turn-speed";
 /** The format of settings files the desktop client wrote before. */
 export const OLD_NATIVE_FORMAT = "bunnyhop-native-settings";
 
+/** The native keys of the viewmodel framing, by their website names. */
+const FRAMING_KEYS = { fov: "viewmodelFov", x: "viewmodelX", y: "viewmodelY", z: "viewmodelZ" } as const;
+/** Native viewmodel revision 3 has the website's current framing (settings.hpp viewmodel_framing_revision). */
+const FRAMING_REVISION = 3;
+
+/**
+ * The website's migrateViewmodel for an import, on native keys: values still at the default they were saved under move
+ * to the current ones once (the framing before revision 3 when all four are given, an exact CS:S Bob before revision 4).
+ * An absent value keeps yours, as in the website's partial import.
+ */
+export function migrateNativeViewmodel(settings: Record<string, unknown>): Record<string, unknown> {
+  const revision = typeof settings.viewmodelRev === "number" ? settings.viewmodelRev : 1;
+  if (revision >= VIEWMODEL_REV) return settings;
+  const out = { ...settings };
+  const fields = Object.entries(FRAMING_KEYS) as [keyof typeof FRAMING_KEYS, string][];
+  if (revision < FRAMING_REVISION && fields.every(([field, key]) => out[key] === VIEWMODEL_POS_V2[field]))
+    for (const [field, key] of fields) out[key] = VIEWMODEL_POS[field];
+  if (out.viewmodelBob === VIEWMODEL_BOB_V3) out.viewmodelBob = VIEWMODEL_BOB;
+  return out;
+}
+
 /** Prefs as `base`, with the native settings in `settings` applied (an old native file or preset). */
 export function prefsFromNative(settings: Record<string, unknown>, base: Prefs = prefs.get()): Prefs {
   const next = JSON.parse(JSON.stringify(base)) as Prefs;
   const current = hostSettings();
-  const patch = settingsPatch(migrateTurnSpeed(settings));
+  const patch = settingsPatch(migrateTurnSpeed(migrateNativeViewmodel(settings)));
   const host = { ...current, ...patch, binds: { ...current.binds, ...patch.binds } } as HostSettings;
   pullHost(next, host);
   return next;

@@ -19,7 +19,7 @@ import type { V3 } from "../../player/bunny/rig";
 import type { GloveStyleId } from "../../loadout";
 import { vmRig, type VmRig } from "../rig";
 import { gp, MAT, NO_SEAM, PAL_SLOT, SLOT_G } from "./paint";
-import { sleeve } from "../sleeve";
+import { fleeceR, sleeve } from "../sleeve";
 
 const S = (slot: number): Paint => ({ code: 3 + slot });
 const HOODIE = S(PAL_SLOT.hoodie), TRIM = S(PAL_SLOT.trim), GLOVE = S(PAL_SLOT.glove);
@@ -258,7 +258,15 @@ export interface PalmSpec {
   /** Outward push (units) at a point (back-of-hand padding). */
   bulge?(q: Q): number;
   wear?(q: Q): number;
+  /** A hard shell (Bun-E): no rounded knuckle end or thenar swell (PALM_SOFT). */
+  hard?: boolean;
 }
+
+/**
+ * The soft palm (v0.0.37; Astra QA: fingers met a flat block): past the knuckle row the palm rounds over into a
+ * narrower end the fingers grow out of (instead of a flat cap), and the palm side swells into a thenar under the thumb.
+ */
+const PALM_SOFT = { end: [0.2, 0.84, 0.66] as const, thenar: 0.13 };
 
 /** The palm block (16 columns; the knit glove's rows plus `rows`). */
 function palm(b: Builder, h: Hand, sp: PalmSpec): void {
@@ -275,18 +283,25 @@ function palm(b: Builder, h: Hand, sp: PalmSpec): void {
     const l = base[base.length - 1];
     return [l[1], l[2]];
   };
-  // (Plus a row 0.8 past the sleeve opening, where the darkening into the sleeve ends: sleeveShade.)
-  const ss = [...new Set([...base.map((r) => r[0]), SLEEVE_OPEN + 0.8, ...(sp.rows ?? [])])].sort((a, b) => a - b);
+  // (Plus a row 0.8 past the sleeve opening, where the darkening into the sleeve ends: sleeveShade; a soft palm one
+  // more past the knuckles, narrower: the rounded end.)
+  const last = base[base.length - 1];
+  const endS = last[0] + PALM_SOFT.end[0];
+  const ss = [...new Set([...base.map((r) => r[0]), SLEEVE_OPEN + 0.8, ...(sp.rows ?? []), ...(sp.hard ? [] : [endS])])].sort((a, b) => a - b);
+  const prof0 = prof;
+  const profS = (s: number): [number, number] => (s >= endS - 1e-6 && !sp.hard ? [last[1] * PALM_SOFT.end[1], last[2] * PALM_SOFT.end[2]] : prof0(s));
   const N = 16;
   const bnOf = (k: number) => -Math.sin((k / N) * Math.PI * 2);
   const acOf = (k: number) => Math.cos((k / N) * Math.PI * 2);
+  // The thenar: the palm side (bn < 0) on the index / thumb side (ac > 0), over the palm's first half.
+  const thenar = (s: number, bn: number, ac: number): number =>
+    sp.hard ? 0 : PALM_SOFT.thenar * smoothstep(0.15, 0.75, ac) * smoothstep(0.05, 0.6, -bn) * Math.sin(Math.PI * Math.min(1, Math.max(0, (s - 0.1) / (h.palmL * 0.62))));
   const rows = ss.map((s, i) => {
-    const [hw, ht] = prof(s);
+    const [hw, ht] = profS(s);
     const c = add(add(h.wrist, scale(h.ax, s)), scale(h.palmN, 0.08));
     const rr = ring(c, h.wAx, h.palmN, hw, ht, N, 2.7);
-    if (!sp.bulge) return rr;
     return rr.map((p, k) => {
-      const e = sp.bulge!({ i, s, bn: bnOf(k), ac: acOf(k) });
+      const e = (sp.bulge?.({ i, s, bn: bnOf(k), ac: acOf(k) }) ?? 0) + thenar(s, bnOf(k), acOf(k));
       return e ? add(p, scale(norm(sub(p, c)), e)) : p;
     });
   });
@@ -319,7 +334,17 @@ export interface DigitSpec {
   creases?: boolean;
   /** Radius scale per path row (e.g. Bun-E's hinges pinched in); default 1. */
   rowScale?(i: number, d: number): number;
+  /** Flat-capped digit ends (Bun-E's mechanical fingers); otherwise every tip is rounded (TIP_DOME). */
+  hardTips?: boolean;
 }
+
+/**
+ * The rounded fingertip (v0.0.37; Astra QA: tips read as capped tubes, then as a flat disk): the last ring narrows and
+ * the tip closes to a point ([advance along the finger, radius] as fractions of the tip's radius; the last entry is the
+ * point), so there's no flat cap at all and the tip's vertices share one smooth normal fan. Adds ~0.13 units of length
+ * (the grip solver's capsules are unchanged) and no vertices (the point replaces the cap).
+ */
+const TIP_DOME: [number, number][] = [[0, 0.86], [0.46, 0]];
 
 /** Crease weight per digit path row: the finger joints (knuckle, middle, last) and the thumb's two. */
 const FINGER_CREASE: Record<number, number> = { 1: 0.55, 3: 1, 5: 0.8 };
@@ -360,18 +385,41 @@ function digits(b: Builder, h: Hand, sp: DigitSpec): void {
         return e ? add(p, scale(norm(sub(p, c)), e)) : p;
       });
     });
+    // Rounded tip: the last ring narrowed, two more rings closing it (they paint, weigh and shade as the tip).
+    if (!sp.hardTips) {
+      const c = centres[n - 1], dir = norm(sub(c, centres[n - 2]));
+      const [u, v] = frames[n - 1];
+      const rs = sc * (sp.rowScale?.(n - 1, d) ?? 1);
+      const ru = dg.ru[n - 1] * rs, rv = dg.rv[n - 1] * rs, r0 = (ru + rv) / 2;
+      const last = rows[n - 1];
+      rows[n - 1] = last.map((p) => add(c, scale(sub(p, c), TIP_DOME[0][1])));
+      for (const [adv, k] of TIP_DOME.slice(1)) rows.push(ring(add(c, scale(dir, adv * r0)), u, v, ru * k, rv * k, M, 2.25));
+    }
+    const R = rows.length;
+    let tipAO = 0;
+    for (let k = 0; k < M; k++) tipAO += fingerAO(d, acAt(n - 1, k), bnAt(n - 1, k), false) / M;
+    const ci = (i: number) => Math.min(n - 1, i), qi = (i: number) => Math.min(n - 2, i);
     emit(b, rows, {
       seamless: sp.seamless,
-      paint: (i, k) => sp.paint({ i, s: (A[i] + A[Math.min(n - 1, i + 1)]) / 2, bn: (bnAt(i, k) + bnAt(i, k + 1)) / 2, ac: (acAt(i, k) + acAt(i, k + 1)) / 2 }, d),
-      weight: (i) => dg.w[i],
-      ao: (i, k) => fingerAO(d, acAt(i, k), bnAt(i, k), i === 0),
+      paint: (i, k) => {
+        const j = qi(i);
+        return sp.paint({ i: j, s: (A[j] + A[Math.min(n - 1, j + 1)]) / 2, bn: (bnAt(j, k) + bnAt(j, k + 1)) / 2, ac: (acAt(j, k) + acAt(j, k + 1)) / 2 }, d);
+      },
+      weight: (i) => dg.w[ci(i)],
+      // The tip's point is one vertex shared by every column: the mean occlusion of the ring under it (not whichever
+      // column wrote last, which left a bright dot).
+      ao: (i, k) => (i >= n ? tipAO : fingerAO(d, acAt(ci(i), k), bnAt(ci(i), k), i === 0)),
       fin: (i, k) => {
-        const q = { i, s: A[i], bn: bnAt(i, k), ac: acAt(i, k) };
-        return [NO_SEAM, A[i], sp.wear?.(q, d) ?? 0, sp.creases === false ? 0 : (dg.thumb ? THUMB_CREASE : FINGER_CREASE)[i] ?? 0];
+        const j = ci(i);
+        const q = { i: j, s: A[j], bn: bnAt(j, k), ac: acAt(j, k) };
+        // (The tip's point: less wear, so worn fingertips don't collect into a bright dot where the triangles meet.)
+        return [NO_SEAM, A[j], (sp.wear?.(q, d) ?? 0) * (i >= n ? 0.35 : 1), sp.creases === false || i >= n ? 0 : (dg.thumb ? THUMB_CREASE : FINGER_CREASE)[i] ?? 0];
       },
       capStart: sp.paint({ i: 0, s: 0, bn: 0, ac: 0 }, d),
-      capEnd: sp.paint({ i: n - 2, s: A[n - 1], bn: 0, ac: 0 }, d),
+      // (A rounded tip closes to a point: no cap.)
+      capEnd: sp.hardTips ? sp.paint({ i: n - 2, s: A[n - 1], bn: 0, ac: 0 }, d) : undefined,
     });
+    void R;
   });
 }
 
@@ -420,6 +468,41 @@ function handBand(b: Builder, h: Hand, s: number[], grow: (j: number, k: number)
     fin: (j) => [seamDist(s[j], o.seams ?? []), s[j], o.wear?.(j) ?? 0],
     // The edges where the band tucks onto the glove sit in its shadow.
     ao: (j) => (j === 0 || j === s.length - 1 ? 0.68 : 1) * sleeveShade(s[j]),
+  });
+}
+
+/** A long cuff's radius that sits just on the sleeve at s (cuff() rings: the same 0.86 / 0.84 scale as the sleeve). */
+const hug = (h: Hand, s: number): number => fleeceR(s, h.L) + 0.05;
+
+/**
+ * A wrist collar (v0.0.37; Astra QA: the Knit / Garden glove met the sleeve's round opening with a flat wrist, a dark
+ * gap above and below): round and tucked inside the opening, it blends into the palm's own section just past it, so
+ * the change from round to flat happens out of sight. Palm frame rows like handBand.
+ */
+function wristCollar(b: Builder, h: Hand, paint: Paint): void {
+  const base = PALM(h.palmL);
+  const prof = (x: number): [number, number] => {
+    for (let i = 0; i + 1 < base.length; i++)
+      if (x <= base[i + 1][0]) {
+        const t = clamp((x - base[i][0]) / (base[i + 1][0] - base[i][0]), 0, 1);
+        return [base[i][1] + (base[i + 1][1] - base[i][1]) * t, base[i][2] + (base[i + 1][2] - base[i][2]) * t];
+      }
+    return [base[base.length - 1][1], base[base.length - 1][2]];
+  };
+  // [s from the wrist, blend 0 = round (inside the sleeve) .. 1 = the palm's section + a skin].
+  const R = 1.42;
+  const st: [number, number][] = [[SLEEVE_OPEN - 0.42, 0], [SLEEVE_OPEN - 0.12, 0.08], [SLEEVE_OPEN + 0.06, 0.45], [SLEEVE_OPEN + 0.24, 1]];
+  const N = 16;
+  const rows = st.map(([x, k]) => {
+    const [hw, ht] = prof(x);
+    const c = add(add(h.wrist, scale(h.ax, x)), scale(h.palmN, 0.08 * k));
+    return ring(c, h.wAx, h.palmN, R + (hw + 0.03 - R) * k, R + (ht + 0.03 - R) * k, N, 2 + 0.7 * k);
+  });
+  emit(b, rows, {
+    paint: () => paint,
+    weight: (j) => (st[j][0] < 0.3 ? [[h.hand, 0.6], [h.twist, 0.4]] : [[h.hand, 1]]),
+    fin: (j) => [NO_SEAM, st[j][0], 0.1],
+    ao: (j) => (j === 0 ? 0.55 : j === 1 ? 0.7 : 1) * sleeveShade(st[j][0]),
   });
 }
 
@@ -483,6 +566,7 @@ function knit(b: Builder, h: Hand): void {
   const { palmL, hand, twist } = h;
   const KNIT = gp(SLOT_G.paw, MAT.knit);
   palm(b, h, { seamless: true, paint: () => KNIT, wear: palmWear(h) });
+  wristCollar(b, h, KNIT);
   digits(b, h, { seamless: true, paint: () => KNIT, wear: (q, d) => (isTip(q, d) ? 0.35 * smoothstep(0.85, 1, q.s / 4.2) : 0) });
   // Accent strap across the back of the glove (the bunny's accent, like the hoodie stripes), lying on the back surface
   // just past the sleeve's trim cuff, its ends tucked into the sides (v0.0.5 had it at 0.18 palmL under the trim's
@@ -653,15 +737,18 @@ const moto: StyleFn = (b, h) => {
     const side = dg.thumb ? norm(add(n0, scale(norm(cross(dir, h.palmN)), dot(cross(dir, h.palmN), h.wAx) > 0 ? -THUMB_TWIST : THUMB_TWIST))) : n0;
     dome(b, add(c, scale(side, (dg.thumb ? dg.ru[i0 + 1] : dg.rv[2]) * 0.92)), side, dir, dg.thumb ? 0.5 : 0.42, 0.3, 0.15, P(B.tips, MAT.plate), [[dg.bones[dg.thumb ? 1 : 0], 1]], 6, { seam: NO_SEAM, wear: 0.6 });
   }
-  // Long cuff over the sleeve, with a strap round it.
+  // Long cuff over the sleeve, with a strap round it. Its back edge hugs the sleeve and flares out (it stood off it,
+  // showing a dark gap inside: Astra, v0.0.38 QA).
   const L0 = h.L;
   cuff(b, h, [
+    [L0 - 1.62, hug(h, L0 - 1.62)],
+    [L0 - 1.5, hug(h, L0 - 1.5) + 0.12],
     [L0 - 1.45, 2.14],
     [L0 - 1.3, 2.26],
     [L0 + 0.1, 2.3],
     [L0 + 0.5, 2.18],
     [L0 + 0.68, 1.96],
-  ], () => P(B.strap, MAT.leather), { N: 16, seams: [L0 - 1.3, L0 + 0.5], wear: (j) => (j === 0 || j === 4 ? 0.8 : 0.15) });
+  ], () => P(B.strap, MAT.leather), { N: 16, seams: [L0 - 1.3, L0 + 0.5], wear: (j) => (j <= 2 || j === 6 ? 0.8 : 0.15) });
   // The strap: a thick band with square edges, closed by a snap on its outer side.
   cuff(b, h, [
     [L0 - 0.75, 2.3],
@@ -706,13 +793,15 @@ const specialist: StyleFn = (b, h) => {
   // Gauntlet cuff, a velcro strap round it, the pull tab off its top edge.
   const L0 = h.L;
   cuff(b, h, [
+    [L0 - 2.08, hug(h, L0 - 2.08)],
+    [L0 - 1.96, hug(h, L0 - 1.96) + 0.12],
     [L0 - 1.9, 2.2],
     [L0 - 1.75, 2.36],
     [L0 - 0.6, 2.3],
     [L0 + 0.3, 2.2],
     [L0 + 0.5, 2.12],
     [L0 + 0.68, 1.96],
-  ], () => P(B.strap, MAT.leather), { seams: [L0 - 1.75, L0 + 0.5], wear: (j) => (j <= 1 ? 0.8 : 0.1) });
+  ], () => P(B.strap, MAT.leather), { seams: [L0 - 1.75, L0 + 0.5], wear: (j) => (j <= 3 ? 0.8 : 0.1) });
   cuff(b, h, [
     [L0 - 1.0, 2.31],
     [L0 - 0.97, 2.46],
@@ -766,6 +855,7 @@ const garden: StyleFn = (b, h) => {
     bulge: (q, d) => ((d < 4 ? q.i >= 5 : q.i >= 4) ? 0.035 : 0),
     wear: digitWear,
   });
+  wristCollar(b, h, P(B.base, MAT.canvas));
   handBand(b, h, [0.5, 0.54, 0.58, 1.1, 1.14, 1.18], (j) => [0.06, 0.15, 0.18, 0.18, 0.15, 0.06][j], () => P(B.strap, MAT.knit), { seams: [0.58, 1.1], wear: (j) => (j === 5 ? 0.6 : 0.1) });
 };
 
@@ -790,6 +880,7 @@ const plush: StyleFn = (b, h) => {
 /** Bun-E's ceramic hand shells with exposed black finger hinges and gold perimeter. */
 const bune: StyleFn = (b, h) => {
   palm(b, h, {
+    hard: true,
     seamless: true,
     rows: [.55, .66, h.palmL * .72, h.palmL * .72 + .08],
     paint: q => {
@@ -801,6 +892,7 @@ const bune: StyleFn = (b, h) => {
   digits(b, h, {
     seamless: true,
     creases: false,
+    hardTips: true,
     paint: (q, d) => {
       const joint = d < 4 ? q.i === 0 || q.i === 3 || q.i === 5 : q.i === 0 || q.i === 2 || q.i === 4;
       return joint || q.bn < -.35 ? P(B.fingers, MAT.rubber) : P(B.base, MAT.plate);

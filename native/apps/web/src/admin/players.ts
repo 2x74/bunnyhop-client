@@ -180,6 +180,22 @@ export const playerView: View = async (root, _params, [id]) => {
         online.length ? h("button", { class: "danger", onclick: () => after(kickDialog(target)) }, glyph("kick"), `Kick from ${online.map((r) => r.id).join(", ")}`) : null,
         ban ? h("button", { class: "danger", onclick: async () => (await ask({ title: `Unban ${u.name}?`, confirm: "Unban" })) && (await post({ action: "unban" }, "Unbanned")) }, "Unban") : h("button", { class: "danger", onclick: () => after(banDialog(target, { actions: d.actions })) }, glyph("ban"), "Ban…"),
         mayShadow(!!u.shadow_at, u.shadow_source) ? h("button", { class: u.shadow_at ? "" : "danger", onclick: () => after(shadowDialog({ ...target, shadow_at: u.shadow_at })) }, u.shadow_at ? "Lift shadowban" : "Shadowban…") : null,
+        // Trusted: the anticheat never shadows them by itself; its flags still wait for staff (apps/api src/ac-rule-clears.ts).
+        may("integrity.ban")
+          ? d.trusted
+            ? h("button", { title: `Trusted by ${d.trusted.set_by_name ?? "staff"}: ${d.trusted.note}`, onclick: async () => (await ask({ title: `Stop trusting ${u.name}?`, text: "The anticheat can shadowban them by itself again.", confirm: "Stop trusting" })) && (await act("/admin/integrity", { action: "rule-unclear", user: u.id, rule: "trusted" }, "No longer trusted")) && reroute() }, "Trusted ✓")
+            : h("button", {
+                onclick: async () => {
+                  const v = await ask({
+                    title: `Trust ${u.name}?`,
+                    text: "For a known good player (Verified players already are): the anticheat never shadowbans them by itself. Its flags still come to the cases board, and a held shadowban shows in the log. You can still shadowban them by hand.",
+                    fields: [{ name: "note", label: "Why (the next reviewer reads it)", kind: "text", required: true }, { name: "days", label: "Days (empty: no expiry)", kind: "number" }],
+                    confirm: "Trust",
+                  });
+                  if (v && (await act("/admin/integrity", { action: "rule-clear", user: u.id, rule: "trusted", note: v.note, days: v.days || null }, "Trusted"))) reroute();
+                },
+              }, "Trust…")
+          : null,
       ),
     h("div", { class: "group" }, ...staffButtons(u.id, u.name, role, d.configAdmin, (b, done) => post(b, done))),
   );

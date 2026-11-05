@@ -15,7 +15,7 @@ struct WireStyle {
     bool playable;
 };
 
-inline constexpr std::array<WireStyle, 11> wire_styles = {{
+inline constexpr std::array<WireStyle, 12> wire_styles = {{
         {"autohop", "Normal", "NM", true},
         {"legit", "EZ Scroll", "EZ", true},
         {"wonly", "W-Only", "W", true},
@@ -27,6 +27,7 @@ inline constexpr std::array<WireStyle, 11> wire_styles = {{
         {"segmented", "Segmented", "SEG", true},
         {"infinite", "Infinite", "INF", true},
         {"backwards", "Backwards", "BW", true},
+        {"adonly", "A/D-Only", "AD", true},
 }};
 
 inline const WireStyle *wire_style_at(unsigned index) {
@@ -51,7 +52,7 @@ inline bool wire_style_playable(std::string_view id) {
 }
 
 // The website's menu order (styles.ts STYLE_DEFS), which the style list and F3 follow: assisted styles last.
-inline constexpr std::array<std::string_view, 11> menu_styles = {
+inline constexpr std::array<std::string_view, 12> menu_styles = {
         "autohop",
         "legit",
         "scroll",
@@ -59,6 +60,7 @@ inline constexpr std::array<std::string_view, 11> menu_styles = {
         "sideways",
         "hsw",
         "backwards",
+        "adonly",
         "lowgrav",
         "segmented",
         "infinite",
@@ -75,7 +77,7 @@ inline std::string_view next_menu_style(std::string_view id) {
 
 // The race picker's styles (web net/race.ts): every style but Segmented, since a race is decided by real time since GO
 // and checkpoint loads rewind the run's clock.
-inline constexpr std::array<std::string_view, 10> race_styles = {
+inline constexpr std::array<std::string_view, 11> race_styles = {
         "autohop",
         "legit",
         "scroll",
@@ -83,6 +85,7 @@ inline constexpr std::array<std::string_view, 10> race_styles = {
         "sideways",
         "hsw",
         "backwards",
+        "adonly",
         "lowgrav",
         "infinite",
         "autostrafe",

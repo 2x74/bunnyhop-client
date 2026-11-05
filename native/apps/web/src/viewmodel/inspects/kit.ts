@@ -382,8 +382,15 @@ let locA = new Float32Array(0), locB = new Float32Array(0), origA = new Float32A
  * this keeps every bone length and only interpolates joint angles. `bones` must list parents before children.
  * `fingers` blends those bones (parent-relative) with their own weight (e.g. fingers that lag behind the knife).
  */
-export function blendPoseH(A: Float32Array, B: Float32Array, w: number, bones: readonly number[], parentOf: (i: number) => number, fingers?: { bones: Set<number>; w: number }): void {
-  if (w <= 0 && !(fingers && fingers.w > 0)) return;
+/** Bones blended at their own weight (blendPoseH): the fingers or the knife during a cancel. */
+export interface BoneGroup {
+  bones: Set<number>;
+  w: number;
+}
+
+export function blendPoseH(A: Float32Array, B: Float32Array, w: number, bones: readonly number[], parentOf: (i: number) => number, fingers?: BoneGroup | readonly BoneGroup[]): void {
+  const groups: readonly BoneGroup[] = !fingers ? [] : Array.isArray(fingers) ? fingers : [fingers as BoneGroup];
+  if (w <= 0 && !groups.some((g) => g.w > 0)) return;
   const n = A.length;
   if (locA.length < n) (locA = new Float32Array(n)), (locB = new Float32Array(n)), (origA = new Float32Array(n));
   origA.set(A);
@@ -401,9 +408,9 @@ export function blendPoseH(A: Float32Array, B: Float32Array, w: number, bones: r
       locB.set(B.subarray(o, o + 12), o);
     }
   }
-  if (fingers) {
-    blendPose(locA, locB, w, bones.filter((i) => !fingers.bones.has(i)));
-    blendPose(locA, locB, fingers.w, bones.filter((i) => fingers.bones.has(i)));
+  if (groups.length) {
+    blendPose(locA, locB, w, bones.filter((i) => !groups.some((g) => g.bones.has(i))));
+    for (const g of groups) blendPose(locA, locB, g.w, bones.filter((i) => g.bones.has(i)));
   } else blendPose(locA, locB, w, bones);
   for (const i of bones) {
     const p = parentOf(i);

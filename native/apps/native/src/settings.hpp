@@ -30,7 +30,8 @@ inline const std::set<std::string> styles = {
         "segmented",
         "autostrafe",
         "infinite",
-        "backwards"
+        "backwards",
+        "adonly"
 };
 
 // EZ Scroll ("legit") and Legit Scroll ("scroll"): every hop is a timed press, so
@@ -70,9 +71,14 @@ inline Json default_hud_layout_web() {
             {"ghostSpeed", place(false, 7, .072, -.262, .9)}};
 }
 
-// Revision of the default viewmodel framing (viewmodel/defaults.ts VIEWMODEL_REV): 3 is v0.0.29's wider framing, with
-// the gloves, cuffs and some sleeve in view. The website's CS:S preset keeps the old one.
-inline constexpr int viewmodel_revision = 3;
+// Revision of the viewmodel defaults (viewmodel/defaults.ts VIEWMODEL_REV): 3 is v0.0.29's wider framing, with the
+// gloves, cuffs and some sleeve in view (the website's CS:S preset keeps the old one); 4 halves the default Bob.
+inline constexpr int viewmodel_revision = 4;
+inline constexpr int viewmodel_framing_revision = 3;
+// Bob amount, 1 = CS:S (viewmodel/defaults.ts VIEWMODEL_BOB): the full CS:S walk bob read as exaggerated. Revisions
+// before 4 defaulted to CS:S.
+inline constexpr double viewmodel_default_bob = .5;
+inline constexpr double viewmodel_bob_before_revision_4 = 1;
 
 inline Json default_settings() {
     Json result = {
@@ -99,10 +105,13 @@ inline Json default_settings() {
             {"viewmodelZ", 0.0},
             {"viewmodelRev", viewmodel_revision},
             {"viewmodelLeftHand", false},
-            {"viewmodelBob", 1.0},
+            {"viewmodelBob", viewmodel_default_bob},
             {"viewmodelSway", 1.0},
-            {"playerModel", "bunny"},
-            {"ghostModel", "same"},
+            // The inspect key starts the knife's tricks, or a quiet blade check first that only you see.
+            {"viewmodelInspect", "tricks"},
+            // In-eye camera options, off by default: a short dip after a really hard fall, a little more FOV when fast.
+            {"viewmodelLandSettle", false},
+            {"viewmodelSpeedFov", false},
             {"showGhost", true},
             {"ghostOpacity", .55},
             {"ghostNearFade", true},
@@ -511,6 +520,9 @@ inline Json patch_settings(const Json &current, const Json &patch, bool switch_l
             }
             if (web_schema && switch_layout && !patch.contains("hudLayout"))
                 drop_moved_legacy_places(out["hudLayout"], current.at("hudLayoutWeb"), v);
+        } else if (key == "viewmodelInspect") {
+            if (!v.is_string() || (v != "tricks" && v != "quiet"))
+                throw std::runtime_error("Inspect style must be tricks or quiet");
         } else if (key == "triggersStyle" || key == "audioMusicMode") {
             const auto choices = key == "triggersStyle" ? std::set<std::string>{"filled", "outline", "bottom"}
                                                         : std::set<std::string>{"always", "menus", "off"};
@@ -553,9 +565,6 @@ inline Json patch_settings(const Json &current, const Json &patch, bool switch_l
                            return std::isxdigit(c);
                        })))
                 throw std::runtime_error("Crosshair color must be #rrggbb");
-        } else if (key == "playerModel" || key == "ghostModel") {
-            if (!v.is_string() || (v != "bunny" && v != "runner" && !(key == "ghostModel" && v == "same")))
-                throw std::runtime_error("Unknown player model");
         } else if (key == "colorBlind") {
             if (!v.is_string() || (v != "off" && v != "redGreen" && v != "blueYellow"))
                 throw std::runtime_error("Unknown color-blind palette");
@@ -643,13 +652,9 @@ inline void fill_new_hud_elements(Json &settings) {
     }
 }
 
-// The website's viewmodel framing migration (ui/settings.ts migrateViewmodel): a saved framing still equal to the
-// default it was saved under is one the player never changed, so it moves to the current default. Any change of theirs
-// stays. Either way the file is marked current, so picking the CS:S preset (the old default) later sticks.
-inline void migrate_viewmodel(Json &saved) {
-    if (!saved.is_object()) return;
-    const auto revision = saved.find("viewmodelRev");
-    if (revision != saved.end() && revision->is_number() && revision->get<double>() >= viewmodel_revision) return;
+// A framing saved before revision 3 that still equals that revision's default (54 / .6 / 1.5 / -.9; an absent value
+// counts as equal) moves to the current one. Any change of theirs keeps all four.
+inline void migrate_viewmodel_framing(Json &saved) {
     const std::pair<const char *, double> previous[] = {
             {"viewmodelFov", 54}, {"viewmodelX", .6}, {"viewmodelY", 1.5}, {"viewmodelZ", -.9}
     };
@@ -660,6 +665,22 @@ inline void migrate_viewmodel(Json &saved) {
     if (unchanged)
         for (const auto &field : previous)
             saved.erase(field.first);
+}
+
+// The website's viewmodel migration (ui/settings.ts migrateViewmodel). The whole settings file is saved on any change,
+// defaults included, so a value still equal to the default it was saved under is one the player never changed: it
+// moves to the current default once. Revisions before 3 check the framing, revisions before 4 the Bob (exactly CS:S's
+// 1 becomes half). Either way the file is marked current, so choosing an old value again later (the CS:S framing
+// preset, Bob 100%) sticks.
+inline void migrate_viewmodel(Json &saved) {
+    if (!saved.is_object()) return;
+    const auto revision = saved.find("viewmodelRev");
+    const double saved_revision = revision != saved.end() && revision->is_number() ? revision->get<double>() : 1;
+    if (saved_revision >= viewmodel_revision) return;
+    if (saved_revision < viewmodel_framing_revision) migrate_viewmodel_framing(saved);
+    const auto bob = saved.find("viewmodelBob");
+    if (bob != saved.end() && bob->is_number() && bob->get<double>() == viewmodel_bob_before_revision_4)
+        *bob = viewmodel_default_bob;
     saved["viewmodelRev"] = viewmodel_revision;
 }
 

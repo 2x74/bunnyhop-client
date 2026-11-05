@@ -18,6 +18,7 @@ import { disposeWorldTree as dispose } from "./world-resources";
 import { Core } from "./core";
 import { Ghost } from "./ghost";
 import { buildWorld, type WorldView } from "./render";
+import { volumesOf } from "./player/map-volumes";
 import { decodeReplay, replayStyle, sha256Hex } from "./replay";
 import { FRAME_STRIDE, simulate } from "./sim";
 import { formatTime } from "./timer";
@@ -460,11 +461,12 @@ export class Attract {
       if (this.stopped) return;
       const world = await buildWorld(core, this.renderer, { bsp: bytes });
       if (this.stopped) return dispose(world.root);
+      const volumes = volumesOf(bytes); // the menu's ghost swims on its own map (not the registry's: a game map's)
       this.world = world;
       world.setPotato(prefs.get().graphics.potato);
       world.setFullbright(prefs.get().graphics.fullbright);
       this.effectTime = 12;
-      this.updateEffects = time => world.update(core.brushOrigins(), time, core.effectStates());
+      this.updateEffects = time => world.update(core.brushOrigins(), time, core.effectStates(), core.propAnims());
       this.updateEffects(this.effectTime);
       this.scene.add(world.root);
       this.scene.onBeforeRender = (_r, _s, cam) => world.cull(cam);
@@ -495,6 +497,7 @@ export class Attract {
                 inspect: replay.inspect,
                 loadout: replay.loadout,
               });
+              ghost.volumes = volumes;
               this.scene.add(ghost.root);
               director = new GhostDirector(sim.frames, sim.startTick, sim.endTick, ghost, fade);
               const time = sim.timer.status === "finished" ? sim.timer.timeMs() / 1000 : (sim.endTick - sim.startTick) * Math.fround(replay.header.settings.tickInterval);

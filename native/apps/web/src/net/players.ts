@@ -22,6 +22,8 @@ import { hasAnimRig, loadAnimRig } from "../player/studio/loader";
 import { DEFAULT_COSMETICS } from "../progression";
 import { cleanLoadout, DEFAULT_LOADOUT } from "../loadout";
 import { NameTag, TagSight, type SightTrace } from "../player/tag";
+import { probeFromTrace } from "../player/bunny/legs";
+import { LadderGuess, waterLevelAt } from "../player/map-volumes";
 import { uiHidden } from "../ui/hide-ui";
 import { formatTime } from "../timer";
 import { styleDef } from "../styles";
@@ -57,6 +59,8 @@ export interface RemotePlayer {
   making: boolean;
   /** Their pose wasn't updated last frame (behind the camera, see frame()): snapped when they're posed again. */
   unposed?: boolean;
+  /** Climbing, inferred from the map and their motion (player/map-volumes.ts LadderGuess). */
+  ladder?: LadderGuess;
 }
 
 const tmp = new THREE.Vector3();
@@ -191,6 +195,9 @@ export class RemotePlayers {
     const model = new PlayerModel({ style: "solid", playerGlow: p.info.playerGlow ?? null, color, outfit: p.info.outfit ?? DEFAULT_COSMETICS.outfit!, loadout: cleanLoadout(p.info.loadout) ?? { ...DEFAULT_LOADOUT } });
     if (this.renderer && this.camera) await compileModel(this.renderer, model.root, this.camera, this.scene);
     if (this.players.get(p.slot) !== p) return model.dispose();
+    // Feet plant on slopes (player/bunny/legs.ts) through the same world trace as the tags' line of sight.
+    const trace = this.trace;
+    if (trace) model.setGroundProbe(probeFromTrace(trace));
     p.model = model;
     this.scene.add(model.root);
     p.tag = new NameTag(color);
@@ -263,7 +270,9 @@ export class RemotePlayers {
       // from the gun's own timing: the sender's core isn't ours), a shell per tube-gun event.
       const held = s.weapon >= 2 ? gunForWeapon(s.weapon) : undefined;
       const gunReload = s.reload && held ? (held.timing.shells ? { seconds: held.timing.shells.each, shell: true } : { seconds: held.timing.reload ?? 2 }) : null;
-      m.setState({ position: s.pos, velocity: s.vel, yaw: s.yaw, pitch: s.pitch, crouched: s.crouched, grounded: s.grounded, jumped: s.jumped, attack: swing, inspect: s.inspect, inspectHeld: s.inspectHeld, gunShot: gunAttack && s.attack === 1, gunReload });
+      // Climbing and swimming from the map's volumes (player/map-volumes.ts): the room wire carries neither.
+      const ladder = (p.ladder ??= new LadderGuess()).update(s.pos, s.vel, s.crouched, s.grounded, now / 1000), water = waterLevelAt(s.pos, s.crouched ? 46 : 64, s.crouched);
+      m.setState({ position: s.pos, velocity: s.vel, yaw: s.yaw, pitch: s.pitch, crouched: s.crouched, grounded: s.grounded, jumped: s.jumped, attack: swing, inspect: s.inspect, inspectHeld: s.inspectHeld, gunShot: gunAttack && s.attack === 1, gunReload, ladder, water });
       if (swing) emitWeaponEvent({ type: swing === 2 ? "stab" : "slash", source: "remote", slot: p.slot, position: [s.pos[0], s.pos[1], s.pos[2]] });
       if (gunAttack && s.attack === 1) this.shot(s, hear, m);
       // Drew a gun (a switch or a pickup): its draw sound at them.

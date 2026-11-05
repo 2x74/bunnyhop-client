@@ -944,7 +944,10 @@ public:
             if (weapon.flags & 128) play(gun("mode", "gun_mode"));
             if (weapon.flags & 256) {
                 pending_cues.clear();
-                const double scale = weapon.silencer_ticks * dt / (114. / 37.);
+                constexpr double usp_silencer_seconds = 114. / 37.;
+                const double authored =
+                        timeline ? timeline->value("silencerSeconds", usp_silencer_seconds) : usp_silencer_seconds;
+                const double scale = weapon.silencer_ticks * dt / authored;
                 schedule(weapon.silencer ? "silencerOn" : "silencerOff", 0, scale > 0 ? scale : 1);
             }
             if (attack) {

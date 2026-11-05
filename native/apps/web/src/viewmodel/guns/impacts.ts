@@ -14,6 +14,7 @@
 
 import * as THREE from "three";
 import type { BrushTransform } from "../../core";
+import { VmRandom } from "../rand";
 import type { ImpactSurface } from "../../audio/impacts";
 
 const DECALS = 64;
@@ -113,6 +114,8 @@ class ParticlePool {
   private next = 0;
   private live = 0;
   private uScale = { value: 600 };
+  /** Spread, speed, size and life of each particle (seeded; GunImpacts.clear reseeds). */
+  readonly rng = new VmRandom(0x2c1b3c6d);
 
   constructor(readonly n: number, additive: boolean, private gravity: number, private drag: number) {
     this.pos = new Float32Array(n * 3);
@@ -149,10 +152,10 @@ class ParticlePool {
     const i = this.next;
     this.next = (this.next + 1) % this.n;
     const o = i * 3;
-    const rx = Math.random() * 2 - 1, ry = Math.random() * 2 - 1, rz = Math.random() * 2 - 1;
+    const rx = this.rng.next() * 2 - 1, ry = this.rng.next() * 2 - 1, rz = this.rng.next() * 2 - 1;
     let dx = dir.x + rx * spread, dy = dir.y + ry * spread, dz = dir.z + rz * spread;
     const l = Math.hypot(dx, dy, dz) || 1;
-    const s = speed * (0.4 + Math.random() * 0.8);
+    const s = speed * (0.4 + this.rng.next() * 0.8);
     (dx /= l), (dy /= l), (dz /= l);
     this.pos[o] = p[0] + dir.x * 0.6;
     this.pos[o + 1] = p[1] + dir.y * 0.6;
@@ -163,9 +166,9 @@ class ParticlePool {
     this.col[o] = color.r;
     this.col[o + 1] = color.g;
     this.col[o + 2] = color.b;
-    this.size[i] = size * (0.7 + Math.random() * 0.6);
+    this.size[i] = size * (0.7 + this.rng.next() * 0.6);
     this.age[i] = 0;
-    this.life[i] = life * (0.75 + Math.random() * 0.5);
+    this.life[i] = life * (0.75 + this.rng.next() * 0.5);
     this.a0[i] = alpha;
     this.alpha[i] = alpha;
     this.live = this.n;
@@ -201,6 +204,7 @@ class ParticlePool {
   }
 
   clear(): void {
+    this.rng.seed();
     this.alpha.fill(0);
     this.points.geometry.getAttribute("aAlpha").needsUpdate = true;
     this.live = 0;
@@ -245,6 +249,8 @@ export class GunImpacts {
   private sparkCol = new THREE.Color(0xffc46b);
   private transforms: Map<number, BrushTransform> | undefined;
   private live = false;
+  /** Decal spin and size (seeded; clear() reseeds). */
+  private rng = new VmRandom(0x7f4a7c15);
 
   constructor() {
     this.root.name = "gun-impacts";
@@ -302,8 +308,8 @@ export class GunImpacts {
     const i = this.nextDecal;
     this.nextDecal = (this.nextDecal + 1) % DECALS;
     this.q.setFromUnitVectors(Z, n);
-    this.m2.makeRotationZ(Math.random() * Math.PI * 2);
-    const size = (o.heavy ? 3.2 : 2.3) * (0.85 + Math.random() * 0.3);
+    this.m2.makeRotationZ(this.rng.next() * Math.PI * 2);
+    const size = (o.heavy ? 3.2 : 2.3) * (0.85 + this.rng.next() * 0.3);
     this.m.compose(this.v.set(p[0] + n.x * 0.12, p[1] + n.y * 0.12, p[2] + n.z * 0.12), this.q, this.s.set(size, size, 1)).multiply(this.m2);
     if (model > 0) {
       // Into the model's space (its transform now).
@@ -416,6 +422,7 @@ export class GunImpacts {
   }
 
   clear(): void {
+    this.rng.seed();
     for (const d of this.decalState) d.age = Infinity;
     this.ringAge.fill(Infinity);
     for (const t of this.tracers) t.t = Infinity;

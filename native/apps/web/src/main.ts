@@ -28,6 +28,7 @@ import type { SampledInput, SamplerSource } from "./input-sampler";
 import { InputDebug, summary as inputSummary } from "./input-debug";
 import { initPlayLock, resumePlay, setPlayAttempt, showStartPrompt } from "./play-lock";
 import { buildWorld, type WorldView } from "./render";
+import { setMapVolumes, volumesOf } from "./player/map-volumes";
 import { debugHookOptIn, RunSession } from "./session";
 import { fetchMapIndex, goToMainMenu, initMenu, revealGame, showError, showHome, showLoading, showReady } from "./menu";
 import { gameView, keyLabel, prefs, verticalFov } from "./ui/settings";
@@ -56,6 +57,7 @@ import { Freecam, freecamSample, freecamUnavailable } from "./freecam";
 import { Viewmodel } from "./viewmodel/viewmodel";
 import { WeaponPresenter } from "./viewmodel/weapons";
 import { GunPresenter } from "./viewmodel/guns/presenter";
+import { EyeFeel } from "./viewmodel/eye-feel";
 import { HitEffects } from "./effects";
 import { scheduleImpactSurfaces } from "./audio/impacts";
 import { isWeaponAction } from "./binds";
@@ -96,6 +98,8 @@ import { setCosmeticsTier, tierOf } from "./viewmodel/finishes/detail";
 import { lookTierOf, setPlayerLookTier } from "./player/look-tier";
 import { PotatoHint } from "./potato-hint";
 import { CanvasVideoGrade } from "./video-grade";
+import { mapLook, setLookMapNow } from "./map-look";
+import { initLookMenu, registerLookCommands } from "./look-menu";
 import { initTriggerOverlay, triggerOverlayFrame } from "./triggers";
 import { FrameLoop, GpuFence } from "./frame-loop";
 import { autoTuneGraphics } from "./gfx-auto";
@@ -201,10 +205,12 @@ input.onSamplerDelivery = (d) => experimentCapture.record("delivery", d);
 input.onSamplerReset = (r) => experimentCapture.record("reset", r);
 let run: RunSession | null = null;
 let world: WorldView | null = null;
+/** The map this page plays or replays (set once it's known): its own Brightness / Fullbright apply (map-look.ts). */
+let lookMap: string | null = null;
 
 // Client preferences, applied live (none of these touch the simulation).
 prefs.watch((p) => {
-  canvasVideoGrade.set(p.graphics);
+  canvasVideoGrade.set({ ...p.graphics, brightness: mapLook(p, lookMap).brightness });
   input.settings.sensitivity = p.sensitivity;
   input.settings.verticalSensitivityEnabled = p.verticalSensitivityEnabled;
   input.settings.verticalSensitivity = p.verticalSensitivity;
@@ -226,7 +232,7 @@ prefs.watch((p) => {
   if (world) {
     world.setPotato(p.graphics.potato);
     world.setFlashlight(p.graphics.flashlight);
-    world.setFullbright(p.graphics.fullbright);
+    world.setFullbright(mapLook(p, lookMap).fullbright);
     applyAnisotropy(world.root, p.graphics.anisotropy);
   }
 });
@@ -328,6 +334,8 @@ if (urlViewer) {
     if (bytes) {
       replayMap = (await decodeReplay(bytes)).header.map;
       viewerStart = preloadedViewerRequest(bytes, name, tg !== "pending" && "runId" in tg ? tg.runId : undefined);
+      // /h2h/<a>/<b>: run A's replay names the map; the viewer loads run B next to it.
+      if (urlViewer.h2h) viewerStart.h2h = urlViewer.h2h;
     } else if ("pb" in (tg as object)) {
       viewerStart = { target: { pb: { map: params.get("map") ?? "", style: urlViewer.style, track: urlViewer.track } } };
     } else viewerStart = { target: { bytes: new Uint8Array(0), name: "" } };
@@ -340,7 +348,7 @@ if (urlViewer) {
       throw e;
     }
     // Opened later so the viewer can say why it failed.
-    viewerStart = "runId" in (tg as object) ? { target: tg as { runId: string } } : null;
+    viewerStart = "runId" in (tg as object) ? { target: tg as { runId: string }, ...(urlViewer.h2h ? { h2h: urlViewer.h2h } : {}) } : null;
   }
 }
 
@@ -425,6 +433,9 @@ if (isStyleId(styleParam) && !gauntletStart) setSelectedStyle(styleParam);
 // (Gauntlets are Normal only: this session runs Normal without changing the style you picked for other maps.)
 const style = gauntletStart ? (GAUNTLET_STYLE as StyleId) : selectedStyle();
 localStorage.setItem("bunnyhop:last-map", mapName);
+lookMap = mapName;
+setLookMapNow(mapName);
+canvasVideoGrade.set({ ...prefs.get().graphics, brightness: mapLook(prefs.get(), lookMap).brightness });
 // A new map: the knife pool moves on to its next knife (player/cosmetics.ts), before anything builds the viewmodel.
 if (!replayMap) advanceKnifePool("map");
 setSocialPlaying(mapName, style); // friends see the map (and the room, once joined: social/state.ts)
@@ -462,13 +473,14 @@ try {
   await afterPaint();
   content = contentLoading(loading, 0.82, 0.92);
   world = await buildWorld(core, renderer, { bsp, content: content.options });
+  setMapVolumes(volumesOf(bsp)); // water + ladders for the bunnies' swim / climb (player/map-volumes.ts)
   content.done();
   attract?.stop();
   attract = null;
   resize();
   world.setPotato(prefs.get().graphics.potato);
   world.setFlashlight(prefs.get().graphics.flashlight);
-  world.setFullbright(prefs.get().graphics.fullbright);
+  world.setFullbright(mapLook(prefs.get(), lookMap).fullbright);
   applyAnisotropy(world.root, prefs.get().graphics.anisotropy);
   scene.add(world.root);
   // Every program the map draws with, culled parts included, for the screen and the look's render targets (water
@@ -528,6 +540,7 @@ function restart(track?: number, at?: RestartPoint | null) {
   run!.practice = thirdPerson.active;
   practice?.onRestart();
   thirdPerson.snap();
+  eyeFeel.reset();
   viewmodel?.draw();
   weapons?.reset(curr);
   guns?.reset(weaponReport(core));
@@ -571,6 +584,8 @@ let weapons: WeaponPresenter | null = null;
 // Gun models (viewmodel/guns/): the map-given guns' viewmodel, sounds, impacts and the bunny's gun, from the core's
 // weapon reports (research/WEAPONS.md). Presentation only.
 let guns: GunPresenter | null = null;
+// Optional in-eye camera feel (Settings -> Viewmodel: hard landing settle, speed FOV; both off by default; render only).
+const eyeFeel = new EyeFeel();
 // Practice mode (practice-mode/): noclip, checkpoints, +left / +right. Solo and in rooms, not on the tutorial.
 let practice: Practice | null = null;
 /** The zone editor (Z) is a dev tool: the dev server, or ?debug=1 / the debug opt-in. Players have no key for it. */
@@ -810,6 +825,9 @@ startPlaytime(() => input.locked && !replayViewer.active && !(mp?.isSpectating ?
 // Weapon commands (weapon-commands.ts): !usp / !glock / !knife / !gun / !guns in chat, their binds below.
 initWeaponCommands({ input: experimentWeapons.input, session, canGive: () => !replayViewer.active && !(mp?.isSpectating ?? false) && !practiceMode.noclipping && !session.flightOn && !session.flying && !freecam.active });
 registerWeaponChatCommands();
+// This map's Brightness / Fullbright (look-menu.ts, map-look.ts): !bright, !fb.
+initLookMenu(input);
+registerLookCommands();
 initPaint(w.root, camera, () => !replayViewer.active && !(mp?.isSpectating ?? false), w.skyFaces);
 initMeasure(w.root, scene, camera, () => !replayViewer.active && !(mp?.isSpectating ?? false), w.skyFaces);
 
@@ -1263,6 +1281,10 @@ function frame(now: number) {
     // practice noclip it has nothing to stay below.
     const top = lerp(prev.position[2] + hullTop(prev.crouched), curr.position[2] + hullTop(curr.crouched));
     camera.position.set(x, practiceMode.noclipping || session.flying ? z : clearEyeZ(eyeTrace, x, y, top, z), -y);
+    const vf = prefs.get().viewmodel;
+    eyeFeel.update(frameDt, landVz, Math.hypot(curr.velocity[0], curr.velocity[1]), vf.landSettle && !session.flying, vf.speedFov);
+    // (Only ever down from the eye: it can't lift the camera into a ceiling.)
+    camera.position.y += eyeFeel.z;
     camera.rotation.y = ((viewYaw - 90) * Math.PI) / 180;
     camera.rotation.x = (-input.pitch * Math.PI) / 180;
     camera.rotation.z = 0;
@@ -1282,14 +1304,14 @@ function frame(now: number) {
   // Zone boxes go with the rest of the UI when it's hidden (ui/hide-ui.ts).
   session.view.root.visible = (p.showZones && !uiHidden()) || !!session.editor?.active;
   const origins = core.brushOrigins();
-  w.update(origins, (curr.tick + alpha) * session.settings.tickInterval, core.effectStates());
+  w.update(origins, (curr.tick + alpha) * session.settings.tickInterval, core.effectStates(), core.propAnims());
   paintVisible(!(mp?.isSpectating ?? false));
   paintFrame(now, input.pointerLocked && !isTextField(document.activeElement) && input.actionHeld("paint"));
   measureFrame(now, !(mp?.isSpectating ?? false) && !uiHidden());
   triggerOverlayFrame(origins, core, uiHidden());
   arms.frame(frameDt, origins);
   // Sniper zoom (client FOV only), first person only.
-  const fov = verticalFov(thirdPerson.active || freecam.active ? p.fov : arms.fov(p.fov));
+  const fov = verticalFov(thirdPerson.active || freecam.active ? p.fov : arms.fov(p.fov + eyeFeel.fov));
   if (camera.fov !== fov) {
     camera.fov = fov;
     camera.updateProjectionMatrix();
@@ -1303,7 +1325,9 @@ function frame(now: number) {
   tutorial?.frame(camera, frameDt);
   // Viewmodel: animate always (swings stay in step), draw only in first person on your own player.
   // (Hidden with a gun out: no knife that shoots.)
-  vm.setVisible(p.viewmodel.show && !thirdPerson.active && !freecam.active && !mp?.isSpectating && arms.knifeOut);
+  const inEyeWeapons = p.viewmodel.show && !thirdPerson.active && !freecam.active && !mp?.isSpectating;
+  // (inEye: after a switch to a gun the knife lowers out of view while the gun comes up; viewmodel.ts holster.)
+  vm.setVisible(inEyeWeapons && arms.knifeOut, true, inEyeWeapons);
   const vmInput = {
     velocity: [lerp(prev.velocity[0], curr.velocity[0]), lerp(prev.velocity[1], curr.velocity[1]), lerp(prev.velocity[2], curr.velocity[2])],
     grounded: curr.grounded,
@@ -1321,7 +1345,7 @@ function frame(now: number) {
   );
   landVz = 0;
   // The gun viewmodel rides the knife viewmodel's bob / sway (which keeps animating while hidden); hidden while scoped.
-  gunView.setVisible(p.viewmodel.show && !thirdPerson.active && !freecam.active && !mp?.isSpectating && !arms.scoped);
+  gunView.setVisible(inEyeWeapons && !arms.scoped);
   gunView.frame(frameDt, vm.feelMatrix, origins, vmInput);
   if (vm.inspects.holding !== inspectHeld) {
     inspectHeld = vm.inspects.holding;

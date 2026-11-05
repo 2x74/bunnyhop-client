@@ -8,13 +8,33 @@
 // (takeFreeCursor): play pauses under the panel and the panel re-locks when it closes, as when opened from the game.
 
 let free = false;
+let held = false;
 
 /** The pointer is released for the chat, not for a pause. */
 export const cursorFree = (): boolean => free;
 
 export function setCursorFree(on: boolean): void {
   free = on;
+  if (!on) held = false;
   document.body.classList.toggle("chat-cursor", on);
+}
+
+/**
+ * A menu a chat command opened (look-menu.ts !bright) keeps the chat's free cursor after the chat closes, so the menu
+ * can be clicked: input.ts recapture leaves the lock alone until releaseHeldCursor. False if the cursor isn't free.
+ */
+export function holdFreeCursor(): boolean {
+  if (free) held = true;
+  return held;
+}
+
+export const cursorHeld = (): boolean => held;
+
+/** The menu closed: true if it was holding the cursor (the caller takes the lock back: input.recapture). */
+export function releaseHeldCursor(): boolean {
+  const was = held;
+  held = false;
+  return was;
 }
 
 /**

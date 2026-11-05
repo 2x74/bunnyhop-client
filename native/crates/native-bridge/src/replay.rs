@@ -493,6 +493,10 @@ impl Decoded {
         if style == "segmented" && (version < 7 || settings.physics < 19 || rules < 2) {
             return Err("Segmented needs replay v7, physics v19 and timer rules 2".into());
         }
+        // replay.ts styleReplayProblem: A/D-Only needs the timer's run state, recorded from physics 25 and rules 4.
+        if style == "adonly" && (version < 7 || settings.physics < 25 || rules < 4) {
+            return Err("A/D-Only needs replay v7, physics v25 and timer rules 4".into());
+        }
         let spawn_json=spawn.as_ref().map(|s|json!({"position":s.position,"yaw":s.yaw,"targetname":s.targetname,"classname":s.classname}));
         let info=CString::new(json!({"version":version,"map":map,"mapSha256":map_sha,"settings":recording::settings_json(settings),"prespeedCap":if cap>0.0{Some(cap)}else{None},"startTick":start,"endTick":end,"totalTicks":n,"track":track,"spawn":spawn_json,"style":style,"timerRules":rules,"zones":zones.iter().map(|z|z.json()).collect::<Vec<_>>(),"clientBuild":client,"player":player,"recordedAt":recorded,"checkpointInterval":interval,"checkpoints":cp_count,"counted":counted,"packedLoadout":packed_loadout,"cosmeticEvents":cosmetic.len(),"inspectEvents":inspect.len()}).to_string()).map_err(|e|e.to_string())?;
         let mut metadata: serde_json::Value =

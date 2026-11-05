@@ -19,6 +19,7 @@
 // through the same migration as stored prefs first. Keys missing from the document keep their current value.
 
 import { DEFAULT_PREFS, migratePrefs, type Prefs } from "./settings";
+import { importMapLooks } from "../map-look";
 import { PAINT_COLORS } from "../paint/prefs";
 import { TRIGGER_OPACITY, TRIGGER_STYLES, TRIGGER_THICKNESS } from "../triggers/volumes";
 import { COLOR_BLIND_MODES } from "../palette";
@@ -47,6 +48,8 @@ const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 export function buildSettingsDoc(p: Prefs, o: { at?: number; app?: string } = {}): SettingsDoc {
   // Derived from the defaults' keys (see the header): only what this build knows, in the order it's declared.
   const settings = pick(DEFAULT_PREFS, p) as SettingsDoc["settings"];
+  // Keyed by map name, so not in the defaults' keys: carried as they are (map-look.ts).
+  settings.mapLooks = clone(p.mapLooks ?? {});
   return { format: FORMAT, version: FORMAT_VERSION, exported: new Date(o.at ?? Date.now()).toISOString(), ...(o.app ? { app: o.app } : {}), settings };
 }
 
@@ -206,11 +209,6 @@ const RULES: [string, Rule][] = [
   ["ghost.routeSource", { oneOf: ["auto", "pb", "wr", "custom"] }],
   ["ghost.compare", { oneOf: ["auto", "pb", "wr", "custom"] }],
   ["ghost.routeMode", { oneOf: ["jumps", "path"] }],
-  ["models.player", { oneOf: ["bunny", "runner", "css"] }],
-  ["models.ghost", { oneOf: ["same", "bunny", "runner", "css"] }],
-  ["models.team", { oneOf: ["ct", "t"] }],
-  ["models.ct", { oneOf: ["ct_urban", "ct_gsg9", "ct_sas", "ct_gign"] }],
-  ["models.t", { oneOf: ["t_phoenix", "t_leet", "t_arctic", "t_guerilla"] }],
   ["graphics.brightness", { range: [0.5, 2] }],
   ["graphics.gamma", { range: [0.5, 2.5] }],
   ["graphics.vibrance", { range: [0, 2] }],
@@ -224,6 +222,7 @@ const RULES: [string, Rule][] = [
   ["viewmodel.bob", { range: [0, 1.5] }],
   ["viewmodel.sway", { range: [0, 1.5] }],
   ["viewmodel.hand", { oneOf: ["right", "left"] }],
+  ["viewmodel.inspect", { oneOf: ["tricks", "quiet"] }],
   ["viewmodel.x", { range: [-2, 2.5] }],
   ["viewmodel.y", { range: [-2, 2] }],
   ["viewmodel.z", { range: [-2, 2] }],
@@ -283,10 +282,24 @@ export interface ImportPlan {
 
 /** Decides what importing `doc` over `current` would do, without applying it. */
 export function planSettingsImport(doc: SettingsDoc, current: Prefs): ImportPlan {
-  const raw = migratePrefs(clone(doc.settings) as Record<string, unknown>);
+  // Partial: what the document doesn't mention stays as it is (no old-default guesses for missing values).
+  const raw = migratePrefs(clone(doc.settings) as Record<string, unknown>, { partial: true });
   const next = clone(current);
   const plan: ImportPlan = { next, applied: [], changed: [], invalid: [], skipped: [] };
+  // Per-map looks (map-look.ts) merge by map and field: what the file doesn't mention stays mine.
+  const looks = importMapLooks(current.mapLooks ?? {}, raw.mapLooks);
+  delete raw.mapLooks;
   walk(DEFAULT_PREFS as unknown as Record<string, unknown>, raw, next as unknown as Record<string, unknown>, "", plan);
+  next.mapLooks = looks.next;
+  plan.invalid.push(...looks.invalid);
+  // Compared as {map, field}, not by splitting the path: map names can have dots.
+  for (const { map, field } of looks.entries) {
+    const path = `mapLooks.${map}.${field}`;
+    plan.applied.push(path);
+    if (current.mapLooks?.[map]?.[field] !== looks.next[map]?.[field]) plan.changed.push(path);
+  }
+  // Maps of mine the 200-map cap dropped to make room: a change too (and Undo brings them back).
+  for (const map of looks.removed) plan.changed.push(`mapLooks.${map}`);
   return plan;
 }
 

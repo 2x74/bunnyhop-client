@@ -9,7 +9,7 @@
 // frame (Z up, -Y forward, X left); arm bones get a rest correction from the A-pose to hanging arms.
 
 import * as THREE from "three";
-import type { PlayerPose } from "../model";
+import type { PlayerPose } from "../pose";
 import { rig, type Rig, type V3 } from "./rig";
 import { hypot2, hypot3 } from "../../hypot";
 
@@ -167,11 +167,15 @@ export class BunnyProcedural {
     const leftV = -vx * Math.sin(by) + vy * Math.cos(by);
 
     const grounded = s.grounded;
-    if (grounded && !this.wasGrounded && this.airTime > 0.12) this.dipV += clamp(-vz / 900, 0.15, 0.7) * 2.2;
+    // (The landing dip moved to the leg layer, legs.ts, which runs on this pose too: no second dip here.)
     this.airTime = grounded ? 0 : this.airTime + dt;
     this.wasGrounded = grounded;
     const gT = grounded ? 1 : 0;
-    this.ground = snap ? gT : damp(this.ground, gT, gT > this.ground ? 9 : 22, dt);
+    // The ground weight's mean over this frame (it eases exponentially), for the stride phase below: integrated
+    // exactly, so the legs' cycle is the same at any frame rate.
+    const g0 = this.ground, gRate = gT > g0 ? 9 : 22;
+    const gMean = snap || dt <= 0 ? gT : gT + ((g0 - gT) * (1 - Math.exp(-gRate * dt))) / (gRate * dt);
+    this.ground = snap ? gT : damp(this.ground, gT, gRate, dt);
     this.crouch = snap ? +s.crouched : damp(this.crouch, s.crouched ? 1 : 0, 14, dt);
     const tuckT = vz > 0 ? 1 : clamp(1 + vz / 520, 0.2, 1);
     this.tuck = snap ? tuckT : damp(this.tuck, tuckT, 7, dt);
@@ -185,15 +189,13 @@ export class BunnyProcedural {
     }
     const stride = clamp(60 + speed * 0.22, 60, 140);
     if (snap && s.visualTime !== undefined) this.phase = (back ? -1 : 1) * (speed / stride) * Math.PI * 2 * s.visualTime;
-    this.phase += (back ? -1 : 1) * ((speed / stride) * Math.PI * 2 * dt) * (0.35 + 0.65 * this.ground);
+    this.phase += (back ? -1 : 1) * ((speed / stride) * Math.PI * 2 * dt) * (0.35 + 0.65 * gMean);
     const legYawT = speed > 30 ? clamp(moveAng, -65, 65) * this.ground : 0;
     this.legYaw = snap ? legYawT : damp(this.legYaw, legYawT, 8, dt);
     const side = s.sidemove ?? 0;
     const leanT = clamp(this.yawRate * 0.055 - (side / 450) * 7, -26, 26) * (0.35 + 0.65 * (1 - this.ground)) * clamp(speed / 200, 0.2, 1);
     this.lean = snap ? leanT : damp(this.lean, leanT, 6, dt);
-    if (snap) this.dip = this.dipV = 0;
-    this.dipV += (-240 * this.dip - 15 * this.dipV) * dt;
-    this.dip = clamp(this.dip + this.dipV * dt, -0.08, 0.16);
+    this.dip = this.dipV = 0;
     this.state = this.ground < 0.5 ? "air" : this.crouch > 0.5 ? "crouch" : speed > 30 ? "run" : "idle";
 
     const P = this.p;

@@ -63,8 +63,8 @@ export class ReplayArms {
     this.knife.setKnife(knifeOf(l.loadout));
     this.knife.setOutfit(l.outfit);
     this.knife.glowOverride = l.glow;
-    this.guns.vm.setLoadout(l.loadout);
-    this.guns.vm.setOutfit(l.outfit);
+    this.guns.setLoadout(l.loadout);
+    this.guns.setOutfit(l.outfit);
   }
 
   /**
@@ -93,6 +93,7 @@ export class ReplayArms {
     const r = weaponReport(core);
     this.guns.reset(r ? { ...r, flags: WEAPON_EVENT_RESTORED } : null);
     this.active = r ? r.active : 1;
+    this.knifeOut = this.active === 1;
     this.knife.idle();
   }
 
@@ -118,11 +119,14 @@ export class ReplayArms {
   /** Per rendered frame: animation, bob / sway from the replay's movement, effects. `show`: drawn this frame. */
   frame(dt: number, input: ViewmodelInput, inspectHeld: boolean, show: boolean, transforms?: Map<number, BrushTransform>): void {
     show &&= this.ready;
-    this.knife.setVisible(show && this.active === 1, this.deployOnShow || !this.knifeOut);
+    // A switch away from the knife: it lowers out of view while the gun comes up (presentation only).
+    if (this.knifeOut && this.active !== 1) this.knife.holster();
+    this.knife.setVisible(show && this.active === 1, this.deployOnShow || !this.knifeOut, show);
     this.knifeOut = this.active === 1;
     this.knife.update(dt, input, { primary: false, secondary: false, inspect: inspectHeld && this.active === 1 });
     this.guns.setVisible(show);
-    this.guns.frame(dt, this.knife.feelMatrix, transforms);
+    // The gun's own movement feel (speed tuck, air, strafes, landings) from the same input as live play (main.ts).
+    this.guns.frame(dt, this.knife.feelMatrix, transforms, input);
     this.guns.impacts.root.visible = show;
     this.shown = show;
   }

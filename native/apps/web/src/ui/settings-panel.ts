@@ -46,6 +46,7 @@ import { StrafeTrainerView } from "../hud/strafe-trainer-view";
 import { trainerZone } from "../hud/strafe-trainer";
 import { clampScale, decodeLayout, presetLayout, encodeLayout, HUD_ELEMENTS, HUD_SCALE, PRESETS, sameLayout, type HudElId, type KeysStyle } from "../hud/layout";
 import { hideUiKeeps, hideUiSwitch, hudMiniature } from "./quick-toggles";
+import { mapLooksSettingsRow } from "./map-look-rows";
 import { jhudRows, ssjRows } from "../ssj";
 import { movementRows } from "../movement-stats";
 import { requestRace } from "../player/race";
@@ -557,7 +558,7 @@ const BIND_KEYWORDS: Partial<Record<Action, string>> = {
   restartMain: "main track m",
   setStart: "set start point position setstart ss spawn restart angle",
   clearStart: "clear delete start point position clearstart deletestart delstart spawn restart",
-  cycleStyle: "style styles autohop scroll legit w-only sideways hsw backwards f3",
+  cycleStyle: "style styles autohop scroll legit w-only sideways hsw backwards a/d-only ad f3",
   hudEditor: "hud editor layout f2",
   chat: "chat say say_team messagemode talk type message commands y u",
   thirdPerson: "third person thirdperson camera t",
@@ -887,6 +888,7 @@ function graphicsSection(ctx: Ctx): SettingsContent {
             keywords: "fullbright full bright lighting dark map shadows visibility video",
           }),
           toggle("Flashlight", () => G().flashlight, (v) => up((p) => (p.graphics.flashlight = v)), { hint: P().binds.flashlight?.[0] ? `${keyLabel(P().binds.flashlight[0])} in game` : undefined, desc: "Light up dark platforms where you look. Works in Potato mode and starts off on each map. Local view only; its state is not recorded in replays.", keywords: "flashlight torch dark lighting visibility lamp" }),
+          mapLooksSettingsRow(),
         ),
         group(
           "Display",
@@ -1016,7 +1018,7 @@ const BUILTIN: Section[] = [
   { id: "hud", label: "HUD", blurb: "", order: 30, render: hudSection, reset: resetKeys("hud", "showZones", "triggers") },
   { id: "keys", label: "Keys", blurb: "Click a slot, then press a key. Backspace clears.", order: 40, render: keysSection, reset: resetKeys("binds", "holdRestart", "autoRestart", "practice", "nullBinds", "wRelease", "yawSpeed", "angleSpeedKey") },
   { id: "ghost", label: "Ghosts & players", blurb: "", order: 50, render: ghostSection, reset: resetKeys("showGhost", "ghost", "tags", "showPlayerGlow", "showPlayers", "firstPersonGlow") },
-  { id: "graphics", label: "Graphics", blurb: "", order: 60, render: graphicsSection, reset: () => void chooseGraphicsPreset("source").then(() => { resetKeys("graphics")(); up((p) => (p.models = clone(DEFAULT_PREFS.models))); }) },
+  { id: "graphics", label: "Graphics", blurb: "", order: 60, render: graphicsSection, reset: () => void chooseGraphicsPreset("source").then(() => { resetKeys("graphics")(); }) },
   { id: "audio", label: "Audio", blurb: "", order: 70, render: audioSection, reset: resetKeys("volume") },
 ];
 
@@ -1257,7 +1259,7 @@ export function settingsPanel(o: SettingsPanelOpts = {}): HTMLElement {
       }
       disarm();
       s.reset?.();
-      // Other sections can show what a reset changed (Graphics → models → Ghost model): re-render them all.
+      // Other sections can show what a reset changed: re-render them all.
       paintAll();
       label.textContent = "Done";
       btn.classList.add("done");

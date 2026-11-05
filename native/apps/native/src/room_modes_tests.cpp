@@ -59,7 +59,7 @@ void races_in_every_wire_style() {
     assert(!native::RoomModes().event(update(unknown), "bhop_eazy", false, 7000).restart);
 }
 
-// F3 walks the website's menu order, Infinite and Backwards included, and wraps.
+// F3 walks the website's menu order, Infinite, Backwards and A/D-Only included, and wraps.
 void style_cycle_follows_the_menu() {
     std::vector<std::string> seen;
     std::string style = "autohop";
@@ -75,6 +75,7 @@ void style_cycle_follows_the_menu() {
             "sideways",
             "hsw",
             "backwards",
+            "adonly",
             "lowgrav",
             "segmented",
             "infinite",

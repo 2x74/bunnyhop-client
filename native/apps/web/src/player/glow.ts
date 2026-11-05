@@ -17,7 +17,7 @@ float auraFlow(vec2 p) { return auraNoise(p)*0.68+auraNoise(p*2.07+vec2(5.2,1.3)
 `;
 const auraFragment = /* glsl */ `
 uniform vec3 uGlowColor;
-uniform float uGlowStrength,uGlowDistance,uOpacity,uFinTime;
+uniform float uGlowStrength,uGlowDistance,uOpacity,uFinTime,uGlowEdge;
 uniform vec3 uAxisA,uAxisB;
 uniform vec2 uNearFade;
 varying float vGlowAlpha,vHalo;
@@ -41,6 +41,8 @@ void main() {
     shape=pow(1.0-edge,0.45)*pow(edge,0.22)*(0.035+flame*1.45+threads*0.15);
   }
   float alpha=nearAlpha*uOpacity*vGlowAlpha*uGlowStrength*uGlowDistance*shape;
+  // Close to the camera the body is big and the contour needs less light to read (glow separation: uGlowEdge).
+  if(uGlowEdge>0.0) alpha*=mix(1.0-0.45*uGlowEdge,1.0,smoothstep(60.0,240.0,length(cameraPosition-(uAxisA+uAxisB)*0.5)));
   if(alpha<0.002) discard;
   vec3 color=mix(uGlowColor,uGlowColor*0.65+vec3(0.55),heat*0.18);
   gl_FragColor=vec4(color*(1.35+uGlowStrength),alpha);
@@ -150,6 +152,10 @@ export class PlayerGlowShell {
   ) {
     parent.add(this.group);
     this.group.visible = false;
+  }
+  /** Whether the shell draws this frame (sync), for the body's glow separation (materials.ts uGlowEdge). */
+  get drawn(): boolean {
+    return this.group.visible;
   }
   set(config: PlayerGlow | null, shown: boolean, auraEnabled = true): void {
     this.auraEnabled = auraEnabled && config?.aura !== false;

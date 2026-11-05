@@ -74,7 +74,11 @@ Check sensitivity with a physical mouse before using Raw; it has not completed t
 - Settings → Display → Fullscreen picks the monitor, resolution and refresh rate exclusive fullscreen switches to,
   so 4:3 (1280×960, 1024×768, 1440×1080) and 16:10 modes work. A new mode shows at once and goes back after ten
   seconds unless you press Enter. A resolution of another shape than the monitor asks Windows for Stretched or Black
-  bars; drivers set to override games decide themselves. `--windowed` recovers from any mode.
+  bars; drivers set to override games decide themselves. On Windows, fullscreen at the desktop's own mode changes
+  no display mode, so opening the menu doesn't blank the monitor.
+- A borderless or fullscreen switch must present its first frames (`src/display_check.hpp`). One the system refuses,
+  or whose swaps stall, goes back to windowed and saves it. A switch the game never came back from leaves
+  `display-check.json` in the data folder, and the next launch starts windowed. `--windowed` does the same by hand.
 - Graphics → Aspect ratio gives the same picture in borderless without a mode change. With black bars the HUD and
   crosshair stay inside the picture. Mouse turning is counts × sensitivity × 0.022° in every mode.
 - Windows: Display → Low latency mode presents through DXGI (flip model, tearing, VRR) and uses NVIDIA Reflex
@@ -83,6 +87,23 @@ Check sensitivity with a physical mouse before using Raw; it has not completed t
 - While you play, Windows also gets a 1 ms timer, no power throttling and the "Games" scheduling class; menus and
   other apps get them back.
 - A finished run records your view (shape, fit, FOV) with its diagnostics, so replays can show "4:3 stretched".
+
+## Weapons
+
+- A weapon switch lowers the old weapon out of view over 0.15 s while the new one comes up. The core still switches
+  on its tick, so equip and fire timing are unchanged.
+- Gun recoil builds up under rapid fire and through the Glock's burst, and rocks side to side from shot to shot. An
+  empty gun twitches when it clicks. Reloads, inspects and the suppressor blend in and out instead of cutting.
+- The hands move like the website's: CS:S bob, lag and strafe tilt, a landing dip, a short settle after a really hard
+  fall, and an idle in the wrist and fingers. Bob now defaults to 50%; a saved Bob of exactly 100% moves to 50% once.
+- Settings → Viewmodel → Inspect: Quiet starts with a short blade check that only you see. Press again for the knife's
+  tricks, which replays record. An attack blends an inspect out instead of cutting to the swing.
+- Settings → Viewmodel → Hard landing settle and Speed FOV are off by default and only move the picture.
+- With your system's reduce motion setting on, the hands, the gun's movement and the bunny in third person move at 45%
+  and Speed FOV stays off, as on the website.
+- The M4A1 has its own model and puts its suppressor on and off in 2.0 s (physics 25). Switching away before it's on
+  or off puts it back as it was, for the USP too.
+- Two exports of the same replay show the same viewmodel frames.
 
 
 
@@ -136,6 +157,17 @@ The HUD layout editor runs in the host, over the game (`src/hud_editor.cpp`): F2
 either side; the run status, notices and replay banner, which the website doesn't have, are anchored `hudLayout`
 entries. HUD presets keep the player’s strafe trainer switch. Settings → HUD → Layout preset sends `hudPreset` with `classic`, `minimal` or `streamer`.
 
+Chat reads commands as the website does, including a Russian layout (`!ызус` is `!spec`) and a leading dot (`.rtv`).
+The numbered menus a chat line opens (`!spec`, `!race`, `!bright`) keep the cursor out until they close: their rows
+take clicks and the keys keep playing (`src/menu_cursor.hpp`). `!bright` and `!fb` set Brightness and Fullbright for
+the map you're on. The `mapLooks` setting keeps them by map name, for play and replays on that map
+(`src/map_look.hpp`); Settings → Graphics keeps the values for every other map.
+
+Peak marks after names and pride flags in the flag column are drawn from the website's own pictures at build time
+(`src/export-hud-glyphs.ts` writes `hud-glyphs.json`). Supporters' name fonts show on the Tab board, name tags, chat and
+the spectator bar: `src/export-name-fonts.ts` draws the website's font files into `name-fonts.json`, and a name is
+never wider than in the HUD font. A name with a letter the font doesn't have, such as Cyrillic, keeps the HUD font.
+
 Account → Edit avatar is the website's avatar editor (`ui/avatar-editor.ts`). The menu has no WebGL, so it sends
 `avatarRender` with the spec, its packed loadout and backdrop, and the host poses and draws the bunny offscreen
 (`src/avatar_service.hpp`), answering `bunnyhopNativeAvatar({id, png | webp | saved | error})`. The saved picture is a
@@ -185,6 +217,8 @@ Smoke runs that need no account:
 ```sh
 apps/native/build/bunnyhop-native --map /path/to/map.bsp --hidden --frames 30 --screenshot /tmp/native.ppm
 apps/native/build/bunnyhop-native --map /path/to/map.bsp --no-menu --hidden --presentation-smoke /tmp/hud
+# Stills of the third-person bunny standing, banking into strafes, mid-jump and far away (build the target first):
+apps/native/build/bunnyhop-native-actor-motion-smoke target/native-assets /tmp/bunny-motion
 ```
 
 Export replays to video without the game, one process for any number of jobs. It prints JSON progress lines and

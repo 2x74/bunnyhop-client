@@ -27,6 +27,7 @@
 // blocks a frame. Reduced motion: no sway, no turntable spin (dragging still turns it).
 
 import * as THREE from "three";
+import { DragVelocity } from "./drag-velocity";
 import { Viewmodel, type ViewmodelInput } from "../viewmodel/viewmodel";
 import { KnifeShowcase, prewarmShowcase } from "../viewmodel/knives/showcase";
 import { KNIVES, knifeById, type KnifeDef } from "../viewmodel/knives/index";
@@ -202,6 +203,11 @@ export class LoadoutStage {
   private lookPitch = 0;
   private spin = 0.35;
   private spinV = 0;
+  /** Release velocity of drags (drag-velocity.ts). */
+  private dragVel = new DragVelocity();
+  /** Seconds left of the settle after the close-up's knife changes (a fling doesn't carry onto the next knife). */
+  private settle = 0;
+  private shownKnife: unknown = undefined;
   private tilt = 0.08;
   private tiltV = 0;
   private dragging: { x: number; y: number; id: number } | null = null;
@@ -337,6 +343,9 @@ export class LoadoutStage {
     // The first-person views show the glow being edited too (ui/player-glow-controls.ts), as the bunny does.
     this.vm.glowOverride = this.look?.playerGlow;
     const k = knifeOf(l.knife);
+    // A different knife up close settles first: the spin from the last one eases out quickly, the tilt comes back level.
+    if (k !== this.shownKnife && this.shownKnife !== undefined && !this.dragging) this.settle = 0.45;
+    this.shownKnife = k;
     this.vm.setKnife(vmKnife(k));
     this.vm.setLoadout(l);
     this.show.setKnife(k);
@@ -768,13 +777,17 @@ export class LoadoutStage {
   private drawCloseUp(dt: number): void {
     // Turntable: inertia from drags and flourishes, a slow spin when left alone (not with reduced motion).
     if (!this.dragging) {
-      const damp = Math.exp(-dt * 2.2);
+      // Inertia: v e^(-c t), integrated exactly over the frame (the same spin at any frame rate); harder while settling.
+      const c = this.settle > 0 ? 9 : 2.2;
+      const damp = Math.exp(-dt * c), moved = (1 - damp) / c;
+      this.spin += this.spinV * moved;
+      this.tilt += this.tiltV * moved;
       this.spinV *= damp;
       this.tiltV *= damp;
       this.idleSpin += ((this.reduced ? 0 : 0.42) - this.idleSpin) * (1 - Math.exp(-dt * 1.5));
-      this.spin += (this.spinV + this.idleSpin) * dt;
-      this.tilt += this.tiltV * dt;
-      this.tilt += (0.08 - this.tilt) * (1 - Math.exp(-dt * 1.2));
+      this.spin += this.idleSpin * dt;
+      this.tilt += (0.08 - this.tilt) * (1 - Math.exp(-dt * (this.settle > 0 ? 5 : 1.2)));
+      this.settle = Math.max(0, this.settle - dt);
     }
     this.tilt = Math.max(-0.7, Math.min(0.7, this.tilt));
     const bob = this.reduced ? 0 : Math.sin(this.t * 0.9) * 0.025;
@@ -823,6 +836,7 @@ export class LoadoutStage {
       c.classList.add("dragging");
       this.spinV = this.tiltV = 0;
       this.idleSpin = 0;
+      this.dragVel.start(e.timeStamp, e.clientX, e.clientY);
     };
     const move = (e: PointerEvent) => {
       const d = this.dragging;
@@ -830,15 +844,13 @@ export class LoadoutStage {
       const dx = e.clientX - d.x, dy = e.clientY - d.y;
       d.x = e.clientX;
       d.y = e.clientY;
+      this.dragVel.move(e.timeStamp, e.clientX, e.clientY);
       if (this.viewMode === "bunny") this.bunny?.drag(dx, this.w);
       else if (this.viewMode === "ghost") return;
       else if (this.viewMode === "close") {
         const k = 4.2 / Math.max(240, this.w);
         this.spin += dx * k;
         this.tilt += dy * k * 0.7;
-        const dt = 1 / 60;
-        this.spinV = (dx * k) / dt;
-        this.tiltV = (dy * k * 0.7) / dt;
       } else {
         this.lookYaw = Math.max(-25, Math.min(25, this.lookYaw - dx * 0.12));
         this.lookPitch = Math.max(-14, Math.min(14, this.lookPitch + dy * 0.1));
@@ -847,14 +859,19 @@ export class LoadoutStage {
     const end = (e: PointerEvent) => {
       if (this.dragging?.id !== e.pointerId) return;
       this.dragging = null;
+      // The fling from the pointer's own timestamps (drag-velocity.ts), whatever its event rate.
+      const [vx, vy] = this.dragVel.release(e.timeStamp);
       if (this.bunny) {
         this.bunny.dragging = false;
-        this.bunny.release();
+        this.bunny.release(vx, this.w);
       }
       c.classList.remove("dragging");
-      // Keep a fling, but not a wild one.
-      this.spinV = Math.max(-9, Math.min(9, this.spinV));
-      this.tiltV = Math.max(-3, Math.min(3, this.tiltV));
+      if (this.viewMode === "close") {
+        const k = 4.2 / Math.max(240, this.w);
+        // Keep a fling, but not a wild one.
+        this.spinV = Math.max(-9, Math.min(9, vx * k));
+        this.tiltV = Math.max(-3, Math.min(3, vy * k * 0.7));
+      }
     };
     c.addEventListener("pointerdown", down);
     c.addEventListener("pointermove", move);

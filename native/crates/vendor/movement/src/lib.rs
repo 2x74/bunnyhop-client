@@ -158,6 +158,14 @@ pub struct MovementFixes {
     pub edgebug: bool,
     /// Run the same prediction without changing anything and report it in `StepResult::edge_landing_kind` (tools).
     pub edgebug_observe: bool,
+    /// Physics v25 ramp fix, the movement half (the collision half is `playsrc_collision::TraceRules`): an airborne
+    /// walking move (not ladders or swimming) that hits world geometry (`Tracer::is_world`), with no progress
+    /// (fraction 0), on a plane it already hit this tick (Source's float rounding on a surface the player slides along:
+    /// the trace sees the box entering the plane it is moving parallel to or away from, the two equal planes make a
+    /// crease with no direction and the move stops dead: the "vertical rampbug") moves the player DIST_EPSILON (1/32)
+    /// off that plane, if that spot is free, and carries on with the same velocity. Momentum Mod fixes the same case
+    /// by pushing the velocity 20 u/s off the plane; this keeps the speed exactly.
+    pub repeated_plane: bool,
     /// No RNGFix pre-move fix this tick: the tick right after an undone edge landing has to hit the ledge (the edge bug)
     /// instead of being moved back above it again.
     pub skip_prevent_collision: bool,
@@ -461,6 +469,11 @@ pub struct Policy {
     /// Recategorize support immediately when a finished crouch changes hull or origin.
     /// Off by default to preserve historical movement policies.
     pub recategorize_after_crouch: bool,
+    /// bunnyhop patch: Momentum Mod's `sv_jump_z_offset` (1.5 in its CS-based modes). After a ground jump's impulse and
+    /// FinishGravity, the origin is set to the floor below (the active hull traced `ground_probe + 0.1` down) plus this,
+    /// when the hull fits there (traced up from the floor). Ground jumps only: air jumps, ladder and swim jumps are
+    /// untouched. `None` = stock SDK.
+    pub jump_z_offset: Option<f32>,
 }
 
 /// bunnyhop patch: which duck states crop the movement command by `crouched_command_factor`.
@@ -515,6 +528,7 @@ impl Default for Policy {
             jump_while_unducking: false,
             air_unduck_from_transition: false,
             recategorize_after_crouch: false,
+            jump_z_offset: None,
         }
     }
 }
@@ -1010,6 +1024,8 @@ pub enum QueryPurpose {
     MoverDisplacement,
     TossDisplacement,
     ObserverDisplacement,
+    /// bunnyhop patch: `Policy::jump_z_offset`'s floor and room traces.
+    JumpOffset,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1118,6 +1134,17 @@ pub struct GroundJump {
     pub crouched: bool,
 }
 
+/// bunnyhop patch: the origin change `Policy::jump_z_offset` made on a ground jump (`StepResult::jump_offset`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct JumpOffset {
+    /// The origin before: where the landing left the player.
+    pub from: [f32; 3],
+    /// Floor + offset.
+    pub to: [f32; 3],
+    /// The hull it was traced with (the jump's active hull).
+    pub hull: Hull,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct StepResult {
     /// Present only for opt-in observational timing. Never affects simulation.
@@ -1151,6 +1178,9 @@ pub struct StepResult {
     /// bunnyhop patch: this tick's landing is an edge landing, and how the next tick would go
     /// (`MovementFixes::edgebug` / `edgebug_observe`).
     pub edge_landing_kind: Option<EdgeLandingKind>,
+    /// bunnyhop patch: `Policy::jump_z_offset` moved this tick's ground jump to floor + offset in CheckJumpButton,
+    /// before the move.
+    pub jump_offset: Option<JumpOffset>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

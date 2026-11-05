@@ -19,6 +19,15 @@ mod map_load;
 pub use map_load::{bh_load_map_begin, bh_load_map_poll, bh_load_map_cancel};
 mod release_crypto;
 mod assets;
+mod map_motion;
+pub use map_motion::{
+    BhMaterialMotion, BhMaterialWireframe, bh_material_motion, bh_material_wireframes, bh_texture_frame,
+};
+mod map_props;
+pub use map_props::{
+    BhAnimatedProp, BhPropAnimState, BhPropTransform, bh_animated_props, bh_prop_anim_names, bh_prop_anim_serial,
+    bh_prop_anim_states, bh_prop_transforms,
+};
 mod look;
 mod v29;
 pub use v29::{
@@ -48,6 +57,8 @@ mod run_timing_tests;
 mod styles;
 #[cfg(test)]
 mod backwards_tests;
+#[cfg(test)]
+mod adonly_tests;
 pub use assets::{BhAttackReport, BhFloorWeapon, BhWeaponReport};
 pub use assets::{BhMaterialExtra, BhPropGroup, BhSkyInfo};
 pub use look::{BhLookSample, BhLookSampleV2};
@@ -316,6 +327,8 @@ struct Map {
     segments: segments::History,
     /// Infinite's noclip key is on (flight.rs).
     flight_on: bool,
+    motion: map_motion::Motion,
+    prop_models: map_props::PropModels,
 }
 impl Map {
     fn load_cancellable(
@@ -417,7 +430,9 @@ impl Map {
         check()?;
         let mut sp = bunnyhop_core::props::static_props(&bsp);
         let n_static = sp.props.len();
-        bunnyhop_core::props::add_props(&mut sp, game.render_props());
+        // Animated props get their own groups for the renderer to pose (map_props.rs), baked in their frozen pose for
+        // when it can't. It has to run before mark_props, which keeps the 3D skybox's animated props frozen.
+        bunnyhop_core::props::add_game_props(&mut sp, &game, true);
         bunnyhop_core::skybox::mark_props(&bsp, &mut sp, n_static);
         let props = loop {
             check()?;
@@ -622,6 +637,8 @@ impl Map {
             checkpoints: Vec::new(),
             segments: segments::History::default(),
             flight_on: false,
+            motion: map_motion::Motion::default(),
+            prop_models: map_props::PropModels::default(),
         })
     }
     fn transform(&mut self, model: u32) -> Result<BhTransform, String> {
@@ -1168,7 +1185,7 @@ pub unsafe extern "C" fn bh_run_configure(
         call(ctx, |c| {
             let mut options = input(options)?;
             if ![1, 2, 3, 4].contains(&options.rules)
-                || options.strafe_keys > 2
+                || options.strafe_keys > styles::STRAFE_KEYS_PRESS
                 || !options.prespeed_cap.is_finite()
                 || options.prespeed_cap < 0.0
                 || !options.start_reentry_cap.is_finite()
@@ -1517,26 +1534,8 @@ pub unsafe extern "C" fn bh_prop_transform(
 ) -> c_int {
     unsafe {
         call(ctx, |c| {
-            let g = &c.map()?.game;
-            let (origin, angles) = g
-                .moving_prop_transforms()
-                .into_iter()
-                .find(|t| t.0 == entity as usize)
-                .map(|t| (t.1, t.2))
-                .or_else(|| g.entity_transform(entity as usize))
-                .ok_or("unknown prop entity")?;
-            output(
-                out,
-                BhTransform {
-                    origin,
-                    angles,
-                    visible: u32::from(
-                        g.overlay_states()
-                            .nth(entity as usize)
-                            .is_some_and(|flags| flags & 2 != 0),
-                    ),
-                },
-            )
+            let transform = c.map()?.single_prop_transform(entity as usize).ok_or("unknown prop entity")?;
+            output(out, transform)
         })
     }
 }
@@ -1651,7 +1650,9 @@ impl Map {
         }
         let cmd = if filter {
             let edge_landing = self.game.state.edge_landing.is_some();
-            self.filter.apply(cmd, BhState::from(&self.game), edge_landing)
+            // timer.ts RunTimer.started before the tick: running, or a rules-2 first tick still in the zone.
+            let running = self.timer.as_ref().is_some_and(|t| t.state.status == 1 || t.state.pending_start != 0);
+            self.filter.apply(cmd, BhState::from(&self.game), edge_landing, running)
         } else {
             cmd
         };

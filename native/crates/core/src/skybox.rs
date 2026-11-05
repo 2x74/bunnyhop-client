@@ -360,11 +360,15 @@ impl Skybox {
 }
 
 /// Marks the props in the 3D skybox set: `sp.props[..n_static]` are the static prop lump in order (by their leaf
-/// lists), the rest entity props (by origin; moving ones never). No-op without a 3D skybox.
+/// lists), the rest entity props (by origin; moving ones never). An animated prop in the set goes back to being baked
+/// there (frozen, as before: the skybox pass doesn't pose models). No-op without a 3D skybox.
 pub fn mark_props(bsp: &Bsp, sp: &mut crate::props::StaticProps, n_static: usize) {
     let Some(sky) = find(bsp, &crate::entities::parse(&crate::content::entity_text(bsp))) else { return };
     let flags = sky.static_props(bsp);
     for (i, p) in sp.props.iter_mut().enumerate() {
-        p.sky3d = if i < n_static { flags.get(i).copied().unwrap_or(false) } else { p.owner == 0 && sky.contains(p.origin) };
+        p.sky3d = if i < n_static { flags.get(i).copied().unwrap_or(false) } else { (p.owner == 0 || p.animated) && sky.contains(p.origin) };
+        if p.sky3d && p.animated {
+            (p.owner, p.animated) = (0, false);
+        }
     }
 }

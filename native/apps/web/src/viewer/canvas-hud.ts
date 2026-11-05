@@ -29,6 +29,8 @@ export interface CanvasHudOptions {
   crosshair?: boolean;
   /** Brief hook text, independent of the HUD toggles. */
   caption?: string;
+  /** The jumps / strafes / sync lines (default: with `hud`); head to head shows them in its panels instead. */
+  stats?: boolean;
 }
 
 /** html { font-size: clamp(14px, 0.35vw + 0.45vh + 7px, 28px) } for a w x h viewport. */
@@ -131,8 +133,8 @@ export class CanvasHud {
       if (L.ghostSpeed.on && v.ghostSpeed !== null) this.place(g, "ghostSpeed", L.ghostSpeed, this.ghostSpeed(g, v.ghostSpeed, em(L.ghostSpeed)));
       if (L.track.on && v.track) this.place(g, "track", L.track, this.text(g, v.track, em(L.track) * 0.85, 750, ACCENT));
       if (L.stage.on && v.stage) this.place(g, "stage", L.stage, this.text(g, v.stage, em(L.stage) * 0.8, 700, "rgba(255,255,255,0.9)"));
-      if (L.stats.on && v.showStats) this.place(g, "stats", L.stats, this.stats(g, v, em(L.stats) * 0.8));
-      if (L.sync.on) this.place(g, "sync", L.sync, this.sync(g, v.sync, em(L.sync) * 0.7, v.perfText));
+      if (L.stats.on && v.showStats && o.stats !== false) this.place(g, "stats", L.stats, this.stats(g, v, em(L.stats) * 0.8));
+      if (L.sync.on && o.stats !== false) this.place(g, "sync", L.sync, this.sync(g, v.sync, em(L.sync) * 0.7, v.perfText));
     }
     if (o.keys && L.keys.on) this.place(g, "keys", L.keys, this.keys(g, v.keys, em(L.keys) * 0.62, p.hud.keys));
     if (o.graph) this.place(g, "graph", L.graph.on ? L.graph : { ...L.graph, on: true }, this.graph(g, d, t, em(L.graph)));
@@ -173,7 +175,7 @@ export class CanvasHud {
       bottom -= gap;
     };
     if (o.graph) stack(this.graph(g, d, t, width / 13));
-    if (o.hud && L.stats.on && v.showStats) stack(this.stats(g, v, e * 0.7));
+    if (o.hud && L.stats.on && v.showStats && o.stats !== false) stack(this.stats(g, v, e * 0.7));
     if (o.hud && L.sync.on) stack(this.sync(g, v.sync, e * 0.7, v.perfText));
     if (o.keys && L.keys.on) stack(this.keys(g, v.keys, e * 0.7, p.hud.keys));
   }

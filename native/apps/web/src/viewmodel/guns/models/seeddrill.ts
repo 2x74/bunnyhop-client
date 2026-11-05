@@ -35,7 +35,8 @@ const POD0 = -5.8, POD1 = 6.4, PODZ = 1.75;
 function build(k: KnifeCtx): void {
   const fp = k.view === "fp";
   // --- Upper body (sand): a long rounded pebble from the butt to the nose, the pod's bed on top.
-  slab(k, [[-8.2, -0.5], [7.4, -0.5], [8.6, 0.1], [8.4, 1.1], [7.2, 1.3], [-8.0, 1.3], [-8.6, 0.5]], -0.95, 0.95, { paint: SAND, part: PART.blade, round: 0.6, bevel: 0.25 });
+  // (v0.0.37 polish: the nose slopes down to the muzzle and the back rounds off over the butt; it was a long block.)
+  slab(k, [[-8.2, -0.5], [7.6, -0.5], [8.6, -0.05], [8.5, 0.5], [6.1, 1.3], [-6.0, 1.3], [-8.3, 0.75], [-8.6, 0.2]], -0.95, 0.95, { paint: SAND, part: PART.blade, round: [0.6, 0.6, 0.5, 0.6, 1.0, 1.0, 0.6, 0.5], bevel: 0.25 });
   // --- Stock (olive), under the rear.
   slab(k, [[-8.4, -0.4], [-2.4, -0.4], [-1.6, -1.6], [-3.2, -3.1], [-8.0, -3.4], [-8.6, -2.2]], -0.9, 0.9, { paint: OLIVE, round: 0.55, bevel: 0.22 });
   // --- Grip (olive), the thumbhole loop round the hand, the trigger.
@@ -51,6 +52,8 @@ function build(k: KnifeCtx): void {
     // A short flash ring on the muzzle; the shells' seam along both flanks and three screws holding them.
     lathe(k, [[8.75, 0.4], [8.95, 0.4]], { c: [0, 0.35], paint: STEEL, sides: 12, capStart: false, capEnd: false });
     for (const y of [-0.95, 0.95]) groove(k, -7.6, 6.8, 0.38, y, { paint: SEAM, lip: LIP });
+    // A panel line round the stock's flank, so the big olive shell doesn't read as one flat slab.
+    for (const y of [-0.9, 0.9]) groove(k, -7.5, -3.4, -2.35, y, { paint: OLIVE_DARK, lip: OLIVE });
     for (const [x, z] of [[-6.9, 0.05], [-1.2, 0.85], [5.9, 0.05]] as const) for (const y of [-1, 1]) stud(k, [x, y * 0.93, z], [0, y, 0], 0.15, 0.06, { paint: SCREW });
   }
   // Charging knob on the left (Slide bone).
@@ -113,6 +116,8 @@ export const seeddrill: GunDef = {
   frame: { o: [21, -6.4, -6.2], a: [-1, 4, -4] },
   trigger: TRIGGER,
   elbows: { R: [8, -18, -18], L: [22, 8, -30] },
+  // On the pod (reload, inspect): the support forearm comes up diagonally from the lower left, not across the view.
+  workElbow: [12, 16, -26],
   // The thumbhole grip turns the firing wrist (a straighter one sends the sleeve across the top of the screen); the
   // support wrist 34 keeps its sleeve as low as before.
   wrist: { R: 40, L: 34 },

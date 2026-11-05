@@ -12,11 +12,15 @@ import { box, dome, groove, guard, lathe, pins, plate, rod, slab, trigger, type 
 import { gunPaint as fixed } from "../material";
 import type { GunDef } from "../types";
 
-const RECV = fixed(0x5b6069, "metal"), RECV_DARK = fixed(0x3f434a, "dark"), STEEL = fixed(0x3a3f47, "dark"), STEEL_LIGHT = fixed(0x6a707a, "metal"), BORE = fixed(0x101114);
+const RECV = fixed(0x4f545c, "metal"), RECV_DARK = fixed(0x3f434a, "dark"), STEEL = fixed(0x3a3f47, "dark"), STEEL_LIGHT = fixed(0x6a707a, "metal"), BORE = fixed(0x101114);
 const WOOD = fixed(0x8f5d36, "wood"), WOOD_DARK = fixed(0x6b4426, "wood"), LEAF = fixed(0x58c64a), LEAF_DARK = fixed(0x2f7d34), ORANGE = fixed(0xff7a1a);
 const HULL = fixed(0xc43c2c), BRASS = fixed(0xd8a640, "metal"), PAD = fixed(0x2b2a2c, "grip"), SEAM = fixed(0x2a2d33, "dark"), LIP = fixed(0x9aa1ab, "metal");
 /** The trigger's pivot (top of its blade, gun-local). */
-const TRIGGER: [number, number, number] = [2.35, 0, -0.3];
+/**
+ * The trigger's pivot (top of its blade, gun-local): tight in front of the grip's thin upper part, where the firing
+ * index's pad rests on it (v0.0.37, as the rifles'; guns/hold.ts solveTriggerIndex).
+ */
+const TRIGGER: [number, number, number] = [0.3, 0, -0.3];
 
 /** Barrel and tube axes (z), the pump's span. */
 const BZ = 1.25, TZ = 0.25, P0 = 9.5, P1 = 16;
@@ -30,6 +34,14 @@ const gripAt = (t: number, d: number): [number, number, number] => {
   const p = along(BACK0, t, d);
   return [p[0], 0, p[1]];
 };
+
+/** The stock's side profile (top line from the receiver to the heel, then the butt, the toe and the belly). */
+const STOCK: P2[] = [[-0.75, 1.55], [-2.0, 1.22], [-4.1, 1.45], [-4.25, -1.3], [-3.6, -1.5], [-1.6, -0.85], [-0.75, -0.2]];
+/** The stock's top (side 1) or belly (side -1) height at x, on its straight edges (for the wrap). */
+function stockAt(x: number, side: 1 | -1): number {
+  const [a, b] = side > 0 ? [STOCK[1], STOCK[2]] : [STOCK[5], STOCK[4]];
+  return a[1] + ((x - a[0]) / (b[0] - a[0])) * (b[1] - a[1]);
+}
 
 function build(k: KnifeCtx): void {
   const fp = k.view === "fp";
@@ -61,17 +73,24 @@ function build(k: KnifeCtx): void {
   // Action bars back to the receiver (they slide with the pump).
   if (fp) for (const y of [-0.45, 0.45]) rod(k, [5.3, y, TZ + 0.2], [P0 + 0.2, y, TZ + 0.2], 0.07, { paint: STEEL_LIGHT, bone: "Pump" });
   // --- Trigger guard, trigger, the walnut pistol grip with its orange cap, a short stock with the leaf wrap.
-  guard(k, [[3.3, -0.3], [3.2, -1.25], [2.0, -1.38], [1.3, -1.15], [1.25, -0.6]], 0.13, { paint: RECV, open: true });
-  trigger(k, TRIGGER, 0.65, { paint: STEEL_LIGHT });
+  guard(k, [[1.6, -0.3], [1.52, -1.22], [0.82, -1.38], [0.3, -1.32]], 0.13, { paint: RECV, open: true });
+  trigger(k, TRIGGER, 0.55, { paint: STEEL_LIGHT });
   const b0 = BACK0;
-  slab(k, [along(b0, 0, -0.05), along(b0, -0.05, 1.0), [1.15, -0.45], along(b0, 1.1, GRIP_DEPTH), along(b0, GRIP_LEN, GRIP_DEPTH - 0.1), along(b0, GRIP_LEN, 0.05), along(b0, 1.5, -0.05)], -0.62, 0.62, { paint: WOOD, part: PART.grip, round: 0.25, bevel: 0.15 });
+  // The grip: thin at the top (the firing index runs along it to the trigger), full depth below the guard (a palm swell).
+  slab(k, [along(b0, 0, -0.05), along(b0, -0.05, 0.35), [0.1, -0.4], [-0.08, -0.94], along(b0, 0.8, -0.05)], -0.62, 0.62, { paint: WOOD, part: PART.grip, round: 0.18, bevel: 0.14 });
+  slab(k, [along(b0, 0.7, -0.05), [-0.12, -0.88], along(b0, 0.85, GRIP_DEPTH), along(b0, GRIP_LEN, GRIP_DEPTH - 0.1), along(b0, GRIP_LEN, 0.05), along(b0, 1.5, -0.05)], -0.62, 0.62, { paint: WOOD, part: PART.grip, round: 0.25, bevel: 0.15 });
   const c0 = along(b0, GRIP_LEN, -0.05), c1 = along(b0, GRIP_LEN, GRIP_DEPTH - 0.05), c2 = along(b0, GRIP_LEN + 0.28, GRIP_DEPTH - 0.15), c3 = along(b0, GRIP_LEN + 0.28, 0.05);
   slab(k, [c0, c1, c2, c3], -0.64, 0.64, { paint: ORANGE, round: 0.12 });
-  slab(k, [[-0.75, 1.55], [-4.2, 1.35], [-4.2, -1.4], [-2.4, -1.05], [-1.2, -0.75], [-0.75, -0.2]], -0.6, 0.6, { paint: WOOD, round: 0.3, bevel: 0.15 });
+  // The stock (v0.0.37 polish: it was a box): a slim wrist, the comb rising to a rounded heel, an angled toe and the belly
+  // sweeping up to the grip. The leaf wrap, the pad and the sling loop follow its outline.
+  slab(k, STOCK, -0.6, 0.6, { paint: WOOD, round: [0.3, 0.6, 0.45, 0.3, 0.5, 0.8, 0.3], bevel: 0.15 });
   // Rubber butt pad, a steel sling loop under the stock.
-  slab(k, [[-4.18, 1.38], [-4.5, 1.36], [-4.5, -1.42], [-4.18, -1.43]], -0.62, 0.62, { paint: PAD, round: 0.1, bevel: 0.08 });
-  if (fp) guard(k, [[-3.35, -1.22], [-3.45, -1.62], [-3.85, -1.66], [-3.9, -1.3]], 0.05, { paint: STEEL_LIGHT, open: true });
-  if (fp) for (const [x, p] of [[-2.9, LEAF], [-3.15, LEAF_DARK]] as const) slab(k, [[x + 0.1, 1.48], [x - 0.1, 1.47], [x - 0.1, -1.18], [x + 0.1, -1.2]], -0.63, 0.63, { paint: p, round: 0.06, bevel: 0.03 });
+  slab(k, [[-4.08, 1.42], [-4.42, 1.36], [-4.55, -1.3], [-4.2, -1.38]], -0.62, 0.62, { paint: PAD, round: 0.1, bevel: 0.08 });
+  if (fp) guard(k, [[-3.0, -1.27], [-3.1, -1.7], [-3.5, -1.74], [-3.55, -1.42]], 0.05, { paint: STEEL_LIGHT, open: true });
+  if (fp) for (const [x, p] of [[-2.35, LEAF], [-2.6, LEAF_DARK]] as const) {
+    const top = stockAt(x, 1), bot = stockAt(x, -1);
+    slab(k, [[x + 0.1, top + 0.06], [x - 0.1, top + 0.06], [x - 0.1, bot - 0.06], [x + 0.1, bot - 0.06]], -0.63, 0.63, { paint: p, round: 0.06, bevel: 0.03 });
+  }
   // --- The shell the left hand loads (Aux; built seated in the tube behind the port, hidden until a reload).
   lathe(k, [[1.5, 0.33], [1.62, 0.33], [1.62, 0.3], [2.75, 0.29], [2.8, 0.2]], { c: [0, TZ], paint: (i) => (i < 1 ? BRASS : HULL), sides: 10, bone: "Aux" });
 }
@@ -84,15 +103,18 @@ export const broadfork: GunDef = {
   cls: "shotgun",
   build,
   right: {
-    o: [-1.53, 0.0, -1.85],
-    up: [-0.2, 0, 0.98],
-    fwd: [0.751, 0.643, 0.153],
+    // v0.0.37: on the pistol grip like the rifles (it came from the side, yawed 40 deg, the index far from the trigger).
+    o: [-0.66, 0.0, -2.3],
+    up: [-0.407, 0, 0.914],
+    fwd: [0.9, 0.174, 0.401],
     index: { c: [16, 34, 20], spread: -4 },
     middle: { c: [84, 98, 75] },
     ring: { c: [88, 98, 75] },
     pinky: { c: [92, 96, 75] },
     thumb: { c: [12, 10, 6], spread: -10 },
     wrap: ["Middle", "Ring", "Pinky", "Thumb"],
+    // (The pad rests high on the blade: the palm sits higher on this grip for the wrap.)
+    triggerRest: 0.12,
     seat: -0.02,
   },
   // The support hand under the handguard (riding the pump), palm up, fingers over its right side (placement from

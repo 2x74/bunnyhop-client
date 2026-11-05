@@ -13,8 +13,13 @@
 // On top (all in view space, from the SDK 2013 viewmodel code): CS:S bob (CWeaponCSBase::CalcViewmodelBob / AddViewmodelBob:
 // cl_bobcycle 0.8, cl_bobup 0.5, speed-limited, only while grounded here), viewmodel lag (CBaseViewModel::CalcViewModelLag:
 // the last-facing vector catching up at 5/s, max lag 1.5, plus the pitch offset), a strafe tilt, a crouch offset, a
-// landing dip and a little breathing. Bob amount and sway amount scale these (Settings -> Viewmodel), and the
-// CS:GO-style viewmodel_offset_x / _y / _z (Settings -> Viewmodel -> Position) moves the whole pose in view space.
+// landing dip and a little breathing. Bob amount and sway amount scale these (Settings -> Viewmodel; Bob defaults to
+// half of CS:S since v0.0.38), and the CS:GO-style viewmodel_offset_x / _y / _z (Settings -> Viewmodel -> Position)
+// moves the whole pose in view space.
+// Since v0.0.38 (feel.ts): the lag catches up exponentially (the same at any frame rate) and its offset levels off
+// (LAG_LIMIT) so a fast strafe sweep no longer throws the hands across the screen while small aim moves stay CS:S; the
+// landing dip is an exact spring kicked by landImpact (a flat bhop landing barely moves it, a real drop does); attacks
+// blend in over ATTACK_BLEND instead of cutting.
 //
 // Purely cosmetic: nothing here reaches the simulation. main.ts forwards mouse binds (attack / attack2 / inspect) only
 // when they aren't movement binds (input.ts gives movement binds priority), and records attacks as replay cosmetics.
@@ -43,7 +48,6 @@ import { hasViewmodelAnims, loadViewmodelAnims, readyViewmodelAnims } from "../p
 import { onPlayerContent } from "../content/player";
 import { prefs, verticalFov } from "../ui/settings";
 import { ATTACK_SLASH, ATTACK_STAB, emitWeaponEvent as emitEvent } from "./events";
-import { angleMatrix } from "./math";
 import { viewmodelGeometry } from "./mesh";
 import { equippedKnife, onKnife } from "./knives/equipped";
 import { KnifeHold, prewarmGrips } from "./knives/hold";
@@ -54,9 +58,11 @@ import { PROC_DURATION, VmProcedural, type VmAction } from "./procedural";
 import { vmRig } from "./rig";
 import { VmInspect } from "./inspects/runtime";
 import { clampFingers } from "./fingers";
-import { hypot2, hypot3 } from "../hypot";
+import { motionScale, ViewFeel } from "./feel";
+import { angleMatrix } from "./math";
+import { HandIdle } from "./idle";
+import { VIEWMODEL_BOB } from "./defaults";
 
-const D2R = Math.PI / 180;
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
 
 /** CS:S knife timings (s): next primary / secondary after a missed slash, after a missed stab, after a draw. */
@@ -64,6 +70,15 @@ const SLASH_NEXT_PRIMARY = 0.4;
 const SLASH_NEXT_SECONDARY = 0.5;
 const STAB_NEXT = 1.0;
 const DRAW_NEXT = 0.6;
+
+/** Crossfade into the attack sequences (CS:S snaps them; a few frames keeps the swing crisp without the pop). */
+export const ATTACK_BLEND = 0.05;
+
+/**
+ * Switching away from the knife (presentation only: the core has already switched): it lowers out of view over this
+ * long while the gun comes up, instead of vanishing. The gun's draw starts below the screen, so the two overlap.
+ */
+export const KNIFE_HOLSTER = 0.15;
 
 /** Sequence names per action (v_knife_t). */
 const SEQ: Record<VmAction, string> = { idle: "idle", draw: "draw", slash1: "midslash1", slash2: "midslash2", stab: "stab_miss" };
@@ -143,19 +158,11 @@ export class Viewmodel {
   private pressedPrimary = false;
   private pressedSecondary = false;
 
-  // Movement feel
-  private bobTime = 0;
-  private bobSpeed = 0;
-  private vBob = 0;
-  private lBob = 0;
-  private lastFacing: [number, number, number] | null = null;
-  private lag = [0, 0, 0];
-  private tilt = 0;
-  private shift = 0;
-  private duck = 0;
-  private dip = 0;
-  private dipV = 0;
-  private V = new Float32Array(12);
+  /** The hand's own idle and settle (idle.ts): wrist and grip, not the screen. */
+  private handIdle = new HandIdle();
+  // Movement feel (bob, lag, tilt, crouch, landing dip, breathing; feel.ts)
+  private feelState = new ViewFeel();
+  private V = this.feelState.V;
   private T = new Float32Array(12);
   private T2 = new Float32Array(12);
   private tmp = new Float32Array(12);
@@ -167,6 +174,12 @@ export class Viewmodel {
   /** Hold layer of the knife: its `state` (wrist / offset / extra-bone angles) is what inspects may adjust. */
   knifeHold: KnifeHold | null = null;
   private visible = true;
+  /** First-person weapons may be drawn at all (setVisible's `inEye`): the lowering knife is drawn only then. */
+  private inEye = true;
+  /** Seconds into the lower out of view after a switch away (Infinity: not lowering). */
+  private holsterT = Infinity;
+  private L = new Float32Array(12);
+  private LV = new Float32Array(12);
   /** Cosmetic loadout on the hands + knife (finish, gloves; the knife itself comes through setKnife) and its program variant. */
   private loadout: CosmeticLoadout = getHeldLoadout();
   private look: MaterialLook = NO_LOOK;
@@ -381,6 +394,7 @@ export class Viewmodel {
 
   /** Deploy (spawn, restart, viewmodel shown again). */
   draw(): void {
+    this.holsterT = Infinity;
     this.setAction("draw");
     this.nextPrimary = this.nextSecondary = this.now + DRAW_NEXT;
     this.inspects.cancel("draw");
@@ -393,8 +407,31 @@ export class Viewmodel {
     this.inspects.remote(sig);
   }
 
-  /** Straight to idle, no deploy (the replay viewer after a seek). */
+  /**
+   * The weapon in hand switched away from the knife (the core's switch; presentation only): if it's on screen, it
+   * lowers out of view over KNIFE_HOLSTER while the gun comes up (drawn after setVisible(false) while `inEye`).
+   */
+  holster(): void {
+    if (!this.visible || this.holsterT < KNIFE_HOLSTER) return;
+    this.holsterT = 0;
+    this.inspects.cancel("switch");
+  }
+
+  /**
+   * Straight to idle, no deploy, and no history (the replay viewer after a seek, an export's start): the viewmodel
+   * clock (breathing, hand idle phases), the sequence (no crossfade from what was showing), the inspect, the movement
+   * feel, the attack timers. The same replay from the same tick then poses the same every time.
+   */
   idle(): void {
+    this.holsterT = Infinity;
+    this.handIdle.reset();
+    this.feelState.reset();
+    this.inspects.reset();
+    this.now = 0;
+    this.nextPrimary = this.nextSecondary = 0;
+    this.slashSide = 0;
+    this.pressedPrimary = this.pressedSecondary = false;
+    this.play = { seq: -1, cycle: 0, prevSeq: -1, prevCycle: 0, fade: 0, fadeT: 0 };
     this.setAction("idle");
     this.inspects.cancel("draw");
   }
@@ -443,7 +480,14 @@ export class Viewmodel {
     const p = this.play;
     const next = cs.d.seqs[seq];
     const snap = (next.flags & STUDIO_SNAP) !== 0 || p.seq < 0;
-    if (snap) {
+    // An attack from a pose on screen blends in over ATTACK_BLEND (the draw still cuts: it comes up from off screen).
+    const attack = a === "slash1" || a === "slash2" || a === "stab";
+    if (snap && attack && p.seq >= 0) {
+      p.prevSeq = p.seq;
+      p.prevCycle = p.cycle;
+      p.fade = ATTACK_BLEND;
+      p.fadeT = 0;
+    } else if (snap) {
       p.prevSeq = -1;
       p.fade = 0;
     } else {
@@ -515,11 +559,13 @@ export class Viewmodel {
     const t0 = performance.now();
     dt = clamp(dt, 0, 0.1) * this.timeScale;
     this.now += dt;
+    if (this.holsterT < KNIFE_HOLSTER) this.holsterT += dt;
     this.actionT += dt;
     this.attack(held);
     if (this.action !== "idle" && this.actionT >= this.duration(this.action)) this.setAction("idle");
     else if (this.action === "idle" && this.actionT >= this.duration("idle")) this.setAction("idle");
     this.inspects.update(dt, held.inspect ?? false);
+    this.handIdle.update(dt, this.action === "idle" && !this.inspects.active);
     this.pose(dt);
     this.feel(dt, s);
     this.lastUpdateMs = performance.now() - t0;
@@ -559,9 +605,12 @@ export class Viewmodel {
       this.proc.pose(this.action, this.actionT, W);
     }
     // Knife hold (non-carrot knives): fingers + knife follow the hand, per-action tweaks; extra bones after the inspect.
+    if (this.knifeHold) this.knifeHold.state.time = this.now;
     this.knifeHold?.apply(W, this.action, this.actionT, cs ? "cs" : "procedural");
     this.inspects.apply(W);
     this.knifeHold?.solve(W);
+    // The hand's idle and settle (idle.ts), scaled like the bob (0 = still) and by reduced motion.
+    this.handIdle.apply(W, this.inspects.arm, this.now, Math.min(1.5, prefs.get().viewmodel.bob / VIEWMODEL_BOB) * motionScale());
     // Safety net: no finger joint past its anatomical range, whatever the layers above did (fingers.ts).
     clampFingers(W, this.r);
     // Skinning matrices: animated bone-to-model * inverse bind, written column-major for three.js.
@@ -579,92 +628,32 @@ export class Viewmodel {
     this.skeleton.update();
   }
 
-  /** Bob, lag/sway, strafe tilt, crouch offset, landing dip, breathing -> this.V (view space). */
+  /** Bob, lag/sway, strafe tilt, crouch offset, landing dip, breathing -> this.V (view space; feel.ts ViewFeel). */
   private feel(dt: number, s: ViewmodelInput): void {
     const vp = prefs.get().viewmodel;
-    const bobK = vp.bob;
-    const swayK = vp.sway;
-    // --- CS:S bob (CalcViewmodelBob), only while grounded.
-    const hs = s.grounded ? hypot2(s.velocity[0], s.velocity[1]) : 0;
-    const maxDelta = dt * 320;
-    let speed = clamp(hs, this.bobSpeed - maxDelta, this.bobSpeed + maxDelta);
-    speed = clamp(speed, -320, 320);
-    this.bobSpeed = speed;
-    this.bobTime += dt * (speed / 320);
-    const CYCLE = 0.8, UP = 0.5;
-    const phase = (len: number) => {
-      let c = (this.bobTime % len) / len;
-      c = c < UP ? (Math.PI * c) / UP : Math.PI + (Math.PI * (c - UP)) / (1 - UP);
-      return c;
-    };
-    let v = speed * 0.005;
-    this.vBob = clamp(v * 0.3 + v * 0.7 * Math.sin(phase(CYCLE)), -7, 4) * bobK;
-    v = speed * 0.005;
-    this.lBob = clamp(v * 0.3 + v * 0.7 * Math.sin(phase(CYCLE * 2)), -7, 4) * bobK;
-
-    // --- Lag (CalcViewModelLag), world space -> view space.
-    const cy = Math.cos(s.yaw * D2R), sy = Math.sin(s.yaw * D2R), cp = Math.cos(s.pitch * D2R), sp = Math.sin(s.pitch * D2R);
-    const fwd: [number, number, number] = [cp * cy, cp * sy, -sp];
-    const left = [-sy, cy, 0];
-    const up = [sp * cy, sp * sy, cp];
-    if (!this.lastFacing) this.lastFacing = [...fwd];
-    const lf = this.lastFacing;
-    // A view snapped (nearly) straight around (a teleport or restart turning 180°) would leave the lag direction
-    // antiparallel and stuck at full strength, pulling the viewmodel into the camera: start the lag over instead.
-    if (hypot3(fwd[0] - lf[0], fwd[1] - lf[1], fwd[2] - lf[2]) > 1.9) (lf[0] = fwd[0]), (lf[1] = fwd[1]), (lf[2] = fwd[2]);
-    const dx = fwd[0] - lf[0], dy = fwd[1] - lf[1], dz = fwd[2] - lf[2];
-    if (dt > 0) {
-      let k = 5;
-      const diff = hypot3(dx, dy, dz);
-      if (diff > 1.5) k *= diff / 1.5;
-      lf[0] += dx * k * dt;
-      lf[1] += dy * k * dt;
-      lf[2] += dz * k * dt;
-      const ll = hypot3(lf[0], lf[1], lf[2]) || 1;
-      lf[0] /= ll, lf[1] /= ll, lf[2] /= ll;
-    }
-    const ox = -5 * dx * swayK, oy = -5 * dy * swayK, oz = -5 * dz * swayK;
-    this.lag[0] = ox * fwd[0] + oy * fwd[1] + oz * fwd[2];
-    this.lag[1] = ox * left[0] + oy * left[1] + oz * left[2];
-    this.lag[2] = ox * up[0] + oy * up[1] + oz * up[2];
-
-    // --- Strafe tilt + slight counter-shift, crouch, landing dip, breathing.
-    const side = clamp(s.sidemove / 450, -1, 1);
-    const kT = 1 - Math.exp(-dt * 7);
-    this.tilt += (side * 3.2 * swayK - this.tilt) * kT;
-    this.shift += (side * 0.35 * swayK - this.shift) * kT;
-    const duckTarget = clamp((64 - s.viewOffsetZ) / 18, 0, 1);
-    this.duck += (duckTarget - this.duck) * (1 - Math.exp(-dt * 10));
-    if (s.landed < -50) this.dipV -= clamp(-s.landed / 300, 0, 2.2) * 9 * bobK;
-    // Slightly underdamped spring back to 0 (semi-implicit Euler in small steps: stable at any frame rate).
-    const K = 170, C = 20;
-    const steps = Math.ceil(dt / (1 / 240));
-    const h = steps ? dt / steps : 0;
-    for (let i = 0; i < steps; i++) {
-      this.dipV += (-K * this.dip - C * this.dipV) * h;
-      this.dip += this.dipV * h;
-    }
-    this.dip = clamp(this.dip, -4, 2);
-    const breathe = Math.sin(this.now * ((2 * Math.PI) / 3.8)) * bobK;
-
-    const pitch = s.pitch > 180 ? s.pitch - 360 : s.pitch;
-    // AddViewmodelBob (scaled down to 40%) + the lag pitch offset (forward, right, up = -pitch * 0.035 / 0.03 / 0.02).
-    const fx = this.vBob * 0.4 + this.lag[0] - pitch * 0.035 - this.duck * 0.4;
-    const fy = -this.lBob * 0.2 + this.lag[1] + pitch * 0.03 + this.shift + this.duck * 0.25;
-    const fz = this.vBob * 0.1 + this.lag[2] - pitch * 0.02 - this.duck * 0.55 + this.dip * 0.6 + breathe * 0.07;
-    const aP = -this.vBob * 0.4 + breathe * 0.12 + this.dip * -1.2;
-    const aY = -this.lBob * 0.3;
-    const aR = this.vBob * 0.5 + this.tilt - this.duck * 1.5;
-    angleMatrix(aP, aY, aR, fx, fy, fz, this.V);
+    // prefers-reduced-motion scales the feel like the guns' (feel.ts motionScale).
+    const m = motionScale();
+    this.feelState.update(dt, s, vp.bob * m, vp.sway * m, this.now);
   }
 
   // -------------------------------------------------------------------------------------------
   // Rendering
 
-  /** Shown / hidden; shown again it deploys (draw) unless `deploy` is false (a replay export's camera cut). */
-  setVisible(v: boolean, deploy = true): void {
+  /**
+   * Shown / hidden; shown again it deploys (draw) unless `deploy` is false (a replay export's camera cut). `inEye`:
+   * first-person weapons can be drawn at all (in eye, viewmodel on, not spectating): a knife lowering after a switch
+   * (holster) is drawn only then.
+   */
+  setVisible(v: boolean, deploy = true, inEye = v): void {
     if (v && !this.visible && deploy) this.draw();
     this.visible = v;
+    this.inEye = inEye;
+    if (!inEye) this.holsterT = Infinity;
+  }
+
+  /** Lowering out of view after a switch away (holster), drawn though hidden. */
+  get lowering(): boolean {
+    return !this.visible && this.inEye && this.holsterT < KNIFE_HOLSTER;
   }
 
   get shown(): boolean {
@@ -673,7 +662,8 @@ export class Viewmodel {
 
   /** Draws the viewmodel over the frame just rendered with `world` (depth cleared first). */
   render(renderer: THREE.WebGLRenderer, world: THREE.PerspectiveCamera): void {
-    if (!this.visible) return;
+    const lowering = this.lowering;
+    if (!this.visible && !lowering) return;
     const vp = prefs.get().viewmodel;
     const cam = this.camera;
     world.updateMatrixWorld();
@@ -687,7 +677,7 @@ export class Viewmodel {
     cam.updateMatrixWorld();
     // root = camera * conv * (offset + V) (* mirror for the left hand). The offset (CS:GO viewmodel_offset_x/y/z, view
     // space: x right, y forward, z up) adds to V's origin (columns forward, left, up); x points outward for either hand.
-    const V = this.V;
+    const V: Float32Array = lowering ? this.lowered(this.holsterT / KNIFE_HOLSTER) : this.V;
     const left = vp.hand === "left";
     this.m4.set(V[0], V[1], V[2], V[3] + vp.y, V[4], V[5], V[6], V[7] + (left ? vp.x : -vp.x), V[8], V[9], V[10], V[11] + vp.z, 0, 0, 0, 1);
     const m = this.root.matrix;
@@ -704,6 +694,25 @@ export class Viewmodel {
     renderer.clearDepth();
     renderer.render(this.scene, cam);
     renderer.autoClear = auto;
+  }
+
+  /**
+   * The feel with the switch-away lower on top (u 0..1 of KNIFE_HOLSTER): down and out of view, accelerating, the
+   * wrist turning the blade down a little about the hand (view space; the gun's holster clip moves the same way).
+   */
+  private lowered(u: number): Float32Array {
+    const k = u <= 0 ? 0 : u >= 1 ? 1 : u * u;
+    const m = motionScale();
+    // About the hand (~16 forward, 6 right, 7 down of the eye in view space).
+    const px = 16, py = -6, pz = -7;
+    angleMatrix(24 * k * m, 0, 12 * k * m, 0, 0, 0, this.L);
+    const L = this.L;
+    L[3] = px - (L[0] * px + L[1] * py + L[2] * pz) - 1.5 * k;
+    // (Out to the right as well as down: the incoming gun's draw comes up the middle.)
+    L[7] = py - (L[4] * px + L[5] * py + L[6] * pz) - 3.5 * k;
+    L[11] = pz - (L[8] * px + L[9] * py + L[10] * pz) - 9 * k;
+    concat(L, 0, this.V, 0, this.LV, 0);
+    return this.LV;
   }
 
   dispose(): void {

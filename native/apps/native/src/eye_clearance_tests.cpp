@@ -18,7 +18,7 @@ float ceiling_z = 1e6f;
 Sweep last_sweep{};
 unsigned sweeps = 0;
 
-bool near(float a, float b) {
+bool close_to(float a, float b) {
     return std::abs(a - b) < .001f;
 }
 
@@ -39,15 +39,15 @@ void away_from_ceilings() {
 
 void under_a_ceiling() {
     constexpr float top = 100 + native::standing_hull_top_units, eye = 100 + standing_eye_units;
-    assert(near(clear(172, top, eye), 160));          // CS:S standing in a 72-unit corridor sees from 60.
-    assert(near(clear(162.03f, top, eye), 150.03f));  // Hull against the ceiling: the eye would be through it.
+    assert(close_to(clear(172, top, eye), 160));          // CS:S standing in a 72-unit corridor sees from 60.
+    assert(close_to(clear(162.03f, top, eye), 150.03f));  // Hull against the ceiling: the eye would be through it.
     assert(clear(176.5f, top, eye) == eye);           // Out of reach.
-    assert(near(clear(176, top, eye), eye));          // Right at reach: no step as a ceiling comes into range.
+    assert(close_to(clear(176, top, eye), eye));          // Right at reach: no step as a ceiling comes into range.
 }
 
 void ducked_and_mid_duck() {
     constexpr float top = 100 + native::ducked_hull_top_units;
-    assert(near(clear(145.03f, top, 100 + ducked_eye_units), 133.03f));
+    assert(close_to(clear(145.03f, top, 100 + ducked_eye_units), 133.03f));
     assert(clear(172, 162, 155) == 155);  // A lower eye on its way down stays where it is.
 }
 
@@ -68,7 +68,7 @@ void blended_hull_top() {
     curr.crouched = 1;
     assert(native::blended_hull_top_z(prev, curr, 0) == 162);
     assert(native::blended_hull_top_z(prev, curr, 1) == 145);
-    assert(near(native::blended_hull_top_z(prev, curr, .5f), 153.5f));
+    assert(close_to(native::blended_hull_top_z(prev, curr, .5f), 153.5f));
 }
 
 void replay_in_eye_camera() {
@@ -81,7 +81,7 @@ void replay_in_eye_camera() {
     float eye[3];
     ceiling_z = 162.03f;
     camera.sample(reinterpret_cast<BhContext *>(1), state, 0, 0, 0, eye, view, .01);
-    assert(near(eye[2], 150.03f));
+    assert(close_to(eye[2], 150.03f));
     ceiling_z = 1e6f;
     camera.sample(nullptr, state, 0, 0, .01, eye, view, .01);
     assert(eye[2] == 164);

@@ -13,6 +13,8 @@ import { h } from "./dom";
 import { landRows } from "./land";
 import { icon } from "./icons";
 import { nameAttrs, nameMarks } from "./marks";
+import { decorated } from "./avatar-deco";
+import { hoverCardFor } from "./hover-card";
 import type { PlayerMarks } from "../creators";
 
 export interface BoardPage<E> {
@@ -195,8 +197,11 @@ export function pagedBoard<E>(view: BoardView<E>): PagedBoard<E> {
     const pinRows = p.pinned.map((e, i) => tag(view.row(e, { prev: p.pinned[i - 1] ?? null, first, mine: view.idOf(e) === myId, found: view.idOf(e) === found, pinned: true }), e));
     pins.replaceChildren(...pinRows);
     const lastPinned = p.pinned[p.pinned.length - 1] ?? null;
-    const bodyRows = p.entries.map((e, i) => {
-      const prev = i ? p.entries[i - 1] : (p.above ?? (p.offset === view.base ? lastPinned : null));
+    // A pinned row is never drawn twice (a server that answers the first page from offset 0 includes the WR again).
+    const pinnedIds = new Set(p.pinned.map((e) => view.idOf(e)));
+    const entries = p.entries.filter((e) => !pinnedIds.has(view.idOf(e)));
+    const bodyRows = entries.map((e, i) => {
+      const prev = i ? entries[i - 1] : (p.above ?? (p.offset === view.base ? lastPinned : null));
       return tag(view.row(e, { prev, first, mine: view.idOf(e) === myId, found: view.idOf(e) === found, pinned: false }), e);
     });
     rows.replaceChildren(...bodyRows);
@@ -489,7 +494,9 @@ export function hueOf(id: string): number {
 export function playerCell(p: { id: string; name: string; avatarUrl: string | null; provider?: string; country?: string | null } & PlayerMarks, open: () => void, sub: string[] = [], href = `/u/${encodeURIComponent(p.id)}`): HTMLTableCellElement {
   const letter = () => h("span.rb-av", { "aria-hidden": "true", style: `--hue:${hueOf(p.id)}` }, (p.name.trim()[0] ?? "?").toUpperCase());
   const pic = pictureOf(p);
-  const av = pic ? avatarImg(pic, { cls: "rb-av", px: 24, letter }) : letter();
+  // The name and picture show the player's hover card (ui/hover-card.ts); the rest of the row keeps its run stats card.
+  // A supporter's avatar decoration, still on boards (ui/avatar-deco.ts): a page of them costs nothing per frame.
+  const av = hoverCardFor(decorated(pic ? avatarImg(pic, { cls: "rb-av", px: 24, letter }) : letter(), p), p);
   const tags = [...sub, p.provider === "guest" ? "guest" : ""].filter(Boolean);
   return h(
     "td.rb-player",
@@ -500,12 +507,12 @@ export function playerCell(p: { id: string; name: string; avatarUrl: string | nu
       av,
       countryFlag(p.country),
       // A real link to the profile's address (middle-click / Ctrl-click open it in a new tab); a plain click opens it in place.
-      h("a.rb-name", { href, title: `${p.name}'s profile`, onclick: (ev: Event) => {
+      hoverCardFor(h("a.rb-name", { href, onclick: (ev: Event) => {
         const e = ev as MouseEvent;
         if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
         e.preventDefault();
         open();
-      }, ...nameAttrs(p) }, p.name),
+      }, ...nameAttrs(p) }, p.name), p),
       nameMarks(p),
       tags.length ? h("span.rb-sub", { title: p.provider === "guest" ? "Guest players haven't linked an account" : null }, tags.join(" · ")) : null,
     ),

@@ -65,7 +65,7 @@ export interface TimerOptions {
   /** shavit_misc_prespeed 2: zero velocity on a landing-tick jump inside a start zone. */
   blockPrehops?: boolean;
   /** Keys that count as strafes (style dependent, see styles.strafeKeys). Default "ad". */
-  strafeKeys?: "ad" | "ws" | "w";
+  strafeKeys?: "ad" | "ws" | "w" | "press";
   /** Start-zone rules version (TIMER_RULES_*). Default TIMER_RULES (the current rules). */
   rules?: number;
   /**
@@ -505,11 +505,15 @@ export class RunTimer {
           if (this.perfGroundTicks === 1) { this.perfectJumps++; if (!(events & (EVENT_TELEPORTED | EVENT_RESPAWNED))) this.lastPerfectTick = s.tick; }
         }
       }
-      // Strafes (bhoptimer strafe_count_*): A/D changes, W/S changes on Sideways, fresh W presses on W-Only.
+      // Strafes (bhoptimer strafe_count_*): A/D changes, W/S changes on Sideways, fresh W presses on W-Only, fresh A or D
+      // presses on A/D-Only ("press").
       const keys = this.options.strafeKeys ?? "ad";
-      const axis = keys === "ad" ? (cmd.side > 0 ? 1 : cmd.side < 0 ? -1 : 0) : cmd.forward > 0 ? 1 : cmd.forward < 0 ? -1 : 0;
+      const axis = keys === "ad" || keys === "press" ? (cmd.side > 0 ? 1 : cmd.side < 0 ? -1 : 0) : cmd.forward > 0 ? 1 : cmd.forward < 0 ? -1 : 0;
       if (keys === "w") {
         if (axis > 0 && this.lastSide <= 0) this.strafes++;
+        this.lastSide = axis;
+      } else if (keys === "press") {
+        if (axis !== 0 && axis !== this.lastSide) this.strafes++;
         this.lastSide = axis;
       } else {
         if (axis !== 0 && axis !== this.lastSide) this.strafes++;
