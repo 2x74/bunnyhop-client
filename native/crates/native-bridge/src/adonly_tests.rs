@@ -1,4 +1,4 @@
-//! A/D-Only against the website's oracle, pinned from v37/ad-only tools/verify/fixtures/adonly-vectors.json (written by
+//! A/D-Only against the website's oracle, pinned from release-0.0.37 tools/verify/fixtures/adonly-vectors.json (written by
 //! tools/verify/adonly-vectors.ts): one filter fed every row in order, comparing the filtered command and the lock.
 //! shared_style_filter_oracle in styles.rs also runs the vendored filter with the run state toggling.
 use super::styles::{strafe_keys, strafe_keys_name, Filter, IDS, STRAFE_KEYS_PRESS};

@@ -257,11 +257,12 @@ impl Filter {
         }
         // Without a jump the core takes an edge landing back before it moves, so the key rules see an air tick.
         let grounded = s.grounded != 0 && !(edge_landing && c.buttons & JUMP == 0);
-        let on_ladder = s.on_ladder != 0 || self.from_ladder;
+        // A/D-Only exempts only the ladder itself, not the air after it: W, S and the other key are blocked again from
+        // the first airborne command off the ladder. Other styles keep the grace until the next landing.
         if self.id == "adonly" {
-            return self.ad_only(c, grounded, on_ladder, running);
+            return self.ad_only(c, grounded, s.on_ladder != 0, running);
         }
-        if grounded || on_ladder {
+        if grounded || s.on_ladder != 0 || self.from_ladder {
             return c;
         }
         if ["wonly", "sideways"].contains(&self.id.as_str()) {
@@ -303,7 +304,8 @@ impl Filter {
     }
     /// styles.ts StyleFilter.adOnly and filterCommand's lock. The lock clears while the run isn't under way; the first
     /// air sidemove sign of a run picks the key, and the command that locks keeps its sidemove, so the verifier
-    /// re-filtering the recorded command locks on the same tick. W, S and the other key are then blocked in the air.
+    /// re-filtering the recorded command locks on the same tick. W, S and the other key are then blocked in the air,
+    /// ladder ticks excepted (the lock is kept through them).
     fn ad_only(&mut self, mut c: BhCmd, grounded: bool, on_ladder: bool, running: bool) -> BhCmd {
         if !running {
             self.side_lock = 0;
@@ -327,18 +329,16 @@ impl Filter {
             c.forward = 0.0;
             c.buttons &= !BACK;
         }
-        // Unlike W-Only's A/D block, the other key's bit alone keeps the locked key's sidemove (null binds).
-        if self.side_lock > 0 {
-            if c.side < 0.0 {
+        // Unlike W-Only's A/D block, the other key's bit alone keeps the locked key's sidemove (null binds). When no
+        // sidemove is left, both side bits go, so a recorded command matches its keys like a keyboard's.
+        if self.side_lock != 0 {
+            if (self.side_lock > 0 && c.side < 0.0) || (self.side_lock < 0 && c.side > 0.0) {
                 c.side = 0.0;
             }
-            c.buttons &= !LEFT;
-        }
-        if self.side_lock < 0 {
-            if c.side > 0.0 {
-                c.side = 0.0;
+            c.buttons &= !(if self.side_lock > 0 { LEFT } else { RIGHT });
+            if c.side == 0.0 {
+                c.buttons &= !(LEFT | RIGHT);
             }
-            c.buttons &= !RIGHT;
         }
         c
     }
