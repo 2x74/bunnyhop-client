@@ -7,6 +7,7 @@
 #include "actor_legs.hpp"
 #include "actor_ticks.hpp"
 #include "actor_springs.hpp"
+#include "actor_animation_metadata.hpp"
 #include <vector>
 #include <array>
 #include <string>
@@ -92,12 +93,15 @@ inline void concat(const float *a, const float *b, float *out) {
 }
 
 struct Data {
-    J info, rig;
+    J rig;
     V bytes, restQ, restP, inverse, bind;
     std::vector<std::string> names;
     std::vector<int> rigParents;
     int csBones = 0;
     std::vector<int> offsets, parent, map;
+    std::vector<AnimationClip> clips;
+    std::vector<AnimationSequence> sequences;
+    std::vector<PoseParameter> parameters;
     size_t bones = 0;
 
     explicit Data(const std::string &root) {
@@ -105,8 +109,16 @@ struct Data {
         J m;
         j >> m;
         if (m.at("version") != 1) throw std::runtime_error("actor animation version");
-        info = m.at("info");
+        const auto &info = m.at("info");
         rig = m.at("rig");
+        for (const auto &clip : info.at("anims"))
+            clips.push_back({clip.at("frames"), clip.at("fps")});
+        for (const auto &sequence : info.at("seqs"))
+            sequences.emplace_back(sequence);
+        for (const auto &parameter : info.at("poseParams"))
+            parameters.push_back(
+                    {parameter.at("name"), parameter.at("start"), parameter.at("end"), parameter.at("loop")}
+            );
         bones = info.at("bones").size();
         if (!bones || bones > 256) throw std::runtime_error("actor animation bones");
         std::ifstream b(root + "/actor-animations.bin", std::ios::binary | std::ios::ate);
@@ -147,42 +159,57 @@ struct Data {
             return s;
         };
         const auto key = lower(name);
-        for (size_t i = 0; i < info["seqs"].size(); i++)
-            if (lower(info["seqs"][i]["name"]) == key) return int(i);
+        for (size_t i = 0; i < sequences.size(); i++)
+            if (sequences[i].name == key) return int(i);
         return -1;
     }
 
     int activity(const std::string &name) const {
-        for (size_t i = 0; i < info["seqs"].size(); i++)
-            if (info["seqs"][i]["activity"] == name) return int(i);
+        for (size_t i = 0; i < sequences.size(); i++)
+            if (sequences[i].activity == name) return int(i);
         return -1;
     }
 
     int param(const std::string &name) const {
-        for (size_t i = 0; i < info["poseParams"].size(); i++)
-            if (info["poseParams"][i]["name"] == name) return int(i);
+        for (size_t i = 0; i < parameters.size(); i++)
+            if (parameters[i].name == name) return int(i);
         return -1;
     }
 };
 
 struct Pose {
+    static constexpr int maximum_blend_depth = 6;
+
+    struct Corners {
+        std::array<std::pair<int, float>, 4> values{};
+        size_t count = 0;
+
+        const auto *begin() const { return values.data(); }
+
+        const auto *end() const { return values.data() + count; }
+    };
+
     const Data &d;
     V q, p, params, world;
+    // Nested layers need separate buffers so they cannot overwrite the parent's blend.
+    V blend_rotations, blend_positions;
 
     explicit Pose(const Data &d)
         : d(d)
         , q(d.restQ)
         , p(d.restP)
-        , params(d.info["poseParams"].size())
-        , world(d.bones * 12) {
+        , params(d.parameters.size())
+        , world(d.bones * 12)
+        , blend_rotations((maximum_blend_depth + 1) * d.bones * 4)
+        , blend_positions((maximum_blend_depth + 1) * d.bones * 3) {
         for (size_t i = 0; i < params.size(); i++)
             set(i, 0);
     }
 
     double set(int i, double value) {
         if (i < 0) return value;
-        const auto &pp = d.info["poseParams"][i];
-        double start = pp["start"], end = pp["end"], loop = pp["loop"];
+        const auto &pp = d.parameters[i];
+        double start = pp.start, end = pp.end, loop = pp.loop;
         if (loop) {
             const double wrap = (start + end) / 2 + loop / 2, shift = loop - wrap;
             value -= loop * std::floor((value + shift) / loop);
@@ -193,19 +220,19 @@ struct Pose {
 
     double get(int i) const {
         if (i < 0) return 0;
-        const auto &v = d.info["poseParams"][i];
-        return params[i] * (v["end"].get<double>() - v["start"].get<double>()) + v["start"].get<double>();
+        const auto &v = d.parameters[i];
+        return params[i] * (v.end - v.start) + v.start;
     }
 
-    std::pair<double, int> local(const J &s, int k) const {
-        const int ip = s["params"][k];
+    std::pair<double, int> local(const AnimationSequence &s, int k) const {
+        const int ip = s.params[k];
         if (ip < 0) return {0, 0};
-        const auto &pp = d.info["poseParams"][ip];
-        double v = params[ip], start = pp["start"], end = pp["end"];
-        int gs = s["groupSize"][k];
-        if (s["poseKeys"].empty()) {
-            double ls = (s["paramStart"][k].get<double>() - start) / (end - start),
-                   le = (s["paramEnd"][k].get<double>() - start) / (end - start), t = clamp((v - ls) / (le - ls), 0, 1);
+        const auto &pp = d.parameters[ip];
+        double v = params[ip], start = pp.start, end = pp.end;
+        int gs = s.groupSize[k];
+        if (s.poseKeys.empty()) {
+            double ls = (s.paramStart[k] - start) / (end - start), le = (s.paramEnd[k] - start) / (end - start),
+                   t = clamp((v - ls) / (le - ls), 0, 1);
             int index = 0;
             if (gs > 2) {
                 index = int(std::floor(t * (gs - 1)));
@@ -215,11 +242,11 @@ struct Pose {
             return {t, index};
         }
         v = v * (end - start) + start;
-        const int base = k ? s["groupSize"][0].get<int>() : 0;
+        const int base = k ? s.groupSize[0] : 0;
         int index = 0;
         double t = 0;
         for (;;) {
-            const double a = s["poseKeys"][base + index], b = s["poseKeys"][base + index + 1];
+            const double a = s.poseKeys[base + index], b = s.poseKeys[base + index + 1];
             t = (v - a) / (b - a);
             if (index < gs - 2 && t > 1) {
                 index++;
@@ -230,13 +257,13 @@ struct Pose {
         return {clamp(t, 0, 1), index};
     }
 
-    std::vector<std::pair<int, float>> corners(const J &s) const {
+    Corners corners(const AnimationSequence &s) const {
         auto [sx, ix] = local(s, 0);
         auto [sy, iy] = local(s, 1);
-        int cols = s["groupSize"][0], rows = s["groupSize"][1], last = int(s["anims"].size()) - 1;
-        std::vector<std::pair<int, float>> r;
+        int cols = s.groupSize[0], rows = s.groupSize[1], last = int(s.anims.size()) - 1;
+        Corners r;
         auto put = [&](int x, int y, double w) {
-            if (w > .001) r.emplace_back(s["anims"][std::min(last, y * cols + x)].get<int>(), float(w));
+            if (w > .001) r.values[r.count++] = {s.anims[std::min(last, y * cols + x)], float(w)};
         };
         put(ix, iy, (1 - sx) * (1 - sy));
         put(std::min(ix + 1, cols - 1), iy, sx * (1 - sy));
@@ -248,10 +275,10 @@ struct Pose {
     double rate(int si) const {
         if (si < 0) return 0;
         double rate = 0;
-        for (auto [a, w] : corners(d.info["seqs"][si])) {
-            const auto &i = d.info["anims"][a];
-            int f = i["frames"];
-            if (f > 1) rate += i["fps"].get<double>() / (f - 1) * w;
+        for (auto [a, w] : corners(d.sequences[si])) {
+            const auto &i = d.clips[a];
+            int f = i.frames;
+            if (f > 1) rate += i.fps / (f - 1) * w;
         }
         return rate;
     }
@@ -262,10 +289,10 @@ struct Pose {
     }
 
     void accumulate(int si, double cycle, double weight, int depth = 0) {
-        if (si < 0 || weight <= 0 || depth > 6) return;
+        if (si < 0 || weight <= 0 || depth > maximum_blend_depth) return;
         weight = std::min(weight, 1.);
-        const auto &s = d.info["seqs"][si];
-        int flags = s["flags"];
+        const auto &s = d.sequences[si];
+        int flags = s.flags;
         if (cycle < 0 || cycle >= 1) {
             if (flags & 1) {
                 cycle -= std::trunc(cycle);
@@ -274,18 +301,21 @@ struct Pose {
                 cycle = clamp(cycle, 0, 1);
         }
         auto cs = corners(s);
-        V tq(d.bones * 4), tp(d.bones * 3);
+        float *tq = blend_rotations.data() + size_t(depth) * d.bones * 4;
+        float *tp = blend_positions.data() + size_t(depth) * d.bones * 3;
+        std::fill_n(tq, d.bones * 4, 0.f);
+        std::fill_n(tp, d.bones * 3, 0.f);
         double wsum = 0;
         int corner = 0;
         for (auto [a, w] : cs) {
             wsum += w;
-            const auto &i = d.info["anims"][a];
-            int frames = i["frames"];
+            const auto &i = d.clips[a];
+            int frames = i.frames;
             double f = cycle * (frames - 1), t = f - std::floor(f);
             int f0 = std::min(frames - 1, int(std::floor(f))), f1 = std::min(frames - 1, f0 + 1);
             const int off = d.offsets[a];
             for (size_t b = 0; b < d.bones; b++) {
-                const double bw = s["weights"].size() == d.bones ? s["weights"][b].get<double>() : 1;
+                const double bw = s.weights.size() == d.bones ? s.weights[b] : 1;
                 if (bw <= 0) continue;
                 float v[7];
                 if (off < 0) {
@@ -314,7 +344,7 @@ struct Pose {
             corner++;
         }
         for (size_t b = 0; b < d.bones; b++) {
-            double bw = s["weights"].size() == d.bones ? s["weights"][b].get<double>() : 1, sw = weight * bw;
+            double bw = s.weights.size() == d.bones ? s.weights[b] : 1, sw = weight * bw;
             if (sw <= 0) continue;
             size_t qo = b * 4, po = b * 3;
             double norm = 0;
@@ -370,12 +400,12 @@ struct Pose {
                     p[po + j] = p[po + j] * (1 - sw) + tp[po + j] * sw;
             }
         }
-        for (const auto &l : s["layers"]) {
-            int lf = l["flags"];
+        for (const auto &l : s.layers) {
+            int lf = l.flags;
             if (lf & 0x1000) continue;
-            double lc = cycle, lw = weight, start = l["start"], end = l["end"], peak = l["peak"], tail = l["tail"];
+            double lc = cycle, lw = weight, start = l.start, end = l.end, peak = l.peak, tail = l.tail;
             if (start != end) {
-                double index = (lf & 0x4000) ? get(l["pose"]) : cycle;
+                double index = (lf & 0x4000) ? get(l.pose) : cycle;
                 if (index < start || index >= end) continue;
                 double sw = 1;
                 if (index < peak && start != peak)
@@ -388,7 +418,7 @@ struct Pose {
                                                  : weight * sw;
                 if (!(lf & 0x4000)) lc = (cycle - start) / (end - start);
             }
-            accumulate(l["seq"], lc, lw, depth + 1);
+            accumulate(l.seq, lc, lw, depth + 1);
         }
     }
 
@@ -429,13 +459,11 @@ struct Transition {
     void check(const Data &d, int seq, bool force) {
         if (queue.empty()) queue.emplace_back();
         if (queue.back().time && (queue.back().seq != seq || force)) {
-            const auto &next = d.info["seqs"][seq];
-            if (next["flags"].get<int>() & 2)
+            const auto &next = d.sequences[seq];
+            if (next.flags & 2)
                 queue.clear();
             else
-                queue.back().fade = std::min(
-                        d.info["seqs"][queue.back().seq]["fadeOut"].get<double>(), next["fadeIn"].get<double>()
-                );
+                queue.back().fade = std::min(d.sequences[queue.back().seq].fadeOut, next.fadeIn);
             queue.emplace_back();
         }
         queue.back().seq = -1;
@@ -570,6 +598,10 @@ struct State {
     std::optional<native_gestures::Rig> gestureRig;
     int px, py, pYaw, pPitch;
 
+    enum SequenceKind : size_t { standing, walking, running, crouch_idle, crouch_walking, sequence_kind_count };
+
+    std::array<int, sequence_kind_count> upper_sequences{}, shot_sequences{};
+
     explicit State(const Data &d)
         : d(d)
         , bs(d)
@@ -578,6 +610,13 @@ struct State {
         , py(d.param("move_y"))
         , pYaw(d.param("body_yaw"))
         , pPitch(d.param("body_pitch")) {
+        constexpr std::array<const char *, sequence_kind_count> sequence_names = {
+                "Idle", "Walk", "Run", "Crouch_Idle", "Crouch_Walk"
+        };
+        for (size_t index = 0; index < sequence_names.size(); ++index) {
+            upper_sequences[index] = d.seq(std::string(sequence_names[index]) + "_Upper_KNIFE");
+            shot_sequences[index] = d.seq(std::string(sequence_names[index]) + "_Shoot_KNIFE");
+        }
         for (size_t i = 0; i < d.rig["names"].size(); i++) {
             const auto &name = d.rig["names"][i];
             if (name == "ValveBiped.Bip01_Head1") head = int(i);
@@ -639,12 +678,12 @@ struct State {
     }
 
     void fire() {
-        std::string n = activity == "ACT_RUN"          ? "Run"
-                        : activity == "ACT_WALK"       ? "Walk"
-                        : activity == "ACT_CROUCHIDLE" ? "Crouch_Idle"
-                        : activity == "ACT_RUN_CROUCH" ? "Crouch_Walk"
-                                                       : "Idle";
-        fireSeq = d.seq(n + "_Shoot_KNIFE");
+        const auto kind = activity == "ACT_RUN"          ? running
+                          : activity == "ACT_WALK"       ? walking
+                          : activity == "ACT_CROUCHIDLE" ? crouch_idle
+                          : activity == "ACT_RUN_CROUCH" ? crouch_walking
+                                                         : standing;
+        fireSeq = shot_sequences[kind];
         fireCycle = 0;
         fireFresh = true;
     }
@@ -657,13 +696,14 @@ struct State {
     double movement() const { return speed <= .5 ? 1 : maxSpeed < .001 ? .01 : clamp(speed / maxSpeed, .01, 10); }
 
     int aim(bool force) {
-        std::string n = force                   ? (activity == "ACT_CROUCHIDLE" ? "Crouch_Idle" : "Idle")
-                        : activity == "ACT_RUN" ? "Run"
-                        : activity == "ACT_WALK" || activity == "ACT_RUNTOIDLE" || activity == "ACT_IDLETORUN" ? "Walk"
-                        : activity == "ACT_CROUCHIDLE" ? "Crouch_Idle"
-                        : activity == "ACT_RUN_CROUCH" ? "Crouch_Walk"
-                                                       : "Idle";
-        return d.seq(n + "_Upper_KNIFE");
+        const auto kind = force                   ? (activity == "ACT_CROUCHIDLE" ? crouch_idle : standing)
+                          : activity == "ACT_RUN" ? running
+                          : activity == "ACT_WALK" || activity == "ACT_RUNTOIDLE" || activity == "ACT_IDLETORUN"
+                                  ? walking
+                          : activity == "ACT_CROUCHIDLE" ? crouch_idle
+                          : activity == "ACT_RUN_CROUCH" ? crouch_walking
+                                                         : standing;
+        return upper_sequences[kind];
     }
 
     void aimLayers(int first, bool force, Transition &t, double scale) {
@@ -717,12 +757,12 @@ struct State {
                                 : "ACT_IDLE";
         int want = d.activity(activity);
         if (want < 0) want = 0;
-        if (seq < 0 || d.info["seqs"][seq]["activity"] != d.info["seqs"][want]["activity"]) {
+        if (seq < 0 || d.sequences[seq].activity != d.sequences[want].activity) {
             bool changed = want != seq;
             seq = want;
-            if (changed || !(d.info["seqs"][want]["flags"].get<int>() & 1)) parity++;
+            if (changed || !(d.sequences[want].flags & 1)) parity++;
         }
-        const std::string act = d.info["seqs"][seq]["activity"];
+        const auto &act = d.sequences[seq].activity;
         maxSpeed = act == "ACT_WALK" || act == "ACT_IDLE" ? 100
                    : act == "ACT_RUN"                     ? 250
                    : act == "ACT_RUN_CROUCH"              ? 85
@@ -759,7 +799,7 @@ struct State {
             yaw -= 360;
         bs.set(px, speed > .5 ? std::cos(yaw * 3.141592653589793 / 180) * movement() : 0);
         bs.set(py, speed > .5 ? -std::sin(yaw * 3.141592653589793 / 180) * movement() : 0);
-        bool loop = d.info["seqs"][seq]["flags"].get<int>() & 1;
+        bool loop = d.sequences[seq].flags & 1;
         double c = sampled && s.grounded && loop ? sampleTime * bs.rate(seq) * playbackRate
                                                  : cycle + dt * bs.rate(seq) * playbackRate;
         if (c < 0 || c >= 1) c = loop ? c - std::floor(c) : clamp(c, 0, 1);
@@ -810,7 +850,7 @@ struct State {
             const auto &b = main.queue[i];
             if (b.seq < 0) continue;
             double c = b.cycle + (now - b.time) * b.rate * bs.rate(b.seq);
-            bool loop = d.info["seqs"][b.seq]["flags"].get<int>() & 1;
+            bool loop = d.sequences[b.seq].flags & 1;
             if (c < 0 || c >= 1) c = loop ? c - std::floor(c) : clamp(c, 0, 1);
             bs.accumulate(b.seq, c, b.weight);
         }
