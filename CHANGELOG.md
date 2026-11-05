@@ -21,7 +21,13 @@ Update from Settings → Updates: press Update, then Restart to update. Your set
 - Map tiers go up to T10: T8 Brutal, T9 Nightmare, T10 Impossible, on the Tab board too.
 - A mark after your name shows the hardest tier you've cleared, in game as well as in the menu.
 - New tier rewards: the Flare, Riptide and Whiteout colourways, their trails, the Riptide ghost, card frames and
-  backgrounds, and the Silver Wreath. The achievements Deep End, Sleepless and True Architect are in too.
+  backgrounds, and the Silver Wreath, plus the Lapis set for T7. The achievements Deep End, Sleepless and True Architect
+  are in too.
+
+**Supporter looks**
+- Supporters' name fonts show in game as on the website: on the Tab board, name tags, chat and the spectating bar. The
+  spectating bar also shows the watched player's name colour and effect.
+- Edit card has the new supporter choices: name font, avatar decoration, card border and effects.
 
 **Chat**
 - Profile flags can be pride flags, shown on the Tab board, name tags and chat.
