@@ -106,6 +106,14 @@ fn js_float_or_zero(text: Option<&str>) -> f64 {
 /// Seeds every random animator with the map and the prop: map-props.ts `hashSeed(path, mapSeed ^ (entity + 1) * k)`.
 const RANDOM_ENTITY_MULTIPLIER: u32 = 0x9e37_79b1;
 
+/// A RandomAnimation prop's seed, from its model path and the map's fingerprint (`map_seed`).
+pub(super) fn random_animator_seed(model_path: &str, map_seed: u32, entity: u32) -> u32 {
+    hash_seed(
+        model_path,
+        map_seed ^ (entity + 1).wrapping_mul(RANDOM_ENTITY_MULTIPLIER),
+    )
+}
+
 fn studio_model_path(entity: &bunnyhop_core::entities::Entity) -> Option<String> {
     if !entity.classname().to_ascii_lowercase().starts_with("prop_dynamic") {
         return None;
@@ -172,10 +180,7 @@ impl Map {
             if js_int_set(e.get("RandomAnimation").unwrap_or("")) && studio != 0 {
                 let model_path = &self.assets.models[studio as usize - 1].path;
                 prop.random = 1;
-                prop.random_seed = hash_seed(
-                    model_path,
-                    fingerprint ^ (entity + 1).wrapping_mul(RANDOM_ENTITY_MULTIPLIER),
-                );
+                prop.random_seed = random_animator_seed(model_path, fingerprint, entity);
                 prop.min_anim_time = js_float_or_zero(e.get("MinAnimTime"));
                 prop.max_anim_time = js_float_or_zero(e.get("MaxAnimTime"));
             }

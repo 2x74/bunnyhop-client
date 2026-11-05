@@ -144,6 +144,27 @@ fn reads_texture_proxies_and_hands_over_flipbook_frames() {
     }
 }
 
+fn entities_from(pairs_list: &serde_json::Value) -> Vec<bunnyhop_core::entities::Entity> {
+    pairs_list
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|pairs| bunnyhop_core::entities::Entity {
+            pairs: pairs
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|kv| {
+                    (
+                        kv[0].as_str().unwrap().to_string(),
+                        kv[1].as_str().unwrap().to_string(),
+                    )
+                })
+                .collect(),
+        })
+        .collect()
+}
+
 /// tools/map-props/generate-vectors.ts: the website's hashSeed and the map fingerprint its random animators use.
 #[test]
 fn seeds_random_animators_like_the_website() {
@@ -158,21 +179,29 @@ fn seeds_random_animators_like_the_website() {
             "{text}"
         );
     }
-    let entities: Vec<bunnyhop_core::entities::Entity> = vectors["entityPairs"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|pairs| bunnyhop_core::entities::Entity {
-            pairs: pairs
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|kv| (kv[0].as_str().unwrap().to_string(), kv[1].as_str().unwrap().to_string()))
-                .collect(),
-        })
-        .collect();
+    let entities = entities_from(&vectors["entityPairs"]);
     assert_eq!(
         u64::from(crate::map_props::map_seed(&entities)),
         vectors["mapSeed"].as_u64().unwrap()
     );
+}
+
+/// The release's golden vectors (apps/web/test/map-props.test.ts): the thumper's map and entity seeds.
+#[test]
+fn seeds_the_golden_thumper_like_the_release() {
+    const GOLDEN_MAP_SEED: u32 = 14_988_861;
+    const GOLDEN_SEED: u32 = 2_031_191_778;
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/native/src/map_props_vectors.json");
+    let vectors: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    let golden = &vectors["golden"];
+    let map_seed = crate::map_props::map_seed(&entities_from(&golden["entityPairs"]));
+    assert_eq!(map_seed, GOLDEN_MAP_SEED);
+    let model = golden["model"].as_str().unwrap();
+    let entity = golden["entity"].as_u64().unwrap() as u32;
+    assert_eq!(
+        crate::map_props::random_animator_seed(model, map_seed, entity),
+        GOLDEN_SEED
+    );
+    assert_eq!(golden["seed"].as_u64(), Some(u64::from(GOLDEN_SEED)));
 }
