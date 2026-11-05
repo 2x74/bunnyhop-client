@@ -56,7 +56,10 @@ Update from Settings → Updates: press Update, then Restart to update. Your set
 
 **Maps**
 - Animated map props move like in CS:S, such as bhop_ceaseless's butterflies and bhop_retrowave's blocks, and the
-  map's own triggers can hide them.
+  map's own triggers can hide them. Props that switch idle animations at random (bhop_shrubhop, bhop_hive's thumpers)
+  animate like on the website.
+- New hard maps bhop_hellopro2 (T8) and bhop_4triedsame (T10): stay on a one-hop block, or land on the same spot again
+  within 4 seconds, and you're sent back, as on CS:S.
 - Frame-animated and scrolling textures animate, at the map's own speed and angle (bhop_umbra's moon clouds no longer
   race), and bhop_4triedsame's wireframe shaft draws.
 - Maps with many props draw faster: on bhop_retrowave the world takes about a third less time per frame.
