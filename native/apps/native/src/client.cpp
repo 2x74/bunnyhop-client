@@ -495,7 +495,9 @@ int run(const native::Options &opt) {
     constexpr unsigned display_notice_ms = 10000;
     if (const auto display_notice = display_guard.notice(); !display_notice.empty())
         hud.toasts.push(display_notice, double(SDL_GetTicksNS()) / 1e9, display_notice_ms / 1000.);
-    if (!opt.frames && opt.menu_smoke.empty() && opt.runtime_smoke.empty()) updater.check_if_due();
+    // Smoke and benchmark runs never check for updates.
+    const bool automatic_updates = !opt.frames && opt.menu_smoke.empty() && opt.runtime_smoke.empty();
+    if (automatic_updates) updater.check_if_due();
 
     auto reset_feedback = [&](bool incomplete_history = false, bool keep_jump_stats = false) {
         hud.reset_history(keep_jump_stats);
@@ -4200,6 +4202,7 @@ int run(const native::Options &opt) {
                 const std::string diagnostics_event =
                         "new CustomEvent('bunnyhop:mouse-diagnostics',{detail:" + diagnostics_state.dump() + "})";
                 menu->evaluate_js("window.dispatchEvent(" + diagnostics_event + ")");
+                if (automatic_updates) updater.poll_schedule(SDL_GetTicksNS());
                 if (const auto update_script = updater.state_script()) menu->evaluate_js(*update_script);
                 {  // Settings -> Game data
                     std::optional<std::string> picked;

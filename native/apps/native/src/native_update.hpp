@@ -551,11 +551,15 @@ public:
         });
     }
 
+    // An automatic check, when one is due. Only from a quiet state: a check clears the release found, a download
+    // and a staged update, so it never runs over one the player is looking at or has started.
     void check_if_due() {
+        reap();
         bool due = false;
         {
             std::lock_guard lock(mutex_);
-            due = schedule_.due(unix_time());
+            const auto status = state_.value("status", std::string());
+            due = !busy_ && (status == "idle" || status == "current") && schedule_.due(unix_time());
         }
         if (due) check(true);
     }

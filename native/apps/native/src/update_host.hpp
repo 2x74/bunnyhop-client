@@ -70,6 +70,7 @@ class Host {
     std::filesystem::path result_file_;
     std::string version_;
     std::string last_state_;
+    uint64_t next_schedule_poll_ns_ = 0;
     std::optional<std::filesystem::path> plan_;
 
     Host(const std::filesystem::path &data_folder, const Json &identity, const InstallTarget &target)
@@ -102,6 +103,14 @@ public:
     }
 
     void check_if_due() { service_.check_if_due(); }
+
+    // Once per frame while the game runs: whether an automatic check is due, looked at once a minute.
+    void poll_schedule(uint64_t now_ns) {
+        constexpr uint64_t schedule_poll_interval_ns = 60'000'000'000;
+        if (now_ns < next_schedule_poll_ns_) return;
+        next_schedule_poll_ns_ = now_ns + schedule_poll_interval_ns;
+        service_.check_if_due();
+    }
 
     void service_status(uint64_t generation, const std::string &status) { gate_.service_status(generation, status); }
 

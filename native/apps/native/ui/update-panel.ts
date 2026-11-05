@@ -6,6 +6,7 @@ import { send } from "./bridge";
 import { toast } from "./account-panel";
 import type { VersionPolicy } from "./run-service";
 import { rankedLine, rankedState, readUpdateStatus, type UpdateStatus } from "./update-status";
+import { updatePromptShown } from "./update-prompt";
 
 type UpdateAction = "check" | "download" | "cancel" | "reveal" | "restart" | "status";
 const act = (action: UpdateAction) => () => send({ type: "update", action });
@@ -46,7 +47,11 @@ function updatesGroups(ui: Ui): HTMLElement[] {
     "Check automatically",
     () => current?.automatic ?? true,
     (enabled) => send({ type: "update", action: "automatic", enabled }),
-    { desc: "Checks once a day when the game starts. Nothing downloads until you press Update." },
+    {
+      desc:
+        "Checks when the game starts and every few hours while it runs, and says so on the home screen. " +
+        "Nothing downloads until you press Update.",
+    },
   );
   const group = ui.group(
     "Native client",
@@ -116,7 +121,8 @@ function noticeNewVersions(): void {
     const status = readUpdateStatus((event as CustomEvent).detail);
     if (status?.status !== "available" || !status.version || noticed.has(status.version)) return;
     noticed.add(status.version);
-    if (!openPanel?.isConnected) toast(`Version ${status.version} is available. Settings → Updates.`, 8000);
+    if (!openPanel?.isConnected && !updatePromptShown())
+      toast(`Version ${status.version} is available. Settings → Updates.`, 8000);
   });
 }
 

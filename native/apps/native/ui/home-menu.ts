@@ -24,6 +24,7 @@ import { onlineSummary } from "../../web/src/ui/servers";
 import { openFeedback } from "../../web/src/feedback/state";
 import { openInbox, withInboxBadge } from "../../web/src/inbox/state";
 import { versionLink } from "../../web/src/ui/changelog";
+import { updatePrompt } from "./update-prompt";
 import { gauntletHub } from "../../web/src/shared-reads";
 import { discordLink } from "../../web/src/ui/community";
 import { tutorialOnHome, tutorialSub } from "./tutorial-entry";
@@ -406,6 +407,7 @@ export function homeScreen(a: HomeActions): HTMLElement {
       h(
         "footer.home-foot",
         null,
+        updatePrompt(),
         h("div.home-foot-row", null, accountChip({ quiet: true }), homeActs(a)),
         homeLinks(a, learn),
       ),

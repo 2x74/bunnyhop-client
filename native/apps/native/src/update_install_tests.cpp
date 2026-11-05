@@ -392,7 +392,7 @@ void restart_waits_for_runs_and_uploads() {
     assert(!gate.blocker({idle, true, 2, true}).empty());  // a video export would be cut short
 }
 
-void automatic_checks_run_daily() {
+void automatic_checks_run_on_schedule() {
     updates::CheckSchedule schedule;
     const int64_t now = 2'000'000'000;
     assert(schedule.due(now));
@@ -425,6 +425,6 @@ int main() {
     outcomes_show_once();
     leftovers_are_removed();
     restart_waits_for_runs_and_uploads();
-    automatic_checks_run_daily();
+    automatic_checks_run_on_schedule();
     std::cout << "update install checks passed\n";
 }

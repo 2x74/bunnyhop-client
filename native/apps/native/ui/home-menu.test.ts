@@ -498,3 +498,38 @@ test("a map that loads before the home screen's backdrop pick: no home request w
     await browser.close();
   }
 }, 20_000);
+
+test("a new signed release is offered on the home screen with one press", async () => {
+  const { browser, page, errors } = await open();
+  try {
+    const status = (detail: Record<string, unknown>) =>
+      page.evaluate((d) => window.dispatchEvent(new CustomEvent("bunnyhop:update", { detail: d })), detail);
+    const line = page.locator(".home-update");
+    // The home screen asks the host for the current state when it opens.
+    await page.waitForFunction(() =>
+      (window as any).messages.some((m: { type: string; action?: string }) => m.type === "update"),
+    );
+    expect((await messages(page)).filter((m) => m.type === "update")).toEqual([{ type: "update", action: "status" }]);
+    await status({ status: "current", currentVersion: "0.7.1", version: "0.7.1" });
+    expect(await line.isHidden()).toBe(true);
+    await status({ status: "available", currentVersion: "0.7.1", version: "0.7.2", inPlace: true });
+    expect(await line.innerText()).toContain("Version 0.7.2 is out.");
+    await line.getByRole("button", { name: "Update" }).click();
+    expect(await last(page)).toEqual({ type: "update", action: "download" });
+    await status({ status: "downloading", version: "0.7.2", received: 50, bytes: 200, inPlace: true });
+    expect(await line.innerText()).toContain("Downloading version 0.7.2… 25%");
+    await status({ status: "staged", version: "0.7.2", inPlace: true });
+    await line.getByRole("button", { name: "Restart to update" }).click();
+    expect(await last(page)).toEqual({ type: "update", action: "restart" });
+    // Not now: hidden for this version, back for the next one.
+    await line.getByRole("button", { name: "Not now" }).click();
+    expect(await line.isHidden()).toBe(true);
+    await status({ status: "available", version: "0.7.2", inPlace: true });
+    expect(await line.isHidden()).toBe(true);
+    await status({ status: "available", version: "0.7.3", inPlace: true });
+    expect(await line.innerText()).toContain("Version 0.7.3 is out.");
+    expect(errors).toEqual([]);
+  } finally {
+    await browser.close();
+  }
+}, 30_000);

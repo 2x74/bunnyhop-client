@@ -80,3 +80,65 @@ export function rankedLine(state: RankedState): string {
     return "The server doesn't list this version yet. Until it does, runs are kept locally and not ranked.";
   return "A new version can submit ranked runs once the server lists it.";
 }
+
+/** What the home screen's update line says and the one action it offers. */
+export interface UpdatePromptView {
+  text: string;
+  action: "download" | "cancel" | "restart" | "reveal" | "check" | null;
+  label: string;
+  /** "Not now" hides the line until a newer version. */
+  dismissible: boolean;
+}
+
+/**
+ * The home screen's line for an update status, or null when there's nothing to offer. `dismissed` is the version
+ * put off with "Not now"; `attempted` the version this line started downloading, so a failed download says so.
+ */
+export function updatePromptView(
+  status: UpdateStatus | null,
+  dismissed: string | null,
+  attempted: string | null,
+): UpdatePromptView | null {
+  if (!status) return null;
+  const version = status.version;
+  const failed = status.status === "error" || status.status === "cancelled";
+  if (failed && attempted) {
+    const text =
+      status.status === "cancelled" ? "The update was cancelled." : `The update didn't finish. ${status.message}`;
+    return { text: text.trim(), action: "check", label: "Try again", dismissible: true };
+  }
+  if (!version || version === dismissed) return null;
+  switch (status.status) {
+    case "available":
+      return {
+        text: `Version ${version} is out.`,
+        action: "download",
+        label: status.inPlace ? "Update" : "Download",
+        dismissible: true,
+      };
+    case "downloading": {
+      const percent = status.bytes ? Math.floor((100 * status.received) / status.bytes) : 0;
+      return {
+        text: `Downloading version ${version}… ${percent}%`,
+        action: "cancel",
+        label: "Cancel",
+        dismissible: false,
+      };
+    }
+    case "staging":
+      return { text: `Checking version ${version}…`, action: null, label: "", dismissible: false };
+    case "staged":
+      return { text: `Version ${version} is ready.`, action: "restart", label: "Restart to update", dismissible: true };
+    case "ready":
+      return {
+        text: `Version ${version} is downloaded. Close the game, then install it from the updates folder.`,
+        action: "reveal",
+        label: "Open updates folder",
+        dismissible: true,
+      };
+    case "restarting":
+      return { text: "Restarting to update…", action: null, label: "", dismissible: false };
+    default:
+      return null;
+  }
+}
