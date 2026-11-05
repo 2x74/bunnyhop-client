@@ -174,6 +174,7 @@ fn c_layouts_are_stable() {
     assert_eq!(size_of::<BhAnimatedProp>(), 12);
     assert_eq!(size_of::<BhPropAnimState>(), 20);
     assert_eq!(size_of::<BhMaterialMotion>(), 32);
+    assert_eq!(size_of::<BhMaterialWireframe>(), 20);
     assert_eq!(size_of::<BhWeaponReport>(), 48);
     assert_eq!(size_of::<BhAttackReport>(), 52);
     assert_eq!(size_of::<BhFloorWeapon>(), 36);

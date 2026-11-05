@@ -20,7 +20,9 @@ pub use map_load::{bh_load_map_begin, bh_load_map_poll, bh_load_map_cancel};
 mod release_crypto;
 mod assets;
 mod map_motion;
-pub use map_motion::{BhMaterialMotion, bh_material_motion, bh_texture_frame};
+pub use map_motion::{
+    BhMaterialMotion, BhMaterialWireframe, bh_material_motion, bh_material_wireframes, bh_texture_frame,
+};
 mod map_props;
 pub use map_props::{
     BhAnimatedProp, BhPropAnimState, BhPropTransform, bh_animated_props, bh_prop_anim_names, bh_prop_anim_serial,

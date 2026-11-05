@@ -330,6 +330,14 @@ typedef struct BhMaterialMotion {
 
 const BhMaterialMotion *bh_material_motion(BhContext *ctx, size_t *count);
 int bh_texture_frame(BhContext *ctx, int32_t texture, uint32_t frame, BhImage *out);
+
+/* Wireframe materials (the core resolves them as missing): their triangle edges in color, unlit, at alpha. */
+typedef struct BhMaterialWireframe {
+    uint32_t material;
+    float color[3], alpha;
+} BhMaterialWireframe;
+
+const BhMaterialWireframe *bh_material_wireframes(BhContext *ctx, size_t *count);
 /* Water geometry JSON: volumes [minx,miny,minz,maxx,maxy,maxz] and convex plane lists [nx,ny,nz,d]. */
 const char *bh_water_json(BhContext *ctx, size_t *byte_count);
 /* Read/decode Source content with pakfile precedence; buffers last until next request of same kind. */

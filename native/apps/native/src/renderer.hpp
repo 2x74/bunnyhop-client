@@ -63,6 +63,7 @@ namespace native {
     X(void, Disable, (GLenum)) \
     X(void, ColorMask, (GLboolean, GLboolean, GLboolean, GLboolean)) \
     X(void, PolygonOffset, (GLfloat, GLfloat)) \
+    X(void, PolygonMode, (GLenum, GLenum)) \
     X(void, DepthMask, (GLboolean)) \
     X(void, DepthFunc, (GLenum)) \
     X(void, CullFace, (GLenum)) \
@@ -679,8 +680,8 @@ class Renderer {
         textures.emplace(key, id);
     }
 
-    // BhMaterial flags (bunnyhop_core's MAT_TRANSLUCENT, MAT_ALPHATEST).
-    static constexpr uint32_t material_translucent = 1, material_alpha_test = 2;
+    // BhMaterial flags (bunnyhop_core's MAT_TRANSLUCENT, MAT_ALPHATEST, MAT_UNLIT).
+    static constexpr uint32_t material_translucent = 1, material_alpha_test = 2, material_unlit = 16;
     // Textures a cutout or translucent material reads alpha from (texture_bleed.hpp).
     std::unordered_set<int32_t> cutoutTextures;
 
@@ -898,12 +899,9 @@ class Renderer {
         const auto &m = index < materials.size() ? materials[index] : fallback;
         if (graphics.potato) {
             const auto found = textureAverages.find(m.texture);
-            const std::array<float, 3> fallbackColor = {.5f, .5f, .5f};
-            gl.Uniform3fv(
-                    materialUniforms.flatColor,
-                    1,
-                    found == textureAverages.end() ? fallbackColor.data() : found->second.data()
-            );
+            const std::array<float, 3> fallbackColor = {.5f, .5f, .5f}, wireColor = {1, 1, 1};
+            const auto *flat = found == textureAverages.end() ? fallbackColor.data() : found->second.data();
+            gl.Uniform3fv(materialUniforms.flatColor, 1, wireframe(index) ? wireColor.data() : flat);
         }
         const BhMaterialExtra empty = {-1, -1, 4, 1, 0, 400, 1};
         const auto &e = index < extras.size() ? extras[index] : empty;
@@ -1291,7 +1289,7 @@ class Renderer {
         if (profiling) frameProfile.survivors += draws.size();
         profile_elapsed(frameProfile.buildCull, phaseStart);
         pose_map_props(draws);
-        bool skinnedBound = false;
+        bool skinnedBound = false, linesBound = false;
         const bool visibleWater =
                 hasWaterMaterials && std::any_of(draws.begin(), draws.end(), [&](const native_render::SceneDraw &d) {
                     return d.material < materials.size() && materials[d.material].kind == 2;
@@ -1322,6 +1320,10 @@ class Renderer {
                 gl.UniformMatrix4fv(materialUniforms.model, 1, GL_FALSE, model.data());
                 bind_material(d.material, d.prop);
                 bind_skinning(materialUniforms.skinned, materialUniforms.boneBase, d.skinned, skinnedBound);
+                if (wireframe(d.material) != linesBound) {
+                    linesBound = !linesBound;
+                    gl.PolygonMode(GL_FRONT_AND_BACK, linesBound ? GL_LINE : GL_FILL);
+                }
                 gl.BindVertexArray(draw_vao(d));
                 gl.DrawElements(
                         GL_TRIANGLES,
@@ -1338,6 +1340,7 @@ class Renderer {
             if (profiling) frameProfile.submit -= frameProfile.sort - sortBefore;
         }
         if (skinnedBound) gl.Uniform1i(materialUniforms.skinned, 0);
+        if (linesBound) gl.PolygonMode(GL_FRONT_AND_BACK, GL_FILL);
         gl.DepthMask(GL_TRUE);
         gl.Disable(GL_POLYGON_OFFSET_FILL);
         gl.Disable(GL_BLEND);
@@ -2033,7 +2036,28 @@ public:
         if (lightmap == white || !bh_lightmap_info(core, &lightmapInfo)) lightmapInfo = {1, 0};
     }
 
+    // Wireframe materials (bhop_4triedsame's shaft), which the core leaves missing: their triangle edges in $color,
+    // unlit, as the website's imposter.ts draws them.
+    std::vector<bool> wireframeMaterials;
+
+    void prepare_wireframes() {
+        size_t count = 0;
+        const auto *wireframes = bh_material_wireframes(core, &count);
+        wireframeMaterials.assign(materials.size(), false);
+        for (size_t i = 0; wireframes && i < count; ++i) {
+            const auto &w = wireframes[i];
+            if (w.material >= materials.size()) continue;
+            materials[w.material] = {-1, 0, material_unlit, w.alpha, .5f, {w.color[0], w.color[1], w.color[2]}};
+            wireframeMaterials[w.material] = true;
+        }
+    }
+
+    bool wireframe(uint32_t material) const {
+        return material < wireframeMaterials.size() && wireframeMaterials[material];
+    }
+
     ResourceLoading prepare_textures() {
+        prepare_wireframes();
         for (const auto &m : materials)
             if (m.flags & (material_translucent | material_alpha_test)) cutoutTextures.insert(m.texture);
         co_yield "resource";
@@ -2727,7 +2751,7 @@ public:
         static constexpr uint32_t additive = 8;
         if (material >= materials.size()) return Caster::none;
         const auto &m = materials[material];
-        if (m.kind == 2 || m.kind == 3 || (m.flags & additive)) return Caster::none;
+        if (m.kind == 2 || m.kind == 3 || (m.flags & additive) || wireframe(material)) return Caster::none;
         return (m.flags & (material_translucent | material_alpha_test)) || m.alpha < 1 ? Caster::cutout : Caster::solid;
     }
 
