@@ -56,8 +56,8 @@ inline double smooth_step(double x) {
 // The cancel's blend for a knife `distance` units and `angle` radians from where the fist holds it.
 inline double cancel_blend(double distance, double angle) {
     constexpr double far_units = 6, far_radians = 2.4;
-    const double far = std::min(1., std::max(distance / far_units, angle / far_radians));
-    return cancel_blend_seconds + (cancel_blend_max_seconds - cancel_blend_seconds) * smooth_step(far);
+    const double reach = std::min(1., std::max(distance / far_units, angle / far_radians));
+    return cancel_blend_seconds + (cancel_blend_max_seconds - cancel_blend_seconds) * smooth_step(reach);
 }
 
 struct ComboSlot {

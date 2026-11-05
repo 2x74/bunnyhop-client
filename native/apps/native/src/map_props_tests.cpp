@@ -134,25 +134,25 @@ void check_shared_and_still_poses(const nlohmann::json &oracle) {
     props->add_instance(10, 0);
     props->add_instance(11, 0);
     props->reserve_rows(512);
-    const float near[3] = {0, 0, 0};
-    props->set_viewer(near);
+    const float viewer_pos[3] = {0, 0, 0};
+    props->set_viewer(viewer_pos);
     auto instances = props->instances();
     // Two props of one model on the same sequence and cycle: one bone setup, the same matrices.
-    assert(props->pose(instances[0], 1.5, near));
-    assert(props->pose(instances[1], 1.5, near));
+    assert(props->pose(instances[0], 1.5, viewer_pos));
+    assert(props->pose(instances[1], 1.5, viewer_pos));
     assert(props->take_pose_count() == 1);
     const size_t bones = props->model(0).rig.bones;
     const auto rows = props->rows();
     for (size_t i = 0; i < bones * native_studio::matrix_floats; ++i)
         assert(rows[i] == rows[bones * native_studio::matrix_floats + i]);
     // Once per frame.
-    assert(!props->pose(instances[0], 1.5, near));
+    assert(!props->pose(instances[0], 1.5, viewer_pos));
     const auto dirty = props->take_dirty();
     assert(dirty.first == 0 && dirty.second == 2 * bones);
     // A one-frame sequence is posed once, then kept.
     instances[0].state.anim = props->model(0).lookup("still", 10);
-    assert(props->pose(instances[0], 2, near));
-    assert(!props->pose(instances[0], 2.5, near));
+    assert(props->pose(instances[0], 2, viewer_pos));
+    assert(!props->pose(instances[0], 2.5, viewer_pos));
     assert(props->take_dirty().second == bones);
 }
 
