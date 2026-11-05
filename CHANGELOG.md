@@ -53,7 +53,10 @@ Update from Settings → Updates: press Update, then Restart to update. Your set
 - The website's weapons pass: the knife and gun move like on the website (CS:S bob, lag, strafe tilt, landing dip), the
   old weapon lowers out while the new one draws, attacks blend an inspect out instead of cutting it, and your hand
   idles between actions. The USP's suppressor arm, rifle grips and gloves are fixed too.
-- The M4A1 has its own suppressor, with its own attach and detach timing and sounds.
+- Shots kick the gun on recoil springs like on the website, so rapid fire and the Glock's burst climb and rock, gun
+  animations blend into each other instead of snapping, and an empty gun's click shows.
+- The M4A1 has its own suppressor, with its own attach and detach timing and sounds. Switching away before a suppressor
+  is on or off puts it back as it was, for the USP too, and silenced shots and the Glock's burst do CS:S's damage.
 - Settings → Viewmodel: Inspect can be Quiet (your first press only checks the knife; replays always show the tricks),
   and Hard landing settle and Speed FOV are new, both off by default.
 - With your system's reduce motion setting on, the hands and guns move less, like on the website.
