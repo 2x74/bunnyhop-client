@@ -1,6 +1,7 @@
 #pragma once
 #include "hud.hpp"
 #include "hud_editor_layout.hpp"
+#include "look_menu.hpp"
 #include "room_state.hpp"
 #include "room_modes.hpp"
 #include "weapon_menu.hpp"
@@ -496,6 +497,16 @@ void hud_parity_smoke(Gl &gl, NativeHud &hud, int width, int height, Save save) 
     clear();
     trigger_menu.draw(hud, width, height, 100, true, false);
     save("hud-trigger-menu");
+    // !bright over the game with its cursor on Brighter, after Brighter twice on this map.
+    LookMenu look_menu;
+    auto look_settings = default_settings();
+    look_settings[std::string(map_looks_key)] = {{"bhop_lol_tutorial", {{"brightness", 1.1}}}};
+    look_menu.toggle("bhop_lol_tutorial", look_settings);
+    const auto look_rows = look_menu.rows(width, height, 100);
+    const auto brighter = look_rows.rows[LookMenu::brighter - 1];
+    clear();
+    look_menu.draw(hud, width, height, 100, std::array<float, 2>{look_rows.left + 60, brighter.top + 4});
+    save("hud-look-menu");
     auto preferences = default_settings();
     preferences["hudMovementLj"] = true;
     for (const char *id : {"startPre", "strafeOffsets", "firstJump", "longJump", "sync", "ghostKeys"})

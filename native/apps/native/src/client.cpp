@@ -95,6 +95,7 @@
 #include "sky_library.hpp"
 #include "menu_messages.hpp"
 #include "free_cameras.hpp"
+#include "menu_cursor.hpp"
 #include "numbered_menus.hpp"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_opengl.h>
@@ -392,6 +393,7 @@ int run(const native::Options &opt) {
     native::Input camera_controls;
     native::SniperZoom scope;
     native::NativeWeaponMenu gun_menu;
+    native::LookMenu look_menu;
     native::NativeTriggerMenu trigger_menu;
     native::FreeCameras free_cameras;
     const native::FreeLookInput free_look_input{input_timeline, input, held_codes};
@@ -425,6 +427,7 @@ int run(const native::Options &opt) {
         camera_controls.separate_vertical = input.separate_vertical;
         camera_controls.invert_y = input.invert_y;
         hud.preferences(preferences);
+        look_menu.refresh(preferences);
         audio.preferences(preferences);
         map_audio.preferences(preferences.at("mapVolume").get<float>(), preferences.at("muteMap").get<bool>());
         SDL_GL_SetSwapInterval(opt.frames ? 0 : prefs.vsync ? 1 : 0);
@@ -482,7 +485,10 @@ int run(const native::Options &opt) {
     native::MovementFeedback feedback;
     native::TurnAdmission turn_admission;
     native::PracticeController practice;
-    native::NumberedMenus numbered_menus{gun_menu, trigger_menu, race_picker, free_cameras.picker, practice.menu_open};
+    native::NumberedMenus numbered_menus{
+            gun_menu, trigger_menu, race_picker, free_cameras.picker, practice.menu_open, look_menu
+    };
+    native::MenuCursor menu_cursor;
     native::LeaveHold leave_hold;
     std::string gauntlet_id, gauntlet_map;
     nlohmann::json gauntlet_progress;
@@ -624,7 +630,7 @@ int run(const native::Options &opt) {
         chat_drag = false;
         chat.close();
         SDL_StopTextInput(window.get());
-        if (captured && focused && (!menu || !menu->visible())) {
+        if (captured && focused && (!menu || !menu->visible()) && !menu_cursor.held()) {
             SDL_SetWindowRelativeMouseMode(window.get(), true);
             native::set_raw_keyboard(true);
         }
@@ -1567,6 +1573,14 @@ int run(const native::Options &opt) {
                         return;
                     }
                 }
+                if (const auto look = look_menu.key(code, down, repeat, preferences); look.handled) {
+                    if (look.patch) {
+                        preferences = native::patch_settings(preferences, *look.patch);
+                        json_writer.write(cache / "settings.json", preferences);
+                        apply_preferences();
+                    }
+                    return;
+                }
                 if (numbered_menus.owns(code, down, room.vote_display.count != 0)) return;
                 if (room.spectator_target && down && !repeat
                     && free_cameras.spectator.changes_camera(code, input_timeline.binds())) {
@@ -1735,7 +1749,9 @@ int run(const native::Options &opt) {
         low_latency.frame_start();
         const uint64_t mouse_pump_start = SDL_GetTicksNS();
         if (input_backend.begin(
-                    prefs.input_backend, captured && focused && !chat.active && !viewer.active && !room.spectator_target
+                    prefs.input_backend,
+                    captured && focused && !chat.active && !menu_cursor.held() && !viewer.active
+                            && !room.spectator_target
             )) {
             SDL_FlushEvent(SDL_EVENT_MOUSE_MOTION);
         }
@@ -1746,7 +1762,8 @@ int run(const native::Options &opt) {
         pump_schedule.frame(mouse_pump_start, true, pump_tick_ns);
         input_timeline.begin_pump(input, mouse_pump_start, pump_schedule, pump_tick_ns);
         mouse_diagnostics.begin(
-                mouse_pump_start, prefs.mouse_diagnostics && captured && focused && !chat.active && !viewer.active
+                mouse_pump_start,
+                prefs.mouse_diagnostics && captured && focused && !chat.active && !menu_cursor.held() && !viewer.active
         );
         bool had_input_activity = false;
         SDL_Event event;
@@ -1880,6 +1897,8 @@ int run(const native::Options &opt) {
                                         race_picker.open(room.display(), zones);
                                         numbered_menus.opened(native::NumberedMenus::Menu::race);
                                         if (!race_picker.count) toast("No other players to race.");
+                                        if (menu_cursor.hold(numbered_menus.chat_menu_open(), captured && focused))
+                                            native::show_menu_cursor(window.get(), true);
                                     } else if (!text.empty() && menu && menu_ready)
                                         menu->evaluate_js(
                                                 "window.bunnyhopNativeMenu?.onChatSubmit?.("
@@ -1956,6 +1975,11 @@ int run(const native::Options &opt) {
                             viewer.controls.pending = viewer.session.range.clamp(target);
                             break;
                         }
+                        if (event.key.scancode == SDL_SCANCODE_ESCAPE && (menu_cursor.held() || look_menu.open())) {
+                            // A menu from chat, and !bright's, close first and the game takes the mouse back.
+                            numbered_menus.close_all();
+                            break;
+                        }
                         if (event.key.scancode == SDL_SCANCODE_ESCAPE) {
                             // Esc pauses, and the guns menu doesn't wait behind the pause (web weapon-commands.ts).
                             gun_menu.close();
@@ -1983,11 +2007,12 @@ int run(const native::Options &opt) {
                     const bool trusted_stamp =
                             native_motion || input_timeline.stamps().source(native::EventStamps::kMotion).trusted;
                     const uint64_t motion_stamp = trusted_stamp ? event.motion.timestamp : received;
-                    if (captured && focused && !chat.active && !viewer.active && !room.spectator_target
+                    const bool pointer_out = chat.active || menu_cursor.held();
+                    if (captured && focused && !pointer_out && !viewer.active && !room.spectator_target
                         && !input_timeline.diverted()) {
                         recorder.diagnostics.motion(motion_stamp, received, event.motion.xrel, event.motion.yrel);
                     }
-                    if (mouse_diagnostics.active && captured && focused && !chat.active) {
+                    if (mouse_diagnostics.active && captured && focused && !pointer_out) {
                         mouse_diagnostics.motion(motion_stamp, received);
                     }
                     if (video.preparing()) {
@@ -2014,7 +2039,14 @@ int run(const native::Options &opt) {
                                     hud.chat_input_byte(event.motion.x * scale, event.motion.y * scale, chat.input))
                             chat.position(*byte, true);
                     }
-                    if (captured && focused && !chat.active) {
+                    if (menu_cursor.held()) {
+                        const auto area = native::window_hud_area(window.get(), renderer.get());
+                        const float density = SDL_GetWindowPixelDensity(window.get());
+                        menu_cursor.point(
+                                native::hud_point(event.motion.x, event.motion.y, area, density, prefs.hud_scale)
+                        );
+                    }
+                    if (captured && focused && !pointer_out) {
                         if (viewer.active && viewer.camera.mode == "free")
                             camera_controls.accumulate(event.motion.xrel, event.motion.yrel);
                         else if (viewer.active && viewer.camera.mode == "chase")
@@ -2085,6 +2117,26 @@ int run(const native::Options &opt) {
                         }
                         break;
                     }
+                    if (menu_cursor.held()) {
+                        // The held menu's rows take the click as their digits; a click away closes the menu.
+                        if (!down || event.button.button != SDL_BUTTON_LEFT) break;
+                        const auto area = native::window_hud_area(window.get(), renderer.get());
+                        const float density = SDL_GetWindowPixelDensity(window.get());
+                        const auto at =
+                                native::hud_point(event.button.x, event.button.y, area, density, prefs.hud_scale);
+                        const auto click = numbered_menus.click(area.width, area.height, prefs.hud_scale, at);
+                        const auto patch = click.brightness ? look_menu.brightness_patch(*click.brightness, preferences)
+                                                            : std::nullopt;
+                        if (click.code)
+                            handle_code(*click.code, true);
+                        else if (patch) {
+                            preferences = native::patch_settings(preferences, *patch);
+                            json_writer.write(cache / "settings.json", preferences);
+                            apply_preferences();
+                        } else if (click.outside)
+                            numbered_menus.close_all();
+                        break;
+                    }
                     if (!captured && down && focused && (!menu || !menu->visible()) && core) {
                         capture(true);
                         break;
@@ -2125,6 +2177,16 @@ int run(const native::Options &opt) {
         }
         mouse_diagnostics.end(SDL_GetTicksNS(), mouse_pump_start);
         frame_diagnostics.mark(native::FrameDiagnostics::kPump, SDL_GetTicksNS());
+        switch (menu_cursor.step(numbered_menus.chat_menu_open(), !focused || (menu && menu->visible()))) {
+            case native::MenuCursor::Step::recapture:
+                if (captured && !chat.active) native::show_menu_cursor(window.get(), false);
+                break;
+            case native::MenuCursor::Step::close_menus:
+                numbered_menus.close_all();
+                break;
+            case native::MenuCursor::Step::keep:
+                break;
+        }
         if (auto layout = hud_editor.take_patch()) {
             try {
                 preferences = native::patch_settings(preferences, *layout, false);
@@ -2324,14 +2386,24 @@ int run(const native::Options &opt) {
                             preferences = native::patch_settings(preferences, native::ssj_chat_patch(message));
                             json_writer.write(cache / "settings.json", preferences);
                             apply_preferences();
-                        } else if (action == "raceMenu") {
-                            race_picker.open(room.display(), zones);
-                            numbered_menus.opened(native::NumberedMenus::Menu::race);
+                        } else if (action == "raceMenu" || action == "spectateMenu" || action == "lookMenu") {
+                            // Opened from chat: the cursor stays out for the menu's rows (menu_cursor.hpp).
+                            if (action == "raceMenu") {
+                                race_picker.open(room.display(), zones);
+                                numbered_menus.opened(native::NumberedMenus::Menu::race);
+                                if (!race_picker.count) toast("No other players to race.");
+                            } else if (action == "lookMenu" && !viewer.active) {
+                                look_menu.toggle(map_id, preferences);
+                                numbered_menus.opened(native::NumberedMenus::Menu::look);
+                            } else if (action == "spectateMenu" && !free_cameras.picker.open())
+                                act("spectatorMode");
+                            if (menu_cursor.hold(
+                                        numbered_menus.chat_menu_open(), captured && focused && !viewer.active
+                                ))
+                                native::show_menu_cursor(window.get(), true);
                         } else if (action == "freecam")
                             act("freecam");
-                        else if (action == "spectateMenu") {
-                            if (!free_cameras.picker.open()) act("spectatorMode");
-                        } else if (action == "lastLj")
+                        else if (action == "lastLj")
                             hud.repeat_long_jump(chat, epoch_ms() / 1000.);
                         else if (action == "jumpStats") {
                             show_menu(true);
@@ -3909,7 +3981,9 @@ int run(const native::Options &opt) {
                     hud_editor_bind.empty() ? std::string() : native::hud_key_label(hud_editor_bind.front()),
                     free_cameras.picker,
                     spectator_bar,
-                    free_cameras.flying(spectator.has_value())
+                    free_cameras.flying(spectator.has_value()),
+                    &look_menu,
+                    menu_cursor.pointer()
             }
                     .draw();
         }

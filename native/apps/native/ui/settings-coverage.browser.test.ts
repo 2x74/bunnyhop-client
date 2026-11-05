@@ -5,7 +5,7 @@ import { HUD_ELEMENTS } from "../../web/src/hud/layout";
 import { ACTIONS, DEFAULT_PREFS } from "../../web/src/ui/settings";
 import { NATIVE_BIND_ACTIONS, state } from "./bridge";
 import type { SeenRow } from "./settings-controls";
-import { NATIVE_GATES, WEB_ROWS } from "./settings-gates";
+import { gateFor, NATIVE_GATES, WEB_ROWS } from "./settings-gates";
 import { REQUESTED_KEYS, requestedDefault } from "./settings-keys";
 
 // Every row of the website's settings screen is in the native one, waiting for a host key (with the key it needs),
@@ -44,8 +44,7 @@ async function rows(page: Page, hostState: unknown): Promise<SeenRow[]> {
 }
 
 const key = (row: SeenRow) => `${row.section}/${row.group}/${row.label}`;
-const listed = (row: SeenRow) =>
-  [key(row), `${row.section}/*/${row.label}`, `${row.section}/${row.group}/*`].some((k) => k in WEB_ROWS);
+const listed = (row: SeenRow) => gateFor(row.section, row.group, row.label) !== null;
 
 test("every website settings row is shown, waiting for a host key, or left out with a reason", async () => {
   const browser = await chromium.launch({ headless: true });
@@ -85,7 +84,7 @@ test("with every key and capability, every row that isn't excluded is shown", as
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     const requested = Object.fromEntries(REQUESTED_KEYS.map((entry) => [entry.key, requestedDefault(entry)]));
     const binds = Object.fromEntries([...NATIVE_BIND_ACTIONS, ...ACTIONS.map((a) => a.id)].map((a) => [a, []]));
-    const settings = { ...state.settings, ...requested, binds, hudLayoutWeb: DEFAULT_PREFS.hud.layout };
+    const settings = { ...state.settings, ...requested, binds, hudLayoutWeb: DEFAULT_PREFS.hud.layout, mapLooks: {} };
     const capabilities = ["hudEditor", ...HUD_ELEMENTS.map((element) => `hud:${element.id}`)];
     const seen = await rows(page, { settings, capabilities });
     const waiting = seen.filter((row) => row.outcome === "hidden" || row.outcome === "unavailable").map(key);

@@ -51,6 +51,7 @@ import { RoomConnection } from "../../web/src/net/room";
 import { setRoomPresence, setRaceTag, currentRoom, currentRace } from "../../web/src/net/presence";
 import { serverBrowser } from "../../web/src/ui/servers";
 import { keyLabel } from "../../web/src/ui/settings";
+import { setLookMapNow } from "../../web/src/map-look";
 import { roomPanel } from "./rooms-panel";
 import { safeNativeChatUrl } from "./chat-links";
 import { NativeChatService } from "./chat-service";
@@ -746,6 +747,8 @@ function receive(value: unknown): void {
   const pauseBefore = paused();
   const applied = applyState(value);
   mapZoneWarning.mapChanged(state.map);
+  // The vendored Settings and pause rows for this map's own look read it from here (web main.ts sets it per page).
+  setLookMapNow(state.map);
   applyReplayHostState(value);
   applyVideoQueueState(value);
   applyHostSkies(value);

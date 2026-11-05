@@ -25,6 +25,7 @@ import { openGiftDialog } from "../../web/src/ui/gifting";
 import { openReport } from "./report";
 import { setNativeChatSink } from "./chat-hud";
 import { registerStrafeTrainerCommand } from "./chat-features";
+import { registerMapLookCommands } from "./map-looks";
 import type { NativeRoomService } from "./room-service";
 
 // Kept explicit so the host can validate actions without accepting arbitrary
@@ -46,7 +47,8 @@ export type ChatAction =
         | "showClips"
         | "freecam"
         | "spectateMenu"
-        | "raceMenu";
+        | "raceMenu"
+        | "lookMenu";
       track?: number;
       weapon?: string;
       weaponId?: number;
@@ -114,6 +116,10 @@ export class NativeChatService {
       registered = true;
       registerSocialCommands();
       registerStrafeTrainerCommand();
+      registerMapLookCommands(
+        () => state.map,
+        () => emit({ type: "chatAction", action: "lookMenu" }),
+      );
       for (const weapon of ["usp", "glock", "knife"])
         registerChatCommand({
           name: weapon,

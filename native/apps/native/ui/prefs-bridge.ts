@@ -13,6 +13,7 @@ import { toast } from "../../web/src/notify";
 import { paintPrefs } from "../../web/src/paint/prefs";
 import { NATIVE_BIND_ACTIONS, nativeKeyCode, send, settingsPatch, state, type SettingsPatch } from "./bridge";
 import { defaultPosition, type HudElementId, type HudLayout as NativeHudLayout } from "./hud-layout";
+import { mergeHostLooks } from "./map-looks";
 import { REQUESTED_KEYS, readPath, requestedPatch, writePath } from "./settings-keys";
 
 /** The host's settings as one object: native keys and the website keys it has added. */
@@ -245,6 +246,15 @@ const webLayout: Mapping = {
   },
 };
 
+/** This map's own Brightness / Fullbright (web map-look.ts): the host draws each map with them (src/map_look.hpp). */
+const mapLooks: Mapping = {
+  keys: ["mapLooks"],
+  toNative: (p) => ({ mapLooks: JSON.parse(JSON.stringify(p.mapLooks ?? {})) }),
+  toPrefs: (p, host) => {
+    p.mapLooks = mergeHostLooks(p.mapLooks, host.mapLooks);
+  },
+};
+
 const NATIVE_ONLY_ACTIONS = NATIVE_BIND_ACTIONS.filter((action) => !(action in DEFAULT_PREFS.binds));
 const SHARED_ACTIONS = NATIVE_BIND_ACTIONS.filter((action) => action in DEFAULT_PREFS.binds) as Action[];
 
@@ -286,6 +296,7 @@ export const MAPPINGS: readonly Mapping[] = [
   nativeLayout,
   webLayout,
   binds,
+  mapLooks,
   ...requested,
 ];
 
