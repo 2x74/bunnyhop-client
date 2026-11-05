@@ -17,6 +17,8 @@ mod map_audio;
 mod flight;
 #[path = "map_props_tests.rs"]
 mod map_props;
+#[path = "hard_maps_tests.rs"]
+mod hard_maps;
 
 struct Fixture(PathBuf);
 impl Fixture {
