@@ -175,7 +175,7 @@ fn c_layouts_are_stable() {
     assert_eq!(size_of::<BhPropTransform>(), 32);
     assert_eq!(size_of::<BhAnimatedProp>(), 40);
     assert_eq!(offset_of!(BhAnimatedProp, min_anim_time), 24);
-    assert_eq!(size_of::<BhPropAnimState>(), 20);
+    assert_eq!(size_of::<BhPropAnimState>(), 28);
     assert_eq!(size_of::<BhMaterialMotion>(), 32);
     assert_eq!(size_of::<BhMaterialWireframe>(), 20);
     assert_eq!(size_of::<BhWeaponReport>(), 48);

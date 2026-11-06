@@ -71,6 +71,7 @@ await copyFile(join(root, "upstream-manifest.json"), join(output, "upstream-mani
 for (const path of [
   "apps/web/src/player/bunny/skeleton.json",
   "apps/web/src/viewmodel/skeleton.json",
+  "apps/web/src/map-effects/crash-particles.json",
   "apps/native/ui/authored-previews.json",
 ]) {
   await mkdir(dirname(join(output, path)), { recursive: true });

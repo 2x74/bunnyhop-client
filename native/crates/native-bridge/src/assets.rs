@@ -75,6 +75,76 @@ pub struct Assets {
     pub model_info: Vec<CString>,
     pub anim: Vec<f32>,
 }
+pub(super) const CRASH_BSP_SHA: &str =
+    "c2b3bc1e5a3f2507df4b7aa6ed71af7c2ac38edb12c41939547d25268ec9613e";
+
+pub(super) fn crash_particle_materials(sha: &str) -> Vec<String> {
+    if sha != CRASH_BSP_SHA {
+        return Vec::new();
+    }
+    let data: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../apps/web/src/map-effects/crash-particles.json"
+    ))
+    .expect("synced Crash particle definitions");
+    let mut names: Vec<_> = data
+        .as_object()
+        .unwrap()
+        .values()
+        .filter_map(|d| d["material"].as_str())
+        .map(|name| {
+            let name = vfs::normalize(name);
+            let name = name.strip_prefix("materials/").unwrap_or(&name);
+            name.strip_suffix(".vmt").unwrap_or(name).to_string()
+        })
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bh_map_sha256(ctx: *const BhContext, out: *mut c_char) -> c_int {
+    unsafe {
+        read(ctx, 0, |c| {
+            let Some(m) = &c.map else { return 0 };
+            if out.is_null() {
+                return 0;
+            }
+            ptr::copy_nonoverlapping(m.map_sha256.as_ptr().cast::<c_char>(), out, 64);
+            out.add(64).write(0);
+            1
+        })
+    }
+}
+
+// A wildcard remote listing claims nonexistent $cdmaterials candidates and masks valid later paths in the pakfile.
+pub(super) fn loose_listing(
+    root: &Path,
+    check: &dyn Fn() -> Result<(), String>,
+) -> Result<vfs::Listing, String> {
+    let mut directories = vec![root.to_path_buf()];
+    let mut paths = Vec::new();
+    while let Some(directory) = directories.pop() {
+        check()?;
+        for entry in
+            std::fs::read_dir(&directory).map_err(|e| format!("{}: {e}", directory.display()))?
+        {
+            check()?;
+            let entry = entry.map_err(|e| e.to_string())?;
+            let kind = entry.file_type().map_err(|e| e.to_string())?;
+            if kind.is_dir() {
+                directories.push(entry.path());
+            } else if kind.is_file() {
+                let path = entry.path();
+                if let Some(relative) = path.strip_prefix(root).ok().and_then(Path::to_str) {
+                    paths.push(relative.to_string());
+                }
+            }
+        }
+    }
+    Ok(vfs::Listing::new("disk", paths))
+}
+
 pub fn fetch_pending(
     fs: &mut vfs::Vfs,
     root: Option<&Path>,

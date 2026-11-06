@@ -4,6 +4,7 @@
 #include "weapon_commands.hpp"
 #include <cstdlib>
 #include <optional>
+#include <thread>
 
 int main(int argc, char **argv) {
     try {
@@ -14,12 +15,16 @@ int main(int argc, char **argv) {
         bool zoneGold = false;
         bool simulateFire = false, aura = true, firstPersonGlow = true;
         bool flashlight = false, triggers = false, msaa = false, sourceLook = false, requireWater = false;
-        int frames = 2;
+        int frames = 2, ticks = 0, restoreTicks = -1, captureWidth = 1280, captureHeight = 720;
+        bool explicitPlayer = false, reset = false, replayPractice = false;
+        float player[3] = {};
+        std::string stateOutput, replay;
+        int seekTick = -1;
         bool actor = false;
         float opacity = .45, actorYaw = 0, actorPitch = 0, actorSpeed = 0;
         uint32_t actorFlags = 2;
         float eye[3] = {};
-        bool explicitEye = false, worldOnly = false;
+        bool explicitEye = false, worldOnly = false, prepared = false;
         double yaw = 0, pitch = 0, seconds = 2;
         int weapon = -1;
         for (int i = 1; i < argc; i++) {
@@ -53,6 +58,10 @@ int main(int argc, char **argv) {
                 seconds = number();
             else if (arg == "--water-quality")
                 waterQuality = value();
+            else if (arg == "--width")
+                captureWidth = int(number());
+            else if (arg == "--height")
+                captureHeight = int(number());
             else if (arg == "--frames")
                 frames = int(number());
             else if (arg == "--zone-file")
@@ -77,6 +86,26 @@ int main(int argc, char **argv) {
                 triggers = true;
             else if (arg == "--weapon")
                 weapon = int(number());
+            else if (arg == "--ticks")
+                ticks = int(number());
+            else if (arg == "--restore-ticks")
+                restoreTicks = int(number());
+            else if (arg == "--reset")
+                reset = true;
+            else if (arg == "--replay")
+                replay = value();
+            else if (arg == "--practice-from-replay")
+                replayPractice = true;
+            else if (arg == "--seek")
+                seekTick = int(number());
+            else if (arg == "--state-json")
+                stateOutput = value();
+            else if (arg == "--player") {
+                for (float &n : player)
+                    n = number();
+                explicitPlayer = true;
+            } else if (arg == "--prepared")
+                prepared = true;
             else if (arg == "--world-only")
                 worldOnly = true;
             else if (arg == "--water-json")
@@ -125,6 +154,8 @@ int main(int argc, char **argv) {
             );
         if (frames < 1 || frames > 10000 || seconds < 0)
             throw std::runtime_error("frames must be 1..10000 and seconds nonnegative");
+        if (captureWidth < 256 || captureWidth > 4096 || captureHeight < 256 || captureHeight > 4096)
+            throw std::runtime_error("capture dimensions must be 256..4096");
         if (waterQuality != "simple" && waterQuality != "refracted")
             throw std::runtime_error("water-quality must be simple or refracted");
         if (!SDL_Init(SDL_INIT_VIDEO)) throw std::runtime_error(SDL_GetError());
@@ -137,7 +168,9 @@ int main(int argc, char **argv) {
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
         SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
-        auto *window = SDL_CreateWindow("Native render evidence", 1280, 720, SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN);
+        auto *window = SDL_CreateWindow(
+                "Native render evidence", captureWidth, captureHeight, SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN
+        );
         if (!window) throw std::runtime_error(SDL_GetError());
 
         struct Window {
@@ -161,8 +194,18 @@ int main(int argc, char **argv) {
         gl.load();
         using Core = std::unique_ptr<BhContext, decltype(&bh_destroy)>;
         Core core(bh_create(), &bh_destroy);
-        if (!core || !bh_load_map(core.get(), map.c_str(), content.empty() ? nullptr : content.c_str()))
-            throw std::runtime_error(core ? bh_last_error(core.get()) : "native core creation failed");
+        if (!core) throw std::runtime_error("native core creation failed");
+        const char *contentRoot = content.empty() ? nullptr : content.c_str();
+        if (prepared) {
+            if (!bh_load_map_begin(core.get(), map.c_str(), contentRoot))
+                throw std::runtime_error(bh_last_error(core.get()));
+            int status = 0;
+            while ((status = bh_load_map_poll(core.get())) == 0)
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            if (status < 0) throw std::runtime_error(bh_last_error(core.get()));
+        } else if (!bh_load_map(core.get(), map.c_str(), contentRoot)) {
+            throw std::runtime_error(bh_last_error(core.get()));
+        }
         if (!waterOutput.empty()) {
             size_t n = 0;
             const char *json = bh_water_json(core.get(), &n);
@@ -173,6 +216,88 @@ int main(int argc, char **argv) {
         BhSettings settings{};
         bh_default_settings(&settings);
         if (!bh_set_settings(core.get(), &settings)) throw std::runtime_error(bh_last_error(core.get()));
+        if (!replay.empty() && !bh_replay_load(core.get(), replay.c_str()))
+            throw std::runtime_error(bh_last_error(core.get()));
+        if (replayPractice && !bh_practice_from_replay(core.get(), "autohop"))
+            throw std::runtime_error(bh_last_error(core.get()));
+        bool playback = !replay.empty() && !replayPractice;
+        if (explicitPlayer) {
+            BhNoclipState placement{};
+            for (size_t k = 0; k < 3; ++k)
+                placement.position[k] = player[k];
+            if (!bh_practice_enter(core.get(), 1)) throw std::runtime_error(bh_last_error(core.get()));
+            BhSnapshot placed{};
+            if (!bh_practice_noclip_exit(core.get(), &placement, float(yaw), float(pitch), &placed))
+                throw std::runtime_error("smoke player placement is stuck");
+        }
+        if (ticks < 0 || ticks > 100000 || restoreTicks > 100000) throw std::runtime_error("invalid smoke tick count");
+        const auto saved = restoreTicks >= 0 ? bh_practice_save(core.get(), float(yaw), float(pitch)) : 0;
+        auto step = [&](int count) {
+            BhCmd command{};
+            BhState state{};
+            for (int tick = 0; tick < count; ++tick)
+                if (!playback) {
+                    if (!bh_step(core.get(), &command, &state)) throw std::runtime_error(bh_last_error(core.get()));
+                } else {
+                    BhSnapshot frame{};
+                    if (!bh_replay_step(core.get(), &frame)) throw std::runtime_error(bh_last_error(core.get()));
+                }
+        };
+        step(ticks);
+        if (restoreTicks >= 0) {
+            BhCmd view{};
+            BhSnapshot restored{};
+            if (!saved || !bh_practice_restore(core.get(), saved, &view, &restored))
+                throw std::runtime_error(bh_last_error(core.get()));
+            playback = false;
+            step(restoreTicks);
+        }
+        if (seekTick >= 0) {
+            BhSnapshot frame{};
+            if (!bh_replay_seek(core.get(), 0, &frame) || !bh_replay_seek(core.get(), uint32_t(seekTick), &frame))
+                throw std::runtime_error(bh_last_error(core.get()));
+        }
+        if (reset && !bh_reset(core.get())) throw std::runtime_error(bh_last_error(core.get()));
+        if (!stateOutput.empty()) {
+            std::vector<BhEntityInstance> instances(native::RuntimePropCopies::entity_limit);
+            const size_t count = bh_entity_instances(core.get(), instances.data(), instances.size());
+            nlohmann::json evidence = {{"instances", nlohmann::json::array()}, {"props", nlohmann::json::array()}};
+            for (size_t i = 0; i < count; ++i) {
+                const auto &copy = instances[i];
+                evidence["instances"].push_back(
+                        {{"entity", copy.entity},
+                         {"source", copy.source},
+                         {"origin", copy.origin},
+                         {"visible", copy.visible}}
+                );
+            }
+            std::vector<BhPropTransform> transforms(native::RuntimePropCopies::entity_limit);
+            const size_t props = bh_prop_transforms(core.get(), transforms.data(), transforms.size());
+            for (size_t i = 0; i < props; ++i) {
+                const auto &prop = transforms[i];
+                evidence["props"].push_back(
+                        {{"entity", prop.entity}, {"origin", prop.origin}, {"visible", prop.visible}}
+                );
+            }
+            std::vector<BhPropAnimState> states(native::RuntimePropCopies::entity_limit);
+            const size_t animations = bh_prop_anim_states(core.get(), states.data(), states.size());
+            evidence["animations"] = nlohmann::json::array();
+            for (size_t i = 0; i < animations; ++i) {
+                const auto &state = states[i];
+                evidence["animations"].push_back(
+                        {{"entity", state.entity},
+                         {"flags", state.flags},
+                         {"body", state.body},
+                         {"skin", state.skin},
+                         {"base", state.base},
+                         {"since", state.since},
+                         {"rate", state.rate}}
+                );
+            }
+            std::ofstream file(stateOutput);
+            file << evidence.dump(2) << '\n';
+            if (!file) throw std::runtime_error("cannot write smoke state");
+        }
         BhSnapshot snapshot{};
         bh_snapshot(core.get(), &snapshot);
         if (!explicitEye)

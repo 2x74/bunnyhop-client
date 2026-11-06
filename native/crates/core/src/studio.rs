@@ -221,6 +221,8 @@ pub struct SkinnedMesh {
     pub indices: Vec<u32>,
     /// `[material (texture index after skin family 0), first index, index count]`.
     pub groups: Vec<[u32; 3]>,
+    /// Material groups for each packed body value, sharing the vertex buffer.
+    pub bodies: Vec<Vec<[u32; 3]>>,
 }
 
 pub const STUDIO_VERTEX_FLOATS: usize = 18;
@@ -522,20 +524,34 @@ fn skinned_mesh(mdl: &[u8], vvd: &[u8], vtx: &[u8], tex: &MdlTextures) -> Option
         out.vertices.extend_from_slice(&w);
         out.vertices.extend_from_slice(&[b[0] as f32, b[1] as f32, b[2] as f32]);
     }
-    // Group triangles by texture (skin family 0), in first-seen order.
+    // Include each authored body model. Static/collision mesh readers still select body zero.
+    let bp_count = i32_at(mdl, 232)?.max(0) as usize;
+    let bp_start = i32_at(mdl, 236)?.max(0) as usize;
+    let mut bodies = 1usize;
+    for bp in 0..bp_count {
+        let at = bp_start + bp * 16;
+        let count = i32_at(mdl, at + 4)?.max(1) as usize;
+        let base = i32_at(mdl, at + 8)?.max(1) as usize;
+        bodies = bodies.max(base.checked_mul(count)?);
+    }
+    // Malformed/pathological assets must not multiply allocation without a bound.
+    if bodies > 256 { return None; }
     let family = tex.skins.first();
-    let mut by_tex: Vec<(u32, Vec<u32>)> = Vec::new();
-    for (skinref, tris) in &geo.meshes {
-        let t = family.and_then(|f| f.get(*skinref)).map(|&t| t as u32).unwrap_or(*skinref as u32);
-        match by_tex.iter_mut().find(|(k, _)| *k == t) {
-            Some((_, v)) => v.extend_from_slice(tris),
-            None => by_tex.push((t, tris.clone())),
+    for body in 0..bodies {
+        let selected;
+        let mesh = if body == 0 { &geo } else {
+            selected = crate::props::model_geometry_body(mdl, vvd, vtx, body)?;
+            &selected
+        };
+        let mut groups = Vec::new();
+        for (skinref, tris) in &mesh.meshes {
+            groups.push([*skinref as u32, out.indices.len() as u32, tris.len() as u32]);
+            out.indices.extend(tris);
         }
+        out.bodies.push(groups);
     }
-    for (t, tris) in by_tex {
-        out.groups.push([t, out.indices.len() as u32, tris.len() as u32]);
-        out.indices.extend(tris);
-    }
+    out.groups = out.bodies.first().cloned().unwrap_or_default().into_iter().map(|[r, first, count]|
+        [family.and_then(|f| f.get(r as usize)).copied().map(u32::from).unwrap_or(r), first, count]).collect();
     Some(out)
 }
 
@@ -1132,6 +1148,16 @@ impl StudioModel {
                 s.push(',');
             }
             let _ = write!(s, "[{},{},{}]", g[0], g[1], g[2]);
+        }
+        s.push_str("],\"bodies\":[");
+        for (i, groups) in self.mesh.bodies.iter().enumerate() {
+            if i > 0 { s.push(','); }
+            s.push('[');
+            for (j, g) in groups.iter().enumerate() {
+                if j > 0 { s.push(','); }
+                let _ = write!(s, "[{},{},{}]", g[0], g[1], g[2]);
+            }
+            s.push(']');
         }
         s.push_str("],\"skins\":[");
         for (i, f) in self.skins.iter().enumerate() {

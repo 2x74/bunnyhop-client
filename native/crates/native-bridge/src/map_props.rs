@@ -16,7 +16,7 @@ pub struct BhAnimatedProp {
     /// `random_seed` (map-props.ts RandomAnimator).
     pub random: u32,
     pub random_seed: u32,
-    pub reserved: u32,
+    pub model_scale: f32,
     pub min_anim_time: f64,
     pub max_anim_time: f64,
 }
@@ -31,6 +31,8 @@ pub struct BhPropAnimState {
     pub base: f32,
     pub since: f32,
     pub rate: f32,
+    pub body: u32,
+    pub skin: i32,
 }
 
 #[repr(C)]
@@ -122,6 +124,54 @@ fn studio_model_path(entity: &bunnyhop_core::entities::Entity) -> Option<String>
     model.ends_with(".mdl").then_some(model)
 }
 
+fn model_scale(entity: &bunnyhop_core::entities::Entity) -> f32 {
+    entity
+        .float("modelscale")
+        .filter(|s| s.is_finite() && *s > 0.0)
+        .unwrap_or(1.0)
+}
+
+/// Optional read-only maker presentation, equivalent to Core.entityInstances().
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct BhEntityInstance {
+    pub entity: u32,
+    pub source: u32,
+    pub origin: [f32; 3],
+    pub angles: [f32; 3],
+    pub visible: u32,
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bh_entity_instances(
+    ctx: *const BhContext,
+    out: *mut BhEntityInstance,
+    capacity: usize,
+) -> usize {
+    unsafe {
+        read(ctx, 0, |c| {
+            let Some(m) = &c.map else { return 0 };
+            if out.is_null() {
+                return 0;
+            }
+            let mut count = 0;
+            for (entity, source, origin, angles, visible) in
+                m.game.entity_instances().take(capacity)
+            {
+                out.add(count).write(BhEntityInstance {
+                    entity: entity as u32,
+                    source: source as u32,
+                    origin,
+                    angles,
+                    visible: u32::from(visible),
+                });
+                count += 1;
+            }
+            count
+        })
+    }
+}
+
 impl Map {
     /// Loads a studio model into the context's cache (`bh_studio_load`), fetching loose content as it goes.
     pub(super) fn load_studio(&mut self, path: &str) -> Result<u32, String> {
@@ -155,7 +205,10 @@ impl Map {
 
     /// The prop_dynamics with their own prop groups and their models, loaded once (on the load worker, or at the
     /// first request).
-    pub(super) fn prepare_prop_models(&mut self, check: &dyn Fn() -> Result<(), String>) -> Result<(), String> {
+    pub(super) fn prepare_prop_models(
+        &mut self,
+        check: &dyn Fn() -> Result<(), String>,
+    ) -> Result<(), String> {
         if self.prop_models.ready {
             return Ok(());
         }
@@ -169,11 +222,14 @@ impl Map {
             let Some(e) = self.game.entities.get(entity as usize).cloned() else {
                 continue;
             };
-            let Some(path) = studio_model_path(&e) else { continue };
+            let Some(path) = studio_model_path(&e) else {
+                continue;
+            };
             let studio = self.load_studio(&path).unwrap_or(0);
             let mut prop = BhAnimatedProp {
                 entity,
                 skin: e.int("skin") as i32,
+                model_scale: model_scale(&e),
                 studio,
                 ..BhAnimatedProp::default()
             };
@@ -227,7 +283,10 @@ impl Map {
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn bh_animated_props(ctx: *mut BhContext, count: *mut usize) -> *const BhAnimatedProp {
+pub unsafe extern "C" fn bh_animated_props(
+    ctx: *mut BhContext,
+    count: *mut usize,
+) -> *const BhAnimatedProp {
     let mut result = ptr::null();
     let _ = unsafe { output(count, 0) };
     unsafe {
@@ -249,7 +308,11 @@ pub unsafe extern "C" fn bh_animated_props(ctx: *mut BhContext, count: *mut usiz
 /// Moves whenever `bh_prop_anim_states` may read differently.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bh_prop_anim_serial(ctx: *const BhContext) -> u32 {
-    unsafe { read(ctx, 0, |c| c.map.as_ref().map_or(0, |m| m.game.prop_anim_serial())) }
+    unsafe {
+        read(ctx, 0, |c| {
+            c.map.as_ref().map_or(0, |m| m.game.prop_anim_serial())
+        })
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -272,6 +335,8 @@ pub unsafe extern "C" fn bh_prop_anim_states(
                     base,
                     since,
                     rate,
+                    body: prop.body,
+                    skin: prop.skin,
                 });
                 count += 1;
             }
@@ -326,8 +391,12 @@ pub unsafe extern "C" fn bh_prop_transforms(
             // Both lists are in entity order: walk the animation states alongside.
             let mut states = m.game.prop_anim_states().peekable();
             let mut count = 0;
-            for (entity, origin, angles) in m.game.moving_prop_transforms().into_iter().take(capacity) {
-                while states.next_if(|(p, ..)| (p.ent as usize) < entity).is_some() {}
+            let transforms = m.game.moving_prop_transforms();
+            for (entity, origin, angles) in transforms.into_iter().take(capacity) {
+                while states
+                    .next_if(|(p, ..)| (p.ent as usize) < entity)
+                    .is_some()
+                {}
                 let flags = states
                     .next_if(|(p, ..)| p.ent as usize == entity)
                     .map(|(_, flags, ..)| flags);

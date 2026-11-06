@@ -132,6 +132,19 @@ typedef struct BhMapSoundState {
 uint32_t bh_map_sound_serial(const BhContext *ctx);
 size_t bh_map_sound_states(const BhContext *ctx, BhMapSoundState *out, size_t capacity);
 size_t bh_map_sound_commands(BhContext *ctx, uint8_t *out, size_t capacity);
+
+/* Read-only build identity of the loaded BSP. out has room for 64 hex characters plus NUL. */
+int bh_map_sha256(const BhContext *ctx, char *out);
+
+/* Display-only runtime maker copies. Rows disappear on reset/seek; source names original geometry/sound. */
+typedef struct BhEntityInstance {
+    uint32_t entity, source;
+    float origin[3], angles[3];
+    uint32_t visible;
+} BhEntityInstance;
+
+size_t bh_entity_instances(const BhContext *ctx, BhEntityInstance *out, size_t capacity);
+
 /* Worker-only pak reader. Returned bytes last until close; never reads loose replacements. */
 typedef struct BhSoundPak BhSoundPak;
 BhSoundPak *bh_sound_pak_open(const char *bsp_path);
@@ -309,13 +322,16 @@ typedef struct BhAnimatedProp {
     int32_t skin;
     uint32_t studio;
     /* RandomAnimation: switches idle sequences every min..max seconds, drawn from random_seed. */
-    uint32_t random, random_seed, reserved;
+    uint32_t random, random_seed;
+    float model_scale; /* Former reserved word; zero means the default scale of one. */
     double min_anim_time, max_anim_time;
 } BhAnimatedProp;
 
 typedef struct BhPropAnimState {
     uint32_t entity, flags; /* flags: hidden 1, removed 2, set by the map's I/O 4 */
     float base, since, rate;
+    uint32_t body;
+    int32_t skin;
 } BhPropAnimState;
 
 const BhAnimatedProp *bh_animated_props(BhContext *ctx, size_t *count);
