@@ -4289,7 +4289,7 @@ impl Game {
                 continue;
             }
             let Some(model) = e.get("model").filter(|m| m.to_ascii_lowercase().ends_with(".mdl")) else { continue };
-            let parented_prop = self.parented_props.contains(&i);
+            let parented_prop = self.parented_props.contains(&i) || (animated && self.prop_anims.contains(i) && e.int("solid") == 0 && e.get("parentname").is_some_and(|n| !n.is_empty()));
             if (e.get("parentname").is_some_and(|p| !p.is_empty()) && !parented_prop) || e.int("rendermode") == 10 {
                 continue;
             }

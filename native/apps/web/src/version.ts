@@ -104,6 +104,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "bhop_crash_egypt's crates break, bounce you and drop fruit like in CS:S, and picking up fruit makes its sound. On every map, sounds now fade with distance like in CS:S, so far-away effects are quieter, and props a map removes no longer stay on screen.",
       "Maps added since the last update: bhop_frankerz_999xl_extreme, bhop_frankerz_2500xl_easyxtreme, bhop_frankerz_999xl_extreme_sr, bhop_insanelyserz (T4), bhop_desertbus, bhop_tatmt_long1_s and bhop_monster_jam_xmas. Thanks to nixii, worldspawn and serialexperimentslain1998.",
       "┃world-records on Discord posts at most one record per player per map every 30 minutes, so a run of style records on one map doesn't flood the channel.",
+      "bhop_crash_egypt's crates splinter when they break, TNT counts down before it explodes, nitro crates explode, and the sarcophagi ride their moving trains.",
       "Your existing runs don't change. The desktop client gets all of this in v0.8.0. Until you update, it can't submit runs on ahop_coast, the frankerz maps, bhop_crash_egypt or bhop_gofuckyourself.",
     ],
   },

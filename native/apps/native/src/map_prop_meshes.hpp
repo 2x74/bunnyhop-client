@@ -30,7 +30,7 @@ public:
     ResourceLoading load(BhContext *core, std::span<const BhPropGroup> prop_groups, const nlohmann::json &names) {
         release();
         mark_owners(prop_groups);
-        index_prop_materials(prop_groups, names);
+        index_prop_materials(names);
         size_t count = 0;
         const auto *animated = bh_animated_props(core, &count);
         for (size_t i = 0; animated && i < count; ++i) {
@@ -44,8 +44,9 @@ public:
             co_yield "animated prop";
         }
         // The world shaders sample it on every draw, so it exists even when nothing poses.
+        byMesh_.reserve(instanceMeshes_.size());
         create_bone_texture();
-        prepare_states(core);
+        prepare_states();
         std::cout << "Map props: " << props.instances().size() << " animated props, " << props.model_count()
                   << " models, " << frozen_ << " frozen\n";
     }
@@ -88,8 +89,8 @@ public:
         if (byMesh_.size() != instanceMeshes_.size()) {
             byMesh_.resize(instanceMeshes_.size());
             std::iota(byMesh_.begin(), byMesh_.end(), 0u);
-            std::stable_sort(byMesh_.begin(), byMesh_.end(), [&](uint32_t a, uint32_t b) {
-                return instanceMeshes_[a] < instanceMeshes_[b];
+            std::sort(byMesh_.begin(), byMesh_.end(), [&](uint32_t a, uint32_t b) {
+                return instanceMeshes_[a] != instanceMeshes_[b] ? instanceMeshes_[a] < instanceMeshes_[b] : a < b;
             });
         }
         return byMesh_;
@@ -132,11 +133,14 @@ private:
         std::vector<float> vertices;
         std::vector<uint32_t> indices;
         nlohmann::json info;
+        std::vector<size_t> variants;
+        uint32_t skins = 1, bodies = 1;
     };
 
     struct Mesh {
         size_t model;
         int32_t skin;
+        uint32_t body;
         std::vector<Group> groups;
     };
 
@@ -186,18 +190,13 @@ private:
     }
 
     // map-props.ts matches studio material names against the prop mesh's materials, as written and lower case.
-    void index_prop_materials(std::span<const BhPropGroup> prop_groups, const nlohmann::json &names) {
+    void index_prop_materials(const nlohmann::json &names) {
         propMaterials_.clear();
-        std::vector<uint32_t> used;
-        for (const auto &g : prop_groups)
-            used.push_back(g.material);
-        std::sort(used.begin(), used.end());
-        used.erase(std::unique(used.begin(), used.end()), used.end());
-        for (const auto index : used) {
-            if (index >= names.size() || !names[index].is_string()) continue;
+        for (size_t index = 0; index < names.size(); ++index) {
+            if (!names[index].is_string()) continue;
             const auto name = names[index].get<std::string>();
-            propMaterials_.emplace(name, index);
-            propMaterials_.emplace(native_studio::lower_ascii(name), index);
+            propMaterials_.emplace(name, uint32_t(index));
+            propMaterials_.emplace(native_studio::lower_ascii(name), uint32_t(index));
         }
     }
 
@@ -262,25 +261,36 @@ private:
     }
 
     std::optional<size_t> mesh_for(BhContext *core, uint32_t handle, int32_t skin) {
-        const auto model = model_for(core, handle);
-        if (!model) return std::nullopt;
-        for (size_t i = 0; i < meshes_.size(); ++i)
-            if (meshes_[i].model == *model && meshes_[i].skin == skin)
-                return meshes_[i].groups.empty() ? std::nullopt : std::optional(i);
-        meshes_.push_back({*model, skin, skin_groups(models_[*model].info, skin)});
-        if (meshes_.back().groups.empty()) return std::nullopt;
-        upload_model(models_[*model]);
-        return meshes_.size() - 1;
+        const auto index = model_for(core, handle);
+        if (!index) return std::nullopt;
+        auto &model = models_[*index];
+        if (model.variants.empty()) {
+            model.skins = std::max(size_t(1), model.info.value("skins", nlohmann::json::array()).size());
+            model.bodies = std::max(size_t(1), model.info.value("bodies", nlohmann::json::array()).size());
+            model.variants.reserve(size_t(model.skins) * model.bodies);
+            for (uint32_t body = 0; body < model.bodies; ++body)
+                for (uint32_t family = 0; family < model.skins; ++family) {
+                    model.variants.push_back(meshes_.size());
+                    meshes_.push_back({*index, int32_t(family), body, skin_groups(model.info, family, body)});
+                }
+            upload_model(model);
+        }
+        return model.variants[skin >= 0 && uint32_t(skin) < model.skins ? uint32_t(skin) : 0];
     }
 
-    // Mesh groups are by skin family 0's textures; the prop's skin swaps each skin reference's texture (map-props.ts).
-    std::vector<Group> skin_groups(const nlohmann::json &info, int32_t skin) const {
+    std::vector<Group> skin_groups(const nlohmann::json &info, uint32_t skin, uint32_t body) const {
         const auto skins = info.value("skins", nlohmann::json::array());
-        const bool remap = skins.size() > 1 && skin > 0 && size_t(skin) < skins.size();
+        const auto bodies = info.value("bodies", nlohmann::json::array());
+        const auto &groups = bodies.empty() ? info.at("groups") : bodies[body % bodies.size()];
         std::vector<Group> out;
-        for (const auto &g : info.at("groups")) {
+        for (const auto &g : groups) {
             int texture = g.at(0).get<int>();
-            if (remap) texture = skinned_texture(skins[0], skins[size_t(skin)], texture);
+            if (!bodies.empty() && !skins.empty()) {
+                const auto &family = skins[skin < skins.size() ? skin : 0];
+                if (texture >= 0 && size_t(texture) < family.size()) texture = family[size_t(texture)].get<int>();
+            } else if (skins.size() > 1 && skin > 0 && skin < skins.size()) {
+                texture = skinned_texture(skins[0], skins[skin], texture);
+            }
             const auto &materials = info.at("materials");
             if (texture < 0 || size_t(texture) >= materials.size()) continue;
             const auto name = materials[size_t(texture)].value("name", std::string());
@@ -290,6 +300,16 @@ private:
             out.push_back({found->second, g.at(1).get<uint32_t>(), g.at(2).get<uint32_t>()});
         }
         return out;
+    }
+
+    void set_variant(size_t instance, const BhPropAnimState &state) {
+        const auto &mesh = meshes_[instanceMeshes_[instance]];
+        const auto &model = models_[mesh.model];
+        const auto skin = state.skin >= 0 && uint32_t(state.skin) < model.skins ? uint32_t(state.skin) : 0;
+        const size_t next = model.variants[size_t(state.body % model.bodies) * model.skins + skin];
+        if (next == instanceMeshes_[instance]) return;
+        instanceMeshes_[instance] = next;
+        byMesh_.clear();
     }
 
     static int skinned_texture(const nlohmann::json &family0, const nlohmann::json &family, int texture) {
@@ -372,12 +392,8 @@ private:
         );
     }
 
-    // The state buffer holds every animated prop the core tracks (fixed per map).
-    void prepare_states(BhContext *core) {
-        states_.resize(64);
-        while (bh_prop_anim_states(core, states_.data(), states_.size()) == states_.size())
-            states_.resize(states_.size() * 2);
-    }
+    // Template particle copies join the fixed props during play; reserve the core entity limit at load.
+    void prepare_states() { states_.resize(RuntimePropCopies::entity_limit); }
 
     void read_states(BhContext *core) {
         const size_t count = bh_prop_anim_states(core, states_.data(), states_.size());
@@ -389,6 +405,7 @@ private:
                 ++next;
             if (next == instances.size()) break;
             if (instances[next].entity != state.entity) continue;
+            set_variant(next, state);
             apply_state(core, i, state, instances[next]);
         }
     }

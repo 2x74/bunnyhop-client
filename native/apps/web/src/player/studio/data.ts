@@ -63,6 +63,9 @@ export interface StudioInfo {
   materials: StudioMaterialInfo[];
   /** [material, firstIndex, indexCount] */
   groups: [number, number, number][];
+  /** Per packed body: [skin reference, firstIndex, indexCount]; select the texture through skins. */
+  bodies?: [number, number, number][][];
+  skins?: number[][];
   vertexCount: number;
   indexCount: number;
 }

@@ -128,6 +128,8 @@ fn frozen_fallback_is_unchanged_with_and_without_opting_in() {
         let (old, new) = (build(false), build(true));
         let mut checked = 0;
         for (ent, ..) in g.prop_anim_states().map(|(p, ..)| (p.ent as usize,)).collect::<Vec<_>>() {
+            // Non-solid animated children are newly drawn; there is no previous frozen bake to compare.
+            if g.entities[ent].get("parentname").is_some_and(|n| !n.is_empty()) { continue; }
             let groups: Vec<_> = new.dynamic_groups.iter().filter(|d| d[0] as usize == ent).collect();
             if groups.is_empty() {
                 continue; // not drawn on its own (parented, model missing from the pakfile, 3D skybox)
@@ -161,4 +163,87 @@ fn frozen_fallback_is_unchanged_with_and_without_opting_in() {
         eprintln!("{map}: {checked} animated props match their frozen bake");
         assert!(checked > 0, "{map}: no animated props checked");
     }
+}
+
+#[test]
+fn body_and_skin_inputs_are_display_only_and_restore() {
+    let mut a = load("bhop_crash_egypt").expect("required Crash Egypt BSP");
+    let mut b = load("bhop_crash_egypt").unwrap();
+    let snap = a.save_state();
+    a.fire_input("Crate_generic1", "SetBodyGroup", "7");
+    a.fire_input("Crate_tnt1", "Skin", "9");
+    assert_eq!(a.snapshot_bytes(), b.snapshot_bytes());
+    for _ in 0..50 { a.step(IDLE).unwrap(); b.step(IDLE).unwrap(); }
+    assert_eq!(a.snapshot_bytes(), b.snapshot_bytes());
+    assert_eq!(a.prop_anim_states().find(|(p,..)| p.ent == 968).unwrap().0.body,7);
+    assert_eq!(a.prop_anim_states().find(|(p,..)| p.ent == 625).unwrap().0.skin,9);
+    a.restore_state(&snap);
+    assert_eq!(a.prop_anim_states().find(|(p,..)| p.ent == 968).unwrap().0.body,0);
+    assert_eq!(a.prop_anim_states().find(|(p,..)| p.ent == 625).unwrap().0.skin,7);
+}
+
+#[test]
+fn tomb_rendering_uses_the_existing_solid_train_without_adding_prop_collision() {
+    let mut g = load("bhop_crash_egypt").expect("required Crash Egypt BSP");
+    for (prop, train) in [(1222,1225),(1226,1227),(1231,1230)] {
+        assert!(g.render_props_with(true).iter().any(|p| p.4 == prop as u32+1));
+        assert!(!g.render_props().iter().any(|p| p.4 == prop as u32+1));
+        assert_eq!(g.entities[prop].int("solid"),0);
+        assert_eq!(g.entities[train].int("spawnflags"),512);
+    }
+    let before = g.moving_prop_transforms();
+    for _ in 0..150 { g.step(IDLE).unwrap(); }
+    let after = g.moving_prop_transforms();
+    for i in [1222,1226,1231] {
+        let a = before.iter().find(|p| p.0==i).unwrap().1;
+        let b = after.iter().find(|p| p.0==i).unwrap().1;
+        assert_ne!(a,b,"tomb {i} follows the already moving train");
+    }
+    assert!(g.brush_states().iter().any(|(m,_,solid)| *m==415 && *solid));
+}
+
+#[test]
+fn packed_crate_has_fourteen_distinct_debris_bodies_and_tnt_skins() {
+    use bunnyhop_core::{studio::{self, Load}, vfs::{Vfs, Source}};
+    let raw = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"),"/../../maps/bhop_crash_egypt.bsp")).unwrap();
+    let bsp = bunnyhop_core::parse_bsp(&raw).unwrap();
+    let mut vfs = Vfs::default(); vfs.mount(Source::from_zip("pak", bunnyhop_core::content::pakfile(&bsp)));
+    let Load::Ready(model) = studio::load(&vfs,"models/dofke/crash bandicoot/props/crates/crate_generic.mdl") else { panic!("packed model") };
+    assert_eq!(model.mesh.bodies.len(),16);
+    assert_eq!(model.skins.len(),17);
+    for body in 1..=14 { assert!(!model.mesh.bodies[body].is_empty()); }
+    assert!(model.mesh.bodies[15].is_empty());
+    assert_ne!(model.skins[8],model.skins[9]); assert_ne!(model.skins[9],model.skins[10]);
+    let json=model.info_json(); assert!(json.contains("\"bodies\":["));
+}
+
+#[test]
+fn authored_crate_and_tnt_io_drive_all_frames_countdown_and_particle_start() {
+    let mut g = load("bhop_crash_egypt").expect("required Crash Egypt BSP");
+    g.set_position([96.0,1408.0,-255.0],0.0);
+    let mut frames = std::collections::BTreeSet::new();
+    for _ in 0..65 {
+        g.step(IDLE).unwrap();
+        frames.insert(g.prop_anim_states().find(|(p,..)|p.ent==968).unwrap().0.body);
+    }
+    assert_eq!(frames,(0..=14).collect());
+    assert!(!g.entity_visible(968));
+    assert!(g.entity_instances().any(|(_,source,..)|source==958));
+    g.reset();g.set_position([2656.0,8480.0,-367.0],0.0);
+    let mut skins=std::collections::BTreeSet::new();
+    let mut particle_at=None;
+    for _ in 0..480 {
+        g.step(IDLE).unwrap();
+        skins.insert(g.prop_anim_states().find(|(p,..)|p.ent==625).unwrap().0.skin);
+        if particle_at.is_none() && g.prop_anim_states().any(|(p,flags,..)|p.anim=="Explosion_Tnt" && p.set && flags & PROP_ANIM_REMOVED==0) { particle_at=Some(g.tick); }
+    }
+    assert_eq!(skins,[7,8,9,10].into_iter().collect());
+    assert!(particle_at.is_some_and(|t|(416..=420).contains(&t)),"{particle_at:?}");
+    assert!(!g.entity_visible(625));
+    let snap=g.save_state();
+    for _ in 0..100 {g.step(IDLE).unwrap();}
+    g.restore_state(&snap);
+    assert!(g.prop_anim_states().any(|(p,..)|p.anim=="Explosion_Tnt" && p.set));
+    g.reset();
+    assert!(!g.prop_anim_states().any(|(p,..)|p.anim=="Explosion_Tnt" && p.set));
 }

@@ -16,9 +16,10 @@ int main(int argc, char **argv) {
         bool simulateFire = false, aura = true, firstPersonGlow = true;
         bool flashlight = false, triggers = false, msaa = false, sourceLook = false, requireWater = false;
         int frames = 2, ticks = 0, restoreTicks = -1;
-        bool explicitPlayer = false, reset = false;
+        bool explicitPlayer = false, reset = false, replayPractice = false;
         float player[3] = {};
-        std::string stateOutput;
+        std::string stateOutput, replay;
+        int seekTick = -1;
         bool actor = false;
         float opacity = .45, actorYaw = 0, actorPitch = 0, actorSpeed = 0;
         uint32_t actorFlags = 2;
@@ -87,6 +88,12 @@ int main(int argc, char **argv) {
                 restoreTicks = int(number());
             else if (arg == "--reset")
                 reset = true;
+            else if (arg == "--replay")
+                replay = value();
+            else if (arg == "--practice-from-replay")
+                replayPractice = true;
+            else if (arg == "--seek")
+                seekTick = int(number());
             else if (arg == "--state-json")
                 stateOutput = value();
             else if (arg == "--player") {
@@ -201,6 +208,11 @@ int main(int argc, char **argv) {
         BhSettings settings{};
         bh_default_settings(&settings);
         if (!bh_set_settings(core.get(), &settings)) throw std::runtime_error(bh_last_error(core.get()));
+        if (!replay.empty() && !bh_replay_load(core.get(), replay.c_str()))
+            throw std::runtime_error(bh_last_error(core.get()));
+        if (replayPractice && !bh_practice_from_replay(core.get(), "autohop"))
+            throw std::runtime_error(bh_last_error(core.get()));
+        bool playback = !replay.empty() && !replayPractice;
         if (explicitPlayer) {
             BhNoclipState placement{};
             for (size_t k = 0; k < 3; ++k)
@@ -216,7 +228,12 @@ int main(int argc, char **argv) {
             BhCmd command{};
             BhState state{};
             for (int tick = 0; tick < count; ++tick)
-                if (!bh_step(core.get(), &command, &state)) throw std::runtime_error(bh_last_error(core.get()));
+                if (!playback) {
+                    if (!bh_step(core.get(), &command, &state)) throw std::runtime_error(bh_last_error(core.get()));
+                } else {
+                    BhSnapshot frame{};
+                    if (!bh_replay_step(core.get(), &frame)) throw std::runtime_error(bh_last_error(core.get()));
+                }
         };
         step(ticks);
         if (restoreTicks >= 0) {
@@ -224,7 +241,13 @@ int main(int argc, char **argv) {
             BhSnapshot restored{};
             if (!saved || !bh_practice_restore(core.get(), saved, &view, &restored))
                 throw std::runtime_error(bh_last_error(core.get()));
+            playback = false;
             step(restoreTicks);
+        }
+        if (seekTick >= 0) {
+            BhSnapshot frame{};
+            if (!bh_replay_seek(core.get(), 0, &frame) || !bh_replay_seek(core.get(), uint32_t(seekTick), &frame))
+                throw std::runtime_error(bh_last_error(core.get()));
         }
         if (reset && !bh_reset(core.get())) throw std::runtime_error(bh_last_error(core.get()));
         if (!stateOutput.empty()) {
@@ -246,6 +269,21 @@ int main(int argc, char **argv) {
                 const auto &prop = transforms[i];
                 evidence["props"].push_back(
                         {{"entity", prop.entity}, {"origin", prop.origin}, {"visible", prop.visible}}
+                );
+            }
+            std::vector<BhPropAnimState> states(native::RuntimePropCopies::entity_limit);
+            const size_t animations = bh_prop_anim_states(core.get(), states.data(), states.size());
+            evidence["animations"] = nlohmann::json::array();
+            for (size_t i = 0; i < animations; ++i) {
+                const auto &state = states[i];
+                evidence["animations"].push_back(
+                        {{"entity", state.entity},
+                         {"flags", state.flags},
+                         {"body", state.body},
+                         {"skin", state.skin},
+                         {"base", state.base},
+                         {"since", state.since},
+                         {"rate", state.rate}}
                 );
             }
             std::ofstream file(stateOutput);

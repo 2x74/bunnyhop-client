@@ -31,6 +31,8 @@ pub struct BhPropAnimState {
     pub base: f32,
     pub since: f32,
     pub rate: f32,
+    pub body: u32,
+    pub skin: i32,
 }
 
 #[repr(C)]
@@ -120,43 +122,6 @@ fn studio_model_path(entity: &bunnyhop_core::entities::Entity) -> Option<String>
     }
     let model = entity.get("model")?.replace('\\', "/").to_lowercase();
     model.ends_with(".mdl").then_some(model)
-}
-
-/// Parent attachment is already simulated by Game. Include its render-only children even when they have no collision.
-pub(super) fn add_parented_props(
-    sp: &mut bunnyhop_core::props::StaticProps,
-    game: &Game,
-) -> Vec<usize> {
-    let mut parents = Vec::new();
-    for (i, e) in game.entities.iter().enumerate() {
-        let Some(model) = studio_model_path(e) else {
-            continue;
-        };
-        if e.int("rendermode") == 10 || e.get("parentname").is_none_or(|p| p.trim().is_empty()) {
-            continue;
-        }
-        parents.push(i);
-        if !sp.props.iter().any(|p| p.owner == i as u32 + 1) {
-            bunnyhop_core::props::add_props(
-                sp,
-                [(
-                    model,
-                    e.origin(),
-                    e.angles(),
-                    e.int("skin") as i32,
-                    i as u32 + 1,
-                )],
-            );
-            sp.props.last_mut().unwrap().animated = game.is_animated_prop(i);
-        }
-    }
-    for prop in &mut sp.props {
-        if prop.owner == 0 {
-            continue;
-        }
-        prop.scale = model_scale(&game.entities[prop.owner as usize - 1]);
-    }
-    parents
 }
 
 fn model_scale(entity: &bunnyhop_core::entities::Entity) -> f32 {
@@ -370,6 +335,8 @@ pub unsafe extern "C" fn bh_prop_anim_states(
                     base,
                     since,
                     rate,
+                    body: prop.body,
+                    skin: prop.skin,
                 });
                 count += 1;
             }
@@ -424,18 +391,7 @@ pub unsafe extern "C" fn bh_prop_transforms(
             // Both lists are in entity order: walk the animation states alongside.
             let mut states = m.game.prop_anim_states().peekable();
             let mut count = 0;
-            let mut transforms = m.game.moving_prop_transforms();
-            let original_count = transforms.len();
-            for &entity in &m.assets.presentation_parents {
-                if !m.game.is_animated_prop(entity) && !m.game.prop_moves(entity) {
-                    if let Some((origin, angles)) = m.game.entity_transform(entity) {
-                        transforms.push((entity, origin, angles));
-                    }
-                }
-            }
-            if transforms.len() != original_count {
-                transforms.sort_unstable_by_key(|t| t.0);
-            }
+            let transforms = m.game.moving_prop_transforms();
             for (entity, origin, angles) in transforms.into_iter().take(capacity) {
                 while states
                     .next_if(|(p, ..)| (p.ent as usize) < entity)

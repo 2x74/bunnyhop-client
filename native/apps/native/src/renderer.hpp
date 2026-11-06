@@ -217,6 +217,7 @@ inline GLuint link_program(Gl &gl, const char *vertex_source, const char *fragme
 #include "sun_shadows.hpp"
 #include "water_reflection.hpp"
 #include "map_prop_meshes.hpp"
+#include "crash_explosions.hpp"
 
 // The website's route guide (apps/web/src/ghost-route.ts): the path in the ghost's colour and a white wire box on
 // every takeoff, as screen-space lines of a fixed pixel width. Segments are expanded to quads once, at upload.
@@ -436,6 +437,7 @@ class Renderer {
     std::vector<BhGroup> groups, skyGroups;
     std::vector<BhPropGroup> propGroups;
     RuntimePropCopies propCopies;
+    std::unique_ptr<CrashExplosions> crashExplosions;
     std::vector<GLuint> normals;
     std::array<float, 3> sunDirection{.35f, .45f, .82f};
     bool hasSun = false;
@@ -1612,6 +1614,8 @@ class Renderer {
         profile_elapsed(frameProfile.presentationWaterUniforms, presentationStart);
         presentationStart = profile_now();
         presentation->draw(vp, eye);
+        if (crashExplosions)
+            crashExplosions->draw(vp, core, propCopies, right, up, worldSeconds, effectsVisible && !graphics.potato);
         profile_elapsed(frameProfile.presentationSubmit, presentationStart);
     }
 
@@ -2371,6 +2375,19 @@ public:
         gl.Uniform1i(loc(program, "sunActive"), 0);
         presentation = std::make_unique<NativePresentation>(gl);
         mapEffects.load(core);
+        crashExplosions = std::make_unique<CrashExplosions>(gl);
+        size_t materialBytes = 0;
+        const char *rawNames = bh_material_names_json(core, &materialBytes);
+        const auto particleNames = rawNames && materialBytes ? nlohmann::json::parse(rawNames, rawNames + materialBytes)
+                                                             : nlohmann::json::array();
+        crashExplosions->load(core, assetRoot, [&](const std::string &name) -> GLuint {
+            for (size_t i = 0; i < particleNames.size() && i < materials.size(); ++i) {
+                if (particleNames[i] != name || materials[i].texture < 0) continue;
+                const auto id = texture(materials[i].texture);
+                return id == checker ? 0 : id;
+            }
+            return 0;
+        });
 
         anisotropySupported = SDL_GL_ExtensionSupported("GL_EXT_texture_filter_anisotropic");
         co_yield "viewmodel";

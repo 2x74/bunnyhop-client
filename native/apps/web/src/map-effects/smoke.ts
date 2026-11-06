@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import crashParticles from "./crash-particles.json";
 import type { BrushTransform } from "../core";
 
 export type EffectEntity = Record<string, string>;
@@ -7,11 +8,11 @@ const number = (e: EffectEntity, k: string, fallback: number) => { const s = val
 const vector = (s?: string): [number, number, number] => (s ?? "0 0 0").split(/\s+/).map(Number).slice(0, 3) as [number, number, number];
 export const materialName = (s: string) => s.replace(/^materials\//i, "").replace(/\.vmt$/i, "").toLowerCase();
 export function effectMaterialNames(entities: EffectEntity[]): string[] {
-  return [...new Set(entities.flatMap(e => {
+  return [...new Set([...((entities.some(e => e.classname === "info_particle_system" && ["Explosion_Tnt", "Explosion_Nitro"].includes(e.effect_name))) ? Object.values(crashParticles).map(s => materialName(s.material.replaceAll("\\", "/"))) : []), ...entities.flatMap(e => {
     const c = value(e, "classname")?.toLowerCase();
     const name = c === "env_smokestack" ? value(e, "SmokeMaterial") : c === "func_smokevolume" ? value(e, "material") : c === "env_spritetrail" ? value(e, "spritename") : undefined;
     return name ? [materialName(name)] : [];
-  }))];
+  })])];
 }
 /** BSP dmodel bounds include nodraw brushes, which the render mesh deliberately omits. */
 export function brushBounds(bsp?: Uint8Array): Map<number, THREE.Box3> {

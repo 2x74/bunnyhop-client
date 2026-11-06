@@ -69,13 +69,54 @@ pub struct Assets {
     pub floor: Vec<BhFloorWeapon>,
     pub props: props::PropMesh,
     pub prop_groups: Vec<BhPropGroup>,
-    pub presentation_parents: Vec<usize>,
     pub water: CString,
     pub bytes: Vec<u8>,
     pub models: Vec<studio::StudioModel>,
     pub model_info: Vec<CString>,
     pub anim: Vec<f32>,
 }
+pub(super) const CRASH_BSP_SHA: &str =
+    "c2b3bc1e5a3f2507df4b7aa6ed71af7c2ac38edb12c41939547d25268ec9613e";
+
+pub(super) fn crash_particle_materials(sha: &str) -> Vec<String> {
+    if sha != CRASH_BSP_SHA {
+        return Vec::new();
+    }
+    let data: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../apps/web/src/map-effects/crash-particles.json"
+    ))
+    .expect("synced Crash particle definitions");
+    let mut names: Vec<_> = data
+        .as_object()
+        .unwrap()
+        .values()
+        .filter_map(|d| d["material"].as_str())
+        .map(|name| {
+            let name = vfs::normalize(name);
+            let name = name.strip_prefix("materials/").unwrap_or(&name);
+            name.strip_suffix(".vmt").unwrap_or(name).to_string()
+        })
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bh_map_sha256(ctx: *const BhContext, out: *mut c_char) -> c_int {
+    unsafe {
+        read(ctx, 0, |c| {
+            let Some(m) = &c.map else { return 0 };
+            if out.is_null() {
+                return 0;
+            }
+            ptr::copy_nonoverlapping(m.map_sha256.as_ptr().cast::<c_char>(), out, 64);
+            out.add(64).write(0);
+            1
+        })
+    }
+}
+
 // A wildcard remote listing claims nonexistent $cdmaterials candidates and masks valid later paths in the pakfile.
 pub(super) fn loose_listing(
     root: &Path,

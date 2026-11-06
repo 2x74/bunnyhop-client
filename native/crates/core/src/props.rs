@@ -75,6 +75,10 @@ pub fn add_game_props(sp: &mut StaticProps, game: &crate::game::Game, animate: b
     add_props(sp, list);
     for (p, a) in sp.props[first..].iter_mut().zip(animated) {
         p.animated = a;
+        if p.owner != 0 && let Some(e) = game.entities.get(p.owner as usize - 1)
+            && e.get("parentname").is_some_and(|n| !n.is_empty()) {
+            p.scale = e.float("modelscale").filter(|s| s.is_finite() && *s > 0.0).unwrap_or(1.0);
+        }
     }
 }
 
@@ -206,6 +210,11 @@ fn vvd_vertices(vvd: &[u8]) -> Option<Vec<[f32; 8]>> {
 }
 
 pub fn model_geometry(mdl: &[u8], vvd: &[u8], vtx: &[u8]) -> Option<ModelGeometry> {
+    model_geometry_body(mdl, vvd, vtx, 0)
+}
+
+/// LOD-0 mesh for Source's packed body value. Display only; collision uses body zero.
+pub fn model_geometry_body(mdl: &[u8], vvd: &[u8], vtx: &[u8], body: usize) -> Option<ModelGeometry> {
     let vertices = vvd_vertices(vvd)?;
     if i32_at(vtx, 0)? != 7 {
         return None;
@@ -219,7 +228,10 @@ pub fn model_geometry(mdl: &[u8], vvd: &[u8], vtx: &[u8]) -> Option<ModelGeometr
         if idx(mdl, mbp + 4)? == 0 {
             continue;
         }
-        let mmodel = mbp + idx(mdl, mbp + 12)?;
+        let count = idx(mdl, mbp + 4)?;
+        let base = idx(mdl, mbp + 8)?.max(1);
+        let selected = body / base % count;
+        let mmodel = mbp + idx(mdl, mbp + 12)? + selected * 148;
         let model_vert_start = idx(mdl, mmodel + 84)? / 48;
         let (nmesh, meshi) = (idx(mdl, mmodel + 72)?, idx(mdl, mmodel + 76)?);
         // VTX body part -> model 0 -> LOD 0.
@@ -227,7 +239,8 @@ pub fn model_geometry(mdl: &[u8], vvd: &[u8], vtx: &[u8]) -> Option<ModelGeometr
         if idx(vtx, vbp)? == 0 {
             continue;
         }
-        let vmodel = vbp + idx(vtx, vbp + 4)?;
+        if selected >= idx(vtx, vbp)? { return None; }
+        let vmodel = vbp + idx(vtx, vbp + 4)? + selected * 8;
         if idx(vtx, vmodel)? == 0 {
             continue;
         }
@@ -392,6 +405,15 @@ pub fn build(sp: &StaticProps, vfs: &Vfs) -> PropMesh {
         loaded.push(model);
         corrections.push(vfs.read(&mdl_p).and_then(crate::studio::root_pose_correction));
         rigid.push(vfs.read(&mdl_p).is_some_and(crate::studio::idle_pose_is_rigid));
+    }
+    // Animated body/skin variants may reference materials absent from the initial body.
+    for p in sp.props.iter().filter(|p| p.animated) {
+        if let Some(Some((_, _, names))) = loaded.get(p.model) {
+            for name in names {
+                let next = material_ids.len() as u32;
+                material_ids.entry(name.clone()).or_insert_with(|| { out.materials.push(name.clone()); next });
+            }
+        }
     }
     for p in &sp.props {
         let Some(Some((geo, tex, names))) = loaded.get(p.model) else { continue };

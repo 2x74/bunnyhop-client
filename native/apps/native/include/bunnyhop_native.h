@@ -133,6 +133,9 @@ uint32_t bh_map_sound_serial(const BhContext *ctx);
 size_t bh_map_sound_states(const BhContext *ctx, BhMapSoundState *out, size_t capacity);
 size_t bh_map_sound_commands(BhContext *ctx, uint8_t *out, size_t capacity);
 
+/* Read-only build identity of the loaded BSP. out has room for 64 hex characters plus NUL. */
+int bh_map_sha256(const BhContext *ctx, char *out);
+
 /* Display-only runtime maker copies. Rows disappear on reset/seek; source names original geometry/sound. */
 typedef struct BhEntityInstance {
     uint32_t entity, source;
@@ -327,6 +330,8 @@ typedef struct BhAnimatedProp {
 typedef struct BhPropAnimState {
     uint32_t entity, flags; /* flags: hidden 1, removed 2, set by the map's I/O 4 */
     float base, since, rate;
+    uint32_t body;
+    int32_t skin;
 } BhPropAnimState;
 
 const BhAnimatedProp *bh_animated_props(BhContext *ctx, size_t *count);

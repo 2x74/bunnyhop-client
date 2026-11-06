@@ -58,7 +58,9 @@ fn lists_animated_props_with_their_states_and_transforms() {
                 flags: 0,
                 base: 0.0,
                 since: 0.0,
-                rate: 1.0
+                rate: 1.0,
+                body: 0,
+                skin: 0,
             }
         );
         assert_eq!(states[1].entity, 3);
@@ -297,11 +299,6 @@ fn render_only_parent_props_keep_their_owner_and_scale() {
         let map = (*c).map.as_ref().unwrap();
         let mut props = bunnyhop_core::props::StaticProps::default();
         bunnyhop_core::props::add_game_props(&mut props, &map.game, true);
-        assert!(props.props.is_empty());
-        assert_eq!(
-            crate::map_props::add_parented_props(&mut props, &map.game),
-            vec![2]
-        );
         assert_eq!(props.props.len(), 1);
         assert_eq!((props.props[0].owner, props.props[0].scale), (3, 1.5));
         assert_eq!(props.models[0], "models/with spaces/tomb.mdl");

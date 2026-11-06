@@ -433,7 +433,6 @@ impl Map {
         // Animated props get their own groups for the renderer to pose (map_props.rs), baked in their frozen pose for
         // when it can't. It has to run before mark_props, which keeps the 3D skybox's animated props frozen.
         bunnyhop_core::props::add_game_props(&mut sp, &game, true);
-        let presentation_parents = map_props::add_parented_props(&mut sp, &game);
         bunnyhop_core::skybox::mark_props(&bsp, &mut sp, n_static);
         let props = loop {
             check()?;
@@ -465,6 +464,9 @@ impl Map {
                 .map(|n| material_index(n) as i32)
                 .collect()
         };
+        for material in assets::crash_particle_materials(&map_sha256) {
+            material_index(&material);
+        }
         let materials = loop {
             check()?;
             let m = materials::resolve(&fs, &names);
@@ -537,7 +539,6 @@ impl Map {
             floor: Vec::new(),
             props,
             prop_groups,
-            presentation_parents,
             water: CString::new(
                 serde_json::json!({"volumes":mesh.water,"planes":mesh.water_planes}).to_string(),
             )

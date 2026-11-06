@@ -46,6 +46,8 @@ pub struct PropAnim {
     pub hidden: bool,
     /// SetAnimation has been received (`PROP_ANIM_SET`).
     pub set: bool,
+    pub body: u32,
+    pub skin: i32,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -54,11 +56,12 @@ pub struct PropAnims {
     pub props: Vec<PropAnim>,
 }
 
-const ANIM_INPUTS: [&str; 11] = ["setanimation", "setdefaultanimation", "setplaybackrate", "setanimationnoreset", "kill", "killhierarchy", "turnoff", "turnon", "disable", "enable", "setbodygroup"];
+const ANIM_INPUTS: [&str; 12] = ["setanimation", "setdefaultanimation", "setplaybackrate", "setanimationnoreset", "kill", "killhierarchy", "turnoff", "turnon", "disable", "enable", "setbodygroup", "skin"];
 
 /// Props that need their own presentation state: animation, initial hiding, or visibility/body I/O.
 /// A static batch cannot remove a single killed prop.
 fn animated(e: &Entity, io_targets: &[String]) -> bool {
+    if e.classname() == "info_particle_system" { return true; }
     if !e.classname().to_ascii_lowercase().starts_with("prop_dynamic") {
         return false;
     }
@@ -82,8 +85,7 @@ impl PropAnims {
             .enumerate()
             .filter(|(_, e)| animated(e, &io_targets))
             .map(|(i, e)| {
-                let anim = e.get("DefaultAnim").unwrap_or("").trim().to_string();
-                PropAnim { ent: i as u32, default_anim: anim.clone(), anim, base: 0.0, since_tick: 0, rate: 1.0, hidden: e.int("StartDisabled") != 0, set: false }
+                PropAnim::new(i, e)
             })
             .collect();
         Self { props }
@@ -95,6 +97,15 @@ impl PropAnims {
 }
 
 impl PropAnim {
+    fn new(i: usize, e: &Entity) -> Self {
+        let particle = e.classname() == "info_particle_system";
+        let anim = e.get(if particle { "effect_name" } else { "DefaultAnim" }).unwrap_or("").trim().to_string();
+        Self { ent: i as u32, default_anim: anim.clone(), anim, base: 0.0, since_tick: 0,
+            rate: 1.0, hidden: if particle { e.int("start_active") == 0 } else { e.int("StartDisabled") != 0 },
+            set: particle && e.int("start_active") != 0,
+            body: e.int("SetBodyGroup").max(0) as u32, skin: e.int("skin") as i32 }
+    }
+
     /// Sequence time (ticks) at `tick`.
     fn time_at(&self, tick: u32) -> f32 {
         self.base + tick.saturating_sub(self.since_tick) as f32 * self.rate
@@ -120,6 +131,10 @@ impl PropAnim {
                 self.since_tick = tick;
                 self.rate = if rate.is_finite() { rate } else { 0.0 };
             }
+            "start" => { self.since_tick = tick; self.base = 0.0; self.set = true; self.hidden = false; },
+            "stop" | "stopplayendcap" | "destroyparticles" => self.hidden = true,
+            "setbodygroup" => self.body = param.trim().parse::<u32>().unwrap_or(0),
+            "skin" => self.skin = param.trim().parse::<i32>().unwrap_or(0).max(0),
             "turnoff" | "disable" => self.hidden = true,
             "turnon" | "enable" => self.hidden = false,
             _ => {}
@@ -128,9 +143,28 @@ impl PropAnim {
 }
 
 impl Game {
+    /// Display-only registration of a maker copy, including reuse of a dead slot.
+    pub(super) fn prop_anim_spawn(&mut self, i: usize) {
+        let e = &self.entities[i];
+        if e.classname() != "info_particle_system" {
+            if let Ok(at) = self.prop_anims.props.binary_search_by_key(&(i as u32), |p| p.ent) {
+                self.prop_anims.props.remove(at);
+                self.prop_anim_serial = self.prop_anim_serial.wrapping_add(1);
+            }
+            return;
+        }
+        let mut p = PropAnim::new(i, e);
+        p.since_tick = self.tick;
+        match self.prop_anims.props.binary_search_by_key(&(i as u32), |p| p.ent) {
+            Ok(at) => self.prop_anims.props[at] = p,
+            Err(at) => self.prop_anims.props.insert(at, p),
+        }
+        self.prop_anim_serial = self.prop_anim_serial.wrapping_add(1);
+    }
+
     /// Called for every input an entity receives, before it is handled. Changes nothing but `prop_anims`.
     pub(super) fn prop_anim_input(&mut self, i: usize, input: &str, param: &str) {
-        if !matches!(input, "setanimation" | "setanimationnoreset" | "setdefaultanimation" | "setplaybackrate" | "turnoff" | "turnon" | "disable" | "enable") {
+        if !matches!(input, "setanimation" | "setanimationnoreset" | "setdefaultanimation" | "setplaybackrate" | "turnoff" | "turnon" | "disable" | "enable" | "setbodygroup" | "skin" | "start" | "stop" | "stopplayendcap" | "destroyparticles") {
             return;
         }
         let Ok(at) = self.prop_anims.props.binary_search_by_key(&(i as u32), |p| p.ent) else { return };
@@ -182,7 +216,7 @@ mod tests {
 
     #[test]
     fn rate_changes_keep_the_cycle() {
-        let mut p = PropAnim { ent: 0, anim: "idle".into(), default_anim: "idle".into(), base: 0.0, since_tick: 0, rate: 1.0, hidden: false, set: false };
+        let mut p = PropAnim { ent: 0, anim: "idle".into(), default_anim: "idle".into(), base: 0.0, since_tick: 0, rate: 1.0, hidden: false, set: false, body: 0, skin: 0 };
         p.input("setplaybackrate", "2", 100);
         assert_eq!(p.time_at(100), 100.0);
         assert_eq!(p.time_at(110), 120.0);
