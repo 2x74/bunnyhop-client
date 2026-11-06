@@ -154,7 +154,12 @@ export class PlayerModel {
   }
 
   get playerGlow(): PlayerGlow | null { return this.o.playerGlow === undefined ? getPlayerGlow() : this.o.playerGlow; }
-  setPlayerGlow(value: PlayerGlow | null | undefined): void { this.o.playerGlow = value; this.syncGlow(); }
+  /** `preview`: show it whatever the Player glow setting says (an editor's preview); undefined keeps the current choice. */
+  setPlayerGlow(value: PlayerGlow | null | undefined, preview?: boolean): void {
+    this.o.playerGlow = value;
+    if (preview !== undefined) this.o.previewGlow = preview;
+    this.syncGlow();
+  }
   private syncGlow(): void { this.impl.setPlayerGlow(this.o.playerGlow === undefined ? getPlayerGlow() : this.o.playerGlow, this.o.previewGlow || prefs.get().showPlayerGlow, !prefs.get().graphics.potato); }
 
   /** The knife the bunny holds: explicit `knife`, else the explicit loadout's, else the one you equipped. */

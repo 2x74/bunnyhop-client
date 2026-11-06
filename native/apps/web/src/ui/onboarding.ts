@@ -14,6 +14,7 @@
 // Returning players never see it (server users.onboarded_at, a local flag, or local play history). It can be replayed
 // from the account panel (ui/account-panel.ts) or with ?intro=1.
 
+import { cmPer360, convertSens, GAMES, roundSens } from "../sens-convert";
 import { WAVEDASH } from "../platform/env";
 import { appHref, appLocation } from "../platform/navigation";
 import { api, type User } from "../api";
@@ -62,16 +63,8 @@ function rememberBhopped(v: "yes" | "no"): void {
 /** "tutorial" is the question (its server step key predates it); "map" the plain Hop in once it's been answered. */
 type StepId = "name" | "look" | "sens" | "tutorial" | "map";
 
-/** Mouse sensitivity in other games -> CS:S units (degrees per count: sens x yaw). */
-export const GAMES: { id: string; label: string; yaw: number }[] = [
-  { id: "cs", label: "CS2 / CS:GO / CS:S", yaw: 0.022 },
-  { id: "source", label: "TF2 / Apex / other Source", yaw: 0.022 },
-  { id: "valorant", label: "Valorant", yaw: 0.07 },
-  { id: "overwatch", label: "Overwatch 2", yaw: 0.0066 },
-  { id: "quake", label: "Quake Champions", yaw: 0.022 },
-];
-export const toCssSens = (sens: number, yaw: number) => Math.round(((sens * yaw) / 0.022) * 1000) / 1000;
-export const cm360 = (sens: number, dpi: number) => (360 / (sens * 0.022) / Math.max(1, dpi)) * 2.54;
+/** Mouse sensitivity in other games (sens-convert.ts has the yaw table and its sources). */
+export { GAMES } from "../sens-convert";
 
 /** Played here before: any local trace of it. */
 function hasLocalHistory(): boolean {
@@ -384,14 +377,15 @@ export function openOnboarding(user?: User | null): void {
       const s = Number(theirs.value);
       const dp = Number(dpi.value);
       if (!(s > 0) || !(s < 1000)) return void (result.textContent = "Enter your sensitivity.");
-      const css = Math.max(0.01, toCssSens(s, g.yaw));
+      // In this game's units at your m_yaw (0.022 unless you changed it): the same degrees per count.
+      const css = Math.max(0.01, roundSens(convertSens(s, g.yaw, p.mYaw)));
       prefs.update((q) => {
         q.sensitivity = css;
         if (dp >= 100 && dp <= 32000) q.dpi = Math.round(dp);
       });
-      const cm = Math.round(cm360(css, prefs.get().dpi));
+      const cm = Math.round(cmPer360(css, p.mYaw, prefs.get().dpi));
       result.replaceChildren(h("b", null, String(cm)), " cm per turn");
-      result.title = `${css} in CS:S units`;
+      result.title = `Sensitivity ${css}`;
       if (!shownCm) shownCm = cm;
       clearTimeout(spinTimer);
       if (cm !== shownCm) spinTimer = window.setTimeout(() => ((shownCm = cm), stage?.spin(cm)), 350);

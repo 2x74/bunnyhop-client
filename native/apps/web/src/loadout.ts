@@ -3,7 +3,10 @@
 // catalogue and unlock rules are progression.ts (slots "knife" / "finish" / "glove"); this file says how an equipped
 // choice becomes something to draw. See research/COSMETICS-PLAN.md §4.
 //
-//   item = (knife, finish, glove)
+//   item = (knife, finish, hilt, glove)
+//
+// - The hilt (v0.0.38) is universal: one skin paints whichever knife is held (its grip, guard and pommel, as that knife
+//   has them: viewmodel/knives/types.ts HiltMap). "hilt-original" (absent) is each knife's own hilt.
 //
 // - Finishes are single fixed designs (owner call, v0.0.6): the same Sunset for everyone, no per-player pattern seed
 //   and no wear. Loadouts written before that carried `seed` / `wear`; every reader here ignores them.
@@ -22,6 +25,11 @@ export interface CosmeticLoadout {
   finish: string;
   /** progression.ts "glove-*" id. */
   glove: string;
+  /**
+   * progression.ts "hilt-*" id (v0.0.38): a skin for the held knife's hilt. Absent = "hilt-original", each knife's own
+   * hilt (older loadouts, rosters and replays never carry it). Checked like the finish wherever loadouts are saved and read.
+   */
+  hilt?: string;
   /**
    * Overall place held when this loadout was taken (1 / 2 / 3: the crown on the bunny; progression.ts crownOf). Not a
    * choice: the server derives it from the rank board for the roster; absent = no crown.
@@ -50,6 +58,11 @@ export interface CosmeticLoadout {
    * the hat (LENGTH_HATS) and not the default. Absent = 100. Older readers drop it and draw the built length.
    */
   hairLength?: number;
+  /**
+   * Gun camo (progression.ts "camo-*" id; camo.ts CAMO_STYLE): one camo on every gun you're handed (v0.0.38). Absent =
+   * none, the guns as they've always looked. Older readers drop it.
+   */
+  camo?: string;
   /**
    * RESERVED, not implemented: a player-picked colour (sRGB 0xRRGGBB) for finishes that offer one (FinishStyle.tintable).
    * Nothing writes, reads, validates or sends it yet; cleanLoadout drops it. Plan: research/COSMETICS-PLAN.md §4.1.
@@ -87,6 +100,7 @@ export const hairHex = (c: number): string => `#${c.toString(16).padStart(6, "0"
 export const DEFAULT_KNIFE = DEFAULT_COSMETICS.knife!;
 export const DEFAULT_FINISH = DEFAULT_COSMETICS.finish!;
 export const DEFAULT_GLOVE = DEFAULT_COSMETICS.glove!;
+export const DEFAULT_HILT = DEFAULT_COSMETICS.hilt!;
 export const DEFAULT_LOADOUT: CosmeticLoadout = Object.freeze({ knife: DEFAULT_KNIFE, finish: DEFAULT_FINISH, glove: DEFAULT_GLOVE });
 
 // ---------------------------------------------------------------------------------------------
@@ -147,8 +161,8 @@ export const finishStyle = (id: string | null | undefined): FinishStyle => FINIS
  * original glove and follows the bunny colourway (palette glove slot + accent strap); exposed paw (fingerless styles,
  * open backs) is the colourway's glove colour too.
  */
-export type GloveStyleId = "knit" | "sport" | "driver" | "wraps" | "moto" | "specialist" | "paws" | "garden" | "plush" | "bune";
-export const GLOVE_STYLE_IDS: readonly GloveStyleId[] = ["knit", "sport", "driver", "wraps", "moto", "specialist", "paws", "garden", "plush", "bune"];
+export type GloveStyleId = "knit" | "sport" | "driver" | "wraps" | "moto" | "specialist" | "paws" | "garden" | "plush" | "bune" | "dress" | "aviator" | "mitts";
+export const GLOVE_STYLE_IDS: readonly GloveStyleId[] = ["knit", "sport", "driver", "wraps", "moto", "specialist", "paws", "garden", "plush", "bune", "dress", "aviator", "mitts"];
 export interface GloveStyle {
   style: GloveStyleId;
   /**
@@ -223,9 +237,96 @@ export const GLOVE_STYLE: Record<string, GloveStyle> = {
   "glove-driver-highroller": G("driver", 0x17181c, 0x1d1e23, 0x0f5a3a, 0xe0b13a, 0xe0b13a),
   "glove-sport-borealis": G("sport", 0x14203d, 0x3ff0a0, 0x9a6bff, 0xe8f6ff, 0x5dffb0),
   "glove-specialist-geode": G("specialist", 0x1d6b74, 0x23232e, 0x7a5ce8, 0x1d6b74, 0x5ff2df),
+  // v0.0.38 styles. Dress: base shell, fingers, tips = the three points, strap = the cuff, detail = the button. Aviator:
+  // base leather, fingers = the knuckle panel, tips = the wrist strap, strap = the fleece, detail = the buckle. Flip
+  // Mitts: base knit, fingers = the folded flap, strap = the cuff, detail = the button (tips unused: bare paws).
+  "glove-mitts-oatmeal": G("mitts", 0xd9c9a8, 0xc6b28c, 0xd9c9a8, 0xb59d76, 0x6b4a2e),
+  "glove-dress-ivory": G("dress", 0xf3eee3, 0xf0eadd, 0xd2c7b4, 0xe6dfd0, 0xfff8ec),
+  "glove-aviator-bomber": G("aviator", 0x6e4528, 0x5a371f, 0x3a2416, 0xf0e6d2, 0xc9a24a),
+  "glove-dress-noir": G("dress", 0x17171b, 0x17171b, 0xe9e6df, 0x17171b, 0xd9dbe0),
+  "glove-dress-lapis": G("dress", 0x26307a, 0x26307a, 0xd9b45a, 0x7c83ff, 0xd9b45a),
+  "glove-aviator-flare": G("aviator", 0x1c1218, 0xe0479f, 0xff9a3c, 0xff8fd2, 0xffd0e8),
+  "glove-aviator-riptide": G("aviator", 0x0e2a4a, 0x4fb8ff, 0x1a4fd8, 0xdfeefc, 0x9fdcff),
+  "glove-mitts-whiteout": G("mitts", 0xf4f6fb, 0xffffff, 0xf4f6fb, 0xb8c8ff, 0xdfe5f2),
+  // Supporter: High Roller's dealer gloves, Borealis' polar night gauntlet, Tidepool's sea-glass mitts with a coral flap.
+  "glove-dress-dealer": G("dress", 0x111114, 0x111114, 0xe0b13a, 0x0f5a3a, 0xffcf4a),
+  "glove-aviator-polar": G("aviator", 0x14203d, 0x9a6bff, 0x3ff0a0, 0xe8f6ff, 0x5dffb0),
+  "glove-mitts-tidepool": G("mitts", 0x5fc8b8, 0xff7f6e, 0x5fc8b8, 0xf3ece2, 0xfff4e6),
+  // Role sets (progression.ts ROLE_SETS). Lookout: navy tactical with a hi-vis lime knuckle bar and reflective silver.
+  // Workbench: ink canvas, teal-dipped tips, a brass cuff band. Keyholder: oxblood dress gloves, silver points and
+  // button. Founder: violet flying gauntlet, a carrot knuckle panel, gold strap, cream fleece, a cyan buckle.
+  "glove-specialist-lookout": G("specialist", 0x1b2740, 0x141a26, 0xc8f53a, 0x1b2740, 0xd8dee8),
+  "glove-garden-workbench": G("garden", 0x2b3448, 0x2b3448, 0x3fd4c6, 0xc9a24a, 0x8a7a5a),
+  "glove-dress-keyholder": G("dress", 0x5a1420, 0x5a1420, 0xcfd6e0, 0x3a0c14, 0xe8edf3),
+  "glove-aviator-founder": G("aviator", 0x241450, 0xff7a1a, 0xffc23d, 0xfff4dc, 0x3ff0ff),
 };
 
 export const gloveStyle = (id: string | null | undefined): GloveStyle => (id && GLOVE_STYLE[id]) || GLOVE_STYLE[DEFAULT_GLOVE];
+
+/**
+ * Hilt skins (v0.0.38): how a "hilt-*" item paints a knife's hilt. Three layers, one per role (viewmodel/knives/types.ts
+ * HiltRole: grip, guard, pommel); each knife has the roles it has (the carrot has no pommel cap, so a skin's pommel
+ * layer just doesn't show on it). A layer is a material (viewmodel/hilts/glsl.ts HILT_KIND_CODE: "keep" leaves the
+ * knife's own look for that role) and two sRGB colours: `color` the main one, `alt` the second (the wood's grain, the
+ * under-wrap in a cord's diamonds, the grooves; on enamel and metal, the knife's own second-tone parts). One fixed look
+ * per skin, the same on every knife, for everyone: no seeds, wear or tiers. Ids are stable forever (saved loadouts,
+ * rosters and replay trailers carry them); a look can be retuned here without breaking anything.
+ */
+export type HiltKind = "keep" | "enamel" | "polished" | "satin" | "wood" | "leather" | "cord" | "rubber" | "bone" | "carved" | "antler" | "cork" | "stone" | "twine" | "bamboo" | "glass" | "marble";
+export interface HiltLayer {
+  kind: HiltKind;
+  color: number;
+  alt: number;
+}
+export interface HiltSkin {
+  grip: HiltLayer;
+  guard: HiltLayer;
+  pommel: HiltLayer;
+}
+const HL = (kind: HiltKind, color: number, alt = color): HiltLayer => ({ kind, color, alt });
+/** A skin whose guard and pommel share their fittings. */
+const HS = (grip: HiltLayer, fittings: HiltLayer, pommel: HiltLayer = fittings): HiltSkin => ({ grip, guard: fittings, pommel });
+
+/** "hilt-original" is null: the knife's own hilt, no skin at all (no HILT program). */
+export const HILT_SKIN: Record<string, HiltSkin | null> = {
+  "hilt-original": null,
+  // Colourways: enamel grips, metal fittings.
+  "hilt-bone-white": HS(HL("enamel", 0xf1eadb, 0xd9cfba), HL("enamel", 0xfaf6ee, 0xe2d9c6)),
+  "hilt-black": HS(HL("enamel", 0x1c1d21, 0x2c2e34), HL("satin", 0x2b2e34, 0x3a3e45)),
+  "hilt-brass": HS(HL("satin", 0xb98a3c, 0x8e6a2c), HL("polished", 0xe0b25a, 0xc9963f)),
+  "hilt-copper": HS(HL("satin", 0x8a4a2c, 0x6e3a22), HL("polished", 0xd9825a, 0xb86a44)),
+  "hilt-gunmetal": HS(HL("satin", 0x3f454e, 0x2d3239), HL("satin", 0x5a616b, 0x474d56)),
+  "hilt-clover": HS(HL("enamel", 0x2f8f4a, 0x23703a), HL("enamel", 0xf3ead2, 0xe0d4b4)),
+  "hilt-gilded": HS(HL("enamel", 0x16161a, 0xd9a83a), HL("polished", 0xffc94a, 0xe8a92e)),
+  // Materials.
+  "hilt-oak": HS(HL("wood", 0xc99a62, 0x9a6a3a), HL("polished", 0xd9a441, 0xc28c34)),
+  "hilt-walnut": HS(HL("wood", 0x6b4428, 0x3e2414), HL("polished", 0xc9d1d8, 0xaab3bc)),
+  "hilt-rosewood": HS(HL("wood", 0x7a2e22, 0x3f120e), HL("polished", 0xdfe5ea, 0xc3cbd2)),
+  "hilt-tan-leather": HS(HL("leather", 0xb27a45, 0x6a4424), HL("satin", 0xc9963f, 0xa87a30)),
+  "hilt-black-leather": HS(HL("leather", 0x1f1c1c, 0x0e0d0d), HL("polished", 0xc9d1d8, 0xaab3bc)),
+  "hilt-navy-cord": HS(HL("cord", 0x22305e, 0xefe8d6), HL("polished", 0xc9d1d8, 0xaab3bc)),
+  "hilt-orange-cord": HS(HL("cord", 0xff7a1a, 0x1d1f24), HL("satin", 0x3f454e, 0x2d3239)),
+  "hilt-olive-rubber": HS(HL("rubber", 0x4f5a34, 0x2c3220), HL("satin", 0x3f454e, 0x2d3239)),
+  "hilt-carved-bone": HS(HL("carved", 0xece2c9, 0xb9a682), HL("polished", 0xd9a441, 0xc28c34)),
+  "hilt-antler": HS(HL("antler", 0xcdbb9a, 0x6e5a40), HL("satin", 0x2b2e34, 0x3a3e45)),
+  "hilt-cork": HS(HL("cork", 0xc79a64, 0x7a5232), HL("satin", 0xb7bec6, 0x8f979f)),
+  "hilt-twine": HS(HL("twine", 0xc8ad7a, 0x7d6440), HL("satin", 0x34373d, 0x26282d)),
+  "hilt-bamboo": HS(HL("bamboo", 0xc7c27a, 0x8e8a46), HL("enamel", 0x2f7d34, 0x58c64a)),
+  "hilt-marble": HS(HL("marble", 0xf2f0ea, 0x8a919b), HL("polished", 0xffc94a, 0xe8a92e)),
+  // Supporter sets (progression.ts SUPPORTER_SETS).
+  "hilt-geode": { grip: HL("stone", 0x1d6b74, 0x7a5ce8), guard: HL("polished", 0x5ff2df, 0x3fc9b8), pommel: HL("polished", 0x8f72ff, 0x7a5ce8) },
+  "hilt-highroller": HS(HL("cord", 0x0f5a3a, 0x111114), HL("polished", 0xe0b13a, 0xc9963f)),
+  "hilt-borealis": { grip: HL("leather", 0x14203d, 0x3ff0a0), guard: HL("polished", 0x9a6bff, 0x7a5ce8), pommel: HL("polished", 0x3ff0a0, 0x2fd39a) },
+  "hilt-tidepool": { grip: HL("glass", 0x5fc8b8, 0xbdeee4), guard: HL("polished", 0xefe6ee, 0xd9cfd8), pommel: HL("enamel", 0xff7f6e, 0xf3ece2) },
+  // Role sets (progression.ts ROLE_SETS).
+  "hilt-lookout": HS(HL("rubber", 0x1b2740, 0xc8f53a), HL("satin", 0xd8dee8, 0xb8c0cc)),
+  "hilt-workbench": HS(HL("wood", 0x2f6e6a, 0x1d4442), HL("polished", 0xc9a24a, 0xa8832f)),
+  "hilt-keyholder": HS(HL("enamel", 0x5a1420, 0x3a0c14), HL("polished", 0xdfe5ea, 0xc3cbd2)),
+  "hilt-founder": { grip: HL("leather", 0x3a1e7a, 0xff7a1a), guard: HL("polished", 0xffc23d, 0xe8a92e), pommel: HL("enamel", 0xff7a1a, 0xffc23d) },
+};
+
+/** Render data of a hilt id: null for the knife's own hilt, an unknown id or a missing one. */
+export const hiltSkin = (id: string | null | undefined): HiltSkin | null => (id ? (HILT_SKIN[id] ?? null) : null);
 
 // ---------------------------------------------------------------------------------------------
 // Reading
@@ -240,9 +341,12 @@ const slotId = (slot: CosmeticSlot, v: unknown, fallback: string): string => {
  * fall back to the defaults, retired ids read as their replacement). Unlocks are checked where choices are saved and
  * read (the API).
  */
-export function loadoutFor(choice: { knife?: unknown; finish?: unknown; glove?: unknown; hat?: unknown; body?: unknown; hairColor?: unknown; hairLength?: unknown } | null | undefined, crown: 1 | 2 | 3 | null = null): CosmeticLoadout {
+export function loadoutFor(choice: { knife?: unknown; finish?: unknown; glove?: unknown; hilt?: unknown; hat?: unknown; body?: unknown; hairColor?: unknown; hairLength?: unknown; camo?: unknown } | null | undefined, crown: 1 | 2 | 3 | null = null): CosmeticLoadout {
   const c = choice ?? {};
   const l: CosmeticLoadout = { knife: slotId("knife", c.knife, DEFAULT_KNIFE), finish: slotId("finish", c.finish, DEFAULT_FINISH), glove: slotId("glove", c.glove, DEFAULT_GLOVE) };
+  // Absent = the knife's own hilt; only a real skin is carried (so every older reader and writer stays the same).
+  const hilt = slotId("hilt", c.hilt, DEFAULT_HILT);
+  if (hilt !== DEFAULT_HILT) l.hilt = hilt;
   if (crown) l.crown = crown;
   const hat = slotId("hat", c.hat, "");
   if (hat) l.hat = hat;
@@ -251,6 +355,8 @@ export function loadoutFor(choice: { knife?: unknown; finish?: unknown; glove?: 
   if (hair !== null) l.hairColor = hair;
   const length = LENGTH_HATS.includes(hat) ? hairLengthOf(c.hairLength) : null;
   if (length !== null && length !== HAIR_LENGTH.default) l.hairLength = length;
+  const camo = slotId("camo", c.camo, "");
+  if (camo) l.camo = camo;
   return l;
 }
 
@@ -267,9 +373,9 @@ export function cleanLoadout(raw: unknown): CosmeticLoadout | null {
 }
 
 export const sameLoadout = (a: CosmeticLoadout | null | undefined, b: CosmeticLoadout | null | undefined) =>
-  !!a && !!b && a.knife === b.knife && a.finish === b.finish && a.glove === b.glove && (a.crown ?? null) === (b.crown ?? null) && (a.hat ?? null) === (b.hat ?? null) && (a.body ?? "body-a") === (b.body ?? "body-a") && (a.outfit ?? null) === (b.outfit ?? null) && (a.hairColor ?? null) === (b.hairColor ?? null) && (a.hairLength ?? null) === (b.hairLength ?? null);
+  !!a && !!b && a.knife === b.knife && a.finish === b.finish && a.glove === b.glove && (a.hilt ?? DEFAULT_HILT) === (b.hilt ?? DEFAULT_HILT) && (a.crown ?? null) === (b.crown ?? null) && (a.hat ?? null) === (b.hat ?? null) && (a.body ?? "body-a") === (b.body ?? "body-a") && (a.outfit ?? null) === (b.outfit ?? null) && (a.hairColor ?? null) === (b.hairColor ?? null) && (a.hairLength ?? null) === (b.hairLength ?? null) && (a.camo ?? null) === (b.camo ?? null);
 
-export const isDefaultLoadout = (l: CosmeticLoadout) => l.knife === DEFAULT_KNIFE && l.finish === DEFAULT_FINISH && l.glove === DEFAULT_GLOVE && l.body !== "body-b";
+export const isDefaultLoadout = (l: CosmeticLoadout) => l.knife === DEFAULT_KNIFE && l.finish === DEFAULT_FINISH && l.glove === DEFAULT_GLOVE && (l.hilt ?? DEFAULT_HILT) === DEFAULT_HILT && l.body !== "body-b" && !l.camo;
 
 // ---------------------------------------------------------------------------------------------
 // Knife pool (progression.ts KnifePool): which knife is held. The pool itself never travels with a loadout: a replay
@@ -309,9 +415,11 @@ export const pairsHave = (packed: string | null | undefined, knife: string, fini
   !!packed && packed.split(",").includes(`${knife.replace(/^knife-/, "")}:${finish.replace(/^fin-/, "")}`);
 
 // ---------------------------------------------------------------------------------------------
-// Packed text form: "2;<knife>;<finish>;<glove>[;<crown>[;<hat>[;<body>[;<outfit>[;<hair>[;<length>]]]]]]". Empty tail
-// fields are placeholders; absent body means Model A, absent outfit an unknown colourway; hair is the wig's colour as 6
-// hex digits, length the ponytail's length as a whole percent (absent = the defaults). Older readers ignore new fields
+// Packed text form:
+//   "2;<knife>;<finish>;<glove>[;<crown>[;<hat>[;<body>[;<outfit>[;<hair>[;<length>[;<hilt>[;<camo>]]]]]]]]".
+// Empty tail fields are placeholders; absent body means Model A, absent outfit an unknown colourway; hair is the wig's
+// colour as 6 hex digits, length the ponytail's length as a whole percent, hilt the hilt skin's id (11th field, v0.0.38),
+// camo the gun camo's id (12th field, v0.0.38); absent = the defaults (the knife's own hilt, no camo). Older readers ignore new fields
 // (a v2 reader takes the fields it knows and stops), so every build keeps the v2 replay format.
 // v1 (v0.0.5 replays) was "1;<knife>;<finish>;<seed>;<wear × 10000>;<glove>[;<crown>]": still read, seed / wear ignored.
 
@@ -319,7 +427,8 @@ const PACK_VERSION = "2";
 
 export function packLoadout(l: CosmeticLoadout): string {
   const outfit = outfitId(l.outfit);
-  const tail: (string | number)[] = [l.crown ?? "", l.hat ?? "", l.body === "body-b" ? l.body : "", outfit ?? "", l.hairColor !== undefined ? hairHex(l.hairColor).slice(1) : "", l.hairLength ?? ""];
+  const hilt = l.hilt && l.hilt !== DEFAULT_HILT ? l.hilt : "";
+  const tail: (string | number)[] = [l.crown ?? "", l.hat ?? "", l.body === "body-b" ? l.body : "", outfit ?? "", l.hairColor !== undefined ? hairHex(l.hairColor).slice(1) : "", l.hairLength ?? "", hilt, l.camo ?? ""];
   while (tail.length && tail[tail.length - 1] === "") tail.pop();
   return [PACK_VERSION, l.knife, l.finish, l.glove, ...tail].join(";");
 }
@@ -335,7 +444,7 @@ export function unpackLoadout(s: string | null | undefined): CosmeticLoadout | n
   if (!s || s.length > 200) return null;
   const f = s.split(";");
   if (f[0] === "2" && f.length >= 4) {
-    const l = cleanLoadout({ knife: f[1], finish: f[2], glove: f[3], crown: f[4] ? Number(f[4]) : null, hat: f[5], body: f[6], hairColor: f[8] ? `#${f[8]}` : undefined, hairLength: f[9] && /^\d+$/.test(f[9]) ? Number(f[9]) : undefined })!;
+    const l = cleanLoadout({ knife: f[1], finish: f[2], glove: f[3], crown: f[4] ? Number(f[4]) : null, hat: f[5], body: f[6], hairColor: f[8] ? `#${f[8]}` : undefined, hairLength: f[9] && /^\d+$/.test(f[9]) ? Number(f[9]) : undefined, hilt: f[10] || undefined, camo: f[11] })!;
     const outfit = outfitId(f[7]);
     return outfit ? { ...l, outfit } : l;
   }

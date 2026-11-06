@@ -1,0 +1,5 @@
+/* cl_showpos (hud/showpos.ts): Source's readout, a 300 px panel flush top-right, white monospace with a dark outline. */
+.showpos { position: fixed; top: 0; right: 0; z-index: var(--z-hud); width: 300px; box-sizing: border-box; padding: 2px; pointer-events: none; font: 12px/14px "Lucida Console", Monaco, Menlo, Consolas, monospace; color: #fff; white-space: pre; text-shadow: 1px 0 0 #000, -1px 0 0 #000, 0 1px 0 #000, 0 -1px 0 #000; }
+.showpos[hidden] { display: none; }
+/* The replay viewer: under its top-right buttons (sound, help, close). */
+#rv .showpos { position: absolute; top: 3.4rem; z-index: 3; }

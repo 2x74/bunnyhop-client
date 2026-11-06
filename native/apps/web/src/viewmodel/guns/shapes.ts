@@ -43,7 +43,8 @@ export function edgeOf(p: Paint): Paint {
     const v = (c >> sh) & 255;
     return Math.min(255, Math.round(v + (255 - v) * k + v * k * 0.5)) << sh;
   };
-  e = { ...p, color: ch(16) | ch(8) | ch(0) } as GunPaint;
+  // A camo-tagged paint keeps its tag with the chamfer's strength: the camo brightens the same way (guns/camo.ts).
+  e = { ...p, color: ch(16) | ch(8) | ch(0), ...(p.camo ? { camo: { ...p.camo, edge: k } } : {}) } as GunPaint;
   edges.set(p, e);
   return e;
 }

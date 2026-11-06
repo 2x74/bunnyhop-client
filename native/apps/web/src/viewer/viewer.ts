@@ -1,3 +1,4 @@
+import { ShowPos } from "../hud/showpos";
 import { appHref } from "../platform/navigation";
 import { ReplayWatchCount, replayWatchThreshold } from "./watch-count";
 import { PlayerShadowProxy } from "../graphics/player-shadow";
@@ -96,6 +97,8 @@ export interface ViewerHost {
   practiceFrom?: (replay: Replay, tick: number) => string | null;
   /** After the world's brushes moved to this tick (`world.update`): the replay's sim and its transforms. */
   onWorldUpdate?: (core: Core, transforms: Map<number, BrushTransform>) => void;
+  /** After the replay's player was sampled for this frame (and the camera placed): its sim and the interpolated sample. */
+  onPlayerFrame?: (core: Core, sample: ViewSample) => void;
   /** Viewer opened / closed: pause the live game, hide its HUD/ghosts/menu; then restore them. */
   onOpen: () => void;
   onClose: () => void;
@@ -210,6 +213,9 @@ export class ReplayViewer implements ExportSource {
   private sound = new ReplayAudio();
   speed = 1;
   hudOn = true;
+  /** cl_showpos over the replay (hud/showpos.ts), and the sample it reads (reused). */
+  private showPos = new ShowPos();
+  private showPosSample: ViewSample | null = null;
   /** Hide UI: the controls, timeline and title are hidden (setClean). */
   clean = false;
   private label = "";
@@ -448,7 +454,7 @@ export class ReplayViewer implements ExportSource {
     const controls = h("div.rv-controls.rv-controls-a", null, h("div.rv-group.rv-left", null, transport, clock), h("div.rv-group.rv-right", null, views, actions));
     const panel = h("footer.rv-panel", null, this.timeline.el, controls);
     this.panel = panel;
-    this.root = h("div#rv", { hidden: true, role: "dialog", "aria-label": "Replay viewer" }, this.stage, this.hud.el, top, this.freeHint, this.loading, this.helpEl, panel);
+    this.root = h("div#rv", { hidden: true, role: "dialog", "aria-label": "Replay viewer" }, this.stage, this.hud.el, this.showPos.el, top, this.freeHint, this.loading, this.helpEl, panel);
     // The HUD and whispers sit above the controls (viewer.css --rv-panel-h), not under them; 0 while Hide UI hides the panel.
     new ResizeObserver(() => document.body.style.setProperty("--rv-panel-h", `${panel.offsetHeight}px`)).observe(panel);
     document.body.append(this.root);
@@ -1421,6 +1427,8 @@ export class ReplayViewer implements ExportSource {
     model.root.visible = showModel;
     model.setHeldHidden(!shown.third);
     this.playerShadow.update(s.pos, s.crouched, !showModel);
+    // The landing spot (main.ts: landing/) from the replay's sim at this tick; a read-only query.
+    if (this.core) this.host.onPlayerFrame?.(this.core, s);
     {
       // Carrot swings recorded in the replay (cosmetic trailer), during normal playback.
       const playing = contiguous;
@@ -1539,6 +1547,13 @@ export class ReplayViewer implements ExportSource {
     } else this.render(this.t, vdt, this.rig);
     this.sound.frame(d, Math.min(this.t, d.n), this.playing && !this.timeline.scrubbing, this.speed);
     if (this.hudOn) this.hud.update(d, Math.min(this.t, d.n), this.deltaAt(Math.min(this.t, d.n)), this.speedDiffAt(Math.min(this.t, d.n)));
+    // cl_showpos (hud/showpos.ts): the replay's state at the shown tick (the run's eye and view, not the camera's).
+    const posMode = this.hudOn ? prefs.get().hud.showPos : 0;
+    if (posMode) {
+      const sp = sampleAt(d, Math.min(this.t, d.n), this.showPosSample ?? undefined);
+      this.showPosSample = sp;
+      this.showPos.update(posMode, { pos: sp.pos, viewZ: sp.viewZ, vel: sp.vel, pitch: sp.pitch, yaw: sp.yaw });
+    } else this.showPos.update(0, null);
     this.timeline.setHead(this.t);
     this.timeline.render();
     this.gauntlet?.frame(d, this.t);
@@ -1800,7 +1815,7 @@ export class ReplayViewer implements ExportSource {
         // Free roam turns like the game: your sensitivity, vertical sensitivity and invert (freecam.ts).
         const p = prefs.get();
         const pitchSens = p.verticalSensitivityEnabled ? p.verticalSensitivity : p.sensitivity;
-        this.rig.free.lookDeg(e.movementX * p.sensitivity * 0.022, e.movementY * pitchSens * (p.invertY ? -0.022 : 0.022));
+        this.rig.free.lookDeg(e.movementX * p.sensitivity * p.mYaw, e.movementY * pitchSens * (p.invertY ? -p.mPitch : p.mPitch));
       }
       else if (this.dragging && this.rig.mode !== "eye") {
         if (this.rig.mode !== "chase") this.setCam("chase");

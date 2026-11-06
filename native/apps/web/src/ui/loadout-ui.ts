@@ -7,7 +7,7 @@ import { colourway } from "../player/bunny/palettes";
 import { getOutfit } from "../player/cosmetics";
 import { achievement, cosmetic, RARITY, type CosmeticDef } from "../progression";
 import { availableNow } from "./community";
-import { finishStyle, gloveStyle, type CosmeticLoadout } from "../loadout";
+import { finishStyle, gloveStyle, hiltSkin, type CosmeticLoadout } from "../loadout";
 import { knifeById } from "../../../native/ui/knife-catalog";
 import { h } from "./dom";
 
@@ -23,12 +23,16 @@ export function listedCosmetic(c: CosmeticDef): boolean {
  */
 export function shownCosmetic(c: CosmeticDef, owned: ReadonlySet<string> | ((c: CosmeticDef) => boolean)): boolean {
   if (!listedCosmetic(c)) return false;
+  // Contributor cosmetics are public catalogue entries, locked in place until the badge is held. Staff cosmetics are
+  // omitted entirely for non-holders so the catalogue does not expose their names or counts.
+  if (c.unlock.kind === "role" && c.unlock.role === "contributor") return true;
   const ownOnly = c.unlock.kind === "role" || (c.unlock.kind === "achievement" && !availableNow(achievement(c.unlock.id)));
   if (!ownOnly) return true;
   return typeof owned === "function" ? owned(c) : owned.has(c.id);
 }
 
-export const isLoadoutSlot = (slot: string): slot is "knife" | "finish" | "glove" => slot === "knife" || slot === "finish" || slot === "glove";
+export type LoadoutSlot = "knife" | "finish" | "hilt" | "glove";
+export const isLoadoutSlot = (slot: string): slot is LoadoutSlot => slot === "knife" || slot === "finish" || slot === "hilt" || slot === "glove";
 
 export function rarityOf(c: CosmeticDef | null): { name: string; color: string } | null {
   return c?.rarity ? RARITY[c.rarity] : null;
@@ -100,9 +104,15 @@ export function finishBackground(id: string | null | undefined): string {
   }
 }
 
-/** Swatch for a knife / finish / glove item (tile size). */
-export function loadoutSwatch(c: CosmeticDef | null, slot: "knife" | "finish" | "glove"): HTMLElement {
+/** Swatch for a knife / finish / hilt / glove item (tile size). */
+export function loadoutSwatch(c: CosmeticDef | null, slot: LoadoutSlot): HTMLElement {
   const rar = rarityOf(c)?.color ?? "#888";
+  if (slot === "hilt") {
+    // A grip between a guard and a pommel, in the skin's colours (the knife's own hilt: the carrot's green and accent).
+    const s = hiltSkin(c?.id);
+    const [g, g2, f] = s ? [s.grip.color, s.grip.alt, s.guard.color] : [0x2f7d34, 0x58c64a, 0xffb43a];
+    return h("span.pf-sw.pf-sw-hilt", { "aria-hidden": "true", style: `--g:${hex(g)};--g2:${hex(g2)};--f:${hex(f)};--rar:${rar}` }, h("i.grip"), h("i.guard"), h("i.pommel"));
+  }
   if (slot === "finish") return h("span.pf-sw.pf-sw-fin", { "aria-hidden": "true", style: `--fin:${finishBackground(c?.id)};--rar:${rar}` }, h("span"));
   if (slot === "glove") {
     const g = gloveStyle(c?.id);
@@ -114,10 +124,10 @@ export function loadoutSwatch(c: CosmeticDef | null, slot: "knife" | "finish" | 
   return h("span.pf-sw.pf-sw-knife", { "aria-hidden": "true", style: `--sw:${c?.color ?? "#ff7a1a"};--rar:${rar}` }, h("span"));
 }
 
-/** "Karrotbit", "Nebula", "Sport · Pandora" (each finish is one design, so its name says it all). */
-export function loadoutSummary(l: CosmeticLoadout): { knife: string; finish: string; glove: string } {
+/** "Karrotbit", "Nebula", "Walnut", "Sport · Pandora" (each finish and hilt is one design, so its name says it all). */
+export function loadoutSummary(l: CosmeticLoadout): { knife: string; finish: string; hilt: string; glove: string } {
   const knife = knifeById(l.knife) ? (cosmetic(l.knife)?.name ?? "Carrot Blade") : "Carrot Blade";
-  return { knife, finish: cosmetic(l.finish)?.name ?? "Garden Fresh", glove: cosmetic(l.glove)?.name ?? "Knit" };
+  return { knife, finish: cosmetic(l.finish)?.name ?? "Garden Fresh", hilt: cosmetic(l.hilt ?? "hilt-original")?.name ?? "Original", glove: cosmetic(l.glove)?.name ?? "Knit" };
 }
 
 /** The Loadout menu item's second line (home, offline): "Karrotbit", "Karrotbit · Nebula". */

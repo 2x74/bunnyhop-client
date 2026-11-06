@@ -1,0 +1,44 @@
+/* The console (console/view.ts) and the config import (console/import-dialog.ts). The game's own panel look: solid ink,
+   one hairline border, the menu radius; the scrollback in the mono face. Tokens from style.css. */
+
+dialog.con {
+  position: fixed; inset: 1.2rem 0 auto; margin: 0 auto; z-index: var(--z-toast);
+  width: min(54rem, calc(100vw - 1.5rem)); height: min(28rem, 52vh); box-sizing: border-box;
+  display: none; flex-direction: column; padding: 0;
+  color: var(--text); background: var(--panel-solid); border: 1px solid var(--line-2); border-radius: var(--radius); box-shadow: var(--shadow);
+}
+dialog.con[open] { display: flex; animation: con-in 0.14s var(--ease) both; }
+@keyframes con-in { from { opacity: 0; transform: translateY(-0.5rem); } }
+@media (prefers-reduced-motion: reduce) { dialog.con[open] { animation: none; } }
+.con-head { display: flex; align-items: center; justify-content: space-between; padding: 0.55rem 0.6rem 0.35rem 1rem; }
+.con-head h2 { margin: 0; font-size: var(--fs-md); font-weight: var(--w-ui); }
+.con-close .icon { font-size: 0.85em; }
+.con-log {
+  flex: 1; min-height: 0; overflow: hidden auto; margin: 0 0.6rem; padding: 0.5rem 0.6rem;
+  background: rgba(0, 0, 0, 0.28); border-radius: var(--radius-sm);
+  font-family: var(--mono); font-size: var(--fs-sm); line-height: 1.4; color: var(--cream-2); user-select: text;
+  overscroll-behavior: contain;
+}
+.con-l { white-space: pre-wrap; overflow-wrap: anywhere; }
+.con-l.echo { color: var(--cream-3); }
+.con-l.out { color: var(--cream); }
+.con-l.ok { color: var(--cream); }
+.con-l.err { color: var(--loss); }
+.con-l.dim { color: var(--cream-2); }
+.con-line { display: flex; align-items: center; gap: 0.5rem; padding: 0.55rem 0.6rem 0.6rem 1rem; }
+.con-prompt { font-family: var(--mono); color: var(--faint); }
+.con-input { flex: 1; min-width: 0; padding: 0.45rem 0.6rem; font-family: var(--mono); font-size: var(--fs-sm); }
+
+/* Import a CS:S config (Settings → Keys) */
+dialog.cfg-dialog { width: min(40rem, 94vw); }
+.cfg-text { width: 100%; box-sizing: border-box; min-height: 9rem; resize: vertical; padding: 0.5rem 0.6rem; font-family: var(--mono); font-size: var(--fs-sm); color: var(--text); background: rgba(0, 0, 0, 0.32); border: 1px solid var(--line-2); border-radius: var(--radius-sm); }
+.cfg-text:focus { outline: none; border-color: var(--accent); }
+.cfg-keep { display: flex; align-items: center; gap: 0.55rem; font-size: var(--fs-sm); color: var(--dim); }
+.cfg-sum { margin: 0.3rem 0 0; font-size: var(--fs-sm); }
+.cfg-list { max-height: 14rem; overflow: auto; margin: 0; padding: 0; list-style: none; font-family: var(--mono); font-size: var(--fs-xs); line-height: 1.5; color: var(--cream-2); }
+.cfg-list li { display: flex; gap: 0.75rem; }
+.cfg-list .cfg-cmd { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--cream-3); }
+.cfg-list .cfg-note { flex: none; max-width: 55%; text-align: right; }
+.cfg-list .error .cfg-note { color: var(--loss); }
+.cfg-list .bound .cfg-note, .cfg-list .set .cfg-note, .cfg-list .unbound .cfg-note { color: var(--cream); }
+.cfg-foot { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.4rem; }

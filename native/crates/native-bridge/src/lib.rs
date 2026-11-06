@@ -1184,7 +1184,7 @@ pub unsafe extern "C" fn bh_run_configure(
     unsafe {
         call(ctx, |c| {
             let mut options = input(options)?;
-            if ![1, 2, 3, 4].contains(&options.rules)
+            if ![1, 2, 3, 4, 5].contains(&options.rules)
                 || options.strafe_keys > styles::STRAFE_KEYS_PRESS
                 || !options.prespeed_cap.is_finite()
                 || options.prespeed_cap < 0.0
@@ -1200,7 +1200,7 @@ pub unsafe extern "C" fn bh_run_configure(
             for z in &zones {
                 finite(&z.mins)?;
                 finite(&z.maxs)?;
-                if z.kind > 3
+                if z.kind > 4
                     || z.track > 255
                     || z.index > 255
                     || (0..3).any(|i| z.mins[i] > z.maxs[i])

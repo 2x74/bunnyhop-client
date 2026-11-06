@@ -109,6 +109,7 @@
 #include <filesystem>
 #include <future>
 #include <iostream>
+#include <unordered_map>
 #include <limits>
 #include <map>
 #include <memory>
@@ -375,6 +376,19 @@ int run(const native::Options &opt) {
     // Keys as last polled (actions, turnbinds, overlays). Timed ticks use their own key state (input.queue.keys).
     std::set<std::string> held_codes;
     native::InputTimeline input_timeline;
+    std::unordered_map<std::string, unsigned> console_holds;
+    std::unordered_map<std::string, std::string> active_command_binds;
+    auto command_hold_bits = [&]() {
+        uint32_t bits = 0;
+        for (const auto &[action, count] : console_holds)
+            if (count) bits |= native::movement_bit(action);
+        return bits;
+    };
+    auto refresh_command_holds = [&]() {
+        const uint32_t bits = command_hold_bits();
+        input_timeline.set_command_held(bits);
+        input.held = input_timeline.binds().held(held_codes) | bits;
+    };
     native::FrameDiagnostics frame_diagnostics;
     native::TurnSettings configured_turns;
     native::RunRecorder recorder;
@@ -419,6 +433,7 @@ int run(const native::Options &opt) {
         if (backdrop) backdrop->graphics_settings(preferences);
         hud_layout.clear();
         input_timeline.set_sensitivity(input, prefs.sensitivity);
+        input_timeline.set_mouse_scales(input, prefs.m_yaw, prefs.m_pitch);
         input.vertical_sensitivity = prefs.vertical_sensitivity;
         input.separate_vertical = prefs.separate_vertical;
         input.invert_y = prefs.invert_y;
@@ -581,7 +596,12 @@ int run(const native::Options &opt) {
     auto show_menu = [&](bool on, bool from_focus_loss = false) {
         if (on) hud_editor.close();
         if (on) menu_state.reset();
-        if (on) input_timeline.keyboard_focus_lost();
+        if (on) {
+            input_timeline.keyboard_focus_lost();
+            console_holds.clear();
+            active_command_binds.clear();
+            input_timeline.set_command_held(0);
+        }
         if (on) {
             viewer.controls.dragging = false;
             viewer.orbit_drag = false;
@@ -1281,6 +1301,29 @@ int run(const native::Options &opt) {
     };
     auto act = native::RecoverableAction(
             [&](const std::string &action, bool wheel = false, bool instant = false) {
+                if (action == "console") {
+                    show_menu(true);
+                    if (menu && menu_ready)
+                        menu->evaluate_js(
+                                "window.dispatchEvent(new "
+                                "CustomEvent('bunnyhop:native-console-open',{detail:{fromGame:true}}))"
+                        );
+                    return;
+                }
+                if (action == "jumpToggle") {
+                    if (free_cameras.freecam.active()) {
+                        toast("Hold jump is off in freecam.");
+                        return;
+                    }
+                    BhSettings jump_style{};
+                    if (!bh_style_settings(active_style.c_str(), &jump_style) || !jump_style.autohop) {
+                        toast(active_style + " has no autohop: holding jump does nothing. Jump for each hop.");
+                        return;
+                    }
+                    input.jump_toggle = !input.jump_toggle;
+                    toast(input.jump_toggle ? "Hold jump on" : "Hold jump off");
+                    return;
+                }
                 if (action == "chat" || action == "commandChat") {
                     open_chat(action == "commandChat");
                     return;
@@ -1529,6 +1572,33 @@ int run(const native::Options &opt) {
             [&](const std::string &code, bool down, bool repeat = false, bool wheel = false, uint64_t stamp = 0) {
                 if (code.empty()) return;
                 if (input_timeline.released_until_keyup(code, down, repeat)) return;
+                std::string command_bind;
+                if (down && !repeat) {
+                    const auto binds = preferences.find("cmdBinds");
+                    if (binds != preferences.end() && binds->is_object()) {
+                        const auto found = binds->find(code);
+                        if (found != binds->end() && found->is_string()) {
+                            command_bind = found->get<std::string>();
+                            active_command_binds[code] = command_bind;
+                        }
+                    }
+                } else if (!down) {
+                    const auto found = active_command_binds.find(code);
+                    if (found != active_command_binds.end()) {
+                        command_bind = found->second;
+                        active_command_binds.erase(found);
+                    }
+                }
+                if (!command_bind.empty()) {
+                    if (menu && menu_ready) {
+                        nlohmann::json detail{{"code", code}, {"down", down}, {"command", command_bind}};
+                        menu->evaluate_js(
+                                "window.dispatchEvent(new CustomEvent('bunnyhop:native-console-bind',{detail:"
+                                + detail.dump() + "}))"
+                        );
+                    }
+                    return;
+                }
                 if (down && !repeat)
                     for (const char *action : {"chat", "commandChat"})
                         for (const auto &key : input_timeline.binds().codes(action))
@@ -1623,6 +1693,7 @@ int run(const native::Options &opt) {
                     } else if (matching && down && !repeat)
                         act(binding.action, wheel);
                 }
+                input.held |= command_hold_bits();
                 if (renderer)
                     native_render::surface_tool_key(
                             *renderer,
@@ -2578,6 +2649,20 @@ int run(const native::Options &opt) {
                         show_menu(false);
                     } else if (type == "restart") {
                         std::cerr << "Restart ignored: " << (core ? "a map is loading" : "no map is up") << '\n';
+                    } else if (type == "consoleAction") {
+                        const auto action = message.at("action").get<std::string>();
+                        const bool down = message.at("down").get<bool>();
+                        if (native::movement_bit(action)) {
+                            auto &count = console_holds[action];
+                            if (down)
+                                ++count;
+                            else if (count)
+                                --count;
+                            if (!count) console_holds.erase(action);
+                            refresh_command_holds();
+                        } else if (down) {
+                            act(action, false, true);
+                        }
                     } else if (type == "selectMap") {
                         const auto style = message.value("style", selected_style);
                         if (!native::styles.contains(style)) throw std::runtime_error("Unknown style");
@@ -2615,6 +2700,9 @@ int run(const native::Options &opt) {
                         if (!trying) json_writer.write(cache / "settings.json", changed);
                         preferences = std::move(changed);
                         input_timeline.settings_changed(input, held_codes);
+                        console_holds.clear();
+                        active_command_binds.clear();
+                        input_timeline.set_command_held(0);
                         apply_preferences();
                         error.clear();
                     } else if (type == "window") {
@@ -3323,7 +3411,8 @@ int run(const native::Options &opt) {
                 cmd = freecam_on ? native::neutral_command(input) : input.command(w_release);
                 if (practice.noclip) {
                     BhSnapshot snapshot{};
-                    require(bh_noclip_move(&practice.flight, &cmd, dt, selected_style.c_str()), core.get(),
+                    require(bh_noclip_move(&practice.flight, &cmd, dt, selected_style.c_str()),
+                            core.get(),
                             "Moving noclip");
                     require(bh_practice_noclip_tick(core.get(), &practice.flight, &snapshot),
                             core.get(),
@@ -3392,6 +3481,10 @@ int run(const native::Options &opt) {
             bh_snapshot(core.get(), &state);
             BhRunState timing{};
             bh_run_state(core.get(), &timing);
+            if (timing.update_flags & (1u << 5))
+                toast("Run stopped: anti-skip zone. Return to start.", 3500);
+            else if (timing.update_flags & (1u << 6))
+                toast("Run stopped: respawn. Return to start.", 3500);
             BhWeaponReport weapon{};
             bh_weapon_report(core.get(), &weapon);
             if (!viewer.active) {
@@ -3628,7 +3721,7 @@ int run(const native::Options &opt) {
                                 run_state.seconds,
                                 native::read_text(data_location::from_utf8(recorder.path)),
                                 play,
-                                {{"sensitivity", prefs.sensitivity}}
+                                {{"sensitivity", prefs.sensitivity * prefs.m_yaw / .022}}
                         ));
                         std::cout << "Native finish " << run_state.seconds << " seconds; replay " << recorder.path
                                   << '\n';
@@ -3997,6 +4090,8 @@ int run(const native::Options &opt) {
                     race_picker,
                     leave_hold,
                     curr,
+                    float(input.pitch),
+                    float(input.yaw()),
                     state,
                     display_run,
                     run_state,

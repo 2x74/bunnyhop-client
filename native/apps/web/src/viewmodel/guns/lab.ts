@@ -11,6 +11,10 @@
 //                                                               silenced); &silenced=1 starts with it on
 //   ?mode=world&cells=glock,usp,fiveseven,m3,xm1014,p90,ak47,awp  dropped models (turntable)
 //   ?mode=tp&gun=glock                                          the bunny holding it (third person)
+//   ?mode=side&camos=camo-woodland,camo-paws&guns=glock,p90,ak47,awp  gun camos (camo.ts): the guns alone from the side,
+//                                                               one row of guns per camo ("none" = no camo); &yaw=20
+//   &camo=camo-woodland (every first-person cell) · &camos=a,b,... (per first-person cell) · &crop=x,y,w,h (first person:
+//   that part of the screen, fractions) · &bench=1 (side / first person: frame time per camo, window.__gunlab.bench)
 //   &cols=3 · &labels=0 · &cross=1 (crosshair) · &glove=sport · &outfit=outfit-...
 // window.__gunlab: { vm, seek(cell, clip, t), fire(), ... } for scripted captures (tools/viewmodel/gun-shots.ts).
 
@@ -26,6 +30,11 @@ import type { GunDef } from "./types";
 import { restOnFloor, worldGunGeometry, worldGunMaterial } from "./world";
 import { silencerLength } from "./silencer";
 import { GunImpacts } from "./impacts";
+import { gunMaterial } from "./material";
+import { gunModelGeometry } from "./meshes";
+import { playerUniforms } from "../../player/materials";
+import { NO_LOOK } from "../finishes/shader";
+import { CAMO_STYLE, camoStyle } from "../../camo";
 
 const q = new URLSearchParams(location.search);
 const canvas = document.getElementById("c") as HTMLCanvasElement;
@@ -35,7 +44,9 @@ const labels = document.getElementById("labels")!;
 const info = document.getElementById("info")!;
 const mode = q.get("mode") ?? "fp";
 const showLabels = q.get("labels") !== "0";
-const loadout = { ...DEFAULT_LOADOUT, glove: q.get("glove") ? `glove-${q.get("glove")}` : DEFAULT_LOADOUT.glove };
+const loadout = { ...DEFAULT_LOADOUT, glove: q.get("glove") ? `glove-${q.get("glove")}` : DEFAULT_LOADOUT.glove, ...(q.get("camo") ? { camo: q.get("camo")! } : {}) };
+const cellCamos = q.get("camos")?.split(",") ?? null;
+const crop = q.get("crop")?.split(",").map(Number) ?? null;
 
 interface Cell {
   label: string;
@@ -210,8 +221,9 @@ function firstPerson(): void {
       crossScene.add(b);
     }
   }
-  cells = specs.map((sp) => {
-    const vm = new GunViewmodel({ loadout });
+  cells = specs.map((sp, i) => {
+    const camo = cellCamos ? cellCamos[i % cellCamos.length] : null;
+    const vm = new GunViewmodel({ loadout: camo ? (camo === "none" ? { ...loadout, camo: undefined } : { ...loadout, camo }) : loadout });
     vm.debugHide = (q.get("hide") as "R" | "L" | "RL" | null) ?? null;
     vms.push(vm);
     if (live) {
@@ -220,9 +232,15 @@ function firstPerson(): void {
       vm.draw();
     } else seekVm(vm, sp);
     const cell: Cell = {
-      label: `<b>${sp.gun.name}</b>${sp.id !== sp.gun.id ? ` (as ${sp.id})` : ""} · ${sp.gun.archetype} · ${sp.clip}${sp.clip === "idle" ? "" : " " + sp.t.toFixed(2)}${unsupported(sp) ? " · <b>unsupported</b>: this gun has no silencer (not simulated by the core)" : ""}`,
+      label: `<b>${sp.gun.name}</b>${camo ? ` · ${camo}` : ""}${sp.id !== sp.gun.id ? ` (as ${sp.id})` : ""} · ${sp.gun.archetype} · ${sp.clip}${sp.clip === "idle" ? "" : " " + sp.t.toFixed(2)}${unsupported(sp) ? " · <b>unsupported</b>: this gun has no silencer (not simulated by the core)" : ""}`,
       draw: (_x, _y, w, h, dt) => {
         cam.aspect = w / h;
+        if (crop) {
+          const W0 = 1000 * (w / h), H0 = 1000;
+          cam.setViewOffset(W0, H0, crop[0] * W0, crop[1] * H0, crop[2] * W0, crop[3] * H0);
+          vm.camera.setViewOffset(W0, H0, crop[0] * W0, crop[1] * H0, crop[2] * W0, crop[3] * H0);
+          cam.aspect = (crop[2] * W0) / (crop[3] * H0);
+        }
         cam.updateProjectionMatrix();
         const hand = prefs.get().viewmodel.hand;
         if (hand !== sp.hand) prefs.update((p) => (p.viewmodel.hand = sp.hand));
@@ -429,6 +447,52 @@ function worldModels(): void {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Camos: the guns alone (first-person detail, the viewmodel's material with the camo), from the left a little above.
+
+function sideModels(): void {
+  const camos = (q.get("camos") ?? "none").split(",");
+  const guns = (q.get("guns") ?? "glock,p90,ak47,awp").split(",").map((id) => gunById(id) ?? GUNS[0]);
+  cols = Number(q.get("cols") ?? guns.length);
+  const yaw = (Number(q.get("yaw") ?? 18) * Math.PI) / 180;
+  const pitch = (Number(q.get("pitch") ?? 12) * Math.PI) / 180;
+  const cam = new THREE.PerspectiveCamera(20, 1, 1, 2000);
+  const mats = new Map<string, THREE.ShaderMaterial>();
+  const matFor = (camo: string) => {
+    let m = mats.get(camo);
+    if (!m) mats.set(camo, (m = gunMaterial(playerUniforms(), NO_LOOK, { camo: camoStyle(camo === "none" ? null : camo), cheap: q.get("potato") === "1" })));
+    return m;
+  };
+  cells = camos.flatMap((camo) =>
+    guns.map((def) => {
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x232833);
+      const root = new THREE.Group();
+      root.rotation.x = -Math.PI / 2; // Source Z-up
+      scene.add(root);
+      const geo = gunModelGeometry(def);
+      root.add(new THREE.Mesh(geo, matFor(camo)));
+      if (!geo.boundingBox) geo.computeBoundingBox();
+      const b = geo.boundingBox!;
+      const c = new THREE.Vector3((b.min.x + b.max.x) / 2, (b.min.z + b.max.z) / 2, -(b.min.y + b.max.y) / 2);
+      const len = Math.max(b.max.x - b.min.x, (b.max.z - b.min.z) * 1.6);
+      return {
+        label: `<b>${def.name}</b> · ${camo}`,
+        draw: (_x, _y, w, h) => {
+          cam.aspect = w / h;
+          const t = Math.tan(THREE.MathUtils.degToRad(cam.fov / 2));
+          const d = Math.max((len * 0.56) / (t * cam.aspect), ((b.max.z - b.min.z) * 0.75) / t);
+          cam.position.set(c.x - Math.sin(yaw) * d * Math.cos(pitch), c.y + Math.sin(pitch) * d, c.z - Math.cos(yaw) * d * Math.cos(pitch));
+          cam.lookAt(c);
+          cam.updateProjectionMatrix();
+          renderer.render(scene, cam);
+        },
+      } satisfies Cell;
+    }),
+  );
+  layout();
+}
+
+// ---------------------------------------------------------------------------------------------
 // Third person: the bunny holding the gun.
 
 async function thirdPerson(): Promise<void> {
@@ -464,7 +528,53 @@ async function thirdPerson(): Promise<void> {
   layout();
 }
 
-if (mode === "world") worldModels();
+// &bench=1: frame time of the first-person gun per camo (one per kind, and none), in game framing and zoomed in (the gun
+// over most of the screen: the per-pixel worst case). CPU wall time of N frames each ended by a 1-pixel readback, so
+// the GPU work is inside it. window.__gunlab.bench(n) -> { [camo]: { game, zoom } } in ms per frame.
+if (q.get("bench") === "1")
+  Object.assign(window, {
+    __gunlab: {
+      bench: async (n = 200) => {
+        const kinds = new Map<string, string>();
+        for (const [id, st] of Object.entries(CAMO_STYLE)) if (![...kinds.values()].includes(st.kind)) kinds.set(id, st.kind);
+        const room = testRoom();
+        const cam = worldCamera();
+        renderer.setSize(1920, 1080, false);
+        renderer.setScissorTest(false);
+        renderer.setViewport(0, 0, 1920, 1080);
+        cam.aspect = 16 / 9;
+        const px = new Uint8Array(4);
+        const gl = renderer.getContext();
+        const out: Record<string, { kind: string; game: number; zoom: number }> = {};
+        for (const id of ["none", ...kinds.keys()]) {
+          const vm = new GunViewmodel({ loadout: { ...loadout, camo: id === "none" ? undefined : id } });
+          vm.setGun(gunById("ak47")!);
+          vm.anim.seek("idle", 0);
+          const res = { kind: id === "none" ? "none" : kinds.get(id)!, game: 0, zoom: 0 };
+          for (const zoom of [false, true]) {
+            if (zoom) (cam.setViewOffset(1600, 900, 700, 420, 600, 338), vm.camera.setViewOffset(1600, 900, 700, 420, 600, 338));
+            else (cam.clearViewOffset(), vm.camera.clearViewOffset());
+            cam.updateProjectionMatrix();
+            const frame = () => {
+              vm.update(1 / 60);
+              renderer.render(room.scene, cam);
+              vm.render(renderer, cam);
+              gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+            };
+            for (let i = 0; i < 20; i++) frame();
+            const t0 = performance.now();
+            for (let i = 0; i < n; i++) frame();
+            res[zoom ? "zoom" : "game"] = +((performance.now() - t0) / n).toFixed(3);
+          }
+          out[id] = res;
+          vm.dispose();
+        }
+        return out;
+      },
+    },
+  });
+else if (mode === "side") sideModels();
+else if (mode === "world") worldModels();
 else if (mode === "tp") await thirdPerson();
 else firstPerson();
 addEventListener("resize", layout);

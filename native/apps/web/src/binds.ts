@@ -57,6 +57,10 @@ export const DEFAULT_BINDS: Record<BindAction, string[]> = {
   left: ["KeyA"],
   right: ["KeyD"],
   jump: ["Space", "MouseWheel"],
+  // Hold jump (toggle): unbound, so nobody's keys change. Bind it in Settings -> Keys or with `bind <key> jump_toggle`.
+  jumpToggle: [],
+  // Crouch jump (jump + duck on one key, input.ts ACTION_BITS): unbound, like the jump toggle.
+  crouchJump: [],
   duck: ["ControlLeft"],
   use: ["KeyE"],
   restart: ["KeyR"],
@@ -71,6 +75,8 @@ export const DEFAULT_BINDS: Record<BindAction, string[]> = {
   // pause menu's own key for it is Backspace (menu.ts), which the tutorial uses in game for the previous lesson.
   mainMenu: [],
   hudEditor: ["F2"],
+  // The console (console/), Source's toggleconsole key. Opens in menus too, never while typing in a text field.
+  console: ["Backquote"],
   // Chat (say / say_team in CS:S). Before it was an action these keys opened it whenever nothing else was bound to them;
   // saved binds that use Y or U for something else keep it there (settings.ts migrateBinds adds only free keys).
   chat: ["KeyY", "KeyU"],

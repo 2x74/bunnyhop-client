@@ -12,7 +12,7 @@ import { concat, xform, type V3 } from "../player/bunny/rig";
 const xform3 = (m: Float32Array, p: V3): V3 => xform(m, 0, p);
 import { angleMatrix, fromAxes, ramp, rotAbout, rotate } from "./math";
 import type { VmRig } from "./rig";
-import { CARROT_HOLD, GRIP_ALONG, solvedHold } from "./knives/hold";
+import { CARROT_HOLD, GRIP_ALONG, registerIdlePose, solvedHold } from "./knives/hold";
 
 export type VmAction = "idle" | "draw" | "slash1" | "slash2" | "stab";
 
@@ -208,3 +208,6 @@ export class VmProcedural {
     }
   }
 }
+
+// The knife hold's wrist lock holds the hand at this base's idle bend (knives/hold.ts lockWrist).
+registerIdlePose((r, W) => new VmProcedural(r).pose("idle", 0, W));

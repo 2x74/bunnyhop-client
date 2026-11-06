@@ -2,15 +2,15 @@
 // maps them into the target mesh's bind space with the right skin weights and the finishUV attribute:
 //   first person  (fpCtx): the viewmodel rig's Knife_Handle bind frame; parts can name an extra bone (rig.ts
 //                          EXTRA_BONES, e.g. the balisong's Bfly_Blade) and are weighted to it.
-//   third person  (tpCtx): the bunny's R_Hand bind frame through the knife's TpSpec, everything on the knife bone
-//                          (bunny.Knife: R_Hand's bind, so it follows the hand unless an inspect spins it),
-//                          fewer segments (k.seg()).
+//   third person  (tpCtx): the bunny's R_Hand bind frame through the knife's TpSpec, on the knife bone (bunny.Knife:
+//                          R_Hand's bind, so it follows the hand unless an inspect spins it); parts that name an
+//                          extra bone go on its third-person twin (bunny.Knife.<name>, v0.0.38); fewer segments.
 // Both append to an existing Builder, so hands + knife (or bunny + knife) stay one geometry and one draw call.
 
 import { add, Builder, clamp, cross, dot, len, norm, ring, scale, smoothstep, sub, type Paint, type Wt } from "../../player/bunny/builder";
-import { KNIFE_BONE, rig as bunnyRig, xform, type V3 } from "../../player/bunny/rig";
+import { KNIFE_BONE, knifePartBone, rig as bunnyRig, xform, type V3 } from "../../player/bunny/rig";
 import { vmRig } from "../rig";
-import { KMAT, PART, type KMat, type TpSpec } from "./types";
+import { HILT_ROLE_CODE, KMAT, PART, type HiltMap, type HiltPart, type KMat, type KnifeDef, type TpSpec } from "./types";
 
 /** A fixed colour, optionally with a hardware material (types.ts KMAT: how the first-person view shades it). */
 export const fixed = (color: number, mat?: KMat): Paint => (mat ? { code: 0, color, mat } : { code: 0, color });
@@ -23,6 +23,21 @@ export const CARROT = fixed(0xff7a1a, KMAT.veg), CARROT_DARK = fixed(0xd95a0c, K
 export type Fin = readonly [number, number, number, number];
 
 /**
+ * Hilt pieces (v0.0.38, Hilt cosmetic slot): the named pieces of a knife's hilt. A builder wraps what it emits for a
+ * piece in k.hilt(piece, ...), which names every surface inside it `piece` unless the surface has its own name
+ * (SurfaceOpts.name). The knife's hilt map (KnifeDef.hilt, types.ts HiltMap) then says which role (grip / guard /
+ * pommel) each name plays; withHilt() applies the map. Names not in the map are never part of the hilt. The paint and
+ * material stay the builder's (the knife's own default hilt). Not every knife has every piece.
+ *   handle   the grip's core / scales / liners: what the fingers close on
+ *   wrap     cord, ribbon or ring bands over the handle
+ *   guard    crossguard, tsuba, bolster plate, quillons
+ *   pommel   the butt cap / pommel ornament (leaves, tufts, rings on the butt)
+ *   fitting  small metal fittings: ferrules, collars, rivets, pins, bolts
+ */
+export const HILT_PIECES = ["handle", "wrap", "guard", "pommel", "fitting"] as const;
+export type HiltPiece = (typeof HILT_PIECES)[number];
+
+/**
  * finishUV.w: the wear mask's edge / tip weight 0..1 (same rule as finishes/layout.ts edgeOf): toward the edge(s)
  * (|across| 0.6 -> 1, or the sharp side's `e`) or the tip (along 0.85 -> 1), whichever is more.
  */
@@ -31,6 +46,8 @@ type Part = (typeof PART)[keyof typeof PART];
 
 export interface SurfaceOpts {
   paint: (i: number, k: number) => Paint;
+  /** The surface's name for the knife's hilt map (KnifeDef.hilt, types.ts HiltMap); unnamed = never part of the hilt. */
+  name?: string;
   /** Extra bone (short name) in first person; default Knife_Handle. */
   bone?: string;
   part?: Part;
@@ -76,6 +93,8 @@ const X: V3 = [1, 0, 0];
 export class KnifeCtx {
   /** Vertices before this knife (to count its triangles). */
   private v0: number;
+  /** The hilt map of the knife being built (withHilt sets it around build()); null = nothing is tagged. */
+  hiltMap: HiltMap | null = null;
   constructor(
     readonly b: Builder,
     readonly view: "fp" | "tp",
@@ -83,6 +102,20 @@ export class KnifeCtx {
     private weightOf: (bone?: string) => Wt,
   ) {
     this.v0 = b.vertexCount;
+  }
+
+  /** The hilt piece being emitted (k.hilt), the name of its unnamed surfaces; null outside one. */
+  private piece: HiltPiece | null = null;
+
+  /** Emits `fn`'s surfaces as hilt piece `piece` (HILT_PIECES): surfaces without their own name take the piece's. */
+  hilt(piece: HiltPiece, fn: () => void): void {
+    const prev = this.piece;
+    this.piece = piece;
+    try {
+      fn();
+    } finally {
+      this.piece = prev;
+    }
   }
 
   /** Triangles emitted through this context so far. */
@@ -133,12 +166,59 @@ export class KnifeCtx {
       this.b.finish = () => f;
     }
     const out = o.out;
-    this.b.surface(m, { paint: o.paint, weight: () => W, capStart: o.capStart, capEnd: o.capEnd, closed: o.closed, flat: o.flat, out: out ? (i, k) => this.D(out(i, k)) : undefined });
+    const hf = o.fin ? null : this.hiltFin(rows, o, part);
+    this.b.surface(m, { paint: o.paint, weight: () => W, capStart: o.capStart, capEnd: o.capEnd, closed: o.closed, flat: o.flat, out: out ? (i, k) => this.D(out(i, k)) : undefined, fin: hf ?? undefined });
     this.b.finish = null;
   }
 
+  /**
+   * finishUV for a hilt part (types.ts HiltMap): [role code (+ 0.25 on the second tone), knife-local z, part, round
+   * 0..1]; null when the surface isn't in the knife's hilt map. Per face (Builder.surface fin): a face's tone is its
+   * paint's, and the quads that wrap round a closed surface count `round` on to 1 rather than back to 0.
+   */
+  private hiltFin(rows: V3[][], o: SurfaceOpts, part: number): ((i: number, k: number, fi: number, fk: number) => Fin) | null {
+    const name = o.name ?? this.piece;
+    const e = name && this.hiltMap ? this.hiltMap[name] : undefined;
+    if (!e) return null;
+    const spec: HiltPart = typeof e === "string" ? { role: e } : e;
+    const code = HILT_ROLE_CODE[spec.role];
+    const alt = spec.alt ?? [];
+    const K = rows[0].length;
+    const tone = (fi: number, fk: number) => {
+      if (!alt.length) return 0;
+      const p = o.paint(Math.min(fi, rows.length - 2), fk % K);
+      return alt.some((a) => a.code === p.code && (a.color ?? null) === (p.color ?? null)) ? 0.25 : 0;
+    };
+    // `round`: each point's angle about its row's centre (turns), measured from one fixed knife axis projected into the
+    // row's plane, so rows that start their ring half a step on (a staggered cord wrap) still line up. Unwrapped along
+    // the row; the closing quads ask for k = K, one whole turn on from column 0.
+    const R = rows.length;
+    const cen = rows.map((r) => scale(r.reduce((a, p) => add(a, p), [0, 0, 0] as V3), 1 / r.length));
+    const round = rows.map((r, i) => {
+      let t = sub(cen[Math.min(R - 1, i + 1)], cen[Math.max(0, i - 1)]);
+      if (len(t) < 1e-6) t = [0, 0, 1];
+      t = norm(t);
+      let u = sub(X, scale(t, dot(X, t)));
+      if (len(u) < 0.2) u = sub([0, 1, 0], scale(t, t[1]));
+      u = norm(u);
+      const v = cross(t, u);
+      const out: number[] = [];
+      let prev = 0;
+      r.forEach((p, k) => {
+        const d = sub(p, cen[i]);
+        let a = Math.atan2(dot(d, v), dot(d, u)) / (2 * Math.PI);
+        if (k > 0) a = prev + (((a - prev + 0.5) % 1) + 1) % 1 - 0.5;
+        out.push((prev = a));
+      });
+      const turn = Math.abs(out[K - 1] - out[0]) > 1e-6 ? Math.sign(out[K - 1] - out[0]) : 1;
+      out.push(out[0] + turn);
+      return out;
+    });
+    return (i, k, fi, fk) => [code + tone(fi, fk), rows[i][k % K][2], part, round[i][Math.min(k, K)]];
+  }
+
   /** A tube along a knife-local polyline (rings perpendicular to the path, closed ends). */
-  tube(path: V3[], radius: number | ((i: number) => number), sides: number, ref: V3, paint: (i: number) => Paint, o: { bone?: string; part?: Part; caps?: boolean } = {}): void {
+  tube(path: V3[], radius: number | ((i: number) => number), sides: number, ref: V3, paint: (i: number) => Paint, o: { bone?: string; part?: Part; caps?: boolean; name?: string } = {}): void {
     const rows = path.map((p, i) => {
       const d = norm(sub(path[Math.min(path.length - 1, i + 1)], path[Math.max(0, i - 1)]));
       let u = sub(ref, scale(d, dot(ref, d)));
@@ -149,14 +229,14 @@ export class KnifeCtx {
       return ring(p, u, v, r, r, sides);
     });
     const caps = o.caps ?? true;
-    this.surface(rows, { paint: (i) => paint(i), bone: o.bone, part: o.part, capStart: caps ? paint(0) : null, capEnd: caps ? paint(path.length - 2) : null });
+    this.surface(rows, { paint: (i) => paint(i), bone: o.bone, part: o.part, capStart: caps ? paint(0) : null, capEnd: caps ? paint(path.length - 2) : null, name: o.name });
   }
 
   /**
    * A flat leaf along a knife-local polyline: lens sections `width(i)` wide (across, ⟂ path and `normal`) and
    * `thick` thick (along `normal`), pointed ends.
    */
-  leaf(path: V3[], width: (i: number) => number, thick: number, normal: V3, paint: (i: number) => Paint, o: { bone?: string; part?: Part; sides?: number } = {}): void {
+  leaf(path: V3[], width: (i: number) => number, thick: number, normal: V3, paint: (i: number) => Paint, o: { bone?: string; part?: Part; sides?: number; name?: string } = {}): void {
     const sides = this.view === "fp" ? (o.sides ?? 8) : 6;
     const rows = path.map((p, i) => {
       const d = norm(sub(path[Math.min(path.length - 1, i + 1)], path[Math.max(0, i - 1)]));
@@ -165,11 +245,11 @@ export class KnifeCtx {
       const w = width(i);
       return ring(p, across, nn, w, Math.min(thick, w * 0.6 + 0.01), sides, 1.6);
     });
-    this.surface(rows, { paint: (i) => paint(i), bone: o.bone, part: o.part ?? PART.grip, capStart: paint(0), capEnd: paint(path.length - 2) });
+    this.surface(rows, { paint: (i) => paint(i), bone: o.bone, part: o.part ?? PART.grip, capStart: paint(0), capEnd: paint(path.length - 2), name: o.name });
   }
 
   /** A closed torus-like loop along a closed knife-local polyline (no caps). */
-  loop(path: V3[], radius: number | ((i: number) => number), sides: number, normal: V3, paint: (i: number) => Paint, o: { bone?: string; part?: Part } = {}): void {
+  loop(path: V3[], radius: number | ((i: number) => number), sides: number, normal: V3, paint: (i: number) => Paint, o: { bone?: string; part?: Part; name?: string } = {}): void {
     const n = path.length;
     const rows = [...path, path[0]].map((p, i) => {
       const d = norm(sub(path[(i + 1) % n], path[(i - 1 + n) % n]));
@@ -178,7 +258,7 @@ export class KnifeCtx {
       const r = typeof radius === "number" ? radius : radius(i % n);
       return ring(p, u, v, r, r, sides);
     });
-    this.surface(rows, { paint: (i) => paint(i % n), bone: o.bone, part: o.part });
+    this.surface(rows, { paint: (i) => paint(i % n), bone: o.bone, part: o.part, name: o.name });
   }
 
   /**
@@ -234,6 +314,28 @@ export class KnifeCtx {
   }
 }
 
+/**
+ * A knife def whose build() tags its hilt parts (def.hilt, types.ts HiltMap) whoever calls it: the viewmodel, the
+ * bunny, the Loadout's showcase and the native exporter all call def.build(ctx) directly.
+ */
+export function withHilt(def: KnifeDef): KnifeDef {
+  const map = def.hilt;
+  if (!map) return def;
+  const build = def.build;
+  return {
+    ...def,
+    build(k: KnifeCtx) {
+      const prev = k.hiltMap;
+      k.hiltMap = map;
+      try {
+        build(k);
+      } finally {
+        k.hiltMap = prev;
+      }
+    },
+  };
+}
+
 /** First person: knife-local = the viewmodel rig's Knife_Handle bind frame; parts weighted to Knife_Handle or an extra bone. */
 export function fpCtx(b: Builder): KnifeCtx {
   const r = vmRig();
@@ -257,10 +359,21 @@ export function tpCtx(b: Builder, tp: TpSpec = TP_CARROT): KnifeCtx {
   const x = cross(y, z);
   const s = tp.s;
   const W: Wt = [[kb >= 0 ? kb : hand, 1]];
+  // Moving parts (a balisong's handles, a spinner) on their third-person bones (bunny/rig.ts KNIFE_PART_BONES).
+  const parts = new Map<string, Wt>();
+  const partW = (bone?: string): Wt => {
+    if (!bone) return W;
+    let w = parts.get(bone);
+    if (!w) {
+      const i = r.index(knifePartBone(bone));
+      parts.set(bone, (w = i >= 0 ? [[i, 1]] : W));
+    }
+    return w;
+  };
   return new KnifeCtx(
     b,
     "tp",
     (p) => xform(H, 0, add(tp.o, add(add(scale(x, p[0] * s), scale(y, p[1] * s)), scale(z, p[2] * s)))),
-    () => W,
+    partW,
   );
 }

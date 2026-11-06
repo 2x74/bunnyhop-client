@@ -14,18 +14,21 @@
 import { fixedModel } from "../player/bunny/look";
 import type { AchievementDef, CosmeticDef, Ring } from "../progression";
 
-export type PreviewKind = "knife" | "glove" | "hat" | "bunny" | "ghost" | "trail" | "plaque" | "medal" | "frame" | "card";
+export type PreviewKind = "knife" | "glove" | "hat" | "bunny" | "ghost" | "trail" | "plaque" | "medal" | "frame" | "card" | "gun";
 
 export interface PreviewSpec {
   kind: PreviewKind;
   /** Same key, same picture: a prepared model is reused for it. */
   key: string;
-  /** knife: knife + finish cosmetic ids. */
+  /** knife: knife + finish cosmetic ids, and a hilt skin (absent = the knife's own hilt). */
   knife?: string;
   finish?: string;
+  hilt?: string;
   /** glove: glove cosmetic id; glove / knife / bunny: the colourway (palette, knit gloves, guards). */
   glove?: string;
   outfit?: string;
+  /** gun: the gun camo's cosmetic id (camo.ts), shown on the Furrow. */
+  camo?: string;
   body?: string;
   hat?: string;
   /** ghost / trail / frame / card / plaque accent. */
@@ -46,6 +49,7 @@ export interface PreviewSpec {
 export interface Equipped {
   knife?: string | null;
   finish?: string | null;
+  hilt?: string | null;
   outfit?: string | null;
   body?: string | null;
 }
@@ -68,15 +72,24 @@ export function previewOf(item: PreviewItem, eq: Equipped = {}): PreviewSpec | n
   const knife = eq.knife || DEFAULT_PREVIEW_KNIFE;
   const finish = eq.finish || DEFAULT_PREVIEW_FINISH;
   const outfit = eq.outfit || DEFAULT_PREVIEW_OUTFIT;
+  // Your hilt skin rides along on knife and finish previews; a new hilt shows on the knife you hold.
+  const hilt = eq.hilt && eq.hilt !== "hilt-original" ? eq.hilt : null;
+  const withHilt = (h: string | null) => (h ? { hilt: h } : {});
   switch (c.slot) {
     case "knife":
-      return { kind: "knife", key: `knife:${c.id}:${finish}:${outfit}`, knife: c.id, finish, outfit };
+      return { kind: "knife", key: `knife:${c.id}:${finish}:${hilt ?? ""}:${outfit}`, knife: c.id, finish, outfit, ...withHilt(hilt) };
     case "finish":
-      return { kind: "knife", key: `knife:${knife}:${c.id}:${outfit}`, knife, finish: c.id, outfit };
+      return { kind: "knife", key: `knife:${knife}:${c.id}:${hilt ?? ""}:${outfit}`, knife, finish: c.id, outfit, ...withHilt(hilt) };
+    case "hilt": {
+      const h = c.id === "hilt-original" ? null : c.id;
+      return { kind: "knife", key: `knife:${knife}:${finish}:${h ?? ""}:${outfit}`, knife, finish, outfit, ...withHilt(h) };
+    }
     case "glove":
       return { kind: "glove", key: `glove:${c.id}:${outfit}`, glove: c.id, outfit };
     case "hat":
       return { kind: "hat", key: `hat:${c.id}`, hat: c.id };
+    case "camo":
+      return { kind: "gun", key: `gun:${c.id}`, camo: c.id };
     case "body":
       return { kind: "bunny", key: `bunny:${outfit}:${c.id}`, outfit, body: c.id };
     case "outfit": {
@@ -118,6 +131,7 @@ export const HERO: Record<PreviewKind, { yaw: number; tilt: number; fill: number
   medal: { yaw: -0.45, tilt: 0.1, fill: 0.68 },
   frame: { yaw: -0.45, tilt: 0.12, fill: 0.74 },
   card: { yaw: -0.45, tilt: 0.12, fill: 0.74 },
+  gun: { yaw: -0.3, tilt: 0.16, fill: 1.05 },
 };
 
 /**

@@ -37,14 +37,43 @@ impl Game {
         false
     }
 
-    /// First physics version of this map's reviewed mechanics: 25 when they come from a v25 build
-    /// (`map_fixes::BUILDS_V25` with its own mechanics), else 19.
+    /// First physics version of this map's reviewed mechanics (exact v26/v25 builds, otherwise v19).
     pub(super) fn mechanics_min_physics(&self) -> u32 {
-        if self.map_build_v25.is_some_and(|b| b.mechanics.is_some()) { PHYSICS_V25 } else { PHYSICS_V19 }
+        if self.map_build_v26.is_some_and(|b| b.mechanics.is_some()) { PHYSICS_V26 } else if self.map_build_v25.is_some_and(|b| b.mechanics.is_some()) { PHYSICS_V25 } else { PHYSICS_V19 }
     }
 
     pub(super) fn mechanics_on(&self) -> bool {
         self.map_mechanics.is_some() && (self.mechanics_min_physics()..=PHYSICS_LATEST).contains(&self.settings.physics_version)
+    }
+
+    pub(super) fn crash_egypt_on(&self) -> bool {
+        self.settings.physics_version >= PHYSICS_V26 && self.map_build_v26.is_some_and(|b| b.map == "bhop_crash_egypt")
+    }
+
+    /// CTimerEntity::ResetTimer samples Lower/UpperRandomBound when UseRandomTime is set.
+    /// The exact Crash build gets deterministic samples, derived from entity and scheduling tick for replayability.
+    pub(super) fn crash_timer_interval(&self, i: usize, fallback: f32) -> f32 {
+        if !self.crash_egypt_on() || self.entities[i].int("UseRandomTime") == 0 { return fallback; }
+        let e = &self.entities[i];
+        let lo = e.float("LowerRandomBound").unwrap_or(0.0);
+        let hi = e.float("UpperRandomBound").unwrap_or(lo).max(lo);
+        let mut h = (i as u32).wrapping_mul(0x9e37_79b9) ^ self.tick.wrapping_mul(0x85eb_ca6b);
+        h ^= h >> 16; h = h.wrapping_mul(0x7feb_352d); h ^= h >> 15;
+        lo + (hi - lo) * (h & 0x00ff_ffff) as f32 / 16777216.0
+    }
+
+    // Preserve the output's caller for ForceSpawnAtEntityOrigin !caller (damage chains originate at the physbox).
+    pub(super) fn crash_maker_caller_input(&mut self, target: Actor, input: &str, param: &str, caller: Actor) -> bool {
+        if !self.crash_egypt_on() || input != "forcespawnatentityorigin" || !param.eq_ignore_ascii_case("!caller") { return false; }
+        let Actor::Entity(i) = target else { return false; };
+        if self.ents[i].removed || self.ents[i].class != "env_entity_maker" { return false; }
+        let pose = match caller {
+            Actor::Entity(j) => self.ents.get(j).map(|e| (e.origin, e.angles)),
+            Actor::Player => Some((self.state.position, [0.0, self.last_angles[1], 0.0])),
+            Actor::None => None,
+        };
+        if let Some((o, a)) = pose { self.maker_spawn(i, o, a); }
+        true
     }
 
     /// Maker inputs run: a reviewed maker build (`MECHANICS_V19`), or a v25 build from v25 on.
@@ -78,6 +107,15 @@ impl Game {
             return false;
         }
         let m = self.map_mechanics.unwrap();
+        // The map requests an ordinary held jump, not a velocity boost. Never run arbitrary commands.
+        if self.crash_egypt_on() && self.ents[i].class == "point_clientcommand" && input == "command" && activator == Actor::Player {
+            match param.trim() {
+                "+jump" => self.extra.map_jump = true,
+                "-jump" => self.extra.map_jump = false,
+                _ => {}
+            }
+            return true;
+        }
         // No script file exists in either original BSP or stock CS:S for these references.
         // Match only the reviewed undefined call; never infer what a missing script might have done.
         if input == "runscriptcode" && param.trim() == "MessageStart()"
@@ -257,6 +295,7 @@ impl Game {
                 self.extra.instance_sources.push(source);
                 j
             };
+            self.map_sound_spawn(i);
             members.push(i);
         }
         for &i in &members {

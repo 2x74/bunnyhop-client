@@ -421,7 +421,7 @@ export function liveEmblem(item: PreviewItem, runGoing = false): LiveEmblem | nu
   const r = sharedRenderer();
   if (!r) return null;
   const l = getLoadout();
-  const spec = previewOf(item, { knife: l.knife, finish: l.finish, outfit: getOutfit() });
+  const spec = previewOf(item, { knife: l.knife, finish: l.finish, hilt: l.hilt, outfit: getOutfit() });
   if (!spec) return null;
   const p = new Preview(spec, r);
   if (!runGoing) p.prep();

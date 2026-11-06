@@ -14,6 +14,9 @@
 //                    knuckle crease (gloves/glsl.ts); w edge / tip weight 0..1 (wear mask). (0, 0, 0, 0) elsewhere.
 //                    Garments (player/fabric.ts: hoodie, sleeves, joggers, shoes, visor, face) write z >= 8 per grid
 //                    point through surface()'s `fin` option instead.
+//   gunCamo   vec3   only on geometry with gun paints tagged for camo (viewmodel/guns/camo-zones.ts GunPaint.camo):
+//                    x zone (1 upper, 2 lower, 3 magazine) plus the bright chamfer's strength (< 0.5), y the paint's
+//                    shade of the camo, z the baked AO multiplier (guns/ao.ts). (0, 1, 1) on every other vertex.
 
 import * as THREE from "three";
 import type { V3 } from "./rig";
@@ -25,7 +28,9 @@ export type Wt = [number, number][];
  * Paint: accent code (see header) and a fixed colour for code 0. `mat`: a knife hardware material
  * (viewmodel/finishes/detail.ts KMAT, 1..6), added to finishUV.z as mat / 16 on sections that write finishUV.
  */
-export type Paint = { code: number; color?: number; mat?: number };
+export type Paint = { code: number; color?: number; mat?: number; camo?: CamoTag };
+/** A gun paint's camo tag (viewmodel/guns/camo-zones.ts): its zone, the shade of the camo it takes, its chamfer. */
+export type CamoTag = { zone: 1 | 2 | 3; shade: number; edge: number };
 /** A finishUV value (see header). */
 export type Fin = readonly [number, number, number, number];
 
@@ -106,6 +111,8 @@ export class Builder {
   private SW: number[] = [];
   private F: number[] = [];
   private hasF = false;
+  /** gunCamo (see the header), created at the first camo-tagged vertex and backfilled. */
+  private Z: number[] | null = null;
   private col = new THREE.Color();
   /** finishUV for the vertices emitted while set (from the bind-pose position; see the header). null = zeros. */
   finish: ((p: V3) => readonly [number, number, number, number]) | null = null;
@@ -122,6 +129,15 @@ export class Builder {
     const t = this.tint ? this.tint(p) : 1;
     this.C.push(this.col.r * t, this.col.g * t, this.col.b * t);
     this.A.push(paint.code);
+    if (paint.camo || this.Z) {
+      if (!this.Z) {
+        this.Z = [];
+        for (let i = 0; i < this.A.length - 1; i++) this.Z.push(0, 1, 1);
+      }
+      const t = paint.camo;
+      if (t) this.Z.push(t.zone + Math.min(0.45, t.edge), t.shade, 1);
+      else this.Z.push(0, 1, 1);
+    }
     if (fe || this.finish) {
       const f = fe ?? this.finish!(p);
       this.F.push(f[0], f[1], f[2] + (paint.mat ? paint.mat / 16 : 0), f[3]);
@@ -278,6 +294,7 @@ export class Builder {
     g.setAttribute("skinIndex", new THREE.Uint16BufferAttribute(this.SI, 4));
     g.setAttribute("skinWeight", new THREE.Float32BufferAttribute(this.SW, 4));
     if (this.hasF) g.setAttribute("finishUV", new THREE.Float32BufferAttribute(this.F, 4));
+    if (this.Z) g.setAttribute("gunCamo", new THREE.Float32BufferAttribute(this.Z, 3));
     g.computeBoundingBox();
     g.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 38), 56);
     return g;

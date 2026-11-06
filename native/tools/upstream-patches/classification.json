@@ -2,7 +2,7 @@
   {
     "path": "apps/web/src/api.ts",
     "classification": "native patch",
-    "baseline": "d526eec0e87684103e99e4fbf447b391101be098"
+    "baseline": "6d3b5fa7d9bfd51fbbac0596e36a7bff68b01295"
   },
   {
     "path": "apps/web/src/assets/audio/manifest.json",
@@ -17,12 +17,12 @@
   {
     "path": "apps/web/src/core.ts",
     "classification": "native patch",
-    "baseline": "1a6341d9b002ea1dc579703a29057b328c97c7b2"
+    "baseline": "3b9fb870bf27edd73fcf451001cc92c2d4e3e88e"
   },
   {
     "path": "apps/web/src/feedback/modal.ts",
     "classification": "native patch",
-    "baseline": "adeb3ac31128dc5e09464ff9590a51b2f11a8f31"
+    "baseline": "a6a39872ee94abeba66da3ec768385b2e96948e6"
   },
   {
     "path": "apps/web/src/feedback/state.ts",
@@ -77,7 +77,7 @@
   {
     "path": "apps/web/src/ui/card-editor.ts",
     "classification": "native patch",
-    "baseline": "a591c2b7952054b14628771b2aeb160f013779ff"
+    "baseline": "3e5b0953652515eb8405b42f148203c39ba06765"
   },
   {
     "path": "apps/web/src/ui/country-picker.ts",
@@ -92,12 +92,12 @@
   {
     "path": "apps/web/src/ui/loadout-ui.ts",
     "classification": "native patch",
-    "baseline": "2224a5dfa0d9f35a3445f5615dec091b94cd610d"
+    "baseline": "338a6e9b7b561eebca51f71adf7504bd009d80be"
   },
   {
     "path": "apps/web/src/ui/player-glow-controls.ts",
     "classification": "native patch",
-    "baseline": "5367589462da3bd605456e48263427085fba0f2c"
+    "baseline": "d7b3460f10cc4076b8b8573846720188667cbc6b"
   },
   {
     "path": "apps/web/src/ui/profile-social.ts",
@@ -122,12 +122,12 @@
   {
     "path": "apps/web/src/ui/support.ts",
     "classification": "native patch",
-    "baseline": "2cd323d89b122ddfb9afa5c9bfa8da82fe833ade"
+    "baseline": "b36abacad0affaae182f65cfcecd68b661c286a2"
   },
   {
     "path": "apps/web/src/viewmodel/inspects/third.ts",
     "classification": "native patch",
-    "baseline": "bab207fc7841609f8f470e29c01dc81c5347f930"
+    "baseline": "7e5b205d8d88e048ce4c480d0ae7d4bf49fa1ad0"
   },
   {
     "path": "apps/web/src/wasm/.gitignore",
@@ -142,7 +142,7 @@
   {
     "path": "crates/core/src/game.rs",
     "classification": "native patch",
-    "baseline": "5a55d9ba3943ee01c6bb6af0ae0df558b022ea42"
+    "baseline": "e46cbe67fdf957d4296184eb2fe1283ee68fef89"
   },
   {
     "path": "crates/core/src/game/flight.rs",
@@ -202,7 +202,7 @@
   {
     "path": "crates/core/src/wasm.rs",
     "classification": "native patch",
-    "baseline": "c57a96a7892a2a54fa61d1cdd5f0e903325df754"
+    "baseline": "c6221ec7c42ee6cdaa20f432bc1556eeeab3d247"
   },
   {
     "path": "crates/core/src/wasm_content.rs",

@@ -13,10 +13,11 @@ import { PART } from "../../knives/types";
 import type { KnifeCtx } from "../../knives/ctx";
 import { ball, box, groove, guard, lathe, pins, rod, slab, trigger, type P2 } from "../shapes";
 import { gunPaint as fixed } from "../material";
+import { coat } from "../camo-zones";
 import type { GunDef } from "../types";
 
-const RECV = fixed(0x3a3e45, "dark"), RECV_DARK = fixed(0x26292e, "dark"), PEA = fixed(0x6f9150), PEA_DARK = fixed(0x55733d), STEEL = fixed(0x3a3f47, "dark"), STEEL_LIGHT = fixed(0x7a818c, "metal");
-const BORE = fixed(0x101114), LENS = fixed(0x2f6f73, "glass"), ORANGE = fixed(0xff7a1a), GRIP = fixed(0x55733d, "grip"), PAD = fixed(0x26292e, "grip");
+const RECV = coat(fixed(0x3a3e45, "dark"), "upper"), RECV_DARK = fixed(0x26292e, "dark"), PEA = coat(fixed(0x6f9150), "lower"), PEA_DARK = coat(fixed(0x55733d), "lower", 0.82), STEEL = fixed(0x3a3f47, "dark"), STEEL_LIGHT = fixed(0x7a818c, "metal");
+const BORE = fixed(0x101114), LENS = fixed(0x2f6f73, "glass"), ORANGE = fixed(0xff7a1a), GRIP = coat(fixed(0x55733d, "grip"), "lower", 0.85), PAD = fixed(0x26292e, "grip");
 const LINE = fixed(0x17191c), LIP = fixed(0x626a76, "metal");
 /** The trigger's pivot (top of its blade, gun-local). */
 /**

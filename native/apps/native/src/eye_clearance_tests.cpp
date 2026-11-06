@@ -41,7 +41,7 @@ void under_a_ceiling() {
     constexpr float top = 100 + native::standing_hull_top_units, eye = 100 + standing_eye_units;
     assert(close_to(clear(172, top, eye), 160));          // CS:S standing in a 72-unit corridor sees from 60.
     assert(close_to(clear(162.03f, top, eye), 150.03f));  // Hull against the ceiling: the eye would be through it.
-    assert(clear(176.5f, top, eye) == eye);           // Out of reach.
+    assert(clear(176.5f, top, eye) == eye);               // Out of reach.
     assert(close_to(clear(176, top, eye), eye));          // Right at reach: no step as a ceiling comes into range.
 }
 

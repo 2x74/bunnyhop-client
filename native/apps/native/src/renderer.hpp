@@ -1570,6 +1570,7 @@ class Renderer {
 
     void draw_ghost_trail(const native_render::Actor &actor, const float eye[3]) {
         if (actor.ghost_slot < 0 || actor.ghost_slot >= int(ghostPaths.size())) return;
+        if (ghostOptions.route_only && actor.ghost_slot == selected_route_slot()) return;
         const auto &path = ghostPaths[size_t(actor.ghost_slot)];
         if (!path.enabled || !ghostOptions.visible(path.source)) return;
         const auto points = ghostTrails.recorded(path, actor.frame.tick);
@@ -1586,8 +1587,8 @@ class Renderer {
         }
     }
 
-    void draw_ghost_route(const native::Matrix &projection) {
-        if (!ghostOptions.route || !ghostRoutes) return;
+    int selected_route_slot() const {
+        if (!ghostOptions.route || !ghostRoutes) return -1;
         int selected = -1;
         for (size_t slot = 0; slot < ghostPaths.size(); ++slot) {
             const auto &path = ghostPaths[slot];
@@ -1601,6 +1602,11 @@ class Renderer {
                            < native_render::route_priority(ghostPaths[size_t(selected)].source))
                 selected = int(slot);
         }
+        return selected;
+    }
+
+    void draw_ghost_route(const native::Matrix &projection) {
+        const int selected = selected_route_slot();
         if (selected < 0) return;
         const auto &path = ghostPaths[size_t(selected)];
         const auto color = path.source == native_render::GhostSource::pb
@@ -1789,6 +1795,10 @@ public:
     bool ghost_visible(unsigned slot) const {
         return slot < ghostPaths.size() && ghostPaths[slot].enabled && ghostOptions.visible(ghostPaths[slot].source);
     }
+
+    int route_slot() const { return selected_route_slot(); }
+
+    const native_render::GhostOptions &ghost_options() const { return ghostOptions; }
 
     const std::string &ghost_name(unsigned slot) const { return ghostPaths.at(slot).name; }
 

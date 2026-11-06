@@ -88,7 +88,7 @@ fn output_kind(e: &RtEnt, classes: &dyn Fn(&str) -> bool) -> Option<u32> {
 
 impl Game {
     /// The overlay kind of trigger entity `i`, or None if it never affects the player.
-    fn trigger_overlay_kind(&self, i: usize) -> Option<u32> {
+    pub(super) fn trigger_overlay_kind(&self, i: usize) -> Option<u32> {
         let e = &self.ents[i];
         let Data::Trigger(t) = &e.data else { return None };
         // CTriggerGravity touches any player; every other trigger needs a client spawnflag (`trigger_passes`).

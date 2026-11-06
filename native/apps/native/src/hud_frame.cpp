@@ -89,7 +89,10 @@ void HudFrame::draw_status(const BhCmd &shown, const BhWeaponReport &weapon) con
             gauntlet_line,
             gauntlet_delta,
             gauntlet_good,
-            leave_hold.progress(epoch_ms())
+            leave_hold.progress(epoch_ms()),
+            prefs.show_pos,
+            view_pitch,
+            view_yaw
     );
 }
 

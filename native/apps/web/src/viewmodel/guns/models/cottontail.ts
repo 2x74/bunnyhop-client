@@ -14,11 +14,12 @@ import { PART } from "../../knives/types";
 import type { KnifeCtx } from "../../knives/ctx";
 import { ball, box, dome, groove, guard, lathe, pins, plate, slab, trigger, type P2 } from "../shapes";
 import { gunPaint as fixed } from "../material";
+import { coat } from "../camo-zones";
 import type { GunDef, SilencerSpec } from "../types";
 
-const SLIDE = fixed(0xd8d0bf), SLIDE_DARK = fixed(0xa79f8d), FRAME = fixed(0x343c50), FRAME_DARK = fixed(0x262c3c);
+const SLIDE = coat(fixed(0xd8d0bf), "upper"), SLIDE_DARK = fixed(0xa79f8d), FRAME = coat(fixed(0x343c50), "lower"), FRAME_DARK = fixed(0x262c3c);
 const TAIL = fixed(0xf6f3ec), TAIL_SHADE = fixed(0xe2ddd2), BORE = fixed(0x14161a), DOT = fixed(0xffffff), ORANGE = fixed(0xff7a1a), STEEL = fixed(0x8b9099, "metal");
-const RIB = fixed(0x262c3c, "grip"), LEVER = fixed(0x22262f, "dark"), MAG = fixed(0x2e3440, "dark"), LINE = fixed(0x1c212d), LIP = fixed(0x5a6680);
+const RIB = coat(fixed(0x262c3c, "grip"), "lower", 0.8), LEVER = fixed(0x22262f, "dark"), MAG = coat(fixed(0x2e3440, "dark"), "mag"), LINE = coat(fixed(0x1c212d), "lower", 0.65), LIP = coat(fixed(0x5a6680), "lower", 1.15);
 /** The trigger's pivot (top of its blade, gun-local). */
 const TRIGGER: [number, number, number] = [2.4, 0, -0.48];
 

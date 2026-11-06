@@ -26,15 +26,18 @@ import { hasRawUpdate, Input, isTextField, type UserCmd } from "./input";
 import { ExperimentWeapons, LiveInputCapture, InputExperimentCapture, experimentRejection, localInputExperimentAllowed, pumpInputExperiment } from "./input-experiment";
 import type { SampledInput, SamplerSource } from "./input-sampler";
 import { InputDebug, summary as inputSummary } from "./input-debug";
-import { initPlayLock, resumePlay, setPlayAttempt, showStartPrompt } from "./play-lock";
+import { allowLeave, initPlayLock, resumePlay, setPlayAttempt, showStartPrompt } from "./play-lock";
+import { initConsole, runBoundCommand, setConsoleHooks } from "./console/view";
+import { jumpHoldRefusal } from "./jump-toggle";
+import { ShowPos, type ShowPosState } from "./hud/showpos";
 import { buildWorld, type WorldView } from "./render";
 import { setMapVolumes, volumesOf } from "./player/map-volumes";
 import { debugHookOptIn, RunSession } from "./session";
-import { fetchMapIndex, goToMainMenu, initMenu, revealGame, showError, showHome, showLoading, showReady } from "./menu";
+import { fetchMapIndex, goToMainMenu, initMenu, openMap, revealGame, showError, showHome, showLoading, showReady } from "./menu";
 import { gameView, keyLabel, prefs, verticalFov } from "./ui/settings";
 import { applyPalette } from "./palette";
 import { setUiHidden, uiHidden } from "./ui/hide-ui";
-import { isStyleId, styleSettings, type StyleId } from "./styles";
+import { isStyleId, styleLabel, styleSettings, type StyleId } from "./styles";
 import { turnBindsAllowed } from "./turn-binds";
 import { nullBindsAllowed } from "./null-binds";
 import { wReleaseAllowed, type WReleaseContext } from "./w-release";
@@ -101,6 +104,7 @@ import { CanvasVideoGrade } from "./video-grade";
 import { mapLook, setLookMapNow } from "./map-look";
 import { initLookMenu, registerLookCommands } from "./look-menu";
 import { initTriggerOverlay, triggerOverlayFrame } from "./triggers";
+import { hideLanding, initLanding, landingFrame } from "./landing";
 import { FrameLoop, GpuFence } from "./frame-loop";
 import { autoTuneGraphics } from "./gfx-auto";
 import { toast, whisper } from "./notify";
@@ -214,14 +218,15 @@ prefs.watch((p) => {
   input.settings.sensitivity = p.sensitivity;
   input.settings.verticalSensitivityEnabled = p.verticalSensitivityEnabled;
   input.settings.verticalSensitivity = p.verticalSensitivity;
-  input.settings.m_pitch = p.invertY ? -0.022 : 0.022;
+  input.settings.m_yaw = p.mYaw;
+  input.settings.m_pitch = p.invertY ? -p.mPitch : p.mPitch; // (a negative m_pitch inverts, as in CS:S)
   input.rawInput = p.rawInput;
   input.rawUpdates = p.graphics.uncapped; // from the next lock (frame-loop.ts)
   input.filter.enabled = p.spikeFilter;
   input.timed = p.timedInput;
   run?.turnSpeedChanged(); // turn binds: now when never submitted, else from the next restart (session.ts)
   inputDebug.setEnabled(p.inputStats || inputDebugParam);
-  input.setBinds(p.binds);
+  input.setBinds(p.binds, { binds: p.cmdBinds, aliases: p.aliases });
   graphicsPipeline.setOptions(p.graphics);
   resize();
   if (applyPalette(p.colorBlind)) run?.view.recolor(); // colour-blind palette (palette.ts): CSS variables, then the zones
@@ -240,6 +245,13 @@ prefs.watch((p) => {
 let viewer: ReplayViewer | null = null;
 // Pointer lock + fullscreen / keyboard lock + Esc pause / resume + the Ctrl+W leave guard (play-lock.ts).
 initPlayLock(input);
+// The console (console/): ` anywhere on the page; the game hooks come once a map runs (setConsoleHooks below).
+initConsole();
+setConsoleHooks({
+  openMap: (name) => openMap(name),
+  menu: () => (run ? (goToMainMenu(), true) : false),
+  maps: () => fetchMapIndex().then((m) => m.map((x) => x.name)),
+});
 initMenu({
   resume: () => void resumePlay(),
   restart: () => run && !viewer?.active && restart(),
@@ -528,6 +540,7 @@ if (import.meta.env.DEV) Object.assign(window, { bunnyhop: { input, core, camera
 /** R / B / M / style switches: reset onto `track` (default: current) at its start-zone restart point. */
 function restart(track?: number, at?: RestartPoint | null) {
   setFreecam(false); // R / B / M, a style switch, spectating: back in your eyes, keys released
+  input.setJumpToggle(false); // Hold jump (toggle) ends with the attempt (style and map changes restart too)
   liveCapture.stop(); // a core/world reset ends this independently reproducible segment
   if (liveCapture.status.stopping) liveCapture.fail("Restart during command application requires a new capture");
   const view = run!.resetCore(track, at ?? null);
@@ -661,6 +674,10 @@ restart(0);
 // !showtriggers / !showclips (triggers/): drawn from the core's own trigger and clip data, after the session has set the
 // map's physics version (which brushes block depends on it).
 initTriggerOverlay(core, w.root);
+// Landing spot (landing/): a read-only core query from the interpolated state below; never steps the core.
+initLanding(w.root);
+const landingPosition = [0, 0, 0];
+const landingVelocity = [0, 0, 0];
 practice = new Practice({
   map: mapName, core, session, input,
   inRoom: !!params.get("server"),
@@ -736,8 +753,11 @@ viewer = new ReplayViewer({
   resize,
   practiceFrom: (replay, tick) => practice?.fromReplay(replay, tick) ?? "Practice isn't available here.",
   onWorldUpdate: (sim, origins) => triggerOverlayFrame(origins, sim, uiHidden()),
+  onPlayerFrame: (sim, s) =>
+    landingFrame({ core: sim, position: s.pos, velocity: s.vel, crouched: s.crouched, grounded: s.grounded, suppressed: uiHidden(), practicing: false, replay: true, camera, viewHeight: canvas.clientHeight, now: performance.now() }),
   onOpen: () => {
     setFreecam(false);
+    hideLanding();
     stopMenuWork();
     paintVisible(false);
     measureVisible(false);
@@ -751,6 +771,7 @@ viewer = new ReplayViewer({
     thirdPerson.setHidden(true);
   },
   onClose: () => {
+    hideLanding();
     paintVisible(true);
     setSocialWatching(false);
     input.resetSampler(performance.now(), "viewer-close");
@@ -787,6 +808,25 @@ const mp = serverId ? (await import("./net/mp")).startMultiplayer({ serverId, ma
 // Not on the tutorial map, whose lessons own the restart keys.
 const soloChat = mp || tutorial ? null : new SoloChat({ input, session, restart: (t) => restart(t), enabled: () => !replayViewer.active, game });
 session.multiplayer = mp !== null;
+// The console in this map: it pauses like a menu and goes back in when closed; chat commands and bound actions run
+// here (console/view.ts). Settings it changes go through prefs like the Settings page.
+setConsoleHooks({
+  // `retry`: the page again (a room's URL rejoins it). Deliberate: no "Leave site?" prompt.
+  retry: () => (allowLeave(), location.reload(), true),
+  playing: () => input.locked && !replayViewer.active,
+  pause: () => void (input.pointerLocked && document.exitPointerLock()),
+  resume: () => void (!replayViewer.active && resumePlay()),
+  chat: (line, reply) => {
+    if (mp) mp.consoleLine(line, reply);
+    else if (soloChat) soloChat.consoleLine(line, reply);
+    else reply("No chat commands on this map.");
+    return true;
+  },
+  action: (a) => (input.onAction?.(a, "console"), true),
+  notice: (t) => whisper(t),
+});
+// A command bind's once-commands (`say gg`, `slot1`, `toggle cl_showpos 0 1`; console/bind-run.ts) run in the console.
+input.onCommand = (c) => runBoundCommand(c);
 const desktopClient = nativeClient();
 // Desktop client (client-bridge.ts). With its "Uncap the whole browser" on, rAF is unthrottled, so it waits on the GPU
 // like the uncapped loop (frame-loop.ts gateRaf).
@@ -930,6 +970,17 @@ setGameInfo(() => {
   };
 });
 
+/**
+ * Hold jump (toggle): on, every command holds jump until it's pressed again (input.ts setJumpToggle). Not in freecam
+ * (the body gets no input), and not where holding jump does nothing: styles without autohop jump once per press.
+ */
+function toggleJumpHold(): void {
+  if (input.jumpToggled) return input.setJumpToggle(false);
+  const why = jumpHoldRefusal({ freecam: freecam.active, autohop: session.settings.autohop, styleName: styleLabel(session.runStyle) });
+  if (why) return session.hud.toast(why, 3000);
+  input.setJumpToggle(true);
+}
+input.onJumpToggle = (on) => session.hud.setJumpHeld(on);
 /** Bound actions that do nothing while freecam is on (main.ts onAction). */
 const FREECAM_BLOCKED = new Set<string>(["attack", "attack2", "inspect", "setStart", "clearStart", "thirdPerson", "practice", "noclip", "cpSave", "cpTeleport", "cpPrev", "cpNext", "giveUsp", "giveGlock", "gunMenu", "turnLeft", "turnRight", "turnFast"]);
 /** R / M / B. With Settings → Keys → Hold to restart on, they fire after a short hold (restart-guard.ts). */
@@ -966,6 +1017,8 @@ input.onAction = (a, code) => {
   if (a === "clearMeasure") return clearMeasure();
   if (a === "mainMenu") return leaveHold.press(performance.now(), session.timer.started);
   if (a === "freecam") return toggleFreecam();
+  if (a === "jumpToggle") return toggleJumpHold();
+  if (a === "console") return; // (console/view.ts takes its key before the game sees it)
   // Freecam: the body takes no input, so nothing that would act through it (weapons, the carrot, practice tools, start
   // points, third person). Restarts and style switches still work and end it.
   if (freecam.active && (isWeaponAction(a) || FREECAM_BLOCKED.has(a))) return;
@@ -1079,6 +1132,11 @@ let accumulator = 0;
 let last = performance.now();
 
 let lastCmd = { forward: 0, side: 0 };
+/** cl_showpos in game (the replay viewer has its own): one state object reused every frame. */
+const showPos = new ShowPos();
+document.body.append(showPos.el);
+const showPosAt: [number, number, number] = [0, 0, 0];
+const showPosState: ShowPosState = { pos: showPosAt, viewZ: 0, vel: [0, 0, 0], pitch: 0, yaw: 0 };
 /** Hide UI in game is in effect (prefs.hud.hidden while the game has the mouse). */
 let gameHidden = false;
 /** Say how to get the UI back the next time it hides: the first time on this page, and after the key turns it on. */
@@ -1210,6 +1268,7 @@ function frame(now: number) {
     // The viewer renders with its own sim; the live run stays paused underneath (and its heartbeats say so).
     session.frameHeld();
     playerAudio.frame(0, true, false);
+    showPos.update(0, null); // (the viewer shows the replay's own cl_showpos)
     replayViewer.frame(now);
     // The whole-browser uncap gates rAF on the GPU fence (frame-loop.ts gateRaf): without a mark the GPU queue fills.
     if (browserUncapped) gpuFence.mark();
@@ -1275,6 +1334,18 @@ function frame(now: number) {
   const x = lerp(prev.position[0], curr.position[0]);
   const y = lerp(prev.position[1], curr.position[1]);
   const z = lerp(prev.position[2] + prev.viewOffsetZ, curr.position[2] + curr.viewOffsetZ);
+  // cl_showpos (hud/showpos.ts): the interpolated feet and eye as drawn, the view angles, the tick's velocity.
+  const showPosMode = prefs.get().hud.showPos;
+  if (showPosMode) {
+    showPosAt[0] = x;
+    showPosAt[1] = y;
+    showPosAt[2] = lerp(prev.position[2], curr.position[2]);
+    showPosState.viewZ = lerp(prev.viewOffsetZ, curr.viewOffsetZ);
+    showPosState.vel = curr.velocity;
+    showPosState.pitch = input.pitch;
+    showPosState.yaw = viewYaw;
+  }
+  showPos.update(showPosMode, showPosState);
   session.camera(camera);
   if (!thirdPerson.frame(camera, prev, curr, alpha, viewYaw, input.pitch, lastCmd, frameDt, (curr.tick + alpha) * session.settings.tickInterval, graphicsPipeline.drawsShadowProxies())) {
     // Source (x, y, z) -> three (x, z, -y). Under a ceiling the eye stays below it, as in CS:S (clearEyeZ); flying in
@@ -1309,6 +1380,22 @@ function frame(now: number) {
   paintFrame(now, input.pointerLocked && !isTextField(document.activeElement) && input.actionHeld("paint"));
   measureFrame(now, !(mp?.isSpectating ?? false) && !uiHidden());
   triggerOverlayFrame(origins, core, uiHidden());
+  for (let k = 0; k < 3; k++) {
+    landingPosition[k] = lerp(prev.position[k], curr.position[k]);
+    landingVelocity[k] = lerp(prev.velocity[k], curr.velocity[k]);
+  }
+  landingFrame({
+    core,
+    position: landingPosition,
+    velocity: landingVelocity,
+    crouched: curr.crouched,
+    grounded: curr.grounded,
+    suppressed: uiHidden() || practiceMode.noclipping || session.flying || curr.onLadder || !!mp?.isSpectating,
+    practicing: session.practicing,
+    camera,
+    viewHeight: canvas.clientHeight,
+    now,
+  });
   arms.frame(frameDt, origins);
   // Sniper zoom (client FOV only), first person only.
   const fov = verticalFov(thirdPerson.active || freecam.active ? p.fov : arms.fov(p.fov + eyeFeel.fov));

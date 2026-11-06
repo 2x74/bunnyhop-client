@@ -2,6 +2,8 @@
 // no production maps, replays, content cache, credentials or private code at runtime.
 import { writeBsp, SURF_NOLIGHT, type Box, type MapSource, type Vec3 } from "../../../tools/tutorial/bsp";
 export const FIXTURE_SUITE = "material-ladder-release-v8";
+const PHYSICS_VERSIONS = [16, 17, 23, 24, 25, 26];
+const LADDER_VERSIONS = [17, 18, 24, 25, 26];
 export const box = (min: Vec3, max: Vec3): Box => ({ min, max, tex: "tools/toolsnodraw" });
 function room(): MapSource {
   return {
@@ -90,7 +92,7 @@ export function createFixtures(): Fixture[] {
   return [
     {
       name: "incline",
-      versions: [16, 17, 23, 24, 25],
+      versions: PHYSICS_VERSIONS,
       bsp: writeBsp(incline).bsp,
       trials: Array.from({ length: 60 }, (_, i) => ({
         position: [400, 0, 400 * (1 / Math.sqrt(3)) + 300 + i * 0.137],
@@ -101,7 +103,7 @@ export function createFixtures(): Fixture[] {
     },
     {
       name: "edge",
-      versions: [16, 17, 23, 24, 25],
+      versions: PHYSICS_VERSIONS,
       bsp: writeBsp(edge).bsp,
       trials: Array.from({ length: 80 }, (_, i) => ({
         // The 3-unit offset makes contact partway through a tick, spanning the edge.
@@ -111,11 +113,11 @@ export function createFixtures(): Fixture[] {
         buttons: 2,
       })),
     },
-    { name: "thin-trigger", versions: [16, 17, 23, 24, 25], bsp: writeBsp(pad).bsp, trials: fall(2) },
-    { name: "telehop", versions: [16, 17, 23, 24, 25], bsp: writeBsp(pad).bsp, trials: fall(0) },
+    { name: "thin-trigger", versions: PHYSICS_VERSIONS, bsp: writeBsp(pad).bsp, trials: fall(2) },
+    { name: "telehop", versions: PHYSICS_VERSIONS, bsp: writeBsp(pad).bsp, trials: fall(0) },
     {
       name: "material-ladder",
-      versions: [17, 18, 24, 25],
+      versions: LADDER_VERSIONS,
       bsp: writeBsp(ladder).bsp,
       trials: Array.from({ length: 16 }, (_, i) => ({
         position: [-16.03125, -60 + i * 8, 64 + i * 0.25],

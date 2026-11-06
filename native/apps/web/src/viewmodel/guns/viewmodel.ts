@@ -20,6 +20,7 @@ import { clampFeel, GunPoser } from "./pose";
 import { gunGeometry, gunRig } from "./rig";
 import { GunFx } from "./fx";
 import { gunMaterial } from "./material";
+import { camoStyle } from "../../camo";
 import { GunMotion, type GunMotionInput } from "./motion";
 import type { GunDef, GunPart } from "./types";
 
@@ -61,6 +62,8 @@ export class GunViewmodel {
   private loadout: CosmeticLoadout;
   private glove: GloveStyleId = "knit";
   private look: MaterialLook = NO_LOOK;
+  /** The gun camo in the material (camo.ts id; null = none). */
+  private camo: string | null = null;
   /** Potato graphics: the gun material without its shading (guns/material.ts GUN_CHEAP). */
   private cheap = false;
   private visible = true;
@@ -98,6 +101,7 @@ export class GunViewmodel {
     this.glove = gloveStyle(this.loadout.glove).style;
     this.cheap = prefs.get().graphics.potato;
     this.mesh = new THREE.SkinnedMesh(new THREE.BufferGeometry(), gunMaterial(this.uniforms, NO_LOOK, { cheap: this.cheap, flash: true }));
+    this.camo = null;
     this.mesh.bindMode = THREE.DetachedBindMode;
     this.mesh.bind(this.skeleton, new THREE.Matrix4());
     this.mesh.frustumCulled = false;
@@ -137,7 +141,10 @@ export class GunViewmodel {
     this.uniforms.uAccent.value.set(c.accent);
   }
 
-  /** Gloves (and colourway accents) of a loadout; guns take no finish yet (the knife's finish stays on the knife). */
+  /**
+   * Gloves (and colourway accents) and the gun camo of a loadout; guns take no knife finish (the knife's finish stays on
+   * the knife).
+   */
   setLoadout(l: CosmeticLoadout): void {
     this.loadout = l;
     const g = gloveStyle(l.glove).style;
@@ -150,11 +157,13 @@ export class GunViewmodel {
 
   private refreshLook(force = false): void {
     // The first-person detail shading (finishes/detail.ts) on the gloves, as on the knife viewmodel.
-    const look = applyLoadoutUniforms(this.uniforms, { ...this.loadout, finish: "fin-garden" }, undefined, true);
-    if (sameLook(look, this.look) && !force) return;
+    const look = applyLoadoutUniforms(this.uniforms, { ...this.loadout, finish: "fin-garden", hilt: undefined }, undefined, true);
+    const camo = camoStyle(this.loadout.camo) ? this.loadout.camo! : null;
+    if (sameLook(look, this.look) && camo === this.camo && !force) return;
     this.look = look;
+    this.camo = camo;
     (this.mesh.material as THREE.Material).dispose();
-    this.mesh.material = gunMaterial(this.uniforms, look, { cheap: this.cheap, flash: true });
+    this.mesh.material = gunMaterial(this.uniforms, look, { cheap: this.cheap, flash: true, camo: camoStyle(camo) });
   }
 
   /** The gun in hand (null hides the viewmodel). Builds / solves on first use per gun + glove (cached). */

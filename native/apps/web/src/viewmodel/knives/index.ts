@@ -10,16 +10,22 @@
 import { bunnyfly } from "./bunnyfly";
 import { candycane } from "./candycane";
 import { carrot } from "./carrot";
+import { carrotBayonet } from "./carrotbayonet";
 import { cleaver } from "./cleaver";
 import { daikon } from "./daikon";
 import { golden } from "./golden";
 import { karrotbit } from "./karrotbit";
+import { leek } from "./leek";
+import { parsnip } from "./parsnip";
+import { radish } from "./radish";
+import { sprouts } from "./sprouts";
 import { thistle } from "./thistle";
 import { thornback } from "./thornback";
 import { whirligig } from "./whirligig";
 import type { KnifeDef } from "./types";
 
-export const KNIVES: readonly KnifeDef[] = [carrot, karrotbit, bunnyfly, daikon, cleaver, candycane, golden, thornback, thistle, whirligig];
+// Catalogue order (progression.ts), the Supporter knives last.
+export const KNIVES: readonly KnifeDef[] = [carrot, carrotBayonet, parsnip, karrotbit, radish, cleaver, bunnyfly, daikon, candycane, golden, whirligig, thornback, thistle, leek, sprouts];
 
 const byId = new Map(KNIVES.flatMap((k) => [[k.id, k] as const, [k.cosmeticId, k] as const]));
 

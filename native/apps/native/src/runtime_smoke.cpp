@@ -129,8 +129,7 @@ void RuntimeSmoke::check_practice() {
     practice_action("noclip");
     check(practice.noclip && practice.active, "noclip entry");
     command.forward = noclip_forward_units_per_second;
-    require(bh_noclip_move(&practice.flight, &command, tick_interval_seconds, "autohop"), core.get(),
-            "Smoke flight");
+    require(bh_noclip_move(&practice.flight, &command, tick_interval_seconds, "autohop"), core.get(), "Smoke flight");
     require(bh_practice_noclip_tick(core.get(), &practice.flight, &snapshot), core.get(), "Smoke noclip tick");
     curr = prev = snapshot.player;
     practice_action("noclip");

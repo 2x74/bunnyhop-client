@@ -96,7 +96,7 @@ test("support/account reuse web flows with explicit checkout and server-reviewed
     await page.evaluate(() => window.bunnyhopNativeMenu.open?.("support"));
     await page.getByRole("spinbutton", { name: "Amount in US dollars" }).waitFor();
     expect(writes.filter((x) => x.path === "/api/support/checkout")).toHaveLength(0);
-    expect(await page.getByText("In first person", { exact: true }).count()).toBe(1);
+    expect(await page.getByText("First person", { exact: true }).count()).toBe(1);
     await page.screenshot({ path: "/tmp/bunnyhop-support-review/support.png", fullPage: true });
     await page.locator(".sp-ask").getByRole("button", { name: "Support", exact: true }).click();
     await page.waitForFunction(() =>

@@ -4,7 +4,8 @@
 
 import { ring, type Paint } from "../../player/bunny/builder";
 import type { V3 } from "../../player/bunny/rig";
-import { fixed, type KnifeCtx } from "./ctx";
+import { fixed, withHilt, type KnifeCtx } from "./ctx";
+import { attackFlavour, hump, idleSway, reducedMotion } from "./bayonet";
 import { SLIM_THUMB, straightHold } from "./hold";
 import { KMAT, PART, type KnifeDef } from "./types";
 
@@ -42,7 +43,7 @@ function build(k: KnifeCtx): void {
     const n = fp ? 32 : 16;
     const disc = (z: number, r: number) => ring([0, 0, z], X, Y, r, r, n);
     const rows = [disc(B0 - 0.36, 0.55), disc(B0 - 0.31, 0.92), disc(B0 - 0.05, 0.92), disc(B0, 0.55)];
-    k.surface(rows, { paint: (i, kk) => (i === 1 ? WHITE : Math.floor((kk / n) * 8 + (i === 2 ? 0.5 : 0)) % 2 ? RED : WHITE), part: PART.guard, capStart: WHITE, capEnd: WHITE });
+    k.hilt("guard", () => k.surface(rows, { paint: (i, kk) => (i === 1 ? WHITE : Math.floor((kk / n) * 8 + (i === 2 ? 0.5 : 0)) % 2 ? RED : WHITE), part: PART.guard, capStart: WHITE, capEnd: WHITE, name: "peppermint" }));
   }
   // --- Grip + crook: the cane continues below the guard and curls round into the hook (one striped tube).
   {
@@ -66,18 +67,42 @@ function build(k: KnifeCtx): void {
       // Twist continues from the blade's base (arc length from the guard) so the stripes run on unbroken.
       return ring(p, X, u, R * end, R * end, m, 2, -TWIST * arc[i]);
     });
-    k.surface(rows, { paint: (_i, kk) => stripe(kk, m), part: PART.grip, capStart: RED, capEnd: WHITE });
+    // (The grip and its crook are one striped tube: the handle and the pommel in one piece.)
+    k.hilt("handle", () => k.surface(rows, { paint: (_i, kk) => stripe(kk, m), part: PART.grip, capStart: RED, capEnd: WHITE, name: "cane" }));
   }
 }
 
-export const candycane: KnifeDef = {
+export const candycane: KnifeDef = withHilt({
   id: "candycane",
   cosmeticId: "knife-candycane",
   name: "Candy Cane Shiv",
   rarity: 5,
   blurb: "A sharpened candy cane with a peppermint guard, from the winter event.",
   build,
+  // The peppermint guard and the striped cane with its crook (the red the second tone, so the stripes and the swirl
+  // stay two-tone in any skin).
+  hilt: { peppermint: { role: "guard", alt: [RED] }, cane: { role: "grip", alt: [RED] } },
   pivots: { hook: { p: HOOK_C, axis: [1, 0, 0] } },
   tp: { o: [3.16, -1.24, 1.34], z: [0.53, 0.1, -0.84], y: [1, 0, 0], s: 1.6 },
   hold: straightHold([0, 0, 0], undefined, SLIM_THUMB),
-};
+  // Light and playful (it's a sweet): the draw comes up hook first, the wrist cocked back, and gives a little bounce as
+  // it levels off; the stab is a short, quick jab that snaps back; the slashes are the light quick wrist of the slim
+  // blades with a small lift at the end.
+  pose(action, t, s) {
+    const k = reducedMotion() ? 0.4 : 1;
+    if (action === "idle") return idleSway(s, 0.9);
+    if (action === "draw") {
+      s.wrist[0] += k * (-14 * hump(t, 0.02, 0.4) + 6 * hump(t, 0.4, 0.62) - 2 * hump(t, 0.62, 0.8));
+      s.arm.o[2] += k * 0.4 * hump(t, 0.36, 0.66);
+      return;
+    }
+    if (action === "stab") {
+      const jab = hump(t, 0.1, 0.38);
+      s.arm.o[0] += k * 1.0 * jab;
+      s.wrist[0] += k * (-5 * hump(t, 0.02, 0.14) + 4 * jab);
+      return;
+    }
+    attackFlavour(action, t, s, { roll: 12, snap: 8, twist: 10 });
+    s.arm.o[2] += k * 0.35 * hump(t, 0.3, 0.6);
+  },
+});

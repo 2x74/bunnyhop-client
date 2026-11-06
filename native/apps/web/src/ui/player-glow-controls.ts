@@ -133,7 +133,7 @@ export function playerGlowControls(o: { root: () => HTMLElement; preview: () => 
     h("label.sp-glow-strength", null, "Intensity", glowIntensity, glowValue),
     h("label.sp-glow-aura", null, "Animated aura", glowAura),
     // Your own hands and knife: a setting of this device, not the account's glow.
-    h("label.sp-glow-aura", null, "In first person", h("input.switch.sm", {
+    h("label.sp-glow-aura", null, "First person", h("input.switch.sm", {
       type: "checkbox", role: "switch", checked: prefs.get().firstPersonGlow,
       onchange: (e: Event) => (prefs.update((p) => (p.firstPersonGlow = (e.currentTarget as HTMLInputElement).checked)), previewGlow()),
     })),

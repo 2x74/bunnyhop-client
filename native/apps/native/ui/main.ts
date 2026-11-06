@@ -94,6 +94,7 @@ import { pickMap } from "./map-pick";
 import { installMenuErrorLog, logToHost } from "./menu-log";
 import { initCustomCss } from "./custom-css/custom-css";
 import { installHudTheme } from "./custom-css/hud-theme";
+import { installNativeConsole } from "./console-panel";
 
 import { installGamepadNavigation } from "./gamepad";
 import { maybeStartOnboarding, openOnboarding } from "./onboarding";
@@ -797,6 +798,45 @@ onHeldLoadout(() => roomService.heldKnifeChanged());
 const chatService = new NativeChatService(roomService, () => {
   send({ type: "chatAction", action: "openRoom" } as unknown as Parameters<typeof send>[0]);
   show("room");
+});
+installNativeConsole({
+  action: (action, down) => {
+    if (down !== undefined) {
+      send({ type: "consoleAction", action, down });
+      return true;
+    }
+    if (action === "jumpToggle") {
+      send({ type: "consoleAction", action, down: true });
+      return true;
+    }
+    if (action === "restart" || action === "restartMain") send({ type: "restart" });
+    else if (action === "noclip") send({ type: "practice", action: "noclip" });
+    else if (action === "practice") send({ type: "practice", action: "toggle" });
+    else if (action === "cpSave") send({ type: "practice", action: "save" });
+    else if (action === "cpTeleport") send({ type: "practice", action: "tele" });
+    else if (action === "cpPrev") send({ type: "practice", action: "prev" });
+    else if (action === "cpNext") send({ type: "practice", action: "next" });
+    else return false;
+    return true;
+  },
+  chat: (line, reply) => {
+    if (!state.map) return false;
+    chatService.submit(line);
+    return true;
+  },
+  map: (name) => {
+    const id = name.trim().toLowerCase();
+    if (!/^[\w.-]{1,64}$/.test(id)) return `"${name}" isn't a map name.`;
+    selectMap(id);
+    return null;
+  },
+  maps: async () => (await fetchMapIndex()).map((entry) => entry.name),
+  menu: () => {
+    if (!state.map) return false;
+    leaveMap();
+    return true;
+  },
+  notice,
 });
 const roomAccount = new RoomAccountBoundary(() => chatService.resetAccount());
 roomService.subscribe(() => {

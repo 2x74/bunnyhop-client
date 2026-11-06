@@ -258,3 +258,18 @@ dialog.confirm-dialog { width: min(30rem, 94vw); }
 .settings .chip-btn.on { background: var(--ink-3); color: #fff; border-color: transparent; box-shadow: inset 0 -2px 0 var(--amber); }
 /* Peeking at a crosshair row shows the real crosshair over the paused game (the menu hides it otherwise). */
 body.in-game.peek #crosshair { visibility: visible; }
+
+/* Settings → Mouse & view: m_yaw / m_pitch boxes and the converter */
+.set-num { display: flex; align-items: center; gap: 0.6rem; }
+.set-num-err { color: var(--loss); font-size: var(--fs-xs); }
+.set-num-err:empty { display: none; }
+.set-convert { display: flex; flex-direction: column; gap: 0.45rem; padding: 0.35rem 0.85rem 0.2rem; }
+.set-convert-out { margin: 0; font-size: var(--fs-sm); color: var(--dim); line-height: 1.4; }
+.set-convert-out b { color: var(--text); font-weight: 750; }
+.set-convert-note:empty { display: none; }
+
+/* Settings → Keys → Chat and command keys */
+.settings .cmd-key .bind { min-width: 5.6rem; }
+.settings .cmd-row .set-label { overflow-wrap: anywhere; }
+.settings .cmd-add { display: flex; align-items: center; gap: 0.5rem; }
+.settings .cmd-text { width: 12rem; padding: 0.35rem 0.55rem; font-size: var(--fs-sm); }

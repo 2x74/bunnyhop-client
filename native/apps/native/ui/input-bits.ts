@@ -18,3 +18,10 @@ export const IN_SLOT_MASK = 3 << IN_SLOT_SHIFT;
 export const SLOT_PRIMARY = 1;
 export const SLOT_PISTOL = 2;
 export const SLOT_KNIFE = 3;
+
+/** Text controls must keep their native/Source key bindings instead of being captured by game shortcuts. */
+export function isTextField(target: EventTarget | null): boolean {
+  const element = target instanceof Element ? target : null;
+  if (!element) return false;
+  return !!element.closest("input, textarea, select, [contenteditable='true'], [role='textbox']");
+}

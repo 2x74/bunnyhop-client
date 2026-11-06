@@ -63,6 +63,11 @@ export class SoloChat {
     this.input.freeCursor();
   }
 
+  /** A line typed in the console (console/view.ts): runs like a chat line, answers there. */
+  consoleLine(line: string, reply: (text: string) => void): void {
+    runChatLine(line, { ...this.ctx, reply });
+  }
+
   /** No movement or buttons while typing (view angles still follow), as in rooms; a weapon command (!usp) goes through. */
   filterInput(cmd: UserCmd): UserCmd {
     if (!this.chat.isOpen) return cmd;

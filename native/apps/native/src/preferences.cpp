@@ -6,6 +6,9 @@ namespace native {
 Preferences Preferences::from_settings(const nlohmann::json &settings) {
     Preferences preferences;
     preferences.sensitivity = settings.at("sensitivity").get<double>();
+    preferences.m_yaw = settings.at("mYaw").get<double>();
+    preferences.m_pitch = settings.at("mPitch").get<double>();
+    preferences.show_pos = settings.at("showPos").get<int>();
     preferences.vertical_sensitivity = settings.at("verticalSensitivity").get<double>();
     preferences.separate_vertical = settings.at("separateVertical").get<bool>();
     preferences.invert_y = settings.at("invertY").get<bool>();

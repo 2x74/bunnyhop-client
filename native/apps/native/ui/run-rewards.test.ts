@@ -184,7 +184,6 @@ test("the tier and map achievements of v0.0.37 reach the run's reward reel with 
       { title: "Sleepless", detail: "Finish 3 different maps of tier 9 or higher" },
       { title: "True Architect", detail: "Finish bhop_lol_backrooms" },
       { title: "Flare", detail: "New background" },
-      { title: "Silver Wreath", detail: "New hat" },
     ]),
   );
 });

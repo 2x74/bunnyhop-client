@@ -21,6 +21,8 @@ const CONDITIONAL = [
   "mouse/Mouse/Show DPI on profile",
   "account/Account/Profile flag",
   "account/Account/Desktop app link",
+  // Native has the host key and gate; this row arrives with the pending route-only web lane.
+  "ghost/Route guide/Route only",
 ];
 
 const menu = readFile(new URL("../../../target/native-menu/menu.html", import.meta.url), "utf8");

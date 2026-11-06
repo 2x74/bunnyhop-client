@@ -258,3 +258,64 @@ pub fn measure(
         entry,
     )
 }
+
+/// Rules 5 anti-skip observation. Sweep the accepted movement path and the real post-touch position; a reset/teleport
+/// without a touch observation never creates a synthetic chord across the map.
+pub fn touches_anti_skip(
+    game: Option<&Game>,
+    state: BhState,
+    from: Option<[f32; 3]>,
+    zones: &[BhZone],
+    track: u32,
+) -> bool {
+    let touch = state.touch_position.iter().all(|value| value.is_finite());
+    let to = if touch { state.touch_position } else { state.position };
+    let ducked = if touch { state.touch_crouched != 0 } else { state.crouched != 0 };
+    let active: Vec<_> = zones
+        .iter()
+        .copied()
+        .filter(|zone| zone.kind == 4 && zone.track == track)
+        .collect();
+    if active.is_empty() {
+        return false;
+    }
+    if active.iter().any(|zone| zone.contains(to, ducked)) {
+        return true;
+    }
+    let teleported = state.events
+        & (bunnyhop_core::game::EVENT_TELEPORTED | bunnyhop_core::game::EVENT_RESPAWNED)
+        != 0;
+    if !touch && teleported {
+        return false;
+    }
+    let mut storage = [BhTimingSegmentV2::default(); MAX_SEGMENTS];
+    let path = game
+        .and_then(|g| g.timing_path.as_ref())
+        .filter(|p| p.unsupported.is_none() && p.segments.len() <= MAX_SEGMENTS)
+        .map(|p| {
+            for (out, segment) in storage.iter_mut().zip(&p.segments) {
+                *out = BhTimingSegmentV2 {
+                    t0: segment.t0,
+                    t1: segment.t1,
+                    from: segment.from,
+                    to: segment.to,
+                    mins: segment.hull.mins,
+                    maxs: segment.hull.maxs,
+                    discrete: u32::from(segment.discrete),
+                    reserved: 0,
+                };
+            }
+            &storage[..p.segments.len()]
+        });
+    let chord = from.map(|from| BhTimingSegmentV2 { from, to, t1: 1.0, ..Default::default() });
+    let segments = match (path, chord.as_ref()) {
+        (Some(path), _) => path,
+        (_, Some(chord)) => std::slice::from_ref(chord),
+        _ => return false,
+    };
+    active.iter().any(|zone| {
+        segments.iter().any(|segment| {
+            sweep(segment, if path.is_some() { crouched(segment) } else { ducked }, zone).is_some()
+        })
+    })
+}

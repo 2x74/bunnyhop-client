@@ -7,6 +7,7 @@
 // chat itself (a measured distance, "Your paint has been cleared.").
 
 import { registerChatCommand, type ChatCommand, type ChatContext } from "../../web/src/chat-commands";
+import { prefs } from "../../web/src/ui/settings";
 import { trainerCommand } from "../../web/src/hud/strafe-trainer";
 import { send, state } from "./bridge";
 import type { ChatAction } from "./chat-service";
@@ -14,6 +15,22 @@ import type { ChatAction } from "./chat-service";
 const emit = (action: ChatAction) => send(action as unknown as Parameters<typeof send>[0]);
 const MAX_CAPABILITIES = 64;
 const registered = new Map<string, () => void>();
+
+registerChatCommand({
+  name: "landing",
+  aliases: ["landingspot", "showlanding"],
+  help: "show or hide the landing spot",
+  group: "more",
+  where: "both",
+  run: (ctx) => {
+    let on = false;
+    prefs.update((p) => {
+      on = p.landing.mode === "off";
+      p.landing.mode = on ? "always" : "off";
+    });
+    ctx.reply(on ? "Showing your landing spot while you're in the air." : "Landing spot hidden.");
+  },
+});
 
 type MovementStat = "offsets" | "fjt" | "lj";
 

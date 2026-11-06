@@ -37,7 +37,7 @@ import { ensureViewmodelLayout } from "../viewmodel/finishes/layout";
 import { viewmodelGeometry } from "../viewmodel/mesh";
 import { vmRig } from "../viewmodel/rig";
 import { getLoadout, getOutfit, onOutfit } from "../player/cosmetics";
-import { GLOVE_STYLE_IDS, gloveStyle, type CosmeticLoadout, type GloveStyleId } from "../loadout";
+import { GLOVE_STYLE_IDS, gloveStyle, hiltSkin, type CosmeticLoadout, type GloveStyleId } from "../loadout";
 import { prefs } from "./settings";
 import { BunnyScene, type BunnyLook } from "./bunny-preview";
 import { HERO, type PreviewSpec } from "../notify/item-preview";
@@ -50,9 +50,11 @@ import { loadoutFor } from "../loadout";
 import { menuIdleAllowed, onMenuMapStart } from "./menu-work";
 import { loadThumb, saveThumb } from "./thumb-store";
 import { playerLookTier } from "../player/look-tier";
+import { CamoStage } from "./camo-stage";
 
-/** First person and close-up (hands), your bunny, your ghost. */
-export type StageView = "fp" | "close" | "bunny" | "ghost";
+/** First person and close-up (hands), your bunny, your ghost; a gun in first person or from the side (Gun camo). */
+export type StageView = "fp" | "close" | "bunny" | "ghost" | "gun" | "gunside";
+const gunView = (v: StageView) => v === "gun" || v === "gunside";
 /** What the bunny views dress the bunny in (the knife, gloves and hat come from the loadout). */
 export type StageLook = Pick<BunnyLook, "outfit" | "ghost" | "trail" | "veil" | "playerGlow" | "previewGlow">;
 
@@ -61,7 +63,7 @@ export const THUMB_W = 384;
 export const THUMB_H = 240;
 
 export type ThumbJob =
-  | { key: string; kind: "knife"; knife: string; loadout: CosmeticLoadout }
+  | { key: string; kind: "knife"; knife: string; loadout: CosmeticLoadout; focus?: "hilt" }
   | { key: string; kind: "glove"; loadout: CosmeticLoadout }
   /** A colourway, ghost colour, trail or hat: the unlock card's model (built on demand, then dropped). */
   | { key: string; kind: "item"; spec: PreviewSpec; scene?: ItemScene | null };
@@ -175,6 +177,8 @@ export class LoadoutStage {
   private shown: CosmeticLoadout;
   private look: StageLook = { outfit: null, ghost: null, trail: null, veil: false };
   private bunny: BunnyScene | null = null;
+  /** The Gun camo tab's guns (ui/camo-stage.ts), made the first time it opens. */
+  private guns: CamoStage | null = null;
   /** Item thumbnails being built (a couple at a time). */
   private building = 0;
   private viewMode: StageView = "fp";
@@ -350,8 +354,19 @@ export class LoadoutStage {
     this.vm.setLoadout(l);
     this.show.setKnife(k);
     this.show.setFinish(specOf(l));
+    this.show.setHilt(hiltSkin(l.hilt));
+    this.guns?.setLoadout(l, this.look.outfit);
     this.showBunny();
     this.kick();
+  }
+
+  /** The gun on the Gun camo stage: its name, after stepping `by` guns (0: the current one). */
+  stepGun(by: number): string {
+    this.guns ??= new CamoStage(this.shown);
+    if (by) this.guns.step(by);
+    this.guns.setLoadout(this.shown, this.look.outfit);
+    this.kick();
+    return this.guns.gun.name;
   }
 
   /**
@@ -382,6 +397,11 @@ export class LoadoutStage {
     this.viewMode = v;
     if (this.host) this.host.dataset.view = v;
     if (v === "close") this.spinV = 2.2; // a little turn on the way in
+    if (gunView(v)) {
+      this.guns ??= new CamoStage(this.shown);
+      this.guns.setLoadout(this.shown, this.look.outfit);
+      if (v === "gunside") this.guns.spinV = 2.2;
+    }
     if (v === "bunny" || v === "ghost") {
       if (this.bunny) this.showBunny();
       else (this.bunny = new BunnyScene(this.bunnyLook())), this.bunny.setTint(...this.tintNow);
@@ -393,6 +413,11 @@ export class LoadoutStage {
   /** Plays the knife's inspect (first person; from the close-up it switches back first; not in the bunny views). */
   inspect(): void {
     if (this.disposed || this.viewMode === "bunny" || this.viewMode === "ghost") return;
+    if (gunView(this.viewMode)) {
+      if (this.viewMode !== "gun") this.setView("gun");
+      this.guns?.inspect();
+      return this.kick();
+    }
     if (this.viewMode !== "fp") this.setView("fp");
     this.vm.inspect();
     this.kick();
@@ -411,7 +436,7 @@ export class LoadoutStage {
   }
   private tintNow: [string | null, number] = [null, 1];
 
-  /** A small confirm when something is equipped: a draw for a knife, an inspect for a finish, a spin up close. */
+  /** A small confirm when something is equipped: a draw for a knife, an inspect for a finish or a hilt, a spin up close. */
   flourish(kind: string): void {
     if (this.disposed || this.reduced) return;
     if (this.viewMode === "bunny" || this.viewMode === "ghost") {
@@ -419,13 +444,19 @@ export class LoadoutStage {
       this.kick();
       return;
     }
-    if (this.viewMode === "close") {
-      this.spinV += 7.5;
+    if (this.viewMode === "close" || this.viewMode === "gunside") {
+      if (this.viewMode === "gunside" && this.guns) this.guns.spinV += 5;
+      else this.spinV += 7.5;
+      this.kick();
+      return;
+    }
+    if (this.viewMode === "gun") {
+      this.guns?.inspect();
       this.kick();
       return;
     }
     if (kind === "knife") this.vm.draw();
-    else if (kind === "finish") this.vm.inspect();
+    else if (kind === "finish" || kind === "hilt") this.vm.inspect();
     this.kick();
   }
 
@@ -518,7 +549,7 @@ export class LoadoutStage {
     r.setViewport(0, 0, tw / pr, th / pr);
     r.setScissor(0, 0, tw / pr, th / pr);
     r.clear();
-    if (job.kind === "knife") this.drawKnifeThumb(job.knife, job.loadout);
+    if (job.kind === "knife") this.drawKnifeThumb(job.knife, job.loadout, job.focus);
     else if (job.kind === "glove") this.drawGloveThumb(job.loadout, tw, th);
     else if (job.scene) {
       this.drawItemThumb(job.scene, job.spec);
@@ -541,20 +572,29 @@ export class LoadoutStage {
     this.deliver(job.key, out);
   }
 
-  /** The knife alone, tip up and to the right, its face turned a little to the light. */
-  private drawKnifeThumb(id: string, l: CosmeticLoadout): void {
+  /** The knife alone, tip up and to the right, its face turned a little to the light (`focus` "hilt": framed on its hilt). */
+  private drawKnifeThumb(id: string, l: CosmeticLoadout, focus?: "hilt"): void {
     const s = this.thumbShow;
     s.setKnife(knifeOf(id));
     s.setFinish(specOf(l));
+    s.setHilt(hiltSkin(l.hilt));
     const q = knifeBasis().premultiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0.38, 0.56, "YXZ")));
     s.root.quaternion.copy(q);
     // Fit the knife as turned to the 16:10 frame (a narrow lens: close to an orthographic product shot).
-    const e = s.extentAt(q);
     const cam = this.thumbCam;
     const tv = Math.tan(THREE.MathUtils.degToRad(cam.fov / 2));
-    const d = Math.max(e.y / tv, e.x / (tv * cam.aspect)) * 1.1 + e.z;
-    cam.position.set(0, 0, d);
-    cam.lookAt(0, 0, 0);
+    const hb = focus === "hilt" ? s.hiltAt(q) : null;
+    if (hb) {
+      // The hilt fills most of the tile, a little of the blade showing past the guard.
+      const d = Math.max(hb.e.y / tv, hb.e.x / (tv * cam.aspect)) * 1.35 + hb.e.z;
+      cam.position.set(hb.c.x, hb.c.y, hb.c.z + d);
+      cam.lookAt(hb.c);
+    } else {
+      const e = s.extentAt(q);
+      const d = Math.max(e.y / tv, e.x / (tv * cam.aspect)) * 1.1 + e.z;
+      cam.position.set(0, 0, d);
+      cam.lookAt(0, 0, 0);
+    }
     cam.updateProjectionMatrix();
     this.renderer.render(this.thumbScene, cam);
   }
@@ -568,7 +608,7 @@ export class LoadoutStage {
     const cam = this.itemCam;
     const fov = THREE.MathUtils.degToRad(cam.fov / 2);
     // A tile is wider than the card's square: the standing bunny can come closer.
-    const fill = spec.kind === "bunny" || spec.kind === "ghost" ? 1.3 : spec.kind === "trail" ? 1.7 : h.fill;
+    const fill = spec.kind === "bunny" || spec.kind === "ghost" ? 1.3 : spec.kind === "trail" ? 1.7 : spec.kind === "gun" ? 1.4 : h.fill;
     cam.position.set(0, 0, (s.radius / Math.sin(fov)) * (0.98 / fill));
     cam.lookAt(0, 0, 0);
     cam.near = cam.position.z * 0.05;
@@ -702,6 +742,8 @@ export class LoadoutStage {
     }
     if (this.viewMode === "fp") this.drawFirstPerson(dt);
     else if (this.viewMode === "close") this.drawCloseUp(dt);
+    else if (this.viewMode === "gun") this.guns?.drawFirstPerson(this.renderer, dt, this.w, this.h, this.reduced);
+    else if (this.viewMode === "gunside") this.guns?.drawSide(this.renderer, dt, this.w, this.h, this.reduced, !!this.dragging);
     else this.drawBunny(dt);
   }
 
@@ -846,8 +888,10 @@ export class LoadoutStage {
       d.y = e.clientY;
       this.dragVel.move(e.timeStamp, e.clientX, e.clientY);
       if (this.viewMode === "bunny") this.bunny?.drag(dx, this.w);
-      else if (this.viewMode === "ghost") return;
-      else if (this.viewMode === "close") {
+      else if (this.viewMode === "ghost" || this.viewMode === "gun") return;
+      else if (this.viewMode === "gunside") {
+        if (this.guns) this.guns.spin += dx * (4.2 / Math.max(240, this.w));
+      } else if (this.viewMode === "close") {
         const k = 4.2 / Math.max(240, this.w);
         this.spin += dx * k;
         this.tilt += dy * k * 0.7;
@@ -866,6 +910,7 @@ export class LoadoutStage {
         this.bunny.release(vx, this.w);
       }
       c.classList.remove("dragging");
+      if (this.viewMode === "gunside" && this.guns) this.guns.spinV = Math.max(-9, Math.min(9, vx * (4.2 / Math.max(240, this.w))));
       if (this.viewMode === "close") {
         const k = 4.2 / Math.max(240, this.w);
         // Keep a fling, but not a wild one.
@@ -927,6 +972,7 @@ export class LoadoutStage {
     this.show.dispose();
     this.thumbShow.dispose();
     this.bunny?.dispose();
+    this.guns?.dispose();
     this.dropThumbs();
     for (const c of thumbCache.values()) if (!c.isConnected) c.remove();
     this.renderer.dispose();

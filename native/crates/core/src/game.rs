@@ -24,11 +24,14 @@ pub use flight::{cap_horizontal, cap_speed, flight_move, EVENT_FLIGHT, EVENT_FLI
 // DanZay's VScript objective gates, emulated natively on bhop_cooksassistant (physics v16).
 mod vscript;
 mod mechanics;
+mod physics26;
 mod scripts19;
 mod momentary;
 // Trigger / clip overlays for the client (never called by `step`; see the module docs).
 mod overlay;
 mod map_sounds;
+#[cfg(test)]
+mod crash_egypt;
 pub use map_sounds::{MAP_SOUND_ACTIVE, MAP_SOUND_LAST_START, MAP_SOUND_REMOVED};
 mod prop_anims;
 pub use prop_anims::{PropAnim, PROP_ANIM_HIDDEN, PROP_ANIM_REMOVED, PROP_ANIM_SET};
@@ -36,6 +39,9 @@ pub use overlay::{
     OVERLAY_CLIP, OVERLAY_GRAVITY, OVERLAY_OTHER, OVERLAY_PUSH, OVERLAY_STATE_ACTIVE, OVERLAY_STATE_VISIBLE, OVERLAY_TELEPORT,
     OVERLAY_WALL, OVERLAY_WHEN_HIDDEN, OverlayBrush,
 };
+// The client's landing spot aid (read-only like the overlays; see the module docs).
+mod landing;
+pub use landing::{LandingPiece, LandingPrediction, LANDING_GROUND, LANDING_NONE, LANDING_TELEPORT};
 
 use crate::entities::{Entity, EntityList, Output, name_matches};
 use playsrc_bsp::{Bsp, LumpData, Model};
@@ -186,7 +192,7 @@ pub const PHYSICS_V16: u32 = 16;
 /// slope or a ledge no longer depends on where inside a tick the player meets it.
 pub const PHYSICS_V17: u32 = 17;
 /// The version new recordings use.
-pub const PHYSICS_LATEST: u32 = PHYSICS_V25;
+pub const PHYSICS_LATEST: u32 = PHYSICS_V26;
 /// v18: ladder surface properties, preserving historical replay behavior.
 pub const PHYSICS_V18: u32 = 18;
 /// v19: scoped map mechanics (template instances and explicit velocity scripts). No new movement fix bits.
@@ -227,6 +233,8 @@ pub const PHYSICS_V24: u32 = 24;
 /// no longer stops you (bhop_bfur: strafing from rest now climbs that curve, as a jump already could on v24). No new fix
 /// bits (all 31 are used): gated on the version number, like v22.
 pub const PHYSICS_V25: u32 = 25;
+/// v26: Source !player name filters; exact-build coast resets, frankerz caps, and Crash Egypt makers/timers/jump I/O.
+pub const PHYSICS_V26: u32 = 26;
 /// Diagnostic pseudo-versions (never valid in a replay, whose field is a u8): `PHYSICS_DIAG | fix bits` turns on only
 /// the listed fixes, to tell which fix changes a replay (tools: /tmp physics-v2 analysis). The fix bits are the low 31
 /// (`PHYSICS_DIAG_FIXES`); before v18 the base was 1 << 30 with 30 fix bits; before v17 the base was 1 << 26 with 26 fix bits, before v16 1 << 25 with 25, before v15
@@ -443,6 +451,11 @@ impl Game {
     }
 }
 
+/// Physics 26 reviewed build (tools/tests); behavior also requires physics >=26.
+pub fn map_build_v26_for(bsp: &Bsp, list: &EntityList) -> Option<&'static str> {
+    map_fixes::build_v26(bsp, &list.entities, &list.outputs).map(|b| b.map)
+}
+
 /// A parsed entity lump's fingerprint, as `MECHANICS_V19` and `PARENTED_DOORS_V21` pin it (tests, tools).
 pub fn map_entity_fingerprint(entities: &[Entity]) -> u32 {
     map_fixes::entity_fingerprint(entities)
@@ -529,7 +542,7 @@ pub fn physics_fixes(version: u32) -> Option<u32> {
         PHYSICS_V15 => Some(PHYSICS_FIX_V15),
         PHYSICS_V16 => Some(PHYSICS_FIX_V16),
         PHYSICS_V17 => Some(PHYSICS_FIX_V17),
-        PHYSICS_V18 | PHYSICS_V19 | PHYSICS_V20 | PHYSICS_V21 | PHYSICS_V22 | PHYSICS_V23 | PHYSICS_V24 | PHYSICS_V25 => Some(PHYSICS_FIX_ALL),
+        PHYSICS_V18 | PHYSICS_V19 | PHYSICS_V20 | PHYSICS_V21 | PHYSICS_V22 | PHYSICS_V23 | PHYSICS_V24 | PHYSICS_V25 | PHYSICS_V26 => Some(PHYSICS_FIX_ALL),
         v if v & !PHYSICS_DIAG_FIXES == PHYSICS_DIAG && v & PHYSICS_DIAG_FIXES & !PHYSICS_FIX_ALL == 0 => Some(v & PHYSICS_DIAG_FIXES),
         _ => None,
     }
@@ -1511,6 +1524,7 @@ pub struct Game {
     map_mechanics: Option<&'static map_fixes::MapMechanics>,
     /// A reviewed physics 25 build (`map_fixes::BUILDS_V25`), matched on its full digest at load.
     map_build_v25: Option<&'static map_fixes::BuildV25>,
+    map_build_v26: Option<&'static map_fixes::BuildV26>,
     /// Exact reviewed entity build matched by map_fixes::PARENTED_DOORS_V21: from physics v21 its parented doors follow
     /// their parents (`door_follows_parent`). Fixed at load.
     map_parented_doors: bool,
@@ -1557,6 +1571,8 @@ struct Extra {
     scripts19: scripts19::State,
     /// Infinite flight (game/flight.rs, physics v24): the player is flying. False on every other style and version.
     flying: bool,
+    /// Exact-build v26 Crash Egypt point_clientcommand jump latch.
+    map_jump: bool,
     /// Infinite flight: this tick's landing spot and crouch (`Game::flight_landing`), before the normal step. An output
     /// of the tick only (None on every other tick), so it's not digested.
     landing: Option<([f32; 3], bool)>,
@@ -1602,6 +1618,7 @@ impl Extra {
             for i in &self.instance_sources { out.extend_from_slice(&(*i as u32).to_le_bytes()); }
         }
         self.scripts19.digest(&mut out);
+        if self.map_jump { out.extend_from_slice(b"map_jump\0"); }
         // (Never set before physics v24 or outside Infinite: those digests are unchanged.)
         if self.flying {
             out.extend_from_slice(b"flying\0");
@@ -1636,7 +1653,8 @@ impl Game {
         let script_triggers = vscript::script_triggers(&entities);
         // v25 exact builds (`map_fixes::BUILDS_V25`): entity CRC, then a digest of entities, outputs and brush collision.
         let map_build_v25 = map_fixes::build_v25(bsp, &entities, &outputs);
-        let map_mechanics = map_fixes::mechanics_v19(&entities).or(map_build_v25.and_then(|b| b.mechanics.as_ref()));
+        let map_build_v26 = map_fixes::build_v26(bsp, &entities, &outputs);
+        let map_mechanics = map_fixes::mechanics_v19(&entities).or(map_build_v25.and_then(|b| b.mechanics.as_ref())).or(map_build_v26.and_then(|b| b.mechanics.as_ref()));
         let map_parented_doors = map_fixes::parented_doors_v21(&entities).is_some();
         let map_parented_doors_v24 = map_fixes::parented_doors_v24(&entities).is_some();
         let map_fingerprint = map_fixes::entity_fingerprint(&entities);
@@ -1760,6 +1778,7 @@ impl Game {
             script_triggers,
             map_mechanics,
             map_build_v25,
+            map_build_v26,
             map_parented_doors,
             map_parented_doors_v24,
             map_event_clock,
@@ -1800,7 +1819,8 @@ impl Game {
 
     pub fn set_settings(&mut self, settings: Settings) {
         let min = self.mechanics_min_physics();
-        let spawn_changed = (self.map_mechanics.is_some() && (min..=PHYSICS_LATEST).contains(&self.settings.physics_version) != (min..=PHYSICS_LATEST).contains(&settings.physics_version))
+        let spawn_changed = (self.map_build_v26.is_some() && (self.settings.physics_version >= PHYSICS_V26) != (settings.physics_version >= PHYSICS_V26))
+            || (self.map_mechanics.is_some() && (min..=PHYSICS_LATEST).contains(&self.settings.physics_version) != (min..=PHYSICS_LATEST).contains(&settings.physics_version))
             || (self.map_build_v25.is_some()
                 && (PHYSICS_V25..=PHYSICS_LATEST).contains(&self.settings.physics_version) != (PHYSICS_V25..=PHYSICS_LATEST).contains(&settings.physics_version))
             || ((self.map_parented_doors || map_fixes::v21_spawn_edits(self.map_mechanics) || self.initial_ents.iter().any(|e| kin::rot_door_spawn_angles(e).is_some()))
@@ -1820,6 +1840,9 @@ impl Game {
             settings.physics_version >= m.min_physics && settings.physics_fixes() & PHYSICS_FIX_MAP_MAX_VELOCITY != 0
         }) {
             self.config.maximum_velocity = entry.max_velocity;
+        }
+        if settings.physics_version >= PHYSICS_V26 && let Some(cap) = self.map_build_v26.and_then(|b| b.max_velocity) {
+            self.config.maximum_velocity = cap;
         }
         self.policy = settings.policy();
         if self.mechanics_on() && self.map_mechanics.is_some_and(|m| m.map == "bhop_profane") {
@@ -1856,6 +1879,7 @@ impl Game {
         self.restart_names = None;
         self.entities.truncate(self.initial_ents.len());
         self.ents = self.initial_ents.clone();
+        self.initialize_coast_v26();
         self.reindex_instances();
         self.initialize_train_entity_edits();
         self.initialize_velocity_scripts();
@@ -1970,6 +1994,7 @@ impl Game {
 
     /// Respawn the player at the spawn point (map entity state is kept, as on a Source respawn).
     pub fn respawn_player(&mut self) {
+        if self.coast_v26() { self.extra.objectives.clear(); }
         self.air_speed_gain = None;
         let (origin, angles) = match self.restart_point {
             Some((p, yaw)) => (p, [0.0, yaw, 0.0]),
@@ -1995,6 +2020,7 @@ impl Game {
         // (v16 NONLINEAR_OBJECTIVES maps; in CS:S a respawn lands in the start room's script triggers, which clear them).
         self.extra.player_outputs.clear();
         self.extra.objectives.clear();
+        self.extra.map_jump = false;
         if let (Some(_), Some((name, class))) = (self.restart_point, &self.restart_names) {
             self.player_name.clone_from(name);
             self.player_class.clone_from(class);
@@ -2212,6 +2238,7 @@ impl Game {
         self.last_angles = [cmd.pitch, cmd.yaw, 0.0];
 
         self.service_events();
+        let cmd = Cmd { buttons: cmd.buttons | if self.crash_egypt_on() && self.extra.map_jump { IN_JUMP } else { 0 }, ..cmd };
         self.rebuild_solid();
 
         // Fell out of the world (or a non-finite state): Source would kill the player.
@@ -2377,6 +2404,7 @@ impl Game {
         let contacts = std::mem::take(&mut self.contacts);
         self.touch_solids(&contacts);
         self.contacts = contacts;
+        self.coast_progress_v26();
         self.note_touch_origin();
         self.touch_triggers();
         if self.settings.physics_fixes() & PHYSICS_FIX_WEAPONS != 0 {
@@ -2394,6 +2422,7 @@ impl Game {
         if self.settings.physics_fixes() & PHYSICS_FIX_KNIFE != 0 && !self.weapon_hidden() {
             self.weapon_post_frame(cmd);
         }
+        self.coast_progress_v26();
         self.state_after_command = self.state;
         if self.rules.telehop_fix
             && self.settings.physics_fixes() & PHYSICS_FIX_TELEHOP == 0
@@ -2657,7 +2686,7 @@ impl Game {
         for k in 0..self.timers.len() {
             let i = self.timers[k];
             if let Data::Timer { enabled: true, refire, next_tick } = self.ents[i].data {
-                let ticks = self.delay_ticks(refire).max(1);
+                let ticks = self.delay_ticks(self.crash_timer_interval(i, refire)).max(1);
                 let due = next_tick != u32::MAX && self.tick >= next_tick;
                 if !self.ents[i].removed && (due || next_tick == u32::MAX) {
                     if let Data::Timer { next_tick, .. } = &mut self.ents[i].data {
@@ -2820,6 +2849,7 @@ impl Game {
     fn accept_input(&mut self, target: Actor, input: &str, param: &str, activator: Actor, caller: Actor) {
         let input = input.to_ascii_lowercase();
         if self.script19_input(target, &input, param, activator, caller) { return; }
+        if self.crash_maker_caller_input(target, &input, param, caller) { return; }
         match target {
             Actor::None => {}
             Actor::Player => self.player_input(&input, param, activator),
@@ -2949,8 +2979,8 @@ impl Game {
         if input == "testactivator" && matches!(self.ents[i].data, Data::Filter { .. }) && self.player_io() {
             let pass = match activator {
                 Actor::None => return,
-                Actor::Player => self.filter_entity_passes(i, &self.player_name, &self.player_class, 0),
-                Actor::Entity(j) => self.filter_entity_passes(i, &self.ents[j].name, &self.ents[j].class, 0),
+                Actor::Player => self.filter_entity_passes(i, &self.player_name, &self.player_class, true, 0),
+                Actor::Entity(j) => self.filter_entity_passes(i, &self.ents[j].name, &self.ents[j].class, false, 0),
             };
             self.fire_output(i, if pass { "onpass" } else { "onfail" }, activator);
             return;
@@ -3489,12 +3519,12 @@ impl Game {
     }
 
     fn passes_filter(&self, filter: Option<&str>, depth: u32) -> bool {
-        self.passes_filter_as(filter, &self.player_name, &self.player_class, depth)
+        self.passes_filter_as(filter, &self.player_name, &self.player_class, true, depth)
     }
 
     /// `passes_filter` for an entity with targetname `name` and classname `class` (the player, or a TestActivator
     /// activator).
-    fn passes_filter_as(&self, filter: Option<&str>, name: &str, class: &str, depth: u32) -> bool {
+    fn passes_filter_as(&self, filter: Option<&str>, name: &str, class: &str, is_player: bool, depth: u32) -> bool {
         let Some(filter) = filter else { return true };
         if depth > 8 {
             return true;
@@ -3506,17 +3536,28 @@ impl Game {
         else {
             return true; // unresolved filter: m_hFilter is NULL, so everything passes
         };
-        self.filter_entity_passes(f, name, class, depth)
+        self.filter_entity_passes(f, name, class, is_player, depth)
+    }
+
+    /// Source CFilterName only special-cases the exact, case-sensitive !player token.
+    /// Other procedural names are target selectors, not filter-name selectors. Identity comes
+    /// from Actor, so a renamed player still passes and a prop named !player does not.
+    fn filter_name_matches(&self, pattern: &str, name: &str, is_player: bool) -> bool {
+        if self.settings.physics_version >= PHYSICS_V26 && pattern == "!player" {
+            is_player
+        } else {
+            name_matches(pattern, name)
+        }
     }
 
     /// CBaseFilter::PassesFilter of filter entity `f` for an entity named `name` of class `class`.
-    fn filter_entity_passes(&self, f: usize, name: &str, class: &str, depth: u32) -> bool {
+    fn filter_entity_passes(&self, f: usize, name: &str, class: &str, is_player: bool, depth: u32) -> bool {
         let Data::Filter { kind, negated } = &self.ents[f].data else { return true };
         let pass = match kind {
-            FilterKind::Name(n) => name_matches(n, name),
+            FilterKind::Name(n) => self.filter_name_matches(n, name, is_player),
             FilterKind::Class(c) => name_matches(c, class),
             FilterKind::Multi { all, filters } => {
-                let mut results = filters.iter().map(|n| self.passes_filter_as(Some(n), name, class, depth + 1));
+                let mut results = filters.iter().map(|n| self.passes_filter_as(Some(n), name, class, is_player, depth + 1));
                 if *all { results.all(|r| r) } else { results.any(|r| r) }
             }
             FilterKind::PassAll | FilterKind::DamageType { .. } => true,
@@ -3546,7 +3587,7 @@ impl Game {
         };
         let Data::Filter { kind, negated } = &f.data else { unreachable!() };
         let pass = match kind {
-            FilterKind::Name(n) => name_matches(n, &self.player_name),
+            FilterKind::Name(n) => self.filter_name_matches(n, &self.player_name, true),
             FilterKind::Class(c) => name_matches(c, &self.player_class),
             FilterKind::Multi { all, filters } => {
                 let mut results = filters.iter().map(|n| self.damage_filter_passes(Some(n), damage_type, depth + 1));
@@ -3685,8 +3726,12 @@ impl Game {
                     }
                 }
                 TriggerKind::Teleport { .. } => {
+                    // Historical Momentum StartTouch subset: flags 1, stop=1, resetang=1.
+                    // Unlike stock CTriggerTeleport::Touch, enabling inside an existing link
+                    // waits for re-entry. No continuous Touch or end-touch mode is admitted.
+                    if self.ents[i].class == "trigger_momentum_teleport" && linked { continue; }
                     // v17: RNGFix counts the teleports a trigger_teleport's Touch makes (`Hook_TriggerTeleportTouchPost`).
-                    if self.teleport_through(i) && self.settings.physics_fixes() & PHYSICS_FIX_TELEHOP != 0 {
+                    if self.teleport_through(i) && self.ents[i].class == "trigger_teleport" && self.settings.physics_fixes() & PHYSICS_FIX_TELEHOP != 0 {
                         self.events |= EVENT_MAP_TELEPORT;
                     }
                 }
@@ -3909,6 +3954,9 @@ impl Game {
                     self.state.velocity = [0.0; 3];
                 }
             }
+        }
+        if self.coast_v26() && self.ents[trigger].class == "trigger_momentum_teleport" {
+            self.state.velocity = [0.0; 3];
         }
         self.state.position = origin;
         self.state.ground = None;
@@ -4210,6 +4258,14 @@ impl Game {
             .collect()
     }
 
+    /// Runtime maker copies: (entity, original definition, origin, angles, visible). Display only.
+    pub fn entity_instances(&self) -> impl Iterator<Item = (usize, usize, [f32; 3], [f32; 3], bool)> + '_ {
+        self.extra.instance_sources.iter().enumerate().filter_map(|(offset, &source)| {
+            let i = self.initial_ents.len() + offset;
+            self.ents.get(i).map(|e| (i, source, e.origin, e.angles, e.visible && !e.removed))
+        })
+    }
+
     /// Entity props to draw with the static props, at their (settled) pose: (model, origin, angles, skin, owner).
     /// prop_dynamic*, prop_physics*, prop_physics_multiplayer, prop_door_rotating; props following a parent
     /// and `rendermode 10` (don't render) / `disableshadows`-only helpers excluded. `owner` is 0, or entity index
@@ -4237,7 +4293,7 @@ impl Game {
             if (e.get("parentname").is_some_and(|p| !p.is_empty()) && !parented_prop) || e.int("rendermode") == 10 {
                 continue;
             }
-            if self.ents.get(i).is_some_and(|r| !r.visible) {
+            if self.ents.get(i).is_some_and(|r| !r.visible) && !(animated && self.prop_anims.contains(i)) {
                 continue;
             }
             let (origin, angles) = poses.get(&(physics::ENTITY_PROP | i as u32)).copied().unwrap_or((e.origin(), e.angles()));

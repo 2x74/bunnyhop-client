@@ -703,8 +703,61 @@ function wreath(): THREE.BufferGeometry {
   return g;
 }
 
+/**
+ * Starfish (Tidepool, Supporter, v0.0.38): a coral starfish clinging to the front corner of the hood like a hair clip,
+ * five plump arms curving with the hood, a paler bumpy line down each. Static.
+ */
+function starfish(): THREE.BufferGeometry {
+  const W = headWeight();
+  const b = new Builder();
+  const CORAL = 0xff7f6e, CORAL2 = 0xe25c4c, PALE = 0xffd8cc;
+  const rad = (d: number) => (d * Math.PI) / 180;
+  /** A point on the hood (a: around it, 270 deg = the face; z: height), `out` units proud of it. */
+  const on = (a: number, z: number, out: number): V3 => {
+    const f = Math.sqrt(Math.max(0.04, 1 - ((z - HOOD_C[2]) / HOOD_R[2]) ** 2));
+    return [(HOOD_R[0] * f + out) * Math.cos(a), HOOD_C[1] + (HOOD_R[1] * f + out) * Math.sin(a), z];
+  };
+  const normalAt = (p: V3): V3 => norm([p[0] / HOOD_R[0] ** 2, (p[1] - HOOD_C[1]) / HOOD_R[1] ** 2, (p[2] - HOOD_C[2]) / HOOD_R[2] ** 2]);
+  const A0 = rad(212), Z0 = 75.3;
+  const centre = on(A0, Z0, 0.25);
+  const n0 = normalAt(centre);
+  // Tangent frame at the centre: e1 round the hood, e2 up it.
+  const e1 = norm(cross([0, 0, 1], n0));
+  const e2 = norm(cross(n0, e1));
+  const R = 3.1;
+  for (let k = 0; k < 5; k++) {
+    const th = rad(90 + k * 72 + 8);
+    const dir = norm(add(scale(e1, Math.cos(th)), scale(e2, Math.sin(th))));
+    const rows: V3[][] = [];
+    const STEPS = 7;
+    for (let i = 0; i <= STEPS; i++) {
+      const t = i / STEPS;
+      // Follow the hood: step along the tangent, then pull back onto the surface (plus the arm's own lift).
+      const flat = add(centre, scale(dir, R * t));
+      const back = sub(flat, scale(n0, 0.35 * t * t * R));
+      const n = normalAt(back);
+      const w = 0.85 * (1 - 0.8 * Math.pow(t, 1.3)) + 0.08;
+      const h = 0.55 * (1 - 0.7 * t) + 0.06;
+      const across = norm(cross(n, dir));
+      const c = add(back, scale(n, h * 0.55));
+      rows.push(ring(c, across, n, w, h, 10, 2.2));
+    }
+    b.surface(rows, {
+      paint: (i, j) => fixed(j >= 2 && j <= 3 ? (i % 2 ? PALE : CORAL) : j < 5 ? CORAL : CORAL2),
+      weight: () => W,
+      capEnd: fixed(CORAL),
+    });
+  }
+  // The middle: a low dome joining the arms.
+  b.surface(b.ellipsoidRows(add(centre, scale(n0, 0.25)), [1.15, 1.15, 0.55], n0, e1, 10, 5), { paint: (i) => fixed(i < 2 ? PALE : CORAL), weight: () => W, closed: true });
+  const g = b.geometry();
+  g.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 70), 60);
+  return g;
+}
+
 const BUILD: Record<string, () => THREE.BufferGeometry> = {
   "hat-wreath": wreath,
+  "hat-starfish": starfish,
   "hat-propeller": propellerCap,
   "hat-capybara": capybara,
   "hat-maxwell": maxwell,

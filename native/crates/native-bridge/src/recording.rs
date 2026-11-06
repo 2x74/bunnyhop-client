@@ -182,6 +182,7 @@ impl ReplayData {
                 "end" => 1,
                 "stage" => 2,
                 "checkpoint" => 3,
+                "anti-skip" => 4,
                 _ => return Err("invalid zone kind".into()),
             });
             w.0.push(z["track"].as_u64().unwrap_or(0) as u8);

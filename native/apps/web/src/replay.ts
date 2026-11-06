@@ -35,7 +35,7 @@
 //   timerRules   u8    start-zone rules the run was timed with (timer.ts TIMER_RULES_*; re-timed with them). Replays
 //                before v7 have no field and are rules 1 (the start zone as a box: leaving it in the air starts the
 //                run). Decoders that predate v7 reject v7 replays instead of re-timing them with rules 1.   [v7]
-//   zones        varint count, then per zone: u8 kind (0 start, 1 end, 2 stage, 3 checkpoint), u8 track,
+//   zones        varint count, then per zone: u8 kind (0 start, 1 end, 2 stage, 3 checkpoint, 4 anti-skip), u8 track,
 //                u8 index (stage/checkpoint number), f32 x3 mins, f32 x3 maxs                     [v2]
 //                v1: no track byte (track 0); u8 count, then per zone: u8 kind (0 start, 1 end),
 //                f32 x3 mins, f32 x3 maxs
@@ -62,6 +62,8 @@
 //   loadout      optional trailer after the cosmetics (absent = unknown, shown as the default carrot): u32 "BHLO",
 //                str8 packed cosmetic loadout (loadout.ts packLoadout: knife, finish, gloves, crown, the owner's hat,
 //                the bunny build and, from v0.0.29, the colourway as an 8th field that older readers never look at;
+//                from v0.0.38 the hilt skin as an 11th, absent for each knife's own hilt, and the gun camo as a
+//                12th, absent for no camo;
 //                v0.0.5 trailers also carried a pattern seed / wear, now ignored),
 //                so a replay or ghost shows the knife the run was played with. Same rules as the cosmetics trailer:
 //                no version bump (older decoders stop before it, including the cosmetics reader, which rewinds on
@@ -221,7 +223,7 @@ export function styleReplayProblem(h: ReplayHeader): string | null {
   }
   return null;
 }
-const ZONE_KIND_CODES: readonly ZoneKind[] = ["start", "end", "stage", "checkpoint"];
+const ZONE_KIND_CODES: readonly ZoneKind[] = ["start", "end", "stage", "checkpoint", "anti-skip"];
 export const FLAG_AUTOHOP = 1 << 0;
 const FLAG_STAMINA = 1 << 1;
 const FLAG_COUNTED = 1 << 2;

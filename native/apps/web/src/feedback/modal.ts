@@ -148,7 +148,7 @@ export function gameContext(fps: number | null): Record<string, unknown> {
     dpr: Math.round(devicePixelRatio * 100) / 100,
     gpu: gpuInfo(),
     fps,
-    settings: { sensitivity: p.sensitivity, fov: p.fov, rawInput: p.rawInput, resolutionScale: p.graphics.resolutionScale, menuBackground: p.graphics.menuBackground, potato: p.graphics.potato },
+    settings: { sensitivity: p.sensitivity, mYaw: p.mYaw, fov: p.fov, rawInput: p.rawInput, resolutionScale: p.graphics.resolutionScale, menuBackground: p.graphics.menuBackground, potato: p.graphics.potato },
     errors: recentErrors(),
   };
 }

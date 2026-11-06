@@ -34,7 +34,18 @@ inline double map_reference_distance(double level) {
 inline double map_distance_gain(double level, double distance) {
     if (!level) return 1;
     const double reference = map_reference_distance(level);
-    return distance <= reference ? 1 : reference / distance;
+    const double travelled = std::max(0., distance);
+    const double relative = travelled / reference * std::pow(10., (4 * travelled / 1200) / map_db_scale);
+    double gain = 1 / std::max(.1, relative);
+    if (gain > .5) {
+        const double power = level > 90 ? 2.5 + (level - 90) * (.8 - 2.5) / 50 : 2.5;
+        gain = 1 - .5 * std::pow(.5 / gain, power);
+    }
+    if (gain < .01) {
+        gain = .01 * (2 - relative * .01);
+        if (gain <= 0) gain = .001;
+    }
+    return gain;
 }
 
 inline std::array<float, 2>

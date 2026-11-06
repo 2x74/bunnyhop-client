@@ -8,7 +8,7 @@
 
 import { add, cross, norm, ring, scale, sub } from "../../player/bunny/builder";
 import type { V3 } from "../../player/bunny/rig";
-import { ACCENT, edgeWeight, fixed, LEAF, LEAF_DARK, type KnifeCtx } from "./ctx";
+import { ACCENT, edgeWeight, fixed, LEAF, LEAF_DARK, withHilt, type KnifeCtx } from "./ctx";
 import { tweak } from "./hold";
 import { attackFlavour, hump, idleSway, localXf, reducedMotion, rise } from "./bayonet";
 import { KMAT, PART, type KnifeDef } from "./types";
@@ -161,7 +161,7 @@ function build(k: KnifeCtx): void {
     const ry = [0.45, 0.55, 0.66, 0.6, 0.46];
     const cy = [0, 0.04, 0.12, 0.1, 0.04];
     const rows = zs.map((z, i) => ring([0, handleAt(Math.min(z, H1))[1] + cy[i], z], X, Y, rx[i], ry[i], fp ? 16 : 10, 2.6));
-    k.surface(rows, { paint: () => ACCENT, part: PART.guard, capStart: ACCENT, capEnd: ACCENT });
+    k.hilt("guard", () => k.surface(rows, { paint: () => ACCENT, part: PART.guard, capStart: ACCENT, capEnd: ACCENT, name: "bolster" }));
   }
   // --- Handle: a leaf cord wrap (diamonds in two greens, the cord rows proud, like bayonet.ts's wrapped grips), three
   //     shallow finger grooves on the edge side (the fingers' side).
@@ -185,12 +185,12 @@ function build(k: KnifeCtx): void {
       }
       rows.push(row);
     }
-    k.surface(rows, { paint: (i, kk) => (fp ? ((i + kk) % 2 ? LEAF : LEAF_DARK) : i % 2 ? LEAF : LEAF_DARK), part: PART.grip, capStart: LEAF_DARK, capEnd: LEAF_DARK });
+    k.hilt("wrap", () => k.surface(rows, { paint: (i, kk) => (fp ? ((i + kk) % 2 ? LEAF : LEAF_DARK) : i % 2 ? LEAF : LEAF_DARK), part: PART.grip, capStart: LEAF_DARK, capEnd: LEAF_DARK, name: "handle" }));
   }
   // --- Collar between the handle and the ring.
   {
     const rows = [RING_Z + RING_R - 0.08, H0 - 0.12, H0 + 0.05].map((z, i) => ring([0, 0, z], X, Y, [0.22, 0.32, 0.29][i], [0.3, 0.44, 0.4][i], fp ? 12 : 8));
-    k.surface(rows, { paint: () => ACCENT, part: PART.guard, capStart: ACCENT, capEnd: ACCENT });
+    k.hilt("fitting", () => k.surface(rows, { paint: () => ACCENT, part: PART.guard, capStart: ACCENT, capEnd: ACCENT, name: "collar" }));
   }
   // --- Finger ring: a smooth lacquered core, the carrot's leaves braided round it (two strands, first person).
   {
@@ -198,7 +198,7 @@ function build(k: KnifeCtx): void {
     const loopAt = (a: number): V3 => [0, Math.sin(a) * RING_R, RING_Z + Math.cos(a) * RING_R];
     const core: V3[] = [];
     for (let i = 0; i < n; i++) core.push(loopAt((i / n) * Math.PI * 2));
-    k.loop(core, fp ? RING_T * 0.62 : RING_T, fp ? 8 : 6, X, () => ACCENT, { part: PART.grip });
+    k.hilt("pommel", () => k.loop(core, fp ? RING_T * 0.62 : RING_T, fp ? 8 : 6, X, () => ACCENT, { part: PART.grip, name: "ring" }));
     if (fp)
       for (let sIdx = 0; sIdx < 2; sIdx++) {
         const path: V3[] = [];
@@ -209,7 +209,7 @@ function build(k: KnifeCtx): void {
           const tw = a * 5 + sIdx * Math.PI;
           path.push(add(c, add(scale(out, Math.cos(tw) * RING_T * 0.62), scale(X, Math.sin(tw) * RING_T * 0.62))));
         }
-        k.loop(path, RING_T * 0.42, 5, X, () => (sIdx ? LEAF : LEAF_DARK), { part: PART.grip });
+        k.hilt("pommel", () => k.loop(path, RING_T * 0.42, 5, X, () => (sIdx ? LEAF : LEAF_DARK), { part: PART.grip }));
       }
   }
   // --- Two leaves sprouting off the collar, curling back over the ring.
@@ -219,7 +219,7 @@ function build(k: KnifeCtx): void {
       const t = i / 6;
       path.push([0.05 * side * t, side * (0.24 + 0.85 * t - 0.12 * t * t), H0 - 0.08 - 0.25 * t - 0.32 * t * t]);
     }
-    k.leaf(path, (i) => 0.17 * Math.sin(((i + 0.35) / 6.7) * Math.PI) + 0.02, 0.05, X, () => (side > 0 ? LEAF : LEAF_DARK));
+    k.hilt("guard", () => k.leaf(path, (i) => 0.17 * Math.sin(((i + 0.35) / 6.7) * Math.PI) + 0.02, 0.05, X, () => (side > 0 ? LEAF : LEAF_DARK)));
   }
 }
 
@@ -228,8 +228,11 @@ const RING_C: V3 = [0, 0, RING_Z], RING_AXIS: V3 = [1, 0, 0];
 /** The draw's turn slides the knife this far along the ring's hole (off the back of the hand) at its middle. */
 const SLIDE = 0.4;
 
-export const karrotbit: KnifeDef = {
+export const karrotbit: KnifeDef = withHilt({
   id: "karrotbit",
+  // Bolster, the two-green cord handle (the lighter cord the second tone), the ring's collar and its lacquered core;
+  // the braided leaves round the ring and the two leaf tips stay the carrot's.
+  hilt: { bolster: "guard", handle: { role: "grip", alt: [LEAF] }, collar: "pommel", ring: "pommel" },
   cosmeticId: "knife-karrotbit",
   name: "Karrotbit",
   rarity: 3,
@@ -290,4 +293,4 @@ export const karrotbit: KnifeDef = {
     // Swings: the hook leads (a bigger wrist roll into the cut than a straight blade), a little twist on the stab.
     attackFlavour(action, t, s, { roll: 16, snap: 9, twist: 10 });
   },
-};
+});

@@ -27,11 +27,13 @@
 
 import * as THREE from "three";
 import type { PlayerUniforms } from "../../player/materials";
-import { finishStyle, gloveStyle, type CosmeticLoadout, type FinishKind, type GloveStyle } from "../../loadout";
+import { finishStyle, gloveStyle, hiltSkin, type CosmeticLoadout, type FinishKind, type GloveStyle, type HiltSkin } from "../../loadout";
 import { NOISE_GLSL } from "./glsl";
 import { FIN_ENV_LODS, FIN_ENV_UNIFORMS } from "./environment";
 import { GLOVE_FRAGMENT_PARS, GLOVE_VERTEX_MAIN, GLOVE_VERTEX_PARS } from "../gloves/glsl";
 import { COS_ENV_ON, COS_TIER, cosEnvUniform, DETAIL_PARS, KNIFE_PARS, type CosEnvUniform } from "./detail";
+import { HILT_FRAGMENT_PARS, HILT_KIND_CODE, HILT_VERTEX_MAIN, HILT_VERTEX_PARS } from "../hilts/glsl";
+export { HILT_FRAGMENT_ALBEDO, HILT_FRAGMENT_LIGHT } from "../hilts/glsl";
 export { GLOVE_FRAGMENT_ALBEDO, GLOVE_FRAGMENT_LIGHT } from "../gloves/glsl";
 
 /** `#define FINISH n` per design (0 = no finish code at all). */
@@ -55,13 +57,19 @@ export interface MaterialLook {
   finish: number;
   glove: boolean;
   detail?: boolean;
+  /** A hilt skin is on (`#define HILT`, viewmodel/hilts/glsl.ts; which skin is uniforms: setHiltUniforms). */
+  hilt?: boolean;
 }
 
 export const NO_LOOK: MaterialLook = Object.freeze({ finish: 0, glove: false });
 
-export const lookOf = (spec: FinishSpec | null, glove: GloveStyle | null, detail = false): MaterialLook => ({ finish: spec ? FINISH_CODE[spec.kind] : 0, glove: !!glove && glove.style !== "knit", detail });
+export const lookOf = (spec: FinishSpec | null, glove: GloveStyle | null, detail = false, hilt: HiltSkin | null = null): MaterialLook => {
+  const l: MaterialLook = { finish: spec ? FINISH_CODE[spec.kind] : 0, glove: !!glove && glove.style !== "knit", detail };
+  if (hilt) l.hilt = true;
+  return l;
+};
 
-export const sameLook = (a: MaterialLook, b: MaterialLook) => a.finish === b.finish && a.glove === b.glove && !!a.detail === !!b.detail;
+export const sameLook = (a: MaterialLook, b: MaterialLook) => a.finish === b.finish && a.glove === b.glove && !!a.detail === !!b.detail && !!a.hilt === !!b.hilt;
 
 /** Phones / tablets: 3 noise octaves instead of 5 and no glitter (plan §4.4 FINISH_LOD). */
 // globalThis: the API (cosmetics catalogue) typechecks this file without the DOM.
@@ -73,6 +81,7 @@ export function lookDefines(l: MaterialLook): Record<string, number> {
   if (l.finish > 0) d.FINISH = l.finish;
   if (l.glove || l.detail) d.GLOVE = 1;
   if (l.detail) d.VM_DETAIL = 1;
+  if (l.hilt) d.HILT = 1;
   if (l.finish > 0 && (FINISH_LOD || still) && !studio) d.FINISH_LOD = 1;
   return d;
 }
@@ -93,6 +102,10 @@ export interface FinishUniforms {
   uCosTier: THREE.IUniform<number>;
   uCosEnv: CosEnvUniform;
   uCosEnvOn: THREE.IUniform<number>;
+  /** Hilt skin (viewmodel/hilts/glsl.ts): per role (grip, guard, pommel) the main and second colour (linear) and the kind. */
+  uHiltA: THREE.IUniform<THREE.Color[]>;
+  uHiltB: THREE.IUniform<THREE.Color[]>;
+  uHiltM: THREE.IUniform<THREE.Vector3>;
 }
 
 /**
@@ -148,6 +161,9 @@ export function finishUniforms(): FinishUniforms {
     uCosTier: COS_TIER,
     uCosEnv: cosEnvUniform(),
     uCosEnvOn: COS_ENV_ON,
+    uHiltA: { value: [new THREE.Color(), new THREE.Color(), new THREE.Color()] },
+    uHiltB: { value: [new THREE.Color(), new THREE.Color(), new THREE.Color()] },
+    uHiltM: { value: new THREE.Vector3() },
   };
 }
 
@@ -163,16 +179,29 @@ export function setGloveUniforms(u: PlayerUniforms, g: GloveStyle | null): void 
   u.uGlove.value.forEach((c, i) => c.setHex(cs[i]));
 }
 
+/** A hilt skin (loadout.ts HILT_SKIN) onto a uniform block; null leaves them (no HILT program reads them). */
+export function setHiltUniforms(u: PlayerUniforms, s: HiltSkin | null): void {
+  if (!s) return;
+  const layers = [s.grip, s.guard, s.pommel];
+  layers.forEach((l, i) => {
+    u.uHiltA.value[i].setHex(l.color);
+    u.uHiltB.value[i].setHex(l.alt);
+  });
+  u.uHiltM.value.set(HILT_KIND_CODE[s.grip.kind], HILT_KIND_CODE[s.guard.kind], HILT_KIND_CODE[s.pommel.kind]);
+}
+
 /**
- * Finish + glove of a loadout onto a uniform block; returns the program variant the material needs (`detail`: the
+ * Finish + glove + hilt of a loadout onto a uniform block; returns the program variant the material needs (`detail`: the
  * first-person viewmodel, see MaterialLook).
  */
 export function applyLoadoutUniforms(u: PlayerUniforms, l: CosmeticLoadout | null, override?: FinishSpec | null, detail = false): MaterialLook {
   const spec = override !== undefined ? override : l ? specOf(l) : null;
   const glove = l ? gloveStyle(l.glove) : null;
+  const hilt = l ? hiltSkin(l.hilt) : null;
   setFinishUniforms(u, spec);
   setGloveUniforms(u, glove);
-  return lookOf(spec && spec.kind !== "none" ? spec : null, glove, detail);
+  setHiltUniforms(u, hilt);
+  return lookOf(spec && spec.kind !== "none" ? spec : null, glove, detail, hilt);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -180,30 +209,33 @@ export function applyLoadoutUniforms(u: PlayerUniforms, l: CosmeticLoadout | nul
 
 /** Vertex: declarations (before main). */
 export const VERTEX_PARS = /* glsl */ `
-#if defined(FINISH) || defined(GLOVE)
+#if defined(FINISH) || defined(GLOVE) || defined(HILT)
 attribute vec4 finishUV;
 #endif
 #ifdef FINISH
 varying vec4 vFin;
 #endif
-${GLOVE_VERTEX_PARS}`;
+${GLOVE_VERTEX_PARS}
+${HILT_VERTEX_PARS}`;
 
 /** Vertex: after vColor is set. Glove faces (accent code >= 16, gloves/paint.ts): colour slot + material. */
 export const VERTEX_MAIN = /* glsl */ `
 #ifdef FINISH
   vFin = finishUV;
 #endif
-${GLOVE_VERTEX_MAIN}`;
+${GLOVE_VERTEX_MAIN}
+${HILT_VERTEX_MAIN}`;
 
 /** Fragment: declarations + the finish recipes (FINISH 1..21) + the glove materials (GLOVE). */
 export const FRAGMENT_PARS = /* glsl */ `
 uniform float uCosTier;
-#if defined(FINISH) || defined(GLOVE)
+#if defined(FINISH) || defined(GLOVE) || defined(HILT)
 ${NOISE_GLSL}
 #endif
 ${DETAIL_PARS}
 ${GLOVE_FRAGMENT_PARS}
 ${KNIFE_PARS}
+${HILT_FRAGMENT_PARS}
 #ifdef FINISH
 varying vec4 vFin;
 uniform float uFinTime;

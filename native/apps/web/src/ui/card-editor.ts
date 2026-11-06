@@ -25,14 +25,13 @@ import { linkIcon } from "./marks";
 import { LINK_PLATFORMS, linkHint, NAME_COLORS, NAME_EFFECTS, parseHandle, PLATFORM_NAME, usesColor2, type LinkPlatform, type NameColorId, type NameEffect, type NameLook, type ProfileLinks } from "../creators";
 import { goalText } from "./loadout-view";
 import { nameAttrs } from "./marks";
-import { autoBadges, earnedLine, lockInfo, profileRanks, progressText, newDot, ownedCosmetics, shortGoal, ownedIds, type LockInfo } from "./unlocks";
+import { autoBadges, earnedLine, lockInfo, profileHolder, profileRanks, progressText, newDot, ownedCosmetics, shortGoal, ownedIds, type LockInfo } from "./unlocks";
 import { pastGoal } from "./unlock-text";
 import { NUMBER_ONE, rankColorOf, rankGroupById } from "../ranking";
-import { AVATAR_DECOS, CARD_BORDERS, CARD_EFFECTS, NAME_FONTS, type AvatarDecoId, type CardBorderId, type CardEffectId, type NameFontId } from "../supporter-looks";
-import { nameColorHex, peakOf } from "../creators";
-import { avatarEl, type SupporterLook } from "./card";
-import { cardLayers, SUPPORTER_FX } from "./card-fx";
-import { decorated } from "./avatar-deco";
+import { type AvatarDecoId, type CardBorderId, type CardEffectId, type NameFontId } from "../supporter-looks";
+import { peakOf } from "../creators";
+import { type SupporterLook } from "./card";
+import { borderChoices, cardEffectChoices, cardFxSwatch, COLOUR_CHOICES, DECO_CHOICES, EFFECT_CHOICES, FONT_CHOICES, nameSample, decoSwatch } from "./supporter-pickers";
 import { navigate } from "./nav";
 
 export const MAX_BADGES = 3;
@@ -118,7 +117,7 @@ export class Loadout {
     this.choice = { ...this.choice, ...patch };
     Object.assign(this.pending, patch);
     // Loadout items show at once (the preview stage and the game follow it); a refused save puts it back.
-    if (Object.keys(patch).some((k) => isLoadoutSlot(k) || k === "hat" || k === "body" || k === "hairColor" || k === "hairLength" || k === "knifePool")) this.syncLoadout();
+    if (Object.keys(patch).some((k) => isLoadoutSlot(k) || k === "camo" || k === "hat" || k === "body" || k === "hairColor" || k === "hairLength" || k === "knifePool")) this.syncLoadout();
     this.status = { kind: "saving", text: "Saving…" };
     this.emit();
     clearTimeout(this.timer);
@@ -214,6 +213,7 @@ export function cosmeticSwatch(c: CosmeticDef | null, slot: CosmeticSlot, label?
     }
     case "knife":
     case "finish":
+    case "hilt":
     case "glove":
       return loadoutSwatch(c, slot);
     default:
@@ -347,7 +347,7 @@ export function cardEditor(p: Profile, lo: Loadout, news: NewTracker, o: CardEdi
     if (st.kind === "saved") statusTimer = window.setTimeout(() => status.classList.add("fade"), 2200);
   }
 
-  const lockOf = (c: CosmeticDef) => lockInfo(c, p.level, p.progress, profileRanks(p), p.role);
+  const lockOf = (c: CosmeticDef) => lockInfo(c, p.level, p.progress, profileRanks(p), profileHolder(p));
 
   /**
    * Edit card → Name, Avatar, Effects: a supporter's looks (supporter-looks.ts). Each item shows on the card while
@@ -375,48 +375,34 @@ export function cardEditor(p: Profile, lo: Loadout, news: NewTracker, o: CardEdi
         pick: () => void supporter?.save({ [key]: value } as SupporterPatch),
         preview: () => o.onNamePreview?.({ [key]: value } as SupporterLook),
       });
-    const sample = (look: NameLook) => {
-      const a = nameAttrs(look, "#eef1f6", "Aa");
-      return h("span.pf-sw.pf-sw-name", { "aria-hidden": "true", ...a }, "Aa");
-    };
     const label = (t: string) => h("p.ce-label", null, t);
     const head = s ? [] : [h("p.ce-support", null, "Supporters can pick these. ", h("button.link-btn", { type: "button", onclick: () => navigate({ screen: "support" }) }, "Support bunnyhop.lol"))];
     if (which === "name") {
       const dot = (hex: string) => h("span.pf-sw.pf-sw-dot", { "aria-hidden": "true", style: `--sw:${hex}` });
-      const colours: { id: NameColorId | null; name: string; hex: string }[] = [{ id: null, name: "White", hex: "#eef1f6" }, ...NAME_COLORS];
-      const effects: { id: NameEffect | null; name: string }[] = [{ id: null, name: "Plain" }, ...NAME_EFFECTS];
-      const fonts: { id: NameFontId | null; name: string }[] = [{ id: null, name: "Default" }, ...NAME_FONTS];
       const second = s && usesColor2(cur.nameEffect)
-        ? [label("Second colour"), grid([{ id: null as NameColorId | null, name: "Automatic", hex: "" }, ...NAME_COLORS].map((c) => item(c.id ? dot(c.hex) : sample({ ...cur, nameColor2: null }), c.name, "nameColor2", c.id, (cur.nameColor2 ?? null) === c.id)))]
+        ? [label("Second colour"), grid([{ id: null as NameColorId | null, name: "Automatic", hex: "" }, ...NAME_COLORS].map((c) => item(c.id ? dot(c.hex) : nameSample({ ...cur, nameColor2: null }), c.name, "nameColor2", c.id, (cur.nameColor2 ?? null) === c.id)))]
         : [];
       return [
         ...head,
         label("Colour"),
-        grid(colours.map((c) => item(dot(c.hex), c.name, "nameColor", c.id, (cur.nameColor ?? null) === c.id))),
+        grid(COLOUR_CHOICES.map((c) => item(dot(c.hex), c.name, "nameColor", c.id, (cur.nameColor ?? null) === c.id))),
         label("Effect"),
-        grid(effects.map((e) => item(sample({ ...cur, nameEffect: e.id }), e.name, "nameEffect", e.id, (cur.nameEffect ?? null) === e.id))),
+        grid(EFFECT_CHOICES.map((e) => item(nameSample({ ...cur, nameEffect: e.id }), e.name, "nameEffect", e.id, (cur.nameEffect ?? null) === e.id))),
         ...second,
         label("Font"),
-        grid(fonts.map((f) => item(sample({ ...cur, nameFont: f.id }), f.name, "nameFont", f.id, (cur.nameFont ?? null) === f.id))),
+        grid(FONT_CHOICES.map((f) => item(nameSample({ ...cur, nameFont: f.id }), f.name, "nameFont", f.id, (cur.nameFont ?? null) === f.id))),
       ];
     }
-    if (which === "avatar") {
-      const av = (id: AvatarDecoId | null) => h("span.pf-sw.pf-sw-av", { "aria-hidden": "true" }, decorated(avatarEl(p.player, "pf-sw-av-img"), { avatarDeco: id, nameColor: cur.nameColor }, { animate: true }));
-      const decos: { id: AvatarDecoId | null; name: string }[] = [{ id: null, name: "None" }, ...AVATAR_DECOS];
-      return [...head, label("Decoration"), grid(decos.map((d) => item(av(d.id), d.name, "avatarDeco", d.id, (cur.avatarDeco ?? null) === d.id)), "ce-grid-name.ce-grid-deco")];
-    }
+    if (which === "avatar")
+      return [...head, label("Decoration"), grid(DECO_CHOICES.map((d) => item(decoSwatch(p.player, d.id, cur.nameColor), d.name, "avatarDeco", d.id, (cur.avatarDeco ?? null) === d.id)), "ce-grid-name.ce-grid-deco")];
     // Effects: with a peak (T7+), "none" keeps the tier's own frame light / motes (supporter-looks.ts cardLayerPlan).
     const peak = peakOf(p.player.special);
-    const sx = nameColorHex(cur.nameColor) ?? SUPPORTER_FX;
-    const fx = (border: CardBorderId | null, effect: CardEffectId | null) => fxSwatch(cardLayers(peak, { cardBorder: border, cardEffect: effect, nameColor: cur.nameColor }), effect ? EFFECT_ICON[effect](sx) : null);
-    const borders: { id: CardBorderId | null; name: string }[] = [{ id: null, name: peak && peak >= 8 ? "Your tier's" : "None" }, ...CARD_BORDERS];
-    const cardFx: { id: CardEffectId | null; name: string }[] = [{ id: null, name: peak && peak >= 9 ? "Your tier's" : "None" }, ...CARD_EFFECTS];
     return [
       ...head,
       label("Border"),
-      grid(borders.map((b) => item(fx(b.id, null), b.name, "cardBorder", b.id, (cur.cardBorder ?? null) === b.id))),
+      grid(borderChoices(peak).map((b) => item(cardFxSwatch(peak, b.id, null, cur.nameColor), b.name, "cardBorder", b.id, (cur.cardBorder ?? null) === b.id))),
       label("Effect"),
-      grid(cardFx.map((e) => item(fx(null, e.id), e.name, "cardEffect", e.id, (cur.cardEffect ?? null) === e.id))),
+      grid(cardEffectChoices(peak).map((e) => item(cardFxSwatch(peak, null, e.id, cur.nameColor), e.name, "cardEffect", e.id, (cur.cardEffect ?? null) === e.id))),
     ];
   }
 
@@ -555,22 +541,6 @@ type SupporterPatch = {
   cardEffect?: CardEffectId | null;
   showBadge?: boolean;
   showOnBoard?: boolean;
-};
-
-/**
- * A small card in the picker: a border runs in its frame band as on the card; an effect is too fine to read at this
- * size, so it shows a still drawing of itself (EFFECT_ICON) in the player's colour.
- */
-function fxSwatch(layers: ReturnType<typeof cardLayers>, icon: string | null): HTMLElement {
-  return h(`span.pf-sw.pf-sw-fx${layers.cls}`, { "aria-hidden": "true", style: layers.style }, layers.aura, h("span.pf-sw-fx-in", { html: icon ?? undefined }, ...(icon ? [] : layers.inner)));
-}
-
-/** The effects drawn still at swatch size (38 x 22), in colour `c`. */
-const EFFECT_ICON: Record<CardEffectId, (c: string) => string> = {
-  hops: (c) => `<svg viewBox="0 0 38 22"><path d="M1 19Q7 5 13 19Q19 5 25 19Q31 5 37 19" fill="none" stroke="${c}" stroke-width="1.4" stroke-dasharray="0.5 2.6" stroke-linecap="round"/></svg>`,
-  embers: (c) => `<svg viewBox="0 0 38 22"><g fill="${c}"><circle cx="7" cy="17" r="1.3"/><circle cx="16" cy="11" r="1"/><circle cx="25" cy="15" r="1.4"/><circle cx="31" cy="7" r="0.9"/><circle cx="11" cy="5" r="0.7"/></g><g fill="#ffe2b0"><circle cx="20" cy="19" r="0.9"/><circle cx="34" cy="16" r="0.8"/></g></svg>`,
-  stars: (c) => `<svg viewBox="0 0 38 22"><path d="M9 4q.5 3 3 3.4q-2.5.5-3 3q-.5-2.5-3-3q2.5-.4 3-3.4zM27 11q.4 2.2 2.4 2.6q-2 .4-2.4 2.4q-.4-2-2.4-2.4q2-.4 2.4-2.6z" fill="${c}"/><path d="M19 3q.3 1.5 1.6 1.8q-1.3.3-1.6 1.6q-.3-1.3-1.6-1.6q1.3-.3 1.6-1.8zM14 15q.3 1.4 1.4 1.6q-1.1.3-1.4 1.4q-.3-1.1-1.4-1.4q1.1-.2 1.4-1.6z" fill="#fff"/></svg>`,
-  aurora: (c) => `<svg viewBox="0 0 38 22"><defs><radialGradient id="au1"><stop offset="0" stop-color="${c}" stop-opacity=".9"/><stop offset="1" stop-color="${c}" stop-opacity="0"/></radialGradient><radialGradient id="au2"><stop offset="0" stop-color="#9a6bff" stop-opacity=".9"/><stop offset="1" stop-color="#9a6bff" stop-opacity="0"/></radialGradient></defs><ellipse cx="12" cy="5" rx="12" ry="7" fill="url(#au1)"/><ellipse cx="27" cy="4" rx="11" ry="6" fill="url(#au2)"/></svg>`,
 };
 
 interface SupporterEditor {

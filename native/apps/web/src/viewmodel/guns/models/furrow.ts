@@ -11,12 +11,13 @@ import { PART } from "../../knives/types";
 import type { KnifeCtx } from "../../knives/ctx";
 import { ball, box, groove, guard, lathe, pins, plate, rod, slab, trigger, type P2 } from "../shapes";
 import { gunPaint as fixed } from "../material";
+import { coat } from "../camo-zones";
 import type { V3 } from "../../../player/bunny/rig";
 import type { GunDef, SilencerSpec } from "../types";
 
-const RECV = fixed(0x3f4436), RECV_DARK = fixed(0x2a2e25, "dark"), WOOD = fixed(0x9a6a3e, "wood"), WOOD_DARK = fixed(0x744c2a, "wood"), TWINE = fixed(0xd8c08a, "grip");
+const RECV = coat(fixed(0x3f4436), "upper"), RECV_DARK = fixed(0x2a2e25, "dark"), WOOD = coat(fixed(0x9a6a3e, "wood"), "lower"), WOOD_DARK = coat(fixed(0x744c2a, "wood"), "lower", 0.82), TWINE = fixed(0xd8c08a, "grip");
 const STEEL = fixed(0x3a3f47, "dark"), STEEL_LIGHT = fixed(0x707782, "metal"), BORE = fixed(0x101114), CARROT = fixed(0xff7a1a), CARROT_DARK = fixed(0xd65e14), SPROUT = fixed(0x58c64a);
-const SEAM = fixed(0x1e211a, "dark"), RIVET = fixed(0x8a9080, "metal"), LIP = fixed(0x6e785c);
+const SEAM = fixed(0x1e211a, "dark"), RIVET = fixed(0x8a9080, "metal"), LIP = coat(fixed(0x6e785c), "upper", 1.2);
 /**
  * The trigger's pivot (top of its blade, gun-local): tight in front of the grip's thin upper part, where the firing
  * index's pad rests on it (v0.0.37: guns/hold.ts solveTriggerIndex; the bunny's short fingers on a deep grip couldn't
@@ -146,7 +147,7 @@ export const furrow: GunDef = {
 // Original design: a matte moss-olive tube, a walnut collar of eight flats where the hand turns it (each turn reads),
 // two twine bands like the handguard's, a dark steel nose. It screws onto the muzzle device's front face.
 
-const CAN = fixed(0x4a5638), CAN_DARK = fixed(0x343d28, "dark");
+const CAN = coat(fixed(0x4a5638), "lower"), CAN_DARK = fixed(0x343d28, "dark");
 /** Where the can's rear face seats (the muzzle device's front), the thread's length, the can's length and radius. */
 const SIL_SEAT = 20.5, SIL_THREAD = 0.5, SIL_L = 6.2, SIL_R = 0.66;
 

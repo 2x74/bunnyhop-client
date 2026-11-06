@@ -160,6 +160,11 @@ function overlaps(m: Movement, z: Zone): [number, number][] | null {
   return hit ? [hit] : [];
 }
 
+/** Any accepted movement segment touches a zone, including a complete pass through it. */
+export function crossesZone(m: Movement, z: Zone): boolean {
+  return playerInZone(m.to, m.crouched, z) || (overlaps(m, z)?.length ?? 0) > 0;
+}
+
 /**
  * Finish: the first phase of the tick at which the box touched one of `zones` that contains the end point (a zone only
  * passed through during the tick isn't the one the timer finished in). Falls back to 1, the end of the tick.

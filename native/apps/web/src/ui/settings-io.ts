@@ -18,6 +18,8 @@
 // allows). Anything else is reported, not applied, and keys this build doesn't know are listed as skipped. Old shapes go
 // through the same migration as stored prefs first. Keys missing from the document keep their current value.
 
+import { sanitizeAliases, sanitizeCmdBinds } from "../console/bind-store";
+import { M_YAW_RANGE } from "../sens-convert";
 import { DEFAULT_PREFS, migratePrefs, type Prefs } from "./settings";
 import { importMapLooks } from "../map-look";
 import { PAINT_COLORS } from "../paint/prefs";
@@ -50,6 +52,9 @@ export function buildSettingsDoc(p: Prefs, o: { at?: number; app?: string } = {}
   const settings = pick(DEFAULT_PREFS, p) as SettingsDoc["settings"];
   // Keyed by map name, so not in the defaults' keys: carried as they are (map-look.ts).
   settings.mapLooks = clone(p.mapLooks ?? {});
+  // Command binds and aliases (console/bind-store.ts): keyed by key code / alias name, carried whole.
+  settings.cmdBinds = clone(p.cmdBinds ?? {});
+  settings.aliases = clone(p.aliases ?? {});
   return { format: FORMAT, version: FORMAT_VERSION, exported: new Date(o.at ?? Date.now()).toISOString(), ...(o.app ? { app: o.app } : {}), settings };
 }
 
@@ -161,6 +166,8 @@ const RULES: [string, Rule][] = [
   ["paint.color", { oneOf: PAINT_COLORS.map(([color]) => color) }],
   ["paint.size", { oneOf: ["small", "medium", "large"] }],
   ["sensitivity", { range: [0.01, 100] }],
+  ["mYaw", { range: [...M_YAW_RANGE] }],
+  ["mPitch", { range: [...M_YAW_RANGE] }],
   ["verticalSensitivity", { range: [0.01, 100] }],
   ["dpi", { range: [50, 32000], int: true }],
   ["fov", { range: [75, 120] }],
@@ -289,9 +296,27 @@ export function planSettingsImport(doc: SettingsDoc, current: Prefs): ImportPlan
   // Per-map looks (map-look.ts) merge by map and field: what the file doesn't mention stays mine.
   const looks = importMapLooks(current.mapLooks ?? {}, raw.mapLooks);
   delete raw.mapLooks;
+  // Command binds and aliases: a file that has them replaces mine whole (they go with its binds); none: mine stay.
+  const keyed = { cmdBinds: "cmdBinds" in raw ? sanitizeCmdBinds(raw.cmdBinds) : null, aliases: "aliases" in raw ? sanitizeAliases(raw.aliases) : null };
+  delete raw.cmdBinds;
+  delete raw.aliases;
   walk(DEFAULT_PREFS as unknown as Record<string, unknown>, raw, next as unknown as Record<string, unknown>, "", plan);
   next.mapLooks = looks.next;
   plan.invalid.push(...looks.invalid);
+  for (const k of ["cmdBinds", "aliases"] as const) {
+    const v = keyed[k];
+    if (!v) continue;
+    next[k] = v;
+    plan.applied.push(k);
+    if (JSON.stringify(current[k] ?? {}) !== JSON.stringify(v)) plan.changed.push(k);
+  }
+  // A key in the file's command binds leaves the actions; without command binds in the file, a key it binds to an action
+  // leaves mine. One key, one binding, as when bound by hand.
+  if (!keyed.cmdBinds && next.cmdBinds) {
+    const bound = new Set(Object.values(next.binds).flat());
+    next.cmdBinds = Object.fromEntries(Object.entries(next.cmdBinds).filter(([c]) => !bound.has(c)));
+  }
+  for (const code of Object.keys(next.cmdBinds ?? {})) for (const a of Object.keys(next.binds) as (keyof Prefs["binds"])[]) next.binds[a] = next.binds[a].filter((c) => c !== code);
   // Compared as {map, field}, not by splitting the path: map names can have dots.
   for (const { map, field } of looks.entries) {
     const path = `mapLooks.${map}.${field}`;

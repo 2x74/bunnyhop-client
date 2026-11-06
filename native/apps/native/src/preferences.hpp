@@ -8,6 +8,9 @@ namespace native {
 // Built from validated settings when they change. JSON remains the persisted/menu form.
 struct Preferences {
     double sensitivity;
+    double m_yaw;
+    double m_pitch;
+    int show_pos;
     double vertical_sensitivity;
     bool separate_vertical;
     bool invert_y;

@@ -34,6 +34,8 @@ export const PROFILE_NAME_MAX = 24;
 /** Prefs a profile leaves alone (dotted paths into Prefs). See the header. */
 export const PROFILE_EXCLUDES: readonly string[] = [
   "sensitivity",
+  "mYaw",
+  "mPitch",
   "verticalSensitivityEnabled",
   "verticalSensitivity",
   "dpi",

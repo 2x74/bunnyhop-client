@@ -47,6 +47,15 @@ export const COLOURWAYS: Record<string, Colourway> = {
   "outfit-highroller": { hoodie: 0x0f5a3a, trim: 0xe0b13a, pants: 0x15161a, pantsTrim: 0xe0b13a, shoe: 0xf3efe2, face: 0x06100b, glove: 0x15161a, detail: 0xffe7a3, accent: 0xffcf4a },
   // Supporter: Borealis. Night-sky navy hoodie and pants, aurora-green trim, violet stripes, a green glow.
   "outfit-borealis": { hoodie: 0x101a33, trim: 0x3ff0a0, pants: 0x0b1124, pantsTrim: 0x9a6bff, shoe: 0xe8f6ff, face: 0x05070d, glove: 0x14203d, detail: 0xb8ffe0, accent: 0x5dffb0 },
+  // Supporter: Tidepool (v0.0.38). Rock-pool teal hoodie, coral trim and stripes, sea-glass pants, pearl shoes, a
+  // sea-glass glow.
+  "outfit-tidepool": { hoodie: 0x2f8f86, trim: 0xff7f6e, pants: 0x1b4a4a, pantsTrim: 0xff7f6e, shoe: 0xf6efe4, face: 0x071716, glove: 0x5fc8b8, detail: 0xfff4e6, accent: 0x9ff2e2 },
+  // Role sets (progression.ts ROLE_SETS, v0.0.38). Lookout (moderators): storm navy, hi-vis lime trim and visor,
+  // reflective silver stripes. Workbench (Contributor): ink canvas, the badge's teal trim and glow, brass stripes.
+  // Keyholder (admins): oxblood hoodie, polished silver trim and stripes, a cold white glow.
+  "outfit-lookout": { hoodie: 0x1b2740, trim: 0xc8f53a, pants: 0x121a2b, pantsTrim: 0xd8dee8, shoe: 0xf2f4f7, face: 0x070a12, glove: 0x141a26, detail: 0xd8dee8, accent: 0xc8f53a },
+  "outfit-workbench": { hoodie: 0x2b3448, trim: 0x3fd4c6, pants: 0x1a2030, pantsTrim: 0xc9a24a, shoe: 0xefe8d8, face: 0x0e1428, glove: 0x2b3448, detail: 0xf1e9d6, accent: 0x3fd4c6 },
+  "outfit-keyholder": { hoodie: 0x5a1420, trim: 0xcfd6e0, pants: 0x1c0d12, pantsTrim: 0xcfd6e0, shoe: 0xf3f1ee, face: 0x0d0507, glove: 0x3a0c14, detail: 0xffffff, accent: 0xe8edf3 },
   "outfit-geode": { hoodie: 0x1d6b74, trim: 0x7a5ce8, pants: 0x23232e, pantsTrim: 0x7a5ce8, shoe: 0xe6fbf8, face: 0x081417, glove: 0x23232e, detail: 0xd6fff8, accent: 0x5ff2df },
   // Batch 1 (progression.ts, research/PROGRESSION-BATCH1.md), earned by playing.
   // Home Turf: clover-green hoodie, buttercup ears and visor, soil-brown pants.

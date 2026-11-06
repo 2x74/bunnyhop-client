@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.8.0 — Native (Phase 1 draft)
+
+Not released. This draft records the parity work started against the interim v0.0.38 snapshot; final content and
+release notes will be updated after the frozen web sync.
+
+**Ranked and replays**
+- Physics v26 and timer rules 5, including the new map fixes and ordered checkpoint rules. Existing replays keep
+  their recorded physics version.
+- Route guide can hide its selected ghost while keeping the route and takeoff boxes; HUD comparisons still count it.
+
+**Controls and console**
+- The Source-style console accepts the web config format, binds, aliases, command chains and chat commands. The
+  native panel follows the game's own menu styling.
+- Hold-jump toggle, Crouch jump, mouse yaw/pitch scaling and the three `cl_showpos` modes are available.
+- `!landing` opens the landing predictor setting; landing prediction is off by default.
+
+**Native performance and windowing**
+- Ghost actor animation reuses pose buffers and caches animation data. Three-ghost frame-time samples improved by
+  39–44% in ThrowTop's benchmark; pose identity stays unchanged.
+- Windows borderless windows no longer retain the title bar or show the original 1280×720 WebView seam.
+
+Phase 1 still needs the frozen web content pass, including knife part bones, hilt and gun-camo rendering, the final
+landing marker shape, role visibility, and the two-handed gun wrist pose. See `/tmp/bh-0038/native-report.md`.
+
 ## v0.7.3 — Native
 
 Update from Settings → Updates: press Update, then Restart to update. Your settings, replays and maps are kept.

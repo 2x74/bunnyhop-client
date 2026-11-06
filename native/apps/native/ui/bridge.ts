@@ -90,6 +90,7 @@ export type MenuMessage =
       knifePick?: number;
     }
   | { type: "settings"; patch: SettingsPatch }
+  | { type: "consoleAction"; action: string; down: boolean }
   | { type: "window"; action: "center" | "minimize" | "maximize" | "toggleFullscreen" }
   /** The HUD colours and element styles resolved from Custom CSS (custom-css/hud-theme.ts). */
   | { type: "hudTheme"; theme: import("./custom-css/hud-theme").HudTheme }
@@ -215,6 +216,8 @@ export const NATIVE_BIND_ACTIONS = [
   "left",
   "right",
   "jump",
+  "jumpToggle",
+  "crouchJump",
   "duck",
   "use",
   "restart",
@@ -259,6 +262,7 @@ export const NATIVE_BIND_ACTIONS = [
   "flashlight",
   "chat",
   "commandChat",
+  "console",
   "scoreboard",
   "spectatorNext",
   "spectatorPrevious",
@@ -341,6 +345,12 @@ export interface NativeAudioState {
   error: string;
 }
 export interface NativeSettings {
+  cmdBinds: Record<string, string>;
+  aliases: Record<string, string>;
+  landing: import("../../web/src/landing/prefs").LandingPrefs;
+  mYaw: number;
+  mPitch: number;
+  showPos: number;
   mouseDiagnostics: boolean;
   inputBackend: "auto" | "sdl" | "raw";
   windowMode: WindowMode;
@@ -751,6 +761,12 @@ function defaultSettings(): NativeSettings {
   const crosshair = web.crosshair;
   const trainer = web.hud.strafeTrainer;
   return {
+    cmdBinds: web.cmdBinds ?? {},
+    aliases: web.aliases ?? {},
+    landing: { ...web.landing },
+    mYaw: web.mYaw,
+    mPitch: web.mPitch,
+    showPos: web.hud.showPos,
     mouseDiagnostics: web.inputStats,
     inputBackend: "auto",
     capturePbScreenshots: false,
@@ -1024,6 +1040,8 @@ export function settingsPatch(value: unknown): Partial<NativeSettings> {
     ["musicVolume", 0, 1],
     ["uiVolume", 0, 1],
     ["sensitivity", 0.01, 100],
+    ["mYaw", 0.001, 1],
+    ["mPitch", 0.001, 1],
     ["verticalSensitivity", 0.01, 100],
     ["fov", 60, 130],
     ["volume", 0, 1],
@@ -1043,6 +1061,36 @@ export function settingsPatch(value: unknown): Partial<NativeSettings> {
     (input.fpsLimit === 0 || (input.fpsLimit >= 30 && input.fpsLimit <= 1000))
   )
     out.fpsLimit = input.fpsLimit;
+  if (input.cmdBinds && typeof input.cmdBinds === "object" && !Array.isArray(input.cmdBinds)) {
+    const entries = Object.entries(input.cmdBinds as Record<string, unknown>);
+    if (
+      entries.length <= 512 &&
+      entries.every(([code, command]) => nativeKeyCode(code) && typeof command === "string" && command.length <= 2048)
+    )
+      out.cmdBinds = Object.fromEntries(entries);
+  }
+  if (input.aliases && typeof input.aliases === "object" && !Array.isArray(input.aliases)) {
+    const entries = Object.entries(input.aliases as Record<string, unknown>);
+    if (
+      entries.length <= 128 &&
+      entries.every(
+        ([name, text]) => /^[a-z0-9_+-]{1,32}$/i.test(name) && typeof text === "string" && text.length <= 2048,
+      )
+    )
+      out.aliases = Object.fromEntries(entries);
+  }
+  if (input.landing && typeof input.landing === "object" && !Array.isArray(input.landing)) {
+    const landing = input.landing as Record<string, unknown>;
+    if (
+      ["off", "practice", "always"].includes(String(landing.mode)) &&
+      typeof landing.arc === "boolean" &&
+      typeof landing.color === "string" &&
+      /^#[0-9a-f]{6}$/i.test(landing.color)
+    )
+      out.landing = { mode: landing.mode, arc: landing.arc, color: landing.color };
+  }
+  if (Number.isInteger(input.showPos) && Number(input.showPos) >= 0 && Number(input.showPos) <= 2)
+    out.showPos = input.showPos;
   for (const key of [
     "mouseDiagnostics",
     "capturePbScreenshots",

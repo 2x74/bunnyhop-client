@@ -350,7 +350,65 @@ const bune: StyleFn = h => {
   digits(h, { seamless: true, creases: false, paint: q => q.i === 1 || q.bn < -.35 ? P(B.fingers, MAT.rubber) : P(B.base, MAT.plate) });
 };
 
-const STYLES: Record<Exclude<GloveStyleId, "knit">, StyleFn> = { sport, driver, wraps, moto, specialist, paws, garden, plush, bune };
+/** Dress (gloves/fp.ts dress): smooth leather, the three points on the back, the turned cuff and its button. */
+const dress: StyleFn = (h) => {
+  const L = h.palmL;
+  palm(h, { rows: [-0.3], paint: (q) => (q.s < -0.3 ? P(B.strap, MAT.leather) : P(B.base, MAT.leather)), wear: (q) => palmWear(h)(q) * 0.5 });
+  digits(h, { paint: (q, d) => P(d === 2 ? B.base : B.fingers, MAT.leather), wear: (q) => digitWear(q) * 0.5 });
+  for (const a of [-0.36, 0, 0.36]) {
+    const path: V3[] = [0.1, L * 0.35, L * 0.65].map((s, i) => backPoint(h, s, a * (1 + i * 0.12), 0.03));
+    strip(h.b, path, () => 0.07, 0.03, () => back(h), P(B.tips, MAT.leather), () => [[h.hand, 1]], 0.2);
+  }
+  handBand(h, [-0.55, -0.45, -0.15, -0.05], (j) => (j === 0 || j === 3 ? 0.06 : 0.14), P(B.strap, MAT.leather));
+  dome(h.b, backPoint(h, -0.3, -0.6, 0.12), back(h), h.ax, 0.18, 0.18, 0.1, P(B.detail, MAT.metal), [[h.hand, 1]], 6);
+};
+
+/** Aviator (gloves/fp.ts aviator): leather, the knuckle panel, the flared gauntlet, its fleece roll and wrist strap. */
+const aviator: StyleFn = (h) => {
+  const L = h.palmL;
+  palm(h, {
+    rows: [L * 0.56],
+    paint: (q) => (q.bn > 0.38 && q.s > L * 0.56 ? P(B.fingers, MAT.leather) : P(B.base, MAT.leather)),
+    bulge: (q) => (q.bn > 0.38 && q.s > L * 0.56 ? 0.07 : 0),
+    wear: palmWear(h),
+  });
+  digits(h, { paint: () => P(B.base, MAT.leather), wear: digitWear });
+  cuff(h, [
+    [-2.5, 3.3],
+    [-2.35, 3.42],
+    [-1.4, 3.1],
+    [-0.5, 2.7],
+    [0.2, 2.42],
+    [0.45, 2.2],
+  ], P(B.base, MAT.leather));
+  cuff(h, [
+    [-2.78, 2.9],
+    [-2.72, 3.4],
+    [-2.55, 3.62],
+    [-2.36, 3.52],
+    [-2.25, 3.36],
+  ], P(B.strap, MAT.fuzz), (j, a) => (j > 0 && j < 4 ? 0.06 * Math.sin(a * 9 + j * 1.7) : 0));
+  cuff(h, [
+    [-0.45, 2.6],
+    [-0.4, 2.8],
+    [0.0, 2.72],
+    [0.05, 2.52],
+  ], P(B.tips, MAT.leather));
+};
+
+/** Flip Mitts (gloves/fp.ts mitts): knit, bare paw tips, the flap folded over the back, its button, a ribbed cuff. */
+const mitts: StyleFn = (h) => {
+  const L = h.palmL;
+  const KN = P(B.base, MAT.knit);
+  palm(h, { seamless: true, paint: () => KN, wear: palmWear(h) });
+  digits(h, { seamless: true, paint: (q) => (q.i >= 2 ? P(B.paw, MAT.fuzz) : KN), bulge: (q) => (q.i === 1 ? 0.06 : 0) });
+  const back = (k: number) => smoothstep(0.05, 0.55, Math.sin((k / 12) * Math.PI * 2) * (dot(h.nAx, h.palmN) > 0 ? -1 : 1));
+  handBand(h, [L * 0.15, L * 0.25, L * 0.5, L * 0.8, L * 0.9], (j, k) => 0.015 + [0.02, 0.3, 0.42, 0.32, 0.04][j] * back(k), P(B.fingers, MAT.knit));
+  dome(h.b, backPoint(h, L * 0.25, 0, 0.3), scale(h.palmN, -1), h.ax, 0.22, 0.22, 0.12, P(B.detail, MAT.metal), [[h.hand, 1]], 6);
+  handBand(h, [-0.55, -0.45, 0.25, 0.35], (j) => (j === 0 || j === 3 ? 0.06 : 0.15), P(B.strap, MAT.knit));
+};
+
+const STYLES: Record<Exclude<GloveStyleId, "knit">, StyleFn> = { sport, driver, wraps, moto, specialist, paws, garden, plush, bune, dress, aviator, mitts };
 
 /** The original knit glove (palette glove slot), exactly as player/bunny/mesh.ts always built it. */
 function knit(h: TpHand): void {

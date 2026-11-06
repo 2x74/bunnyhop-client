@@ -1,5 +1,5 @@
 // Mouse/keyboard input mapped to Source-style user commands.
-// Sensitivity matches CS:S: degrees = counts * sensitivity * m_yaw (0.022).
+// Sensitivity matches CS:S: degrees = counts * sensitivity * m_yaw (0.022 by default; Settings → Mouse & view → m_yaw).
 //
 // Binds are KeyboardEvent.code strings plus mouse pseudo-codes: Mouse1 and up (buttons, Source's names: binds.ts mouseCode),
 // MWheelUp / MWheelDown, and MouseWheel (either direction). Wheel binds pulse for one tick,
@@ -19,6 +19,8 @@ import { countedYaw, norm360, YAW_SET_RAW, YAW_SET_SENSITIVITY, YAW_SET_SPAWN, Y
 import { DEFAULT_TURN_SPEED, IN_LEFT, IN_RIGHT, IN_TURN_FAST, turnDelta, type TurnSpeed } from "./turn-binds";
 import { resolveNullBinds } from "./null-binds";
 import { WRelease, type WReleaseContext } from "./w-release";
+import { keyForCode } from "./console/names";
+import { mixesMoveAndTurn, MOVE_TURN_REFUSAL, runPress, runRelease, type Aliases, type ChainOps } from "./console/bind-run";
 
 /**
  * Whether `unadjustedMovement` really turns raw input on here (only for the diagnostics label): Chromium does (Windows,
@@ -119,10 +121,15 @@ export const ACTION_BITS: Partial<Record<Action, number>> = {
   right: IN_MOVERIGHT,
   jump: IN_JUMP,
   duck: IN_DUCK,
+  /** Crouch jump: one key held = jump and duck held, exactly as both keys pressed together. */
+  crouchJump: IN_JUMP | IN_DUCK,
   use: IN_USE,
 };
 
 export { DEFAULT_BINDS } from "./binds";
+
+/** The input experiment's sampler sees Hold jump (toggle) as a key with this code (never a KeyboardEvent.code). */
+export const JUMP_TOGGLE_CODE = "+jump_toggle";
 
 /** Key events aimed at a text input / textarea / contenteditable (not game input). */
 export function isTextField(t: EventTarget | null): boolean {
@@ -226,6 +233,11 @@ export class Input {
     return this.sampler?.enqueue(payload, eventTime, arrivalTime) ?? true;
   }
   private releaseCode(code: string, e: Event): void {
+    const bound = this.cmdHeld.get(code);
+    if (bound !== undefined) {
+      this.cmdHeld.delete(code);
+      this.runChain(code, e, (ops) => runRelease(bound, this.aliases, ops));
+    }
     this.untilKeyup.delete(code);
     if (this.timedActive && this.heldCodes.has(code) && (this.codeBits.get(code) ?? 0) & TIMED_KEY_BITS) this.ti.addEdge(this.ti.stamp(e.timeStamp, performance.now()), code, false);
     this.heldCodes.delete(code);
@@ -405,6 +417,30 @@ export class Input {
   private give = 0;
   private heldCodes = new Set<string>();
   private wheelBits = 0;
+  /**
+   * Hold jump (toggle) (the jumpToggle bind, console jump_toggle): while on, every command has IN_JUMP exactly as if a
+   * jump key were held down. It works like Source's kbutton_t with a console `+jump` (in_main.cpp KeyDown / KeyUp with
+   * no key number): a real jump key pressed meanwhile adds a second holder, and letting go of it leaves the jump held
+   * until the toggle goes off. Nothing new is recorded: the replay and the verifier see an ordinary held jump.
+   * releaseAll (blur, focus, a hidden tab, pointer lock lost: menus, the chat, the console) turns it off; main.ts also
+   * turns it off on restarts (style and map changes restart too).
+   */
+  private jumpLatched = false;
+  /** The toggle went on or off (the HUD cue). */
+  onJumpToggle: ((on: boolean) => void) | null = null;
+  /**
+   * Command binds (Prefs.cmdBinds, console/bind-run.ts): key code -> command text, and the aliases they use. A held
+   * `+x` is a virtual key `<code>><action>` in heldCodes, with x's bit or action, pressed and released through
+   * press / releaseCode exactly like a physical key bound to x: so the commands equal holding those keys.
+   */
+  private cmdCodes = new Map<string, string>();
+  private aliases: Aliases = {};
+  /** Command keys down now -> the text they ran (their release runs its - commands). */
+  private cmdHeld = new Map<string, string>();
+  /** Virtual keys held by command binds -> their action. */
+  private virtual = new Map<string, Action>();
+  /** A command bind's once-commands (`say gg`, `slot1`, cvars): main.ts runs them through the console. */
+  onCommand: ((command: string) => void) | null = null;
 
   constructor(private canvas: HTMLCanvasElement) {
     this.setBinds(DEFAULT_BINDS);
@@ -462,6 +498,8 @@ export class Input {
         if (delta === 0) return;
         if (this.wheelSink) return this.wheelSink(delta < 0 ? 1 : -1);
         const dir = delta < 0 ? "MWheelUp" : "MWheelDown";
+        const cmdCode = this.cmdCodes.has(dir) ? dir : this.cmdCodes.has("MouseWheel") ? "MouseWheel" : null;
+        if (cmdCode) return this.wheelCommand(cmdCode, e);
         const bits = (this.codeBits.get(dir) ?? 0) | (this.codeBits.get("MouseWheel") ?? 0);
         this.wheelBits |= bits;
         this.queue({type:"pulse", bits}, e.timeStamp);
@@ -665,10 +703,22 @@ export class Input {
     if (!this.timedActive) this.cmdPitch = this.viewPitch;
   }
 
-  private press(code: string, repeat: boolean, e: Event): void {
+  private press(code: string, repeat: boolean, e: Event, actionCode = code): void {
     if (repeat && this.untilKeyup.has(code)) return;
     if (!repeat) this.untilKeyup.delete(code);
     if (this.ownsKey?.(code)) return void this.untilKeyup.add(code);
+    const bound = this.cmdCodes.get(code);
+    if (bound !== undefined) {
+      // A command bind (console/bind-run.ts): its + commands hold, the rest run once, on the press only.
+      e.preventDefault();
+      if (repeat || this.cmdHeld.has(code)) return;
+      // The real guard (aliases change after binding; toggles switch what a key does): a press that would start a move
+      // and a turn is dropped whole, input as before it, and said once in the console.
+      if (this.refuseMoveTurn(code, bound)) return;
+      this.cmdHeld.set(code, bound);
+      this.runChain(code, e, (ops) => runPress(bound, this.aliases, ops));
+      return;
+    }
     if (this.codeBits.has(code)) {
       // A key not held yet: a press, or a key repeat of one a release-all forgot while it stayed down (blur / focus).
       // Frame-sampled input re-adds it on that repeat too (heldCodes below), so timed input gives it back the same way.
@@ -685,7 +735,7 @@ export class Input {
       this.heldCodes.add(code); // for actionHeld
       if (a === "attack" || a === "attack2") this.queue({type:"key", code, down:true, bits:a === "attack" ? IN_ATTACK : IN_ATTACK2}, e.timeStamp);
       else if (!repeat && (a === "turnLeft" || a === "turnRight" || a === "turnFast")) this.queue({type:"key", code, down:true, bits:a === "turnLeft" ? IN_LEFT : a === "turnRight" ? IN_RIGHT : IN_TURN_FAST}, e.timeStamp);
-      this.onAction?.(a, code);
+      this.onAction?.(a, actionCode);
     } else this.onKey?.(code);
   }
 
@@ -696,10 +746,124 @@ export class Input {
     return false;
   }
 
-  setBinds(binds: Partial<Record<BindAction, string[]>>): void {
+  /** What a command bind's + / - / once commands do for physical key `code` (console/bind-run.ts). */
+  private chainOps(code: string, e: Event): ChainOps {
+    return {
+      hold: (a) => this.holdVirtual(`${code}>${a}`, a, e, code),
+      unhold: (a, own) => {
+        for (const [vc, va] of [...this.virtual]) if (va === a && (!own || vc === `${code}>${a}`)) this.releaseVirtual(vc, e);
+      },
+      once: (c) => this.onCommand?.(c),
+      error: (t) => this.onCommand?.(`echo "${t.replace(/"/g, "'")}"`),
+    };
+  }
+
+  /**
+   * Commands after a `wait` in a key's chain (console/bind-run.ts): slot k runs right after the (k+1)th command from
+   * now, so they land one command later each, as Source runs them a frame later. Dropped by releaseAll.
+   */
+  private later: { code: string; run: (ops: ChainOps) => void }[][] = [];
+
+  /** Runs a chain for key `code` now, its `wait` parts after the following commands. */
+  private runChain(code: string, e: Event, run: (ops: ChainOps) => void): void {
+    const now = this.chainOps(code, e);
+    let step = -1;
+    const at = (f: (o: ChainOps) => void) => (step < 0 ? f(now) : (this.later[step] ??= []).push({ code, run: f }));
+    run({
+      hold: (a, own) => at((o) => o.hold(a, own)),
+      unhold: (a, own) => at((o) => o.unhold(a, own)),
+      once: (c) => at((o) => o.once(c)),
+      error: now.error,
+      wait: () => void step++,
+    });
+  }
+
+  /** After a command: the chain parts waiting for it (runChain), stamped just after its boundary `at`. */
+  private runLater(at: number): void {
+    const due = this.later.shift();
+    if (!due) return;
+    const e = { timeStamp: at + 0.001, preventDefault() {} } as unknown as Event;
+    for (const { code, run } of due) run(this.chainOps(code, e));
+  }
+
+  /** Keys whose refused press was already said (code + text: said again only if what the key does changes). */
+  private refused = new Set<string>();
+  /** True (and said once) when this press of `code` would move and turn (console/bind-run.ts mixesMoveAndTurn). */
+  private refuseMoveTurn(code: string, text: string): boolean {
+    if (!mixesMoveAndTurn(text, this.aliases)) return false;
+    const key = `${code}|${text}|${JSON.stringify(this.aliases)}`;
+    if (!this.refused.has(key)) {
+      this.refused.add(key);
+      this.onCommand?.(`echo "${keyForCode(code)}: ${MOVE_TURN_REFUSAL} Nothing was pressed."`);
+    }
+    return true;
+  }
+
+  /** A command bind's `+x`: virtual key `vc` goes down as a key bound to `a` would (`code`: the physical key). */
+  private holdVirtual(vc: string, a: Action, e: Event, code: string): void {
+    if (this.virtual.has(vc)) return; // already held by this key (Source: the same key twice is a repeat)
+    this.virtual.set(vc, a);
+    const bit = ACTION_BITS[a];
+    if (bit) this.codeBits.set(vc, bit);
+    else this.codeAction.set(vc, a);
+    this.press(vc, false, e, code);
+  }
+
+  /** Its `-x`: the virtual key comes up. */
+  private releaseVirtual(vc: string, e: Event): void {
+    if (!this.virtual.has(vc)) return;
+    this.releaseCode(vc, e);
+    this.virtual.delete(vc);
+    this.codeBits.delete(vc);
+    this.codeAction.delete(vc);
+  }
+
+  /**
+   * A wheel notch on a command bind: Source presses and releases a wheel key in one go, and its button still counts
+   * for one command ("impulse down"). Here a + command's button pulses for one tick like a wheel bind, a + action
+   * fires once, and the release's - commands run (only what they do besides letting go matters).
+   */
+  private wheelCommand(code: string, e: Event): void {
+    const text = this.cmdCodes.get(code)!;
+    if (this.refuseMoveTurn(code, text)) return;
+    const once = (c: string) => this.onCommand?.(c);
+    const pulse: ChainOps = {
+      hold: (a) => {
+        const bit = ACTION_BITS[a];
+        if (bit) {
+          this.wheelBits |= bit;
+          this.queue({type:"pulse", bits:bit}, e.timeStamp);
+        } else this.onAction?.(a, code);
+      },
+      unhold: () => {},
+      once,
+    };
+    runPress(text, this.aliases, pulse);
+    runRelease(text, this.aliases, pulse);
+  }
+
+  /** Hold jump (toggle) is on: commands hold IN_JUMP. */
+  get jumpToggled(): boolean {
+    return this.jumpLatched;
+  }
+
+  /**
+   * Turns Hold jump (toggle) on or off. `quiet`: a release-all, whose sampler reset drops held keys anyway. Off does
+   * nothing to a real jump key that is still down: that key keeps the jump held, as in Source.
+   */
+  setJumpToggle(on: boolean, quiet = false): void {
+    if (on === this.jumpLatched) return;
+    this.jumpLatched = on;
+    if (!quiet) this.queue({type:"key", code:JUMP_TOGGLE_CODE, down:on, bits:IN_JUMP});
+    this.onJumpToggle?.(on);
+  }
+
+  setBinds(binds: Partial<Record<BindAction, string[]>>, commands: { binds?: Record<string, string>; aliases?: Aliases } = {}): void {
     if (this.sampler) this.releaseAll();
     this.codeBits.clear();
     this.codeAction.clear();
+    this.cmdCodes = new Map(Object.entries(commands.binds ?? {}));
+    this.aliases = { ...(commands.aliases ?? {}) };
     const weapon: [BindAction, string[]][] = [];
     for (const [action, codes] of Object.entries(binds) as [BindAction, string[]][]) {
       if (!Array.isArray(codes)) continue;
@@ -715,6 +879,14 @@ export class Input {
     }
     // Weapon keys: only on keys nothing else uses (Settings -> Keys already keeps every key on one action).
     for (const [action, codes] of weapon) for (const c of codes) if (!this.codeBits.has(c) && !this.codeAction.has(c)) this.codeAction.set(c, action);
+    // A key with a command bind runs that, not an action (Settings keeps a key in one or the other).
+    for (const c of this.cmdCodes.keys()) (this.codeBits.delete(c), this.codeAction.delete(c));
+    // Holds a command bind made stay held under the new binds (as held keys do).
+    for (const [vc, a] of this.virtual) {
+      const bit = ACTION_BITS[a];
+      if (bit) this.codeBits.set(vc, bit);
+      else this.codeAction.set(vc, a);
+    }
     // Held movement keys carry over under the new binds, as frame-sampled input reads them from heldCodes. Every
     // settings write runs this (main.ts prefs.watch): clearing the timed keys here killed a held W/A/S/D until it was
     // pressed again (v0.0.29-0.0.30, GothQueen's dropped keys).
@@ -766,6 +938,12 @@ export class Input {
   }
 
   releaseAll(): void {
+    this.setJumpToggle(false, true);
+    // Command binds: every hold goes (a keyup after this releases nothing more), as Source clears its buttons.
+    this.cmdHeld.clear();
+    this.later = [];
+    for (const vc of this.virtual.keys()) (this.codeBits.delete(vc), this.codeAction.delete(vc));
+    this.virtual.clear();
     this.resetSampler(performance.now(), "release-all");
     this.untilKeyup.clear();
     this.heldCodes.clear();
@@ -807,7 +985,7 @@ export class Input {
 
   /** True if `code` is bound to any action. */
   isBound(code: string): boolean {
-    return this.codeBits.has(code) || this.codeAction.has(code);
+    return this.codeBits.has(code) || this.codeAction.has(code) || this.cmdCodes.has(code);
   }
 
   /**
@@ -830,6 +1008,7 @@ export class Input {
     }
     for (const c of this.ti.keys) pressed.push(this.codeBits.get(c) ?? 0);
     pressed.push(this.wheelBits);
+    if (this.jumpLatched) pressed.push(IN_JUMP); // (no movement axis: null binds pass it through)
     if (this.nullBinds) return resolveNullBinds(pressed);
     let b = 0;
     for (const v of pressed) b |= v;
@@ -842,9 +1021,10 @@ export class Input {
       const pressed: number[] = [];
       for (const c of this.heldCodes) pressed.push(this.codeBits.get(c) ?? 0);
       pressed.push(this.wheelBits); // a wheel pulse is this tick's press: the newest
+      if (this.jumpLatched) pressed.push(IN_JUMP);
       return resolveNullBinds(pressed);
     }
-    let b = this.wheelBits;
+    let b = this.wheelBits | (this.jumpLatched ? IN_JUMP : 0);
     for (const c of this.heldCodes) b |= this.codeBits.get(c) ?? 0;
     return b;
   }
@@ -1001,6 +1181,7 @@ export class Input {
     this.framesSince = this.eventsSince = this.reportsSince = 0;
     this.sampledYawEpoch = this.yawEpoch;
     const pitch = timed ? this.cmdPitch : this.pitch;
+    if (this.later.length) this.runLater(o.at ?? performance.now()); // (a chain's `wait`: from the next command)
     return { pitch, yaw: countedYaw(this.yawBase, count, this.yawK), forwardmove, sidemove, buttons, look, ...(this.nullBinds ? { nullBinds: true } : {}), ...(timed ? { timed: true } : {}), ...(o.wRelease ? { wRelease: true } : {}) };
   }
 }

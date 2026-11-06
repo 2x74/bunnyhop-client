@@ -126,7 +126,7 @@ for (const job of jobs) {
   let w = 1024,
     h = 768;
   // Keep high resolution where the original character crops were only ~70px wide.
-  if (!["actor", "ghost", "hat"].includes(job.kind)) {
+  if (job.kind !== "actor") {
     const small = Buffer.alloc(512 * 384 * 4);
     for (let y = 0; y < 384; y++)
       for (let x = 0; x < 512; x++)

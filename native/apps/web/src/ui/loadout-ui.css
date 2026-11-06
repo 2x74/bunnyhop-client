@@ -15,6 +15,12 @@
 .pf-sw-glove .f2 { left: 1.17rem; top: 0.08rem; height: 0.76rem; }
 .pf-sw-glove .f3 { left: 1.54rem; }
 
+/* A hilt on its side: pommel, grip (with the second colour in bands), guard. */
+.pf-sw-hilt { position: relative; width: 2.9rem; height: 1.85rem; filter: drop-shadow(0 0 0.35rem color-mix(in srgb, var(--rar) 45%, transparent)); }
+.pf-sw-hilt .grip { position: absolute; left: 0.55rem; top: 0.66rem; width: 1.55rem; height: 0.52rem; border-radius: 0.2rem; background: repeating-linear-gradient(90deg, var(--g) 0 0.24rem, var(--g2) 0.24rem 0.3rem); }
+.pf-sw-hilt .guard { position: absolute; left: 2.08rem; top: 0.3rem; width: 0.28rem; height: 1.25rem; border-radius: 0.14rem; background: var(--f); }
+.pf-sw-hilt .pommel { position: absolute; left: 0.3rem; top: 0.58rem; width: 0.32rem; height: 0.68rem; border-radius: 0.2rem; background: var(--f); }
+
 /* Settings -> Viewmodel: the equipped loadout */
 .vm-loadout { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
 .vm-loadout { justify-content: flex-end; }

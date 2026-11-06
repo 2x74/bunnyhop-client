@@ -86,6 +86,27 @@ body.potato .sp-deck-card, body.potato .sp-deck .pc::after { transition: none; }
 .sp-fx-s { font-weight: 850; font-size: 1rem; }
 .sp-perks { margin: 0; color: var(--dim); font-size: var(--fs-sm); line-height: 1.5; }
 
+/* Your name | Your card: two views under one heading (the set names' style), so the column keeps its height. The font,
+   decoration, border and effect choices are Edit card's swatches (ui/supporter-pickers.ts), without the tiles. */
+.sp-look-head { display: flex; align-items: baseline; gap: 0.9rem; margin-bottom: 0.55rem; }
+.sp-look-tabs { display: flex; gap: 0.9rem; }
+.sp-look-tab { padding: 0; border: 0; background: none; color: var(--cream-3); font: inherit; font-size: var(--fs-md); font-weight: 700; cursor: pointer; transition: color var(--t-step) var(--ease-glide); }
+.sp-look-tab:hover { color: var(--cream-2); }
+.sp-look-tab.on { color: var(--cream); }
+.sp-look-tab:focus-visible { outline: none; border-radius: var(--r-1); box-shadow: 0 0 0 2px var(--amber); }
+.sp-look { min-height: 5.9rem; }
+.sp-look-row { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.3rem; }
+.sp-look-row:first-child { margin-top: 0; }
+.sp-look-label { flex: none; width: 3.4rem; color: var(--dim); font-size: var(--fs-sm); }
+.sp-look-opts { min-width: 0; display: flex; flex-wrap: wrap; gap: 0.15rem; }
+.sp-look-i { display: grid; place-items: center; padding: 0.1rem 0.15rem; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text); cursor: pointer; }
+.sp-look-i:hover { background: var(--raise); }
+.sp-look-i.on { background: var(--raise-2); box-shadow: inset 0 -2px 0 var(--accent); }
+.sp-look-i:focus-visible { outline: none; box-shadow: var(--ring); }
+.sp-look-i .pf-sw-name { width: 1.75rem; height: 1.5rem; font-size: 1rem; }
+.sp-look-i .pf-sw-av { width: 2.3rem; height: 1.9rem; }
+.sp-look-i .pf-sw-fx { width: 2.4rem; height: 1.45rem; }
+
 /* The Loadout, supporter items only: each set's items on a row of their own under its name (three at most), so every
    set shows at once beside the stage. */
 .sp-set { min-height: 0; display: flex; flex-direction: column; }
@@ -100,6 +121,7 @@ body.potato .sp-deck-card, body.potato .sp-deck .pc::after { transition: none; }
 .sp-set[data-set="geode"] .lo-stage { background: radial-gradient(36% 28% at 50% 88%, rgba(80, 235, 215, 0.13), transparent 70%), radial-gradient(70% 60% at 50% 38%, rgba(150, 110, 255, 0.1), transparent 75%), linear-gradient(180deg, #161a29, #0d1017); }
 .sp-set[data-set="highroller"] .lo-stage { background: radial-gradient(36% 28% at 50% 88%, rgba(255, 200, 100, 0.15), transparent 70%), radial-gradient(70% 60% at 50% 42%, rgba(50, 160, 100, 0.1), transparent 75%), linear-gradient(180deg, #161c1b, #0c100f); }
 .sp-set[data-set="borealis"] .lo-stage { background: radial-gradient(80% 45% at 40% 0%, rgba(80, 255, 185, 0.12), transparent 70%), radial-gradient(55% 40% at 75% 8%, rgba(120, 130, 255, 0.11), transparent 72%), radial-gradient(36% 28% at 50% 88%, rgba(160, 220, 255, 0.09), transparent 70%), linear-gradient(180deg, #0f1627, #0a0d16); }
+.sp-set[data-set="tidepool"] .lo-stage { background: radial-gradient(70% 45% at 45% 0%, rgba(159, 242, 226, 0.13), transparent 70%), radial-gradient(36% 28% at 50% 88%, rgba(255, 127, 110, 0.12), transparent 70%), linear-gradient(180deg, #0f2a29, #0a1514); }
 
 /* Top supporters: plain rows, the total in the warm accent; a supporter's switch above them. */
 .sp-top-page { flex: 1; min-height: 0; width: min(100%, 52rem); margin: 0 auto; display: flex; flex-direction: column; gap: var(--sp-4); }
@@ -187,8 +209,12 @@ body.potato .sp-deck-card, body.potato .sp-deck .pc::after { transition: none; }
 
 /* Support's Loadout: the items, then the glow controls under them. */
 .sp-side { min-height: 0; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-4); }
-/* The sets side by side: each tile is named after its set already, so the set headings go. */
-.sp-side > .lo-grid { flex: 1; grid-template-columns: repeat(3, minmax(0, 1fr)) !important; overflow: hidden; }
+/* The sets side by side: each tile is named after its set already, so the set headings go. The slots with many items
+   (Hat, Finish) scroll inside the column with the page's quiet scrollbar; the page itself stays one screen. A short
+   bottom pad: a slot whose rows fit (Colourway) shows no scrollbar. */
+.sp-side > .lo-grid { flex: 1; grid-template-columns: repeat(3, minmax(0, 1fr)) !important; overflow: hidden auto; scrollbar-width: thin; padding-bottom: 2px; }
+/* More rows below: a soft edge (Settings' .set-scroll), gone once scrolled to the end. */
+.sp-side > .lo-grid.sp-more { mask-image: linear-gradient(to bottom, #000 calc(100% - 2.6rem), transparent 100%); }
 .sp-side .lo-set-h { display: none; }
 .sp-side > .sp-name { flex: none; padding: var(--sp-3) 0.35rem 0; border-top: 1px solid var(--line); }
 .sp-side > .sp-glow { flex: none; gap: 0.6rem; padding: var(--sp-3) 0.35rem 0; border-top: 1px solid var(--line); }

@@ -5,7 +5,8 @@
 // take the colourway's accent. Original design: a garden wind spinner on a hawkbill, not any game's knife.
 //
 // The spinner is its own bone in first person (rig.ts EXTRA_BONES v_weapon.Whirl_Spin at WHIRL, turning about the knife's
-// x, the axle). It runs on the wall clock: every WHIRL_FLICK.period the thumb gives it a flick and it spins down; the
+// x, the axle). It runs on the viewmodel's clock (KnifeState.time; v0.0.37 read the wall clock, so a replay or an
+// export showed a different spin each time): every WHIRL_FLICK.period the thumb gives it a flick and it spins down; the
 // draw and every slash give it a kick; the inspects (inspects/whirligig.ts) flick it hard. Every kick and flick turns
 // it a whole number of thirds of a turn, so whatever ends one (an inspect cancelled, the idle's next flick) never
 // shows a jump: the spinner has three-fold symmetry. Third person: the same model, still (no extra bones there).
@@ -15,7 +16,7 @@
 import { smoothstep } from "../../player/bunny/builder";
 import type { V3 } from "../../player/bunny/rig";
 import { WHIRL } from "../rig";
-import { ACCENT, fixed, type KnifeCtx } from "./ctx";
+import { ACCENT, fixed, withHilt, type KnifeCtx } from "./ctx";
 import { attackFlavour, bayonetBlade, bayonetGrip, bayonetHold, hump, idleSway, plate, reducedMotion, type BayonetBladeSpec, X, Y } from "./bayonet";
 import { KMAT, PART, type KnifeDef } from "./types";
 import { ring } from "../../player/bunny/builder";
@@ -102,20 +103,20 @@ function build(k: KnifeCtx): void {
   const fp = k.view === "fp";
   bayonetBlade(k, WHIRL_BLADE);
   // --- The axle through the blade's root (between the plates), fixed to the knife.
-  k.tube([[-PLATE_X, YC, ZC], [0, YC, ZC], [PLATE_X, YC, ZC]], 0.13, fp ? 10 : 6, Y, () => STEEL, { part: PART.guard });
+  k.tube([[-PLATE_X, YC, ZC], [0, YC, ZC], [PLATE_X, YC, ZC]], 0.13, fp ? 10 : 6, Y, () => STEEL, { part: PART.guard, name: "axle" });
   spinnerPlate(k, 1);
   spinnerPlate(k, -1);
   // --- Collar: a plain satin ring from the grip up to under the spinner (its petals clear it), the blade's root
   //     standing out of it.
-  plate(k, [G1 - 0.04, G1 + 0.05, C1 - 0.05, C1], [0.34, 0.38, 0.36, 0.3], [0.46, 0.52, 0.5, 0.42], YC, COLLAR, PART.guard, 2.4);
+  k.hilt("guard", () => plate(k, [G1 - 0.04, G1 + 0.05, C1 - 0.05, C1], [0.34, 0.38, 0.36, 0.3], [0.46, 0.52, 0.5, 0.42], YC, COLLAR, PART.guard, 2.4, "collar"));
   {
     // The blade's root from the collar into the hub (unsharpened, the same blackened steel).
     const rows = [C1 - 0.06, ZC - 0.2].map((z, i) => ring([0, YC + 0.04, z], X, Y, [0.1, 0.11][i], [0.4, 0.48][i], fp ? 10 : 6, 3));
     k.surface(rows, { paint: () => BLACK, part: PART.guard, capStart: BLACK, capEnd: BLACK });
   }
   // --- Grip: a dark cord wrap, then a rounded steel pommel cap.
-  bayonetGrip(k, { z0: G0, z1: G1, rx: 0.33, ry: 0.44, cy: -0.04, ribs: 7, a: WRAP, b: WRAP_DARK, wrap: true });
-  plate(k, [G0 - 0.22, G0 - 0.12, G0 + 0.02], [0.24, 0.34, 0.33], [0.32, 0.45, 0.44], -0.04, STEEL, PART.guard, 2.2);
+  k.hilt("wrap", () => bayonetGrip(k, { z0: G0, z1: G1, rx: 0.33, ry: 0.44, cy: -0.04, ribs: 7, a: WRAP, b: WRAP_DARK, wrap: true }));
+  k.hilt("pommel", () => plate(k, [G0 - 0.22, G0 - 0.12, G0 + 0.02], [0.24, 0.34, 0.33], [0.32, 0.45, 0.44], -0.04, STEEL, PART.guard, 2.2, "pommel"));
 }
 
 /**
@@ -125,7 +126,7 @@ function build(k: KnifeCtx): void {
  */
 export const WHIRL_FLICK = { period: 6.5, thirds: 15, tau: 0.85 } as const;
 
-/** The idle spinner angle (deg) at wall-clock time `now` (s): continuous across every action. */
+/** The idle spinner angle (deg) at time `now` (s, the viewmodel's clock): continuous across every action. */
 export function whirlIdle(now: number): number {
   const { period, thirds, tau } = WHIRL_FLICK;
   const u = now - Math.floor(now / period) * period;
@@ -139,15 +140,16 @@ export function whirlKick(t: number, t0: number, dur: number, thirds: number): n
   return thirds * 120 * (1 - (1 - x) ** 3);
 }
 
-const nowS = (): number => (((globalThis as { performance?: { now(): number } }).performance?.now() ?? 0) / 1000) % 3600;
-
-export const whirligig: KnifeDef = {
+export const whirligig: KnifeDef = withHilt({
   id: "whirligig",
   cosmeticId: "knife-whirligig",
   name: "Whirligig",
   rarity: 4,
   blurb: "A talon with a three-petal spinner on its bolster. The thumb never leaves it alone.",
   build,
+  // The axle and collar (guard), the cord grip (the darker cord the second tone), the pommel cap; the spinner stays
+  // the Whirligig's.
+  hilt: { axle: "guard", collar: "guard", grip: { role: "grip", alt: [WRAP_DARK] }, pommel: "pommel" },
   joints: ["Whirl_Spin"],
   // crook: where it rides on the index finger in its finger spins (the collar, under the spinner on the edge side);
   // whirl: the spinner's axle.
@@ -157,7 +159,8 @@ export const whirligig: KnifeDef = {
   pose(action, t, s) {
     const rm = reducedMotion();
     // The spinner: the idle's thumb flicks (not with reduced motion), plus a kick on the draw and on every swing.
-    let spin = rm ? 0 : whirlIdle(nowS());
+    // (The viewmodel's clock, KnifeState.time, not the wall clock: replays, seeks and exports show the same spin.)
+    let spin = rm ? 0 : whirlIdle(s.time % 3600);
     if (action === "draw") spin += whirlKick(t, 0.12, 0.9, rm ? 3 : 6);
     else if (action === "slash1" || action === "slash2") spin += whirlKick(t, 0.1, 0.55, action === "slash1" ? 3 : -3);
     else if (action === "stab") spin += whirlKick(t, 0.3, 0.6, 3);
@@ -172,4 +175,4 @@ export const whirligig: KnifeDef = {
     }
     attackFlavour(action, t, s, { roll: 14, snap: 8, twist: 12 });
   },
-};
+});

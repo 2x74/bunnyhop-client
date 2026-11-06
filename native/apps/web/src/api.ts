@@ -520,7 +520,7 @@ export interface PointsPage {
   more?: boolean;
 }
 
-export type CosmeticChoice = Record<"background" | "frame" | "title" | "ghost" | "trail" | "outfit" | "knife" | "finish" | "glove" | "hat" | "body", string | null> & {
+export type CosmeticChoice = Record<"background" | "frame" | "title" | "ghost" | "trail" | "outfit" | "knife" | "finish" | "glove" | "hilt" | "hat" | "body" | "camo", string | null> & {
   /** A wig's hair colour ("#rrggbb"), kept for players who own one; absent = the default. */
   hairColor?: string | null;
   /** The ponytail's length (a whole percent, progression.ts HAIR_LENGTH), kept for wig owners; absent = 100. */

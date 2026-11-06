@@ -11,11 +11,12 @@ import { PART } from "../../knives/types";
 import type { KnifeCtx } from "../../knives/ctx";
 import { ball, boneOf, box, groove, guard, lathe, slab, stud, trigger, type P2 } from "../shapes";
 import { gunPaint as fixed } from "../material";
+import { coat } from "../camo-zones";
 import type { GunDef } from "../types";
 
-const SAND = fixed(0xcdbf99), SAND_DARK = fixed(0xb0a27c), OLIVE = fixed(0x66744a), OLIVE_DARK = fixed(0x4c5737);
+const SAND = coat(fixed(0xcdbf99), "upper"), SAND_DARK = coat(fixed(0xb0a27c), "upper", 0.85), OLIVE = coat(fixed(0x66744a), "lower"), OLIVE_DARK = coat(fixed(0x4c5737), "lower", 0.8);
 const POD = fixed(0x8fd16a), POD_DARK = fixed(0x5fa543), PEA = fixed(0xa6e07c), SPROUT = fixed(0x58c64a), BORE = fixed(0x121316), STEEL = fixed(0x707782, "metal"), ORANGE = fixed(0xff7a1a);
-const GRIP = fixed(0x66744a, "grip"), SEAM = fixed(0x8a7d5b), SCREW = fixed(0x5b5f66, "metal"), LIP = fixed(0xeae0c0);
+const GRIP = coat(fixed(0x66744a, "grip"), "lower", 0.9), SEAM = coat(fixed(0x8a7d5b), "upper", 0.7), SCREW = fixed(0x5b5f66, "metal"), LIP = coat(fixed(0xeae0c0), "upper", 1.1);
 /** The trigger's pivot (top of its blade, gun-local). */
 const TRIGGER: [number, number, number] = [1.75, 0, -0.5];
 

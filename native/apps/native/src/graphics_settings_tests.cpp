@@ -11,6 +11,7 @@ using Json = nlohmann::json;
 
 static void rejects(const std::string &key, const Json &patch) {
     auto document = native::default_graphics_settings();
+    assert(document.at("ghostRouteOnly") == false);
     const auto before = document;
     bool rejected = false;
     try {
@@ -47,6 +48,8 @@ static void settings_validation() {
     assert(!native::patch_graphics_setting(document, "graphics", 42));
     assert(native::patch_graphics_setting(document, "graphicsSkyExposure", 4));
     assert(native::GraphicsSettings::read(document).sky_exposure == 4);
+    assert(native::patch_graphics_setting(document, "ghostRouteOnly", true));
+    assert(document.at("ghostRouteOnly") == true);
     native::GraphicsMenuPacer pacer;
     pacer.settings({{"graphicsMenuFps", 30}});
     uint64_t waited = 0;

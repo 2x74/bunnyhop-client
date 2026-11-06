@@ -1484,7 +1484,10 @@ else{color=vec4(ink.rgb,ink.a*(uv.x<-1.?1.:texture(font,uv).a));}})"
          const std::string &gauntlet_line = "",
          const std::string &gauntlet_delta = "",
          bool gauntlet_good = false,
-         float leave_progress = -1) {
+         float leave_progress = -1,
+         int show_pos = 0,
+         float pitch = 0,
+         float yaw = 0) {
         if (width <= 0 || height <= 0) return;
         hidden_ = !visible;
         element_shift_x_ = element_shift_y_ = 0;
@@ -1548,6 +1551,34 @@ else{color=vec4(ink.rgb,ink.a*(uv.x<-1.?1.:texture(font,uv).a));}})"
                 const auto [x, y] = place("replay", frame_width_ / 2, replay_banner_top);
                 text(x, y, "REPLAY - ESC FOR PLAYBACK CONTROLS", 14, amber, true);
             }
+        }
+        if (visible && show_pos > 0) {
+            const auto angle = [](float value) {
+                float normalized = std::remainder(value, 360.0f);
+                if (normalized == -180.0f) normalized = 180.0f;
+                return normalized;
+            };
+            const float z = s.player.position[2] + (show_pos == 2 ? 0.0f : s.player.view_offset_z);
+            const float p = show_pos == 2 ? 0.0f : angle(pitch);
+            char lines[3][112];
+            std::snprintf(
+                    lines[0], sizeof(lines[0]), "pos:  %.02f %.02f %.02f", s.player.position[0], s.player.position[1], z
+            );
+            std::snprintf(lines[1], sizeof(lines[1]), "ang:  %.02f %.02f %.02f", p, angle(yaw), 0.0f);
+            std::snprintf(
+                    lines[2],
+                    sizeof(lines[2]),
+                    "vel:  %.2f",
+                    std::hypot(s.player.velocity[0], s.player.velocity[1], s.player.velocity[2])
+            );
+            constexpr float panel_width = 224;
+            constexpr float panel_height = 54;
+            const float x = width / scale - panel_width;
+            overlay_begin(width, height, 100);
+            overlay_rect(x, 0, panel_width, panel_height, {.015f, .018f, .025f, .78f});
+            const std::array<float, 4> ink{.96f, .95f, .90f, 1};
+            for (int i = 0; i < 3; ++i)
+                overlay_text(x + 8, 5 + i * 15, lines[i], 12, ink);
         }
         hidden_ = false;
         flush(width, height);

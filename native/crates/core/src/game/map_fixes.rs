@@ -794,3 +794,33 @@ pub(crate) fn end_touch_outputs_v24(entities: &[Entity], fingerprint: u32) -> Ve
         .map(|(i, _)| i)
         .collect()
 }
+
+/// Physics 26's reviewed builds, using the v25 physics-input digest algorithm unchanged.
+/// SHA-256 of the full BSP is additionally pinned in catalogue/completeness/admission.
+/// A different collision, output, surface or prop input gets no map-specific v26 behavior.
+pub(crate) struct BuildV26 {
+    pub map: &'static str,
+    pub fingerprint: u32,
+    pub digest: &'static str,
+    pub coast: bool,
+    pub mechanics: Option<MapMechanics>,
+    pub max_velocity: Option<f32>,
+}
+pub(crate) const BUILDS_V26: &[BuildV26] = &[
+    // Full BSP 7253cbef3f668d2b5e00b677986a12c3921e1b7518061cc73abb8c35b5de6fcb.
+    BuildV26 { map: "ahop_coast", fingerprint: 0x116cea2e, digest: "eef52957fbb0c79e9c109438a71be5943f0346ccd7c6d026fc5a513b1dab3498", coast: true, mechanics: None, max_velocity: None },
+    // Full BSP 02e9dc711ae77a369df332c2f59337a03834b355aeae0cc1e5874b00c09bfafc.
+    BuildV26 { map: "bhop_frankerz_999xl_extreme", fingerprint: 0x687e722a, digest: "00b7e1a307092b8c97e93e8bf4dd8c2ba2b44b391e8b72f124a59f402eefee92", coast: false, mechanics: None, max_velocity: Some(100_000.0) },
+    // Full BSP 06d00c1336cd3057fce6b98961fad7be0db8fceb4be6cb1dc036d7e9db8ba322.
+    BuildV26 { map: "bhop_frankerz_2500xl_easyxtreme", fingerprint: 0x4cacddd6, digest: "06a452fea8eb8623e55d457d60791eb2f6ec57bf10fc1f32c0baa8c91495c61d", coast: false, mechanics: None, max_velocity: Some(100_000.0) },
+    // Full BSP cd2d440b5e8453a6888c6d796f7428f21101561709ca3899d0963df9591a75aa.
+    BuildV26 { map: "bhop_frankerz_999xl_extreme_sr", fingerprint: 0x371820d3, digest: "9ed84c96c6de5a1da20963de65427f5c45957ec2fa0f892f8654bf1a1b2ff116", coast: false, mechanics: None, max_velocity: Some(100_000.0) },
+    // Full BSP c2b3bc1e5a3f2507df4b7aa6ed71af7c2ac38edb12c41939547d25268ec9613e.
+    BuildV26 { map: "bhop_crash_egypt", fingerprint: 0x106ea9fd, digest: "9811db1fce501059d7051b7d275163caf3935b829250a8916af2075afb67f27f", coast: false, max_velocity: None,
+        mechanics: Some(MapMechanics { map: "bhop_crash_egypt", fingerprint: 0x106ea9fd, makers: true, velocity_scripts: false }) },
+];
+pub(crate) fn build_v26(bsp: &playsrc_bsp::Bsp, entities: &[Entity], outputs: &[Vec<crate::entities::Output>]) -> Option<&'static BuildV26> {
+    let fingerprint = entity_fingerprint(entities);
+    let candidate = BUILDS_V26.iter().find(|b| b.fingerprint == fingerprint)?;
+    (build_digest_v25(bsp, entities, outputs) == candidate.digest).then_some(candidate)
+}

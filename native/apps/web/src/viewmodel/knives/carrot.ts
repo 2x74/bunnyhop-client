@@ -4,8 +4,8 @@
 
 import { add, norm, ring, scale, type Paint } from "../../player/bunny/builder";
 import type { V3 } from "../../player/bunny/rig";
-import { ACCENT, CARROT, CARROT_DARK, edgeWeight, LEAF, LEAF_DARK, type KnifeCtx } from "./ctx";
-import { PART, type KnifeDef } from "./types";
+import { ACCENT, CARROT, CARROT_DARK, edgeWeight, LEAF, LEAF_DARK, withHilt, type KnifeCtx } from "./ctx";
+import { PART, type HiltMap, type KnifeDef } from "./types";
 
 const X: V3 = [1, 0, 0], Y: V3 = [0, 1, 0];
 const at = (z: number): V3 => [0, 0, z];
@@ -29,10 +29,10 @@ export function buildCarrotFp(k: KnifeCtx, P: CarrotPalette = CARROT_PALETTE): v
     const rad = 0.5 + (i % 2 ? 0.05 : 0);
     grip.push(ring(at(z), X, Y, rad * 0.9, rad, 12));
   }
-  k.surface(grip, { paint: () => P.grip, part: PART.grip, capStart: P.grip, capEnd: P.grip });
+  k.hilt("handle", () => k.surface(grip, { paint: () => P.grip, part: PART.grip, capStart: P.grip, capEnd: P.grip, name: "grip" }));
   // Guard (accent).
   const guard = [ring(at(1.6), X, Y, 0.8, 1.05, 14), ring(at(1.95), X, Y, 0.92, 1.22, 14), ring(at(2.3), X, Y, 0.78, 1.02, 14)];
-  k.surface(guard, { paint: () => P.guard, part: PART.guard, capStart: P.guard, capEnd: P.guard });
+  k.hilt("guard", () => k.surface(guard, { paint: () => P.guard, part: PART.guard, capStart: P.guard, capEnd: P.guard, name: "guard" }));
   // Blade: a slightly flattened carrot cone with growth rings, tapering to a point.
   const blade: V3[][] = [];
   const n = 18;
@@ -78,9 +78,9 @@ export function buildCarrotTp(k: KnifeCtx, P: CarrotPalette = CARROT_PALETTE): v
     const rad = 0.7 + (i % 2 ? 0.07 : 0);
     grip.push(ring(at(s), Y, V, rad, rad, 10));
   }
-  k.surface(grip, { paint: () => P.grip, part: PART.grip, capStart: P.grip, capEnd: P.grip });
+  k.hilt("handle", () => k.surface(grip, { paint: () => P.grip, part: PART.grip, capStart: P.grip, capEnd: P.grip, name: "grip" }));
   const guard = [ring(at(4.5), Y, V, 1.35, 1.0, 12), ring(at(4.9), Y, V, 1.5, 1.12, 12), ring(at(5.3), Y, V, 1.3, 0.95, 12)];
-  k.surface(guard, { paint: () => P.guard, part: PART.guard, capStart: P.guard, capEnd: P.guard });
+  k.hilt("guard", () => k.surface(guard, { paint: () => P.guard, part: PART.guard, capStart: P.guard, capEnd: P.guard, name: "guard" }));
   const blade: V3[][] = [];
   const n = 14;
   for (let i = 0; i <= n; i++) {
@@ -112,7 +112,10 @@ export function buildCarrotTp(k: KnifeCtx, P: CarrotPalette = CARROT_PALETTE): v
   }
 }
 
-export const carrot: KnifeDef = {
+/** Hilt parts (types.ts HiltMap): the ridged grip and the guard; the pommel leaves stay the carrot's. */
+export const CARROT_HILT: HiltMap = { grip: "grip", guard: "guard" };
+
+export const carrot: KnifeDef = withHilt({
   id: "carrot",
   cosmeticId: "knife-carrot",
   name: "Carrot Blade",
@@ -122,4 +125,5 @@ export const carrot: KnifeDef = {
   // The bunny's original third-person placement; the recipe above is already third-person sized, s = 1.15 makes it
   // read at normal viewing distance (v0.0.5: every knife's third-person scale went up ~30%, knives/types.ts TpSpec).
   tp: { o: [2.05, -1.45, 3.1], z: [0.53, 0.1, -0.84], y: [0, 1, 0], s: 1.15 },
-};
+  hilt: CARROT_HILT,
+});

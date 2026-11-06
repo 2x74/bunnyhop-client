@@ -62,6 +62,7 @@ inline PrimaryGhost append_ghost_actors(
     PrimaryGhost primary;
     const auto elapsed =
             native_render::ghost_elapsed_ticks(context.run.status, context.tick, context.run.start_tick, context.blend);
+    const int route_only_slot = renderer.ghost_options().route_only ? renderer.route_slot() : -1;
     for (unsigned index = 0; index < GhostSlots::slot_count; ++index) {
         const auto &slot = ghosts.slots[index];
         if (!ghost_slot_races(slot, renderer, index, context)) {
@@ -71,16 +72,17 @@ inline PrimaryGhost append_ghost_actors(
         native_render::Actor actor;
         actor.id = "ghost-" + std::to_string(index);
         if (!ghosts.present(context.core, index, renderer.ghost_path(index), elapsed, actor)) continue;
-        actor.name = renderer.ghost_name(index);
-        actor.outfit = context.outfit;
-        actor.loadout = renderer.ghost_loadout(index);
-        actor.opacity = context.opacity;
-        renderer.decorate_ghost(actor, index);
         if (index == 0) {
             primary.shown = true;
             if (actor.frame.tick <= renderer.ghost_path(0).end)
                 bh_ghost_command(context.core, slot.handle, actor.frame.tick, &primary.command);
         }
+        if (int(index) == route_only_slot) continue;
+        actor.name = renderer.ghost_name(index);
+        actor.outfit = context.outfit;
+        actor.loadout = renderer.ghost_loadout(index);
+        actor.opacity = context.opacity;
+        renderer.decorate_ghost(actor, index);
         actors.push_back(std::move(actor));
     }
     return primary;

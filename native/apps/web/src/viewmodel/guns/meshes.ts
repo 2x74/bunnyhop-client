@@ -7,6 +7,7 @@ import { xform, type V3 } from "../../player/bunny/rig";
 import { gunHoldData, type GunHoldData } from "../../player/bunny/gun-hold";
 import { KnifeCtx } from "../knives/ctx";
 import type { GunDef } from "./types";
+import { bakeGunAO } from "./ao";
 
 const geos = new Map<string, THREE.BufferGeometry>();
 
@@ -19,6 +20,25 @@ export function worldGunGeometry(def: GunDef): THREE.BufferGeometry {
   g = b.geometry();
   g.computeBoundingSphere();
   geos.set(def.id, g);
+  return g;
+}
+
+const modelGeos = new Map<string, THREE.BufferGeometry>();
+
+/**
+ * The gun alone at first-person detail in gun-local units (x forward, z up), every part where it sits at rest, with its
+ * AO: the Loadout's gun camo stage and thumbnails (ui/camo-stage.ts), the gun lab's side views. Non-skinned, cached.
+ */
+export function gunModelGeometry(def: GunDef): THREE.BufferGeometry {
+  let g = modelGeos.get(def.id);
+  if (g) return g;
+  const b = new Builder();
+  def.build(new KnifeCtx(b, "fp", (p) => p, () => [[0, 1]]));
+  g = b.geometry();
+  bakeGunAO(g);
+  g.computeBoundingBox();
+  g.computeBoundingSphere();
+  modelGeos.set(def.id, g);
   return g;
 }
 

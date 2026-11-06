@@ -106,7 +106,7 @@ export class BunnyScene {
       this.model.setOpacity(look.mode === "ghost" ? 0.75 : 1);
     }
     if (look.outfit !== prev.outfit) this.model.bunnyModel?.setOutfit(look.outfit);
-    this.model.setPlayerGlow(look.playerGlow ?? null);
+    this.model.setPlayerGlow(look.playerGlow ?? null, !!look.previewGlow);
     if (look.loadout !== prev.loadout) this.model.setLoadout(look.loadout);
     this.model.bunnyModel?.setSilhouette(!!look.veil && look.mode === "solid");
     this.trail.setColor(colorOf(look.trail, "#ffc23d"), color2Of(look.trail));

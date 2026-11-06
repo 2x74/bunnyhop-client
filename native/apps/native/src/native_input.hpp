@@ -185,9 +185,11 @@ constexpr uint32_t yaw_set_spawn = 1, yaw_set_teleport = 2;
 // a float rounding error for every mouse report. Only SDL relative motion feeds this.
 struct Input {
     double yaw_base = 0, yaw_counts = 0, pitch = 0, sensitivity = 2, vertical_sensitivity = 2;
+    double m_yaw = kDegreesPerCount, m_pitch = kDegreesPerCount;
     bool separate_vertical = false, invert_y = false;
     uint32_t epoch = 0, kind = 1, frames = 0, motion_events = 0;
     uint32_t held = 0, pulse = 0;
+    bool jump_toggle = false;
     NullBindPresses null_presses;
     WRelease w_release;
     std::optional<uint32_t> sampled_epoch;
@@ -208,7 +210,7 @@ struct Input {
         return std::clamp(signed_p, -89.0, 89.0);
     }
 
-    double yaw() const { return normalize(yaw_base - yaw_counts * (sensitivity * 0.022)); }
+    double yaw() const { return normalize(yaw_base - yaw_counts * (sensitivity * m_yaw)); }
 
     void set_yaw(double v, uint32_t reason = 5) {
         yaw_base = normalize(v);
@@ -237,6 +239,15 @@ struct Input {
         set_yaw(at, 4);
     }
 
+    void set_mouse_scales(double yaw_scale, double pitch_scale) {
+        if (yaw_scale != m_yaw) {
+            const double at = yaw();
+            m_yaw = yaw_scale;
+            set_yaw(at, 4);
+        }
+        m_pitch = pitch_scale;
+    }
+
     void set_angles(double p, double y, uint32_t reason = 1) {
         pitch = view_pitch(p);
         set_yaw(y, reason);
@@ -245,7 +256,7 @@ struct Input {
     // A report's pitch change in degrees, with the current inversion and (separate) vertical sensitivity.
     double pitch_degrees(double y) const {
         const double scale = separate_vertical ? vertical_sensitivity : sensitivity;
-        return (invert_y ? -y : y) * scale * kDegreesPerCount;
+        return (invert_y ? -y : y) * scale * m_pitch;
     }
 
     void apply_report(double x, double p) {
@@ -346,7 +357,7 @@ struct Input {
         sampled_epoch = epoch;
         // SDL preserves trackpad fractional deltas. Never round those into invented integer mouse counts.
         if (!std::isfinite(yaw_counts) || std::abs(yaw_counts) > 0x3fffffff) return std::nullopt;
-        return BhLookSampleV2{yaw_base, sensitivity * .022, yaw_counts, epoch, kind, f, e, e};
+        return BhLookSampleV2{yaw_base, sensitivity * m_yaw, yaw_counts, epoch, kind, f, e, e};
     }
 
     void button(uint32_t bit, bool down) {
@@ -361,6 +372,7 @@ struct Input {
     void clear() {
         held = 0;
         pulse = 0;
+        jump_toggle = false;
         null_presses.clear();
         w_release.reset();
         acc_x = 0;
@@ -378,6 +390,7 @@ struct Input {
     // `release`: Release W on jump is active for this command (only the forward bit changes, and forwardmove follows).
     BhCmd command(const std::optional<WReleaseContext> &release = std::nullopt) {
         uint32_t bits = held | pulse;
+        if (jump_toggle) bits |= jump;
         pulse = 0;
         if (release)
             bits = w_release.apply(bits, *release);

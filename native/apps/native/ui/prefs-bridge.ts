@@ -40,6 +40,12 @@ function direct(path: string, key: string): Mapping {
 }
 
 const DIRECT: readonly [string, string][] = [
+  ["mYaw", "mYaw"],
+  ["mPitch", "mPitch"],
+  ["hud.showPos", "showPos"],
+  ["cmdBinds", "cmdBinds"],
+  ["aliases", "aliases"],
+  ["landing", "landing"],
   ["sensitivity", "sensitivity"],
   ["verticalSensitivityEnabled", "separateVertical"],
   ["verticalSensitivity", "verticalSensitivity"],

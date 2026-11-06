@@ -19,7 +19,7 @@ import { getPlayerGlow, onPlayerGlow } from "../player/cosmetics";
 import "./loadout-view.css";
 import { fixedModel } from "../player/bunny/look";
 import type { Profile } from "../api";
-import { SUPPORTER_MIN_USD, COSMETICS, cosmetic, HAIR_HATS, KNIFE_POOL_MAX, type KnifePool, crownOf, DEFAULT_COSMETICS, isUnlocked, secretCosmetic, SUPPORTER_SETS, supporterItem, type CosmeticDef } from "../progression";
+import { SUPPORTER_MIN_USD, COSMETICS, cosmetic, HAIR_HATS, KNIFE_POOL_MAX, type KnifePool, crownOf, DEFAULT_COSMETICS, isUnlocked, secretCosmetic, supporterItem, type CosmeticDef } from "../progression";
 import { HAIR_DEFAULT, HAIR_LENGTH, HAIR_PRESETS, LENGTH_HATS, hairColorOf, hairHex, hairLengthOf, isWig, loadoutFor, packLoadout, type CosmeticLoadout } from "../loadout";
 import { glowColorPicker } from "./glow-color-picker";
 import { getGhostCosmetics, getKnifePool, getLoadout, getOutfit, onGhostCosmetics, onHeldLoadout, onLoadout, onOutfit, setGhostCosmetics, setKnifePool, setLoadout, setOutfit } from "../player/cosmetics";
@@ -28,9 +28,9 @@ import type { Loadout, NewTracker } from "./card-editor";
 import { arrowNav, h } from "./dom";
 import type { LoadoutStage, StageLook, StageView, ThumbJob } from "./loadout-stage";
 import { loadoutSwatch, rarityOf, shownCosmetic } from "./loadout-ui";
-import { isLoadoutCategory, LOADOUT_CATEGORIES, loadoutCategories, stageKind, type LoadoutCategory } from "./cosmetic-slots";
+import { EMPTYABLE, isLoadoutCategory, LOADOUT_CATEGORIES, loadoutCategories, loadoutSections, noneLabel, stageKind, type LoadoutCategory } from "./cosmetic-slots";
 import { keyLabel, prefs } from "./settings";
-import { earnedLine, lockInfo, profileRanks, type LockInfo } from "./unlocks";
+import { earnedLine, lockInfo, profileHolder, profileRanks, type LockInfo } from "./unlocks";
 import { earnedHint } from "./unlock-text";
 import { navigate } from "./nav";
 import { sfx } from "../audio";
@@ -71,9 +71,11 @@ const pick = (c: Record<string, unknown>): LoadoutChoice => ({
   knife: (c.knife as string | null | undefined) ?? DEFAULT_COSMETICS.knife,
   finish: (c.finish as string | null | undefined) ?? DEFAULT_COSMETICS.finish,
   glove: (c.glove as string | null | undefined) ?? DEFAULT_COSMETICS.glove,
+  hilt: (c.hilt as string | null | undefined) ?? DEFAULT_COSMETICS.hilt,
   outfit: (c.outfit as string | null | undefined) ?? DEFAULT_COSMETICS.outfit,
   body: (c.body as string | null | undefined) ?? DEFAULT_COSMETICS.body,
   hat: (c.hat as string | null | undefined) ?? null,
+  camo: (c.camo as string | null | undefined) ?? null,
   ghost: (c.ghost as string | null | undefined) ?? DEFAULT_COSMETICS.ghost,
   trail: (c.trail as string | null | undefined) ?? DEFAULT_COSMETICS.trail,
   hairColor: (c.hairColor as string | null | undefined) ?? null,
@@ -89,7 +91,7 @@ export function profileModel(p: Profile, lo: Loadout, news: NewTracker): Loadout
     choice: () => pick(lo.choice),
     crown: () => crownOf(profileRanks(p)),
     owns: (c) => lo.owned.has(c.id),
-    lock: (c) => lockInfo(c, p.level, p.progress, profileRanks(p), p.role),
+    lock: (c) => lockInfo(c, p.level, p.progress, profileRanks(p), profileHolder(p)),
     earned: (c) => earnedLine(c, p),
     equip: (slot, id) => lo.equip(slot, id),
     setHairColor: (hex) => lo.apply({ hairColor: hex }),
@@ -162,10 +164,12 @@ const LOCK_SVG = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 7V5a
 let lastSlot: LoadoutCategory = "knife";
 /** First person or close-up, for the hands' categories. */
 let lastHandsView: StageView = "fp";
+/** First person or side, for the Gun camo. */
+let lastGunView: StageView = "gun";
 
 const NAME: Record<LoadoutCategory, string> = Object.fromEntries(LOADOUT_CATEGORIES.map((c) => [c.slot, c.label])) as Record<LoadoutCategory, string>;
 /** The caption's second line per category (what the item is). */
-const KIND: Record<LoadoutCategory, string> = { knife: "Knife", finish: "Finish", glove: "Gloves", outfit: "Colourway", hat: "Hat", ghost: "Ghost colour", trail: "Trail" };
+const KIND: Record<LoadoutCategory, string> = { knife: "Knife", finish: "Finish", hilt: "Hilt", glove: "Gloves", camo: "Gun camo", outfit: "Colourway", hat: "Hat", ghost: "Ghost colour", trail: "Trail" };
 
 export interface LoadoutViewOpts {
   playerGlow?: () => import("../player/glow-config").PlayerGlow | null;
@@ -223,14 +227,24 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
   /** The choice the stage shows: what you wear, with the previewed item swapped in (a veiled one as its silhouette). */
   const shownChoice = (): LoadoutChoice => {
     const c = choice();
-    if (preview !== null) c[slot] = preview || null;
+    // (A secret camo not earned yet isn't put on the guns: its tile shows the gun's shape only.)
+    if (preview !== null) c[slot] = slot === "camo" && veiled(cosmetic(preview)) ? null : preview || null;
     if (hairDraft) c.hairColor = hairDraft;
     if (lengthDraft !== null) c.hairLength = lengthDraft;
     return c;
   };
   const loadoutOf = (c: LoadoutChoice): CosmeticLoadout => loadoutFor(c, m.crown());
-  const lookOf = (c: LoadoutChoice): StageLook => ({ playerGlow: o.playerGlow ? o.playerGlow() : m.playerGlow?.() ?? null, previewGlow: !!o.playerGlow, outfit: c.outfit, ghost: c.ghost, trail: c.trail, veil: veiled(cosmetic(c.outfit)) });
-  const viewFor = (s: LoadoutCategory): StageView => (stageKind(s) === "hands" ? lastHandsView : stageKind(s) === "bunny" ? "bunny" : "ghost");
+  /**
+   * The glow on the stage: the one being edited (the Player glow tab, the Support page: shown whatever the settings
+   * say, it's a preview), else the player's own as the game shows it (their saved glow, under the Player glow /
+   * First-person glow settings) on every other tab too: the bunny on Colourway and Hat, the hands on Knife, Finish and
+   * Gloves. Thumbnails never show one.
+   */
+  const lookOf = (c: LoadoutChoice): StageLook => {
+    const editing = o.playerGlow?.() ?? null;
+    return { playerGlow: editing ?? m.playerGlow?.() ?? null, previewGlow: !!editing, outfit: c.outfit, ghost: c.ghost, trail: c.trail, veil: veiled(cosmetic(c.outfit)) };
+  };
+  const viewFor = (s: LoadoutCategory): StageView => (stageKind(s) === "hands" ? lastHandsView : stageKind(s) === "guns" ? lastGunView : stageKind(s) === "bunny" ? "bunny" : "ghost");
 
   // --- stage
   const capName = h("h3.lo-cap-name");
@@ -241,6 +255,23 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
   const inspectKey = () => prefs.get().binds.inspect?.find((k) => !k.startsWith("Mouse")) ?? "KeyF";
   const inspectBtn = h("button.btn.lo-insp", { type: "button", title: "Inspect (tap again for the next trick)", onclick: () => stage?.inspect() }, "Inspect", h("kbd", null, keyLabel(inspectKey())));
   const drag = h("span.lo-drag", { "aria-hidden": "true" }, "Drag to turn");
+  // Gun camo: which gun the stage holds (every gun takes the same camo).
+  const gunName = h("span.lo-gun-name", { "aria-live": "polite" });
+  const gunNav = h(
+    "div.lo-gunnav",
+    { hidden: true },
+    h("button.lo-gun-step", { type: "button", "aria-label": "Previous gun", title: "Previous gun", onclick: () => stepGun(-1) }, "‹"),
+    gunName,
+    h("button.lo-gun-step", { type: "button", "aria-label": "Next gun", title: "Next gun", onclick: () => stepGun(1) }, "›"),
+  );
+  function stepGun(by: number): void {
+    if (!stage) return;
+    gunName.textContent = stage.stepGun(by);
+  }
+  function drawGunNav(): void {
+    gunNav.hidden = stageKind(slot) !== "guns";
+    if (!gunNav.hidden && stage) gunName.textContent = stage.stepGun(0);
+  }
   // The room: a pool of light on the floor and a slow rim light behind the bunny, both in the shown item's rarity
   // colour (quiet for common items); a shine sweeps across when you equip something.
   const stageHost = h(
@@ -249,7 +280,7 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
     h("span.lo-light", { "aria-hidden": "true" }),
     h("span.lo-rim", { "aria-hidden": "true" }),
     h("div.lo-cap", null, capName, capMeta, capHow, capState),
-    h("div.lo-tools", null, viewSeg, drag),
+    h("div.lo-tools", null, viewSeg, gunNav, drag),
     inspectBtn,
     h("span.lo-shine", { "aria-hidden": "true" }),
   );
@@ -271,21 +302,28 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
   }
 
   function drawViewSeg(): void {
-    const hands = stageKind(slot) === "hands";
-    viewSeg.hidden = !hands;
-    if (!hands) return viewSeg.replaceChildren();
-    const cur = stage?.view ?? lastHandsView;
+    const kind = stageKind(slot);
+    viewSeg.hidden = kind !== "hands" && kind !== "guns";
+    drawGunNav();
+    if (viewSeg.hidden) return viewSeg.replaceChildren();
+    const cur = stage?.view ?? (kind === "guns" ? lastGunView : lastHandsView);
     viewSeg.replaceChildren(
       ...(
-        [
-          ["fp", "First person"],
-          ["close", "Close-up"],
-        ] as [StageView, string][]
+        (kind === "guns"
+          ? [
+              ["gun", "First person"],
+              ["gunside", "Side"],
+            ]
+          : [
+              ["fp", "First person"],
+              ["close", "Close-up"],
+            ]) as [StageView, string][]
       ).map(([v, label]) => h(`button${cur === v ? ".on" : ""}`, { type: "button", role: "radio", "aria-checked": String(cur === v), onclick: () => setView(v) }, label)),
     );
   }
   function setView(v: StageView): void {
     if (v === "fp" || v === "close") lastHandsView = v;
+    if (v === "gun" || v === "gunside") lastGunView = v;
     stageHost.dataset.view = v;
     stageHost.dataset.kind = stageKind(slot);
     stage?.setView(v);
@@ -320,15 +358,16 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
     drawBody(); apply(); bodySeg.querySelector<HTMLElement>('[aria-checked="true"]')?.focus();
   });
   /**
-   * A row that belongs to some hats (hair colour, ponytail length): on the Hat tab it keeps its place whenever you own
-   * such a hat and is only blanked (and inert) while the hat on the stage isn't one. Hovering a card puts that hat on
-   * the stage, so a row that came and went with it pushed the grid down under the cursor, onto the next card, which
-   * took the row away again: the grid jittered between two cards (syl, 2026-10-29).
+   * A row that belongs to some hats (hair colour, ponytail length). Hovering a card puts that hat on the stage; when the
+   * rows sat over the grid, one that came and went with it pushed the grid down under the cursor, onto the next card,
+   * which took the row away again (syl, 2026-10-29). They sit under the grid now, so they simply show while they apply.
    */
-  function reserveRow(row: HTMLElement, show: boolean, keep: boolean): void {
-    row.hidden = !keep;
-    row.classList.toggle("lo-row-idle", keep && !show);
-    row.inert = keep && !show;
+  function reserveRow(row: HTMLElement, show: boolean, _keep: boolean): void {
+    // Under the grid (v0.0.38): coming and going there only shortens the grid's view, it never moves a tile under the
+    // pointer, so the row no longer needs to keep its place while unused.
+    row.hidden = !show;
+    row.classList.remove("lo-row-idle");
+    row.inert = false;
   }
   // Hair colour: under the tabs while a wig is on the stage (worn or hovered) and yours. Presets and a custom colour.
   const hairSw = h("div.lo-hair-sw", { role: "radiogroup", "aria-label": "Hair colour" });
@@ -444,7 +483,9 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
     if (active) (swapSeg.draw(p), orderSeg.draw(p));
     poolHint.textContent = active ? "" : p.items.length ? "Add one more to swap between them" : "Swap between knives each map or restart";
   }
-  const root = h("section.lo", { "aria-label": "Loadout" }, h("div.lo-head", null, tabs, clearIndicators, status), bodyRow, hairRow, lengthRow, poolRow, h("div.lo-body", null, stageHost, grid, glowPane));
+  // The category's own options (player model, hair, ponytail length, knife pool) sit over the grid, beside the stage,
+  // so the stage keeps its place and size on every tab (they used to push it down on Hat, Knife and Finish).
+  const root = h("section.lo", { "aria-label": "Loadout" }, h("div.lo-head", null, tabs, clearIndicators, status), h("div.lo-body", null, stageHost, h("div.lo-side", null, bodyRow, poolRow, grid, glowPane, hairRow, lengthRow)));
 
   function drawTabs(): void {
     clearIndicators.disabled = !COSMETICS.some((c) => isLoadoutCategory(c.slot) && m.owns(c) && m.isNew(c.id));
@@ -504,10 +545,12 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
   /** The thumbnail a tile shows: knife / finish / gloves on your equipped loadout, the item's model for the rest. */
   function thumbJob(c: CosmeticDef): ThumbJob | null {
     const outfit = choice().outfit ?? getOutfit();
-    if (slot === "knife" || slot === "finish" || slot === "glove") {
+    if (slot === "knife" || slot === "finish" || slot === "hilt" || slot === "glove") {
       const l = loadoutFor({ ...choice(), [slot]: c.id });
       if (slot === "glove") return { key: `g|${packLoadout(l)}|${outfit}|${prefs.get().viewmodel.hand}`, kind: "glove", loadout: l };
-      return { key: `k|${l.knife}|${l.finish}|${outfit}`, kind: "knife", knife: l.knife, loadout: l };
+      // (The Hilt tab frames the tiles on the hilt; the knife and finish tabs show the whole knife.)
+      if (slot === "hilt") return { key: `h|${l.knife}|${l.finish}|${l.hilt ?? ""}|${outfit}`, kind: "knife", knife: l.knife, loadout: l, focus: "hilt" };
+      return { key: `k|${l.knife}|${l.finish}|${l.hilt ?? ""}|${outfit}`, kind: "knife", knife: l.knife, loadout: l };
     }
     const spec = previewOf({ cosmetic: c }, { outfit, body: choice().body });
     if (spec && veiled(c)) return { key: `i|${spec.key}|veil`, kind: "item", spec: { ...spec, veil: true } };
@@ -553,28 +596,36 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
     t.el.classList.toggle("locked", !owned(t));
     t.el.setAttribute("aria-pressed", String(on));
     const lock = owned(t) || !t.c ? null : m.lock(t.c);
-    t.el.setAttribute("aria-label", `${nameOf(t.c) ?? "No hat"}${on ? ", equipped" : ""}${lock ? `, locked: ${lock.goal}` : ""}`);
+    t.el.setAttribute("aria-label", `${nameOf(t.c) ?? noneLabel(slot)}${on ? ", equipped" : ""}${lock ? `, locked: ${lock.goal}` : ""}`);
   }
 
   /** Swatch under the thumbnail (also what shows without WebGL). */
   function swatch(c: CosmeticDef | null): HTMLElement {
-    if (slot === "knife" || slot === "finish" || slot === "glove") return loadoutSwatch(c, slot);
+    if (slot === "knife" || slot === "finish" || slot === "hilt" || slot === "glove") return loadoutSwatch(c, slot);
     if (!c) return h("span.pf-sw.lo-sw-none", { "aria-hidden": "true" });
     return h("span.pf-sw.lo-sw-dot", { "aria-hidden": "true", style: `--sw:${c.color ?? "#888"}` });
   }
 
-  function makeTile(c: CosmeticDef | null): TileRef {
+  function makeTile(c: CosmeticDef | null, group?: string): TileRef {
     const lock = c && !m.owns(c) ? m.lock(c) : null;
     const rar = veiled(c) ? null : rarityOf(c);
     const canvas = h("canvas", { width: 384, height: 240, "aria-hidden": "true" }) as HTMLCanvasElement;
     const thumb = h(`span.lo-thumb${veiled(c) ? ".lo-veiled" : ""}`, null, veiled(c) ? h("span.pf-sw.lo-sw-none", { "aria-hidden": "true" }) : swatch(c), canvas, h("span.lo-on", { html: CHECK_SVG, "aria-hidden": "true" }));
-    const sub = lock ? h("span.lo-sub.lo-lock", { title: lock.hint }, h("span.lo-lock-i", { html: LOCK_SVG }), goalText(c, lock.goal, true)) : rar ? h("span.lo-sub", null, rar.name) : null;
+    // In the Supporter and Staff sections the line under the name is the item's set (the heading already says how it's
+    // had; the rarity is the line under the thumbnail): "Geode", or the lock and the set for a locked one.
+    const sub = lock
+      ? h("span.lo-sub.lo-lock", { title: lock.hint }, h("span.lo-lock-i", { html: LOCK_SVG }), goalText(c, group ?? lock.goal, true))
+      : group
+        ? h("span.lo-sub", null, group)
+        : rar
+          ? h("span.lo-sub", null, rar.name)
+          : null;
     const id = c?.id ?? "";
     const el = h(
       "button.lo-tile",
       { type: "button", "data-id": id, "data-sound": "none", style: rar ? `--rar:${rar.color}` : undefined, onclick: () => choose(t) },
       thumb,
-      h("span.lo-name", null, h("span", null, nameOf(c) ?? "No hat"), c && m.isNew(c.id) ? h("span.pf-new-dot", { role: "img", "aria-label": "new" }) : null),
+      h("span.lo-name", null, h("span", null, nameOf(c) ?? noneLabel(slot)), c && m.isNew(c.id) ? h("span.pf-new-dot", { role: "img", "aria-label": "new" }) : null),
       sub,
       lock && lock.fraction !== null ? h("span.lo-prog", { style: `--f:${lock.fraction}`, "aria-hidden": "true" }) : null,
     ) as HTMLButtonElement;
@@ -589,22 +640,33 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
     const mine = items.filter((c) => m.owns(c));
     // Locked: nearest first, a secret one last.
     const locked = items.filter((c) => !m.owns(c)).sort((a, b) => Number(veiled(a)) - Number(veiled(b)) || lockOf(b) - lockOf(a));
-    // Supporter items come last, grouped by set under the set's name (the rest keep their order: yours first).
-    const plain = [...mine, ...locked].filter((c) => !c.set);
-    const groups = SUPPORTER_SETS.map((st) => ({ st, items: [...mine, ...locked].filter((c) => c.set === st.id) })).filter((g) => g.items.length);
-    const headed = groups.length > 1 || (!o.only && groups.length > 0);
+    const ordered = [...mine, ...locked];
+    // Three sections: what's earned by playing (yours first, then the nearest goals), then every Supporter item under
+    // one heading, set by set (the sets in their order, then the ones in no set), then the role sets you hold.
+    const sections = loadoutSections(ordered);
+    const headed = !o.only;
     const els: HTMLElement[] = [];
     tiles = [];
-    const add = (c: CosmeticDef | null) => {
-      const t = makeTile(c);
+    const add = (c: CosmeticDef | null, group?: string) => {
+      const t = makeTile(c, group);
       tiles.push(t);
       els.push(t.el);
     };
-    if (slot === "hat" && !o.only) add(null);
-    plain.forEach(add);
-    for (const g of groups) {
-      if (headed) els.push(h("h4.lo-set-h", null, g.st.name));
-      g.items.forEach(add);
+    if ((slot === "hat" || slot === "camo") && !o.only) add(null);
+    sections.earned.forEach((c) => add(c));
+    if (sections.supporter.length) {
+      const owner = sections.supporter.some((x) => m.owns(x.c));
+      if (headed)
+        els.push(h("h4.lo-set-h", null, h("span", null, "Supporter"), !owner && !o.previewOnly ? h("a.lo-set-link", { href: "/?support", onclick: (e: Event) => (e.preventDefault(), navigate({ screen: "support" })) }, `Support from $${SUPPORTER_MIN_USD}`) : ""));
+      sections.supporter.forEach((x) => add(x.c, x.group));
+    }
+    if (sections.contributor.length) {
+      if (headed) els.push(h("h4.lo-set-h", null, h("span", null, "Contributor"), h("small", null, "For players who worked on the game")));
+      sections.contributor.forEach((c) => add(c, c.roleSet ? c.roleSet[0].toUpperCase() + c.roleSet.slice(1) : "Contributor"));
+    }
+    if (sections.staff.length) {
+      if (headed) els.push(h("h4.lo-set-h", null, h("span", null, "Staff")));
+      sections.staff.forEach((x) => add(x.c, x.group));
     }
     grid.replaceChildren(...els);
     grid.setAttribute("aria-label", NAME[slot]);
@@ -694,12 +756,13 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
       return;
     }
     const hands = stageKind(slot) === "hands";
+    const l0 = loadoutOf(c);
     const focus = cosmetic(preview !== null ? preview : c[slot]);
     if (hands) {
       const l = loadoutOf(c);
       capName.replaceChildren(h("span", null, cosmetic(l.knife)?.name ?? "Carrot Blade"), h("span.lo-cap-fin", null, cosmetic(l.finish)?.name ?? "Garden Fresh"));
     } else {
-      capName.replaceChildren(h("span", null, nameOf(focus) ?? (slot === "hat" ? "No hat" : "")), h("span.lo-cap-fin", null, KIND[slot]));
+      capName.replaceChildren(h("span", null, nameOf(focus) ?? (EMPTYABLE.has(slot) ? noneLabel(slot) : "")), h("span.lo-cap-fin", null, KIND[slot]));
     }
     const rar = veiled(focus) ? null : rarityOf(focus);
     // The room takes the shown item's rarity colour (common items barely tint it).
@@ -710,6 +773,7 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
     stage?.tint(rar?.color ?? null, level <= 1 ? 0.35 : 1);
     capMeta.replaceChildren(
       rar ? h("span.lo-cap-rar", { style: `--rar:${rar.color}` }, h("i", { "aria-hidden": "true" }), rar.name) : "",
+      hands && l0.hilt ? h("span.dim", null, `${cosmetic(l0.hilt)?.name ?? ""} hilt`) : "",
       hands ? h("span.dim", null, `${cosmetic(c.glove)?.name ?? "Knit"} gloves`) : "",
     );
     // How the item shown was earned (a locked one says how to get it in the state line instead).
@@ -794,7 +858,7 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
   });
   const onKey = (e: KeyboardEvent) => {
     if (!root.isConnected) return removeKeys();
-    if (e.code !== inspectKey() || e.ctrlKey || e.metaKey || e.altKey || stageKind(slot) !== "hands") return;
+    if (e.code !== inspectKey() || e.ctrlKey || e.metaKey || e.altKey || (stageKind(slot) !== "hands" && stageKind(slot) !== "guns")) return;
     const t = e.target as HTMLElement | null;
     if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || root.closest("[inert]") || !root.offsetParent) return;
     if (e.type === "keydown") {
@@ -832,6 +896,7 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
       stage.setView(viewFor(slot));
       stage.onView = (v) => {
         if (v === "fp" || v === "close") lastHandsView = v;
+        if (v === "gun" || v === "gunside") lastGunView = v;
         stageHost.dataset.view = v;
         drawViewSeg();
       };

@@ -4,6 +4,8 @@ import { ANGLE_SPEED_KEY_RANGE, YAW_SPEED_RANGE } from "../turn-binds";
 import type { LightingProfileId } from "../graphics/profiles";
 import { graphicsPreset as lookPreset, type GraphicsPreset as LookPreset } from "../graphics/presets";
 import { DEFAULT_MOUSE_DPI } from "../mouse-settings";
+import { M_YAW, M_YAW_RANGE } from "../sens-convert";
+import { sanitizeAliases, sanitizeCmdBinds } from "../console/bind-store";
 // Client preferences (localStorage, applied live). Nothing here feeds the simulation's physics:
 // tick rate / airaccelerate / autohop are fixed per style (styles.ts, picked in the menus or with the cycleStyle
 // key) and recorded in replays.
@@ -15,6 +17,7 @@ import { DEFAULT_SSJ, type SsjPrefs } from "../ssj/stats";
 import { DEFAULT_JHUD, type JhudPrefs } from "../ssj/jhud";
 import { DEFAULT_TRIGGER_PREFS, normalizeTriggerPrefs, type TriggerPrefs } from "../triggers/volumes";
 import { DEFAULT_PAINT, type PaintPrefs } from "../paint/prefs";
+import { DEFAULT_LANDING_PREFS, normalizeLandingPrefs, type LandingPrefs } from "../landing/prefs";
 import type { GhostRouteMode, GhostRouteSource } from "../ghost-route-data";
 import type { AutoRestartAction, AutoRestartWhen } from "../auto-restart";
 import { COLOR_BLIND_MODES, type ColorBlindMode } from "../palette";
@@ -25,6 +28,10 @@ export type Action =
   | "left"
   | "right"
   | "jump"
+  // Hold jump (toggle) (input.ts setJumpToggle): press once and jump stays held, press again to let go. Unbound by default.
+  | "jumpToggle"
+  // Crouch jump: jump and duck held together (CS:S's `alias +cj "+duck; +jump"`). Unbound by default.
+  | "crouchJump"
   | "duck"
   | "use"
   | "restart"
@@ -37,6 +44,8 @@ export type Action =
   // Leave for the main menu from the game (leave-confirm.ts: asks once during a timed run). Unbound by default.
   | "mainMenu"
   | "hudEditor"
+  // The console (console/): Source-style commands, binds and cvars. ` by default; works in menus too.
+  | "console"
   // Opens the chat (rooms: net/mp.ts; solo: solo-chat.ts). Y and U by default, like CS:S say / say_team.
   | "chat"
   | "thirdPerson"
@@ -143,6 +152,14 @@ export interface Prefs {
   paint: PaintPrefs;
   /** CS:S `sensitivity` (degrees per count = sensitivity * m_yaw). */
   sensitivity: number;
+  /**
+   * CS:S `m_yaw`: degrees per count at sensitivity 1 (default 0.022, M_YAW_RANGE). Lets a sensitivity from another
+   * game be used as is (Valorant's 0.07, say). Everything that turns mouse counts into degrees reads it (input.ts k, the
+   * replay viewer's free look, cm/360); the server gets the CS:S-equivalent sensitivity (mouse-settings.ts).
+   */
+  mYaw: number;
+  /** CS:S `m_pitch`, as a size (M_YAW_RANGE): Invert mouse Y is its sign, as a negative m_pitch is in CS:S. */
+  mPitch: number;
   verticalSensitivityEnabled: boolean;
   verticalSensitivity: number;
   /** Mouse DPI, only used to show cm/360. */
@@ -206,6 +223,10 @@ export interface Prefs {
     /** JHUD (!jhud, ssj/jhud.ts): what it shows and its colours. The HUD element is layout.jhud. */
     jhud: JhudPrefs;
     movement: { fjtChat: boolean; lj: boolean; ljChat: boolean };
+    /** CS:S `cl_showpos` (hud/showpos.ts): 0 off, 1 eye position and view angles, 2 feet origin. */
+    showPos: number;
+    /** `net_graph` (console): the FPS counter also shows your ping in servers. */
+    netGraph: boolean;
   };
   /** Master volume (0..1). The per-bus levels and the rest of the sound options are in `audio`. */
   volume: number;
@@ -222,6 +243,8 @@ export interface Prefs {
     trail: boolean;
     /** Persistent jump-to-jump/recorded path and white takeoff markers for one selected race ghost. */
     route: boolean;
+    /** Hide the selected route ghost while retaining its route and HUD comparison. */
+    routeOnly: boolean;
     routeSource: GhostRouteSource;
     /** The ghost the HUD's split and speed difference compare with. Auto: PB, else WR, else custom. */
     compare: GhostRouteSource;
@@ -254,6 +277,11 @@ export interface Prefs {
   firstPersonGlow: boolean;
   /** Trigger and clip overlays (!showtriggers, !showclips, the !triggers menu; triggers/). Drawn only, never part of a run. */
   triggers: TriggerPrefs;
+  /**
+   * Landing spot (landing/; !landing): while you're in the air, where you'd land with no further input. Drawn only,
+   * never part of a run. Off by default.
+   */
+  landing: LandingPrefs;
   /**
    * Brightness and Fullbright for one map, keyed by map name (map-look.ts): set from !bright, !fb and the pause menu's
    * On screen tab. graphics.brightness / graphics.fullbright are what every other map uses.
@@ -371,6 +399,13 @@ export interface Prefs {
     rev: number;
   };
   binds: Record<Action, string[]>;
+  /**
+   * Keys bound to a command line instead of one action (console/bind-store.ts): `bind q "+moveleft; +left"`,
+   * `bind k "say gg"`, an alias. Key code -> command text. A key is here or in `binds`, never both.
+   */
+  cmdBinds: Record<string, string>;
+  /** Source aliases (`alias +mleft "+moveleft; +left"`), name (lower case) -> command text. */
+  aliases: Record<string, string>;
   /** Practice mode (practice-mode/): a checkpoint teleport keeps the speed you saved it with (bhoptimer does), or stops you. */
   practice: { keepVelocity: boolean };
   /** Restart keys (R / B / M) need a short hold (restart-hold.ts HOLD_MS) so a stray press can't end a run (restart-guard.ts). */
@@ -392,6 +427,8 @@ export const ACTIONS: { id: Action; label: string }[] = [
   { id: "left", label: "Strafe left" },
   { id: "right", label: "Strafe right" },
   { id: "jump", label: "Jump" },
+  { id: "jumpToggle", label: "Hold jump (toggle)" },
+  { id: "crouchJump", label: "Crouch jump" },
   { id: "duck", label: "Duck" },
   { id: "use", label: "Use (doors, buttons)" },
   { id: "restart", label: "Restart run" },
@@ -402,6 +439,7 @@ export const ACTIONS: { id: Action; label: string }[] = [
   { id: "cycleStyle", label: "Switch style" },
   { id: "mainMenu", label: "Main menu" },
   { id: "hudEditor", label: "Edit HUD layout" },
+  { id: "console", label: "Console" },
   { id: "chat", label: "Chat" },
   { id: "thirdPerson", label: "Third person (practice)" },
   { id: "freecam", label: "Freecam" },
@@ -490,6 +528,8 @@ export function trainerPreset(t: TrainerPrefs): TrainerPreset | null {
 export const DEFAULT_PREFS: Prefs = {
   paint: { ...DEFAULT_PAINT },
   sensitivity: 2,
+  mYaw: M_YAW,
+  mPitch: M_YAW,
   verticalSensitivityEnabled: false,
   verticalSensitivity: 2,
   dpi: DEFAULT_MOUSE_DPI,
@@ -506,7 +546,7 @@ export const DEFAULT_PREFS: Prefs = {
   inputStats: false,
   fov: 90,
   crosshair: { style: "cross", color: "#4dff6a", size: 6, thickness: 2, gap: 4, outline: true, alpha: 1 },
-  hud: { speedColors: true, gainTicks: true, edgeGlow: false, place: "off", strafeTrainer: DEFAULT_TRAINER, scale: 1, layout: CLASSIC, keys: DEFAULT_KEYS, hidden: false, hiddenKeeps: "speedKeys", ssj: DEFAULT_SSJ, jhud: DEFAULT_JHUD, movement: { fjtChat: false, lj: false, ljChat: true } },
+  hud: { speedColors: true, gainTicks: true, edgeGlow: false, place: "off", strafeTrainer: DEFAULT_TRAINER, scale: 1, layout: CLASSIC, keys: DEFAULT_KEYS, hidden: false, hiddenKeeps: "speedKeys", ssj: DEFAULT_SSJ, jhud: DEFAULT_JHUD, movement: { fjtChat: false, lj: false, ljChat: true }, showPos: 0, netGraph: false },
   volume: 0.8,
   audio: {
     announcer: { enabled: false, finish: true, movement: true, local: true, server: true, volume: 0.8, pb: "perfect", wr: "godlike", speed: "godlike", highSpeed: "holyshit", streak: "perfect", lj: "perfect", speedThreshold: 1500, highSpeedThreshold: 2500, streakThreshold: 3, ljThreshold: 250 },
@@ -529,11 +569,12 @@ export const DEFAULT_PREFS: Prefs = {
     muteInBackground: true,
   },
   showGhost: true,
-  ghost: { pb: true, wr: true, custom: true, opacity: 0.55, trail: true, route: false, routeSource: "auto", compare: "auto", routeMode: "jumps", nearFade: true, tag: true },
+  ghost: { pb: true, wr: true, custom: true, opacity: 0.55, trail: true, route: false, routeOnly: false, routeSource: "auto", compare: "auto", routeMode: "jumps", nearFade: true, tag: true },
   tags: { throughWalls: false, players: true },
   showZones: true,
   colorBlind: "off",
   triggers: DEFAULT_TRIGGER_PREFS,
+  landing: DEFAULT_LANDING_PREFS,
   showPlayerGlow: true,
   showPlayers: true,
   firstPersonGlow: true,
@@ -541,6 +582,8 @@ export const DEFAULT_PREFS: Prefs = {
   graphics: { preset: "source", waterReflections: true, bloom: true, mapProfiles: false, ambienceShowcase: false, lightingProfile: "map", skyMode: "map", skyPackId: null, skyRotation: 0, skyExposure: 0, lightingSource: "map", directContribution: 1, ambientContribution: 1, clouds: false, cloudQuality: "low", cloudCoverage: .45, cloudDensity: 1, contactShading: false, atmosphere: false, sunShafts: false, materialResponse: true, volumetric: false, spatialAA: true, localLights: false, localQuality: "medium", localBudget: 1, localStrength: .2, dynamicGI: false, tracedGI: false, giQuality: "low", giStrength: .25, giRange: 256, dynamicShadows: false, shadowQuality: "medium", shadowDistance: 1024, shadowStrength: .18, resolutionScale: 1, antialias: true, aspect: "native", aspectFit: "stretch", pixelated: false, anisotropy: 8, brightness: 1, gamma: 1, vibrance: 1, fullbright: false, menuBackground: "live", fullscreen: true, potato: false, flashlight: false, fpsLimit: 1000, uncapped: false, lowLatency: false, menuFps: 0 },
   viewmodel: { show: true, ...VIEWMODEL_POS, bob: VIEWMODEL_BOB, sway: 1, hand: "right", inspect: "tricks", landSettle: false, speedFov: false, rev: VIEWMODEL_REV },
   binds: DEFAULT_BINDS,
+  cmdBinds: {},
+  aliases: {},
   practice: { keepVelocity: true },
   holdRestart: false,
   autoRestart: { when: "off", action: "restart" },
@@ -571,6 +614,16 @@ const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 function migrate(raw: Record<string, unknown>, partial = false): Record<string, unknown> {
   if (typeof raw.verticalSensitivity !== "number" || !Number.isFinite(raw.verticalSensitivity)) delete raw.verticalSensitivity;
   else raw.verticalSensitivity = Math.max(0.01, Math.min(100, raw.verticalSensitivity));
+  // m_yaw / m_pitch: within M_YAW_RANGE (a broken one falls back to 0.022). m_pitch is a size; a negative one (pasted
+  // from a CS:S config) means Invert mouse Y.
+  for (const key of ["mYaw", "mPitch"] as const) {
+    const v = raw[key];
+    if (typeof v !== "number" || !Number.isFinite(v) || v === 0) delete raw[key];
+    else {
+      if (key === "mPitch" && v < 0) raw.invertY = true;
+      raw[key] = Math.max(M_YAW_RANGE[0], Math.min(M_YAW_RANGE[1], Math.abs(v)));
+    }
+  }
   // Turn speeds: within what a replay may record (turn-binds.ts); a broken one falls back to the default.
   for (const [key, [lo, hi]] of [["yawSpeed", YAW_SPEED_RANGE], ["angleSpeedKey", ANGLE_SPEED_KEY_RANGE]] as const) {
     const v = raw[key];
@@ -599,6 +652,7 @@ function migrate(raw: Record<string, unknown>, partial = false): Record<string, 
   migrateViewmodel(raw, partial);
   migrateAudio(raw);
   normalizeTriggerPrefs(raw.triggers);
+  normalizeLandingPrefs(raw.landing);
   return migrateHud(raw);
 }
 
@@ -695,6 +749,8 @@ function migrateBinds(raw: Record<string, unknown>): void {
   for (const a of REMOVED_ACTIONS) delete b[a];
   const used = new Set<string>();
   for (const v of Object.values(b)) if (Array.isArray(v)) for (const c of v) if (typeof c === "string") used.add(c);
+  // Keys bound to a command line (cmdBinds) are taken too.
+  if (raw.cmdBinds && typeof raw.cmdBinds === "object") for (const c of Object.keys(raw.cmdBinds as object)) used.add(c);
   for (const [a, codes] of Object.entries(DEFAULT_BINDS)) if (!(a in b)) b[a] = codes.filter((c) => !used.has(c));
 }
 
@@ -770,6 +826,10 @@ export function parsePrefs(raw: string | null): Prefs {
   const p = merge(DEFAULT_PREFS, m);
   // (merge keeps only the defaults' keys; the per-map looks are keyed by map name.)
   p.mapLooks = sanitizeMapLooks(m.mapLooks);
+  // (Keyed by key code / alias name, so not in the defaults' keys either.)
+  p.cmdBinds = sanitizeCmdBinds(m.cmdBinds);
+  p.aliases = sanitizeAliases(m.aliases);
+  for (const code of Object.keys(p.cmdBinds)) for (const a of Object.keys(p.binds) as Action[]) p.binds[a] = p.binds[a].filter((c) => c !== code);
   if (!COLOR_BLIND_MODES.some(([m]) => m === p.colorBlind)) p.colorBlind = DEFAULT_PREFS.colorBlind;
   p.graphics.preset = lookPreset(p.graphics.preset);
   return p;

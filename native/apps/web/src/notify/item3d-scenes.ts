@@ -9,11 +9,11 @@
 // Everything is built once per look and cached by the caller; geometry builders cache their own meshes too.
 
 import * as THREE from "three";
-import { cleanLoadout, DEFAULT_LOADOUT, gloveStyle, loadoutFor } from "../loadout";
+import { cleanLoadout, DEFAULT_LOADOUT, gloveStyle, hiltSkin, loadoutFor } from "../loadout";
 import { achievement } from "../progression";
 import { colourway, paletteOf } from "../player/bunny/palettes";
 import { hatGeometry, headwearKey } from "../player/bunny/hats";
-import { playerUniforms, solidMaterial, type PlayerUniforms } from "../player/materials";
+import { playerUniforms, silhouetteMaterial, solidMaterial, type PlayerUniforms } from "../player/materials";
 import { PlayerModel } from "../player/model";
 import { Trail } from "../player/trail";
 import { applyLoadoutUniforms, specOf } from "../viewmodel/finishes/shader";
@@ -24,6 +24,11 @@ import { viewmodelGeometry } from "../viewmodel/mesh";
 import { vmRig } from "../viewmodel/rig";
 import { badgeToken } from "../ui/badges";
 import type { PreviewSpec } from "./item-preview";
+import { gunById } from "../viewmodel/guns/index";
+import { gunModelGeometry } from "../viewmodel/guns/meshes";
+import { gunMaterial } from "../viewmodel/guns/material";
+import { NO_LOOK } from "../viewmodel/finishes/shader";
+import { camoStyle } from "../camo";
 
 export interface ItemScene {
   readonly scene: THREE.Scene;
@@ -76,6 +81,7 @@ function knifeScene(spec: PreviewSpec): ItemScene {
   const show = new KnifeShowcase();
   show.setKnife(knifeById(spec.knife) ?? carrot);
   show.setFinish(specOf({ finish: spec.finish ?? DEFAULT_LOADOUT.finish }));
+  show.setHilt(hiltSkin(spec.hilt));
   show.setColours(spec.outfit);
   // Tip up and to the right, like a blade held up to the light.
   show.root.quaternion.copy(knifeBasis().premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), 0.62)));
@@ -136,6 +142,27 @@ function gloveScene(spec: PreviewSpec): ItemScene {
   holder.add(mesh);
   pivot.add(holder);
   return { scene, pivot, radius: geo.boundingBox!.getSize(new THREE.Vector3()).length() / 2, dispose: disposers(scene) };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Gun camos: the Furrow (the rifle shows the most coated surface) on its side in the camo, muzzle to the right.
+
+function gunScene(spec: PreviewSpec): ItemScene {
+  const { scene, pivot } = base();
+  const def = gunById("ak47")!;
+  const geo = gunModelGeometry(def);
+  // A secret camo not earned yet (ui/loadout-view.ts veils it): the gun's shape only.
+  const mat = spec.veil ? silhouetteMaterial(playerUniforms()) : gunMaterial(playerUniforms(), NO_LOOK, { camo: camoStyle(spec.camo), noEnv: true });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.frustumCulled = false;
+  // Gun-local (x forward, y left, z up) -> x right, z up turned to y up: the right flank faces the camera.
+  const holder = new THREE.Group();
+  holder.rotation.x = -Math.PI / 2;
+  const c = geo.boundingBox!.getCenter(new THREE.Vector3());
+  mesh.position.copy(c).multiplyScalar(-1);
+  holder.add(mesh);
+  pivot.add(holder);
+  return { scene, pivot, radius: geo.boundingBox!.getSize(new THREE.Vector3()).x * 0.5, dispose: () => mat.dispose() };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -526,6 +553,8 @@ export async function buildItemScene(spec: PreviewSpec): Promise<ItemScene> {
       return knifeScene(spec);
     case "glove":
       return gloveScene(spec);
+    case "gun":
+      return gunScene(spec);
     case "hat":
       return hatScene(spec);
     case "bunny":

@@ -902,6 +902,109 @@ const bune: StyleFn = (b, h) => {
   });
 };
 
+/**
+ * Dress (v0.0.38): fitted smooth leather, three stitched points running down the back of the hand, a short turned cuff
+ * with a vent and one button. tips = the points, strap = the cuff, detail = the button.
+ */
+const dress: StyleFn = (b, h) => {
+  const L = h.palmL;
+  palm(b, h, {
+    rows: [0.78],
+    paint: (q) => (q.s < 0.78 ? P(B.strap, MAT.leather) : P(B.base, MAT.leather)),
+    wear: (q) => palmWear(h)(q) * 0.5,
+  });
+  digits(b, h, {
+    scale: 0.97,
+    paint: (q, d) => P(d === 4 ? B.base : B.fingers, MAT.leather),
+    wear: (q, d) => digitWear(q, d) * 0.5,
+  });
+  // The points: three raised lines of stitching from the cuff toward the knuckles, splaying a little.
+  const back = scale(h.palmN, -1);
+  for (const a of [-0.36, 0, 0.36]) {
+    const path: V3[] = [0.9, 0.9 + (L * 0.7 - 0.9) / 3, 0.9 + ((L * 0.7 - 0.9) * 2) / 3, L * 0.7].map((s, i) => backPoint(h, s, a * (1 + i * 0.14), 0.035));
+    strip(b, path, (i) => (i === 3 ? 0.045 : 0.075), 0.035, () => back, P(B.tips, MAT.leather), () => [[h.hand, 1]], 0.2);
+  }
+  // The turned cuff and its vent on the pinky side, closed by a button.
+  handBand(b, h, [0.5, 0.54, 0.6, 0.74, 0.8], (j) => [0.04, 0.12, 0.13, 0.12, 0.04][j], () => P(B.strap, MAT.leather), { seams: [0.77], wear: (j) => (j === 4 ? 0.5 : 0.1) });
+  dome(b, backPoint(h, 0.67, -0.62, 0.14), back, h.ax, 0.15, 0.15, 0.1, P(B.detail, MAT.metal), [[h.hand, 1]], 10);
+};
+
+/**
+ * Aviator (v0.0.38): a leather flying gauntlet. A full glove with a padded panel over the knuckles, a wide cuff that
+ * flares up the forearm with a fleece roll at its mouth, and a strap with a buckle round the wrist. fingers = the
+ * knuckle panel, strap = the fleece, tips = the wrist strap, detail = the buckle.
+ */
+const aviator: StyleFn = (b, h) => {
+  const L = h.palmL;
+  const k0 = L * 0.56;
+  palm(b, h, {
+    rows: [k0],
+    paint: (q) => (q.bn > 0.38 && q.s > k0 ? P(B.fingers, MAT.leather) : P(B.base, MAT.leather)),
+    bulge: (q) => (q.bn > 0.3 && q.s > k0 ? 0.08 * smoothstep(0.3, 0.6, q.bn) * smoothstep(k0, k0 + 0.15, q.s) : 0),
+    wear: palmWear(h),
+  });
+  digits(b, h, { paint: () => P(B.base, MAT.leather), bulge: (q, d) => (d < 4 && q.i === 2 ? 0.04 : 0), wear: digitWear });
+  const L0 = h.L;
+  // The gauntlet: snug at the wrist, flaring wide up the forearm.
+  cuff(b, h, [
+    [L0 - 2.05, hug(h, L0 - 2.05) + 0.1],
+    [L0 - 1.95, 2.86],
+    [L0 - 1.2, 2.62],
+    [L0 - 0.4, 2.3],
+    [L0 + 0.25, 2.14],
+    [L0 + 0.5, 2.06],
+    [L0 + 0.68, 1.94],
+  ], () => P(B.base, MAT.leather), { N: 18, seams: [L0 - 1.2], wear: (j) => (j <= 1 ? 0.7 : j === 6 ? 0.6 : 0.15) });
+  // The fleece roll turned out over the mouth.
+  cuff(b, h, [
+    [L0 - 2.32, hug(h, L0 - 2.32)],
+    [L0 - 2.28, 2.86],
+    [L0 - 2.14, 3.06],
+    [L0 - 1.98, 3.0],
+    [L0 - 1.88, 2.84],
+  ], () => P(B.strap, MAT.fuzz), { N: 18, wobble: (j, a) => (j > 0 && j < 4 ? 0.05 * Math.sin(a * 9 + j * 1.7) : 0) });
+  // The wrist strap and its buckle on the outer side.
+  cuff(b, h, [
+    [L0 - 0.58, 2.24],
+    [L0 - 0.55, 2.4],
+    [L0 - 0.16, 2.36],
+    [L0 - 0.13, 2.2],
+  ], () => P(B.tips, MAT.leather), { N: 18, seams: [L0 - 0.5, L0 - 0.21], wear: () => 0.3 });
+  {
+    const out = scale(h.fv, -1);
+    const c = add(add(h.root, scale(h.dA, L0 - 0.35)), scale(out, 2.4 * 0.84));
+    dome(b, c, out, h.dA, 0.32, 0.24, 0.1, P(B.detail, MAT.metal), [[h.arm, 0.6], [h.twist, 0.4]], 8);
+  }
+};
+
+/**
+ * Flip Mitts (v0.0.38): fingerless knit with a mitten flap folded back over the back of the hand and buttoned down, a
+ * ribbed cuff. base = the knit, fingers = the flap, strap = the cuff, detail = the button; bare paw fingertips.
+ */
+const mitts: StyleFn = (b, h) => {
+  const L = h.palmL;
+  const KN = P(B.base, MAT.knit);
+  palm(b, h, { seamless: true, paint: () => KN, wear: palmWear(h) });
+  wristCollar(b, h, KN);
+  digits(b, h, {
+    seamless: true,
+    paint: (q, d) => ((d < 4 ? q.i >= 4 : q.i >= 4) ? P(B.paw, MAT.fuzz) : KN),
+    // A rolled edge where the knit stops.
+    bulge: (q, d) => ((d < 4 ? q.i === 3 : q.i === 3) ? 0.07 : 0),
+  });
+  // The folded flap: a padded band over the back of the hand, flat on the palm side (where it's part of the glove).
+  // Its free end (toward the wrist) is rounded like a mitten's top: the rows there lift only the middle of the back.
+  const fs = [L * 0.18, L * 0.24, L * 0.32, L * 0.52, L * 0.8, L * 0.9];
+  const lift = [0.02, 0.2, 0.3, 0.34, 0.27, 0.04];
+  const from = [0.82, 0.62, 0.32, 0.1, 0.05, 0.05];
+  const bnK = (k: number) => -Math.sin((k / 16) * Math.PI * 2);
+  const backness = (j: number, k: number) => smoothstep(from[j], from[j] + 0.4, bnK(k));
+  handBand(b, h, fs, (j, k) => 0.012 + lift[j] * backness(j, k), (j, k) => (backness(Math.min(j + 1, 5), k + 0.5) > 0.15 ? P(B.fingers, MAT.knit) : KN), { N: 16, seams: [L * 0.88] });
+  dome(b, backPoint(h, L * 0.34, 0, 0.3), scale(h.palmN, -1), h.ax, 0.2, 0.2, 0.12, P(B.detail, MAT.metal), [[h.hand, 1]], 10);
+  // Ribbed cuff past the trim.
+  handBand(b, h, [0.46, 0.52, 1.05, 1.12], (j, k) => [0.02, 0.08, 0.08, 0.03][j] + (j > 0 && j < 3 && k % 2 ? 0.04 : 0), () => P(B.strap, MAT.knit), { N: 24, seams: [1.1] });
+};
+
 /** Matching forearms belong to the glove, so they also work with other outfits. */
 function supporterSleeve(b: Builder, h: Hand, robot: boolean): void {
   if (robot) robotForearm(b, h);
@@ -1014,10 +1117,10 @@ const sleeveShade = (s: number) => 1 - 0.33 * (1 - smoothstep(SLEEVE_OPEN, SLEEV
 /** How far the thumb guard turns from the back of the hand toward the thumb's outer (camera) side. */
 const THUMB_TWIST = -2.5;
 
-const STYLES: Record<Exclude<GloveStyleId, "knit">, StyleFn> = { sport, driver, wraps, moto, specialist, paws, garden, plush, bune };
+const STYLES: Record<Exclude<GloveStyleId, "knit">, StyleFn> = { sport, driver, wraps, moto, specialist, paws, garden, plush, bune, dress, aviator, mitts };
 
 /** Styles whose cuff covers the sleeve's trim (the trim rows under it aren't built). */
-const LONG_CUFF: Partial<Record<GloveStyleId, number>> = { moto: -1.3, specialist: -1.3 };
+const LONG_CUFF: Partial<Record<GloveStyleId, number>> = { moto: -1.3, specialist: -1.3, aviator: -1.75 };
 
 /** Both hands + sleeves in a glove style (the knit glove: the original geometry). */
 export function buildFpHands(b: Builder, style: GloveStyleId = "knit"): void {

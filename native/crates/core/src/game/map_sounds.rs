@@ -116,6 +116,21 @@ impl MapSounds {
 }
 
 impl Game {
+    /// A maker copy has its own channel and lifetime. Saved with the same simulation snapshot.
+    pub(super) fn map_sound_spawn(&mut self, i: usize) {
+        if !self.ents[i].class.eq_ignore_ascii_case("ambient_generic") { return; }
+        let mut sound = AmbientSound::new(i as u32, &self.entities[i]);
+        match self.map_sounds.ambients.binary_search_by_key(&(i as u32), |a| a.ent) {
+            Ok(at) => {
+                sound.starts = self.map_sounds.ambients[at].starts;
+                sound.stops = self.map_sounds.ambients[at].stops;
+                self.map_sounds.ambients[at] = sound;
+            },
+            Err(at) => self.map_sounds.ambients.insert(at, sound),
+        }
+        self.map_sound_serial = self.map_sound_serial.wrapping_add(1);
+    }
+
     /// Called for every input an entity receives, before it is handled. Changes nothing but `map_sounds`.
     pub(super) fn map_sound_input(&mut self, i: usize, input: &str, param: &str) {
         match input {

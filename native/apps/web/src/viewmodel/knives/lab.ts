@@ -6,7 +6,7 @@
 //   ?mode=turn&knife=bunnyfly&cells=0,45,90,135,180,0/30,90:180:180                     yaw[/pitch][:joint angles]
 //          (&at=<z> looks at that knife-local z instead of the middle, &dist=<units>)
 //   ?mode=tp&knife=karrotbit&cells=full,hand,ghost,back                                  third-person shots
-//   &fin=nebula (a finish design or item id) · &cols=3 · &zoom=1.5&cx=0.6&cy=0.6 (fp) · &labels=0 · &dist=14 (turn)
+//   &fin=nebula (a finish design or item id) · &hilt=oak (a hilt skin, "oak" or "hilt-oak"; turn mode) · &cols=3 · &zoom=1.5&cx=0.6&cy=0.6 (fp) · &labels=0 · &dist=14 (turn)
 
 import * as THREE from "three";
 import { Builder } from "../../player/bunny/builder";
@@ -14,7 +14,8 @@ import { solidMaterial, playerUniforms } from "../../player/materials";
 import { PlayerModel } from "../../player/model";
 import { prefs } from "../../ui/settings";
 import { ensureViewmodelLayout } from "../finishes/layout";
-import { lookOf, setFinishUniforms, type FinishSpec } from "../finishes/shader";
+import { lookOf, setFinishUniforms, setHiltUniforms, type FinishSpec } from "../finishes/shader";
+import { hiltSkin } from "../../loadout";
 import type { VmAction } from "../procedural";
 import { vmRig } from "../rig";
 import { Viewmodel, type ViewmodelInput } from "../viewmodel";
@@ -211,7 +212,10 @@ function turntable(): void {
   const u = playerUniforms();
   u.uAccent.value.set(0xffb43a);
   if (fin) setFinishUniforms(u, fin);
-  const mesh = new THREE.SkinnedMesh(geo, solidMaterial(u, lookOf(fin, null, true)));
+  const hq = q.get("hilt");
+  const hilt = hq ? hiltSkin(hq.startsWith("hilt-") ? hq : `hilt-${hq}`) : null;
+  setHiltUniforms(u, hilt);
+  const mesh = new THREE.SkinnedMesh(geo, solidMaterial(u, lookOf(fin, null, true, hilt)));
   mesh.bindMode = THREE.DetachedBindMode;
   mesh.bind(skeleton, new THREE.Matrix4());
   mesh.frustumCulled = false;

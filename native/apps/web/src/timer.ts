@@ -5,7 +5,7 @@
 // whose results may differ between JS engines (V8 vs JavaScriptCore).
 
 import { playerInZone, splitCount, touching, trackOf, type Zone } from "./zones";
-import { entryCrossing, exitCrossing, FRACTION_UNITS, movement, TIMING_POLICY, timeUnits, unitsToMs, type Crossing, type PathSource, type RunTiming } from "./run-timing";
+import { crossesZone, entryCrossing, exitCrossing, FRACTION_UNITS, movement, TIMING_POLICY, timeUnits, unitsToMs, type Crossing, type PathSource, type RunTiming } from "./run-timing";
 
 export type RunStatus = "idle" | "running" | "finished";
 
@@ -50,6 +50,8 @@ export interface TickState {
 
 export interface TimerUpdate {
   started?: boolean;
+  /** Rules 5 / physics 26: anti-skip touch stopped the attempt; return to start to re-arm. */
+  stopped?: boolean;
   finished?: boolean;
   /** Re-entered the start zone while running/finished: attempt reset. */
   restarted?: boolean;
@@ -62,6 +64,8 @@ export interface TimerUpdate {
 export interface TimerOptions {
   /** Horizontal speed cap applied on the run's first tick (bhoptimer-style prespeed limit). null = off. */
   prespeedCap: number | null;
+  /** Physics used by this run (rules 5 anti-skip zones require >=26). */
+  physics?: number;
   /** shavit_misc_prespeed 2: zero velocity on a landing-tick jump inside a start zone. */
   blockPrehops?: boolean;
   /** Keys that count as strafes (style dependent, see styles.strafeKeys). Default "ad". */
@@ -94,6 +98,11 @@ export interface TimerOptions {
  *   OnStartTouch `basevelocity -520 0 0` starts at the zone's edge) lands on the tick that ends the armed state, and rules
  *   2 cut it to the cap, so walking out lost the boost and fell short. bhoptimer never scales speed here: it just stops
  *   restarting the timer.
+ * - 5: rules 4, plus anti-skip stop volumes on physics >=26. A touch or complete pass-through stops timing;
+ *   return to start to re-arm. Stop beats end in the same tick; other tracks and old replay rules are unchanged.
+ *   A respawn (EVENT_RESPAWNED: a death, or the core cancelling an attempt, e.g. ahop_coast's cancel region or an
+ *   unearned end) also stops timing, as bhoptimer stops the timer on death. Before rules 5 a respawn outside the start
+ *   zone left the clock running.
  * - 4: rules 3, plus bhoptimer's `shavit_misc_prespeed 2` (no prehopping) in the start zones of the maps in
  *   START_ZONE_NO_PREHOP_V4, in every style: a jump on the landing tick inside a start zone loses all speed, as Scroll
  *   already does everywhere. A takeoff from the ground keeps its prestrafe; hopping around the zone to build speed
@@ -104,7 +113,8 @@ export const TIMER_RULES_V2 = 2;
 export const TIMER_RULES_V3 = 3;
 export const TIMER_RULES_V4 = 4;
 /** The rules new runs are timed and recorded with. */
-export const TIMER_RULES = TIMER_RULES_V4;
+export const TIMER_RULES_V5 = 5;
+export const TIMER_RULES = TIMER_RULES_V5;
 /**
  * Rules 4: maps whose start zones block prehops in every style. Part of the rules: a rules 4 replay is re-timed with this
  * list, so adding a map here needs a new rules version (or that map's rules 4 runs would change).
@@ -495,6 +505,31 @@ export class RunTimer {
     // Infinite: entering the start zone too fast while running (run.rs reentry_guard; not when the start already clamped).
     if (!out.clampVelocity && wasRunning && inStart && !this.wasInStart) this.guardStartReentry(s, out);
     this.wasInStart = this.inStart = inStart;
+
+    // A stop zone has priority over end zones, even when both are crossed in
+    // one command. Follow the accepted path to the pre-teleport touch position;
+    // never sweep the artificial chord of a teleport to its destination.
+    if (this.rules >= TIMER_RULES_V5 && (this.options.physics ?? 26) >= 26 && this.started) {
+      // A respawn ends the attempt (rules 5): the core's cancels (physics26.rs) and deaths. Return to start to re-arm.
+      if (events & EVENT_RESPAWNED) {
+        this.stop();
+        this.lastTick = s.tick;
+        this.prevPosition = s.position;
+        return { stopped: true };
+      }
+      const anti = this.zones.filter(z => z.kind === "anti-skip" && trackOf(z) === this.track);
+      if (anti.length) {
+        const to = s.touchPosition ?? s.position;
+        const pre = !s.touchPosition && (events & (EVENT_TELEPORTED | EVENT_RESPAWNED)) ? null : from;
+        const move = movement(this.pathSource?.() ?? null, pre, to, s.touchCrouched ?? s.crouched);
+        if (anti.some(z => crossesZone(move, z) || playerInZone(s.position, s.crouched, z))) {
+          this.stop();
+          this.lastTick = s.tick;
+          this.prevPosition = s.position;
+          return { stopped: true };
+        }
+      }
+    }
 
     // Stats count from the run's first tick (rules 2: also while it is still inside the zone, e.g. the takeoff jump).
     if (this.status === "running" || this.pendingStart) {

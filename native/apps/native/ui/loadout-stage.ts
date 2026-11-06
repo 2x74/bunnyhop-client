@@ -6,7 +6,7 @@ import { packLoadout, type CosmeticLoadout } from "../../web/src/loadout";
 import { requestPreview, cancelPreview, nativePreviewAvailable } from "./loadout-preview";
 import type { PreviewSpec } from "../../web/src/notify/item-preview";
 import type { PlayerGlow } from "../../web/src/player/glow-config";
-export type StageView = "fp" | "close" | "bunny" | "ghost";
+export type StageView = "fp" | "close" | "bunny" | "ghost" | "gun" | "gunside";
 export interface StageLook {
   outfit?: string | null;
   ghost?: string | null;
@@ -16,7 +16,7 @@ export interface StageLook {
   previewGlow?: boolean;
 }
 export type ThumbJob =
-  | { key: string; kind: "knife"; knife: string; loadout: CosmeticLoadout }
+  | { key: string; kind: "knife"; knife: string; loadout: CosmeticLoadout; focus?: "hilt" }
   | { key: string; kind: "glove"; loadout: CosmeticLoadout }
   | { key: string; kind: "item"; spec: PreviewSpec; scene?: unknown };
 export const THUMB_W = 384,
@@ -128,6 +128,7 @@ export class LoadoutStage {
   private shown: CosmeticLoadout;
   private look: StageLook = {};
   private viewMode: StageView = "fp";
+  private gunIndex = 0;
   private disposed = false;
   static acquire(host: HTMLElement, initial: CosmeticLoadout): LoadoutStage {
     return new LoadoutStage(host, initial);
@@ -168,6 +169,11 @@ export class LoadoutStage {
     this.viewMode = view;
     this.draw();
     this.onView?.(view);
+  }
+  stepGun(by: number): string {
+    const guns = ["Beanpole", "Broadfork", "Cottontail", "Hedgerow", "Jackrabbit", "Seeddrill", "Thumper"];
+    this.gunIndex = (this.gunIndex + (by % guns.length) + guns.length) % guns.length;
+    return guns[this.gunIndex];
   }
   private draw(): void {
     if (this.disposed) return;
@@ -243,7 +249,7 @@ export class LoadoutStage {
         outfit: this.look.outfit ?? "outfit-cream",
         ghost: this.look.ghost ?? "ghost-gold",
         playerGlow: this.look.playerGlow ?? null,
-        view: this.viewMode,
+        view: this.viewMode === "gun" || this.viewMode === "gunside" ? "fp" : this.viewMode,
         yaw: this.yaw,
         pitch: this.pitch,
         inspect: this.inspectCount,

@@ -20,6 +20,7 @@ inline nlohmann::json default_graphics_settings() {
             {"ghostRoute", false},
             {"ghostRouteSource", "auto"},
             {"ghostRouteMode", "jumps"},
+            {"ghostRouteOnly", false},
             {"tagsPlayers", true},
             {"tagsThroughWalls", false},
             {"graphicsPotato", false},
