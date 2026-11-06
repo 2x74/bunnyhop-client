@@ -1,5 +1,6 @@
 // Browser-safe palette/shape previews for the native menu. The equipped model is rendered by the native game.
 // This canvas intentionally uses only the 2D context; importing a model or Three here breaks the menu boundary.
+import { VisiblePreviews } from "./visible-previews";
 import authored from "./authored-previews.json";
 import { COSMETICS, cosmetic } from "../../web/src/progression";
 import { packLoadout, type CosmeticLoadout } from "../../web/src/loadout";
@@ -157,7 +158,7 @@ export class LoadoutStage {
   private look: StageLook = {};
   private viewMode: StageView = "fp";
   private gunIndex = lastGunIndex;
-  private thumbRequests = new Map<string, number>();
+  private visibleThumbs = new VisiblePreviews();
   private disposed = false;
   static acquire(host: HTMLElement, initial: CosmeticLoadout): LoadoutStage {
     return new LoadoutStage(host, initial);
@@ -340,79 +341,78 @@ export class LoadoutStage {
       thumbs.set(job.key, canvas);
     }
     done(canvas);
-    if (nativePreviewAvailable() && !this.thumbRequests.has(job.key)) {
-      const spec = job.kind === "item" ? job.spec : null;
-      const loadout =
-        job.kind === "item"
-          ? {
-              ...this.shown,
-              ...(spec?.knife ? { knife: spec.knife } : {}),
-              ...(spec?.finish ? { finish: spec.finish } : {}),
-              ...(spec?.glove ? { glove: spec.glove } : {}),
-              ...(spec?.hilt ? { hilt: spec.hilt } : {}),
-              ...(spec?.camo ? { camo: spec.camo } : {}),
-              ...(spec?.hat ? { hat: spec.hat } : {}),
-            }
-          : job.loadout;
-      const request = requestPreview(
-        {
-          loadout: packLoadout(loadout),
-          outfit: spec?.outfit ?? this.look.outfit ?? "outfit-cream",
-          ghost: (spec?.kind === "ghost" && colourItem("ghost", spec)) || this.look.ghost || "ghost-gold",
-          trail: (spec?.kind === "trail" && colourItem("trail", spec)) || this.look.trail || "trail-gold",
-          playerGlow: null,
-          view:
-            spec?.kind === "gun"
-              ? "gunside"
-              : spec?.kind === "hat" || spec?.kind === "bunny"
-                ? "bunny"
-                : spec?.kind === "ghost" || spec?.kind === "trail"
-                  ? "ghost"
-                  : job.kind === "knife" && job.focus === "hilt"
-                    ? "hilt"
-                    : job.kind === "knife" || spec?.kind === "knife"
-                      ? "knife"
-                      : "fp",
-          weapon: 17,
-          yaw: 0,
-          pitch: 0,
-          inspect: 0,
-          held: false,
-          width: THUMB_W,
-          height: THUMB_H,
-        },
-        (png) => {
-          this.thumbRequests.delete(job.key);
-          if (this.disposed || !png) return;
-          const image = new Image();
-          image.onload = () => {
-            if (this.disposed) return;
-            paintRevisions.set(canvas!, (paintRevisions.get(canvas!) ?? 0) + 1);
-            canvas!.dataset.nativeThumbnail = "true";
-            canvas!.width = image.naturalWidth;
-            canvas!.height = image.naturalHeight;
-            canvas!.getContext("2d")?.drawImage(image, 0, 0);
-            done(canvas!);
-          };
-          image.src = png;
-        },
-        10000,
-      );
-      this.thumbRequests.set(job.key, request);
+    if (nativePreviewAvailable() && canvas.dataset.nativeThumbnail !== "true") {
+      this.visibleThumbs.watch(job.key, canvas, (complete) => {
+        const spec = job.kind === "item" ? job.spec : null;
+        const loadout =
+          job.kind === "item"
+            ? {
+                ...this.shown,
+                ...(spec?.knife ? { knife: spec.knife } : {}),
+                ...(spec?.finish ? { finish: spec.finish } : {}),
+                ...(spec?.glove ? { glove: spec.glove } : {}),
+                ...(spec?.hilt ? { hilt: spec.hilt } : {}),
+                ...(spec?.camo ? { camo: spec.camo } : {}),
+                ...(spec?.hat ? { hat: spec.hat } : {}),
+              }
+            : job.loadout;
+        const request = requestPreview(
+          {
+            loadout: packLoadout(loadout),
+            outfit: spec?.outfit ?? this.look.outfit ?? "outfit-cream",
+            ghost: (spec?.kind === "ghost" && colourItem("ghost", spec)) || this.look.ghost || "ghost-gold",
+            trail: (spec?.kind === "trail" && colourItem("trail", spec)) || this.look.trail || "trail-gold",
+            playerGlow: null,
+            view:
+              spec?.kind === "gun"
+                ? "gunside"
+                : spec?.kind === "hat" || spec?.kind === "bunny"
+                  ? "bunny"
+                  : spec?.kind === "ghost" || spec?.kind === "trail"
+                    ? "ghost"
+                    : job.kind === "knife" && job.focus === "hilt"
+                      ? "hilt"
+                      : job.kind === "knife" || spec?.kind === "knife"
+                        ? "knife"
+                        : "fp",
+            weapon: 17,
+            yaw: 0,
+            pitch: 0,
+            inspect: 0,
+            held: false,
+            width: THUMB_W,
+            height: THUMB_H,
+            thumbnail: true,
+          },
+          (png) => {
+            complete();
+            if (this.disposed || !png) return;
+            const image = new Image();
+            image.onload = () => {
+              if (this.disposed) return;
+              paintRevisions.set(canvas!, (paintRevisions.get(canvas!) ?? 0) + 1);
+              canvas!.dataset.nativeThumbnail = "true";
+              canvas!.width = image.naturalWidth;
+              canvas!.height = image.naturalHeight;
+              canvas!.getContext("2d")?.drawImage(image, 0, 0);
+              done(canvas!);
+            };
+            image.src = png;
+          },
+          10000,
+        );
+        return () => cancelPreview(request);
+      });
     }
   }
   cancelThumbs(keep: (key: string) => boolean): void {
-    for (const [key, request] of this.thumbRequests) {
-      if (keep(key)) continue;
-      cancelPreview(request);
-      this.thumbRequests.delete(key);
-    }
+    this.visibleThumbs.keep(keep);
   }
   dispose(): void {
     this.disposed = true;
     clearTimeout(this.frame);
     cancelPreview(this.request);
-    this.cancelThumbs(() => false);
+    this.visibleThumbs.dispose();
     this.canvas.removeEventListener("pointerdown", this.down);
     this.canvas.removeEventListener("pointermove", this.move);
     this.canvas.removeEventListener("pointerup", this.up);

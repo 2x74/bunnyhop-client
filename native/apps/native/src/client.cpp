@@ -27,7 +27,7 @@
 #include "console_bind_host.hpp"
 #include "replay_player.hpp"
 #include "menu_backdrop.hpp"
-#include "loadout_preview.hpp"
+#include "loadout_preview_service.hpp"
 #include "avatar_service.hpp"
 #include "menu_gamepad.hpp"
 #include "hud.hpp"
@@ -195,8 +195,14 @@ int run(const native::Options &opt) {
     native::HudDemoState hud_demo;
     std::vector<std::string> hud_editor_bind;
     native::MenuGamepad menu_gamepad;
-    std::unique_ptr<NativeLoadoutPreview> loadout_preview;
-    std::deque<nlohmann::json> preview_requests;
+    std::unique_ptr<LoadoutPreviewService> loadout_preview;
+    if (!opt.no_menu) {
+        try {
+            loadout_preview = std::make_unique<LoadoutPreviewService>(assets);
+        } catch (const std::exception &error) {
+            std::cerr << "Loadout preview: " << error.what() << '\n';
+        }
+    }
     native::avatar::AvatarService avatar_service(gl, assets);
     native::NativeHud::Layout hud_layout;
     // Resolved before the audio device so the custom sound/ and bgm/ folders
@@ -2316,9 +2322,13 @@ int run(const native::Options &opt) {
                         refresh_command_holds();
                         continue;
                     }
+                    if (type == "loadoutPreviewCancel") {
+                        if (loadout_preview) loadout_preview->cancel(message.value("id", 0u));
+                        continue;
+                    }
                     if (type == "loadoutPreview") {
-                        if (menu->visible() && raw.size() <= 8192 && preview_requests.size() < 240)
-                            preview_requests.push_back(std::move(message));
+                        if (loadout_preview && menu->visible() && raw.size() <= 8192)
+                            loadout_preview->request(std::move(message));
                         continue;
                     }
                     if (type == "avatarRender") {
@@ -3270,23 +3280,10 @@ int run(const native::Options &opt) {
         if (menu && menu_ready) {
             if (const auto state = menu_gamepad.sample(menu->visible() && focused))
                 menu->evaluate_js("window.bunnyhopNativeMenu?.onGamepad?.(" + state->dump() + ")");
-            if (!preview_requests.empty()) {
-                auto job = std::move(preview_requests.front());
-                preview_requests.pop_front();
-                std::string png;
-                try {
-                    if (menu->visible()) {
-                        if (!loadout_preview) loadout_preview = std::make_unique<NativeLoadoutPreview>(gl, assets);
-                        png = loadout_preview->render(job, double(SDL_GetTicksNS()) / 1e9);
-                    }
-                } catch (const std::exception &e) {
-                    std::cerr << "Loadout preview: " << e.what() << '\n';
-                }
-                const nlohmann::json result = {
-                        {"id", job.value("id", 0u)},
-                        {"png", png.empty() ? std::string() : "data:image/png;base64," + native::base64(png)}
-                };
-                menu->evaluate_js("window.bunnyhopNativeLoadoutPreview?.(" + result.dump() + ")");
+            if (loadout_preview) {
+                if (!menu->visible()) loadout_preview->cancel_all();
+                for (const auto &reply : loadout_preview->take_replies())
+                    menu->evaluate_js(reply);
             }
             if (menu->visible()) avatar_service.frame();
             for (const auto &reply : avatar_service.take_replies())

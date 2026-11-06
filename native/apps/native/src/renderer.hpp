@@ -57,6 +57,11 @@
 #include <unordered_set>
 #include <vector>
 
+#include <condition_variable>
+#include <mutex>
+#include "native_model_data.hpp"
+#include "hidden_gl_context.hpp"
+
 namespace native {
 // All GL entry points come from the active SDL context, including on Linux.
 // clang-format off
@@ -162,7 +167,17 @@ struct Gl {
 #undef LOAD
     }
 
-    void load() { load(SDL_GL_GetProcAddress); }
+    void(APIENTRY *MaxShaderCompilerThreadsKHR)(GLuint) = nullptr;
+
+    void load() {
+        load(SDL_GL_GetProcAddress);
+        if (SDL_GL_ExtensionSupported("GL_KHR_parallel_shader_compile")) {
+            MaxShaderCompilerThreadsKHR = reinterpret_cast<decltype(MaxShaderCompilerThreadsKHR)>(
+                    SDL_GL_GetProcAddress("glMaxShaderCompilerThreadsKHR")
+            );
+            if (MaxShaderCompilerThreadsKHR) MaxShaderCompilerThreadsKHR(2);
+        }
+    }
 };
 
 inline GLuint shader(Gl &gl, GLenum kind, const char *source) {
@@ -210,6 +225,7 @@ inline GLuint link_program(Gl &gl, const char *vertex_source, const char *fragme
 #include "native_presentation.hpp"
 #include "landing_render.hpp"
 #include "native_viewmodel.hpp"
+#include "actor_warmup.hpp"
 #include "native_map_effects.hpp"
 // Standard headers must be included at file scope before these GL-dependent definitions.
 #include "source_hdr.hpp"
@@ -438,6 +454,7 @@ class Renderer {
     bool hasSky = false;
     NativeMapEffects mapEffects;
     std::unique_ptr<NativePresentation> presentation;
+    std::unique_ptr<ActorWarmup> actorWarmup;
     std::unique_ptr<NativeViewmodel> viewmodel;
     bool viewmodelVisible = true, floorWeaponsVisible = true;
     std::optional<uint32_t> viewmodelWeapon;
@@ -2391,6 +2408,12 @@ public:
         else
             viewmodel = std::make_unique<NativeViewmodel>(gl, assetRoot);
         viewmodel->set_inspect_style(inspectQuiet);
+        viewmodel->prepare_room_fallback();
+        try {
+            actorWarmup = std::make_unique<ActorWarmup>(assetRoot);
+        } catch (const std::exception &error) {
+            std::cerr << "Player warm-up context: " << error.what() << '\n';
+        }
         co_yield "resource";
         gl.Enable(GL_DEPTH_TEST);
         gl.DepthFunc(GL_LEQUAL);
@@ -2406,6 +2429,7 @@ public:
         presentation.reset();
         hdr.reset();
         viewmodel.reset();
+        actorWarmup.reset();
         mapPropMeshes.reset();
         destroy(worldMesh);
         destroy(propMesh);
@@ -2635,6 +2659,15 @@ public:
         }
         if (!compareActor) compareActor.emplace();
         *compareActor = *actor;
+    }
+
+    void draw_room_actor(
+            const native_render::Actor &actor, const native::Matrix &projection, const float eye[3], double seconds
+    ) {
+        if (actorWarmup)
+            actorWarmup->draw(*viewmodel, actor, projection, eye, seconds);
+        else
+            viewmodel->draw_actor(actor, projection, eye, seconds);
     }
 
     void set_room_actors(const std::vector<native_render::Actor> &actors) {
@@ -3073,7 +3106,7 @@ public:
         }
         if (!viewmodel) return;
         for (const auto &actor : roomActors)
-            if (actor.ghost_slot < 0) viewmodel->draw_actor(actor, lightVp, eye, seconds);
+            if (actor.ghost_slot < 0) draw_room_actor(actor, lightVp, eye, seconds);
     }
 
     // The sun's depth map around the camera and the world shader's sun terms for this frame.
@@ -3175,7 +3208,7 @@ public:
         if (replayActor) viewmodel->draw_actor(*replayActor, vp, eye, seconds);
         if (compareActor) viewmodel->draw_actor(*compareActor, vp, eye, seconds);
         for (const auto &actor : roomActors)
-            viewmodel->draw_actor(actor, vp, eye, seconds);
+            draw_room_actor(actor, vp, eye, seconds);
     }
 
     // The world mirrored through the chosen water plane, clipped to what is above it, into the half-size reflection
@@ -3245,6 +3278,7 @@ public:
         lastPitch = input.pitch;
         if (viewmodel) viewmodel->view_angles(float(lastYaw), float(lastPitch));
         if (viewmodel) viewmodel->set_actor_context(core, reducedMotion);
+        if (actorWarmup && viewmodel) actorWarmup->frame(roomActors, *viewmodel);
         actorVolumes.poll();
         actorVolumes.annotate(roomActors, seconds);
         if (compareActor) actorVolumes.annotate_recorded(*compareActor);
@@ -3332,7 +3366,7 @@ public:
             if (replayActor) viewmodel->draw_actor(*replayActor, vp, eye, seconds);
             if (compareActor) viewmodel->draw_actor(*compareActor, vp, eye, seconds);
             for (const auto &actor : roomActors)
-                viewmodel->draw_actor(actor, vp, eye, seconds);
+                draw_room_actor(actor, vp, eye, seconds);
             profile_elapsed(frameProfile.actorDraw, detailStart);
         }
         BhSnapshot landingState{};

@@ -65,14 +65,9 @@ inline BackdropMap load_backdrop_map(const std::filesystem::path &bsp, const std
 
 // The current back buffer as a small PNG: box-filtered to fit 960x540, halved
 // again until its data URI fits `max_uri_bytes`. Read before SwapWindow.
-inline std::string backbuffer_png(native::Gl &gl, int width, int height, size_t max_uri_bytes = 2000000) {
-    if (width <= 0 || height <= 0) return {};
-    std::vector<unsigned char> pixels(size_t(width) * height * 3);
-    int alignment = 4;
-    gl.GetIntegerv(GL_PACK_ALIGNMENT, &alignment);
-    gl.PixelStorei(GL_PACK_ALIGNMENT, 1);
-    gl.ReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
-    gl.PixelStorei(GL_PACK_ALIGNMENT, alignment);
+inline std::string
+encode_backbuffer_png(std::span<const unsigned char> pixels, int width, int height, size_t max_uri_bytes = 2000000) {
+    if (width <= 0 || height <= 0 || pixels.size() != size_t(width) * height * 3) return {};
     double scale = std::min({1.0, 960.0 / width, 540.0 / height});
     for (;;) {
         const int w = std::max(1, int(width * scale)), h = std::max(1, int(height * scale));
@@ -122,6 +117,20 @@ inline std::string backbuffer_png(native::Gl &gl, int width, int height, size_t 
         if (w <= 160) throw std::runtime_error("Backdrop PNG exceeds its size limit");
         scale *= .5;
     }
+}
+
+inline std::string backbuffer_png(native::Gl &gl, int width, int height, size_t max_uri_bytes = 2000000) {
+    if (width <= 0 || height <= 0) return {};
+    std::vector<unsigned char> pixels(size_t(width) * height * 3);
+    GLint alignment = 4, previous = 0;
+    gl.GetIntegerv(GL_PACK_ALIGNMENT, &alignment);
+    gl.GetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING, &previous);
+    gl.BindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+    gl.PixelStorei(GL_PACK_ALIGNMENT, 1);
+    gl.ReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
+    gl.PixelStorei(GL_PACK_ALIGNMENT, alignment);
+    gl.BindBuffer(GL_PIXEL_PACK_BUFFER, GLuint(previous));
+    return encode_backbuffer_png(pixels, width, height, max_uri_bytes);
 }
 
 class MenuBackdrop {
