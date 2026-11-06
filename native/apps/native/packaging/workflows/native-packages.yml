@@ -164,7 +164,7 @@ jobs:
     if: github.event_name == 'push' || inputs.platform == 'all' || inputs.platform == 'macos'
     needs: [version, resources]
     timeout-minutes: 45
-    runs-on: macos-15
+    runs-on: macos-26
     env:
       MACOSX_DEPLOYMENT_TARGET: "14.0"
     steps:
