@@ -95,6 +95,9 @@ export const GRIP_SKIN: Record<GloveStyleId, { finger: number; thumb: number }> 
   specialist: { finger: 0, thumb: 0 },
   paws: { finger: 0, thumb: 0.05 },
   garden: { finger: 0, thumb: 0 },
+  dress: { finger: -0.012, thumb: -0.015 },
+  aviator: { finger: 0, thumb: 0 },
+  mitts: { finger: 0, thumb: 0 },
 };
 
 /** Distance from point p to segment a-b. */
@@ -552,7 +555,7 @@ interface SolvedGrip {
   bones: number[];
   L: Float32Array;
   invHand: Float32Array;
-  loose: { h: HandFrame; spec: HoldSpec; curls: V3[] };
+  loose: { h: HandFrame; spec: HoldSpec; curls: V3[]; thumb: V3 };
 }
 
 /**
@@ -593,7 +596,7 @@ function solvedGrip(def: KnifeDef, r: VmRig, glove: GloveStyleId): SolvedGrip {
   mats.push(knife);
   const L = new Float32Array(bones.length * 12);
   mats.forEach((mm, j) => concat(invHand, 0, mm, 0, L, j * 12));
-  const grip: SolvedGrip = { bones, L, invHand, loose: { h, spec, curls: FINGERS.map((f) => solved.get(f) ?? spec[f.toLowerCase() as "index"].c) } };
+  const grip: SolvedGrip = { bones, L, invHand, loose: { h, spec, curls: FINGERS.map((f) => solved.get(f) ?? spec[f.toLowerCase() as "index"].c), thumb: solved.get("Thumb") ?? spec.thumb.c } };
   m.set(key, { spec, grip });
   return grip;
 }
@@ -611,6 +614,18 @@ export function prewarmGrips(knives: readonly KnifeDef[], glove: GloveStyleId, r
     idle(step);
   };
   idle(step);
+}
+
+/** How much of the rotation a wrist lock (state.lock) takes out of the wrist goes to the elbow instead. */
+export const WRIST_TO_ELBOW = 0.8;
+const NEUTRAL = new WeakMap<VmRig, Float32Array>();
+/**
+ * The procedural base's idle pose (procedural.ts registers it: it imports this file, so this one can't import it):
+ * where the neutral wrist bend comes from. Without it (nothing loaded procedural.ts) the bind pose's.
+ */
+let idlePose: ((r: VmRig, W: Float32Array) => void) | null = null;
+export function registerIdlePose(fn: (r: VmRig, W: Float32Array) => void): void {
+  idlePose = fn;
 }
 
 /** Per-knife first-person hold runtime (one per Viewmodel + knife). */
@@ -635,7 +650,7 @@ export class KnifeHold {
   private helper: number[];
   private M = new Float32Array(12);
   /** The bind-space hand the hold was solved in, and the held curls per finger (index .. pinky): for state.loosen. */
-  private loose: { h: HandFrame; spec: HoldSpec; curls: V3[] };
+  private loose: { h: HandFrame; spec: HoldSpec; curls: V3[]; thumb: V3 };
   private invHand: Float32Array;
   private Lf = new Float32Array(12);
 
@@ -663,7 +678,7 @@ export class KnifeHold {
       return { i, parent, local };
     });
     this.rest = this.joints.map(() => 0);
-    this.state = { arm: { o: [0, 0, 0], a: [0, 0, 0] }, wrist: [0, 0, 0], offset: [0, 0, 0], local: null, angles: [...this.rest], show: 0, loosen: 0, time: 0 };
+    this.state = { arm: { o: [0, 0, 0], a: [0, 0, 0] }, wrist: [0, 0, 0], offset: [0, 0, 0], local: null, angles: [...this.rest], show: 0, loosen: 0, lock: 0, thumb: [0, 0, 0], time: 0 };
     this.right = [...r.subtree(r.bone("Root36")), this.kp, this.kb];
     this.arm = r.bone("Right_Arm");
     this.helper = ["Root98", "R_wrist_helper"].map((n) => r.bone(n));
@@ -683,11 +698,14 @@ export class KnifeHold {
     s.offset[0] = s.offset[1] = s.offset[2] = 0;
     s.local = null;
     s.loosen = 0;
+    s.lock = 0;
+    s.thumb[0] = s.thumb[1] = s.thumb[2] = 0;
     for (let j = 0; j < this.rest.length; j++) s.angles[j] = this.rest[j];
     this.def.pose?.(action, t, s, src);
     this.devPose?.(s);
     const ho = this.hand * 12;
     const H = this.H;
+    if (s.lock > 0) this.lockWrist(W, Math.min(1, s.lock));
     const ao = s.arm.o, aa = s.arm.a;
     if (ao[0] || ao[1] || ao[2] || aa[0] || aa[1] || aa[2]) {
       // Rigid move of the right arm: roll about the forearm (elbow -> wrist) through the wrist, then pitch / yaw about
@@ -733,6 +751,7 @@ export class KnifeHold {
     const n = this.bones.length;
     for (let j = 0; j < n; j++) concat(H, 0, this.L, j * 12, W, this.bones[j] * 12);
     if (s.loosen > 0) this.loosenFingers(W, H, Math.min(1, s.loosen));
+    if (s.thumb[0] || s.thumb[1] || s.thumb[2]) this.playThumb(W, H, s.thumb);
     const kb = this.kb * 12;
     if (s.offset[0] || s.offset[1] || s.offset[2]) {
       identity(this.T);
@@ -760,6 +779,81 @@ export class KnifeHold {
       }
       h.curl(f, { c, spread: spec[f.toLowerCase() as "index"].spread });
     });
+  }
+
+  /**
+   * Holds the wrist toward its neutral bend by k (state.lock): the hand turns about the wrist toward the neutral
+   * hand-on-forearm rotation (the procedural idle's), and the whole arm turns back about the elbow by WRIST_TO_ELBOW of
+   * that, so the blade keeps most of its swing but the arm makes it. Before the hold's other moves.
+   */
+  private lockWrist(W: Float32Array, k: number): void {
+    const ho = this.hand * 12, ao = this.arm * 12;
+    const N = this.neutralWrist();
+    // Target hand rotation T = R_arm N; D = T R_hand^T (world), scaled to k.
+    const T = this.T, D = this.R;
+    for (let i = 0; i < 3; i++)
+      for (let j = 0; j < 3; j++) {
+        let v = 0;
+        for (let q = 0; q < 3; q++) v += W[ao + i * 4 + q] * N[q * 3 + j];
+        T[i * 4 + j] = v;
+      }
+    for (let i = 0; i < 3; i++)
+      for (let j = 0; j < 3; j++) {
+        let v = 0;
+        for (let q = 0; q < 3; q++) v += T[i * 4 + q] * W[ho + j * 4 + q];
+        D[i * 4 + j] = v;
+      }
+    // Axis-angle of D.
+    const tr = D[0] + D[5] + D[10];
+    const ang = Math.acos(Math.max(-1, Math.min(1, (tr - 1) / 2)));
+    if (ang < 1e-5) return;
+    const ax: V3 = [D[9] - D[6], D[2] - D[8], D[4] - D[1]];
+    const al = Math.hypot(ax[0], ax[1], ax[2]);
+    if (al < 1e-9) return;
+    ax[0] /= al, ax[1] /= al, ax[2] /= al;
+    const wrist: V3 = [W[ho + 3], W[ho + 7], W[ho + 11]];
+    const elbow: V3 = [W[ao + 3], W[ao + 7], W[ao + 11]];
+    // The hand (and the twist helpers, half) toward neutral about the wrist.
+    rotAbout(ax, ang * k, wrist, this.T);
+    concat(this.T, 0, W, ho, this.T2, 0);
+    W.set(this.T2, ho);
+    rotAbout(ax, ang * k * 0.5, wrist, this.T);
+    for (const i of this.helper) {
+      concat(this.T, 0, W, i * 12, this.T2, 0);
+      W.set(this.T2, i * 12);
+    }
+    // The arm (and the hand with it) back about the elbow.
+    rotAbout(ax, -ang * k * WRIST_TO_ELBOW, elbow, this.T);
+    for (const i of this.right) {
+      concat(this.T, 0, W, i * 12, this.T2, 0);
+      W.set(this.T2, i * 12);
+    }
+  }
+
+  /** The procedural idle's hand rotation relative to the forearm (3x3 row-major, R_arm^T R_hand), per rig. */
+  private neutralWrist(): Float32Array {
+    let n = NEUTRAL.get(this.r);
+    if (n) return n;
+    const W = new Float32Array(this.r.names.length * 12);
+    if (idlePose) idlePose(this.r, W);
+    else W.set(this.r.bind);
+    const ho = this.hand * 12, ao = this.arm * 12;
+    n = new Float32Array(9);
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) for (let q = 0; q < 3; q++) n[i * 3 + j] += W[ao + q * 4 + i] * W[ho + q * 4 + j];
+    NEUTRAL.set(this.r, n);
+    return n;
+  }
+
+  /** Re-curls the thumb by `d` (deg per joint) from its held curl, in bind space like loosenFingers. */
+  private playThumb(W: Float32Array, H: Float32Array, d: V3): void {
+    const { h, spec, thumb } = this.loose;
+    const sp = spec.thumb.spread;
+    h.curl("Thumb", { c: [thumb[0] + d[0], thumb[1] + d[1], thumb[2] + d[2]], spread: sp });
+    for (let j = 1; j <= 3; j++) {
+      concat(this.invHand, 0, h.bone(`Thumb0${j}`), 0, this.Lf, 0);
+      concat(H, 0, this.Lf, 0, W, this.r.bone(`Right_Thumb0${j}`) * 12);
+    }
+    h.curl("Thumb", { c: thumb, spread: sp });
   }
 
   /** Applies state.local to Knife_Handle (after the inspect may have set it), then solves the extra bones. */

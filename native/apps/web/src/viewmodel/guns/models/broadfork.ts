@@ -10,11 +10,12 @@ import { PART } from "../../knives/types";
 import type { KnifeCtx } from "../../knives/ctx";
 import { box, dome, groove, guard, lathe, pins, plate, rod, slab, trigger, type P2 } from "../shapes";
 import { gunPaint as fixed } from "../material";
+import { coat } from "../camo-zones";
 import type { GunDef } from "../types";
 
-const RECV = fixed(0x4f545c, "metal"), RECV_DARK = fixed(0x3f434a, "dark"), STEEL = fixed(0x3a3f47, "dark"), STEEL_LIGHT = fixed(0x6a707a, "metal"), BORE = fixed(0x101114);
-const WOOD = fixed(0x8f5d36, "wood"), WOOD_DARK = fixed(0x6b4426, "wood"), LEAF = fixed(0x58c64a), LEAF_DARK = fixed(0x2f7d34), ORANGE = fixed(0xff7a1a);
-const HULL = fixed(0xc43c2c), BRASS = fixed(0xd8a640, "metal"), PAD = fixed(0x2b2a2c, "grip"), SEAM = fixed(0x2a2d33, "dark"), LIP = fixed(0x9aa1ab, "metal");
+const RECV = coat(fixed(0x4f545c, "metal"), "upper"), RECV_DARK = fixed(0x3f434a, "dark"), STEEL = fixed(0x3a3f47, "dark"), STEEL_LIGHT = fixed(0x6a707a, "metal"), BORE = fixed(0x101114);
+const WOOD = coat(fixed(0x8f5d36, "wood"), "lower"), WOOD_DARK = coat(fixed(0x6b4426, "wood"), "lower", 0.82), LEAF = fixed(0x58c64a), LEAF_DARK = fixed(0x2f7d34), ORANGE = fixed(0xff7a1a);
+const HULL = fixed(0xc43c2c), BRASS = fixed(0xd8a640, "metal"), PAD = fixed(0x2b2a2c, "grip"), SEAM = fixed(0x2a2d33, "dark"), LIP = coat(fixed(0x9aa1ab, "metal"), "upper", 1.2);
 /** The trigger's pivot (top of its blade, gun-local). */
 /**
  * The trigger's pivot (top of its blade, gun-local): tight in front of the grip's thin upper part, where the firing
@@ -119,10 +120,14 @@ export const broadfork: GunDef = {
   },
   // The support hand under the handguard (riding the pump), palm up, fingers over its right side (placement from
   // tools/viewmodel/gun-grip-fit.ts); its forearm drops toward the elbow anchor below it, out of view.
+  // v0.0.38 gun grips: the support hand turned so the handguard runs across its palm (knuckles 18 deg forward, 30 up),
+  // its elbow down, back and in where that leaves the wrist near neutral (about 10 deg extension, 8 ulnar): the forearm
+  // comes up diagonally from the bottom of the screen and does the holding, instead of standing straight under the
+  // handguard with the wrist bent back 42 deg. The firing elbow likewise sits in line with a pistol-grip wrist.
   left: {
     o: [11.6, 0.0, -0.05],
-    up: [1, 0, 0],
-    fwd: [0.0, -0.707, 0.707],
+    up: [0.976, 0.195, -0.098],
+    fwd: [0.218, -0.873, 0.436],
     index: { c: [60, 80, 60] },
     middle: { c: [64, 84, 64] },
     ring: { c: [68, 86, 64] },
@@ -137,8 +142,7 @@ export const broadfork: GunDef = {
   },
   frame: { o: [16, -6.2, -5.9], a: [-1, 4, -4] },
   trigger: TRIGGER,
-  elbows: { R: [8, -18, -18], L: [24, -6, -26] },
-  wrist: { L: 34 },
+  elbows: { R: [7.7, -12.3, -15.1], L: [22.2, 1.85, -13.45] },
   muzzle: [24.1, 0, BZ],
   eject: { p: [2.4, -0.8, 1.2], dir: [-0.15, -0.9, 0.4] },
   shell: "shotgun",

@@ -99,6 +99,7 @@ export const REQUESTED_KEYS: readonly RequestedKey[] = [
   render("ghost.route", boolean),
   render("ghost.routeSource", choice("auto", "pb", "wr", "custom")),
   render("ghost.routeMode", choice("jumps", "path")),
+  render("ghost.routeOnly", boolean),
   render("tags.players", boolean),
   render("tags.throughWalls", boolean),
   render("graphics.potato", boolean),

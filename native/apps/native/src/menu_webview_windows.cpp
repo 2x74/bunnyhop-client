@@ -175,8 +175,7 @@ struct MenuWebView::Impl {
     ComPtr<ICoreWebView2Environment> environment;
     ComPtr<ICoreWebView2Controller> controller, auth_controller;
     ComPtr<ICoreWebView2> menu, auth;
-    bool backdrop = false, shown = false, initial_navigation = true, served = false, com_initialized = false,
-         failed = false;
+    bool shown = false, initial_navigation = true, served = false, com_initialized = false, failed = false;
     uint64_t auth_generation = 0;
     std::string html;
 
@@ -312,11 +311,10 @@ struct MenuWebView::Impl {
     }
 
     void configure() {
-        // WebView2 alpha reveals the native OpenGL child surface. CSS remains
-        // opaque until the client explicitly enables the scene presentation.
-        ComPtr<ICoreWebView2Controller2> alpha;
-        if (SUCCEEDED(controller.As(&alpha)))
-            backdrop = SUCCEEDED(alpha->put_DefaultBackgroundColor(COREWEBVIEW2_COLOR{0, 0, 0, 0}));
+        // Transparency exposes the old window bounds after a borderless resize. The menu uses a still map backdrop.
+        ComPtr<ICoreWebView2Controller2> background;
+        if (SUCCEEDED(controller.As(&background)))
+            background->put_DefaultBackgroundColor(COREWEBVIEW2_COLOR{255, 0, 0, 0});
         restrict_webview(menu.Get(), true);
         RECT r;
         GetClientRect(window, &r);
@@ -642,7 +640,7 @@ bool MenuWebView::available() const {
 }
 
 bool MenuWebView::supports_backdrop() const {
-    return available() && impl_->backdrop;
+    return false;
 }
 
 const std::string &MenuWebView::error() const {

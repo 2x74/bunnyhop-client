@@ -114,6 +114,8 @@ fn trampislow_peak(version: u32) -> Option<f32> {
 fn trampislow_booster_reaches_its_recorded_speed_on_v23() {
     let Some(old) = trampislow_peak(PHYSICS_V22) else { return };
     let new = trampislow_peak(PHYSICS_V23).unwrap();
+    assert_eq!(trampislow_peak(25).unwrap(), new, "production v25 inherits the clock fix");
+    assert_eq!(trampislow_peak(26).unwrap(), new, "v26 preserves the working booster");
     // bhop.rip's recording peaks at 1138 u/s here, from a slightly different landing.
     assert!((old - 952.0).abs() < 8.0, "v22 {old}");
     assert!((new - 1134.0).abs() < 8.0, "v23 {new}");

@@ -2,6 +2,7 @@
 import { EVENT_JUMPED, EVENT_TELEPORTED } from "./core";
 import type { GhostKind } from "./player/colors";
 import { FRAME_GROUNDED, FRAME_STRIDE } from "./sim";
+import type { Prefs } from "./ui/settings";
 
 export type GhostRouteSource = "auto" | GhostKind;
 export type GhostRouteMode = "jumps" | "path";
@@ -26,6 +27,26 @@ export interface RouteData {
 export function routeGhostKind(source: GhostRouteSource, available: readonly GhostKind[]): GhostKind | null {
   if (source === "pb" || source === "wr" || source === "custom") return available.includes(source) ? source : null;
   return ROUTE_PRIORITY.find((kind) => available.includes(kind)) ?? null;
+}
+
+export interface GhostPlan {
+  /** Fetch the server WR ghost for this track (it races, or only its route shows). */
+  fetchWR: boolean;
+  /** The ghost whose route is drawn this frame. */
+  routeKind: GhostKind | null;
+  /** Route only: the ghost drawn as its route alone (no model, trail, tag or sounds). It still counts for the split. */
+  routeOnlyKind: GhostKind | null;
+}
+
+/**
+ * Per-frame ghost decisions from the settings. loaded: ghost kinds loaded for this track and style. hidden: watching a
+ * replay (no ghosts at all); hideUi: the UI is hidden (routes go with it; a route-only ghost stays hidden).
+ */
+export function ghostPlan(p: Pick<Prefs, "showGhost" | "ghost">, loaded: readonly GhostKind[], hidden: boolean, hideUi: boolean): GhostPlan {
+  const g = p.ghost;
+  const on = p.showGhost && !hidden;
+  const routed = on && g.route ? routeGhostKind(g.routeSource, (["pb", "wr", "custom"] as const).filter((k) => g[k] && loaded.includes(k))) : null;
+  return { fetchWR: on && g.wr, routeKind: hideUi ? null : routed, routeOnlyKind: g.routeOnly ? routed : null };
 }
 
 /** Static geometry, built once on demand. Keep start/finish legs and cut at teleports, even short ones. */

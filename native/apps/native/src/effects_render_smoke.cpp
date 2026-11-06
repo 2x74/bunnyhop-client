@@ -102,7 +102,7 @@ int main(int argc, char **argv) {
             renderer.decorate_ghost(actor, slot);
             actors.push_back(actor);
         }
-        const float eye[] = {spawn.player.position[0], spawn.player.position[1] + 125, spawn.player.position[2] + 115};
+        float eye[] = {spawn.player.position[0], spawn.player.position[1] + 125, spawn.player.position[2] + 115};
         native::Input input;
         input.set_angles(15, 0);
         const auto output = std::filesystem::path(argv[3]);
@@ -176,17 +176,29 @@ int main(int argc, char **argv) {
         preferences["graphicsPotato"] = false;
         native::Input aim;
         aim.set_angles(50, 0);
-        renderer.tool_message({{"type", "paint"}, {"action", "stamp"}}, spawn.player, aim);
-        renderer.tool_message({{"type", "measure"}, {"action", "point"}}, spawn.player, aim);
+        renderer.tool_message({{"type", "paint"}, {"action", "stamp"}}, spawn.player, aim, true);
+        renderer.tool_message({{"type", "measure"}, {"action", "point"}}, spawn.player, aim, true);
         aim.set_angles(40, 20);
-        renderer.tool_message({{"type", "measure"}, {"action", "point"}}, spawn.player, aim);
+        renderer.tool_message({{"type", "measure"}, {"action", "point"}}, spawn.player, aim, true);
         const auto tools = renderer.surface_tools_state();
         if (tools.at("paintMarks") != 1 || tools.at("measurePoints") != 2) {
             throw std::runtime_error("Surface picking/paint/measure fixture failed");
         }
         capture("paint-and-measure");
         std::ofstream(output / "surface-tools.json") << tools.dump(2);
-        std::cout << "12 rendering effect fixtures; GL_NO_ERROR\n";
+        eye[0] = spawn.player.position[0] - 120;
+        eye[1] = spawn.player.position[1] - 120;
+        eye[2] = spawn.player.position[2] + 120;
+        input.set_angles(45, 35);
+        renderer.landing_context(false, false, false);
+        spawn.player.position[2] += 100;
+        spawn.player.grounded = 0;
+        capture("landing-off");
+        preferences["landing"] = {{"mode", "always"}, {"arc", false}, {"color", "#4de1ff"}};
+        capture("landing-dome");
+        preferences["landing"]["arc"] = true;
+        capture("landing-path");
+        std::cout << "15 rendering effect fixtures; GL_NO_ERROR\n";
         return 0;
     } catch (const std::exception &error) {
         std::cerr << error.what() << '\n';

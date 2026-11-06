@@ -47,6 +47,7 @@ import { installTutorialProgress } from "./tutorial-entry";
 import { watchGauntletSplit } from "./gauntlet-watch";
 import { NativeRoomService } from "./room-service";
 import { RoomConnection } from "../../web/src/net/room";
+import { leaveRoomBefore } from "./room-message-policy";
 import { setRoomPresence, setRaceTag, currentRoom, currentRace } from "../../web/src/net/presence";
 import { serverBrowser } from "../../web/src/ui/servers";
 import { keyLabel } from "../../web/src/ui/settings";
@@ -94,6 +95,7 @@ import { pickMap } from "./map-pick";
 import { installMenuErrorLog, logToHost } from "./menu-log";
 import { initCustomCss } from "./custom-css/custom-css";
 import { installHudTheme } from "./custom-css/hud-theme";
+import { installNativeConsole } from "./console-panel";
 
 import { installGamepadNavigation } from "./gamepad";
 import { maybeStartOnboarding, openOnboarding } from "./onboarding";
@@ -798,6 +800,45 @@ const chatService = new NativeChatService(roomService, () => {
   send({ type: "chatAction", action: "openRoom" } as unknown as Parameters<typeof send>[0]);
   show("room");
 });
+installNativeConsole({
+  action: (action, down) => {
+    if (down !== undefined) {
+      send({ type: "consoleAction", action, down });
+      return true;
+    }
+    if (action === "jumpToggle") {
+      send({ type: "consoleAction", action, down: true });
+      return true;
+    }
+    if (action === "restart" || action === "restartMain") send({ type: "restart" });
+    else if (action === "noclip") send({ type: "practice", action: "noclip" });
+    else if (action === "practice") send({ type: "practice", action: "toggle" });
+    else if (action === "cpSave") send({ type: "practice", action: "save" });
+    else if (action === "cpTeleport") send({ type: "practice", action: "tele" });
+    else if (action === "cpPrev") send({ type: "practice", action: "prev" });
+    else if (action === "cpNext") send({ type: "practice", action: "next" });
+    else return false;
+    return true;
+  },
+  chat: (line, reply) => {
+    if (!state.map) return false;
+    chatService.submit(line);
+    return true;
+  },
+  map: (name) => {
+    const id = name.trim().toLowerCase();
+    if (!/^[\w.-]{1,64}$/.test(id)) return `"${name}" isn't a map name.`;
+    selectMap(id);
+    return null;
+  },
+  maps: async () => (await fetchMapIndex()).map((entry) => entry.name),
+  menu: () => {
+    if (!state.map) return false;
+    leaveMap();
+    return true;
+  },
+  notice,
+});
 const roomAccount = new RoomAccountBoundary(() => chatService.resetAccount());
 roomService.subscribe(() => {
   const view = roomService.view;
@@ -815,13 +856,9 @@ roomService.subscribe(() => {
   scoreboardFeed.update(hostScoreboard(roomService.view, clock, chatKeyLabel()));
 });
 onBeforeSend((message) => {
-  if (
-    roomService.view.id &&
-    ((message.type === "replay" && ["play", "ghost"].includes(message.action)) ||
-      message.type === "replayData" ||
-      (message.type === "tutorial" && message.action !== "stop"))
-  )
-    roomService.leave();
+  // Replay playback and !spec keep the room transport alive. The native viewer overlays the current screen;
+  // detaching the room here made every replay opened from a room look like an explicit leave.
+  if (roomService.view.id && leaveRoomBefore(message)) roomService.leave();
 });
 setRaceTag((board) => {
   const race = roomService.view.race;

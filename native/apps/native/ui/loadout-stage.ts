@@ -1,12 +1,12 @@
 // Browser-safe palette/shape previews for the native menu. The equipped model is rendered by the native game.
 // This canvas intentionally uses only the 2D context; importing a model or Three here breaks the menu boundary.
 import authored from "./authored-previews.json";
-import { cosmetic } from "../../web/src/progression";
+import { COSMETICS, cosmetic } from "../../web/src/progression";
 import { packLoadout, type CosmeticLoadout } from "../../web/src/loadout";
 import { requestPreview, cancelPreview, nativePreviewAvailable } from "./loadout-preview";
 import type { PreviewSpec } from "../../web/src/notify/item-preview";
 import type { PlayerGlow } from "../../web/src/player/glow-config";
-export type StageView = "fp" | "close" | "bunny" | "ghost";
+export type StageView = "fp" | "close" | "bunny" | "ghost" | "gun" | "gunside";
 export interface StageLook {
   outfit?: string | null;
   ghost?: string | null;
@@ -16,13 +16,14 @@ export interface StageLook {
   previewGlow?: boolean;
 }
 export type ThumbJob =
-  | { key: string; kind: "knife"; knife: string; loadout: CosmeticLoadout }
+  | { key: string; kind: "knife"; knife: string; loadout: CosmeticLoadout; focus?: "hilt" }
   | { key: string; kind: "glove"; loadout: CosmeticLoadout }
   | { key: string; kind: "item"; spec: PreviewSpec; scene?: unknown };
 export const THUMB_W = 384,
   THUMB_H = 240;
 const CLOSE_UP_ZOOM = 1.3;
 const thumbs = new Map<string, HTMLCanvasElement>();
+let lastGunIndex = 6;
 const color = (id: string | undefined | null, fallback: string) => cosmetic(id)?.color ?? fallback;
 const name = (id: string | undefined | null, fallback: string) => cosmetic(id)?.name ?? fallback;
 const paintRevisions = new WeakMap<HTMLCanvasElement, number>();
@@ -39,6 +40,9 @@ function imageFor(id: string): HTMLImageElement | null {
   return image;
 }
 function previewId(spec: PreviewSpec): string {
+  if (spec.kind === "gun") return spec.camo ?? "camo-none";
+  if (spec.kind === "knife" && spec.key.startsWith("h|") && spec.hilt && spec.hilt !== "hilt-original")
+    return spec.hilt;
   if (spec.kind === "bunny") return spec.body === "body-b" ? "body-b" : (spec.outfit ?? "outfit-cream");
   if (spec.kind === "ghost") return spec.key.startsWith("ghost-") ? spec.key : (spec.outfit ?? "outfit-cream");
   if (spec.kind === "hat") return spec.hat ?? "";
@@ -111,6 +115,31 @@ function paint(canvas: HTMLCanvasElement, spec: PreviewSpec, hero = false, zoom 
   }
 }
 
+// The host renders at most 960×600 (loadout_preview.hpp). Scale both sides together so a stage that isn't 16:10
+// still gets a picture of its own shape rather than a squashed or letterboxed one.
+const MAX_RENDER_W = 960,
+  MAX_RENDER_H = 600,
+  MIN_RENDER_W = 384,
+  MIN_RENDER_H = 240;
+function stageRenderSize(canvas: HTMLCanvasElement): { width: number; height: number } {
+  const ratio = devicePixelRatio || 1;
+  const width = Math.max(1, canvas.clientWidth * ratio);
+  const height = Math.max(1, canvas.clientHeight * ratio);
+  const scale = Math.min(1, MAX_RENDER_W / width, MAX_RENDER_H / height);
+  return {
+    width: Math.max(MIN_RENDER_W, Math.round(width * scale)),
+    height: Math.max(MIN_RENDER_H, Math.round(height * scale)),
+  };
+}
+
+// Ghost and trail tiles describe the item by its colours (item-preview.ts); the host renders by item id.
+function colourItem(slot: "ghost" | "trail", spec: PreviewSpec): string | null {
+  const match = COSMETICS.find(
+    (c) => c.slot === slot && c.color === spec.color && (c.color2 ?? null) === (spec.color2 ?? null),
+  );
+  return match?.id ?? null;
+}
+
 export class LoadoutStage {
   readonly canvas = document.createElement("canvas");
   onView: ((view: StageView) => void) | null = null;
@@ -124,10 +153,11 @@ export class LoadoutStage {
   private active = false;
   private request = 0;
   private host: HTMLElement;
-  private note: HTMLElement;
   private shown: CosmeticLoadout;
   private look: StageLook = {};
   private viewMode: StageView = "fp";
+  private gunIndex = lastGunIndex;
+  private thumbRequests = new Map<string, number>();
   private disposed = false;
   static acquire(host: HTMLElement, initial: CosmeticLoadout): LoadoutStage {
     return new LoadoutStage(host, initial);
@@ -143,11 +173,6 @@ export class LoadoutStage {
     if (nativePreviewAvailable()) host.dataset.nativeHost = "true";
     this.canvas.setAttribute("role", "img");
     host.append(this.canvas);
-    const note = document.createElement("p");
-    note.className = "native-loadout-preview-note";
-    note.textContent = "Native-rendered item samples · combinations shown in game";
-    host.append(note);
-    this.note = note;
     this.canvas.tabIndex = 0;
     this.canvas.addEventListener("pointerdown", this.down);
     this.canvas.addEventListener("pointermove", this.move);
@@ -169,6 +194,13 @@ export class LoadoutStage {
     this.draw();
     this.onView?.(view);
   }
+  stepGun(by: number): string {
+    const guns = ["Thumper", "Cottontail", "Jackrabbit", "Broadfork", "Hedgerow", "Seed Drill", "Furrow", "Beanpole"];
+    this.gunIndex = (this.gunIndex + (by % guns.length) + guns.length) % guns.length;
+    lastGunIndex = this.gunIndex;
+    this.draw();
+    return guns[this.gunIndex];
+  }
   private draw(): void {
     if (this.disposed) return;
     this.renderNative();
@@ -179,6 +211,8 @@ export class LoadoutStage {
       key: this.look.ghost ?? "stage",
       knife: this.shown.knife,
       finish: this.shown.finish,
+      hilt: this.shown.hilt,
+      camo: this.shown.camo,
       glove: this.shown.glove,
       body: this.shown.body,
       outfit: this.look.outfit ?? undefined,
@@ -187,6 +221,7 @@ export class LoadoutStage {
       color2: this.viewMode === "ghost" ? cosmetic(this.look.ghost)?.color2 : undefined,
       veil: this.look.veil,
     };
+    if (slot === "camo") spec = { ...spec, kind: "gun" };
     if (slot === "glove") spec = { ...spec, kind: "glove" };
     if (slot === "hat") spec = { ...spec, kind: "hat" };
     if (slot === "finish") spec = { ...spec, kind: "knife", knife: "knife-carrot" };
@@ -198,7 +233,7 @@ export class LoadoutStage {
           : character
             ? name(this.look.outfit, "Bunny")
             : name(this.shown.knife, "Knife") + " · " + name(this.shown.finish, "Finish");
-    this.canvas.setAttribute("aria-label", label + " authored native-rendered item preview");
+    this.canvas.setAttribute("aria-label", label);
     // Close-up (web loadout-view.ts, the hands' categories): the same sample, framed closer.
     const zoom = this.viewMode === "close" && !character ? CLOSE_UP_ZOOM : 1;
     paint(this.canvas, spec, true, zoom);
@@ -242,14 +277,15 @@ export class LoadoutStage {
         loadout: packLoadout(this.shown),
         outfit: this.look.outfit ?? "outfit-cream",
         ghost: this.look.ghost ?? "ghost-gold",
+        trail: this.look.trail ?? "trail-gold",
         playerGlow: this.look.playerGlow ?? null,
         view: this.viewMode,
+        weapon: [2, 3, 7, 8, 9, 14, 17, 22][this.gunIndex],
         yaw: this.yaw,
         pitch: this.pitch,
         inspect: this.inspectCount,
         held: this.held,
-        width: Math.min(960, Math.max(384, Math.round(this.canvas.clientWidth * (devicePixelRatio || 1)))),
-        height: Math.min(600, Math.max(240, Math.round(this.canvas.clientHeight * (devicePixelRatio || 1)))),
+        ...stageRenderSize(this.canvas),
       },
       (png) => {
         this.request = 0;
@@ -264,7 +300,6 @@ export class LoadoutStage {
             this.canvas.getContext("2d")?.drawImage(image, 0, 0);
             this.host.dataset.nativeStatic = "false";
             this.host.dataset.nativeInteractive = "true";
-            this.note.textContent = "Native live preview · drag or use arrow keys to turn";
           };
           image.src = png;
         }
@@ -287,9 +322,8 @@ export class LoadoutStage {
   flourish(_kind: string): void {
     this.inspect();
   }
-  tint(color: string | null, _strength = 1): void {
-    this.canvas.style.borderColor = color ?? "transparent";
-  }
+  // The caption names the rarity in its colour. A coloured frame round the picture only read as a debug outline.
+  tint(_color: string | null, _strength = 1): void {}
   requestThumb(job: ThumbJob, done: (canvas: HTMLCanvasElement) => void): void {
     if (this.disposed) return;
     let canvas = thumbs.get(job.key);
@@ -300,26 +334,90 @@ export class LoadoutStage {
           ? job.spec
           : job.kind === "glove"
             ? { kind: "glove", key: job.key, glove: job.loadout.glove }
-            : { kind: "knife", key: job.key, knife: job.knife, finish: job.loadout.finish };
+            : { kind: "knife", key: job.key, knife: job.knife, finish: job.loadout.finish, hilt: job.loadout.hilt };
       paint(canvas, spec);
       if (thumbs.size >= 240) thumbs.delete(thumbs.keys().next().value!);
       thumbs.set(job.key, canvas);
     }
     done(canvas);
+    if (nativePreviewAvailable() && !this.thumbRequests.has(job.key)) {
+      const spec = job.kind === "item" ? job.spec : null;
+      const loadout =
+        job.kind === "item"
+          ? {
+              ...this.shown,
+              ...(spec?.knife ? { knife: spec.knife } : {}),
+              ...(spec?.finish ? { finish: spec.finish } : {}),
+              ...(spec?.glove ? { glove: spec.glove } : {}),
+              ...(spec?.hilt ? { hilt: spec.hilt } : {}),
+              ...(spec?.camo ? { camo: spec.camo } : {}),
+              ...(spec?.hat ? { hat: spec.hat } : {}),
+            }
+          : job.loadout;
+      const request = requestPreview(
+        {
+          loadout: packLoadout(loadout),
+          outfit: spec?.outfit ?? this.look.outfit ?? "outfit-cream",
+          ghost: (spec?.kind === "ghost" && colourItem("ghost", spec)) || this.look.ghost || "ghost-gold",
+          trail: (spec?.kind === "trail" && colourItem("trail", spec)) || this.look.trail || "trail-gold",
+          playerGlow: null,
+          view:
+            spec?.kind === "gun"
+              ? "gunside"
+              : spec?.kind === "hat" || spec?.kind === "bunny"
+                ? "bunny"
+                : spec?.kind === "ghost" || spec?.kind === "trail"
+                  ? "ghost"
+                  : job.kind === "knife" && job.focus === "hilt"
+                    ? "hilt"
+                    : job.kind === "knife" || spec?.kind === "knife"
+                      ? "knife"
+                      : "fp",
+          weapon: 17,
+          yaw: 0,
+          pitch: 0,
+          inspect: 0,
+          held: false,
+          width: THUMB_W,
+          height: THUMB_H,
+        },
+        (png) => {
+          this.thumbRequests.delete(job.key);
+          if (this.disposed || !png) return;
+          const image = new Image();
+          image.onload = () => {
+            if (this.disposed) return;
+            paintRevisions.set(canvas!, (paintRevisions.get(canvas!) ?? 0) + 1);
+            canvas!.dataset.nativeThumbnail = "true";
+            canvas!.width = image.naturalWidth;
+            canvas!.height = image.naturalHeight;
+            canvas!.getContext("2d")?.drawImage(image, 0, 0);
+            done(canvas!);
+          };
+          image.src = png;
+        },
+        10000,
+      );
+      this.thumbRequests.set(job.key, request);
+    }
   }
-  cancelThumbs(_keep: (key: string) => boolean): void {
-    /* All software thumbnails finish synchronously. */
+  cancelThumbs(keep: (key: string) => boolean): void {
+    for (const [key, request] of this.thumbRequests) {
+      if (keep(key)) continue;
+      cancelPreview(request);
+      this.thumbRequests.delete(key);
+    }
   }
   dispose(): void {
     this.disposed = true;
     clearTimeout(this.frame);
     cancelPreview(this.request);
+    this.cancelThumbs(() => false);
     this.canvas.removeEventListener("pointerdown", this.down);
     this.canvas.removeEventListener("pointermove", this.move);
     this.canvas.removeEventListener("pointerup", this.up);
     this.canvas.removeEventListener("pointercancel", this.up);
     this.canvas.removeEventListener("keydown", this.key);
-    this.note.remove();
     this.canvas.remove();
   }
 }

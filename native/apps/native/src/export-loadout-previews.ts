@@ -5,7 +5,7 @@ import { existsSync } from "node:fs";
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { deflateSync } from "node:zlib";
-import { COSMETICS } from "../../web/src/progression";
+import { COSMETICS, staffItem } from "../../web/src/progression";
 const missingOnly = process.argv.includes("--missing");
 const args = process.argv.slice(2).filter((arg) => arg !== "--missing");
 const executable = args[0] ?? "/tmp/bunnyhop-export-previews",
@@ -22,9 +22,11 @@ interface CJob {
   kind: string;
   outfit: string;
   loadout: string;
+  weapon?: number;
 }
 for (const c of COSMETICS) {
-  if (!["knife", "finish", "glove", "outfit", "hat", "body", "ghost"].includes(c.slot)) continue;
+  if (staffItem(c)) continue;
+  if (!["knife", "finish", "hilt", "camo", "glove", "outfit", "hat", "body", "ghost"].includes(c.slot)) continue;
   if (c.slot === "knife" && !metadata.meshes["fpknife:" + c.id.replace(/^knife-/, "")]) continue;
   if (c.slot === "hat" && !metadata.hats[c.id]) continue;
   if (Object.hasOwn(kept, c.id)) continue;
@@ -36,15 +38,20 @@ for (const c of COSMETICS) {
   jobs.push({
     id: c.id,
     kind:
-      c.slot === "ghost"
-        ? "ghost"
-        : c.slot === "hat"
-          ? "hat"
-          : c.slot === "outfit" || c.slot === "body"
-            ? "actor"
-            : "fp",
+      c.slot === "hilt"
+        ? "hilt"
+        : c.slot === "camo"
+          ? "gunside"
+          : c.slot === "ghost"
+            ? "ghost"
+            : c.slot === "hat"
+              ? "hat"
+              : c.slot === "outfit" || c.slot === "body"
+                ? "actor"
+                : "fp",
     outfit,
-    loadout: `2;${knife};${finish};${glove};;${hat};${c.slot === "body" ? c.id : "body-a"}`,
+    loadout: `2;${knife};${finish};${glove};;${hat};${c.slot === "body" ? c.id : "body-a"};;;;${c.slot === "hilt" ? c.id : ""};${c.slot === "camo" ? c.id : ""}`,
+    weapon: c.slot === "camo" ? 17 : 1,
   });
 }
 await writeFile(resolve(temp, "jobs.json"), JSON.stringify(jobs));
@@ -115,7 +122,7 @@ function filterRows(pixels: Buffer, width: number, height: number): Buffer {
 const images: Record<string, string> = {};
 let pngBytes = 0;
 // Kept pictures stay in the catalog's order, still for items the website has; new ones follow.
-const shipped = new Set(COSMETICS.map((c) => c.id));
+const shipped = new Set(COSMETICS.filter((c) => !staffItem(c)).map((c) => c.id));
 for (const [id, image] of Object.entries(kept)) {
   if (!shipped.has(id)) continue;
   images[id] = image;
@@ -126,19 +133,24 @@ for (const job of jobs) {
   let w = 1024,
     h = 768;
   // Keep high resolution where the original character crops were only ~70px wide.
-  if (!["actor", "ghost", "hat"].includes(job.kind)) {
-    const small = Buffer.alloc(512 * 384 * 4);
-    for (let y = 0; y < 384; y++)
-      for (let x = 0; x < 512; x++)
+  if (job.kind !== "actor") {
+    // Catalogue additions are occasional. Keep their thumbnails smaller than the original hand-tuned catalog so
+    // Contributor and future role items fit the embedded 4 MiB menu limit without dropping previews.
+    const scale = missingOnly ? 8 : job.kind === "gunside" || job.loadout.split(";")[10] ? 4 : 2,
+      outW = 1024 / scale,
+      outH = 768 / scale;
+    const small = Buffer.alloc(outW * outH * 4);
+    for (let y = 0; y < outH; y++)
+      for (let x = 0; x < outW; x++)
         for (let c = 0; c < 4; c++) {
           let sum = 0;
-          for (let dy = 0; dy < 2; dy++)
-            for (let dx = 0; dx < 2; dx++) sum += raw[((y * 2 + dy) * 1024 + x * 2 + dx) * 4 + c];
-          small[(y * 512 + x) * 4 + c] = Math.round(sum / 4);
+          for (let dy = 0; dy < scale; dy++)
+            for (let dx = 0; dx < scale; dx++) sum += raw[((y * scale + dy) * 1024 + x * scale + dx) * 4 + c];
+          small[(y * outW + x) * 4 + c] = Math.round(sum / (scale * scale));
         }
     raw = small;
-    w = 512;
-    h = 384;
+    w = outW;
+    h = outH;
   }
   let x0 = w,
     y0 = h,

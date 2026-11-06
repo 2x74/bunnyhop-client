@@ -1,6 +1,7 @@
 // Actual web gesture layer on running, crouching, airborne and looking poses.
 import { writeFile } from "node:fs/promises";
-import { rig, concat } from "../../web/src/player/bunny/rig";
+import { PartPoser } from "../../web/src/viewmodel/knives/tp-parts";
+import { rig, concat, knifePartBone } from "../../web/src/player/bunny/rig";
 import { BunnyProcedural } from "../../web/src/player/bunny/procedural";
 import { TpInspect, type TpBones } from "../../web/src/viewmodel/inspects/third";
 import { inspectSetFor } from "../../web/src/viewmodel/inspects/index";
@@ -28,6 +29,13 @@ for (const knife of KNIVES) {
       W.set(tmp, i * 12);
     },
   };
+  const parts = new PartPoser(knife, r.bind, r.names.indexOf("ValveBiped.Bip01_R_Hand") * 12, knife.tp ?? TP_CARROT);
+  const partBones = (knife.joints ?? []).map((joint) => r.names.indexOf(knifePartBone(joint)));
+  const poseParts = (time: number) => {
+    const angles = parts.baseAngles(time);
+    tp.angles(angles);
+    parts.pose(W, r.names.indexOf("bunny.Knife") * 12, partBones, angles);
+  };
   const frames: any[] = [];
   for (let f = 0; f < 240; f++) {
     const dt = 1 / 60,
@@ -52,7 +60,8 @@ for (const knife of KNIVES) {
     tp.setHeld(held);
     tp.update(dt);
     tp.apply(bones, key, "bunny.Knife", knife.tp ?? TP_CARROT);
-    frames.push({ dt, signal, attack, reset, held, base, expected: Array.from(W) });
+    poseParts(f / 60);
+    frames.push({ time: f / 60, dt, signal, attack, reset, held, base, expected: Array.from(W) });
   }
   for (let clip = 0; clip < inspectSetFor(knife).clips.length; clip++)
     for (const t of [0, 0.13, 0.43, 0.91, 1.31, 1.73, 2.2]) {
@@ -68,7 +77,9 @@ for (const knife of KNIVES) {
       );
       const base = Array.from(W);
       tp.apply(bones, key, "bunny.Knife", knife.tp ?? TP_CARROT);
+      poseParts(t);
       frames.push({
+        time: t,
         seek: { clip, t: Math.min(t, inspectSetFor(knife).clips[clip].len - 1e-6) },
         dt: 0,
         base,

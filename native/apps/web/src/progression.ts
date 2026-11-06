@@ -802,10 +802,13 @@ export function earnedAchievements(s: ProgressStats): string[] {
 // ---------------------------------------------------------------------------------------------
 // Cosmetics (all unlocked by playing; card editor + ghost settings)
 
-export type CosmeticSlot = "background" | "frame" | "title" | "ghost" | "trail" | "outfit" | "knife" | "finish" | "glove" | "hat" | "body";
+export type CosmeticSlot = "background" | "frame" | "title" | "ghost" | "trail" | "outfit" | "knife" | "finish" | "glove" | "hilt" | "hat" | "body" | "camo";
 
-/** The first-person loadout slots (apps/web/src/loadout.ts): what you hold, what it's painted with, your gloves. */
-export const LOADOUT_SLOTS = ["knife", "finish", "glove"] as const satisfies readonly CosmeticSlot[];
+/**
+ * The first-person loadout slots (apps/web/src/loadout.ts): what you hold, what its blade is painted with, its hilt (one
+ * skin for whichever knife is held, v0.0.38), your gloves.
+ */
+export const LOADOUT_SLOTS = ["knife", "finish", "hilt", "glove"] as const satisfies readonly CosmeticSlot[];
 
 export type Unlock =
   | { kind: "free" }
@@ -818,11 +821,12 @@ export type Unlock =
    */
   | { kind: "rank"; max: number; scope: "all" | "style" }
   /**
-   * Role-held: yours while you hold the role ("owner" = the API's OWNER_ID account; "staff" = room admins, D1
-   * room_admins or ROOM_ADMINS, and the owner). Checked server-side on save and on every read like rank-held items, so
-   * a removed admin reads back as the default. Never shown as a locked goal to players who can't hold it.
+   * Role-held: yours while you hold the role (RoleNeed, holdsRole). Checked server-side on save and on every read like
+   * rank-held items, so a removed admin or a revoked Contributor badge reads back as the default. Staff items are never
+   * listed or previewed for players who don't hold the role (staffItem); Contributor items are listed for everyone,
+   * locked and marked Contributor.
    */
-  | { kind: "role"; role: "owner" | "staff" };
+  | { kind: "role"; role: RoleNeed };
 
 /**
  * A player's staff role as the server sees it (null = none): "owner" (OWNER_ID), "admin" (a room admin) or "moderator"
@@ -832,15 +836,64 @@ export type Unlock =
 export type StaffRole = "owner" | "admin" | "moderator";
 
 /**
- * Whether `role` satisfies a role-held unlock (the owner is staff too). Moderators hold neither: they get the Mod tag but
- * no cosmetic perks (no staffGrant, no Staff title), so modding is never a shortcut to unlocks.
+ * Who a role-held item belongs to (v0.0.38 role model). The staff roles are a ladder, each holding the items of the roles
+ * under it; Contributor is a badge beside the ladder (creators.ts special "contributor", granted by staff, no
+ * permissions), so admins and moderators don't get it from their role. The owner holds everything.
+ *   "owner"        the owner (OWNER_ID)
+ *   "admin"        admins and the owner
+ *   "staff"        the same as "admin" (the name the Staff title has always used)
+ *   "moderator"    moderators, admins and the owner
+ *   "contributor"  players with the Contributor badge, and the owner
+ * Role-held items are their own looks (ROLE_SETS), never earned items: staffGrant still gives admins the earned
+ * catalogue and moderators nothing, so modding is never a shortcut to anything earned by playing.
  */
-export function holdsRole(need: "owner" | "staff", role: StaffRole | null | undefined): boolean {
-  return need === "owner" ? role === "owner" : role === "owner" || role === "admin";
+export type RoleNeed = "owner" | "staff" | "admin" | "moderator" | "contributor";
+export const ROLE_NEEDS: readonly RoleNeed[] = ["owner", "staff", "admin", "moderator", "contributor"];
+
+/** What role-held items check: the staff role, and whether the player has the Contributor badge. */
+export interface RoleHolder {
+  role: StaffRole | null;
+  contributor?: boolean;
+}
+/** A bare staff role (older callers: no Contributor badge) or a full RoleHolder. */
+export type Holder = StaffRole | RoleHolder | null | undefined;
+export const holderOf = (h: Holder): RoleHolder => (h && typeof h === "object" ? { role: h.role ?? null, contributor: !!h.contributor } : { role: h ?? null, contributor: false });
+/** The Contributor badge among a player's special badges (users.special_badges; creators.ts SPECIAL_BADGES). */
+export const hasContributorBadge = (special: readonly string[] | null | undefined): boolean => !!special?.includes("contributor");
+
+/** Whether `who` holds a role-held unlock (see RoleNeed). */
+export function holdsRole(need: RoleNeed, who: Holder): boolean {
+  const { role, contributor } = holderOf(who);
+  switch (need) {
+    case "owner":
+      return role === "owner";
+    case "staff":
+    case "admin":
+      return role === "owner" || role === "admin";
+    case "moderator":
+      return role === "owner" || role === "admin" || role === "moderator";
+    case "contributor":
+      return role === "owner" || !!contributor;
+  }
 }
 
-/** "Owner only", "Staff only". */
-export const roleHint = (need: "owner" | "staff"): string => (need === "owner" ? "Owner only" : "Staff only");
+/**
+ * A staff item (v0.0.38, owner 11-06): held through a staff role (moderator, admin / "staff", owner). Nobody who doesn't
+ * hold that role may browse or preview it: it's left out of every selector, Loadout section, tab count, unlock list and
+ * preview, and the API answers for it like for an id that doesn't exist (cosmeticsProblem "unknown item"). Someone
+ * wearing one still shows it to everyone (rooms, replays, their card). Contributor items aren't staff items: they stay
+ * listed for everyone as a locked goal, marked Contributor.
+ */
+export const staffItem = (c: Pick<CosmeticDef, "unlock">): boolean => c.unlock.kind === "role" && c.unlock.role !== "contributor";
+
+/** Whether `who` may see `c` listed or previewed anywhere (selectors, counts, unlock lists, API lists): see staffItem. */
+export function listedFor(c: Pick<CosmeticDef, "unlock">, who: Holder): boolean {
+  return c.unlock.kind !== "role" || c.unlock.role === "contributor" || holdsRole(c.unlock.role, who);
+}
+
+/** "Owner only", "Staff only", "Moderators only", "Contributors only". */
+export const roleHint = (need: RoleNeed): string =>
+  need === "owner" ? "Owner only" : need === "staff" ? "Staff only" : need === "admin" ? "Admins only" : need === "moderator" ? "Moderators only" : "Contributors only";
 
 /** Display name of a role ("Owner", "Admin", "Mod"): chat tags, the scoreboard and the player card. */
 export const roleName = (role: StaffRole): string => (role === "owner" ? "Owner" : role === "admin" ? "Admin" : "Mod");
@@ -887,7 +940,7 @@ export interface CosmeticDef {
   unlock: Unlock;
   /** Ghost / trail colour, or the swatch for card backgrounds and frames. */
   color?: string;
-  /** Loadout items (knife / finish / glove). */
+  /** Loadout items (knife / finish / hilt / glove). */
   rarity?: Rarity;
   /**
    * A second colour, for the two-tone items: the Geode trail fades from `color` at the head to this at the tail, and
@@ -902,13 +955,15 @@ export interface CosmeticDef {
   legacy?: readonly Unlock[];
   /** A supporter item's set (SUPPORTER_SETS): the Loadout groups them by it, the Support page switches between them. */
   set?: SupporterSetId;
+  /** A role-held item's set (ROLE_SETS): the Loadout groups them by it. */
+  roleSet?: RoleSetId;
 }
 
 const free: Unlock = { kind: "free" };
 const lvl = (level: number): Unlock => ({ kind: "level", level });
 const ach = (id: string): Unlock => ({ kind: "achievement", id });
 const held = (max: number, scope: "all" | "style" = "all"): Unlock => ({ kind: "rank", max, scope });
-const role = (r: "owner" | "staff"): Unlock => ({ kind: "role", role: r });
+const role = (r: RoleNeed): Unlock => ({ kind: "role", role: r });
 
 export const COSMETICS: CosmeticDef[] = [
   // Card backgrounds (ui/card.css: .pc-bg-<id>)
@@ -1015,7 +1070,7 @@ export const COSMETICS: CosmeticDef[] = [
   { id: "outfit-founder", slot: "outfit", name: "Founder", unlock: role("owner"), color: "#2a1660", rarity: 5 },
   // Knives (first person + third person). Built in code by the viewmodel knife registry (viewmodel/knives/); the client
   // only lists the ones that registry can draw, so a knife whose model hasn't shipped stays hidden. EVERY KNIFE IS FREE
-  // (owner call, v0.0.5; the Supporter set's two bayonets are the exception): you just pick the one you like in the
+  // (owner call, v0.0.5; the Supporter knives below are the exception): you just pick the one you like in the
   // Loadout screen; finishes, gloves and rank-held items are what you unlock. The rarity is the knife's tier of flair
   // (its colour in the UI), not how hard it is to get.
   { id: "knife-carrot", slot: "knife", name: "Carrot Blade", unlock: free, color: "#ff7a1a", rarity: 1 },
@@ -1023,19 +1078,21 @@ export const COSMETICS: CosmeticDef[] = [
   { id: "knife-parsnip", slot: "knife", name: "Parsnip Stiletto", unlock: free, color: "#efe2b8", rarity: 2 },
   { id: "knife-karrotbit", slot: "knife", name: "Karrotbit", unlock: free, color: "#ff7a1a", rarity: 3 },
   { id: "knife-radish", slot: "knife", name: "Radish Kukri", unlock: free, color: "#ff5c8a", rarity: 3 },
-  { id: "knife-leek", slot: "knife", name: "Leek Saber", unlock: free, color: "#8fdc6a", rarity: 3 },
   { id: "knife-cleaver", slot: "knife", name: "Clover Cleaver", unlock: free, color: "#5ee08a", rarity: 3 },
   { id: "knife-bunnyfly", slot: "knife", name: "Bunnyfly", unlock: free, color: "#ff9a3c", rarity: 4 },
   { id: "knife-daikon", slot: "knife", name: "Daikon-tana", unlock: free, color: "#f3f1ea", rarity: 4 },
-  { id: "knife-sprouts", slot: "knife", name: "Twin Sprouts", unlock: free, color: "#ffb04a", rarity: 4 },
   { id: "knife-candycane", slot: "knife", name: "Candy Cane Shiv", unlock: free, color: "#e8333f", rarity: 5 },
   { id: "knife-golden", slot: "knife", name: "Golden Carrot", unlock: free, color: "#ffd45e", rarity: 5 },
   // v0.0.30: a talon with a three-petal spinner on its bolster (viewmodel/knives/whirligig.ts; kill's ask).
   { id: "knife-whirligig", slot: "knife", name: "Whirligig", unlock: free, color: "#f2a93b", rarity: 4 },
-  // Supporter (SUPPORTER): the two bayonets, the only knives that aren't free (viewmodel/knives/thornback.ts, thistle.ts).
-  // A big sawback clip point with a muzzle ring; a slim spinner with a thistle-head pommel.
+  // Supporter (SUPPORTER): the only knives that aren't free, standalone (no set). The two bayonets
+  // (viewmodel/knives/thornback.ts, thistle.ts): a big sawback clip point with a muzzle ring; a slim spinner with a
+  // thistle-head pommel. v0.0.38 (owner 11-06): the Leek Saber (leek.ts, a long curved white-to-green saber; Heirloom like
+  // every Supporter item) and Twin Sprouts (sprouts.ts, two golden tines from a seed).
   { id: "knife-thornback", slot: "knife", name: "Thornback", unlock: ach(SUPPORTER), color: "#2b6870", rarity: 4 },
   { id: "knife-thistle", slot: "knife", name: "Thistle", unlock: ach(SUPPORTER), color: "#b46ad8", rarity: 4 },
+  { id: "knife-leek", slot: "knife", name: "Leek Saber", unlock: ach(SUPPORTER), color: "#8fdc6a", rarity: 4 },
+  { id: "knife-sprouts", slot: "knife", name: "Twin Sprouts", unlock: ach(SUPPORTER), color: "#ffb04a", rarity: 4 },
   // Finishes: paint for any knife's blade (viewmodel/finishes/). Owner call (v0.0.6): each finish is ONE fixed design,
   // the same for everyone (no per-player patterns, no wear), and the lineup is our own garden-themed set rather than a
   // copy of anyone's skin list. The v0.0.5 ids still read (FINISH_ALIASES below), and `legacy` keeps every v0.0.5 route,
@@ -1114,6 +1171,22 @@ export const COSMETICS: CosmeticDef[] = [
   // High Roller: black driving gloves, felt-green tips, gold snaps. Borealis: navy sport gloves, green and violet panels.
   { id: "glove-driver-highroller", slot: "glove", name: "Driver · High Roller", unlock: ach(SUPPORTER), color: "#17181c", rarity: 4 },
   { id: "glove-sport-borealis", slot: "glove", name: "Sport · Borealis", unlock: ach(SUPPORTER), color: "#14203d", rarity: 4 },
+  // v0.0.38 glove styles (loadout.ts GLOVE_STYLE: Dress, Aviator, Flip Mitts), earned by playing. They fill goals that
+  // had no glove: an early one (1,000 jumps), level 25, 50 PBs, the Aero time goal, and the first T7 to T10 clears (each
+  // tier's own colours, beside its colourway, trail and frame).
+  { id: "glove-mitts-oatmeal", slot: "glove", name: "Flip Mitts · Oatmeal", unlock: ach("jumps_1k"), color: "#d9c9a8", rarity: 1 },
+  { id: "glove-dress-ivory", slot: "glove", name: "Dress · Ivory", unlock: lvl(25), color: "#f3eee3", rarity: 3 },
+  { id: "glove-aviator-bomber", slot: "glove", name: "Aviator · Bomber", unlock: ach("time_bhop_lol_aero_35"), color: "#6e4528", rarity: 3 },
+  { id: "glove-dress-noir", slot: "glove", name: "Dress · Noir", unlock: ach("pbs_50"), color: "#16161a", rarity: 4 },
+  { id: "glove-dress-lapis", slot: "glove", name: "Dress · Lapis", unlock: ach("tier_7"), color: "#26307a", rarity: 4 },
+  { id: "glove-aviator-flare", slot: "glove", name: "Aviator · Flare", unlock: ach("tier_8"), color: "#e0479f", rarity: 4 },
+  { id: "glove-aviator-riptide", slot: "glove", name: "Aviator · Riptide", unlock: ach("tier_9"), color: "#4fb8ff", rarity: 5 },
+  { id: "glove-mitts-whiteout", slot: "glove", name: "Flip Mitts · Whiteout", unlock: ach("tier_10"), color: "#f4f6fb", rarity: 5 },
+  // Supporter (v0.0.38): a second glove for High Roller (black dress gloves with gold points and a felt-green cuff) and
+  // Borealis (a navy flying gauntlet, violet knuckles, an aurora-green strap), and the new Tidepool set's mitts.
+  { id: "glove-dress-dealer", slot: "glove", name: "Dress · Dealer", unlock: ach(SUPPORTER), color: "#e0b13a", rarity: 4 },
+  { id: "glove-aviator-polar", slot: "glove", name: "Aviator · Polar Night", unlock: ach(SUPPORTER), color: "#9a6bff", rarity: 4 },
+  { id: "glove-mitts-tidepool", slot: "glove", name: "Flip Mitts · Tidepool", unlock: ach(SUPPORTER), color: "#5fc8b8", rarity: 4 },
   // Batch 1 (2026-10-21, research/PROGRESSION-BATCH1.md): earned by playing, themed on our own maps. Each goal gives a
   // small matched set. Colourways in player/bunny/palettes.ts, gloves in loadout.ts GLOVE_STYLE.
   // Home Turf: Meadow's clover green with buttercup accents, and canvas gloves dipped in buttercup yellow.
@@ -1185,6 +1258,51 @@ export const COSMETICS: CosmeticDef[] = [
   { id: "bg-riptide", slot: "background", name: "Riptide", unlock: ach("t9_clears_3"), color: "#0a1f3a" },
 ];
 
+// Hilt skins (v0.0.38, the owner's ask: one hilt slot for every knife, skins in colourways and materials, so knife ×
+// finish × hilt × gloves make the combos). Render data: loadout.ts HILT_SKIN; which parts of each knife are its hilt:
+// viewmodel/knives/types.ts HiltMap. Earned ones fill goals that gave nothing (First T1, level 10, every style's first
+// clear and 10 clears, T3 / T4 / T6 / T7 sweeps, Top 10, Bonus Collector, Meadowlark, Every Gauntlet, Record
+// Collector); the supporter and role sets each get their own. Ids are stable forever.
+COSMETICS.push(
+  { id: "hilt-original", slot: "hilt", name: "Original", unlock: free, color: "#2f7d34", rarity: 1 },
+  { id: "hilt-bone-white", slot: "hilt", name: "Bone White", unlock: ach("tier_1"), color: "#f1eadb", rarity: 1 },
+  { id: "hilt-black", slot: "hilt", name: "Black", unlock: lvl(10), color: "#1c1d21", rarity: 2 },
+  // Every style's first clear: a material each.
+  { id: "hilt-cork", slot: "hilt", name: "Cork", unlock: ach("style_legit"), color: "#c79a64", rarity: 2 },
+  { id: "hilt-oak", slot: "hilt", name: "Oak", unlock: ach("style_scroll"), color: "#c99a62", rarity: 2 },
+  { id: "hilt-twine", slot: "hilt", name: "Garden Twine", unlock: ach("style_wonly"), color: "#c8ad7a", rarity: 2 },
+  { id: "hilt-olive-rubber", slot: "hilt", name: "Olive Rubber", unlock: ach("style_sideways"), color: "#4f5a34", rarity: 2 },
+  { id: "hilt-tan-leather", slot: "hilt", name: "Tan Leather", unlock: ach("style_hsw"), color: "#b27a45", rarity: 2 },
+  // Ten clears in a style: the step up.
+  { id: "hilt-walnut", slot: "hilt", name: "Walnut", unlock: ach("scroll_10"), color: "#6b4428", rarity: 3 },
+  { id: "hilt-antler", slot: "hilt", name: "Antler", unlock: ach("legitscroll_10"), color: "#cdbb9a", rarity: 3 },
+  { id: "hilt-orange-cord", slot: "hilt", name: "Orange Cord", unlock: ach("wonly_10"), color: "#ff7a1a", rarity: 3 },
+  { id: "hilt-bamboo", slot: "hilt", name: "Bamboo", unlock: ach("sideways_10"), color: "#c7c27a", rarity: 3 },
+  { id: "hilt-black-leather", slot: "hilt", name: "Black Leather", unlock: ach("hsw_10"), color: "#1f1c1c", rarity: 3 },
+  // Maps, boards and sweeps.
+  { id: "hilt-clover", slot: "hilt", name: "Clover", unlock: ach("time_bhop_lol_meadow_16"), color: "#2f8f4a", rarity: 3 },
+  { id: "hilt-navy-cord", slot: "hilt", name: "Navy Cord", unlock: ach("top10_1"), color: "#22305e", rarity: 3 },
+  { id: "hilt-copper", slot: "hilt", name: "Copper", unlock: ach("bonus_25"), color: "#d9825a", rarity: 3 },
+  { id: "hilt-brass", slot: "hilt", name: "Brass", unlock: ach("sweep_3"), color: "#e0b25a", rarity: 3 },
+  { id: "hilt-carved-bone", slot: "hilt", name: "Carved Bone", unlock: ach("sweep_4"), color: "#ece2c9", rarity: 4 },
+  { id: "hilt-gunmetal", slot: "hilt", name: "Gunmetal", unlock: ach("gauntlet_every"), color: "#5a616b", rarity: 4 },
+  { id: "hilt-rosewood", slot: "hilt", name: "Rosewood", unlock: ach("sweep_6"), color: "#7a2e22", rarity: 4 },
+  { id: "hilt-gilded", slot: "hilt", name: "Gilded", unlock: ach("wr_5"), color: "#ffc94a", rarity: 5 },
+  { id: "hilt-marble", slot: "hilt", name: "Marble", unlock: ach("sweep_7"), color: "#f2f0ea", rarity: 5 },
+  // Supporter (SUPPORTER), one per set: banded geode stone with aqua and amethyst fittings; felt-green cord and gold;
+  // a navy leather wrap edged in aurora green with violet fittings; frosted sea glass, pearl and coral.
+  { id: "hilt-geode", slot: "hilt", name: "Geode", unlock: ach(SUPPORTER), color: "#1d6b74", rarity: 4 },
+  { id: "hilt-highroller", slot: "hilt", name: "High Roller", unlock: ach(SUPPORTER), color: "#0f5a3a", rarity: 4 },
+  { id: "hilt-borealis", slot: "hilt", name: "Borealis", unlock: ach(SUPPORTER), color: "#3ff0a0", rarity: 4 },
+  { id: "hilt-tidepool", slot: "hilt", name: "Sea Glass", unlock: ach(SUPPORTER), color: "#5fc8b8", rarity: 4 },
+  // Role sets (ROLE_SETS): storm-navy rubber with a hi-vis lime groove and reflective silver; teal-stained wood and
+  // brass; oxblood lacquer and polished silver; violet leather edged in carrot orange, gold fittings.
+  { id: "hilt-lookout", slot: "hilt", name: "Lookout", unlock: role("moderator"), color: "#c8f53a", rarity: 5 },
+  { id: "hilt-workbench", slot: "hilt", name: "Workbench", unlock: role("contributor"), color: "#2f6e6a", rarity: 5 },
+  { id: "hilt-keyholder", slot: "hilt", name: "Keyholder", unlock: role("admin"), color: "#5a1420", rarity: 5 },
+  { id: "hilt-founder", slot: "hilt", name: "Founder", unlock: role("owner"), color: "#ffc23d", rarity: 5 },
+);
+
 // Titles: every achievement title, plus a few level titles. id = "title-<slug>".
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 for (const a of ACHIEVEMENTS) if (a.title) COSMETICS.push({ id: `title-${slug(a.title)}`, slot: "title", name: a.title, unlock: ach(a.id) });
@@ -1245,34 +1363,207 @@ COSMETICS.push(
   { id: "title-stargazer", slot: "title", name: "Stargazer", unlock: ach(SUPPORTER), rarity: 4 },
 );
 
+// The Tidepool set (v0.0.38, Supporter): sea glass, coral and pearl. A rock-pool green hoodie with coral trim, pearl
+// shoes; a sea-glass ghost glowing coral; a trail of foam into sea glass; the card a pool lit from above; a starfish
+// on the hood.
+COSMETICS.push(
+  { id: "outfit-tidepool", slot: "outfit", name: "Tidepool", unlock: ach(SUPPORTER), color: "#2f8f86", rarity: 4 },
+  { id: "ghost-tidepool", slot: "ghost", name: "Tidepool", unlock: ach(SUPPORTER), color: "#7fe0cf", color2: "#ff8a78", rarity: 4 },
+  { id: "trail-tidepool", slot: "trail", name: "Tidepool", unlock: ach(SUPPORTER), color: "#f3ece2", color2: "#5fc8b8", rarity: 4 },
+  { id: "bg-tidepool", slot: "background", name: "Tidepool", unlock: ach(SUPPORTER), color: "#0f3b3a", rarity: 4 },
+  { id: "frame-tidepool", slot: "frame", name: "Tidepool", unlock: ach(SUPPORTER), color: "#5fc8b8", rarity: 4 },
+  { id: "hat-starfish", slot: "hat", name: "Starfish", unlock: ach(SUPPORTER), color: "#ff7f6e", rarity: 4 },
+  { id: "title-beachcomber", slot: "title", name: "Beachcomber", unlock: ach(SUPPORTER), rarity: 4 },
+);
+
+// ---------------------------------------------------------------------------------------------
+// Role sets (v0.0.38): a whole look per role, held while the role is (RoleNeed / holdsRole), like the Founder items.
+// Lookout (moderators): storm navy with hi-vis lime and reflective silver, someone on watch. Workbench (Contributor
+// badge): ink canvas with the badge's teal and brass, the workshop. Keyholder (admins): oxblood and polished silver.
+// Founder (the owner): the Founder items it always had, plus a glove and a card background.
+COSMETICS.push(
+  { id: "glove-specialist-lookout", slot: "glove", name: "Specialist · Lookout", unlock: role("moderator"), color: "#c8f53a", rarity: 5 },
+  { id: "outfit-lookout", slot: "outfit", name: "Lookout", unlock: role("moderator"), color: "#1b2740", rarity: 5 },
+  { id: "ghost-lookout", slot: "ghost", name: "Lookout", unlock: role("moderator"), color: "#c8f53a", color2: "#d8dee8", rarity: 5 },
+  { id: "trail-lookout", slot: "trail", name: "Lookout", unlock: role("moderator"), color: "#c8f53a", color2: "#d8dee8", rarity: 5 },
+  { id: "bg-lookout", slot: "background", name: "Lookout", unlock: role("moderator"), color: "#111a2c", rarity: 5 },
+  { id: "frame-lookout", slot: "frame", name: "Lookout", unlock: role("moderator"), color: "#c8f53a", rarity: 5 },
+  { id: "title-moderator", slot: "title", name: "Moderator", unlock: role("moderator"), rarity: 5 },
+
+  { id: "glove-garden-workbench", slot: "glove", name: "Garden · Workbench", unlock: role("contributor"), color: "#3fd4c6", rarity: 5 },
+  { id: "outfit-workbench", slot: "outfit", name: "Workbench", unlock: role("contributor"), color: "#2b3448", rarity: 5 },
+  { id: "ghost-workbench", slot: "ghost", name: "Workbench", unlock: role("contributor"), color: "#3fd4c6", color2: "#c9a24a", rarity: 5 },
+  { id: "trail-workbench", slot: "trail", name: "Workbench", unlock: role("contributor"), color: "#3fd4c6", color2: "#c9a24a", rarity: 5 },
+  { id: "bg-workbench", slot: "background", name: "Workbench", unlock: role("contributor"), color: "#18202f", rarity: 5 },
+  { id: "frame-workbench", slot: "frame", name: "Workbench", unlock: role("contributor"), color: "#3fd4c6", rarity: 5 },
+  { id: "title-contributor", slot: "title", name: "Contributor", unlock: role("contributor"), rarity: 5 },
+
+  { id: "glove-dress-keyholder", slot: "glove", name: "Dress · Keyholder", unlock: role("admin"), color: "#5a1420", rarity: 5 },
+  { id: "outfit-keyholder", slot: "outfit", name: "Keyholder", unlock: role("admin"), color: "#5a1420", rarity: 5 },
+  { id: "ghost-keyholder", slot: "ghost", name: "Keyholder", unlock: role("admin"), color: "#e8edf3", color2: "#c0283c", rarity: 5 },
+  { id: "trail-keyholder", slot: "trail", name: "Keyholder", unlock: role("admin"), color: "#e8edf3", color2: "#8a1c2c", rarity: 5 },
+  { id: "bg-keyholder", slot: "background", name: "Keyholder", unlock: role("admin"), color: "#2a0a10", rarity: 5 },
+  { id: "frame-keyholder", slot: "frame", name: "Keyholder", unlock: role("admin"), color: "#cfd6e0", rarity: 5 },
+
+  { id: "glove-aviator-founder", slot: "glove", name: "Aviator · Founder", unlock: role("owner"), color: "#ff7a1a", rarity: 5 },
+  { id: "bg-founder", slot: "background", name: "Founder", unlock: role("owner"), color: "#1a0f3a", rarity: 5 },
+);
+
+// Contributor items, round two (v0.0.38, owner 11-06: "a cool contributor cosmetic or few"). Shown to everyone as a
+// locked goal (staffItem), so they are the role's showpiece. Workbench gains the two slots it lacked: Ruler, a teal
+// anodised blade with a brass ruler along it, and Pencil, a carpenter's pencil tucked behind the left ear.
+// Draftsman, the second Contributor set: blueprint blue with white linework, a technical drawing to wear. Its finish,
+// Linework, draws the blade's own outline, a grid and a dimension line in white on blueprint blue.
+COSMETICS.push(
+  { id: "fin-ruler", slot: "finish", name: "Ruler", unlock: role("contributor"), color: "#2fb8ab", rarity: 5 },
+  { id: "hat-pencil", slot: "hat", name: "Pencil", unlock: role("contributor"), color: "#ffc23d", rarity: 5 },
+
+  { id: "fin-linework", slot: "finish", name: "Linework", unlock: role("contributor"), color: "#1d4f91", rarity: 5 },
+  { id: "glove-dress-draftsman", slot: "glove", name: "Dress · Draftsman", unlock: role("contributor"), color: "#1d4f91", rarity: 5 },
+  { id: "hilt-draftsman", slot: "hilt", name: "Draftsman", unlock: role("contributor"), color: "#1d4f91", rarity: 5 },
+  { id: "camo-draftsman", slot: "camo", name: "Draftsman", unlock: role("contributor"), color: "#1d4f91", rarity: 5, roleSet: "draftsman" },
+  { id: "outfit-draftsman", slot: "outfit", name: "Draftsman", unlock: role("contributor"), color: "#1d4f91", rarity: 5 },
+  { id: "ghost-draftsman", slot: "ghost", name: "Draftsman", unlock: role("contributor"), color: "#bfe0ff", color2: "#ffffff", rarity: 5 },
+  { id: "trail-draftsman", slot: "trail", name: "Draftsman", unlock: role("contributor"), color: "#ffffff", color2: "#3f86e0", rarity: 5 },
+  { id: "bg-draftsman", slot: "background", name: "Draftsman", unlock: role("contributor"), color: "#1d4f91", rarity: 5 },
+  { id: "frame-draftsman", slot: "frame", name: "Draftsman", unlock: role("contributor"), color: "#bfe0ff", rarity: 5 },
+);
+
+export type RoleSetId = "lookout" | "workbench" | "draftsman" | "keyholder" | "founder";
+/**
+ * The role sets: a theme per role, for the Loadout's grouping. `role`: who holds it (holdsRole: higher staff roles hold
+ * the sets under them, the owner all of them). `look`: the whole set worn at once (null = the set has none in that slot).
+ */
+export const ROLE_SETS: readonly { id: RoleSetId; name: string; role: RoleNeed; items: readonly string[]; look: { finish: string | null; glove: string; hilt: string; outfit: string; hat: string | null; ghost: string; trail: string; background: string; frame: string; title: string } }[] = [
+  {
+    id: "founder",
+    name: "Founder",
+    role: "owner",
+    items: ["glove-aviator-founder", "hilt-founder", "outfit-founder", "fin-founder", "hat-founder-crown", "hat-tophat", "hat-beanie", "ghost-founder", "trail-founder", "bg-founder", "frame-founder", "title-owner"],
+    look: { finish: "fin-founder", glove: "glove-aviator-founder", hilt: "hilt-founder", outfit: "outfit-founder", hat: "hat-founder-crown", ghost: "ghost-founder", trail: "trail-founder", background: "bg-founder", frame: "frame-founder", title: "title-owner" },
+  },
+  {
+    id: "keyholder",
+    name: "Keyholder",
+    role: "admin",
+    items: ["glove-dress-keyholder", "hilt-keyholder", "outfit-keyholder", "ghost-keyholder", "trail-keyholder", "bg-keyholder", "frame-keyholder", "title-staff"],
+    look: { finish: null, glove: "glove-dress-keyholder", hilt: "hilt-keyholder", outfit: "outfit-keyholder", hat: null, ghost: "ghost-keyholder", trail: "trail-keyholder", background: "bg-keyholder", frame: "frame-keyholder", title: "title-staff" },
+  },
+  {
+    id: "lookout",
+    name: "Lookout",
+    role: "moderator",
+    items: ["glove-specialist-lookout", "hilt-lookout", "outfit-lookout", "ghost-lookout", "trail-lookout", "bg-lookout", "frame-lookout", "title-moderator"],
+    look: { finish: null, glove: "glove-specialist-lookout", hilt: "hilt-lookout", outfit: "outfit-lookout", hat: null, ghost: "ghost-lookout", trail: "trail-lookout", background: "bg-lookout", frame: "frame-lookout", title: "title-moderator" },
+  },
+  {
+    id: "workbench",
+    name: "Workbench",
+    role: "contributor",
+    items: ["fin-ruler", "glove-garden-workbench", "hilt-workbench", "outfit-workbench", "hat-pencil", "ghost-workbench", "trail-workbench", "bg-workbench", "frame-workbench", "title-contributor"],
+    look: { finish: "fin-ruler", glove: "glove-garden-workbench", hilt: "hilt-workbench", outfit: "outfit-workbench", hat: "hat-pencil", ghost: "ghost-workbench", trail: "trail-workbench", background: "bg-workbench", frame: "frame-workbench", title: "title-contributor" },
+  },
+  {
+    id: "draftsman",
+    name: "Draftsman",
+    role: "contributor",
+    items: ["fin-linework", "glove-dress-draftsman", "hilt-draftsman", "camo-draftsman", "outfit-draftsman", "ghost-draftsman", "trail-draftsman", "bg-draftsman", "frame-draftsman"],
+    look: { finish: "fin-linework", glove: "glove-dress-draftsman", hilt: "hilt-draftsman", outfit: "outfit-draftsman", hat: null, ghost: "ghost-draftsman", trail: "trail-draftsman", background: "bg-draftsman", frame: "frame-draftsman", title: "title-contributor" },
+  },
+];
+for (const set of ROLE_SETS) for (const id of set.items) {
+  const c = COSMETICS.find((x) => x.id === id);
+  if (c) c.roleSet = set.id;
+}
+
 /**
  * The Supporter sets (every supporter owns all of them): a theme each, for the Loadout's grouping and the Support
  * page's switcher. `look`: what the Support page first puts on the preview for the set.
  */
-export type SupporterSetId = "geode" | "highroller" | "borealis";
-export const SUPPORTER_SETS: readonly { id: SupporterSetId; name: string; items: readonly string[]; look: { finish: string; glove: string; outfit: string; hat: string; ghost: string; trail: string } }[] = [
+export type SupporterSetId = "geode" | "highroller" | "borealis" | "tidepool";
+export const SUPPORTER_SETS: readonly { id: SupporterSetId; name: string; items: readonly string[]; look: { finish: string; glove: string; hilt: string; outfit: string; hat: string; ghost: string; trail: string } }[] = [
   {
     id: "geode",
     name: "Geode",
-    items: ["bg-geode", "frame-geode", "ghost-geode", "trail-geode", "outfit-geode", "fin-geode", "fin-rift", "fin-spectrum", "glove-specialist-geode", "hat-gem-orbit", "hat-halo", "hat-circlet"],
-    look: { finish: "fin-geode", glove: "glove-specialist-geode", outfit: "outfit-geode", hat: "hat-gem-orbit", ghost: "ghost-geode", trail: "trail-geode" },
+    items: ["bg-geode", "frame-geode", "ghost-geode", "trail-geode", "outfit-geode", "fin-geode", "fin-rift", "fin-spectrum", "glove-specialist-geode", "hilt-geode", "hat-gem-orbit", "hat-halo", "hat-circlet"],
+    look: { finish: "fin-geode", glove: "glove-specialist-geode", hilt: "hilt-geode", outfit: "outfit-geode", hat: "hat-gem-orbit", ghost: "ghost-geode", trail: "trail-geode" },
   },
   {
     id: "highroller",
     name: "High Roller",
-    items: ["bg-highroller", "frame-highroller", "ghost-highroller", "trail-highroller", "outfit-highroller", "fin-goldleaf", "glove-driver-highroller", "hat-dealer-visor", "hat-lucky-coins", "title-high-roller"],
-    look: { finish: "fin-goldleaf", glove: "glove-driver-highroller", outfit: "outfit-highroller", hat: "hat-lucky-coins", ghost: "ghost-highroller", trail: "trail-highroller" },
+    items: ["bg-highroller", "frame-highroller", "ghost-highroller", "trail-highroller", "outfit-highroller", "fin-goldleaf", "glove-driver-highroller", "glove-dress-dealer", "hilt-highroller", "hat-dealer-visor", "hat-lucky-coins", "title-high-roller"],
+    look: { finish: "fin-goldleaf", glove: "glove-driver-highroller", hilt: "hilt-highroller", outfit: "outfit-highroller", hat: "hat-lucky-coins", ghost: "ghost-highroller", trail: "trail-highroller" },
   },
   {
     id: "borealis",
     name: "Borealis",
-    items: ["bg-borealis", "frame-borealis", "ghost-borealis", "trail-borealis", "outfit-borealis", "fin-aurora", "glove-sport-borealis", "hat-aurora", "title-stargazer"],
-    look: { finish: "fin-aurora", glove: "glove-sport-borealis", outfit: "outfit-borealis", hat: "hat-aurora", ghost: "ghost-borealis", trail: "trail-borealis" },
+    items: ["bg-borealis", "frame-borealis", "ghost-borealis", "trail-borealis", "outfit-borealis", "fin-aurora", "glove-sport-borealis", "glove-aviator-polar", "hilt-borealis", "hat-aurora", "title-stargazer"],
+    look: { finish: "fin-aurora", glove: "glove-sport-borealis", hilt: "hilt-borealis", outfit: "outfit-borealis", hat: "hat-aurora", ghost: "ghost-borealis", trail: "trail-borealis" },
+  },
+  {
+    id: "tidepool",
+    name: "Tidepool",
+    items: ["bg-tidepool", "frame-tidepool", "ghost-tidepool", "trail-tidepool", "outfit-tidepool", "fin-pearl", "glove-mitts-tidepool", "hilt-tidepool", "hat-starfish", "title-beachcomber"],
+    look: { finish: "fin-pearl", glove: "glove-mitts-tidepool", hilt: "hilt-tidepool", outfit: "outfit-tidepool", hat: "hat-starfish", ghost: "ghost-tidepool", trail: "trail-tidepool" },
   },
 ];
 for (const set of SUPPORTER_SETS) for (const id of set.items) {
   const c = COSMETICS.find((x) => x.id === id);
   if (c) c.set = set.id;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Gun camos (v0.0.38; camo.ts has the designs, viewmodel/guns/camo.ts draws them): one camo on every gun you're handed.
+// No camo is the default (null). Earned ones fill achievements and levels that had no loadout item yet (the style
+// clears, the record and sweep goals, the Backrooms, a few early levels); Supporter ones join their set; role ones
+// complete the role sets. Ids are stable forever.
+COSMETICS.push(
+  // Solids and two-tones.
+  { id: "camo-field", slot: "camo", name: "Field", unlock: ach("tier_1"), color: "#6b6f4a", rarity: 1 },
+  { id: "camo-graphite", slot: "camo", name: "Graphite", unlock: lvl(7), color: "#2e3036", rarity: 1 },
+  { id: "camo-split", slot: "camo", name: "Split", unlock: ach("style_hsw"), color: "#eae2cf", rarity: 2 },
+  // Game-native, early.
+  { id: "camo-carrot-patch", slot: "camo", name: "Carrot Patch", unlock: lvl(9), color: "#ff7a1a", rarity: 2 },
+  { id: "camo-picnic", slot: "camo", name: "Picnic", unlock: lvl(11), color: "#f08a8a", rarity: 2 },
+  { id: "camo-paws", slot: "camo", name: "Paw Prints", unlock: lvl(14), color: "#7a5236", rarity: 2 },
+  // The classics, one per unassisted style's first clear.
+  { id: "camo-woodland", slot: "camo", name: "Woodland", unlock: ach("style_legit"), color: "#5f7a45", rarity: 2 },
+  { id: "camo-desert", slot: "camo", name: "Desert", unlock: ach("style_scroll"), color: "#d8c49a", rarity: 2 },
+  { id: "camo-urban", slot: "camo", name: "Urban", unlock: ach("style_wonly"), color: "#8c9096", rarity: 2 },
+  { id: "camo-reeds", slot: "camo", name: "Reeds", unlock: ach("style_sideways"), color: "#8a9a5b", rarity: 2 },
+  // Longer goals.
+  { id: "camo-splat", slot: "camo", name: "Paint Splat", unlock: ach("race_1"), color: "#2fb7a8", rarity: 3 },
+  { id: "camo-sprinkles", slot: "camo", name: "Sprinkles", unlock: ach("bonus_25"), color: "#ff6fae", rarity: 3 },
+  { id: "camo-carbon", slot: "camo", name: "Carbon", unlock: ach("top10_1"), color: "#3a3e46", rarity: 3 },
+  { id: "camo-finish-line", slot: "camo", name: "Finish Line", unlock: ach("photo_finish"), color: "#f4f4f6", rarity: 3 },
+  { id: "camo-meadow", slot: "camo", name: "Meadow", unlock: ach("scenic_route"), color: "#5f9a4a", rarity: 3 },
+  { id: "camo-snow", slot: "camo", name: "Snowfield", unlock: ach("scroll_10"), color: "#c9d1dc", rarity: 3 },
+  { id: "camo-night", slot: "camo", name: "Night Woodland", unlock: ach("legitscroll_10"), color: "#2a3346", rarity: 3 },
+  { id: "camo-crab", slot: "camo", name: "Crab Shell", unlock: ach("sideways_10"), color: "#f08a4b", rarity: 3 },
+  { id: "camo-backrooms", slot: "camo", name: "Backrooms", unlock: ach(TRUE_ARCHITECT), color: "#d9c46a", rarity: 3 },
+  { id: "camo-devgrid", slot: "camo", name: "Dev Grid", unlock: ach("gauntlet_classic"), color: "#e8862a", rarity: 4 },
+  { id: "camo-gilded", slot: "camo", name: "Gold Vein", unlock: ach("wr_5"), color: "#e0b13a", rarity: 4 },
+  { id: "camo-gold-weave", slot: "camo", name: "Gold Weave", unlock: ach("wr_10"), color: "#b8902e", rarity: 5 },
+  // The high tiers' sweeps, in their tier's colours (the Lapis, Flare, Riptide and Whiteout sets).
+  { id: "camo-lapis", slot: "camo", name: "Lapis", unlock: ach("sweep_7"), color: "#26307a", rarity: 5 },
+  { id: "camo-flare", slot: "camo", name: "Flare", unlock: ach("sweep_8"), color: "#e0479f", rarity: 5 },
+  { id: "camo-riptide", slot: "camo", name: "Riptide", unlock: ach("sweep_9"), color: "#4fb8ff", rarity: 5 },
+  { id: "camo-whiteout", slot: "camo", name: "Whiteout", unlock: ach("sweep_10"), color: "#dfe5f2", rarity: 5 },
+  // Supporter, one per set.
+  { id: "camo-geode", slot: "camo", name: "Geode", unlock: ach(SUPPORTER), color: "#7a5ce8", rarity: 4, set: "geode" },
+  { id: "camo-highroller", slot: "camo", name: "High Roller", unlock: ach(SUPPORTER), color: "#0f5a3a", rarity: 4, set: "highroller" },
+  { id: "camo-borealis", slot: "camo", name: "Borealis", unlock: ach(SUPPORTER), color: "#3ff0a0", rarity: 4, set: "borealis" },
+  { id: "camo-tidepool", slot: "camo", name: "Tidepool", unlock: ach(SUPPORTER), color: "#5fc8b8", rarity: 4, set: "tidepool" },
+  // Role sets.
+  { id: "camo-lookout", slot: "camo", name: "Lookout", unlock: role("moderator"), color: "#c8f53a", rarity: 5, roleSet: "lookout" },
+  { id: "camo-workbench", slot: "camo", name: "Workbench", unlock: role("contributor"), color: "#3fd4c6", rarity: 5, roleSet: "workbench" },
+  { id: "camo-keyholder", slot: "camo", name: "Keyholder", unlock: role("admin"), color: "#5a1420", rarity: 5, roleSet: "keyholder" },
+  { id: "camo-founder", slot: "camo", name: "Founder", unlock: role("owner"), color: "#241450", rarity: 5, roleSet: "founder" },
+);
+// The camos join their sets' item lists (kept here, beside the camos, rather than in the lists above).
+for (const c of COSMETICS) if (c.slot === "camo") {
+  const st = c.set ? SUPPORTER_SETS.find((x) => x.id === c.set) : c.roleSet ? ROLE_SETS.find((x) => x.id === c.roleSet) : null;
+  if (st && !st.items.includes(c.id)) (st.items as string[]).push(c.id);
 }
 
 /**
@@ -1311,8 +1602,12 @@ export const DEFAULT_COSMETICS: Record<CosmeticSlot, string | null> = {
   knife: "knife-carrot",
   finish: "fin-garden",
   glove: "glove-knit",
+  /** Each knife's own hilt (loadout.ts HILT_SKIN: no skin). */
+  hilt: "hilt-original",
   /** null = no hat (the owner's hats and the Supporter's three). */
   hat: null,
+  /** null = no gun camo (v0.0.38; camo.ts): the guns as they've always looked. */
+  camo: null,
 };
 
 /**
@@ -1324,7 +1619,8 @@ export const DEFAULT_COSMETICS: Record<CosmeticSlot, string | null> = {
  * on save and on every read, so a removed admin reads back as what they really earned. Cosmetics only: achievements,
  * XP and showcased badges (earned achievements) are untouched; the crown still needs the real place.
  */
-export function staffGrant(c: CosmeticDef, staff: StaffRole | null | undefined): boolean {
+export function staffGrant(c: CosmeticDef, who: Holder): boolean {
+  const staff = holderOf(who).role;
   if (c.unlock.kind === "role" || !holdsRole("staff", staff)) return false;
   // The Supporter set says "this player donated": admins get it only by supporting (the owner gets everything).
   if (supporterItem(c) && staff !== "owner") return false;
@@ -1346,7 +1642,7 @@ export function isUnlocked(
   level: number,
   achievements: ReadonlySet<string> | readonly string[],
   ranks: HeldRanks = {},
-  staff: StaffRole | null = null,
+  staff: Holder = null,
   grant = true,
 ): boolean {
   if (grant && staffGrant(c, staff)) return true;
@@ -1483,7 +1779,7 @@ const hairHexOf = (v: unknown): string | null => (typeof v === "string" && /^#[0
 /** A saved / carried hair length (a whole percent in range), else null. */
 export const hairLengthOf = (v: unknown): number | null =>
   typeof v === "number" && Number.isInteger(v) && v >= HAIR_LENGTH.min && v <= HAIR_LENGTH.max ? v : null;
-const ownsHair = (level: number, achievements: readonly string[], ranks: HeldRanks, staff: StaffRole | null) =>
+const ownsHair = (level: number, achievements: readonly string[], ranks: HeldRanks, staff: Holder) =>
   HAIR_HATS.some((id) => {
     const c = cosmetic(id);
     return !!c && isUnlocked(c, level, achievements, ranks, staff);
@@ -1493,7 +1789,7 @@ const ownsHair = (level: number, achievements: readonly string[], ranks: HeldRan
  * Validates a choice. strict (on save): returns the first bad slot. lenient (on read): falls back to defaults for
  * anything unknown or no longer unlocked (hatchdle's cardProblem / cleanCard split).
  */
-export function cleanCosmetics(raw: unknown, level: number, achievements: readonly string[], ranks: HeldRanks = {}, staff: StaffRole | null = null): CosmeticChoice {
+export function cleanCosmetics(raw: unknown, level: number, achievements: readonly string[], ranks: HeldRanks = {}, staff: Holder = null): CosmeticChoice {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const out: CosmeticChoice = { ...DEFAULT_COSMETICS };
   for (const slot of Object.keys(DEFAULT_COSMETICS) as CosmeticSlot[]) {
@@ -1512,7 +1808,7 @@ export function cleanCosmetics(raw: unknown, level: number, achievements: readon
   return out;
 }
 
-export function cosmeticsProblem(raw: unknown, level: number, achievements: readonly string[], ranks: HeldRanks = {}, staff: StaffRole | null = null): { slot: string; reason: string } | null {
+export function cosmeticsProblem(raw: unknown, level: number, achievements: readonly string[], ranks: HeldRanks = {}, staff: Holder = null): { slot: string; reason: string } | null {
   if (!raw || typeof raw !== "object") return { slot: "*", reason: "expected an object" };
   for (const [slot, v] of Object.entries(raw as Record<string, unknown>)) {
     if (slot === "hairColor") {
@@ -1539,9 +1835,10 @@ export function cosmeticsProblem(raw: unknown, level: number, achievements: read
       continue;
     }
     if (!(slot in DEFAULT_COSMETICS)) return { slot, reason: "unknown slot" };
-    if (v === null && (slot === "title" || slot === "hat")) continue;
+    if (v === null && (slot === "title" || slot === "hat" || slot === "camo")) continue;
     const c = typeof v === "string" ? cosmetic(v) : null;
-    if (!c || c.slot !== slot) return { slot, reason: "unknown item" };
+    // A staff item its sender doesn't hold reads exactly like an id that doesn't exist (staffItem).
+    if (!c || c.slot !== slot || !listedFor(c, staff)) return { slot, reason: "unknown item" };
     if (!isUnlocked(c, level, achievements, ranks, staff)) return { slot, reason: `locked (${unlockHint(c)})` };
   }
   return null;

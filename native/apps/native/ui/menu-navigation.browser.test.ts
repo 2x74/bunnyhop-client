@@ -195,12 +195,12 @@ test("Loadout opens on a category; the static stage keeps the web's view switch;
     ).toBe("true");
     expect(await page.locator(".lo-insp").isVisible()).toBe(true);
     expect(await page.locator(".lo-insp").evaluate((button) => getComputedStyle(button).pointerEvents)).toBe("auto");
-    // The stage keeps its 16:10 shape in view instead of stretching down the scrolling item grid.
+    // The stage keeps its 4:3 shape in view instead of stretching down the scrolling item grid.
     const stage = await page.evaluate(() => {
       const r = document.querySelector(".lo-stage")!.getBoundingClientRect();
       return { inView: r.bottom <= innerHeight + 1, ratio: Math.round((r.width / r.height) * 10) / 10 };
     });
-    expect(stage).toEqual({ inView: true, ratio: 1.6 });
+    expect(stage).toEqual({ inView: true, ratio: 1.3 });
     await page.keyboard.press("Escape");
     expect(await screen(page)).toBe("home");
     await page.evaluate(() => window.bunnyhopNativeMenu.open!("loadout"));

@@ -17,6 +17,10 @@ import {
   type CosmeticDef,
   type HeldRanks,
   type StaffRole,
+  holderOf,
+  type Holder,
+  type RoleHolder,
+  type RoleNeed,
   type Unlock,
 } from "../progression";
 
@@ -81,7 +85,7 @@ export interface EarnedFrom {
   level: number;
   achievements: readonly { id: string; unlockedAt?: string; map?: string }[];
   ranks?: HeldRanks;
-  role?: StaffRole | null;
+  role?: Holder;
 }
 
 /** "Oct 5" (this year), "Oct 5, 2025" (another). */
@@ -101,8 +105,17 @@ export function earnedHint(c: CosmeticDef, p: EarnedFrom, o: { when?: boolean; n
   const ids = p.achievements.map((a) => a.id);
   // The route actually met (an item's legacy routes count too), without the staff grant: what the player did.
   const met = [c.unlock, ...(c.legacy ?? [])].find((u) => isUnlocked({ ...c, unlock: u, legacy: undefined }, p.level, ids, p.ranks ?? {}, p.role ?? null, false));
-  if (!met) return staffGrant(c, p.role) ? (p.role === "owner" ? "Unlocked as owner" : "Unlocked as staff") : "";
+  if (!met) return staffGrant(c, p.role) ? (holderOf(p.role).role === "owner" ? "Unlocked as owner" : "Unlocked as staff") : "";
   return earnedText(met, p, o);
+}
+
+/** How a role-held item is held: "Yours as the owner", "Yours as a moderator", "Yours as a contributor". */
+export function heldAs(need: RoleNeed, who: RoleHolder): string {
+  if (need === "contributor" && who.contributor && who.role !== "owner") return "Yours as a contributor";
+  if (who.role === "owner") return "Yours as the owner";
+  if (who.role === "admin") return "Yours as an admin";
+  if (who.role === "moderator") return "Yours as a moderator";
+  return roleHint(need);
 }
 
 function earnedText(u: Unlock, p: EarnedFrom, o: { when?: boolean; now?: Date }): string {
@@ -114,7 +127,7 @@ function earnedText(u: Unlock, p: EarnedFrom, o: { when?: boolean; now?: Date })
     case "rank":
       return rankHint(u).replace(/^Hold /, "While holding ");
     case "role":
-      return roleHint(u.role);
+      return heldAs(u.role, holderOf(p.role));
     case "achievement": {
       const a = achievement(u.id);
       if (!a) return "";

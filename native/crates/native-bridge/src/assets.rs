@@ -29,6 +29,24 @@ pub struct BhMaterialExtra {
 }
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
+pub struct BhLandingPiece {
+    pub start: [f32; 3],
+    pub velocity: [f32; 3],
+    pub acceleration: [f32; 3],
+    pub seconds: f32,
+}
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct BhLandingPrediction {
+    pub kind: u32,
+    pub traces: u32,
+    pub piece_count: u32,
+    pub position: [f32; 3],
+    pub normal: [f32; 3],
+    pub seconds: f32,
+}
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct BhPropGroup {
     pub material: u32,
     pub first_index: u32,
@@ -391,6 +409,56 @@ pub unsafe extern "C" fn bh_overlay_states(ctx: *mut BhContext, count: *mut usiz
         })
     };
     result
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bh_predict_landing(
+    ctx: *mut BhContext,
+    position: *const f32,
+    velocity: *const f32,
+    crouched: u32,
+    max_seconds: f32,
+    out: *mut BhLandingPrediction,
+    pieces: *mut BhLandingPiece,
+    capacity: usize,
+) -> c_int {
+    unsafe {
+        call(ctx, |c| {
+            let position = input(position.cast::<[f32; 3]>())?;
+            let velocity = input(velocity.cast::<[f32; 3]>())?;
+            finite(&position)?;
+            finite(&velocity)?;
+            finite(&[max_seconds])?;
+            let game = &c.map()?.game;
+            let prediction = game.predict_landing(position, velocity, crouched != 0, max_seconds);
+            if prediction.pieces.len() > capacity || (!prediction.pieces.is_empty() && pieces.is_null()) {
+                return Err("landing prediction buffer too small".into());
+            }
+            if !prediction.pieces.is_empty() {
+                let target = std::slice::from_raw_parts_mut(pieces, capacity);
+                for (out, piece) in target.iter_mut().zip(&prediction.pieces) {
+                    *out = BhLandingPiece {
+                        start: piece.start,
+                        velocity: piece.velocity,
+                        acceleration: piece.acceleration,
+                        seconds: piece.seconds,
+                    };
+                }
+            }
+            output(
+                out,
+                BhLandingPrediction {
+                    kind: prediction.kind,
+                    traces: prediction.traces,
+                    piece_count: prediction.pieces.len() as u32,
+                    position: prediction.position,
+                    normal: prediction.normal,
+                    seconds: prediction.seconds,
+                },
+            )?;
+            Ok(())
+        })
+    }
 }
 
 /// Pairs of entity index and enabled flag. Valid until the next call on this context.

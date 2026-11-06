@@ -18,6 +18,7 @@ inline uint32_t movement_bit(std::string_view action) {
     if (action == "left") return left;
     if (action == "right") return right;
     if (action == "jump") return jump;
+    if (action == "crouchJump") return jump | duck;
     if (action == "duck") return duck;
     if (action == "use") return use;
     if (action == "attack") return attack;

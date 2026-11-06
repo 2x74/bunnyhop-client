@@ -47,6 +47,9 @@ const BAND: Record<GloveStyleId, [number, number, number] | null> = {
   specialist: null,
   paws: [0.39, 0.45, 1.22],
   garden: [0.18, 0.5, 1.18],
+  dress: [0.13, 0.5, 0.8],
+  aviator: null,
+  mitts: [0.09, 0.46, 1.12],
 };
 
 /** gloves/fp.ts PALM: half width / half thickness of the palm block at s (superellipse, exponent 2.7). */
@@ -101,6 +104,12 @@ export function gloveCapsules(W: ArrayLike<number>, r: VmRig, style: GloveStyleI
       },
     });
   }
+  if (style === "aviator")
+    // The flared gauntlet over the sleeve (wider than the moto's at its mouth), tapering onto the hand past the trim.
+    out.push({ name: "glove:cuff", a: add(wrist, mul(fore, -2.3)), b: add(wrist, mul(fore, 0.68)), r: 2.6, base: 1.82 });
+  if (style === "mitts")
+    // The folded flap over the back of the hand.
+    out.push({ name: "glove:flap", a: at(palmL * 0.3, -0.7, 0.92), b: at(palmL * 0.8, 0.7, 0.92), r: 0.36, base: 0 });
   if (style === "moto" || style === "specialist") {
     // Gauntlet cuff over the sleeve (radius ~2.3 * 0.86), tapering onto the hand.
     // It ends with the sleeve's trim (0.62 past the wrist), a little over it.

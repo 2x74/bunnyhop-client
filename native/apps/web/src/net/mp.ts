@@ -234,6 +234,8 @@ export class Multiplayer {
       status: (s, detail) => this.onStatus(s, detail),
     });
     this.banner.set("Connecting…", o.serverId);
+    // net_graph: your ping beside the FPS counter (hud.ts).
+    o.session.hud.pingMs = () => (this.status === "open" && this.conn.rtt > 0 ? this.conn.rtt : null);
     document.addEventListener("keydown", (e) => this.keydown(e));
     document.addEventListener("keyup", (e) => {
       if (e.code === "Tab") this.board.show(false);
@@ -769,6 +771,19 @@ export class Multiplayer {
     const r = runChatLine(text, this.chatCtx);
     // "log": answered here (!help, an unknown command); the room only logs it (and adds staff help for staff).
     if (r !== "done") this.conn.send(r === "log" ? { t: "chat", text, local: true } : { t: "chat", text });
+  }
+
+  /**
+   * A line typed in the console (console/view.ts): the same as typing it in the chat (commands, or chat to the room
+   * for `say`), with local answers in the console.
+   */
+  consoleLine(typed: string, reply: (text: string) => void): void {
+    const text = normalizeChatLine(typed);
+    const r = runChatLine(text, { ...this.chatCtx, reply });
+    if (r === "done") return;
+    // Not connected: say so rather than drop it (the room's own checks answer everything else: limits, mutes, filters).
+    if (this.status !== "open") return reply(r === "log" ? "" : "Not connected to the server: that didn't send.");
+    this.conn.send(r === "log" ? { t: "chat", text, local: true } : { t: "chat", text });
   }
 
   /** !spec <name>: the first other player whose name starts with it; no name opens the spectate menu. */

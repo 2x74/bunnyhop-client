@@ -34,6 +34,10 @@ public:
 
     const BindTable &binds() const { return binds_; }
 
+    void set_command_held(uint32_t bits) { command_held_ = bits; }
+
+    uint32_t command_held() const { return command_held_; }
+
     const EventStamps &stamps() const { return stamps_; }
 
     // Once, after SDL_Init: which event times this video backend gets right.
@@ -145,7 +149,7 @@ public:
         if (camera_) {
             return 0;
         }
-        return timed_ ? binds_.held(queue_.keys) : binds_.held(held_codes);
+        return (timed_ ? binds_.held(queue_.keys) : binds_.held(held_codes)) | command_held_;
     }
 
     // ---- free cameras (freecam, spectator free look) ----------------------------------------------------------
@@ -188,6 +192,12 @@ public:
         }
         commit_pending(input);
         input.set_sensitivity(sensitivity);
+    }
+
+    void set_mouse_scales(Input &input, double yaw, double pitch) {
+        if (yaw == input.m_yaw && pitch == input.m_pitch) return;
+        commit_pending(input);
+        input.set_mouse_scales(yaw, pitch);
     }
 
     // The render camera's view: the input plus everything not yet in a tick. The queue keeps it.
@@ -241,6 +251,7 @@ public:
 private:
     bool timed_ = true;
     bool tick_contributed_ = false;
+    uint32_t command_held_ = 0;
     TimedInput queue_;
     BindTable binds_;
     EventStamps stamps_;

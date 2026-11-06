@@ -2,6 +2,7 @@
 #include "room_state.hpp"
 #include "movement_audio.hpp"
 #include "audio.hpp"
+#include <memory>
 #include <thread>
 #ifdef NDEBUG
 #undef NDEBUG
@@ -340,7 +341,8 @@ int main() {
     std::filesystem::create_symlink(folder / "safe.bhr", folder / "alias.bhr", symlink_error);
     if (!symlink_error) rejects([&] { native::replay_file(folder, "alias.bhr"); });
     assert(native::mouse_code(SDL_BUTTON_RIGHT) == "Mouse2" && native::key_code(SDL_SCANCODE_W) == "KeyW");
-    native::RoomState room;
+    const auto room_owner = std::make_unique<native::RoomState>();
+    auto &room = *room_owner;
     const auto welcome =
             J{{"t", "welcome"},
               {"you", 1},

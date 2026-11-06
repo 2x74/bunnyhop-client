@@ -917,6 +917,7 @@ export async function buildWorld(
   // Static props (one mesh, Source space, under the Z-up root).
   let propTris = 0;
   let props: { pm: ReturnType<Core["propsMesh"]>; meshes: THREE.Mesh[] } | null = null;
+  const instanceModels = new Set<number>();
   let animProps: AnimatedProps | null = null;
   if (built.propMats.length) {
     const pm = core.propsMesh();
@@ -1214,8 +1215,25 @@ export async function buildWorld(
       scrolls.update(visualTime);
       localLights.update(transforms, effectStates, visualTime);
       const D = Math.PI / 180;
+      for (const model of instanceModels) {
+        if (transforms.has(model)) continue;
+        models.get(model)?.removeFromParent();
+        models.delete(model);
+        instanceModels.delete(model);
+      }
       for (const [model, t] of transforms) {
-        const mesh = models.get(model);
+        let mesh = models.get(model);
+        if (t[7] !== undefined) {
+          const source = models.get(t[7]);
+          if (source && (!mesh || mesh.userData.instanceSource !== t[7])) {
+            mesh?.removeFromParent();
+            mesh = source.clone();
+            mesh.userData = { ...mesh.userData, instanceSource: t[7] };
+            models.set(model, mesh);
+            instanceModels.add(model);
+            root.add(mesh);
+          }
+        }
         if (!mesh) continue;
         mesh.position.set(t[0], t[1], t[2]);
         // Source AngleMatrix = Rz(yaw) * Ry(pitch) * Rx(roll) in the Z-up space of `root`.

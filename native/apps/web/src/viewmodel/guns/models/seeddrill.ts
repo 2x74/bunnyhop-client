@@ -11,11 +11,12 @@ import { PART } from "../../knives/types";
 import type { KnifeCtx } from "../../knives/ctx";
 import { ball, boneOf, box, groove, guard, lathe, slab, stud, trigger, type P2 } from "../shapes";
 import { gunPaint as fixed } from "../material";
+import { coat } from "../camo-zones";
 import type { GunDef } from "../types";
 
-const SAND = fixed(0xcdbf99), SAND_DARK = fixed(0xb0a27c), OLIVE = fixed(0x66744a), OLIVE_DARK = fixed(0x4c5737);
+const SAND = coat(fixed(0xcdbf99), "upper"), SAND_DARK = coat(fixed(0xb0a27c), "upper", 0.85), OLIVE = coat(fixed(0x66744a), "lower"), OLIVE_DARK = coat(fixed(0x4c5737), "lower", 0.8);
 const POD = fixed(0x8fd16a), POD_DARK = fixed(0x5fa543), PEA = fixed(0xa6e07c), SPROUT = fixed(0x58c64a), BORE = fixed(0x121316), STEEL = fixed(0x707782, "metal"), ORANGE = fixed(0xff7a1a);
-const GRIP = fixed(0x66744a, "grip"), SEAM = fixed(0x8a7d5b), SCREW = fixed(0x5b5f66, "metal"), LIP = fixed(0xeae0c0);
+const GRIP = coat(fixed(0x66744a, "grip"), "lower", 0.9), SEAM = coat(fixed(0x8a7d5b), "upper", 0.7), SCREW = fixed(0x5b5f66, "metal"), LIP = coat(fixed(0xeae0c0), "upper", 1.1);
 /** The trigger's pivot (top of its blade, gun-local). */
 const TRIGGER: [number, number, number] = [1.75, 0, -0.5];
 
@@ -97,10 +98,13 @@ export const seeddrill: GunDef = {
     wrap: ["Middle", "Ring", "Pinky", "Thumb"],
     seat: -0.02,
   },
+  // v0.0.38 gun grips: the support hand turned with the front of the body across its palm (knuckles 12 deg forward,
+  // 26 up), its elbow down and back where that leaves the wrist near neutral (about 10 deg extension, 8 ulnar): the
+  // forearm comes up from the lower left instead of standing under the hand with the wrist bent back 42 deg.
   left: {
     o: [5.2, 0.0, -1.6],
-    up: [1, 0, 0.1],
-    fwd: [0.018, -1.045, 0.172],
+    up: [0.991, 0.123, -0.05],
+    fwd: [0.133, -0.918, 0.373],
     index: { c: [70, 90, 66] },
     middle: { c: [76, 95, 72] },
     ring: { c: [84, 100, 76] },
@@ -110,17 +114,27 @@ export const seeddrill: GunDef = {
     seat: -0.02,
   },
   places: {
+    // v0.0.38 gun grips: rolled 50 deg around the pod (the knuckles up over it), so the wrist stays in its range with
+    // the forearm coming up from the lower left (it bent 66 deg / 70 deg sideways on screen).
+    mag: { o: [0.6, 0, PODZ + 0.2], up: [-1, 0, 0], fwd: [0, -0.643, 0.766] },
+    // (Rolled -45 deg about the handle, the same way: the wrist stays in range pulling it.)
+    rack: { o: [4.6, 2.0, 0.6], up: [0, 0, 1], fwd: [0.707, -0.707, 0] },
+  },
+  // Third person keeps the support, pod and handle grips as they were: its arm reaches them from the shoulder, and the
+  // turned first-person grips bent the bunny's wrist further in the reload (v0.0.38 gun grips).
+  tpPlaces: {
+    left: { o: [5.2, 0.0, -1.6], up: [1, 0, 0.1], fwd: [0.018, -1.045, 0.172] },
     mag: { o: [0.6, 0, PODZ + 0.2], up: [-1, 0, 0], fwd: [0, -1, 0] },
     rack: { o: [4.6, 2.0, 0.6], up: [0, 0, 1], fwd: [1, 0, 0] },
   },
   frame: { o: [21, -6.4, -6.2], a: [-1, 4, -4] },
   trigger: TRIGGER,
-  elbows: { R: [8, -18, -18], L: [22, 8, -30] },
+  elbows: { R: [8, -18, -18], L: [21.7, 2.15, -14.75] },
   // On the pod (reload, inspect): the support forearm comes up diagonally from the lower left, not across the view.
   workElbow: [12, 16, -26],
-  // The thumbhole grip turns the firing wrist (a straighter one sends the sleeve across the top of the screen); the
-  // support wrist 34 keeps its sleeve as low as before.
-  wrist: { R: 40, L: 34 },
+  // The thumbhole grip sets the firing wrist a little flexed (about 14 deg; a straighter one sends the sleeve across the
+  // top of the screen): its range allows that much.
+  wrist: { R: { flex: 18 } },
   muzzle: [9.3, 0, 0.35],
   eject: { p: [-2.5, 0, -0.6], dir: [0, -0.2, -1] },
   shell: "smg",

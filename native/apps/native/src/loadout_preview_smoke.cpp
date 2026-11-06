@@ -1,4 +1,5 @@
 #include <set>
+#include "base64.hpp"
 #include "online.hpp"
 #include "renderer.hpp"
 #include "menu_backdrop.hpp"
@@ -20,8 +21,20 @@ int main(int argc, char **argv) {
         SDL_GL_MakeCurrent(window, context);
         native::Gl gl;
         gl.load();
-        std::filesystem::create_directories(argv[2]);
         NativeLoadoutPreview preview(gl, argv[1]);
+        if (std::string(argv[2]) == "--stdio") {
+            std::string line;
+            while (std::getline(std::cin, line)) {
+                const auto request = nlohmann::json::parse(line);
+                const auto png = preview.render(request, request.value("seconds", 2.));
+                std::cout << nlohmann::json(
+                                     {{"id", request.at("id")},
+                                      {"png", png.empty() ? "" : "data:image/png;base64," + native::base64(png)}}
+                ).dump() << std::endl;
+            }
+            return 0;
+        }
+        std::filesystem::create_directories(argv[2]);
         nlohmann::json job = {
                 {"id", 1},
                 {"loadout", "2;knife-bayonet;fin-sunset;glove-sport-pandora"},
@@ -133,6 +146,43 @@ int main(int argc, char **argv) {
         job["view"] = "fp";
         job["playerGlow"]["aura"] = true;
         capture("hands-aura", 17.5);
+        job["playerGlow"] = nullptr;
+        job["view"] = "fp";
+        job["inspect"] = 0;
+        job["held"] = false;
+        job["yaw"] = 0;
+        job["pitch"] = 0;
+        nlohmann::json metadata;
+        std::ifstream(std::filesystem::path(argv[1]) / "viewmodels.json") >> metadata;
+        double sample_time = 20;
+        for (const auto &[id, code] : metadata.at("finishes").items()) {
+            if (code != 28 && code != 29) continue;
+            job["loadout"] = "2;knife-carrot;" + id + ";glove-knit";
+            job["view"] = "fp";
+            capture(id + "-fp", sample_time++);
+            job["view"] = "bunny";
+            capture(id + "-tp", sample_time++);
+        }
+        job["view"] = "fp";
+        for (const auto &[id, skin] : metadata.at("hilts").items()) {
+            if (!skin.is_object()) continue;
+            job["loadout"] = "2;knife-leek;fin-garden;glove-knit;;;;;;;" + id;
+            capture(id, sample_time++);
+        }
+        for (const auto &[id, camo] : metadata.at("camos").items()) {
+            job["loadout"] = "2;knife-carrot;fin-garden;glove-knit;;;;;;;;" + id;
+            job["view"] = "gunside";
+            job["weapon"] = 17;
+            capture(id + "-side", sample_time++);
+            job["view"] = "gun";
+            capture(id + "-fp", sample_time++);
+        }
+        job["view"] = "gun";
+        job["loadout"] = "2;knife-carrot;fin-garden;glove-knit";
+        for (unsigned weapon : {2u, 3u, 7u, 8u, 9u, 14u, 17u, 18u, 22u}) {
+            job["weapon"] = weapon;
+            capture("gun-" + std::to_string(weapon), sample_time++);
+        }
         job["view"] = "onboarding";
         auto malformed = job;
         malformed["stage"]["position"] = {0, 0};

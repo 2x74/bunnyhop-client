@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.8.0 — Native
+
+Matches website v0.0.38. Update from Settings → Updates: press Update, then Restart. Your settings, replays and maps
+are kept.
+
+**Maps and replays**
+- Physics 26 fixes the resets on ahop_coast, raises the frankerz speed limit to 100,000 u/s and restores crash_egypt's
+  breakable crates, fruit drops and jump triggers. gofuckyourself has the website's route checks, and maps support
+  ordered checkpoints.
+  Timer rules 5 stop the timer when you respawn. Existing replays keep their recorded physics version.
+- Spectating a replay no longer kicks you from your lobby.
+- Route only hides the selected ghost while keeping its route and the HUD comparison.
+
+**Loadout**
+- The Carrot Bayonet, Parsnip Stiletto, Radish Kukri, Leek Saber and Twin Sprouts join the Loadout, along with the
+  Bunnyfly balisong. Its handles and the Whirligig's spinner move in third person too, and cancelling an inspect
+  brings the moving parts home before the fingers close.
+- Hilt skins and gun camos show in first person, on other players and in the Loadout preview. Leek Saber hilt skins
+  keep its leaf guard green.
+- The new gloves, glove colourways, Tidepool Supporter set and Contributor sets are available, with the Ruler and
+  Linework finishes and Pencil hat. Staff items appear in the Loadout only for their holders.
+- The Loadout has separate tabs for knives, finishes, hilts, gloves, gun camos, colourways, hats, ghosts and trails,
+  with a live preview and an Inspect button.
+- Guns use the website's two-handed grips, with corrected wrist positions and recoil that moves both arms together.
+
+**Controls and console**
+- The console accepts Source-style configs, binds, aliases and command chains. Chat binds send your message with
+  the same guard as the website, and `wait` advances on commands rather than a wall-clock timer.
+- Hold jump repeats jumps while you hold the key. Crouch jump binds duck and jump to one key.
+- `m_yaw` and `m_pitch` control mouse scaling, and the sensitivity converter helps match another game's sensitivity.
+- Landing spot shows where you would land with no further input. It is off by default, with Practice and Always
+  modes, a colour choice, an optional dotted path and `!landing` to toggle it.
+
+**Performance and windowing**
+- Thanks to ThrowTop for caching actor animation data and reusing pose buffers, and for fixing the Windows title
+  bar and the old window edge showing through the menu ([#44](https://github.com/2x74/bunnyhop-client/pull/44)).
+
 ## v0.7.3 — Native
 
 Update from Settings → Updates: press Update, then Restart to update. Your settings, replays and maps are kept.

@@ -227,7 +227,12 @@ export class VmInspect {
       if (ang) for (let i = 0; i < ang.length; i++) ang[i] += (this.angC[i] - ang[i]) * pz.mix;
       R = Wp;
     }
-    if (ang && pz.weight < 1) for (let i = 0; i < ang.length; i++) ang[i] = this.angB[i] + (ang[i] - this.angB[i]) * pz.weight;
+    // Cancel blend-out of the knife's moving parts (a balisong's handles, a spinner): home in the first half, before
+    // the fingers close on the handle (below), so a cancel mid-flip doesn't close the fist on a handle still swinging.
+    if (ang && pz.weight < 1) {
+      const k = Math.max(0, Math.min(1, (pz.weight - 0.5) / 0.5)), w = k * k * (3 - 2 * k);
+      for (let i = 0; i < ang.length; i++) ang[i] = this.angB[i] + (ang[i] - this.angB[i]) * w;
+    }
     if (pz.weight >= 1) this.measureGap(W, R);
     // Cancel blend-out: the knife comes home into the fist in the first half (a catch: a knife mid-toss slerping
     // home in step with the arm hangs off the open hand on the way), the fingers hold the inspect's pose through that

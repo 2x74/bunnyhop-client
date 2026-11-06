@@ -401,6 +401,9 @@ function render(dir: "in" | "out" = "in", animate = false): void {
   });
 }
 
+/** Opens map `name` (the console's `map`): the same as picking it in the map browser. */
+export const openMap = (name: string): void => pickMap(name);
+
 function pickMap(name: string): void {
   localStorage.setItem(LAST_MAP, name);
   dropRouteParams();

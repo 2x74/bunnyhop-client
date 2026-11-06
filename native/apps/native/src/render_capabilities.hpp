@@ -15,6 +15,7 @@ inline void append_render_capabilities(nlohmann::json &capabilities) {
           "ghostRoute",
           "ghostRouteSource",
           "ghostRouteMode",
+          "ghostRouteOnly",
           "tagsPlayers",
           "tagsThroughWalls",
           "graphicsPotato",

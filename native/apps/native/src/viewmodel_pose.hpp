@@ -29,7 +29,7 @@ struct KnifeRig {
     int hand_bone = 0, arm_bone = 0, knife_handle = 0, knife_parent = 0;
     // Handedness of (axis, width, normal) on this rig, fixed from the bind pose.
     double normal_sign = 1;
-    // Per bone: 1 for a finger, 2 for the knife (the cancel blends them at their own weights).
+    // Per bone: finger, knife or moving part (each homes at its own cancel weight).
     std::vector<uint8_t> cancel_group;
     // Per bone: whether it is in `blend`.
     std::vector<uint8_t> blended;
@@ -129,6 +129,8 @@ inline KnifeRig KnifeRig::from_json(const nlohmann::json &rig) {
             out.cancel_group[size_t(bone)] = 1;
     for (int bone : out.knife)
         out.cancel_group[size_t(bone)] = 2;
+    for (int bone : rig.value("parts", std::vector<int>{}))
+        out.cancel_group[size_t(bone)] = 3;
     return out;
 }
 
@@ -332,7 +334,7 @@ struct PoseWork {
 
 // Weights of a cancel's bone groups (inspects/runtime.ts): the fingers and the knife blend at their own.
 struct CancelWeights {
-    double fingers = 0, knife = 0;
+    double fingers = 0, knife = 0, parts = 0;
 };
 
 // A = blend(A, B, w) through the hierarchy (kit.ts blendPoseH): each blended bone's transform relative to its blend
@@ -346,7 +348,7 @@ inline void blend_hierarchy(
         PoseWork &work,
         const CancelWeights *groups = nullptr
 ) {
-    if (w <= 0 && !(groups && (groups->fingers > 0 || groups->knife > 0))) return;
+    if (w <= 0 && !(groups && (groups->fingers > 0 || groups->knife > 0 || groups->parts > 0))) return;
     std::copy(a.begin(), a.end(), work.original.begin());
     std::array<float, 12> parent_inverse{};
     const auto in_blend = [&](int bone) {
@@ -368,7 +370,10 @@ inline void blend_hierarchy(
     }
     for (int bone : rig.blend) {
         const auto group = groups ? rig.cancel_group[size_t(bone)] : 0;
-        const double weight = group == 1 ? groups->fingers : group == 2 ? groups->knife : w;
+        const double weight = group == 1   ? groups->fingers
+                              : group == 2 ? groups->knife
+                              : group == 3 ? groups->parts
+                                           : w;
         const size_t at = size_t(bone) * floats_per_bone;
         blend_bone(work.local_a.data() + at, work.local_b.data() + at, weight);
     }
@@ -381,6 +386,25 @@ inline void blend_hierarchy(
             std::copy(composed.begin(), composed.end(), a.data() + at);
         } else
             std::copy_n(work.local_a.data() + at, floats_per_bone, a.data() + at);
+    }
+}
+
+// Moving parts are authored as unwrapped angles: a full balisong turn must not collapse to a shortest-arc blend.
+inline void apply_part_angles(
+        const KnifeRig &rig, std::span<float> world, std::span<const int> bones, std::span<const double> angles
+) {
+    std::array<float, 12> local{}, rotated{}, rotation = identity34;
+    for (size_t joint = 0; joint < bones.size(); joint++) {
+        const int bone = bones[joint], parent = rig.parent[size_t(bone)];
+        if (parent < 0) continue;
+        concat_at(rig.inverse_bind.data() + parent * 12, rig.bind.data() + bone * 12, local.data());
+        const double angle = -angles[joint] * radians_per_degree;
+        rotation[5] = rotation[10] = float(std::cos(angle));
+        rotation[6] = -float(std::sin(angle));
+        rotation[9] = float(std::sin(angle));
+        concat_at(local.data(), rotation.data(), rotated.data());
+        concat_at(world.data() + parent * 12, rotated.data(), local.data());
+        std::copy(local.begin(), local.end(), world.begin() + bone * 12);
     }
 }
 

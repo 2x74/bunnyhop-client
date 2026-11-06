@@ -43,6 +43,7 @@ const adapters: Record<string, string> = {
   input: "input-bits.ts",
   "net/hud": "chat-hud.ts",
   "ui/loadout-stage": "loadout-stage.ts",
+  "viewmodel/knives/index": "knife-catalog.ts",
   "notify/item3d": "item-emblem.ts",
   // The website's controls, with rows the native client can't honour left out (settings-controls.ts).
   "ui/controls": "settings-controls.ts",

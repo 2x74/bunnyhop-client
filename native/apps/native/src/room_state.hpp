@@ -124,9 +124,22 @@ class RoomState {
                                      + l.value("glove", std::string("glove-default")) + ";";
                 if (l.contains("crown") && l["crown"].is_number_integer())
                     peer.actor.loadout += std::to_string(l["crown"].get<int>());
-                peer.actor.loadout += ";"
-                                      + (l.contains("hat") && l["hat"].is_string() ? l["hat"].get<std::string>() : "")
-                                      + ";" + l.value("body", std::string("body-a"));
+                auto text = [&](const char *key, std::string fallback = {}) {
+                    return l.contains(key) && l[key].is_string() ? l[key].get<std::string>() : fallback;
+                };
+                auto number = [&](const char *key) -> std::string {
+                    if (!l.contains(key) || !l[key].is_number_integer()) return {};
+                    return std::to_string(l[key].get<int>());
+                };
+                peer.actor.loadout += ";" + text("hat") + ";" + text("body", "body-a") + ";"
+                                      + text("outfit", peer.actor.outfit) + ";";
+                if (l.contains("hairColor") && l["hairColor"].is_number_integer()) {
+                    const auto color = uint32_t(std::clamp<int64_t>(l["hairColor"].get<int64_t>(), 0, 0xffffff));
+                    constexpr char hex[] = "0123456789abcdef";
+                    for (int shift : {20, 16, 12, 8, 4, 0})
+                        peer.actor.loadout.push_back(hex[(color >> shift) & 15]);
+                }
+                peer.actor.loadout += ";" + number("hairLength") + ";" + text("hilt") + ";" + text("camo");
                 if (peer.actor.loadout.size() > 200) peer.actor.loadout.clear();
             } else
                 peer.actor.loadout.clear();

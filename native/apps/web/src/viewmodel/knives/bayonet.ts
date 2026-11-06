@@ -167,7 +167,7 @@ export function sawback(k: KnifeCtx, sp: BayonetBladeSpec, along: (s: number) =>
  * Oval grip from z0 to z1 (half sizes rx, ry, centre y cy): ribs (every other row swells), a palm swell, rounded ends.
  * `wrap`: a diamond cord wrap instead (rows alternate their phase, faces alternate colours).
  */
-export function bayonetGrip(k: KnifeCtx, o: { z0: number; z1: number; rx: number; ry: number; cy?: number; ribs: number; a: Paint; b: Paint; wrap?: boolean }): void {
+export function bayonetGrip(k: KnifeCtx, o: { z0: number; z1: number; rx: number; ry: number; cy?: number; ribs: number; a: Paint; b: Paint; wrap?: boolean; name?: string }): void {
   const fp = k.view === "fp";
   const n = fp ? o.ribs * 2 : Math.max(6, o.ribs);
   const seg = fp ? 12 : 8;
@@ -186,11 +186,12 @@ export function bayonetGrip(k: KnifeCtx, o: { z0: number; z1: number; rx: number
     part: PART.grip,
     capStart: o.a,
     capEnd: o.a,
+    name: o.name ?? "grip",
   });
 }
 
 /** A plate (crossguard / pommel cap): superellipse sections at the given z rows (rx, ry per row), centre y cy. */
-export function plate(k: KnifeCtx, zs: number[], rx: number[], ry: number[], cy: number, paint: Paint, part: (typeof PART)[keyof typeof PART] = PART.guard, ex = 3.2): void {
+export function plate(k: KnifeCtx, zs: number[], rx: number[], ry: number[], cy: number, paint: Paint, part: (typeof PART)[keyof typeof PART] = PART.guard, ex = 3.2, name?: string): void {
   const fp = k.view === "fp";
   const seg = fp ? 20 : 10;
   // First person: each chamfer becomes a rounded bevel (a row between, pushed out along the arc), so the plate's edges
@@ -204,7 +205,7 @@ export function plate(k: KnifeCtx, zs: number[], rx: number[], ry: number[], cy:
     Z.push(z), RX.push(rx[i]), RY.push(ry[i]);
   });
   const rows = Z.map((z, i) => ring([0, cy, z], X, Y, RX[i], RY[i], seg, ex));
-  k.surface(rows, { paint: () => paint, part, capStart: paint, capEnd: paint });
+  k.surface(rows, { paint: () => paint, part, capStart: paint, capEnd: paint, name });
 }
 
 /** The bayonets' hold: the straight hammer grip (edge toward the knuckles), slim thumb over the index. */

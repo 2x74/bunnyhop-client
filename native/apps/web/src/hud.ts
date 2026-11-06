@@ -202,6 +202,8 @@ export class Hud {
   private speedNum = text();
   /** "+14" floating off the speed on each jump (one reused element; restarted, never stacked). */
   private gainEl = h("i.gain-tick", { "aria-hidden": "true" });
+  /** "Jump held" under the speed while Hold jump (toggle) is on (setJumpHeld; input.ts setJumpToggle). */
+  private jumpHeldEl = h("span.hud-jumpheld", null, "Jump held");
   private timerEl: HTMLElement;
   private timeFace = new TimeFace();
   /** "Practice" under the crosshair while this attempt won't count (layout element "practice"; setPractice). */
@@ -235,6 +237,10 @@ export class Hud {
   private pbText = text();
   private pbVal = h("b.pb-val", null, this.pbText);
   private fpsText = text();
+  /** net_graph: " · 38 ms" after the FPS in servers (pingMs, net/mp.ts); empty otherwise. */
+  private pingText = text();
+  /** Your round trip to the room (net/mp.ts sets it; null in solo). */
+  pingMs: (() => number | null) | null = null;
   /** The end of a run: the timer becomes the result (hud/result.ts). */
   private card = new ResultCard();
   private xhair: HTMLElement;
@@ -318,7 +324,7 @@ export class Hud {
     this.root = document.getElementById("hud")!;
     this.root.replaceChildren();
     this.xhair = h("div#crosshair");
-    this.speedEl = h("div.hud-speed", null, h("span.speed-num", null, this.speedNum), h("span.unit", null, "u/s"), this.gainEl);
+    this.speedEl = h("div.hud-speed", null, h("span.speed-num", null, this.speedNum), h("span.unit", null, "u/s"), this.gainEl, this.jumpHeldEl);
     this.timerEl = h("div.hud-timer", null, this.timeFace.el, this.zoneLine);
     this.syncFill = h("i.sync-fill");
     this.mapLine = h("div.hud-map");
@@ -349,7 +355,7 @@ export class Hud {
       longJump: this.ljView.el,
       map: this.mapLine,
       pb: h("div.hud-pb", null, h("small", null, "PB"), this.pbVal),
-      fps: h("div.hud-fps", null, this.fpsText, " fps"),
+      fps: h("div.hud-fps", null, this.fpsText, " fps", this.pingText),
       // Chat (net/hud.ts ChatBox: net/mp.ts in a room, solo-chat.ts in solo play); demo lines only in the layout editor.
       chat: (this.chatEl = h(
         "div.hud-chat",
@@ -602,6 +608,11 @@ export class Hud {
    * and the yellow timer. Null: a run that counts. Cheap when unchanged. `warn`: a second line, for a run the player may
    * well think counts; shown even with the Practice element turned off.
    */
+  /** Hold jump (toggle) is on: a small line under the speed (it doesn't move the readout or change its box). */
+  setJumpHeld(on: boolean): void {
+    this.jumpHeldEl.classList.toggle("on", on);
+  }
+
   setPractice(label: string | null, segmented = false, warn: string | null = null): void {
     if (label === this.practiceLabel && segmented === this.segmentLine && warn === this.practiceWarn) return;
     this.practiceLabel = label;
@@ -804,6 +815,8 @@ export class Hud {
     this.frames++;
     if (now - this.fpsT > 500) {
       this.fpsText.data = String(Math.round((this.frames * 1000) / (now - this.fpsT)));
+      const ping = prefs.get().hud.netGraph ? this.pingMs?.() ?? null : null;
+      this.pingText.data = ping !== null && ping > 0 ? ` · ${Math.round(ping)} ms` : "";
       this.frames = 0;
       this.fpsT = now;
     }

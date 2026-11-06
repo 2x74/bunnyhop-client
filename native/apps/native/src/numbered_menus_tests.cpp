@@ -99,7 +99,8 @@ constexpr Menu every_menu[] = {Menu::guns, Menu::triggers, Menu::race, Menu::spe
 void test_opening_one_closes_the_others() {
     for (const Menu first : every_menu)
         for (const Menu second : every_menu) {
-            Menus menus;
+            const auto menus_owner = std::make_unique<Menus>();
+            auto &menus = *menus_owner;
             menus.open(first);
             menus.open(second);
             for (const Menu menu : every_menu)
@@ -109,7 +110,8 @@ void test_opening_one_closes_the_others() {
 
 // !guns in a room, then N: 1 watches the first player instead of picking a gun category.
 void test_spectate_menu_over_guns_takes_the_digits() {
-    Menus menus;
+    const auto menus_owner = std::make_unique<Menus>();
+    auto &menus = *menus_owner;
     menus.open(Menu::guns);
     menus.open(Menu::spectate);
     const auto outcome = menus.digit("Digit1");
@@ -119,27 +121,31 @@ void test_spectate_menu_over_guns_takes_the_digits() {
 
 void test_each_menu_gets_its_own_digit() {
     {
-        Menus menus;
+        const auto menus_owner = std::make_unique<Menus>();
+        auto &menus = *menus_owner;
         menus.open(Menu::spectate);
         menus.open(Menu::triggers);
         assert(menus.digit("Digit1").trigger == "showTriggers" && !menus.spectate.open());
     }
     {
-        Menus menus;
+        const auto menus_owner = std::make_unique<Menus>();
+        auto &menus = *menus_owner;
         menus.open(Menu::triggers);
         menus.open(Menu::race);
         const auto outcome = menus.digit("Digit1");
         assert(outcome.race_handled && outcome.trigger.empty());
     }
     {
-        Menus menus;
+        const auto menus_owner = std::make_unique<Menus>();
+        auto &menus = *menus_owner;
         menus.open(Menu::race);
         menus.open(Menu::checkpoints);
         const auto outcome = menus.digit("Digit1");
         assert(outcome.checkpoint_picked && !outcome.race_handled);
     }
     {
-        Menus menus;
+        const auto menus_owner = std::make_unique<Menus>();
+        auto &menus = *menus_owner;
         menus.open(Menu::checkpoints);
         menus.open(Menu::guns);
         const auto outcome = menus.digit("Digit2");
@@ -149,7 +155,8 @@ void test_each_menu_gets_its_own_digit() {
 
 // The guns key again (7 with default binds) closes the guns menu rather than picking its 7th entry; 0 closes it too.
 void test_the_guns_key_closes_the_guns_menu() {
-    Menus menus;
+    const auto menus_owner = std::make_unique<Menus>();
+    auto &menus = *menus_owner;
     assert(menus.binds.is_bound("gunMenu", "Digit7"));
     menus.open(Menu::guns);
     const auto outcome = menus.digit("Digit7");
@@ -160,7 +167,8 @@ void test_the_guns_key_closes_the_guns_menu() {
 
 // While a menu or the room's map vote is on screen, a digit it doesn't use still fires no bind (7 opens no guns menu).
 void test_open_menus_own_the_digits() {
-    Menus menus;
+    const auto menus_owner = std::make_unique<Menus>();
+    auto &menus = *menus_owner;
     assert(menus.digit("Digit7").reached_binds);
     assert(!menus.digit("Digit7", true).reached_binds);
     menus.open(Menu::spectate);

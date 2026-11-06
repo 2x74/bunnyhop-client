@@ -9,6 +9,8 @@
 //     the procedural rest pose and expressed in the knife's own axes (a spin about the blade's face normal stays one),
 //     replayed on the third-person knife (the bunny's knife bone, player/bunny/rig.ts KNIFE_BONE; a CS:S model's
 //     weapon_bone, the bone-merged w_knife follows it). Translations scale with the third-person knife (TpSpec.s).
+//   - its moving parts (v0.0.38): the clip's joint angles over the hold's, sampled with the same track (angles()),
+//     which the bunny turns its knife-part bones by (knives/tp-parts.ts).
 // Fingers stay as animated (too small to read at third-person distances).
 //
 // Cost: nothing until a signal arrives (models create it lazily); then ~20 3x4 products per frame.
@@ -33,6 +35,9 @@ interface Track {
   q: Float32Array;
   p: Float32Array;
   n: number;
+  /** The knife's joint angles (KnifeDef.joints) the trick adds over the hold's, per sample (J per sample; v0.0.38). */
+  a: Float32Array;
+  J: number;
 }
 
 const tracks = new WeakMap<InspectClip, Map<string, Track>>();
@@ -60,7 +65,7 @@ function quatOf(m: ArrayLike<number>, q: Float32Array, o: number): void {
 }
 
 /** Samples a first-person clip's knife-in-hand motion (relative to the held knife), for knife `def`. */
-export function inspectKnifeTrack(clip: InspectClip, def: KnifeDef | null): Track {
+export function inspectKnifeTrack(clip: InspectClip, def: KnifeDef | null): Readonly<Track> {
   let m = tracks.get(clip);
   if (!m) tracks.set(clip, (m = new Map()));
   const key = def?.id ?? "carrot";
@@ -79,6 +84,7 @@ export function inspectKnifeTrack(clip: InspectClip, def: KnifeDef | null): Trac
   };
   const base = () => {
     proc.pose("idle", 0, W);
+    if (hold) hold.state.time = 0;
     hold?.apply(W, "idle", 0);
   };
   base();
@@ -86,10 +92,13 @@ export function inspectKnifeTrack(clip: InspectClip, def: KnifeDef | null): Trac
   rel(rel0);
   invert34(rel0, 0, rel0i, 0);
   const n = Math.ceil(clip.len * RATE) + 1;
-  tr = { q: new Float32Array(n * 4), p: new Float32Array(n * 3), n };
+  const J = hold?.state.angles.length ?? 0;
+  const a0 = hold ? [...hold.state.angles] : [];
+  tr = { q: new Float32Array(n * 4), p: new Float32Array(n * 3), n, a: new Float32Array(n * J), J };
   for (let i = 0; i < n; i++) {
     base();
     clip.apply(W, Math.min(clip.len, i / RATE), ctx);
+    for (let j = 0; j < J; j++) tr.a[i * J + j] = hold!.state.angles[j] - a0[j];
     rel(relT);
     concat(rel0i, 0, relT, 0, D, 0);
     quatOf(D, tr.q, i * 4);
@@ -97,6 +106,20 @@ export function inspectKnifeTrack(clip: InspectClip, def: KnifeDef | null): Trac
   }
   m.set(key, tr);
   return tr;
+}
+
+/**
+ * A clip's sampled knife track for knife `def` (the root's knife-local motion at 60 Hz, and its joint angles over the
+ * hold's): what the native client's build exports for its third-person inspects (apps/native export-tp-inspects.ts).
+ */
+export type { Track as InspectKnifeTrack };
+
+/** The trick's joint angles at t (linear between samples), added into out[j] scaled by k. */
+function sampleAngles(tr: Track, t: number, k: number, out: number[]): void {
+  if (!tr.J || !k) return;
+  const f = Math.max(0, Math.min(tr.n - 1, t * RATE));
+  const i = Math.min(tr.n - 2, Math.floor(f)), u = Math.max(0, f - i);
+  for (let j = 0; j < tr.J && j < out.length; j++) out[j] += k * (tr.a[i * tr.J + j] + (tr.a[(i + 1) * tr.J + j] - tr.a[i * tr.J + j]) * u);
 }
 
 /** D (3x4, knife-local) of a track at t. */
@@ -218,6 +241,25 @@ export class TpInspect {
     const ev = this.combo.update(dt, this.held);
     this.combo.pose(this.pz);
     return ev;
+  }
+
+  /**
+   * Adds the playing trick's joint angles (a balisong's handles, a spinner) to `out` (the knife's own angles), blended
+   * like the first person's (inspects/runtime.ts): crossfaded between chained tricks, and home in the first half of a
+   * cancel, before the hand closes.
+   */
+  angles(out: number[]): void {
+    const pz = this.pz;
+    if (!pz.cur || pz.weight <= 0) return;
+    const clips = this.set.clips;
+    const w = pz.weight;
+    const k = w >= 1 ? 1 : (() => {
+      const x = Math.max(0, Math.min(1, (w - 0.5) / 0.5));
+      return x * x * (3 - 2 * x);
+    })();
+    const mix = pz.prev && pz.mix < 1 ? pz.mix : 1;
+    sampleAngles(inspectKnifeTrack(clips[pz.cur.trick], this.knife), pz.cur.t, k * mix, out);
+    if (pz.prev && mix < 1) sampleAngles(inspectKnifeTrack(clips[pz.prev.trick], this.knife), pz.prev.t, k * (1 - mix), out);
   }
 
   /** Clip id playing (debug), or null. */

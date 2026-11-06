@@ -10,11 +10,12 @@ import { PART } from "../../knives/types";
 import type { KnifeCtx } from "../../knives/ctx";
 import { ball, box, groove, guard, lathe, pins, plate, rod, slab, trigger, type P2 } from "../shapes";
 import { gunPaint as fixed } from "../material";
+import { coat } from "../camo-zones";
 import type { GunDef } from "../types";
 
-const RECV = fixed(0x34383f, "dark"), RECV_DARK = fixed(0x24272c, "dark"), GREEN = fixed(0x557d47), GREEN_DARK = fixed(0x3c5c33), VENT = fixed(0x1d2a1a);
+const RECV = coat(fixed(0x34383f, "dark"), "upper"), RECV_LO = coat(fixed(0x34383f, "dark"), "lower"), RECV_DARK = fixed(0x24272c, "dark"), GREEN = coat(fixed(0x557d47), "lower"), GREEN_DARK = coat(fixed(0x3c5c33), "lower", 0.8), VENT = fixed(0x1d2a1a);
 const STEEL = fixed(0x3a3f47, "dark"), STEEL_LIGHT = fixed(0x707782, "metal"), BORE = fixed(0x101114), LEAF = fixed(0x7fd36a), HULL = fixed(0xc43c2c), BRASS = fixed(0xd8a640, "metal");
-const GRIP = fixed(0x3c5c33, "grip"), PAD = fixed(0x26282b, "grip"), SLOT = fixed(0x17191c), LIP = fixed(0x5d636d, "metal");
+const GRIP = coat(fixed(0x3c5c33, "grip"), "lower", 0.85), PAD = fixed(0x26282b, "grip"), SLOT = fixed(0x17191c), LIP = fixed(0x5d636d, "metal");
 /** The trigger's pivot (top of its blade, gun-local). */
 /**
  * The trigger's pivot (top of its blade, gun-local): tight in front of the grip's thin upper part, where the firing
@@ -65,15 +66,15 @@ function build(k: KnifeCtx): void {
   }
   // --- Guard, trigger, the polymer grip, the looped skeleton stock.
   // A short guard round the trigger, open at the back where it meets the grip's swell.
-  guard(k, [[1.65, -0.35], [1.58, -1.26], [0.85, -1.42], [0.3, -1.36]], 0.14, { paint: RECV, open: true });
+  guard(k, [[1.65, -0.35], [1.58, -1.26], [0.85, -1.42], [0.3, -1.36]], 0.14, { paint: RECV_LO, open: true });
   trigger(k, TRIGGER, 0.55, { paint: STEEL_LIGHT });
   const b0 = BACK0;
   // The grip: thin at the top (the firing index runs along it to the trigger), full depth below the guard where the
   // other three fingers wrap it (a palm swell), as two slabs (a notched outline doesn't cap as one).
-  slab(k, [along(b0, 0, -0.05), along(b0, -0.05, 0.35), [0.1, -0.45], [-0.08, -0.98], along(b0, 0.8, -0.05)], -0.6, 0.6, { paint: RECV, part: PART.grip, round: 0.18, bevel: 0.14 });
-  slab(k, [along(b0, 0.7, -0.05), [-0.12, -0.92], along(b0, 0.85, GRIP_DEPTH), along(b0, GRIP_LEN, GRIP_DEPTH - 0.1), along(b0, GRIP_LEN, 0.05), along(b0, 1.5, -0.05)], -0.6, 0.6, { paint: RECV, part: PART.grip, round: 0.25, bevel: 0.15 });
+  slab(k, [along(b0, 0, -0.05), along(b0, -0.05, 0.35), [0.1, -0.45], [-0.08, -0.98], along(b0, 0.8, -0.05)], -0.6, 0.6, { paint: RECV_LO, part: PART.grip, round: 0.18, bevel: 0.14 });
+  slab(k, [along(b0, 0.7, -0.05), [-0.12, -0.92], along(b0, 0.85, GRIP_DEPTH), along(b0, GRIP_LEN, GRIP_DEPTH - 0.1), along(b0, GRIP_LEN, 0.05), along(b0, 1.5, -0.05)], -0.6, 0.6, { paint: RECV_LO, part: PART.grip, round: 0.25, bevel: 0.15 });
   if (fp) for (const y of [-1, 1]) slab(k, [along(b0, 1.3, 0.3), along(b0, 1.3, GRIP_DEPTH - 0.4), along(b0, GRIP_LEN - 0.3, GRIP_DEPTH - 0.4), along(b0, GRIP_LEN - 0.3, 0.3)], y > 0 ? 0.58 : -0.62, y > 0 ? 0.62 : -0.58, { paint: GRIP, part: PART.grip, round: 0.15, bevel: 0.02 });
-  guard(k, [[-0.85, 1.55], [-6.5, 1.25], [-6.6, -1.6], [-2.2, -1.0], [-0.9, -0.5]], 0.22, { paint: RECV });
+  guard(k, [[-0.85, 1.55], [-6.5, 1.25], [-6.6, -1.6], [-2.2, -1.0], [-0.9, -0.5]], 0.22, { paint: RECV_LO });
   box(k, [-6.6, 0, -0.15], [0.35, 0.55, 1.75], { paint: PAD, round: 0.25 });
   // --- The shell the left hand loads (Aux, hidden until a reload): red hull, brass base.
   lathe(k, [[1.6, 0.33], [1.72, 0.33], [1.72, 0.3], [2.85, 0.29], [2.9, 0.2]], { c: [0, TZ], paint: (i) => (i < 1 ? BRASS : HULL), sides: 10, bone: "Aux" });
@@ -103,10 +104,14 @@ export const hedgerow: GunDef = {
   },
   // The support hand under the handguard, palm up, fingers over its right side (placement from
   // tools/viewmodel/gun-grip-fit.ts); its forearm drops toward the elbow anchor below it, out of view.
+  // v0.0.38 gun grips: the support hand turned so the handguard runs across its palm (knuckles 18 deg forward, 30 up),
+  // its elbow down, back and in where that leaves the wrist near neutral (about 10 deg extension, 8 ulnar): the forearm
+  // comes up diagonally from the bottom of the screen and does the holding, instead of standing straight under the
+  // handguard with the wrist bent back 42 deg. The firing elbow likewise sits in line with a pistol-grip wrist.
   left: {
     o: [9.9, 0.0, 0.0],
-    up: [1, 0, 0],
-    fwd: [0.0, -0.848, 0.53],
+    up: [0.976, 0.195, -0.098],
+    fwd: [0.218, -0.873, 0.436],
     index: { c: [60, 80, 60] },
     middle: { c: [64, 84, 64] },
     ring: { c: [68, 86, 64] },
@@ -121,8 +126,7 @@ export const hedgerow: GunDef = {
   },
   frame: { o: [16, -6.2, -6.0], a: [-1, 4, -4] },
   trigger: TRIGGER,
-  elbows: { R: [8, -18, -18], L: [24, -6, -26] },
-  wrist: { L: 34 },
+  elbows: { R: [6.85, -10.55, -15.6], L: [20.5, 1.55, -13.8] },
   muzzle: [22.1, 0, BZ],
   eject: { p: [2.6, -0.85, 1.3], dir: [-0.15, -0.9, 0.4] },
   shell: "shotgun",

@@ -30,6 +30,7 @@ import { DEFAULT_PREFS, gameView, horizontalFovAt, keyLabel, prefs, ACTIONS, ass
 import { arrowNav, h } from "./dom";
 import * as ui from "./controls";
 import { group, range, rowDesc, segmented, select, toggle, check, color, row, button, syncSwitches, SWATCHES } from "./controls";
+import { DEFAULT_LANDING_COLOR, LANDING_MODES, type LandingMode } from "../landing/prefs";
 import { DEFAULT_TRIGGER_PREFS, KINDS, TRIGGER_OPACITY, TRIGGER_STYLES, TRIGGER_THICKNESS, type TriggerStyle } from "../triggers/volumes";
 import { onSettingsSections, registeredSections, type SettingsContent } from "./settings-registry";
 import { didYouMean, indexEntry, matchRanges, searchSettings, tokenize, type IndexedEntry } from "./settings-search";
@@ -52,6 +53,12 @@ import { movementRows } from "../movement-stats";
 import { requestRace } from "../player/race";
 import { guardSideMouseButtons, mouseCode } from "../binds";
 import { ANGLE_SPEED_KEY_RANGE, YAW_SPEED_RANGE } from "../turn-binds";
+import { clampSens, cmPer360, convertSens, cssEquivalent, fmtTurn, gameById, GAMES, M_YAW_RANGE, roundSens, sensProblem } from "../sens-convert";
+import type { RowOpts } from "./controls";
+import { openConsole } from "../console/view";
+import { openConfigImport } from "../console/import-dialog";
+import { bindCommand, isChatCommand, uncommand } from "../console/exec";
+import { chatMessageOf, sayCommand } from "../console/bind-store";
 import "./settings.css";
 import { nativeClient, openClientSettings } from "../client-bridge";
 import { GHOST_CSS, type GhostKind } from "../player/colors";
@@ -87,15 +94,117 @@ const reducedMotion = () => matchMedia("(prefers-reduced-motion: reduce)").match
 // ---------------------------------------------------------------------------------------------
 // Mouse & view
 
+/**
+ * A typed number row (m_yaw, m_pitch: values a slider can't place). `check` returns why a value can't be used: the box
+ * goes back to the current value and says so for a few seconds.
+ */
+function numberRow(label: string, get: () => number, set: (v: number) => void, o: RowOpts & { range: readonly [number, number]; check?: (v: number) => string | null }): HTMLElement {
+  const id = ui.uniqueId("n");
+  const num = h("input.num-input", { type: "number", id, min: String(o.range[0]), max: String(o.range[1]), step: "any", inputmode: "decimal", "aria-label": `${label} value` });
+  const err = h("small.set-num-err", { role: "status" });
+  let timer = 0;
+  const show = () => (num.value = String(get()));
+  num.addEventListener("change", () => {
+    const v = Number(num.value);
+    const why = num.value.trim() === "" || !Number.isFinite(v) ? "Type a number." : v < o.range[0] || v > o.range[1] ? `From ${o.range[0]} to ${o.range[1]}.` : o.check?.(v) ?? null;
+    clearTimeout(timer);
+    err.textContent = why ?? "";
+    if (why) timer = window.setTimeout(() => (err.textContent = ""), 4000);
+    else set(v);
+    show();
+  });
+  num.addEventListener("keydown", (e) => (e as KeyboardEvent).key === "Enter" && (num.blur(), e.preventDefault()));
+  show();
+  prefs.watch(() => document.activeElement !== num && show());
+  return row(label, h("div.set-num", null, err, num), o, id);
+}
+
+/** Settings → Mouse & view's converter: what you play elsewhere and at what sensitivity (kept while the page is open). */
+const convertState = { game: "valorant", theirs: 0.35 };
+
+/**
+ * From another game (sens-convert.ts): pick the game and type its sensitivity; the readout gives ours at your m_yaw,
+ * with cm and inches per 360° at your DPI. One button applies it; the other keeps that game's number and sets m_yaw to
+ * its yaw instead (the same turn either way).
+ */
+function convertGroup(paintStats: () => void): HTMLElement {
+  const game = () => gameById(convertState.game) ?? GAMES[0];
+  const theirs = h("input.num-input", { type: "number", min: "0.0001", max: "1000", step: "any", inputmode: "decimal", value: String(convertState.theirs), "aria-label": "Sensitivity in that game" });
+  const unit = h("span.unit", { "aria-hidden": "true" });
+  const out = h("p.set-convert-out", { "aria-live": "polite" });
+  const note = h("small.dim.set-convert-note");
+  const use = button("Use it", () => apply(false), { primary: true });
+  const pair = button("", () => apply(true));
+  const result = () => {
+    const s = convertState.theirs;
+    if (!(s > 0)) return null;
+    const g = game();
+    return { g, ours: roundSens(convertSens(s, g.yaw, P().mYaw)) };
+  };
+  const paint = () => {
+    const r = result();
+    unit.textContent = game().unit ?? "";
+    note.textContent = game().note ?? "";
+    if (!r) {
+      out.textContent = "Type your sensitivity in that game.";
+      use.disabled = pair.disabled = true;
+      return;
+    }
+    const p = P();
+    const problem = sensProblem(r.ours, p.mYaw);
+    const cm = cmPer360(r.ours, p.mYaw, p.dpi);
+    out.replaceChildren(
+      problem ? problem : h("span", null, "Here that's ", h("b", null, String(r.ours)), ` at m_yaw ${p.mYaw}: ${fmtTurn(cm, "cm")} (${fmtTurn(cm / 2.54, "in")}) per 360° at ${p.dpi} DPI.`),
+    );
+    use.disabled = !!problem || r.ours === p.sensitivity;
+    use.textContent = `Use ${r.ours}`;
+    const pairProblem = sensProblem(convertState.theirs, r.g.yaw);
+    pair.textContent = `Keep ${convertState.theirs}, set m_yaw ${r.g.yaw}`;
+    pair.disabled = !!pairProblem || (p.mYaw === r.g.yaw && p.sensitivity === convertState.theirs);
+    pair.title = pairProblem ?? `Sensitivity ${convertState.theirs} with m_yaw ${r.g.yaw}, the way ${r.g.label} counts it.`;
+  };
+  const apply = (keepTheirs: boolean) => {
+    const r = result();
+    if (!r) return;
+    up((p) => {
+      if (keepTheirs) {
+        p.mYaw = r.g.yaw;
+        p.sensitivity = convertState.theirs;
+      } else p.sensitivity = r.ours;
+    });
+    paintStats();
+    paint();
+    uiSound("ui_click", 1, 0.7);
+  };
+  theirs.addEventListener("input", () => ((convertState.theirs = Number(theirs.value)), paint()));
+  theirs.addEventListener("keydown", (e) => (e as KeyboardEvent).key === "Enter" && !use.disabled && apply(false));
+  const pick = select("Game", () => convertState.game, (v) => ((convertState.game = v), paint()), GAMES.map((g) => [g.id, g.label] as [string, string]), {
+    desc: "Converts by each game's degrees per count, so a turn takes the same mouse distance.",
+    keywords: "convert converter sensitivity valorant overwatch apex fortnite cs2 csgo quake tf2 momentum other game",
+  });
+  prefs.watch(() => out.isConnected && paint());
+  paint();
+  return group(
+    "From another game",
+    pick,
+    row("Sensitivity there", h("span.num-wrap", null, theirs, unit), { desc: "Your sensitivity in that game, as its settings show it.", keywords: "convert converter other game sensitivity" }),
+    h("div.set-convert", null, out, note, h("div.btn-row", null, use, pair)),
+  );
+}
+
 function mouseSection(): SettingsContent {
   const cm = h("b");
+  const inch = h("small.dim");
   const edpi = h("b");
   const hfov = h("b");
   const hsub = h("small");
   const paint = () => {
     const p = P();
-    cm.textContent = ((360 / (p.sensitivity * 0.022) / Math.max(1, p.dpi)) * 2.54).toFixed(1);
-    edpi.textContent = String(Math.round(p.sensitivity * p.dpi));
+    const c = cmPer360(p.sensitivity, p.mYaw, p.dpi);
+    cm.textContent = c.toFixed(1);
+    inch.textContent = fmtTurn(c / 2.54, "in");
+    // eDPI in CS:S units (sensitivity × DPI at m_yaw 0.022), so it compares with other players' whatever their m_yaw.
+    edpi.textContent = String(Math.round(cssEquivalent(p.sensitivity, p.mYaw) * p.dpi));
     hfov.textContent = `${horizontalFovAt(p.fov, innerWidth / innerHeight).toFixed(1)}°`;
     hsub.textContent = `at ${innerWidth}×${innerHeight}`;
   };
@@ -106,11 +215,22 @@ function mouseSection(): SettingsContent {
       [
         group(
           "Mouse",
-          range("Sensitivity", () => P().sensitivity, (v) => (up((p) => (p.sensitivity = Math.round(v * 1000) / 1000)), paint()), {
+          range("Sensitivity", () => P().sensitivity, (v) => (up((p) => (p.sensitivity = clampSens(Math.round(v * 1000) / 1000, p.mYaw))), paint()), {
             min: 0.1, max: 10, step: 0.01, inputRange: [0.01, 100],
-            hint: "CS:S units, as in your config",
-            desc: "CS:S sensitivity: degrees per count = sensitivity × m_yaw (0.022), same as CS:S. Type values beyond the slider in the box (up to 100).",
-            keywords: "sens m_yaw aim mouse speed",
+            hint: "As in your CS:S config",
+            desc: "Degrees per count = sensitivity × m_yaw, as in CS:S. Type values beyond the slider in the box (up to 100).",
+            keywords: "sens aim mouse speed",
+          }),
+          numberRow("m_yaw", () => P().mYaw, (v) => (up((p) => (p.mYaw = v)), paint()), {
+            range: M_YAW_RANGE,
+            check: (v) => sensProblem(P().sensitivity, v),
+            desc: "Degrees per count at sensitivity 1. CS:S and CS2 use 0.022. Set another game's yaw to keep its sensitivity number.",
+            keywords: "m_yaw yaw myaw mouse yaw factor degrees per count valorant 0.07 overwatch 0.0066",
+          }),
+          numberRow("m_pitch", () => P().mPitch, (v) => up((p) => (p.mPitch = v)), {
+            range: M_YAW_RANGE,
+            desc: "The same for looking up and down (default 0.022). Invert mouse Y below flips it.",
+            keywords: "m_pitch pitch mouse pitch factor vertical",
           }),
           range("Mouse DPI", () => P().dpi, (v) => (up((p) => (p.dpi = Math.round(v), p.dpiConfirmed = true)), paint()), { min: 100, max: 6400, step: 50, inputRange: [50, 32000], desc: "Your mouse's DPI (CPI). The browser can't detect it. Used for the eDPI and cm/360 readouts.", keywords: "cpi edpi" }),
           api.available()
@@ -129,8 +249,9 @@ function mouseSection(): SettingsContent {
         group(
           "View",
           range("Field of view", () => P().fov, (v) => (up((p) => (p.fov = v)), paint()), { min: 75, max: 120, step: 1, unit: "°", peek: true, hint: "Horizontal at 4:3, like CS:S", desc: "fov_desired (CS:S default 90). Wider screens see more at the sides (Hor+), like CS:S.", keywords: "fov fov_desired zoom" }),
-          h("div.set-stats", null, stat(cm, "cm / 360°"), stat(edpi, "eDPI"), stat(hfov, "horizontal FOV", hsub)),
+          h("div.set-stats", null, stat(cm, "cm / 360°", inch), stat(edpi, "eDPI"), stat(hfov, "horizontal FOV", hsub)),
         ),
+        convertGroup(paint),
       ],
     ],
     advanced: [
@@ -409,8 +530,13 @@ function hudSection(ctx: Ctx): SettingsContent {
           check("Edge glow", () => P().hud.edgeGlow, (v) => up((p) => (p.hud.edgeGlow = v)), { desc: "The edges of the screen glow at high speed.", keywords: "speed glow vignette edge effect" }),
           check("Zones", () => P().showZones, (v) => up((p) => (p.showZones = v)), { desc: "Start (green) and end (red) zone boxes in the world.", keywords: "start end box show zones" }),
         ),
+        select("Position readout", () => P().hud.showPos, (v) => up((p) => (p.hud.showPos = v)), [[0, "Off"], [1, "Eye and view"], [2, "Feet"]], {
+          desc: "Position, angles and speed in the top-right corner, like cl_showpos 1 (eye) or 2 (feet) in CS:S. Also in replays.",
+          keywords: "cl_showpos showpos position pos ang angles vel velocity coordinates origin xyz debug",
+        }),
       ),
       triggersGroup(),
+      landingGroup(),
       group(
         "Share layout",
         row("Layout code", h("div.share-row", null, code, exp, imp), { desc: "Export copies your HUD layout as a code; paste one and Import to use it. (Your whole setup: Export at the top of Settings.)", keywords: "share export import copy paste hud layout code" }),
@@ -445,6 +571,26 @@ function triggersGroup(): HTMLElement {
   );
 }
 
+/** HUD → Advanced: the landing spot (landing/), when it shows and its look. */
+function landingGroup(): HTMLElement {
+  const l = () => P().landing;
+  const ul = (fn: (l: Prefs["landing"]) => void) => up((p) => fn(p.landing));
+  return group(
+    "Landing spot",
+    segmented<LandingMode>("Landing spot", () => l().mode, (v) => ul((x) => (x.mode = v)), LANDING_MODES, {
+      desc: "While you're in the air, marks where you'd land if you stopped strafing. Practice shows it only in practice. !landing turns it on and off.",
+      keywords: "landing spot predict prediction land marker where route routing cylinder trajectory practice",
+    }),
+    check("Path", () => l().arc, (v) => ul((x) => (x.arc = v)), { when: () => l().mode !== "off", desc: "Dots along the way to the landing spot.", keywords: "landing arc path trajectory dots line" }),
+    color("Colour", () => l().color, (v) => ul((x) => (x.color = v)), {
+      when: () => l().mode !== "off",
+      swatches: [DEFAULT_LANDING_COLOR, ...SWATCHES.filter((s) => s !== DEFAULT_LANDING_COLOR)],
+      desc: "Colour of the landing spot. A path into a teleport shows red.",
+      keywords: "landing spot colour color",
+    }),
+  );
+}
+
 function flash(b: HTMLElement, text: string): void {
   const old = b.dataset.label ?? b.textContent ?? "";
   b.dataset.label = old;
@@ -473,7 +619,7 @@ function bindSlot(action: Action, slot: number, refresh: () => void): HTMLElemen
       stop();
       // The key leaves any other action that had it: that action's slots shake so you see where it came from.
       const took = c ? (Object.keys(prefs.get().binds) as Action[]).filter((a) => a !== action && prefs.get().binds[a].includes(c)) : [];
-      prefs.update((p) => assignBindSlot(p.binds, action, slot, c));
+      prefs.update((p) => (assignBindSlot(p.binds, action, slot, c), c && uncommand(p, c)));
       refresh();
       if (c) landed(action, prefs.get().binds[action].indexOf(c), took);
     };
@@ -524,6 +670,93 @@ function landed(action: Action, slot: number, took: Action[]): void {
   uiSound("ui_error", 0.6);
 }
 
+/**
+ * Waits for one key, mouse button or wheel notch (Esc cancels: null), like a bind slot does. `b` shows the wait.
+ */
+function captureKey(b: HTMLElement, done: (code: string | null) => void): void {
+  capturing?.();
+  const before = b.textContent;
+  b.classList.add("capturing");
+  b.textContent = "Press a key…";
+  const finish = (c: string | null) => {
+    stop();
+    b.classList.remove("capturing");
+    b.textContent = before;
+    done(c);
+  };
+  const key = (e: KeyboardEvent) => (e.preventDefault(), e.stopImmediatePropagation(), finish(e.key === "Escape" ? null : e.code));
+  const mouse = (e: MouseEvent) => (e.preventDefault(), e.stopImmediatePropagation(), finish(mouseCode(e.button)));
+  const wheel = (e: WheelEvent) => (e.preventDefault(), finish(e.deltaY < 0 ? "MWheelUp" : "MWheelDown"));
+  const block = (e: Event) => (e.preventDefault(), e.stopImmediatePropagation());
+  const stop = () => {
+    removeEventListener("keydown", key, true);
+    removeEventListener("mousedown", mouse, true);
+    removeEventListener("wheel", wheel, true);
+    removeEventListener("contextmenu", block, true);
+    capturing = null;
+  };
+  capturing = () => finish(null);
+  setTimeout(() => {
+    addEventListener("keydown", key, true);
+    addEventListener("mousedown", mouse, true);
+    addEventListener("wheel", wheel, { capture: true, passive: false });
+    addEventListener("contextmenu", block, true);
+  }, 0);
+}
+
+/** A few plain lines to start from (the message box suggests them). */
+const CHAT_EXAMPLES = ["gg", "nice run", "one more", "glhf", "wp"];
+
+/**
+ * Keys → Chat and command keys: every key bound to a command line (console/bind-store.ts cmdBinds) as a row that reads
+ * as what it does (a chat key as its message, a chain as its commands), its key (click to move it) and a remove button;
+ * then "Chat message": type a line, pick a key. Chains and aliases are made in the console.
+ */
+function commandKeysGroup(refresh: () => void): HTMLElement {
+  const rows = Object.entries(P().cmdBinds ?? {})
+    .sort(([a], [b]) => keyLabel(a).localeCompare(keyLabel(b)))
+    .map(([code, text]) => {
+      const msg = chatMessageOf(text);
+      const label = msg ?? text;
+      const key = h("button.bind", { type: "button", "aria-label": `${label}: ${keyLabel(code)}. Press Enter to move it to another key` }, keyLabel(code));
+      key.addEventListener("click", () =>
+        captureKey(key, (c) => {
+          if (!c || c === code) return;
+          if (c === "Escape") return;
+          up((p) => (uncommand(p, code), bindCommand(p, c, text)));
+          refresh();
+        }),
+      );
+      const remove = h("button.bind-reset", { type: "button", title: "Remove", "aria-label": `Remove ${label}` }, icon("close"));
+      remove.addEventListener("click", () => (up((p) => uncommand(p, code)), refresh()));
+      const r = row(label, h("div.bind-line", null, h("div.cmd-key", null, key), remove), {
+        hint: msg ? (isChatCommand(msg) ? "Chat command" : "Chat message") : "Commands",
+        desc: msg ? "Sent through the chat like typing it, at most one a second." : "Edit it in the console: bind <key> \"…\".",
+        keywords: `chat message say bind command alias chain ${text}`,
+      });
+      r.classList.add("bind-row", "cmd-row");
+      return r;
+    });
+  const text = h("input.text-input.cmd-text", { type: "text", maxlength: "120", placeholder: "gg", list: "chat-examples", "aria-label": "Chat message" }) as HTMLInputElement;
+  const pick = h("button.btn.btn-sm", { type: "button", disabled: true }, "Pick a key");
+  text.addEventListener("input", () => (pick.disabled = !text.value.trim()));
+  text.addEventListener("keydown", (e) => (e as KeyboardEvent).key === "Enter" && !pick.disabled && (e.preventDefault(), pick.click()));
+  pick.addEventListener("click", () =>
+    captureKey(pick, (c) => {
+      const msg = text.value.trim();
+      if (!c || c === "Escape" || !msg) return;
+      up((p) => bindCommand(p, c, sayCommand(msg)));
+      text.value = "";
+      refresh();
+    }),
+  );
+  const add = row("Chat message", h("div.cmd-add", null, text, h("datalist#chat-examples", null, ...CHAT_EXAMPLES.map((v) => h("option", { value: v }))), pick), {
+    desc: "Type a message or a chat command (!r), then pick the key that sends it. Servers' chat rules still apply.",
+    keywords: "chat message say bind key gg nice run funny team chat command !r",
+  });
+  return group("Chat and command keys", ...rows, add);
+}
+
 /** The ghost's colour as a small square beside its switch (instead of naming the colour). */
 function ghostDot(kind: GhostKind, r: HTMLElement): HTMLElement {
   r.querySelector(".set-control")!.prepend(h("span.ghost-dot", { style: `--c:${GHOST_CSS[kind]}`, "aria-hidden": "true" }));
@@ -531,12 +764,12 @@ function ghostDot(kind: GhostKind, r: HTMLElement): HTMLElement {
 }
 
 const BIND_GROUPS: [string, Action[]][] = [
-  ["Movement", ["forward", "back", "left", "right", "jump", "duck", "turnLeft", "turnRight", "turnFast"]],
+  ["Movement", ["forward", "back", "left", "right", "jump", "jumpToggle", "crouchJump", "duck", "turnLeft", "turnRight", "turnFast"]],
   ["Run", ["restart", "restartBonus", "restartMain", "setStart", "clearStart", "cycleStyle", "mainMenu", "chat"]],
   ["Show / hide", ["keysOverlay", "hideUi", "viewmodel", "thirdPerson", "freecam", "flashlight", "mute", "nextTrack"]],
   ["Carrot", ["attack", "attack2", "inspect"]],
   ["Practice", ["practice", "noclip", "cpSave", "cpTeleport", "cpPrev", "cpNext"]],
-  ["Tools", ["hudEditor", "measurePoint", "clearMeasure", "lastLj"]],
+  ["Tools", ["console", "hudEditor", "measurePoint", "clearMeasure", "lastLj"]],
   ["Weapons", ["slot1", "slot2", "slot3", "lastWeapon", "nextWeapon", "prevWeapon", "drop", "reload", "giveUsp", "giveGlock", "gunMenu"]],
   ["Paint", ["paint", "paintOnce", "clearPaint"]],
 ];
@@ -550,7 +783,10 @@ const BIND_KEYWORDS: Partial<Record<Action, string>> = {
   left: "strafe left a move",
   right: "strafe right d move",
   jump: "jump scroll wheel mwheeldown mwheelup autohop bhop hop space",
+  jumpToggle: "hold jump toggle autohop auto hop bhop held space tired lock +jump jump_toggle",
   duck: "duck crouch ctrl control",
+  crouchJump: "crouch jump crouchjump cj duck jump ctrl space +cj alias script ducked jump",
+  console: "console toggleconsole tilde backquote ~ ` commands cvars bind config cfg autoexec",
   use: "use doors buttons e interact",
   restart: "restart reset respawn r",
   restartBonus: "bonus next track main b f4",
@@ -607,7 +843,10 @@ function bindReset(action: Action, label: string, refresh: () => void): HTMLElem
   b.addEventListener("click", () => {
     capturing?.();
     let took: Action[] = [];
-    up((p) => (took = resetBind(p.binds, action)));
+    up((p) => {
+      took = resetBind(p.binds, action);
+      for (const c of p.binds[action]) uncommand(p, c);
+    });
     refresh();
     landed(action, 0, took);
     // The button goes with the change: focus stays on the row.
@@ -658,6 +897,7 @@ function keysSection(ctx: Ctx): SettingsContent {
         ),
         group(carrot[0], ...carrot[1].map(bindRow)),
         group(paint[0], ...paint[1].map(bindRow)),
+        commandKeysGroup(ctx.refresh),
         group(
           practice[0],
           ...practice[1].map(bindRow),
@@ -690,7 +930,10 @@ function keysSection(ctx: Ctx): SettingsContent {
         group(weapons[0], ...weapons[1].map(bindRow)),
       ],
     ],
-    advanced: [group(tools[0], ...tools[1].map(bindRow), row("Pause / menu", h("div.bind-line", null, h("div.bind-pair", null, h("span.bind.fixed", null, "Esc")), h("span.bind-reset", { "aria-hidden": "true" })), { desc: "Fixed: Esc always opens the menu.", keywords: "escape esc pause menu" }))],
+    advanced: [group(tools[0], ...tools[1].map(bindRow), row("Console and configs", h("div.btn-row", null, button("Open console", () => openConsole()), button("Import a CS:S config…", () => openConfigImport(ctx.refresh))), {
+      desc: "The console takes Source commands: bind, sensitivity, fps_max, toggle. Import reads the binds and settings from a config.cfg or autoexec.cfg and lists the lines it can't use.",
+      keywords: "console config cfg autoexec import paste cs:s csgo binds commands cvars exec",
+    }), row("Pause / menu", h("div.bind-line", null, h("div.bind-pair", null, h("span.bind.fixed", null, "Esc")), h("span.bind-reset", { "aria-hidden": "true" })), { desc: "Fixed: Esc always opens the menu.", keywords: "escape esc pause menu" }))],
   };
 }
 
@@ -747,6 +990,7 @@ function ghostSection(): SettingsContent {
           "Route guide",
           toggle("Ghost route", () => P().ghost.route, g("route"), { desc: "A persistent path with white boxes at each takeoff, visible before and during your run. Only you see it. Show ghosts and the chosen source must be on.", keywords: "route ghost path line jump jumps takeoff marker box beam trace practice racing optimize" }),
           select<GhostRouteSource>("Route ghost", () => P().ghost.routeSource, g("routeSource"), [["auto", "Auto (custom, PB, WR)"], ["pb", "Your PB"], ["wr", "World record"], ["custom", "Custom ghost"]], { when: () => P().ghost.route, desc: "Auto follows the custom ghost you chose to race, or your PB, then the WR. A specific source shows a route only when that ghost is loaded and enabled.", keywords: "route ghost choose source race replay leaderboard pb wr custom" }),
+          toggle("Route only", () => P().ghost.routeOnly, g("routeOnly"), { when: () => P().ghost.route, desc: "Hides the route ghost but keeps its route. Other ghosts still show. The HUD split works as before.", keywords: "route only hide ghost model invisible path line no ghost bot practice" }),
           segmented<GhostRouteMode>("Route path", () => P().ghost.routeMode, g("routeMode"), [["jumps", "Jump to jump"], ["path", "Recorded path"]], { when: () => P().ghost.route, desc: "Jump to jump draws straight links between takeoffs. Recorded path follows every movement tick, including turns and air arcs. Both break at teleports and mark the same takeoffs.", keywords: "route straight line path exact full curved jump jumps" }),
         ),
       ],
@@ -1013,9 +1257,9 @@ function audioSection(): SettingsContent {
 // ---------------------------------------------------------------------------------------------
 
 const BUILTIN: Section[] = [
-  { id: "mouse", label: "Mouse & view", blurb: "", order: 10, render: mouseSection, reset: resetKeys("sensitivity", "verticalSensitivityEnabled", "verticalSensitivity", "dpi", "dpiConfirmed", "dpiHidden", "invertY", "rawInput", "spikeFilter", "timedInput", "inputStats", "fov") },
+  { id: "mouse", label: "Mouse & view", blurb: "", order: 10, render: mouseSection, reset: resetKeys("sensitivity", "mYaw", "mPitch", "verticalSensitivityEnabled", "verticalSensitivity", "dpi", "dpiConfirmed", "dpiHidden", "invertY", "rawInput", "spikeFilter", "timedInput", "inputStats", "fov") },
   { id: "crosshair", label: "Crosshair", blurb: "", order: 20, render: crosshairSection, reset: resetKeys("crosshair") },
-  { id: "hud", label: "HUD", blurb: "", order: 30, render: hudSection, reset: resetKeys("hud", "showZones", "triggers") },
+  { id: "hud", label: "HUD", blurb: "", order: 30, render: hudSection, reset: resetKeys("hud", "showZones", "triggers", "landing") },
   { id: "keys", label: "Keys", blurb: "Click a slot, then press a key. Backspace clears.", order: 40, render: keysSection, reset: resetKeys("binds", "holdRestart", "autoRestart", "practice", "nullBinds", "wRelease", "yawSpeed", "angleSpeedKey") },
   { id: "ghost", label: "Ghosts & players", blurb: "", order: 50, render: ghostSection, reset: resetKeys("showGhost", "ghost", "tags", "showPlayerGlow", "showPlayers", "firstPersonGlow") },
   { id: "graphics", label: "Graphics", blurb: "", order: 60, render: graphicsSection, reset: () => void chooseGraphicsPreset("source").then(() => { resetKeys("graphics")(); }) },

@@ -26,7 +26,7 @@ const IDLE: Cmd = Cmd { forward: 0.0, side: 0.0, yaw: 0.0, pitch: 0.0, buttons: 
 #[test]
 fn ceaseless_butterflies_are_animated_props() {
     let Some(g) = load("bhop_ceaseless") else { return };
-    let anims: Vec<_> = g.prop_anim_states().map(|(p, flags, ..)| (p.ent, p.anim.clone(), flags)).collect();
+    let anims: Vec<_> = g.prop_anim_states().filter(|(p, ..)| g.entities[p.ent as usize].get("model").is_some_and(|m| m.contains("butterfly"))).map(|(p, flags, ..)| (p.ent, p.anim.clone(), flags)).collect();
     assert_eq!(anims.len(), 14, "{anims:?}");
     assert!(anims.iter().all(|(_, a, f)| a.starts_with("run") && *f == 0));
     let owners: Vec<u32> = g.render_props_with(true).iter().filter(|p| p.0.contains("butterfly")).map(|p| p.4).collect();
@@ -142,11 +142,17 @@ fn frozen_fallback_is_unchanged_with_and_without_opting_in() {
             let placed = |v: &[f32]| [0, 1, 2].map(|i| r[i][0] * v[0] + r[i][1] * v[1] + r[i][2] * v[2] + o[i]);
             // Every placed vertex of the new group is a vertex of the old static mesh (to float rounding).
             let old_verts: Vec<[f32; 3]> = old.vertices.chunks(PROP_VERTEX_FLOATS).map(|v| [v[0], v[1], v[2]]).collect();
+            // Index the frozen bake spatially: keep the 0.05-unit comparison without an O(vertices²) scan.
+            let mut cells = std::collections::HashMap::<[i32; 3], Vec<[f32; 3]>>::new();
+            for q in old_verts { cells.entry(q.map(|v| (v / 0.05).floor() as i32)).or_default().push(q); }
             for d in groups {
                 for k in d[2]..d[2] + d[3] {
                     let vi = new.indices[k as usize] as usize * PROP_VERTEX_FLOATS;
                     let p = placed(&new.vertices[vi..vi + 3]);
-                    let near = old_verts.iter().any(|q| (0..3).all(|i| (q[i] - p[i]).abs() < 0.05));
+                    let cell = p.map(|v| (v / 0.05).floor() as i32);
+                    let near = (-1..=1).any(|x| (-1..=1).any(|y| (-1..=1).any(|z| {
+                        cells.get(&[cell[0]+x,cell[1]+y,cell[2]+z]).is_some_and(|qs| qs.iter().any(|q| (0..3).all(|i| (q[i]-p[i]).abs()<0.05)))
+                    })));
                     assert!(near, "{map} entity {ent}: vertex {p:?} isn't in the frozen bake");
                 }
             }

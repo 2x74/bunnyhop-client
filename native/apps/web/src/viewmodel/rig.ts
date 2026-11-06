@@ -20,7 +20,7 @@ import { concat, invert34, quatMat, type V3 } from "../player/bunny/rig";
  * thickness = the pin axis). Knife_Handle itself is the SAFE handle (the one the fist holds); the pins sit at the top of
  * the grip, y = +pinY (safe handle / blade) and y = -pinY (bite handle / blade).
  */
-export const BFLY = { pinZ: 2.35, pinY: 0.3 } as const;
+export const BFLY = { pinZ: 2.35, pinY: 0.3, latchZ: -2.92 } as const;
 
 /**
  * Whirligig (knives/whirligig.ts) spinner: its axle in Knife_Handle's frame (the knife's x, through the blade's root,
@@ -36,14 +36,18 @@ export const WHIRL = { pos: [0, -0.04, 2.5] as V3, r: 0.94 } as const;
  *   v_weapon.Bfly_Bite   parent Bfly_Blade, at pin B (0, -2 pinY, 0) from pin A: the bite (latch) handle, rotating about
  *                        pin B relative to the blade. Angle 0 = open (alongside the safe handle when the blade is open),
  *                        180 = closed over the blade's edge; it rotates by -angle about local x.
- * Both closed (180, 180) is the idle; knives/bunnyfly.ts poseBunnyfly() drives them (and can keep the bite handle in
- * the fist instead of the safe one, for flips).
+ *   v_weapon.Bfly_Latch  parent Bfly_Bite, at the latch hinge under the bite handle's butt (0, 0, latchZ - pinZ from pin
+ *                        B): the latch, 0 = locked across both butts (knife open), 90 hanging, 180 locked (knife closed).
+ *                        Appended last (v0.0.38) so every earlier bone keeps its index.
+ * Open and latched (0, 0, 0) is the idle; knives/bunnyfly.ts / knives/balisong.ts drive them (and can keep the bite
+ * handle in the fist instead of the safe one, for flips).
  *   v_weapon.Whirl_Spin  parent Knife_Handle, at WHIRL.pos: the Whirligig's spinner, turning about the axle (local x).
  */
 export const EXTRA_BONES: { name: string; parent: string; pos: V3 }[] = [
   { name: "v_weapon.Bfly_Blade", parent: "v_weapon.Knife_Handle", pos: [0, BFLY.pinY, BFLY.pinZ] },
   { name: "v_weapon.Bfly_Bite", parent: "v_weapon.Bfly_Blade", pos: [0, -2 * BFLY.pinY, 0] },
   { name: "v_weapon.Whirl_Spin", parent: "v_weapon.Knife_Handle", pos: WHIRL.pos },
+  { name: "v_weapon.Bfly_Latch", parent: "v_weapon.Bfly_Bite", pos: [0, 0, BFLY.latchZ - BFLY.pinZ] },
 ];
 
 export interface VmRig {

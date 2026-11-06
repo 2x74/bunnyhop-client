@@ -114,7 +114,7 @@ export function wantsReflection(g: THREE.BufferGeometry): boolean {
 // GLSL (FRAGMENT_PARS, after the noise; GLOVE or VM_DETAIL)
 
 export const DETAIL_PARS = /* glsl */ `
-#if defined(GLOVE) || defined(VM_DETAIL) || defined(FINISH)
+#if defined(GLOVE) || defined(VM_DETAIL) || defined(FINISH) || defined(HILT)
 // (uCosTier is declared for every solid program: shader.ts FRAGMENT_PARS; the hats read it too, player/hat-detail.ts.)
 // What this program draws at the current look (see finishes/detail.ts).
 float cosLevel() {

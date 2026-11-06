@@ -184,11 +184,8 @@ export interface RunPlay {
   invertY?: boolean;
 }
 
-/** RunPlay's vertical look: vsens always, invertY only when on. */
-export function pitchPlay(s: { sensitivity: number; m_pitch: number; verticalSensitivityEnabled?: boolean; verticalSensitivity?: number }): Pick<RunPlay, "vsens" | "invertY"> {
-  const v = s.verticalSensitivityEnabled ? (s.verticalSensitivity ?? s.sensitivity) : s.sensitivity;
-  return { ...(Number.isFinite(v) && v > 0 ? { vsens: v } : {}), ...(s.m_pitch < 0 ? { invertY: true } : {}) };
-}
+/** RunPlay's vertical look (mouse-settings.ts, DOM-free so it can be tested). */
+export { pitchPlay } from "./mouse-settings";
 
 /**
  * After a submitted run: waits for the self-check and the upload (its run id; "" = not stored: offline, refused at

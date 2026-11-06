@@ -10,29 +10,31 @@ import { playerGlowControls } from "./player-glow-controls";
 //   ┌ the ask (or the thanks) ───────┬ Knife  Finish  Gloves  Colourway  Hat  Ghost  Trail ────────────┐
 //   │ two short lines, the amount    │ the Loadout's own stage (ui/loadout-view.ts  │ the slot's item    │
 //   │ and the Support button         │ in preview mode, supporter items only: drag  │ from each set      │
-//   │ your card in each set, fanned  │ to turn; nothing is equipped or saved),      │ your name's colour │
-//   │ (the picked one in front),     │ dressed and lit in the picked set; trying an │ and effect         │
-//   │ the sets' names under it       │ item on picks its set                        │ player glow        │
+//   │ your card in each set, fanned  │ to turn; nothing is equipped or saved),      │ Your name | Your   │
+//   │ (the picked one in front),     │ dressed and lit in the picked set; trying an │ card: the name and │
+//   │ the sets' names under it       │ item on picks its set                        │ card looks         │
+//   │                                │                                              │ player glow        │
 //   │ the other perks in a sentence  │                                              │                    │
 //   └────────────────────────────────┴──────────────────────────────────────────────┴────────────────────┘
 //
 // A supporter (GET /me/supporter: a payment or an admin's grant) gets a thank-you and links to their Loadout and Edit card
 // instead, and their "Show me in Top supporters" switch on that tab. The previews follow the game's settings: Potato
 // mode holds the animated ones still (viewmodel/finishes/shader.ts setCosmeticsStill), reduced motion stops the name
-// effects (ui/marks.css).
+// effects (ui/marks.css), and both hold the decorations, borders and card effects still (avatar-deco.css, card-fx.css).
 
 import { WAVEDASH } from "../platform/env";
 import { wavedashCopy } from "../platform/wavedash";
 import "./support.css";
 import { api, lastKnownMe, type MySupport, type Profile, type TopSupporter } from "../api";
-import { NAME_COLORS, NAME_EFFECTS, type NameColorId, type NameEffect, type NameLook } from "../creators";
-import { cosmetic, DEFAULT_COSMETICS, supporterItem, SUPPORTER_MIN_USD, SUPPORTER_SETS, type SupporterSetId } from "../progression";
+import { NAME_COLORS, peakOf, type NameColorId } from "../creators";
+import { lookSaver, PREVIEW_LOOK, savedPicks, type LookPicks } from "../support-look";
+import { COSMETICS, cosmetic, DEFAULT_COSMETICS, supporterItem, SUPPORTER_MIN_USD, SUPPORTER_SETS, type SupporterSetId } from "../progression";
 import { UNRANKED } from "../ranking";
 import { uiSound } from "../audio/ui";
 import { getLoadout, getPlayerGlow, playerGlowRevision, setPlayerGlow } from "../player/cosmetics";
 import { discordLink } from "./community";
 import { me, myProfile, openAccount, accountGeneration, onAccountChange } from "./account-state";
-import { playerCard } from "./card";
+import { playerCard, type SupporterLook } from "./card";
 import { h } from "./dom";
 import { hopIndicator } from "./hop";
 import { loadoutView, type LoadoutChoice, type LoadoutModel } from "./loadout-view";
@@ -40,6 +42,7 @@ import { nameAttrs, supporterMark } from "./marks";
 import { navigate } from "./nav";
 import { profileWriteGuard } from "./profile-write";
 import { supportGifting } from "./support-gifting";
+import { borderChoices, cardEffectChoices, cardFxSwatch, COLOUR_CHOICES, DECO_CHOICES, decoSwatch, EFFECT_CHOICES, FONT_CHOICES, nameSample } from "./supporter-pickers";
 
 /**
  * Back from Stripe's payment page (/?support=thanks, src/stripe.ts success_url): read at load, before menu.ts tidies the
@@ -56,7 +59,9 @@ export const SUPPORT_ICON = `<svg viewBox="0 0 24 24" aria-hidden="true" width="
 /** A set's look on the preview (your own knife, so the finish shows on it). */
 function setLook(id: SupporterSetId): LoadoutChoice {
   const st = SUPPORTER_SETS.find((x) => x.id === id) ?? SUPPORTER_SETS[0];
-  return { body: getLoadout().body ?? "body-a", knife: getLoadout().knife ?? DEFAULT_COSMETICS.knife, ...st.look };
+  // The set's gun camo (progression.ts: every Supporter set has one).
+  const camo = COSMETICS.find((c) => c.slot === "camo" && c.set === st.id)?.id ?? null;
+  return { body: getLoadout().body ?? "body-a", knife: getLoadout().knife ?? DEFAULT_COSMETICS.knife, camo, ...st.look };
 }
 
 /** The Loadout's model for trying the set on: every supporter item shown and clickable, nothing saved. */
@@ -149,47 +154,47 @@ export function supportScreen(o: SupportScreenOpts): HTMLElement {
   setHost.append(loadout);
   // Your name's look and the glow controls sit under the items, beside the stage.
   const side = h("div.sp-side");
-  const grid = loadout.querySelector(".lo-grid");
+  const grid = loadout.querySelector<HTMLElement>(".lo-grid");
+  const gridWatch: { disconnect(): void }[] = [];
   if (grid) {
     grid.replaceWith(side);
     side.append(grid);
+    // Slots with more items than fit (Hat, Finish) scroll; a soft edge says there's more until the end is reached.
+    const more = () => grid.classList.toggle("sp-more", grid.scrollTop + grid.clientHeight < grid.scrollHeight - 4);
+    grid.addEventListener("scroll", more, { passive: true });
+    const items = new MutationObserver(() => requestAnimationFrame(more));
+    const size = new ResizeObserver(more);
+    items.observe(grid, { childList: true });
+    size.observe(grid);
+    gridWatch.push(items, size);
   }
 
-  // --- a supporter's pickers are their real name look: seeded from the saved one (drawAsk) and saved on every pick,
-  // a moment after the last one (POST /me/supporter, as Edit card → Name does). A failed save puts the saved look back.
+  // --- a supporter's pickers are their real look: seeded from the saved one (drawAsk) and saved a moment after the
+  // last pick (POST /me/supporter, as Edit card does), one request at a time, each against the server's last answer
+  // (support-look.ts lookSaver). A failed save puts the saved look back. Everyone else's picks only dress the cards.
   const nameStatus = h("span.pf-status");
-  let savedLook: { color: NameColorId | null; effect: NameEffect | null } | null = null;
-  let saveTimer = 0;
-  let saveSeq = 0;
+  let fadeTimer = 0;
   const status = (text: string, kind = "") => {
+    clearTimeout(fadeTimer);
     nameStatus.textContent = text;
     nameStatus.className = `pf-status ${kind}`;
   };
-  look.on(() => {
-    if (!savedLook || (look.color === savedLook.color && look.effect === savedLook.effect)) return;
-    clearTimeout(saveTimer);
-    const write=profileWriteGuard(lastKnownMe()?.id??"");
-    status("Saving…");
-    saveTimer = window.setTimeout(() => {
-      const seq = ++saveSeq;
-      const want = { color: look.color, effect: look.effect };
-      api.saveSupporter({ nameColor: want.color, nameEffect: want.effect },write).then(
-        (s) => {
-          if (seq !== saveSeq) return;
-          savedLook = { color: s.nameColor, effect: s.nameEffect };
-          status("Saved", "saved");
-          window.setTimeout(() => seq === saveSeq && nameStatus.classList.add("fade"), 1500);
-        },
-        () => {
-          if (seq !== saveSeq || !savedLook) return;
-          status("Couldn't save", "error");
-          look.set({ ...savedLook });
-        },
-      );
-    }, 400);
+  const saver = lookSaver({
+    save: (patch) => api.saveSupporter(patch, profileWriteGuard(lastKnownMe()?.id ?? "")),
+    restore: (picks) => look.set(picks),
+    status: (state) => {
+      if (state === "idle") status("");
+      else if (state === "saving") status("Saving…");
+      else if (state === "error") status("Couldn't save", "error");
+      else {
+        status("Saved", "saved");
+        fadeTimer = window.setTimeout(() => nameStatus.classList.add("fade"), 1500);
+      }
+    },
   });
+  look.on(() => saver.edit(look));
 
-  side.append(nameLook(look, nameStatus), glowEditor.panel);
+  side.append(lookPickers(look, nameStatus, deck), glowEditor.panel);
   const perksLine = perks();
   const page = h("div.sp", { role: "tabpanel", "aria-labelledby": "sp-tab-page" }, h("div.sp-col", null, ask, deck.el, perksLine), setHost);
   // ← → flip the cards when nothing else is listening for them (focus on the page, not in a field or the item grid).
@@ -227,11 +232,12 @@ export function supportScreen(o: SupportScreenOpts): HTMLElement {
     if (supporter !== !!since) (supporter = !!since), model.changed();
     perksLine.hidden = !!since;
     glowEditor.seed(nextGlow, preserveGlowEdits);
-    if (since && s?.supporter && !savedLook) {
+    if (since && s?.supporter && !saver.seeded) {
       const own = s.supporter;
       look.own = { color2: own.nameColor2 };
-      look.set({ color: own.nameColor, effect: own.nameEffect });
-      savedLook = { color: own.nameColor, effect: own.nameEffect };
+      const picks = savedPicks(own);
+      saver.seed(picks);
+      look.set(picks);
     }
     again.hidden = !(since && s?.payments);
     if (since) {
@@ -368,8 +374,9 @@ export function supportScreen(o: SupportScreenOpts): HTMLElement {
     disposed = true;
     clearTimeout(pendingTimer);
     glowEditor.dispose();
-    clearTimeout(saveTimer);
-    ++saveSeq;
+    saver.reset();
+    clearTimeout(fadeTimer);
+    gridWatch.forEach((w) => w.disconnect());
     cleanup.disconnect();
   });
   cleanup.observe(document.body, { childList: true, subtree: true });
@@ -436,8 +443,9 @@ export function supportScreen(o: SupportScreenOpts): HTMLElement {
   onAccountChange(root, () => {
     const generation = accountGeneration();
     glowEditor.reset();
-    saveSeq++; clearTimeout(saveTimer);
-    savedLook = null; signedInAs = null;
+    saver.reset();
+    status("");
+    signedInAs = null;
     supporter = false; drawPending();
     deck.reload();
     void me().then(u => {
@@ -452,16 +460,13 @@ export function supportScreen(o: SupportScreenOpts): HTMLElement {
 
 /** A supporter's "Show me in Top supporters" switch (also the About page's thank-you list). */
 function boardSwitch(s: MySupport): HTMLElement {
-  const generation=accountGeneration(),write=profileWriteGuard(lastKnownMe()?.id??"");
   const box = h("input.switch", { type: "checkbox", checked: !!s.supporter?.showOnBoard }) as HTMLInputElement;
   const status = h("span.pf-status", { role: "status", "aria-live": "polite" });
   box.onchange = async () => {
-    if(generation!==accountGeneration())return;
     box.disabled = true;
     status.textContent = "Saving…";
     try {
-      const next = await api.saveSupporter({ showOnBoard: box.checked },write);
-      if(generation!==accountGeneration()||!box.isConnected)return;
+      const next = await api.saveSupporter({ showOnBoard: box.checked });
       box.checked = next.showOnBoard;
       status.textContent = "Saved";
     } catch {
@@ -497,25 +502,23 @@ function topList(top: TopSupporter[] | "failed" | null): HTMLElement {
 }
 
 // ---------------------------------------------------------------------------------------------
-// The name look the card and the examples share: a colour and an effect. For everyone else a preview; for a supporter
-// their real look, saved on every pick (supportScreen, like Edit card → Name).
+// The look the cards and the pickers share: the name's colour, effect and font, the avatar decoration and the card's
+// border and effect (support-look.ts). For everyone else a preview; for a supporter their real look, saved on every
+// pick (supportScreen, like Edit card).
 
-interface Look {
-  color: NameColorId | null;
-  effect: NameEffect | null;
+interface Look extends LookPicks {
   /** A supporter's own look: the saved gradient colour (null = the automatic paler shade), not the preview's pick. */
   own: { color2: NameColorId | null } | null;
   /** The player's own name ("Your name" until we know it). */
   name: string;
   on(fn: () => void): void;
-  set(p: Partial<Pick<Look, "color" | "effect" | "name">>): void;
+  set(p: Partial<LookPicks & Pick<Look, "name">>): void;
 }
 
 function lookState(): Look {
   const fns: (() => void)[] = [];
   const l: Look = {
-    color: "aqua",
-    effect: "sparkle",
+    ...PREVIEW_LOOK,
     own: null,
     name: "Your name",
     on: (fn) => void fns.push(fn),
@@ -524,12 +527,13 @@ function lookState(): Look {
   return l;
 }
 
-/** The look as nameAttrs reads it: a gradient's second colour is the next colour along (never the same one). */
-function lookAttrs(l: Pick<Look, "color" | "effect"> & Partial<Pick<Look, "own">>): NameLook {
-  if (l.own) return { nameColor: l.color, nameEffect: l.effect, nameColor2: l.own.color2 };
+/** The look as the card reads it: a gradient's second colour is the next colour along (never the same one). */
+function lookAttrs(l: LookPicks & Partial<Pick<Look, "own">>): SupporterLook {
+  const more = { nameFont: l.font, avatarDeco: l.deco, cardBorder: l.border, cardEffect: l.cardEffect };
+  if (l.own) return { nameColor: l.color, nameEffect: l.effect, nameColor2: l.own.color2, ...more };
   const i = NAME_COLORS.findIndex((c) => c.id === l.color);
   const color2 = NAME_COLORS[(i + 2) % NAME_COLORS.length].id;
-  return { nameColor: l.color, nameEffect: l.effect, nameColor2: color2 };
+  return { nameColor: l.color, nameEffect: l.effect, nameColor2: color2, ...more };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -547,6 +551,8 @@ interface Deck {
   step(by: -1 | 1): void;
   /** The account changed: read the profile again. */
   reload(): void;
+  /** Whose card it is: the avatar the decoration pickers wear, and the peak (T7+) whose layers "None" keeps. */
+  player(): Profile["player"];
 }
 
 const quietMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches || document.body.classList.contains("potato");
@@ -644,6 +650,7 @@ function cardDeck(l: Look, who: () => { provider: string } | null, pick: (id: Su
       draw();
       load();
     },
+    player: () => (profile ?? freshProfile(l.name, who()?.provider ?? null)).player,
   };
   let loads = 0;
   const load = () => {
@@ -663,37 +670,91 @@ function cardDeck(l: Look, who: () => { provider: string } | null, pick: (id: Su
 }
 
 // ---------------------------------------------------------------------------------------------
-// Your name's colour and effect (shown on the cards; beside the stage, above the player glow).
+// Your look, beside the stage above the player glow: two views under one heading, so the column keeps its height.
+//   Your name: colour, effect and font.   Your card: avatar decoration, card border and card effect.
+// The choices and swatches are Edit card's (ui/supporter-pickers.ts); every pick shows on the cards at once.
 
-function nameLook(l: Look, status: HTMLElement): HTMLElement {
-  const colours = h("div.sp-colours", { role: "radiogroup", "aria-label": "Name colour" });
-  const effects = h("div.sp-fx", { role: "radiogroup", "aria-label": "Name effect" });
-  const draw = () => {
-    colours.replaceChildren(
-      ...[{ id: null as NameColorId | null, name: "White", hex: "#eef1f6" }, ...NAME_COLORS].map((c) =>
-        h(`button.sp-swatch${l.color === c.id ? ".on" : ""}`, { type: "button", role: "radio", "aria-checked": String(l.color === c.id), "aria-label": c.name, title: c.name, style: `--sw:${c.hex}`, onclick: () => l.set({ color: c.id }) }),
+function lookPickers(l: Look, status: HTMLElement, deck: Pick<Deck, "player">): HTMLElement {
+  let view: "name" | "card" = "name";
+  const tabs = h("div.sp-look-tabs", { role: "tablist", "aria-label": "Your look" });
+  const body = h("div.sp-look", { role: "tabpanel" });
+  /** One row of choices: a radio group of swatch buttons, its label (Your card's rows) beside it. */
+  const row = <T extends string | null>(label: string, shown: string | null, choices: { id: T; name: string }[], cur: T, look: (id: T) => HTMLElement, pick: (id: T) => void) =>
+    h(
+      "div.sp-look-row",
+      null,
+      shown ? h("span.sp-look-label", { "aria-hidden": "true" }, shown) : null,
+      h(
+        "div.sp-look-opts",
+        { role: "radiogroup", "aria-label": label },
+        ...choices.map((c) =>
+          h(`button.sp-look-i${cur === c.id ? ".on" : ""}`, { type: "button", role: "radio", "aria-checked": String(cur === c.id), "aria-label": c.name, title: c.name, "data-id": c.id ?? "none", onclick: () => pick(c.id) }, look(c.id)),
+        ),
       ),
     );
-    effects.replaceChildren(
-      ...[{ id: null as NameEffect | null, name: "Plain" }, ...NAME_EFFECTS].map((e) => {
-        const a = nameAttrs(lookAttrs({ color: l.color, effect: e.id, own: l.own }), "#eef1f6");
-        return h(
-          `button.sp-fx-i${l.effect === e.id ? ".on" : ""}`,
-          { type: "button", role: "radio", "aria-checked": String(l.effect === e.id), onclick: () => l.set({ effect: e.id }) },
-          h("span.sp-fx-s", { "aria-hidden": "true", style: a.style, class: a.class }, "Aa"),
-          e.name,
-        );
-      }),
+  const draw = () => {
+    // A pick redraws the rows: keep focus on the same choice for keyboard players.
+    const active = document.activeElement;
+    const at = active && body.contains(active) ? [...body.querySelectorAll("button")].indexOf(active as HTMLButtonElement) : -1;
+    // A tab switch (pointer or keys) redraws the tabs too: focus moves to the selected one (Sol R2).
+    const onTab = !!active && tabs.contains(active);
+    tabs.replaceChildren(
+      ...(["name", "card"] as const).map((v) =>
+        h(`button.sp-look-tab${v === view ? ".on" : ""}`, { type: "button", role: "tab", "aria-selected": String(v === view), tabindex: v === view ? "0" : "-1", "data-view": v, onclick: () => {
+          if (v !== view) (view = v), draw();
+          // Also where a click doesn't focus a button (Safari): keep focus on the tab, as the arrow keys do.
+          tabs.querySelector<HTMLElement>(".sp-look-tab.on")?.focus({ preventScroll: true });
+        } }, v === "name" ? "Your name" : "Your card"),
+      ),
     );
+    const attrs = lookAttrs(l);
+    if (view === "name") {
+      const colours = h("div.sp-colours", { role: "radiogroup", "aria-label": "Name colour" });
+      colours.append(
+        ...COLOUR_CHOICES.map((c) =>
+          h(`button.sp-swatch${l.color === c.id ? ".on" : ""}`, { type: "button", role: "radio", "aria-checked": String(l.color === c.id), "aria-label": c.name, title: c.name, style: `--sw:${c.hex}`, onclick: () => l.set({ color: c.id }) }),
+        ),
+      );
+      const effects = h(
+        "div.sp-fx",
+        { role: "radiogroup", "aria-label": "Name effect" },
+        ...EFFECT_CHOICES.map((e) => {
+          const a = nameAttrs({ ...attrs, nameEffect: e.id }, "#eef1f6");
+          return h(
+            `button.sp-fx-i${l.effect === e.id ? ".on" : ""}`,
+            { type: "button", role: "radio", "aria-checked": String(l.effect === e.id), onclick: () => l.set({ effect: e.id }) },
+            h("span.sp-fx-s", { "aria-hidden": "true", style: a.style, class: a.class }, "Aa"),
+            e.name,
+          );
+        }),
+      );
+      body.replaceChildren(colours, effects, row("Name font", null, FONT_CHOICES, l.font, (id) => nameSample({ ...attrs, nameFont: id }), (id) => l.set({ font: id })));
+    } else {
+      const player = deck.player();
+      const peak = peakOf(player.special);
+      body.replaceChildren(
+        row("Avatar decoration", "Avatar", DECO_CHOICES, l.deco, (id) => decoSwatch(player, id, l.color), (id) => l.set({ deco: id })),
+        row("Card border", "Border", borderChoices(peak), l.border, (id) => cardFxSwatch(peak, id, null, l.color), (id) => l.set({ border: id })),
+        row("Card effect", "Effect", cardEffectChoices(peak), l.cardEffect, (id) => cardFxSwatch(peak, null, id, l.color), (id) => l.set({ cardEffect: id })),
+      );
+    }
+    if (at >= 0) body.querySelectorAll("button")[at]?.focus({ preventScroll: true });
+    if (onTab) tabs.querySelector<HTMLElement>(".sp-look-tab.on")?.focus({ preventScroll: true });
   };
+  tabs.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    view = view === "name" ? "card" : "name";
+    draw();
+  });
   l.on(draw);
   draw();
-  return h("div.sp-name", null, h("h3.sp-h", null, "Your name ", status), colours, effects);
+  return h("div.sp-name", null, h("div.sp-look-head", null, tabs, status), body);
 }
 
 /** The rest, in a sentence. */
 function perks(): HTMLElement {
-  return h("p.sp-perks", null, "You also get a heart by your name, a reserved spot on full servers and a place in Top supporters.");
+  return h("p.sp-perks", null, "You also get name fonts, avatar decorations, card borders and effects, a heart by your name, a reserved spot on full servers and a place in Top supporters.");
 }
 
 export const openSupport = () => navigate({ screen: "support" });

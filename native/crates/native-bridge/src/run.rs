@@ -11,6 +11,8 @@ const START_SLOW_SPEED: f64 = 50.0;
 /// Timer rules 4 (website timer.ts START_ZONE_NO_PREHOP_V4): maps whose start zones block prehops in every style.
 /// Part of the rules: adding a map here needs a new rules version, or that map's rules 4 runs would re-time.
 pub const START_ZONE_NO_PREHOP_V4: [&str; 1] = ["bhop_futile"];
+pub const UPDATE_STOPPED_ANTI_SKIP: u32 = 32;
+pub const UPDATE_STOPPED_RESPAWN: u32 = 64;
 
 /// Whether start-zone prehops lose their speed for this style on this map under `rules` (website `blocksPrehops`).
 pub fn blocks_prehops(style: &str, map: &str, rules: u32) -> bool {
@@ -42,7 +44,11 @@ impl BhZone {
             && p[2] + if crouched { 45.0 } else { 62.0 } >= f64::from(self.mins[2])
     }
     pub fn json(&self) -> Value {
-        let mut v = json!({"kind": (["start","end","stage","checkpoint"][self.kind as usize]), "mins": self.mins, "maxs": self.maxs});
+        let kind = ["start", "end", "stage", "checkpoint", "anti-skip"]
+            .get(self.kind as usize)
+            .copied()
+            .unwrap_or("start");
+        let mut v = json!({"kind": kind, "mins": self.mins, "maxs": self.maxs});
         if self.track != 0 {
             v["track"] = self.track.into();
         }
@@ -69,7 +75,7 @@ impl Default for BhRunOptions {
         Self {
             prespeed_cap: 290.0,
             cap_enabled: 1,
-            rules: 4,
+            rules: 5,
             block_prehops: 0,
             strafe_keys: 0,
             start_reentry_cap: 0.0,
@@ -127,6 +133,7 @@ pub struct Timer {
     prev_position: Option<[f32; 3]>,
     start_crossing: Crossing,
     end_crossing: Crossing,
+    stopped_reason: u32,
 }
 impl Timer {
     pub fn new(zones: Vec<BhZone>, options: BhRunOptions, interval: f32) -> Self {
@@ -150,6 +157,7 @@ impl Timer {
             prev_position: None,
             start_crossing: Crossing::boundary(0),
             end_crossing: Crossing::boundary(FRACTION_UNITS),
+            stopped_reason: 0,
         }
     }
     pub fn reset(&mut self, interval: f32) {
@@ -277,6 +285,7 @@ impl Timer {
         self.splits.clear();
         self.start_crossing = Crossing::boundary(0);
         self.end_crossing = Crossing::boundary(FRACTION_UNITS);
+        self.stopped_reason = 0;
     }
     pub fn before_step(&mut self, cmd: BhCmd, s: BhState) -> Option<[f32; 3]> {
         let grounded = s.grounded != 0 && s.on_ladder == 0;
@@ -396,6 +405,7 @@ impl Timer {
         let events = s.events;
         self.state.last_tick = s.tick;
         self.state.update_flags = 0;
+        self.stopped_reason = 0;
         self.disarm_relocated_landing(landing);
         if s.on_ladder != 0 || events & (EVENT_JUMPED | EVENT_TELEPORTED | EVENT_RESPAWNED) != 0 {
             self.state.last_perfect_tick = -1;
@@ -417,6 +427,18 @@ impl Timer {
         let in_start = start.is_some();
         let was_running = self.state.status == 1;
         let mut clamp = None;
+        let rules5 = self.options.rules >= 5
+            && game.is_some_and(|g| g.settings.physics_version >= 26);
+        if rules5 && (was_running || self.state.pending_start != 0) {
+            if events & EVENT_RESPAWNED != 0 {
+                self.stop(s.tick, in_start, UPDATE_STOPPED_RESPAWN);
+                return None;
+            }
+            if run_timing::touches_anti_skip(game, s, from, &self.zones, self.state.track) {
+                self.stop(s.tick, in_start, UPDATE_STOPPED_ANTI_SKIP);
+                return None;
+            }
+        }
         if self.options.rules == 1 {
             if let Some(start) = start.filter(|_| !pass_end) {
                 if self.state.status != 0 {
@@ -566,7 +588,7 @@ impl Timer {
         if self.state.status == 1 {
             let last = self.splits.last().map_or(-1, |s| i64::from(s.index));
             if let Some(z) = self.zones.iter().find(|z| {
-                z.kind >= 2
+                (2..=3).contains(&z.kind)
                     && z.track == self.state.track
                     && i64::from(z.index) > last
                     && z.contains(s.position, s.crouched != 0)
@@ -622,6 +644,20 @@ impl Timer {
         };
         clamp
     }
+    fn stop(&mut self, tick: u32, in_start: bool, reason: u32) {
+        self.state.status = 0;
+        self.state.start_tick = 0;
+        self.state.end_tick = 0;
+        self.state.last_tick = tick;
+        self.state.pending_start = 0;
+        self.state.seconds = 0.0;
+        self.state.update_flags = reason;
+        self.stopped_reason = reason;
+        self.armed = false;
+        self.was_in_start = in_start;
+        self.state.in_start = u32::from(in_start);
+        self.clear_stats();
+    }
     pub fn ticks(&self) -> u32 {
         match self.state.status {
             1 => self.state.last_tick - self.state.start_tick,
@@ -657,6 +693,7 @@ impl Timer {
             "jumps":self.state.jumps,"strafes":self.state.strafes,"perfectJumps":self.state.perfect_jumps,"measuredJumps":self.state.measured_jumps,"lastPerfectTick":self.state.last_perfect_tick,
             "syncGood":self.state.sync_good,"syncTotal":self.state.sync_total,"syncPercent":self.state.sync_percent,"perfPercent":self.state.perf_percent,
             "inStart":self.state.in_start!=0,"pendingStart":self.state.pending_start,"updateFlags":self.state.update_flags,
+            "stoppedReason":self.stopped_reason,
             "splits":self.splits.iter().map(|s|json!({"index":s.index,"kind":if s.kind==2 {"stage"} else {"checkpoint"},"ticks":s.ticks})).collect::<Vec<_>>()})
     }
 }

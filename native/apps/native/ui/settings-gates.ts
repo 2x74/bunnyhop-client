@@ -40,6 +40,10 @@ const DESKTOP_CHAT_ROWS: Record<string, Gate> = WEBSITE_CHAT_BIND
 const ROWS: Record<string, Gate> = {
   ...WEBSITE_CHAT_ROWS,
   "mouse/Mouse/Sensitivity": needs("sensitivity"),
+  "mouse/Mouse/m_yaw": needs("mYaw"),
+  "mouse/Mouse/m_pitch": needs("mPitch"),
+  "mouse/From another game/Game": menuOnly,
+  "mouse/From another game/Sensitivity there": menuOnly,
   "mouse/Mouse/Mouse DPI": menuOnly,
   "mouse/Mouse/Show DPI on profile": menuOnly,
   "mouse/Mouse/Separate vertical sensitivity": needs("separateVertical"),
@@ -129,6 +133,10 @@ const ROWS: Record<string, Gate> = {
   "hud/More elements/Speed colours": needs("speedColors"),
   "hud/More elements/Gain ticks": needs("gainTicks"),
   "hud/More elements/Edge glow": needs("hudEdgeGlow"),
+  "hud/More elements/Position readout": needs("showPos"),
+  "hud/Landing spot/Landing spot": needs("landing"),
+  "hud/Landing spot/Path": needs("landing"),
+  "hud/Landing spot/Colour": needs("landing"),
   "hud/More elements/Zones": needs("zonesVisible"),
   "hud/Triggers and clips/Triggers": needs("triggersVisible"),
   "hud/Triggers and clips/Clips": needs("clipsVisible"),
@@ -145,6 +153,8 @@ const ROWS: Record<string, Gate> = {
 
   // Bind rows: one per action, in whichever group the website puts it.
   ...Object.fromEntries(ACTIONS.map((action) => [`keys/*/${action.label}`, needs(`bind:${action.id}`)])),
+  "keys/Chat and command keys/Chat message": needs("bind:chat"),
+  "keys/Tools/Console and configs": needs("bind:console"),
   "keys/Movement/Null binds": needs("nullBinds"),
   "keys/Movement/Release W on jump": needs("wRelease"),
   "hud/JHUD/JHUD": needs("hud:jhud"),
@@ -191,6 +201,7 @@ const ROWS: Record<string, Gate> = {
   "ghost/Look/Trail": needs("ghostTrail"),
   "ghost/Route guide/Ghost route": needs("ghostRoute"),
   "ghost/Route guide/Route ghost": needs("ghostRoute", "ghostRouteSource"),
+  "ghost/Route guide/Route only": needs("ghostRoute", "ghostRouteOnly"),
   "ghost/Route guide/Route path": needs("ghostRoute", "ghostRouteMode"),
   "ghost/More/Fade when close": needs("ghostNearFade"),
   "ghost/More/Replay file": excluded("Race a replay file from Replays or the pause menu's Load replay file."),

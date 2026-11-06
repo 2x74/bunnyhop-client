@@ -4,12 +4,15 @@ import { resolve } from "node:path";
 import { inspectKnifeTrack } from "../../web/src/viewmodel/inspects/third";
 import { inspectSetFor } from "../../web/src/viewmodel/inspects/index";
 import { KNIVES } from "../../web/src/viewmodel/knives/index";
+import { partChain, tpFrame } from "../../web/src/viewmodel/knives/tp-parts";
+import { rig, knifePartBone } from "../../web/src/player/bunny/rig";
 import { TP_CARROT } from "../../web/src/viewmodel/knives/ctx";
 // The authored bayonet hold uses performance.now() for idle wrist sway. Freeze it while
 // baking / comparing knife-local tracks so wall-clock timing cannot change the asset.
 Object.defineProperty(performance, "now", { value: () => 0, configurable: true });
 Math.random = () => 0;
 const output = resolve(process.argv[2] ?? "target/native-assets");
+const bunny = rig();
 const knives = Object.fromEntries(
   KNIVES.map((knife) => {
     const def = knife.id === "carrot" ? null : knife,
@@ -18,6 +21,12 @@ const knives = Object.fromEntries(
       knife.id,
       {
         tp: knife.tp ?? TP_CARROT,
+        parts: {
+          frame: Array.from(tpFrame(knife.tp ?? TP_CARROT)),
+          chain: partChain(knife),
+          bones: (knife.joints ?? []).map((joint) => bunny.names.indexOf(knifePartBone(joint))),
+          spinner: (knife.joints ?? []).indexOf("Whirl_Spin"),
+        },
         maxLoops: set.spec.maxLoops ?? 6,
         clips: set.clips.map((c) => {
           const tr = inspectKnifeTrack(c, def);
@@ -30,6 +39,8 @@ const knives = Object.fromEntries(
             n: tr.n,
             q: Array.from(tr.q),
             p: Array.from(tr.p),
+            a: Array.from(tr.a),
+            J: tr.J,
           };
         }),
       },

@@ -38,7 +38,7 @@ fn v(version: u32) -> Settings {
 #[test]
 fn versions_and_fix_bits() {
     assert_eq!(Settings::css_bhop().physics_version, PHYSICS_V1, "native default stays v1");
-    assert_eq!(PHYSICS_LATEST, PHYSICS_V25);
+    assert_eq!(PHYSICS_LATEST, 26);
     assert_eq!(physics_fixes(PHYSICS_V1), Some(0));
     assert_eq!(physics_fixes(PHYSICS_V2), Some(PHYSICS_FIX_PLAYERCLIP | PHYSICS_FIX_UNDUCK_JUMP));
     assert_eq!(
@@ -104,7 +104,8 @@ fn versions_and_fix_bits() {
     assert_eq!(physics_fixes(PHYSICS_V23), physics_fixes(PHYSICS_V22));
     assert_eq!(physics_fixes(PHYSICS_V24), physics_fixes(PHYSICS_V23));
     assert_eq!(physics_fixes(PHYSICS_V25), physics_fixes(PHYSICS_V24));
-    assert_eq!(physics_fixes(26), None);
+    assert_eq!(physics_fixes(26), physics_fixes(PHYSICS_V25));
+    assert_eq!(physics_fixes(27), None);
     // v7 used all 16 bits of the old diagnostic mask (base 0x1_0000); v8's fix is bit 16, so the base moved to bit 24
     // with 24 fix bits; v15's fix is bit 24, so it moved again to bit 25 with 25 fix bits, v16's is bit 25, so it moved
     // to bit 26, and v17's four are bits 26..29, so it is now bit 30 with 30 fix bits. Versions keep their fix sets bit

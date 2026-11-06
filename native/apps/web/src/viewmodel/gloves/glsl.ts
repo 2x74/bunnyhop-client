@@ -213,6 +213,10 @@ export const GLOVE_FRAGMENT_ALBEDO = /* glsl */ `
   // A finished blade is the finish's alone (finishShade, unbumped normal).
   if (abs(vFin.z - 1.0) < 0.5) kM = 0.0;
 #endif
+#ifdef HILT
+  // A hilt part under a hilt skin is the skin's alone (viewmodel/hilts/glsl.ts).
+  if (hiltRole() > 0.5) kM = 0.0;
+#endif
   if (kM > 0.5) gH = kHeight(kM, gLv);
 #endif
   if (gLv > 0.5) {

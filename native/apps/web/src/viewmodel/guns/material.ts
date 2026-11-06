@@ -22,6 +22,8 @@ import { solidMaterial, type PlayerUniforms } from "../../player/materials";
 import { FIN_ENV_LODS } from "../finishes/environment";
 import type { MaterialLook } from "../finishes/shader";
 import type { Paint } from "../../player/bunny/builder";
+import type { CamoStyle } from "../../camo";
+import { camoUniforms, patchCamo } from "./camo";
 
 /** Material codes (finishUV.w = 2 + code). */
 export const GUN_MAT = { poly: 0, metal: 1, dark: 2, grip: 3, wood: 4, glass: 5 } as const;
@@ -65,7 +67,7 @@ varying vec3 vGunP;
 #ifndef GUN_NO_ENV
 #define GUN_ENV 1
 #ifdef FINISH
-#if FINISH >= 22
+#if FINISH >= 22 && FINISH <= 27
 #ifndef FINISH_LOD
 #define GUN_ENV_DECLARED 1
 #endif
@@ -153,7 +155,14 @@ vec3 gunShade(float code, vec3 base, vec3 lit, vec3 n, vec3 V, vec3 L, float key
 const FRAG_MAIN = /* glsl */ `
 #ifndef GUN_CHEAP
   if (vGunMat > 1.5) {
+#ifdef GUN_CAMO
+    // A camo (guns/camo.ts) is a coating: the coated parts shade as its sheen (grips keep their checkering).
+    float gc = floor(vGunMat - 2.0 + 0.5);
+    bool coated = vCamo.x > 0.5 && gc < 2.5 || vCamo.x > 0.5 && gc > 3.5;
+    vec3 gs = gunShade(coated ? float(CAMO_SHEEN) : gc, coated ? camoAlb : vColor, col, n, V, L, key);
+#else
     vec3 gs = gunShade(floor(vGunMat - 2.0 + 0.5), vColor, col, n, V, L, key);
+#endif
     if (back > 0.5) col = gs;
   }
 #ifdef GUN_FLASH
@@ -162,7 +171,11 @@ const FRAG_MAIN = /* glsl */ `
     vec3 fd = uGunFlashPos - vWorldPos;
     float fl = length(fd);
     float wrap = 0.35 + 0.65 * max(dot(n, fd / max(fl, 1e-3)), 0.0);
+#ifdef GUN_CAMO
+    col += uGunFlash.rgb * uGunFlash.a * wrap * (vCamo.x > 0.5 ? camoAlb : vColor) * 2.2 / (1.0 + fl * fl / 90.0) * back;
+#else
     col += uGunFlash.rgb * uGunFlash.a * wrap * vColor * 2.2 / (1.0 + fl * fl / 90.0) * back;
+#endif
   }
 #endif
 #endif
@@ -183,6 +196,8 @@ export interface GunMaterialOptions {
   noEnv?: boolean;
   /** The muzzle light on hands + gun (the first-person viewmodel): adds uGunFlash / uGunFlashPos to `u`. */
   flash?: boolean;
+  /** A gun camo (camo.ts; guns/camo.ts): its pattern on the tagged parts, uCamo* added to `u`. Absent: no camo code. */
+  camo?: CamoStyle | null;
 }
 
 let warned = false;
@@ -193,6 +208,7 @@ let warned = false;
  */
 export function gunMaterial(u: PlayerUniforms, look: MaterialLook, o: GunMaterialOptions = {}): THREE.ShaderMaterial {
   const m = solidMaterial(u, look);
+  if (o.camo && patchCamo(m, o.camo)) camoUniforms(u as unknown as Record<string, THREE.IUniform>, o.camo);
   if (o.cheap) {
     m.defines = { ...m.defines, GUN_CHEAP: 1 };
     return m;

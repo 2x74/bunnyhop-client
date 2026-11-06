@@ -62,7 +62,7 @@ export const gplain = (mat: number, ao = 0): Fin => [NO_SEAM, NO_SEAM, 8 + mat, 
 
 /** Vertex: declarations. finishUV is the finishes' attribute; declared here when no finish / glove look did. */
 export const FABRIC_VERTEX_PARS = /* glsl */ `
-#if !defined(FINISH) && !defined(GLOVE)
+#if !defined(FINISH) && !defined(GLOVE) && !defined(HILT)
 attribute vec4 finishUV;
 #endif
 varying vec4 vGarm;`;

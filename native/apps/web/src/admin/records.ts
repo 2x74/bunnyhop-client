@@ -57,6 +57,7 @@ interface Settings {
   maxTimeSec: number;
   hardTier: number;
   cooldownMin: number;
+  playerCooldownMin: number;
   coalesceSec: number;
 }
 
@@ -178,6 +179,7 @@ export function recordsView(d: RecordsDeps): View {
       numIn("maxTimeSec", "Max run time (s, 0 = any)"),
       numIn("hardTier", "From this tier every WR posts: first clears, any length (0 = off)"),
       numIn("cooldownMin", "Map cooldown (min)"),
+      numIn("playerCooldownMin", "Same player on a map (min)"),
       numIn("coalesceSec", "Batch window (s)"),
       numIn("dailyCap", "Posts per day (0 = no cap)"),
       h("button", { type: "submit", class: "primary" }, "Save"),

@@ -16,9 +16,10 @@ import type { GloveStyleId } from "../../loadout";
 import { angleMatrix, rotAbout } from "../math";
 import { clampFingers } from "../fingers";
 import { GunAnimator, type CurlPreset, type GunPose } from "./anim";
-import { FingerPoser, flatCurls, handAt, solveHand, solveSilencerHand, type SolvedHand } from "./hold";
+import { FingerPoser, flatCurls, handAt, sideBind, solveHand, solveSilencerHand, type SolvedHand } from "./hold";
 import { gunRig } from "./rig";
 import type { GunDef, GunPart } from "./types";
+import { WRIST, type WristRange } from "./wrist";
 
 /** Left-hand finger presets (deg per joint + spread; index, middle, ring, pinky, thumb). */
 const PRESET_CURLS: Record<Exclude<CurlPreset, "support" | "sil">, [number, number, number, number][]> = {
@@ -49,15 +50,92 @@ export function clampFeel(feel: ArrayLike<number>, out: Float32Array): Float32Ar
 }
 
 /**
- * How much the forearms aim at the elbow anchors (1) vs continue the hand (0), and the most a wrist may bend (deg)
- * between the line the hand continues and its forearm: the firing hand nearly straight, the support hand a little
- * more (the forearm still heads toward its anchor, only as far as that allows).
+ * The forearm solve. `anchor`: how much a forearm aims at its elbow anchor (1) vs continues the hand (0); the wrist's
+ * natural range (WRIST) bounds what's left, the forearm turning with the hand past it. `carry`: how much of the wrist's
+ * way from its rest the anchor travels with (the arm moves with the hand: drawn up from below, pushed out in a reload,
+ * down for a magazine), so the forearm keeps its line instead of pivoting about a fixed point. (The recoil kick turns
+ * the gun about the firing grip by a few degrees: the wrists move under a degree.)
  */
-export const ARM = { anchor: 0.9, bendR: 14, bendL: 24 };
-/** The firing wrist's limit while the hand is on a bolt (GunPose.rightW). */
-const BOLT_WRIST = 55;
-/** The support wrist's limit while the hand is away from the gun (GunPose.leftArm): the forearm aims at its elbow as it did before the wrist limits (10-28). */
-const FREE_WRIST = 180;
+export const ARM = { anchor: 0.9, carry: 1 };
+
+export { WRIST, type WristRange } from "./wrist";
+
+/**
+ * A gun's wrist range on one side (WRIST.grip / WRIST.support with the gun's own, GunDef.wrist), opened by `work` (0..1)
+ * toward WRIST.work: the range the forearm solve keeps that wrist in.
+ */
+export function wristRange(def: GunDef | null, side: "R" | "L", work = 0, out: WristRange = { ext: 0, flex: 0, uln: 0, rad: 0 }): WristRange {
+  const base = side === "R" ? WRIST.grip : WRIST.support, own = def?.wrist?.[side];
+  const w = Math.max(0, Math.min(1, work));
+  for (const k of ["ext", "flex", "uln", "rad"] as const) {
+    const v = own?.[k] ?? base[k];
+    out[k] = v + (Math.max(v, WRIST.work[k]) - v) * w;
+  }
+  return out;
+}
+
+/** Scratch for wristAngles. */
+const wa = { T: new Float32Array(12) };
+
+/**
+ * A posed hand's wrist angles (deg; WristRange's anatomy): `flex` + flexion / - extension, `dev` + radial / - ulnar,
+ * from the forearm's axis (the arm bone's joint to the wrist) and the hand's knuckle line, palm normal and thumb side
+ * (its bind axes, guns/hold.ts sideBind, carried by the hand bone). The same measure the forearm solve clamps.
+ */
+export function wristAngles(W: ArrayLike<number>, side: "R" | "L", out = { flex: 0, dev: 0 }): { flex: number; dev: number } {
+  const r = gunRig().hands, b = armBonesOf(side);
+  const h = b.hand * 12, a = r.bone(side === "R" ? "Right_Arm" : "Left_Arm") * 12;
+  const F: V3 = [W[h + 3] - W[a + 3], W[h + 7] - W[a + 7], W[h + 11] - W[a + 11]];
+  concat(W, h, b.invHand, 0, wa.T, 0);
+  const sb = sideBind(side);
+  const ang = handFrameAngles(wa.T, sb.ax, sb.n, sb.across, F);
+  out.flex = ang[0];
+  out.dev = ang[1];
+  return out;
+}
+
+/** (flex, dev) in deg of forearm direction F (elbow -> wrist) against a hand moved by T (bind axes ax / n / across). */
+function handFrameAngles(T: ArrayLike<number>, ax: V3, n: V3, ac: V3, F: V3): [number, number] {
+  const A = mul3(T, ax), N = mul3(T, n), C = mul3(T, ac);
+  const x = F[0] * A[0] + F[1] * A[1] + F[2] * A[2];
+  return [Math.atan2(-(F[0] * N[0] + F[1] * N[1] + F[2] * N[2]), x) / D2R, Math.atan2(-(F[0] * C[0] + F[1] * C[1] + F[2] * C[2]), x) / D2R];
+}
+
+const nrm3 = (v: V3): V3 => {
+  const l = Math.hypot(v[0], v[1], v[2]) || 1;
+  return [v[0] / l, v[1] / l, v[2] / l];
+};
+
+/** Spherical blend of unit vectors a -> b by t (a straight blend when they're nearly parallel or opposite). */
+function slerp3(a: V3, b: V3, t: number): V3 {
+  const c = Math.max(-1, Math.min(1, a[0] * b[0] + a[1] * b[1] + a[2] * b[2]));
+  const th = Math.acos(c), sn = Math.sin(th);
+  if (sn < 1e-4) return nrm3([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]);
+  const wa = Math.sin((1 - t) * th) / sn, wb = Math.sin(t * th) / sn;
+  return nrm3([a[0] * wa + b[0] * wb, a[1] * wa + b[1] * wb, a[2] * wa + b[2] * wb]);
+}
+
+/**
+ * How far out of view a hand is (0 in view .. 1 well out): its wrist and its knuckles against the default framing's
+ * view (CS:S viewmodel_fov 64 at 16:9, the default offset), with a margin for the other framings and FOVs.
+ */
+function outOfView(wrist: V3, ax: V3): number {
+  let m = -1;
+  for (const s of [0, 3.2]) {
+    const x = wrist[0] + ax[0] * s + VIEW.y, y = wrist[1] + ax[1] * s - VIEW.x, z = wrist[2] + ax[2] * s;
+    if (x <= 0.75) continue;
+    m = Math.max(m, Math.min(VIEW.tanH - Math.abs(y / x), VIEW.tanV - Math.abs(z / x)));
+  }
+  // In view (or within the margin of its edge): 0; fully free 0.12 (as a tangent) past it.
+  return Math.max(0, Math.min(1, (-m - VIEW.margin) / 0.12));
+}
+const VIEW = (() => {
+  const tanV = Math.tan(Math.atan(Math.tan((64 * Math.PI) / 360) * 0.75));
+  return { x: 0.5, y: 1.5, tanV, tanH: (tanV * 16) / 9, margin: 0.08 };
+})();
+
+const mul3 = (T: ArrayLike<number>, d: V3): V3 => [T[0] * d[0] + T[1] * d[1] + T[2] * d[2], T[4] * d[0] + T[5] * d[1] + T[6] * d[2], T[8] * d[0] + T[9] * d[1] + T[10] * d[2]];
+
 /**
  * Elbow anchors (view space): forearms aim from the wrists back toward these. The pistols' (and the default): out to
  * each side and down, so the two forearms open into a V below the gun and leave the screen at its bottom edge instead
@@ -124,6 +202,8 @@ export class GunPoser {
   setGun(def: GunDef | null, glove: GloveStyleId, keepAnim = false): void {
     this.def = def;
     this.hadLeft = false;
+    this.swapK = 0;
+    this.swapT = "";
     if (!def) return;
     this.right = solveHand(def, "R", glove);
     this.left = solveHand(def, "L", glove);
@@ -134,20 +214,69 @@ export class GunPoser {
     this.targets.clear();
     for (const [k, pl] of Object.entries(def.places)) if (pl && k !== "bolt") this.targets.set(k, handAt("L", pl));
     this.rightBolt = def.places.bolt ? handAt("R", def.places.bolt) : null;
+    this.restSet(def, "R", this.right.handInGun);
+    this.restSet(def, "L", this.left.handInGun);
     if (!keepAnim || this.anim.def !== def) this.anim.setGun(def);
   }
+
+  /**
+   * A wrist's resting set (flex, dev; deg): the hold at rest (the gun at its framing), the forearm toward the elbow
+   * anchor as the hold was designed to be seen (ARM.anchor), inside the wrist's range; and where the wrist is then.
+   */
+  private restSet(def: GunDef, side: "R" | "L", handInGun: Float32Array): void {
+    const G = this.C, H = this.C2, T = this.C3, b = this.bones[side], sb = sideBind(side);
+    angleMatrix(def.frame.a[0], def.frame.a[1], def.frame.a[2], def.frame.o[0], def.frame.o[1], def.frame.o[2], G);
+    concat(G, 0, handInGun, 0, H, 0);
+    concat(H, 0, b.invHand, 0, T, 0);
+    const e = def.elbows?.[side] ?? ELBOW[side], d = b.dir;
+    const cur = mul3(T, d);
+    const D = nrm3([H[3] - e[0], H[7] - e[1], H[11] - e[2]]);
+    const k = ARM.anchor;
+    const want = nrm3([D[0] * k + cur[0] * (1 - k), D[1] * k + cur[1] * (1 - k), D[2] * k + cur[2] * (1 - k)]);
+    this.rest[side][0] = H[3];
+    this.rest[side][1] = H[7];
+    this.rest[side][2] = H[11];
+    const [fl, dv] = handFrameAngles(T, sb.ax, sb.n, sb.across, want);
+    const rg = wristRange(def, side);
+    const lf = fl >= 0 ? rg.flex : rg.ext, ld = dv >= 0 ? rg.rad : rg.uln;
+    const over = Math.sqrt((fl / lf) ** 2 + (dv / ld) ** 2);
+    const k1 = over > 1 ? 1 / over : 1;
+    this.set[side][0] = fl * k1;
+    this.set[side][1] = dv * k1;
+  }
+  /** The wrists' resting sets (flex, dev; deg) and positions (view space, the gun at its framing). */
+  private set = { R: [0, 0], L: [0, 0] };
+  private rest = { R: [0, 0, 0], L: [0, 0, 0] };
 
   draw(): void {
     this.anim.draw();
     this.hadLeft = false;
+    this.swapK = 0;
+    this.swapT = "";
   }
 
   /** Advances the animation by dt and poses every bone. */
   update(dt: number): void {
     if (!this.def) return;
     this.anim.update(dt);
+    this.dt = dt;
     this.pose(this.def, this.anim.pose);
   }
+  private dt = 0;
+  /** The recoil's rigid move this frame (view space) and its inverse; scratch for its parts. */
+  private Q = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0]);
+  private Qi = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0]);
+  private ra: V3 = [0, 0, 0];
+  private ro: V3 = [0, 0, 0];
+  /**
+   * A support hand switching targets inside a clip (the Seed Drill's pod to its charging handle): the hand and its
+   * fingers ease over from where they were shown (SWAP_TIME) instead of cutting. 0 = none; snapped by a seek (dt 0).
+   */
+  private swapK = 0;
+  private swapT = "";
+  private swapFrom = new Float32Array(12);
+  private swapCurls = new Float32Array(20);
+  private shownCurls = new Float32Array(20);
 
   private partMatrix(part: GunPart): number {
     return this.rig.part(part) * 12;
@@ -175,6 +304,20 @@ export class GunPoser {
     G[3] += p.o[0];
     G[7] += p.o[1];
     G[11] += p.o[2];
+    // The recoil's share of that (a view-space rigid move, Q = G * inverse(G without it)): the forearms take it with the
+    // hands (arm()), so a kick moves the arms rather than bending the wrists.
+    this.anim.recoilPart(this.ra, this.ro);
+    angleMatrix(p.a[0] - this.ra[0], p.a[1] - this.ra[1], p.a[2] - this.ra[2], 0, 0, 0, T2);
+    T2[3] = piv[0] - (T2[0] * piv[0] + T2[1] * piv[1] + T2[2] * piv[2]);
+    T2[7] = piv[1] - (T2[4] * piv[0] + T2[5] * piv[1] + T2[6] * piv[2]);
+    T2[11] = piv[2] - (T2[8] * piv[0] + T2[9] * piv[1] + T2[10] * piv[2]);
+    concat(T, 0, T2, 0, this.Q, 0);
+    this.Q[3] += p.o[0] - this.ro[0];
+    this.Q[7] += p.o[1] - this.ro[1];
+    this.Q[11] += p.o[2] - this.ro[2];
+    invert34(this.Q, 0, this.Qi, 0);
+    concat(G, 0, this.Qi, 0, this.Q, 0);
+    invert34(this.Q, 0, this.Qi, 0);
     const gi = this.partMatrix("Gun");
     W.set(G, gi);
     // --- Parts.
@@ -248,6 +391,20 @@ export class GunPoser {
       this.prevLeft.set(this.hadLeft ? this.shownLeft : this.H);
     }
     if (this.anim.leftFade > 0 && this.hadLeft) lerpRigid(this.H, this.prevLeft, this.anim.leftFade * this.anim.leftFade * (3 - 2 * this.anim.leftFade), this.H);
+    // A target switch inside a clip (no crossfade of its own): ease over from the hand as shown.
+    const tNow = p.leftW > 0.01 ? p.leftT : "";
+    if (tNow !== this.swapT) {
+      if (this.swapT && tNow && this.hadLeft && this.dt > 0 && this.anim.leftFade <= 0) {
+        this.swapK = 1;
+        this.swapFrom.set(this.shownLeft);
+        this.swapCurls.set(this.shownCurls);
+      }
+      this.swapT = tNow;
+    }
+    if (this.dt <= 0) this.swapK = 0;
+    else if (this.swapK > 0) this.swapK = Math.max(0, this.swapK - this.dt / SWAP_TIME);
+    const swapW = this.swapK * this.swapK * (3 - 2 * this.swapK);
+    if (swapW > 0) lerpRigid(this.H, this.swapFrom, swapW, this.H);
     this.shownLeft.set(this.H);
     this.hadLeft = true;
     W.set(this.H, hL);
@@ -264,6 +421,8 @@ export class GunPoser {
       const w = Math.min(1, p.leftOpen);
       for (let i = 0; i < 20; i++) cL[i] += (pre[i] - cL[i]) * w;
     }
+    if (swapW > 0) for (let i = 0; i < 20; i++) cL[i] += (this.swapCurls[i] - cL[i]) * swapW;
+    this.shownCurls.set(cL);
     this.poserL.pose(W, (i, k) => cL[i * 4 + k], (i) => cL[i * 4 + 3]);
     // --- Magazine: seated / sliding out along its axis / falling, or in the left hand.
     const mi = this.partMatrix("Mag");
@@ -371,34 +530,61 @@ export class GunPoser {
     // Bind forearm direction (elbow -> wrist), carried by the hand's move.
     const d = b.dir;
     const cur: V3 = [T[0] * d[0] + T[1] * d[1] + T[2] * d[2], T[4] * d[0] + T[5] * d[1] + T[6] * d[2], T[8] * d[0] + T[9] * d[1] + T[10] * d[2]];
-    let e = this.def?.elbows?.[side] ?? ELBOW[side];
-    let k = ARM.anchor;
-    // A support hand away from its grip: toward the working elbow, fully (the hand's own line says nothing then).
-    const la = side === "L" ? Math.max(0, Math.min(1, this.anim.pose.leftArm)) : 0;
-    if (la > 0) {
+    // The elbow anchor travels with the hand (ARM.carry of the wrist's way from its rest: the gun drawn up from below,
+    // pushed out in a reload, the support hand down for a magazine): the arm moves with it rather than pivoting the
+    // forearm about a fixed point, which would stand the sleeve up once the hand dropped below it.
+    // Worked out without the recoil's move, then moved with it (Q): the kick carries the elbow along with the hand.
+    const e0 = this.def?.elbows?.[side] ?? ELBOW[side], wr = this.rest[side], Qi = this.Qi, Q = this.Q;
+    const wn: V3 = [
+      Qi[0] * wrist[0] + Qi[1] * wrist[1] + Qi[2] * wrist[2] + Qi[3],
+      Qi[4] * wrist[0] + Qi[5] * wrist[1] + Qi[6] * wrist[2] + Qi[7],
+      Qi[8] * wrist[0] + Qi[9] * wrist[1] + Qi[10] * wrist[2] + Qi[11],
+    ];
+    const en: V3 = [e0[0] + (wn[0] - wr[0]) * ARM.carry, e0[1] + (wn[1] - wr[1]) * ARM.carry, e0[2] + (wn[2] - wr[2]) * ARM.carry];
+    let e: V3 = [
+      Q[0] * en[0] + Q[1] * en[1] + Q[2] * en[2] + Q[3],
+      Q[4] * en[0] + Q[5] * en[1] + Q[6] * en[2] + Q[7],
+      Q[8] * en[0] + Q[9] * en[1] + Q[10] * en[2] + Q[11],
+    ];
+    // Away from the grip (the support hand off to the can / pod: leftArm; the firing hand on a bolt: rightW) the
+    // forearm heads for its working elbow, fully: the hand's resting set means nothing there.
+    const work = Math.max(0, Math.min(1, side === "L" ? this.anim.pose.leftArm : this.anim.pose.rightW));
+    if (side === "L" && work > 0) {
       const we = this.def?.workElbow ?? WORK_ELBOW;
-      e = [e[0] + (we[0] - e[0]) * la, e[1] + (we[1] - e[1]) * la, e[2] + (we[2] - e[2]) * la];
-      k += (1 - k) * la;
+      e = [e[0] + (we[0] - e[0]) * work, e[1] + (we[1] - e[1]) * work, e[2] + (we[2] - e[2]) * work];
     }
-    let want: V3 = [wrist[0] - e[0], wrist[1] - e[1], wrist[2] - e[2]];
-    const wl = Math.hypot(want[0], want[1], want[2]) || 1;
-    // Mostly toward the elbow anchor, a little of a straight wrist (the forearm continuing the hand).
-    const cl = Math.hypot(cur[0], cur[1], cur[2]) || 1;
-    want = [(want[0] / wl) * k + (cur[0] / cl) * (1 - k), (want[1] / wl) * k + (cur[1] / cl) * (1 - k), (want[2] / wl) * k + (cur[2] / cl) * (1 - k)];
-    const hl = Math.hypot(want[0], want[1], want[2]) || 1;
-    want = [want[0] / hl, want[1] / hl, want[2] / hl];
-    // Keep the wrist nearly straight: no more than ARM.bendR / bendL from the hand's own line (a slerp from it).
-    const cn: V3 = [cur[0] / cl, cur[1] / cl, cur[2] / cl];
-    const th = Math.acos(Math.max(-1, Math.min(1, cn[0] * want[0] + cn[1] * want[1] + cn[2] * want[2])));
-    let limDeg = this.def?.wrist?.[side] ?? (side === "R" ? ARM.bendR : ARM.bendL);
-    // Working a bolt, the firing wrist turns (its forearm drops toward the elbow below the screen, not across it).
-    if (side === "R") limDeg += (BOLT_WRIST - limDeg) * Math.max(0, Math.min(1, this.anim.pose.rightW));
-    // Away from the gun (the can carried below the screen, a magazine fetched), the support wrist bends freely.
-    else limDeg += (FREE_WRIST - limDeg) * Math.max(0, Math.min(1, this.anim.pose.leftArm));
-    const lim = (limDeg * Math.PI) / 180;
-    if (th > lim && th > 1e-4) {
-      const sn = Math.sin(th), a = Math.sin(th - lim) / sn, b = Math.sin(lim) / sn;
-      want = [cn[0] * a + want[0] * b, cn[1] * a + want[1] * b, cn[2] * a + want[2] * b];
+    const sb = sideBind(side);
+    const A = mul3(T, sb.ax), N = mul3(T, sb.n), C = mul3(T, sb.across);
+    // The wrist at its resting set: the forearm along the hand's line bent by the set.
+    const st = this.set[side], tf0 = Math.tan(st[0] * D2R), td0 = Math.tan(st[1] * D2R);
+    const nat = nrm3([A[0] - tf0 * N[0] - td0 * C[0], A[1] - tf0 * N[1] - td0 * C[1], A[2] - tf0 * N[2] - td0 * C[2]]);
+    // Toward the elbow anchor.
+    const D = nrm3([wrist[0] - e[0], wrist[1] - e[1], wrist[2] - e[2]]);
+    // Mostly toward the elbow anchor; fully while working away from the grip (the hand's own line says nothing then).
+    let k = ARM.anchor;
+    if (side === "L") k += (1 - k) * work;
+    const off = side === "R" ? work : Math.max(0, Math.min(1, Math.max(this.anim.pose.leftW, Math.hypot(this.anim.pose.leftOff[0], this.anim.pose.leftOff[1], this.anim.pose.leftOff[2]) / 3)));
+    let want = slerp3(nat, D, k);
+    // Keep the wrist in its natural range (WRIST): if that asks for more, the forearm stops where the range's edge (an
+    // ellipse in flexion / deviation) crosses the arc from the resting set toward it (continuous: no side flips).
+    const rg = this.range(side, Math.max(off, work));
+    // A hand off its grip and out of view (fetching a magazine, carrying the can below the screen): its wrist is free,
+    // as before (nobody sees it; the forearm keeps heading for its elbow, so the sleeve stays out of view).
+    let hide = Math.max(off, work) * outOfView(wrist, A);
+    if (side === "L" && this.def?.silencer?.freeWrist && this.anim.pose.leftT === "sil") hide = Math.max(hide, Math.min(1, this.anim.pose.leftW));
+    if (hide > 0) for (const q of ["ext", "flex", "uln", "rad"] as const) rg[q] += (179 - rg[q]) * hide;
+    const outside = (v: V3) => {
+      const [fl, dv] = handFrameAngles(T, sb.ax, sb.n, sb.across, v);
+      return (fl / (fl >= 0 ? rg.flex : rg.ext)) ** 2 + (dv / (dv >= 0 ? rg.rad : rg.uln)) ** 2 > 1;
+    };
+    if (outside(want)) {
+      let lo = 0, hi = 1;
+      for (let it = 0; it < 14; it++) {
+        const mid = (lo + hi) / 2;
+        if (outside(slerp3(nat, want, mid))) hi = mid;
+        else lo = mid;
+      }
+      want = slerp3(nat, want, lo);
     }
     const ax: V3 = [cur[1] * want[2] - cur[2] * want[1], cur[2] * want[0] - cur[0] * want[2], cur[0] * want[1] - cur[1] * want[0]];
     const s = Math.hypot(ax[0], ax[1], ax[2]);
@@ -411,6 +597,15 @@ export class GunPoser {
     for (const i of b.helper) concat(T, 0, r.bind, i * 12, W, i * 12);
   }
 
+
+  /**
+   * A wrist's range now (wristRange): opened toward the working range as the firing hand works a bolt (rightW) or
+   * the support hand leaves its grip (`off`: a target, a trip, leftArm).
+   */
+  private range(side: "R" | "L", off: number): WristRange {
+    return wristRange(this.def, side, off, this.rg);
+  }
+  private rg: WristRange = { ext: 0, flex: 0, uln: 0, rad: 0 };
 
   /** Posed bone matrices (Source viewmodel space, 3x4 per bone; audits / fx). */
   get bonesW(): Float32Array {
@@ -431,6 +626,8 @@ export class GunPoser {
 }
 
 const D2R = Math.PI / 180;
+/** A support hand's switch between targets inside a clip eases over this long (s). */
+const SWAP_TIME = 0.14;
 /** How far the trigger swings back at a full squeeze (deg). */
 const TRIGGER_DEG = 16;
 
@@ -464,6 +661,11 @@ interface ArmBones {
   invHand: Float32Array;
   /** Bind forearm direction (elbow -> wrist). */
   dir: V3;
+}
+
+const armBonesCache: Partial<Record<"R" | "L", ArmBones>> = {};
+function armBonesOf(side: "R" | "L"): ArmBones {
+  return (armBonesCache[side] ??= armBones(side));
 }
 
 function armBones(side: "R" | "L"): ArmBones {

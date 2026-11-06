@@ -4,6 +4,7 @@
 #ifdef NDEBUG
 #undef NDEBUG
 #endif
+#include <memory>
 #include <cassert>
 #include <cmath>
 #include <cstdio>
@@ -243,10 +244,11 @@ void test_every_way_out_of_freecam_gives_the_input_back() {
     }
 }
 
-native::HudScoreboard room_of(std::initializer_list<std::tuple<unsigned, const char *, bool, bool>> rows) {
-    native::HudScoreboard board;
+std::unique_ptr<native::HudScoreboard>
+room_of(std::initializer_list<std::tuple<unsigned, const char *, bool, bool>> rows) {
+    auto board = std::make_unique<native::HudScoreboard>();
     for (const auto &[slot, name, you, spectator] : rows) {
-        auto &row = board.rows[board.count++];
+        auto &row = board->rows[board->count++];
         row.slot = slot;
         row.name = name;
         row.you = you;
@@ -257,19 +259,19 @@ native::HudScoreboard room_of(std::initializer_list<std::tuple<unsigned, const c
 
 void test_spectate_menu() {
     native::SpectatePicker picker;
-    assert(!picker.show(room_of({{0, "me", true, false}, {1, "watcher", false, true}}), std::nullopt));
+    assert(!picker.show(*room_of({{0, "me", true, false}, {1, "watcher", false, true}}), std::nullopt));
     assert(!picker.open());
     const auto board = room_of({{0, "me", true, false}, {1, "goobert", false, false}, {2, "akee", false, false}});
-    assert(picker.show(board, std::nullopt) && picker.count() == 2 && picker.name(0) == "goobert");
+    assert(picker.show(*board, std::nullopt) && picker.count() == 2 && picker.name(0) == "goobert");
     assert(!picker.offers_stop());
     auto pick = picker.key("Digit3", true, false);
     assert(pick.handled && !pick.watch && !pick.stop && picker.open());
     pick = picker.key("Digit2", true, false);
     assert(pick.handled && pick.watch == 2u && !picker.open());
-    assert(picker.show(board, 1u) && picker.offers_stop());
+    assert(picker.show(*board, 1u) && picker.offers_stop());
     pick = picker.key("Digit3", true, false);
     assert(pick.stop && !pick.watch && !picker.open());
-    picker.show(board, 1u);
+    picker.show(*board, 1u);
     assert(!picker.key("Digit1", true, true).handled && !picker.key("KeyW", true, false).handled);
     assert(picker.key("Digit0", true, false).handled && !picker.open());
     assert(native::spectate_script(2u) == "window.bunnyhopNativeMenu?.onRoomCommand?.({t:'spec',target:2})");

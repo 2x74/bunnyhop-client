@@ -11,6 +11,7 @@
 #include "graphics_settings.hpp"
 #include "runner_view.hpp"
 #include "paint.hpp"
+#include "landing_marker.hpp"
 #include "measure.hpp"
 #include "scene_lighting.hpp"
 #include "sky_image.hpp"
@@ -206,6 +207,7 @@ inline GLuint link_program(Gl &gl, const char *vertex_source, const char *fragme
 }
 
 #include "native_presentation.hpp"
+#include "landing_render.hpp"
 #include "native_viewmodel.hpp"
 #include "native_map_effects.hpp"
 // Standard headers must be included at file scope before these GL-dependent definitions.
@@ -512,6 +514,10 @@ class Renderer {
     }
 
     static constexpr double paint_second_ns = 1'000'000'000;
+    native_render::LandingMarker landingMarker;
+    bool landingSuppressed = true, landingPracticing = false, landingReplay = false;
+    double landingClock = -1;
+    float landingPixelsPerUnit = 600;
     bool toolsVisible = true, paintHeld = false, paintVisible = true;
     std::string paintHeldCode;
     std::string measureLabel;
@@ -1557,6 +1563,7 @@ class Renderer {
                 }
             }
         }
+        draw_landing(landingMarker, *presentation, eye, landingPixelsPerUnit, right, up, semanticPalette.loss);
         draw_map_effects(eye, seconds, right, up);
         profile_elapsed(frameProfile.presentationBuild, presentationStart);
         presentationStart = profile_now();
@@ -1570,6 +1577,7 @@ class Renderer {
 
     void draw_ghost_trail(const native_render::Actor &actor, const float eye[3]) {
         if (actor.ghost_slot < 0 || actor.ghost_slot >= int(ghostPaths.size())) return;
+        if (ghostOptions.route_only && actor.ghost_slot == selected_route_slot()) return;
         const auto &path = ghostPaths[size_t(actor.ghost_slot)];
         if (!path.enabled || !ghostOptions.visible(path.source)) return;
         const auto points = ghostTrails.recorded(path, actor.frame.tick);
@@ -1586,8 +1594,8 @@ class Renderer {
         }
     }
 
-    void draw_ghost_route(const native::Matrix &projection) {
-        if (!ghostOptions.route || !ghostRoutes) return;
+    int selected_route_slot() const {
+        if (!ghostOptions.route || !ghostRoutes) return -1;
         int selected = -1;
         for (size_t slot = 0; slot < ghostPaths.size(); ++slot) {
             const auto &path = ghostPaths[slot];
@@ -1601,6 +1609,11 @@ class Renderer {
                            < native_render::route_priority(ghostPaths[size_t(selected)].source))
                 selected = int(slot);
         }
+        return selected;
+    }
+
+    void draw_ghost_route(const native::Matrix &projection) {
+        const int selected = selected_route_slot();
         if (selected < 0) return;
         const auto &path = ghostPaths[size_t(selected)];
         const auto color = path.source == native_render::GhostSource::pb
@@ -1789,6 +1802,10 @@ public:
     bool ghost_visible(unsigned slot) const {
         return slot < ghostPaths.size() && ghostPaths[slot].enabled && ghostOptions.visible(ghostPaths[slot].source);
     }
+
+    int route_slot() const { return selected_route_slot(); }
+
+    const native_render::GhostOptions &ghost_options() const { return ghostOptions; }
 
     const std::string &ghost_name(unsigned slot) const { return ghostPaths.at(slot).name; }
 
@@ -2357,6 +2374,7 @@ public:
                 }
             }
         }
+        landingMarker.settings(settings);
         paint.settings(settings);
         toolBindings.read(settings);
         toolsVisible = settings.value("hud", true);
@@ -2424,6 +2442,13 @@ public:
         skyPanoramaInfo.rotation = picture->rotation;
         skyPanoramaInfo.exposure = picture->exposure;
         skyPanoramaId = id;
+    }
+
+    void landing_context(bool suppressed, bool practicing, bool replay, double clock = -1) {
+        landingSuppressed = suppressed;
+        landingPracticing = practicing;
+        landingReplay = replay;
+        landingClock = clock;
     }
 
     void set_pixel_density(float value) { pixelDensity = std::isfinite(value) && value > 0 ? value : 1; }
@@ -3121,6 +3146,8 @@ public:
          double seconds = -1) {
         if (width <= 0 || height <= 0) return;
         const int outputWidth = width, outputHeight = height;
+        landingPixelsPerUnit =
+                float(height) * 2 / 3 / pixelDensity / std::tan(float(fieldOfView * native::radians * .5));
         GLint outputTarget = 0;
         gl.GetIntegerv(GL_FRAMEBUFFER_BINDING, &outputTarget);
         const auto graphicsView = native::graphics_view(graphics, width, height);
@@ -3226,6 +3253,19 @@ public:
                 viewmodel->draw_actor(actor, vp, eye, seconds);
             profile_elapsed(frameProfile.actorDraw, detailStart);
         }
+        BhSnapshot landingState{};
+        if (state)
+            landingState = *state;
+        else
+            bh_snapshot(core, &landingState);
+        landingMarker.frame(
+                core,
+                landingState.player,
+                landingSuppressed || !toolsVisible,
+                landingPracticing,
+                landingReplay,
+                landingClock >= 0 ? landingClock : seconds
+        );
         draw_presentation(vp, eye, seconds);
         profile_elapsed(frameProfile.presentation, phaseStart);
         phaseStart = profile_now();

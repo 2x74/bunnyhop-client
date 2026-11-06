@@ -482,6 +482,20 @@ pub extern "C" fn prop_transforms() -> usize {
     })
 }
 
+/// Runtime maker copies: entity, source, origin xyz, angles pyr, visible. Display only.
+#[unsafe(no_mangle)]
+pub extern "C" fn entity_instances() -> usize {
+    with(|c| {
+        c.scratch_f32.clear();
+        if let Some(g) = &c.game {
+            for (i, source, o, a, visible) in g.entity_instances() {
+                c.scratch_f32.extend([i as f32, source as f32, o[0], o[1], o[2], a[0], a[1], a[2], visible as u32 as f32]);
+            }
+        }
+        c.scratch_f32.len()
+    })
+}
+
 /// Factor the lightmap atlas was scaled by before sRGB encoding (multiply by its inverse after sampling).
 #[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
 pub extern "C" fn lightmap_scale() -> f32 {
@@ -867,6 +881,30 @@ pub extern "C" fn overlay_states() -> usize {
             c.scratch_u32.extend(g.overlay_states());
         }
         c.scratch_u32.len()
+    })
+}
+
+/// Landing spot (game/landing.rs `Game::predict_landing`; display only, changes no state): where a player at feet
+/// origin (px, py, pz) moving at (vx, vy, vz), crouched hull if `crouched` != 0, would land within `max_seconds` with
+/// no further input. Into scratch_f32: [kind (LANDING_*), x, y, z, normal x, y, z, seconds, traces, pieces], then
+/// per piece [start x, y, z, velocity x, y, z, acceleration x, y, z, seconds]. Empty when no map is loaded.
+#[unsafe(no_mangle)]
+pub extern "C" fn predict_landing(px: f32, py: f32, pz: f32, vx: f32, vy: f32, vz: f32, crouched: u32, max_seconds: f32) -> usize {
+    with(|c| {
+        c.scratch_f32.clear();
+        let Some(g) = &c.game else { return 0 };
+        let r = g.predict_landing([px, py, pz], [vx, vy, vz], crouched != 0, max_seconds);
+        c.scratch_f32.push(r.kind as f32);
+        c.scratch_f32.extend_from_slice(&r.position);
+        c.scratch_f32.extend_from_slice(&r.normal);
+        c.scratch_f32.extend_from_slice(&[r.seconds, r.traces as f32, r.pieces.len() as f32]);
+        for piece in &r.pieces {
+            c.scratch_f32.extend_from_slice(&piece.start);
+            c.scratch_f32.extend_from_slice(&piece.velocity);
+            c.scratch_f32.extend_from_slice(&piece.acceleration);
+            c.scratch_f32.push(piece.seconds);
+        }
+        c.scratch_f32.len()
     })
 }
 

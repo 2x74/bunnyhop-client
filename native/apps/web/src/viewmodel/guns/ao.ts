@@ -24,6 +24,8 @@ export function bakeGunAO(g: THREE.BufferGeometry, isGun: (vertex: number) => bo
   const Pa = g.getAttribute("position"), Na = g.getAttribute("normal"), Ca = g.getAttribute("partColor");
   if (!Pa || !Na || !Ca) return;
   const P = Pa.array as Float32Array, N = Na.array as Float32Array, C = Ca.array as Float32Array;
+  // Camo-tagged geometry (player/bunny/builder.ts gunCamo) keeps the same multiplier in z: a camo replaces the colour.
+  const Za = g.getAttribute("gunCamo"), Z = Za ? (Za.array as Float32Array) : null;
   const R = BASE_RADIUS * scale, r2 = R * R, eps = 0.004 * scale * scale;
   const nv = Pa.count, nt = Math.floor(nv / 3);
   // Which triangles are the gun's (a triangle is all one part).
@@ -96,7 +98,9 @@ export function bakeGunAO(g: THREE.BufferGeometry, isGun: (vertex: number) => bo
       C[o3] *= k;
       C[o3 + 1] *= k;
       C[o3 + 2] *= k;
+      if (Z) Z[o3 + 2] = k;
     }
   }
   Ca.needsUpdate = true;
+  if (Za) Za.needsUpdate = true;
 }

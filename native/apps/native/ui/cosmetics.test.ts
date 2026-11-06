@@ -117,3 +117,31 @@ test("shared web loadout changes cannot be overwritten by an older native cosmet
     (globalThis as { localStorage?: unknown }).localStorage = original;
   }
 });
+
+test("saved hilt and camo survive account refresh, local choice and packed host propagation", async () => {
+  const { getLoadout } = await import("../../web/src/player/cosmetics");
+  const { packLoadout } = await import("../../web/src/loadout");
+  const original = (globalThis as { localStorage?: Storage }).localStorage;
+  const store = new Map<string, string>();
+  (globalThis as { localStorage?: unknown }).localStorage = {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => store.set(key, value),
+    removeItem: (key: string) => store.delete(key),
+  };
+  try {
+    const choice = { ...DEFAULT_COSMETICS, hilt: "hilt-walnut", camo: "camo-field" };
+    const service = new NativeCosmetics({
+      myCosmetics: async () => ({ choice, unlocked: ["hilt-walnut", "camo-field"] }),
+      saveCosmetics: async (patch) => ({ ...choice, ...patch }),
+    });
+    await service.refresh();
+    expect(getLoadout().hilt).toBe("hilt-walnut");
+    expect(getLoadout().camo).toBe("camo-field");
+    expect(packLoadout(getLoadout()).split(";").slice(10)).toEqual(["hilt-walnut", "camo-field"]);
+    service.observeLocal();
+    expect(service.choice.hilt).toBe("hilt-walnut");
+    expect(service.choice.camo).toBe("camo-field");
+  } finally {
+    (globalThis as { localStorage?: unknown }).localStorage = original;
+  }
+});

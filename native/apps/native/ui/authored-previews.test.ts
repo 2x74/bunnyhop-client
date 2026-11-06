@@ -1,15 +1,18 @@
 import { test, expect } from "bun:test";
 import catalog from "./authored-previews.json";
 import { KNIVES } from "../../web/src/viewmodel/knives/index";
-import { COSMETICS } from "../../web/src/progression";
+import { COSMETICS, staffItem } from "../../web/src/progression";
 test("embedded authored previews cover every shipped knife, finish, glove, outfit, headwear and ghost without network or placeholder geometry", () => {
   expect(catalog.version).toBe(1);
   expect(catalog.source).toBe("native original meshes/poses/cosmetic shaders");
   expect(catalog.pngBytes).toBeLessThan(4 * 1024 * 1024);
   const images = catalog.images as Record<string, string>;
   for (const knife of KNIVES) expect(images[knife.cosmeticId]).toStartWith("data:image/png;base64,");
-  for (const c of COSMETICS.filter((c) => ["finish", "glove", "outfit", "hat", "body", "ghost"].includes(c.slot)))
+  for (const c of COSMETICS.filter(
+    (c) => !staffItem(c) && ["finish", "hilt", "camo", "glove", "outfit", "hat", "body", "ghost"].includes(c.slot),
+  ))
     expect(images[c.id], c.id).toStartWith("data:image/png;base64,");
+  for (const c of COSMETICS.filter(staffItem)) expect(images[c.id], c.id).toBeUndefined();
   expect(new Set(KNIVES.map((k) => images[k.cosmeticId])).size).toBe(KNIVES.length);
   for (const source of Object.values(images)) {
     const data = Buffer.from(source.split(",")[1], "base64");

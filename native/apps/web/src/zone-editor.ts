@@ -29,6 +29,8 @@ export function zoneColor(z: Pick<Zone, "kind" | "track">, c: Palette["zones"] =
       return hexNum(bonus ? c.bonusStart : c.start);
     case "end":
       return hexNum(bonus ? c.bonusEnd : c.end);
+    case "anti-skip":
+      return 0xff4f5e;
     default:
       return hexNum(c.split);
   }
@@ -244,7 +246,7 @@ export class ZoneEditor {
   }
 
   help(): string {
-    return `ZONE EDITOR [${trackName(this.track)}] · 1 corner A · 2 corner B · 3 start · 4 end · 6 checkpoint · 7 track · 8 delete here · 5 save · 0 clear override · Z exit`;
+    return `ZONE EDITOR [${trackName(this.track)}] · 1 corner A · 2 corner B · 3 start · 4 end · 6 checkpoint · 9 anti-skip · 7 track · 8 delete here · 5 save · 0 clear override · Z exit`;
   }
 
   private commit(zones: Zone[], msg: string): void {
@@ -281,15 +283,19 @@ export class ZoneEditor {
         break;
       case "Digit3":
       case "Digit4":
-      case "Digit6": {
+      case "Digit6":
+      case "Digit9": {
         const box = this.box();
         if (!box || !this.b) return this.notify("place corners A (1) and B (2) first"), true;
-        const kind: ZoneKind = code === "Digit3" ? "start" : code === "Digit4" ? "end" : "checkpoint";
+        const kind: ZoneKind = code === "Digit3" ? "start" : code === "Digit4" ? "end" : code === "Digit9" ? "anti-skip" : "checkpoint";
         const t = this.track;
         if (kind === "checkpoint") {
           const index = 1 + Math.max(0, ...zones.filter((z) => (z.kind === "checkpoint" || z.kind === "stage") && trackOf(z) === t).map((z) => z.index ?? 0));
           this.a = this.b = null;
           this.commit([...zones, normalizeZone("checkpoint", box.mins, box.maxs, t, index)], `${trackName(t)} checkpoint ${index} added · press 5 to save`);
+        } else if (kind === "anti-skip") {
+          this.a = this.b = null;
+          this.commit([...zones, normalizeZone(kind, box.mins, box.maxs, t)], `${trackName(t)} anti-skip zone added · press 5 to save`);
         } else {
           this.a = this.b = null;
           this.commit(

@@ -15,7 +15,7 @@
    line to the right, plain sliders without notches. The rows and controls are the website's. */
 /* Wide windows only: under 52rem the website's screen puts the rail across the top, and that stays. */
 @media (min-width: 52.01rem) {
-  .native-menu .settings { grid-template-columns: 11rem minmax(0, 1fr); gap: 0.75rem 1.5rem; }
+  .native-menu .settings { grid-template-columns: 12.5rem minmax(0, 1fr); gap: 0.75rem 1.5rem; }
   .native-menu .settings .set-top { display: contents; }
   .native-menu .settings .set-search { grid-column: 1; grid-row: 1; }
   .native-menu .settings .set-actions { grid-column: 2; grid-row: 1; justify-self: end; }
@@ -56,3 +56,24 @@
 /* Settings → Updates: the release notes as compact lines under the rows. */
 .native-menu .settings .update-notes { display: flex; flex-direction: column; gap: 0.2rem; padding: 0 0.85rem; }
 .native-menu .settings .update-notes p { margin: 0; font-size: var(--fs-sm); line-height: 1.4; }
+/* Room for the match count beside the query: the rail is wide enough for a two-word search and "3 matches". */
+.native-menu .settings .set-search:has(.set-q-count:not(:empty)) .set-q { padding-right: 5.9rem; }
+/* The website's compact switch tile is for the two-up grids (HUD → Show on screen). On its own in a column of rows,
+   as Landing spot → Path is, it takes the size of the rows around it. */
+.native-menu .settings .set-row.compact:not(.check-grid > .set-row) {
+  min-height: 2.9rem;
+  padding-top: 0.4rem;
+  padding-bottom: 0.4rem;
+}
+.native-menu .settings .set-row.compact:not(.check-grid > .set-row) .set-name {
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+.native-menu .settings .set-row.compact:not(.check-grid > .set-row) input.switch.sm {
+  --sw-cap: 1.12rem;
+  width: 2.6rem;
+  height: 1.45rem;
+}
+.native-menu .settings .set-row.compact:not(.check-grid > .set-row) input.switch.sm:checked::after {
+  transform: translateX(calc(2.6rem - var(--sw-cap) - 2 * var(--sw-pad)));
+}

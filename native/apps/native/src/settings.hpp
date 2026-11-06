@@ -83,8 +83,14 @@ inline constexpr double viewmodel_bob_before_revision_4 = 1;
 inline Json default_settings() {
     Json result = {
             {"sensitivity", 2.0},
+            {"mYaw", 0.022},
+            {"mPitch", 0.022},
+            {"showPos", 0},
             {"verticalSensitivity", 2.0},
             {"separateVertical", false},
+            {"cmdBinds", Json::object()},
+            {"aliases", Json::object()},
+            {"landing", {{"mode", "off"}, {"arc", false}, {"color", "#4de1ff"}}},
             // Turn rates follow cl_yawspeed and cl_anglespeedkey and freeze for each recording.
             {"invertY", false},
             {"holdRestart", false},
@@ -256,6 +262,8 @@ inline Json default_settings() {
               {"left", {"KeyA"}},
               {"right", {"KeyD"}},
               {"jump", {"Space", "MouseWheel"}},
+              {"crouchJump", Json::array()},
+              {"jumpToggle", Json::array()},
               {"duck", {"ControlLeft"}},
               {"use", {"KeyE"}},
               {"restart", {"KeyR"}},
@@ -286,6 +294,7 @@ inline Json default_settings() {
               // Chat (say / say_team in CS:S), as the website binds it: Y and U.
               {"chat", {"KeyY", "KeyU"}},
               {"commandChat", Json::array()},
+              {"console", {"Backquote"}},
               {"scoreboard", {"Tab"}},
               {"spectatorNext", Json::array()},
               {"spectatorPrevious", Json::array()},
@@ -482,6 +491,43 @@ inline Json patch_settings(const Json &current, const Json &patch, bool switch_l
             }
             out["binds"] = std::move(binds);
             continue;
+        } else if (key == "cmdBinds") {
+            if (!v.is_object() || v.size() > 512) throw std::runtime_error("Invalid command binds");
+            Json commands = Json::object();
+            for (const auto &[code, text] : v.items()) {
+                if (!valid_bind_code(code) || !text.is_string() || text.get_ref<const std::string &>().size() > 2048)
+                    throw std::runtime_error("Invalid command bind");
+                commands[code] = text;
+            }
+            out[key] = std::move(commands);
+            continue;
+        } else if (key == "aliases") {
+            if (!v.is_object() || v.size() > 128) throw std::runtime_error("Invalid aliases");
+            Json aliases = Json::object();
+            for (const auto &[name, text] : v.items()) {
+                if (name.empty() || name.size() > 32
+                    || !std::all_of(
+                            name.begin(),
+                            name.end(),
+                            [](unsigned char c) { return std::isalnum(c) || c == '_' || c == '+' || c == '-'; }
+                    )
+                    || !text.is_string() || text.get_ref<const std::string &>().size() > 2048)
+                    throw std::runtime_error("Invalid alias");
+                aliases[name] = text;
+            }
+            out[key] = std::move(aliases);
+            continue;
+        } else if (key == "landing") {
+            if (!v.is_object() || v.size() != 3 || !v.contains("mode") || !v.contains("arc") || !v.contains("color")
+                || !v["mode"].is_string() || !v["arc"].is_boolean() || !v["color"].is_string())
+                throw std::runtime_error("Invalid landing settings");
+            const auto mode = v["mode"].get<std::string>();
+            const auto color = v["color"].get<std::string>();
+            if ((mode != "off" && mode != "practice" && mode != "always") || color.size() != 7 || color[0] != '#'
+                || !std::all_of(color.begin() + 1, color.end(), [](unsigned char c) { return std::isxdigit(c); }))
+                throw std::runtime_error("Invalid landing settings");
+            out[key] = v;
+            continue;
         } else if (key == "hudLayout" || key == "hudLayoutWeb") {
             const bool web_schema = key == "hudLayoutWeb";
             // Replaces the whole layout: what isn't listed goes back to its built-in place.
@@ -591,6 +637,10 @@ inline Json patch_settings(const Json &current, const Json &patch, bool switch_l
             const auto n = v.get<double>();
             if ((key == "sensitivity" || key == "verticalSensitivity") && (n < .01 || n > 100))
                 throw std::runtime_error("Sensitivity must be .01–100");
+            if ((key == "mYaw" || key == "mPitch") && (n < .001 || n > 1))
+                throw std::runtime_error("Mouse yaw or pitch must be .001–1");
+            if (key == "showPos" && (n != std::floor(n) || n < 0 || n > 2))
+                throw std::runtime_error("cl_showpos must be 0, 1 or 2");
             if (key == "hudScale" && (n != std::floor(n) || n < 50 || n > 175))
                 throw std::runtime_error("HUD scale must be 50–175%");
             if (key == "fov" && (n < 60 || n > 130)) throw std::runtime_error("FOV must be 60–130");

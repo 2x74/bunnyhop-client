@@ -19,8 +19,11 @@ import {
   DISCORD_MEMBER,
   EARLY_HOPPER,
   SUPPORTER,
+  hasContributorBadge,
   heldRanks,
   holdsRole,
+  type Holder,
+  type RoleHolder,
   isSecret,
   isUnlocked,
   levelInfo,
@@ -62,8 +65,10 @@ export const SLOT_NAMES: Record<CosmeticSlot, string> = {
   knife: "Knife",
   finish: "Finish",
   glove: "Gloves",
+  hilt: "Hilt",
   hat: "Hat",
   body: "Player model",
+  camo: "Gun camo",
 };
 
 /**
@@ -71,10 +76,16 @@ export const SLOT_NAMES: Record<CosmeticSlot, string> = {
  * the owner's items: progression.ts staffGrant), among the ones this client lists (a knife the registry hasn't built
  * yet stays hidden, and shows up as new once it ships). `grant` = false: without the staff grant (new-unlock tracking).
  */
-export function ownedCosmetics(p: Pick<Profile, "level" | "achievements"> & Partial<Pick<Profile, "rank" | "styles" | "role">>, grant = true): Set<string> {
+export function ownedCosmetics(p: Pick<Profile, "level" | "achievements"> & Partial<Pick<Profile, "rank" | "styles" | "role" | "player">>, grant = true): Set<string> {
   const earned = p.achievements.map((a) => a.id);
   const ranks = profileRanks(p);
-  return new Set(COSMETICS.filter((c) => listedCosmetic(c) && isUnlocked(c, p.level.level, earned, ranks, p.role ?? null, grant)).map((c) => c.id));
+  const who = profileHolder(p);
+  return new Set(COSMETICS.filter((c) => listedCosmetic(c) && isUnlocked(c, p.level.level, earned, ranks, who, grant)).map((c) => c.id));
+}
+
+/** What a profile's role-held items check: its staff role and the Contributor badge (progression.ts holdsRole). */
+export function profileHolder(p: Partial<Pick<Profile, "role" | "player">>): RoleHolder {
+  return { role: p.role ?? null, contributor: hasContributorBadge((p.player as { special?: string[] } | undefined)?.special) };
 }
 
 /** The places a profile currently holds (overall + per style), for rank-held cosmetics and the crown. */
@@ -86,7 +97,7 @@ export function profileRanks(p: Partial<Pick<Profile, "rank" | "styles">>): Held
  * Everything that can be "new": earned achievement ids + unlocked cosmetic ids. Items staff own only through the role
  * never count (no "120 new unlocks" for a new admin; staffNote says it once instead); the ones they earn still do.
  */
-export function ownedIds(p: Pick<Profile, "level" | "achievements"> & Partial<Pick<Profile, "rank" | "styles" | "role">>): string[] {
+export function ownedIds(p: Pick<Profile, "level" | "achievements"> & Partial<Pick<Profile, "rank" | "styles" | "role" | "player">>): string[] {
   return [...p.achievements.map((a) => a.id), ...ownedCosmetics(p, false)];
 }
 
@@ -134,7 +145,7 @@ export interface LockInfo {
  * How to unlock a cosmetic, with the owner's progress when known (`progress` is null for visitors). `role` = the
  * profile's staff role: staff see rank-held items they don't hold as preview-only (progression.ts staffGrant).
  */
-export function lockInfo(c: CosmeticDef, level: LevelView, progress: Profile["progress"], ranks?: HeldRanks, role?: Profile["role"]): LockInfo {
+export function lockInfo(c: CosmeticDef, level: LevelView, progress: Profile["progress"], ranks?: HeldRanks, role?: Holder): LockInfo {
   switch (c.unlock.kind) {
     case "free":
       return { hint: "Free", goal: "Free", fraction: null };
@@ -163,7 +174,9 @@ export function lockInfo(c: CosmeticDef, level: LevelView, progress: Profile["pr
       return { hint: `${rankHint(u)}${where}`, goal: rankHint(u), fraction: null };
     }
     case "role":
-      // Only ever listed for players who hold it (shownCosmetic), so this is the rare "role removed" case.
+      // Contributor items are listed for everyone: the goal says whose they are. Staff items are only ever listed for
+      // players who hold the role (shownCosmetic), so for them this is the rare "role removed" case.
+      if (c.unlock.role === "contributor") return { hint: "Contributor: for players who worked on the game", goal: "Contributor", fraction: null };
       return { hint: roleHint(c.unlock.role), goal: roleHint(c.unlock.role), fraction: null };
   }
 }
@@ -173,8 +186,8 @@ export function lockInfo(c: CosmeticDef, level: LevelView, progress: Profile["pr
  * How an owned cosmetic was earned on this profile ("Cleared a T3 map · Oct 5 on bhop_eazy"); `when` = false: without
  * the date and map (picker items). Locked items say lockInfo's hint instead.
  */
-export function earnedLine(c: CosmeticDef, p: Pick<Profile, "level" | "achievements"> & Partial<Pick<Profile, "rank" | "styles" | "role">>, when = true): string {
-  return earnedHint(c, { level: p.level.level, achievements: p.achievements, ranks: profileRanks(p), role: p.role ?? null }, { when });
+export function earnedLine(c: CosmeticDef, p: Pick<Profile, "level" | "achievements"> & Partial<Pick<Profile, "rank" | "styles" | "role" | "player">>, when = true): string {
+  return earnedHint(c, { level: p.level.level, achievements: p.achievements, ranks: profileRanks(p), role: profileHolder(p) }, { when });
 }
 
 /** The three badges the card shows automatically when none are picked (server: profileView). */
@@ -311,7 +324,7 @@ const COMMUNITY_WHY: Record<string, string> = {
 };
 const COMMUNITY_KICKER: Partial<Record<CosmeticSlot, string>> = { glove: "New gloves", outfit: "New colourway", trail: "New trail", title: "New title", hat: "New hat" };
 /** Which of an achievement's items leads its card (the rest are named in the detail). */
-const SLOT_ORDER: CosmeticSlot[] = ["hat", "glove", "finish", "knife", "outfit", "trail", "ghost", "frame", "background", "title"];
+const SLOT_ORDER: CosmeticSlot[] = ["hat", "glove", "finish", "hilt", "knife", "outfit", "trail", "ghost", "frame", "background", "title"];
 
 function communityNote(p: Profile): void {
   const uid = p.player.id;

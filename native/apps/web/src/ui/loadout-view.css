@@ -70,6 +70,14 @@ body.potato .lo-rim { display: none; }
 .lo-stage[data-kind="bunny"] .lo-insp, .lo-stage[data-kind="ghost"] .lo-insp, .lo-stage[data-kind="ghost"] .lo-tools { display: none; }
 .lo-stage[data-kind="ghost"] { cursor: default; }
 .lo-viewseg[hidden] { display: none; }
+/* Gun camo: which gun the stage holds. Plain arrows either side of its name. */
+.lo-gunnav { display: flex; align-items: center; gap: 0.15rem; background: rgba(8, 10, 14, 0.72); border-radius: 999px; padding: 0.1rem; }
+.lo-gunnav[hidden] { display: none; }
+.lo-gun-name { min-width: 6.5em; text-align: center; font-size: var(--fs-sm); color: var(--text); }
+.lo-gun-step { width: 1.9rem; height: 1.9rem; border: 0; border-radius: 50%; background: transparent; color: var(--dim); font-size: 1.15rem; line-height: 1; cursor: pointer; }
+.lo-gun-step:hover, .lo-gun-step:focus-visible { color: var(--text); background: rgba(255, 255, 255, 0.08); }
+.lo-stage[data-view="gunside"] .lo-drag { opacity: 1; }
+@media (max-width: 640px) { .lo-gun-name { min-width: 5em; } }
 .lo-insp { position: absolute; right: clamp(0.8rem, 3%, 1.6rem); bottom: clamp(0.9rem, 3%, 1.8rem); z-index: 2; background: rgba(8, 10, 14, 0.72); }
 .lo-insp kbd { margin-left: 0.15rem; }
 .lo-stage[data-view="close"] .lo-insp { opacity: 0.75; }
@@ -154,8 +162,18 @@ body.potato .lo-rim { display: none; }
 .lo-goal-link { color: inherit; text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 45%, transparent); text-underline-offset: 0.18em; cursor: pointer; }
 .lo-goal-link:hover { color: var(--text); text-decoration-color: currentColor; }
 
-/* The supporter sets' names over their items in the grid. */
-.lo-set-h { grid-column: 1 / -1; margin: 0.7rem 0 -0.1rem 0.15rem; font-size: var(--fs-sm); font-weight: 650; color: var(--dim); }
+/* The Supporter and Staff sections' headings in the grid: a line across, the name, and (not a supporter yet) the way
+   to become one at the end of the line. */
+.lo-set-h { grid-column: 1 / -1; display: flex; align-items: baseline; gap: var(--sp-3); margin: var(--sp-4) 0.35rem 0 0.35rem; padding-top: var(--sp-3); border-top: 1px solid var(--line); font-size: var(--fs-md); font-weight: 680; color: var(--text); }
+.lo-set-link { margin-left: auto; font-size: var(--fs-sm); font-weight: 600; color: var(--accent); text-decoration: none; }
+.lo-set-link:hover { text-decoration: underline; }
+.lo-set-note { margin-left: auto; font-size: var(--fs-sm); font-weight: 500; color: var(--dim); }
+
+/* The right column: the category's options over its grid (the stage beside them keeps its place on every tab). */
+.lo-side { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.lo-side > .lo-grid, .lo-side > .lo-glow-pane { flex: 1; }
+.lo-side > .lo-model-row { padding: 0 0.35rem 12px; flex-wrap: wrap; row-gap: 8px; }
+.lo-side > .lo-hair-row, .lo-side > .lo-length-row { padding: 12px 0.35rem 0; border-top: 1px solid var(--line); }
 
 /* The bunny build is independent of the equipped colourway and accessories. */
 .lo-model-row { display: flex; align-items: center; gap: 12px; padding: 0 0 14px; }

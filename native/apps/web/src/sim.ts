@@ -30,7 +30,7 @@ export function quantize(forward: number, side: number, yaw: number, pitch: numb
  * map's name (rules 4 block start-zone prehops on some maps, timer.ts START_ZONE_NO_PREHOP_V4).
  */
 export function makeTimer(zones: readonly Zone[], settings: Settings, prespeedCap: number | null, style: StyleDef | null = null, rules = TIMER_RULES, map = ""): RunTimer {
-  return new RunTimer(zones, Math.fround(settings.tickInterval), { prespeedCap, blockPrehops: blocksPrehops(style?.id, map, rules), strafeKeys: strafeKeys(style), rules, startReentryCap: style ? styleStartReentryCap(style.id) : null });
+  return new RunTimer(zones, Math.fround(settings.tickInterval), { prespeedCap, physics: settings.physics ?? 1, blockPrehops: blocksPrehops(style?.id, map, rules), strafeKeys: strafeKeys(style), rules, startReentryCap: style ? styleStartReentryCap(style.id) : null });
 }
 
 /** Apply start-zone prehop blocking before movement, shared by live play, recording and replay verification. */

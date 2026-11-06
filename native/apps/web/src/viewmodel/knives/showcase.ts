@@ -13,7 +13,8 @@ import { Builder } from "../../player/bunny/builder";
 import { colourway, paletteOf } from "../../player/bunny/palettes";
 import { playerUniforms, solidMaterial, type PlayerUniforms } from "../../player/materials";
 import { concat, invert34 } from "../../player/bunny/rig";
-import { lookOf, setFinishUniforms, type FinishSpec } from "../finishes/shader";
+import { lookOf, setFinishUniforms, setHiltUniforms, type FinishSpec } from "../finishes/shader";
+import type { HiltSkin } from "../../loadout";
 import { vmRig } from "../rig";
 import { KnifeCtx } from "./ctx";
 import { KnifeHold } from "./hold";
@@ -28,6 +29,8 @@ interface Built {
   half: THREE.Vector3;
   /** Every few vertices, centred (knife-local): tight framing at any angle (extentAt). */
   pts: Float32Array;
+  /** The hilt's vertices (knives/types.ts HiltMap: tagged guard / grip parts), centred like `pts`: the Hilt tab's framing. */
+  hilt: Float32Array;
 }
 
 const built = new Map<string, Built>();
@@ -53,7 +56,13 @@ function build(k: KnifeDef): Built {
     pts[j + 1] = P.getY(i) - center.y;
     pts[j + 2] = P.getZ(i) - center.z;
   }
-  b = { geo, center, radius: half.length(), half, pts };
+  const F = geo.getAttribute("finishUV");
+  const hv: number[] = [];
+  for (let i = 0; F && i < P.count; i++) {
+    const part = Math.floor(F.getZ(i) + 0.02);
+    if ((part === 2 || part === 3) && F.getX(i) > 0.5) hv.push(P.getX(i) - center.x, P.getY(i) - center.y, P.getZ(i) - center.z);
+  }
+  b = { geo, center, radius: half.length(), half, pts, hilt: new Float32Array(hv) };
   built.set(k.id, b);
   return b;
 }
@@ -71,7 +80,10 @@ export class KnifeShowcase {
   private skeleton: THREE.Skeleton;
   private hold: KnifeHold | null = null;
   private knife: KnifeDef | null = null;
-  private mats = new Map<number, THREE.ShaderMaterial>();
+  private mats = new Map<string, THREE.ShaderMaterial>();
+  /** The finish design shown (FINISH_CODE) and whether a hilt skin is on (setHilt). */
+  private code = 0;
+  private hilt = false;
   private BLinv: Float32Array;
   private W: Float32Array;
   private S = new Float32Array(12);
@@ -105,9 +117,10 @@ export class KnifeShowcase {
     }
   }
 
-  private material(code: number): THREE.ShaderMaterial {
-    let m = this.mats.get(code);
-    if (!m) this.mats.set(code, (m = solidMaterial(this.uniforms, { finish: code, glove: false, detail: true })));
+  private material(code: number, hilt = false): THREE.ShaderMaterial {
+    const key = `${code}|${hilt ? 1 : 0}`;
+    let m = this.mats.get(key);
+    if (!m) this.mats.set(key, (m = solidMaterial(this.uniforms, { finish: code, glove: false, detail: true, ...(hilt ? { hilt: true } : {}) })));
     return m;
   }
 
@@ -132,6 +145,20 @@ export class KnifeShowcase {
       out.set(Math.max(out.x, Math.abs(v.x)), Math.max(out.y, Math.abs(v.y)), Math.max(out.z, Math.abs(v.z)));
     }
     return out;
+  }
+
+  /** The hilt's box (centre and half extents, world axes) with the knife turned by `q`; null without a tagged hilt. */
+  hiltAt(q: THREE.Quaternion): { c: THREE.Vector3; e: THREE.Vector3 } | null {
+    const pts = this.cur?.hilt;
+    if (!pts || !pts.length) return null;
+    const lo = new THREE.Vector3(Infinity, Infinity, Infinity), hi = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
+    const v = new THREE.Vector3();
+    for (let j = 0; j < pts.length; j += 3) {
+      v.set(pts[j], pts[j + 1], pts[j + 2]).applyQuaternion(q);
+      lo.min(v);
+      hi.max(v);
+    }
+    return { c: lo.clone().add(hi).multiplyScalar(0.5), e: hi.sub(lo).multiplyScalar(0.5) };
   }
 
   get current(): KnifeDef | null {
@@ -159,7 +186,15 @@ export class KnifeShowcase {
   setFinish(spec: FinishSpec | null): void {
     const s = spec && spec.kind !== "none" ? spec : null;
     setFinishUniforms(this.uniforms, s);
-    this.mesh.material = this.material(lookOf(s, null).finish);
+    this.code = lookOf(s, null).finish;
+    this.mesh.material = this.material(this.code, this.hilt);
+  }
+
+  /** A hilt skin on whatever knife is shown (loadout.ts hiltSkin; null = the knife's own hilt). */
+  setHilt(skin: HiltSkin | null): void {
+    setHiltUniforms(this.uniforms, skin);
+    this.hilt = !!skin;
+    this.mesh.material = this.material(this.code, this.hilt);
   }
 
   /** Every finish kind's program, compiled ahead (KHR_parallel_shader_compile where available). */

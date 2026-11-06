@@ -13,10 +13,11 @@ import { PART } from "../../knives/types";
 import type { KnifeCtx } from "../../knives/ctx";
 import { ball, box, groove, guard, lathe, pins, rod, slab, trigger, type P2 } from "../shapes";
 import { gunPaint as fixed } from "../material";
+import { coat } from "../camo-zones";
 import type { GunDef } from "../types";
 
-const RECV = fixed(0x3a3e45, "dark"), RECV_DARK = fixed(0x26292e, "dark"), PEA = fixed(0x6f9150), PEA_DARK = fixed(0x55733d), STEEL = fixed(0x3a3f47, "dark"), STEEL_LIGHT = fixed(0x7a818c, "metal");
-const BORE = fixed(0x101114), LENS = fixed(0x2f6f73, "glass"), ORANGE = fixed(0xff7a1a), GRIP = fixed(0x55733d, "grip"), PAD = fixed(0x26292e, "grip");
+const RECV = coat(fixed(0x3a3e45, "dark"), "upper"), RECV_DARK = fixed(0x26292e, "dark"), PEA = coat(fixed(0x6f9150), "lower"), PEA_DARK = coat(fixed(0x55733d), "lower", 0.82), STEEL = fixed(0x3a3f47, "dark"), STEEL_LIGHT = fixed(0x7a818c, "metal");
+const BORE = fixed(0x101114), LENS = fixed(0x2f6f73, "glass"), ORANGE = fixed(0xff7a1a), GRIP = coat(fixed(0x55733d, "grip"), "lower", 0.85), PAD = fixed(0x26292e, "grip");
 const LINE = fixed(0x17191c), LIP = fixed(0x626a76, "metal");
 /** The trigger's pivot (top of its blade, gun-local). */
 /**
@@ -103,10 +104,14 @@ export const beanpole: GunDef = {
     triggerRest: true,
     seat: -0.02,
   },
+  // v0.0.38 gun grips: the support hand turned so the handguard runs across its palm (knuckles 18 deg forward, 30 up),
+  // its elbow down, back and in where that leaves the wrist near neutral (about 10 deg extension, 8 ulnar): the forearm
+  // comes up diagonally from the bottom of the screen and does the holding, instead of standing straight under the
+  // handguard with the wrist bent back 42 deg. The firing elbow likewise sits in line with a pistol-grip wrist.
   left: {
     o: [10.9, 0.0, 0.0],
-    up: [1, 0, 0],
-    fwd: [0.0, -0.848, 0.53],
+    up: [0.976, 0.195, -0.098],
+    fwd: [0.218, -0.873, 0.436],
     index: { c: [60, 80, 60] },
     middle: { c: [64, 84, 64] },
     ring: { c: [68, 86, 64] },
@@ -124,8 +129,7 @@ export const beanpole: GunDef = {
   frame: { o: [16, -6.2, -6.2], a: [-1, 4, -4] },
   trigger: TRIGGER,
   bolt: { axis: BOLT_AXIS, side: -1 },
-  elbows: { R: [8, -18, -18], L: [24, -6, -26] },
-  wrist: { L: 34 },
+  elbows: { R: [6.85, -10.55, -15.8], L: [21.5, 1.6, -14.05] },
   muzzle: [26.5, 0, BZ],
   eject: { p: [3.0, -0.6, 1.2], dir: [-0.15, -0.9, 0.4] },
   shell: "smg",

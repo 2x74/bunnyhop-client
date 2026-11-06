@@ -609,7 +609,12 @@ export class RunSession {
     }
     // A practice attempt (practice mode, third person, a lesson, scripted commands, the debug hook) is never submitted,
     // so it never beats either: a run that turns into practice drops its session.
-    if (update.restarted || this.unranked) this.clock.stop();
+    if (update.restarted || update.stopped || this.unranked) this.clock.stop();
+    if (update.stopped) {
+      announcerPolicy.resetAttempt();
+      this.view.reset();
+      this.hud.toast("Run stopped: anti-skip zone. Return to start.", 4000);
+    }
     // Back in a start zone after a checkpoint teleport or noclip: the timer resets there as if for a new run, but the
     // attempt stays practice until a restart (attempt.ts). Said once per attempt, when the timer goes back to the start
     // after being out of it (not right after a teleport into the zone).

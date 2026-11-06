@@ -17,6 +17,14 @@ export const EAR_BONES = ["bunny.EarL", "bunny.EarL2", "bunny.EarR", "bunny.EarR
  * copies the hand's matrix) until an inspect spins / tosses the knife on its own (viewmodel/inspects/third.ts).
  */
 export const KNIFE_BONE = "bunny.Knife";
+/**
+ * The knife's moving parts in third person (v0.0.38): children of the knife bone, one per viewmodel extra bone
+ * (viewmodel/rig.ts EXTRA_BONES: the Bunnyfly's blade / bite handle / latch, the Whirligig's spinner), named
+ * `bunny.Knife.<short name>`. Their bind is the knife bone's (the hand's); viewmodel/knives/tp-parts.ts poses them from
+ * the knife's joint angles. Appended after the knife bone, so every earlier index is unchanged.
+ */
+export const KNIFE_PART_BONES = ["Bfly_Blade", "Bfly_Bite", "Bfly_Latch", "Whirl_Spin"] as const;
+export const knifePartBone = (short: string) => `${KNIFE_BONE}.${short}`;
 
 export interface Rig {
   names: string[];
@@ -94,8 +102,8 @@ let cached: Rig | null = null;
 export function rig(): Rig {
   if (cached) return cached;
   const bones = (skeleton as { bones: { name: string; parent: number; pos: number[]; quat: number[] }[] }).bones;
-  const n = bones.length + EAR_BONES.length + 1;
-  const names = [...bones.map((b) => b.name), ...EAR_BONES, KNIFE_BONE];
+  const n = bones.length + EAR_BONES.length + 1 + KNIFE_PART_BONES.length;
+  const names = [...bones.map((b) => b.name), ...EAR_BONES, KNIFE_BONE, ...KNIFE_PART_BONES.map(knifePartBone)];
   const parent = new Int16Array(n);
   const bind = new Float32Array(n * 12);
   const local = new Float32Array(12);
@@ -121,8 +129,13 @@ export function rig(): Rig {
   });
   {
     const hand = names.indexOf("ValveBiped.Bip01_R_Hand");
-    parent[n - 1] = hand;
-    bind.copyWithin((n - 1) * 12, hand * 12, hand * 12 + 12);
+    const knife = names.indexOf(KNIFE_BONE);
+    parent[knife] = hand;
+    bind.copyWithin(knife * 12, hand * 12, hand * 12 + 12);
+    for (let k = knife + 1; k < n; k++) {
+      parent[k] = knife;
+      bind.copyWithin(k * 12, hand * 12, hand * 12 + 12);
+    }
   }
   const idx = new Map(names.map((nm, i) => [nm.toLowerCase(), i]));
   const index = (name: string) => idx.get(name.toLowerCase()) ?? -1;

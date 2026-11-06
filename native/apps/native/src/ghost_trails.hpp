@@ -36,6 +36,7 @@ struct GhostOptions {
     bool pb = true, wr = true, custom = true, trail = true, route = false, show = true, near_fade = true;
     GhostSource route_source = GhostSource::none;
     bool route_path = false;
+    bool route_only = false;
 
     void read(const nlohmann::json &settings) {
         show = settings.value("showGhost", true);
@@ -48,6 +49,7 @@ struct GhostOptions {
         const auto source = settings.value("ghostRouteSource", std::string("auto"));
         route_source = source == "auto" ? GhostSource::none : ghost_source(source);
         route_path = settings.value("ghostRouteMode", std::string("jumps")) == "path";
+        route_only = settings.value("ghostRouteOnly", false);
     }
 
     bool visible(GhostSource source) const {

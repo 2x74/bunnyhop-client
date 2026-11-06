@@ -31,7 +31,8 @@ import { BunnyProcedural } from "./procedural";
 import { BodyBank } from "./bank";
 import { LegLayer, type GroundProbe } from "./legs";
 import { motionScale, springRamp } from "../../viewmodel/feel";
-import { concat, EAR, EAR_DOWN, invert34, KNIFE_BONE, rig, type Rig } from "./rig";
+import { concat, EAR, EAR_DOWN, invert34, KNIFE_BONE, KNIFE_PART_BONES, knifePartBone, rig, type Rig } from "./rig";
+import { PartPoser } from "../../viewmodel/knives/tp-parts";
 import { TpInspect, type TpBones } from "../../viewmodel/inspects/third";
 import { TP_CARROT } from "../../viewmodel/knives/ctx";
 import { gloveStyle, HAIR_DEFAULT, HAIR_LENGTH, type CosmeticLoadout } from "../../loadout";
@@ -47,6 +48,8 @@ import { gunById } from "../../viewmodel/guns/index";
 /** The ponytail's length over the built one (loadout.hairLength, a percent; absent = 1). */
 const ponyLength = (l: CosmeticLoadout | null | undefined): number => (l?.hairLength ?? HAIR_LENGTH.default) / 100;
 import { bunnyGunGeometry, bunnyHold, bunnySilencerGeometry } from "../../viewmodel/guns/meshes";
+import { camoTpGeometry } from "../../viewmodel/guns/camo";
+import { camoStyle } from "../../camo";
 import { GunHold } from "./gun-hold";
 import { BunnyGunFx } from "./gun-fx";
 import { hypot2, hypot3 } from "../../hypot";
@@ -566,7 +569,14 @@ export class BunnyModel implements PlayerModelImpl {
       this.uniforms.uPonytail.value.set(0, 0, 1, 0);
       this.uniforms.uPropellerAngle.value = 0;
     }
+    const camoChanged = (this.loadout?.camo ?? null) !== (l?.camo ?? null);
     this.loadout = l;
+    // The gun camo is in the gun's geometry (flat colours per zone): a held gun is rebuilt in the new one.
+    if (camoChanged && this.gunId) {
+      const id = this.gunId;
+      this.gunId = null;
+      this.setGun(id, true);
+    }
     this.uniforms.uHairColor.value.setHex(l?.hairColor ?? HAIR_DEFAULT);
     this.uniforms.uPonytail.value.z = ponyLength(l);
     this.applyLook();
@@ -574,7 +584,7 @@ export class BunnyModel implements PlayerModelImpl {
   }
 
   /** The gun in the right hand (a core weapon id, "glock"; viewmodel/guns), or null for the knife. */
-  setGun(id: string | null): void {
+  setGun(id: string | null, keepHold = false): void {
     if (id === this.gunId) return;
     this.gunId = id;
     this.gun?.removeFromParent();
@@ -584,12 +594,14 @@ export class BunnyModel implements PlayerModelImpl {
     const def = id ? gunById(id) : undefined;
     this.gunFx?.clear();
     // A switch or pickup draws (not a model appearing with a gun, or a snap).
-    (this.hold ??= new GunHold(this.r)).setGun(def ? bunnyHold(def) : null, this.hasLast && !this.snapNext);
+    // (keepHold: the same gun again in a new camo, no draw.)
+    if (!keepHold) (this.hold ??= new GunHold(this.r)).setGun(def ? bunnyHold(def) : null, this.hasLast && !this.snapNext);
     if (!def) return;
     this.gunSkel ??= new DirectSkeleton(2);
-    this.gun = this.handMesh(bunnyGunGeometry(def), this.gunSkel);
+    this.gun = this.handMesh(camoTpGeometry(bunnyGunGeometry(def), this.loadout?.camo, camoStyle(this.loadout?.camo)), this.gunSkel);
     this.yawG.add(this.gun);
-    const sil = bunnySilencerGeometry(def);
+    const silGeo = bunnySilencerGeometry(def);
+    const sil = silGeo && camoTpGeometry(silGeo, this.loadout?.camo, camoStyle(this.loadout?.camo));
     if (sil) {
       this.silencer = this.handMesh(sil, this.gunSkel);
       this.silencer.visible = this.silencerOn;
@@ -931,8 +943,13 @@ export class BunnyModel implements PlayerModelImpl {
     // The knife bone follows the hand (same bind), then the inspect gesture may move the arm and the knife.
     if (this.knifeBone >= 0) S.copyWithin(this.knifeBone * 12, this.handBone * 12, this.handBone * 12 + 12);
     if (!this.gun) this.inspectLayer(s, snap, dt);
+    // The knife's moving parts (a balisong's handles and latch, a spinner) after the inspect moved the knife.
+    this.knifePartsLayer();
     // A gun out (or an empty hand): the knife collapses to nothing (its geometry stays in the body's mesh; no swap).
-    if ((this.gun || this.knifeHidden) && this.knifeBone >= 0) S.fill(0, this.knifeBone * 12, this.knifeBone * 12 + 12);
+    if ((this.gun || this.knifeHidden) && this.knifeBone >= 0) {
+      S.fill(0, this.knifeBone * 12, this.knifeBone * 12 + 12);
+      for (const b of this.partBonesAll) S.fill(0, b * 12, b * 12 + 12);
+    }
 
     const bm = this.skeleton.boneMatrices!;
     const n = r.names.length;
@@ -1088,6 +1105,30 @@ export class BunnyModel implements PlayerModelImpl {
       swing(e.dir0, bd, e.mid, hangs ? 0.3 : 0.5, hangs ? 0.5 : 1.1, m2);
       concat(S, bIdx * 12, m2, 0, S, (bIdx + 1) * 12);
     }
+  }
+
+  private parts: PartPoser | null = null;
+  private partBones: number[] = [];
+  private partBonesAll = KNIFE_PART_BONES.map((b) => this.r.index(knifePartBone(b))).filter((i) => i >= 0);
+
+  /**
+   * The knife's moving parts on their third-person bones (viewmodel/knives/tp-parts.ts): the knife's own joint angles
+   * at the model's time (its idle: the Whirligig's thumb flicks), plus the playing inspect's (the Bunnyfly's flips).
+   * Knives without moving parts: the part bones just follow the knife bone.
+   */
+  private knifePartsLayer(): void {
+    const S = this.S, kb = this.knifeBone;
+    if (kb < 0) return;
+    for (const b of this.partBonesAll) S.copyWithin(b * 12, kb * 12, kb * 12 + 12);
+    const def = this.knife;
+    if (!def?.joints?.length) return;
+    if (!this.parts || this.parts.def !== def) {
+      this.parts = new PartPoser(def, this.r.bind, this.handBone * 12, def.tp ?? TP_CARROT);
+      this.partBones = def.joints.map((j) => this.r.index(knifePartBone(j)));
+    }
+    const a = this.parts.baseAngles(this.time);
+    if (this.tp && !this.gun) this.tp.angles(a);
+    this.parts.pose(S, kb * 12, this.partBones, a);
   }
 
   /** Inspect gesture (viewmodel/inspects/third.ts) on the skinning matrices: signals in, arm + knife bone out. */

@@ -41,6 +41,8 @@ const SLOT_NAMES: Record<CosmeticSlot, string> = {
   knife: "knife",
   finish: "finish",
   glove: "gloves",
+  hilt: "hilt",
+  camo: "gun camo",
   hat: "hat",
   body: "player model",
 };

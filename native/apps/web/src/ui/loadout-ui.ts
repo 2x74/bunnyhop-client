@@ -5,10 +5,10 @@
 import "./loadout-ui.css";
 import { colourway } from "../player/bunny/palettes";
 import { getOutfit } from "../player/cosmetics";
-import { achievement, cosmetic, RARITY, type CosmeticDef } from "../progression";
+import { achievement, cosmetic, RARITY, staffItem, type CosmeticDef } from "../progression";
 import { availableNow } from "./community";
-import { finishStyle, gloveStyle, type CosmeticLoadout } from "../loadout";
-import { knifeById } from "../../../native/ui/knife-catalog";
+import { finishStyle, gloveStyle, hiltSkin, type CosmeticLoadout } from "../loadout";
+import { knifeById } from "../viewmodel/knives/index";
 import { h } from "./dom";
 
 /** Knives the registry hasn't built yet stay hidden everywhere (they appear, as new, once they ship). */
@@ -17,18 +17,20 @@ export function listedCosmetic(c: CosmeticDef): boolean {
 }
 
 /**
- * Listed AND worth showing to this player: role-held items (the owner's / staff items) only appear for whoever owns
- * them, never as a locked goal for everyone else; so do items from achievements that can't be earned right now
- * (Early Hopper; the Discord server rewards while the bot is off: ui/community.ts availableNow).
+ * Listed AND worth showing to this player. Staff items (moderator, admin and owner items: progression.ts staffItem) only
+ * appear for whoever holds the role, never as a locked goal for anyone else, and so never in a tab count or a preview;
+ * so do items from achievements that can't be earned right now (Early Hopper; the Discord server rewards while the bot
+ * is off: ui/community.ts availableNow). Contributor items show for everyone, locked and marked Contributor.
  */
 export function shownCosmetic(c: CosmeticDef, owned: ReadonlySet<string> | ((c: CosmeticDef) => boolean)): boolean {
   if (!listedCosmetic(c)) return false;
-  const ownOnly = c.unlock.kind === "role" || (c.unlock.kind === "achievement" && !availableNow(achievement(c.unlock.id)));
+  const ownOnly = staffItem(c) || (c.unlock.kind === "achievement" && !availableNow(achievement(c.unlock.id)));
   if (!ownOnly) return true;
   return typeof owned === "function" ? owned(c) : owned.has(c.id);
 }
 
-export const isLoadoutSlot = (slot: string): slot is "knife" | "finish" | "glove" => slot === "knife" || slot === "finish" || slot === "glove";
+export type LoadoutSlot = "knife" | "finish" | "hilt" | "glove";
+export const isLoadoutSlot = (slot: string): slot is LoadoutSlot => slot === "knife" || slot === "finish" || slot === "hilt" || slot === "glove";
 
 export function rarityOf(c: CosmeticDef | null): { name: string; color: string } | null {
   return c?.rarity ? RARITY[c.rarity] : null;
@@ -95,14 +97,26 @@ export function finishBackground(id: string | null | undefined): string {
       return "repeating-linear-gradient(90deg, #3b3a40 0 1.5px, transparent 1.5px 5px, #3b3a40 5px 6.5px, transparent 6.5px 10px, #3b3a40 10px 11.5px, transparent 11.5px 15px, #3b3a40 15px 16.5px, transparent 16.5px 26px) 0 30% / 100% 40% no-repeat, #efe9dc";
     case "devgrid":
       return "linear-gradient(90deg, rgba(255, 255, 255, 0.9) 1px, transparent 1px) 0 0 / 8px 8px, linear-gradient(0deg, rgba(255, 255, 255, 0.9) 1px, transparent 1px) 0 0 / 8px 8px, linear-gradient(90deg, #f08a24 0 50%, #8f9296 50%)";
+    // Contributor: Workbench's Ruler (a brass rule with ink ticks over teal steel), Draftsman's Linework (white lines on
+    // blueprint blue).
+    case "ruler":
+      return "repeating-linear-gradient(90deg, #1a1816 0 1px, transparent 1px 6px) 0 0 / 100% 22% no-repeat, repeating-linear-gradient(90deg, #1a1816 0 1px, transparent 1px 24px) 0 0 / 100% 36% no-repeat, linear-gradient(180deg, #cba24c 0 38%, #1a1816 38% 40%, #2a9d94 40%, #1f8178 100%)";
+    case "linework":
+      return "linear-gradient(180deg, transparent 18%, #f0f6ff 18% 21%, transparent 21% 79%, #f0f6ff 79% 82%, transparent 82%), linear-gradient(90deg, rgba(255, 255, 255, 0.18) 1px, transparent 1px) 0 0 / 7px 7px, linear-gradient(0deg, rgba(255, 255, 255, 0.18) 1px, transparent 1px) 0 0 / 7px 7px, #1d4f91";
     default:
       return "repeating-linear-gradient(90deg, #ff7a1a 0 9px, #d95a0c 9px 11px)";
   }
 }
 
-/** Swatch for a knife / finish / glove item (tile size). */
-export function loadoutSwatch(c: CosmeticDef | null, slot: "knife" | "finish" | "glove"): HTMLElement {
+/** Swatch for a knife / finish / hilt / glove item (tile size). */
+export function loadoutSwatch(c: CosmeticDef | null, slot: LoadoutSlot): HTMLElement {
   const rar = rarityOf(c)?.color ?? "#888";
+  if (slot === "hilt") {
+    // A grip between a guard and a pommel, in the skin's colours (the knife's own hilt: the carrot's green and accent).
+    const s = hiltSkin(c?.id);
+    const [g, g2, f] = s ? [s.grip.color, s.grip.alt, s.guard.color] : [0x2f7d34, 0x58c64a, 0xffb43a];
+    return h("span.pf-sw.pf-sw-hilt", { "aria-hidden": "true", style: `--g:${hex(g)};--g2:${hex(g2)};--f:${hex(f)};--rar:${rar}` }, h("i.grip"), h("i.guard"), h("i.pommel"));
+  }
   if (slot === "finish") return h("span.pf-sw.pf-sw-fin", { "aria-hidden": "true", style: `--fin:${finishBackground(c?.id)};--rar:${rar}` }, h("span"));
   if (slot === "glove") {
     const g = gloveStyle(c?.id);
@@ -114,10 +128,10 @@ export function loadoutSwatch(c: CosmeticDef | null, slot: "knife" | "finish" | 
   return h("span.pf-sw.pf-sw-knife", { "aria-hidden": "true", style: `--sw:${c?.color ?? "#ff7a1a"};--rar:${rar}` }, h("span"));
 }
 
-/** "Karrotbit", "Nebula", "Sport · Pandora" (each finish is one design, so its name says it all). */
-export function loadoutSummary(l: CosmeticLoadout): { knife: string; finish: string; glove: string } {
+/** "Karrotbit", "Nebula", "Walnut", "Sport · Pandora" (each finish and hilt is one design, so its name says it all). */
+export function loadoutSummary(l: CosmeticLoadout): { knife: string; finish: string; hilt: string; glove: string } {
   const knife = knifeById(l.knife) ? (cosmetic(l.knife)?.name ?? "Carrot Blade") : "Carrot Blade";
-  return { knife, finish: cosmetic(l.finish)?.name ?? "Garden Fresh", glove: cosmetic(l.glove)?.name ?? "Knit" };
+  return { knife, finish: cosmetic(l.finish)?.name ?? "Garden Fresh", hilt: cosmetic(l.hilt ?? "hilt-original")?.name ?? "Original", glove: cosmetic(l.glove)?.name ?? "Knit" };
 }
 
 /** The Loadout menu item's second line (home, offline): "Karrotbit", "Karrotbit · Nebula". */

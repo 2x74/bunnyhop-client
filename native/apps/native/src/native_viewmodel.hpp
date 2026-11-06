@@ -29,7 +29,14 @@ class NativeViewmodel {
     struct Look {
         std::string outfit = "outfit-cream", knife = "carrot", glove = "knit", gloveId = "glove-knit", hat,
                     body = "classic", bodyLook = "bunny", hatMesh;
-        int finish = 0, crown = 0;
+        int finish = 0, crown = 0, camoKind = -1, camoStamp = 0, camoSheen = 0;
+        bool hiltOn = false;
+        std::array<float, 9> hiltA{}, hiltB{};
+        std::array<float, 3> hiltM{};
+        std::array<float, 12> camoColors{};
+        std::array<float, 9> camoTpColors{};
+        std::array<float, 4> camoParams{};
+        float camoScale = 1;
         // The standard bunny lowers its hood for a wig (loadout.ts isWig).
         bool hoodDown = false;
         std::array<float, 24> palette{};
@@ -48,6 +55,7 @@ class NativeViewmodel {
 
     std::array<CachedLook, 128> lookCache;
     size_t nextLook = 0;
+    native_vm::KnifeRig previewKnifeRig;
     std::vector<float> basePose;
     std::unique_ptr<NativePresentation> gunFx;
     double gunFlashStarted = -100;
@@ -58,7 +66,7 @@ class NativeViewmodel {
     Gl &gl;
     using PlayerProgram = native_render::PlayerProgram;
     using PlayerMaterial = native_render::PlayerMaterial;
-    static constexpr size_t vertex_floats = 23;
+    static constexpr size_t vertex_floats = 26;
     // The metals' scene reflection sampler: a black cube on its own unit, read only when a look turns reflections on.
     static constexpr GLint reflection_unit = 9;
     GLuint bonesTexture = 0, identityBonesTexture = 0, reflectionCube = 0;
@@ -134,6 +142,7 @@ class NativeViewmodel {
     std::vector<int> actorParents;
     std::vector<float> actorBind;
     nlohmann::json tpInspects;
+    std::unordered_map<std::string, native_tp::PartPose> tpParts;
 
     struct ActorAction {
         native_tp::Combo gesture;
@@ -261,6 +270,31 @@ class NativeViewmodel {
                 if (f.size() > 5 && metadata.at("hats").contains(f[5])) out.hat = f[5];
                 if (f.size() > 6 && f[6] == "body-b") out.body = "feminine";
                 read_hair(f, out);
+                if (f.size() > 10 && metadata.at("hilts").contains(f[10])
+                    && metadata.at("hilts").at(f[10]).is_object()) {
+                    const auto &skin = metadata.at("hilts").at(f[10]);
+                    const char *roles[] = {"grip", "guard", "pommel"};
+                    for (size_t i = 0; i < 3; ++i) {
+                        const auto &layer = skin.at(roles[i]);
+                        out.hiltM[i] = layer.at("kind").get<float>();
+                        linearColor(layer.at("color").get<uint32_t>(), out.hiltA.data() + i * 3);
+                        linearColor(layer.at("alt").get<uint32_t>(), out.hiltB.data() + i * 3);
+                    }
+                    out.hiltOn = true;
+                }
+                if (f.size() > 11 && metadata.at("camos").contains(f[11])) {
+                    const auto &style = metadata.at("camos").at(f[11]);
+                    out.camoKind = style.at("kind").get<int>();
+                    out.camoStamp = style.at("stamp").get<int>();
+                    out.camoSheen = style.at("sheen").get<int>();
+                    out.camoScale = style.at("scale").get<float>();
+                    for (size_t i = 0; i < 3; ++i)
+                        linearColor(style.at("tpColors").at(i).get<uint32_t>(), out.camoTpColors.data() + i * 3);
+                    for (size_t i = 0; i < 4; ++i) {
+                        linearColor(style.at("colors").at(i).get<uint32_t>(), out.camoColors.data() + i * 3);
+                        out.camoParams[i] = style.at("p").at(i).get<float>();
+                    }
+                }
             }
         }
         // These two character outfits ship with matching paws in the site's default loadout.
@@ -282,8 +316,10 @@ class NativeViewmodel {
         return cached.look;
     }
 
-    PlayerProgram link_player_program(int finish, bool glove, bool detail, PlayerMaterial material) {
-        const auto defines = native_render::player_defines(finish, glove, detail, material);
+    PlayerProgram link_player_program(
+            int finish, bool glove, bool detail, bool hilt, int camo, int stamp, int sheen, PlayerMaterial material
+    ) {
+        const auto defines = native_render::player_defines(finish, glove, detail, hilt, camo, stamp, sheen, material);
         const bool gun = material == PlayerMaterial::gun || material == PlayerMaterial::world_gun;
         const auto vertex = defines + (gun ? shaders->gunVertex : shaders->vertex);
         const auto fragment = defines
@@ -346,6 +382,13 @@ class NativeViewmodel {
         p.axisB = at("uAxisB");
         p.nearFade = at("uNearFade");
         p.contour = at("uContour");
+        p.hiltA = at("uHiltA");
+        p.hiltB = at("uHiltB");
+        p.hiltM = at("uHiltM");
+        p.camoC = at("uCamoC");
+        p.camoP = at("uCamoP");
+        p.camoScale = at("uCamoScale");
+        p.camoTp = at("uCamoTp");
         return p;
     }
 
@@ -353,9 +396,14 @@ class NativeViewmodel {
         const bool glove = look.glove != "knit";
         // Guns take no finish (the knife's finish stays on the knife), as on the website.
         const int finish = material == PlayerMaterial::solid ? look.finish : 0;
-        const int key = native_render::player_program_key(finish, glove, detail, material);
+        const bool hilt = material == PlayerMaterial::solid && look.hiltOn;
+        const int camo = material == PlayerMaterial::gun || material == PlayerMaterial::solid ? look.camoKind : -1;
+        const int stamp = camo >= 0 ? look.camoStamp : 0;
+        const int sheen = camo >= 0 ? look.camoSheen : 0;
+        const int key = native_render::player_program_key(finish, glove, detail, hilt, camo, stamp, sheen, material);
         if (const auto found = programs.find(key); found != programs.end()) return found->second;
-        return programs.emplace(key, link_player_program(finish, glove, detail, material)).first->second;
+        return programs.emplace(key, link_player_program(finish, glove, detail, hilt, camo, stamp, sheen, material))
+                .first->second;
     }
 
     void mesh(const std::string &name, int instances = 1) {
@@ -372,8 +420,8 @@ class NativeViewmodel {
             );
             // position, normal, partColor, skinIndex, skinWeight, accent, finishUV, then headwear at location 8
             // (location 7 is the glow's smooth normal, in its own buffer).
-            constexpr std::array<GLuint, 8> location = {0, 1, 2, 3, 4, 5, 6, 8};
-            constexpr std::array<int, 8> size = {3, 3, 3, 4, 4, 1, 4, 1}, offset = {0, 3, 6, 9, 13, 17, 18, 22};
+            constexpr std::array<GLuint, 9> location = {0, 1, 2, 3, 4, 5, 6, 8, 9};
+            constexpr std::array<int, 9> size = {3, 3, 3, 4, 4, 1, 4, 1, 3}, offset = {0, 3, 6, 9, 13, 17, 18, 22, 23};
             for (size_t a = 0; a < location.size(); a++) {
                 gl.EnableVertexAttribArray(location[a]);
                 gl.VertexAttribPointer(
@@ -442,9 +490,6 @@ class NativeViewmodel {
             pose[i] = x + (y - x) * f;
         }
         native_render::turn_spinner(pose, spinner, spinDegrees);
-        gl.ActiveTexture(GL_TEXTURE0);
-        gl.BindTexture(GL_TEXTURE_2D, bonesTexture);
-        gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, 3, entry.bones, 0, GL_RGBA, GL_FLOAT, pose.data());
     }
 
     void load_gun_holds(const nlohmann::json &metadata, size_t cs_bones) {
@@ -558,6 +603,8 @@ class NativeViewmodel {
                 state.gesture.remote(actor.inspect, spec["clips"]);
             state.gesture.update(dt, actor.inspectHeld, spec);
             native_tp::apply(state.gesture, spec, actorNames, actorParents, actorBind, pose);
+            if (const auto part = tpParts.find(look.knife); part != tpParts.end())
+                part->second.apply(state.gesture, spec, native_render::whirl_idle_degrees(spinner, seconds), pose);
         } else
             state.gesture.reset();
         native_render::advance_accessory(
@@ -631,6 +678,13 @@ class NativeViewmodel {
         gl.Uniform3fv(p.palette, 8, look.palette.data());
         gl.Uniform3fv(p.accent, 1, look.accent.data());
         gl.Uniform3fv(p.glove, 5, look.gloveColors.data());
+        gl.Uniform3fv(p.hiltA, 3, look.hiltA.data());
+        gl.Uniform3fv(p.hiltB, 3, look.hiltB.data());
+        gl.Uniform3fv(p.hiltM, 1, look.hiltM.data());
+        gl.Uniform3fv(p.camoC, 4, look.camoColors.data());
+        gl.Uniform4fv(p.camoP, 1, look.camoParams.data());
+        gl.Uniform1f(p.camoScale, look.camoScale);
+        gl.Uniform3fv(p.camoTp, 3, look.camoTpColors.data());
         gl.Uniform3fv(p.hairColor, 1, look.hairColor.data());
         gl.Uniform3fv(p.headwearScale, 1, look.fit.scale.data());
         gl.Uniform3fv(p.headwearOffset, 1, look.fit.offset.data());
@@ -732,6 +786,8 @@ public:
                 if (actorParents[i] >= int(i)) throw std::runtime_error("Invalid actor rig hierarchy");
             load_gun_holds(metadata, rig.value("csBones", actorNames.size()));
         }
+        for (const auto &[knife, spec] : tpInspects.items())
+            tpParts.emplace(knife, native_tp::PartPose(spec, actorNames, actorBind));
         for (const auto &[name, raw] : metadata.at("meshes").items()) {
             Mesh m;
             m.vertices = raw.at("vertices");
@@ -754,11 +810,19 @@ public:
                 if (!t.frames || t.frames > 1024 || !std::isfinite(t.duration) || t.duration < 0
                     || t.offset + t.frames * e.bones * 12 > data.size())
                     throw std::runtime_error("Invalid native pose range");
+                const auto joints = c.value("jointBones", std::vector<int>{});
+                if (joints.size() > t.joint_bones.size()) throw std::runtime_error("Invalid knife joint count");
+                t.joint_count = joints.size();
+                std::copy(joints.begin(), joints.end(), t.joint_bones.begin());
+                t.angle_offset = c.value("angleOffset", size_t(0)) / 4;
+                if (t.angle_offset + t.frames * t.joint_count > data.size())
+                    throw std::runtime_error("Invalid knife angle range");
                 e.clips.push_back(t);
             }
             entries.emplace(name, std::move(e));
         }
 
+        previewKnifeRig = native_vm::KnifeRig::from_json(metadata.at("knifeRig"));
         firstPerson = std::make_unique<native_vm::FirstPersonWeapons>(
                 native_vm::FirstPersonConfig::from_metadata(metadata), data
         );
@@ -918,7 +982,11 @@ public:
             const std::string &previewAction = "idle",
             float previewSpeed = 0
     ) {
-        if (kind == "actor" || kind == "hat" || kind == "ghost") {
+        if (kind == "hilt" || kind == "knife") {
+            draw_knife_sample(width, height, kind == "hilt", seconds);
+        } else if (kind == "gunside") {
+            draw_gun_side(width, height, weapon, seconds);
+        } else if (kind == "actor" || kind == "hat" || kind == "ghost") {
             native_render::Actor actor;
             actor.id = "asset-preview";
             actor.opacity = kind == "ghost" ? .55f : 1.f;
@@ -958,11 +1026,16 @@ public:
             float yaw,
             float pitch,
             unsigned presses,
-            bool held
+            bool held,
+            uint32_t weapon = 17
     ) {
         previewYaw = std::remainder(yaw, 360.f);
         previewPitch = std::clamp(pitch, -45.f, 45.f);
-        if (kind == "bunny" || kind == "ghost") {
+        if (kind == "hilt" || kind == "knife") {
+            draw_knife_sample(width, height, kind == "hilt", seconds);
+        } else if (kind == "gunside") {
+            draw_gun_side(width, height, weapon, seconds);
+        } else if (kind == "bunny" || kind == "ghost") {
             native_render::Actor actor;
             actor.id = "menu-preview";
             actor.opacity = kind == "ghost" ? .55f : 1.f;
@@ -1006,9 +1079,82 @@ public:
             inspect_held(held);
             BhSnapshot state{};
             state.player.tick = uint32_t(seconds * 60) + 1;
-            draw(width, height, state, 1, 0, false, 0, seconds);
+            draw(width, height, state, kind == "gun" ? weapon : 1, 0, false, 0, seconds);
         }
         previewYaw = previewPitch = 0;
+    }
+
+    static void narrow_preview_lens(native::Matrix &projection) {
+        const float zoom = float(1 / std::tan(11 * native::radians)) / (4.f / 3);
+        for (int column = 0; column < 4; column++) {
+            projection[column * 4] *= zoom;
+            projection[column * 4 + 1] *= zoom;
+        }
+    }
+
+    void draw_knife_sample(int width, int height, bool hilt, double seconds) {
+        const auto &stage = metadata.at("knifeStages").at(equipped.knife);
+        const auto center = stage.at(hilt ? "hiltCenter" : "center").get<std::array<float, 3>>();
+        const auto size = stage.at(hilt ? "hiltSize" : "size").get<std::array<float, 3>>();
+        const auto &rig = previewKnifeRig;
+        layerPose.resize(rig.bones() * 12);
+        for (size_t bone = 0; bone < rig.bones(); bone++)
+            std::copy(native_vm::identity34.begin(), native_vm::identity34.end(), layerPose.begin() + bone * 12);
+        upload_pose(rig.bones());
+        BhTransform turn{};
+        turn.angles[1] = 90 + previewYaw;
+        turn.angles[0] = previewPitch;
+        const auto rotation = native::model_matrix(turn);
+        const auto moved = native::transform_point(rotation, center);
+        BhTransform shift{};
+        for (int i = 0; i < 3; i++)
+            shift.origin[i] = -moved[i];
+        native_vm::Matrix34 inverse;
+        std::copy_n(rig.inverse_bind.data() + rig.knife_handle * 12, 12, inverse.data());
+        const auto model =
+                native::multiply(native::multiply(native::model_matrix(shift), rotation), to_matrix(inverse));
+        const float tangent = float(std::tan(11 * native::radians)), aspect = float(width) / height;
+        const float distance = std::max(size[2] / tangent, size[1] / (tangent * aspect)) * .675f + size[0] * .5f;
+        const float eye[3] = {0, -distance, 0};
+        auto projection = native::camera_matrix(eye, 90, 0, aspect);
+        narrow_preview_lens(projection);
+        BindOptions options;
+        options.detail = true;
+        bind(equipped, projection, model, eye, seconds, options);
+        mesh("fpknife:" + equipped.knife);
+    }
+
+    void draw_gun_side(int width, int height, uint32_t weapon, double seconds) {
+        if (weapon >= weapons.size() || !metadata.at("gunStages").contains(weapons[weapon])) return;
+        const auto &stage = metadata.at("gunStages").at(weapons[weapon]);
+        const auto center = stage.at("center").get<std::array<float, 3>>();
+        const auto size = stage.at("size").get<std::array<float, 3>>();
+        const auto *entry = first_person_entry(weapon);
+        if (!entry) return;
+        layerPose.resize(entry->bones * 12);
+        for (size_t bone = 0; bone < entry->bones; bone++)
+            std::copy(native_vm::identity34.begin(), native_vm::identity34.end(), layerPose.begin() + bone * 12);
+        upload_pose(entry->bones);
+        BhTransform turn{};
+        turn.angles[1] = previewYaw - 180.f - float(std::sin(.5 + seconds * .35) * .75 / native::radians);
+        turn.angles[0] = previewPitch;
+        turn.angles[2] = float(.18 / native::radians);
+        const auto rotation = native::model_matrix(turn);
+        const auto moved = native::transform_point(rotation, center);
+        BhTransform shift{};
+        for (int i = 0; i < 3; i++)
+            shift.origin[i] = -moved[i];
+        const auto model = native::multiply(native::model_matrix(shift), rotation);
+        const float tangent = float(std::tan(11 * native::radians)), aspect = float(width) / height;
+        const float distance = std::max(size[0] * .58f / (tangent * aspect), size[2] * .9f / tangent) + size[1];
+        const float eye[3] = {0, -distance, size[2] * .08f};
+        auto projection = native::camera_matrix(eye, 90, std::atan2(eye[2], distance) / native::radians, aspect);
+        narrow_preview_lens(projection);
+        BindOptions options;
+        options.material = PlayerMaterial::gun;
+        options.detail = true;
+        bind(equipped, projection, model, eye, seconds, options);
+        mesh("fpgun:" + weapons[weapon]);
     }
 
     void draw_onboarding_preview(int width, int height, const nlohmann::json &stage, double seconds, unsigned signal) {
@@ -1265,7 +1411,6 @@ public:
                 const float amount = std::min(std::abs(frame.pitch) / 60.f, 1.f);
                 for (size_t i = 0; i < pose.size(); i++)
                     pose[i] = basePose[i] + (pose[i] - basePose[i]) * amount;
-                gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, 3, entry.bones, 0, GL_RGBA, GL_FLOAT, pose.data());
             }
             if (actorAnimationData) {
                 auto &state = actor_state(actor.id);

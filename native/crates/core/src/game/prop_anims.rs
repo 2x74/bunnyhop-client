@@ -54,15 +54,15 @@ pub struct PropAnims {
     pub props: Vec<PropAnim>,
 }
 
-const ANIM_INPUTS: [&str; 4] = ["setanimation", "setdefaultanimation", "setplaybackrate", "setanimationnoreset"];
+const ANIM_INPUTS: [&str; 11] = ["setanimation", "setdefaultanimation", "setplaybackrate", "setanimationnoreset", "kill", "killhierarchy", "turnoff", "turnon", "disable", "enable", "setbodygroup"];
 
-/// Whether `e` is a prop_dynamic the client animates: it has a DefaultAnim or RandomAnimation, or the map's I/O sends it
-/// an animation input.
+/// Props that need their own presentation state: animation, initial hiding, or visibility/body I/O.
+/// A static batch cannot remove a single killed prop.
 fn animated(e: &Entity, io_targets: &[String]) -> bool {
     if !e.classname().to_ascii_lowercase().starts_with("prop_dynamic") {
         return false;
     }
-    if e.get("DefaultAnim").is_some_and(|a| !a.trim().is_empty()) || e.int("RandomAnimation") != 0 {
+    if e.get("DefaultAnim").is_some_and(|a| !a.trim().is_empty()) || e.int("RandomAnimation") != 0 || e.int("StartDisabled") != 0 {
         return true;
     }
     let name = e.get("targetname").unwrap_or("");
@@ -166,6 +166,19 @@ impl Game {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn static_kill_targets_wildcards_and_start_disabled_props_get_owners() {
+        let list = crate::entities::parse_with_outputs(r#"{ "classname" "prop_dynamic" "targetname" "crate_1" }
+            { "classname" "prop_dynamic" "targetname" "crate_2" }
+            { "classname" "prop_dynamic" "StartDisabled" "1" }
+            { "classname" "prop_dynamic" "targetname" "decoration" }
+            { "classname" "logic_relay" "OnTrigger" "crate_*,Kill,,0,-1" }"#, true);
+        let outputs: Vec<&[crate::entities::Output]> = list.outputs.iter().map(|v|v.as_slice()).collect();
+        let props = PropAnims::new(&list.entities, &outputs);
+        assert!(props.contains(0) && props.contains(1) && props.contains(2));
+        assert!(!props.contains(3));assert!(props.props[2].hidden);
+    }
 
     #[test]
     fn rate_changes_keep_the_cycle() {

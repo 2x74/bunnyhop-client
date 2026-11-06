@@ -14,15 +14,16 @@
 //       { "kind": "start", "mins": [x,y,z], "maxs": [x,y,z] },                 // track omitted = 0 (main)
 //       { "kind": "end",   "track": 1, "mins": [...], "maxs": [...] },         // bonus 1
 //       { "kind": "stage", "index": 2, "mins": [...], "maxs": [...] },         // split: stage 2 begins here
-//       { "kind": "checkpoint", "index": 1, "mins": [...], "maxs": [...] }     // split on a linear map
+//       { "kind": "checkpoint", "index": 1, "mins": [...], "maxs": [...] },    // split on a linear map
+//       { "kind": "anti-skip", "mins": [...], "maxs": [...] }                 // rules 5 / physics 26 stop zone
 //     ],
 //     "provenance": { "source": "srcwr", ... }                                  // informational only
 //   }
 // Version 1 files ({kind: start|end} only) are a subset of this and load unchanged.
 
-export type ZoneKind = "start" | "end" | "stage" | "checkpoint";
+export type ZoneKind = "start" | "end" | "stage" | "checkpoint" | "anti-skip";
 
-export const ZONE_KINDS: readonly ZoneKind[] = ["start", "end", "stage", "checkpoint"];
+export const ZONE_KINDS: readonly ZoneKind[] = ["start", "end", "stage", "checkpoint", "anti-skip"];
 
 export interface Zone {
   kind: ZoneKind;

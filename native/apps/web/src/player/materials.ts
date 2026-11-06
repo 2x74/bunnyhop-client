@@ -23,7 +23,7 @@ import { HAT_FX_FRAGMENT_GHOST, HAT_FX_FRAGMENT_PARS, HAT_FX_FRAGMENT_SOLID, HAT
 import { FABRIC_FRAGMENT_PARS, FABRIC_VERTEX_MAIN, FABRIC_VERTEX_PARS } from "./fabric";
 import { PLAYER_LOOK_UNIFORMS, type PlayerLookUniforms } from "./look-tier";
 import { HAT_DETAIL_FRAGMENT_PARS, HAT_DETAIL_FRAGMENT_SOLID } from "./hat-detail";
-import { finishUniforms, FRAGMENT_IS_BLADE, FRAGMENT_PARS, GLOVE_FRAGMENT_ALBEDO, GLOVE_FRAGMENT_LIGHT, lookDefines, NO_LOOK, VERTEX_MAIN, VERTEX_PARS, type FinishUniforms, type MaterialLook } from "../viewmodel/finishes/shader";
+import { finishUniforms, FRAGMENT_IS_BLADE, FRAGMENT_PARS, GLOVE_FRAGMENT_ALBEDO, GLOVE_FRAGMENT_LIGHT, HILT_FRAGMENT_ALBEDO, HILT_FRAGMENT_LIGHT, lookDefines, NO_LOOK, VERTEX_MAIN, VERTEX_PARS, type FinishUniforms, type MaterialLook } from "../viewmodel/finishes/shader";
 
 export interface PlayerUniforms extends FinishUniforms, PlayerLookUniforms {
   [name: string]: THREE.IUniform;
@@ -225,6 +225,7 @@ void main() {
   vec3 sky = vec3(0.70, 0.76, 0.88), ground = vec3(0.30, 0.27, 0.26);
   vec3 ambient = mix(ground, sky, n.y * 0.5 + 0.5) * 0.62;
 ${GLOVE_FRAGMENT_ALBEDO}
+${HILT_FRAGMENT_ALBEDO}
   vec3 col = albedo * (ambient * gm.aoA + key * vec3(0.78, 0.74, 0.68) * gm.aoK);
   float rim = pow(1.0 - max(dot(n, V), 0.0), 3.0);
   float far = farness();
@@ -245,6 +246,7 @@ ${GLOVE_FRAGMENT_ALBEDO}
     col = mix(col, col * (0.8 + 0.35 * key), far * 0.5);
   }
 ${GLOVE_FRAGMENT_LIGHT}
+${HILT_FRAGMENT_LIGHT}
   col = mix(col * 0.38, col, back); // inside of the hood
   col = mix(col, vColor * 1.6 + 0.15, vGlow);
 ${HAT_FX_FRAGMENT_SOLID}

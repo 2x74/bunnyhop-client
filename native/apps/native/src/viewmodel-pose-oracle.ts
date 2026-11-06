@@ -6,7 +6,7 @@ import { writeFile } from "node:fs/promises";
 import { vmRig } from "../../web/src/viewmodel/rig";
 import { VmProcedural, type VmAction } from "../../web/src/viewmodel/procedural";
 import { KnifeHold } from "../../web/src/viewmodel/knives/hold";
-import { knifeById } from "../../web/src/viewmodel/knives/index";
+import { KNIVES, knifeById } from "../../web/src/viewmodel/knives/index";
 import { inspectSetFor } from "../../web/src/viewmodel/inspects/index";
 import { quietSet } from "../../web/src/viewmodel/inspects/quiet";
 import { Arm, blendPoseH } from "../../web/src/viewmodel/inspects/kit";
@@ -16,8 +16,9 @@ import type { InspectClip } from "../../web/src/viewmodel/inspects/types";
 
 const vr = vmRig();
 const arm = new Arm(vr);
+const parts = [...new Set(KNIVES.flatMap((knife) => knife.joints ?? []))].map((name) => vr.bone(name));
 const knifeBones = new Set(arm.knife);
-const blend = [...arm.all.filter((i) => !knifeBones.has(i)).sort((a, b) => a - b), ...arm.knife];
+const blend = [...arm.all.filter((i) => !knifeBones.has(i)).sort((a, b) => a - b), ...arm.knife, ...parts];
 const knifeParent = vr.bone("knife_Parent");
 const blendParent = (i: number) => (i === knifeParent ? arm.handBone : vr.parent[i]);
 const def = knifeById("bunnyfly")!;
@@ -43,18 +44,33 @@ const presented = posed("idle", 0, set.clips[0], set.clips[0].enter + 0.2);
 const cancel = slash.slice();
 const weight = 0.6;
 const k = Math.max(0, Math.min(1, (weight - 0.45) / 0.55));
+const partWeight = Math.max(0, Math.min(1, (weight - 0.5) / 0.5));
 const groups = [
+  { bones: new Set(parts), w: partWeight * partWeight * (3 - 2 * partWeight) },
   { bones: new Set(Object.values(arm.fingers).flat()), w: Math.min(1, weight * 2) },
   { bones: knifeBones, w: k * k * (3 - 2 * k) },
 ];
 blendPoseH(cancel, toss, weight, blend, blendParent, groups);
+const jointBones = (def.joints ?? []).map((name) => vr.bone(name));
+const tossAngles = [...hold.state.angles];
+// posed(presented) above last set the hold: sample the toss again to read its authored joint angles.
+posed("idle", 0, set.clips[1], set.clips[1].len * 0.45);
+for (let i = 0; i < tossAngles.length; i++) tossAngles[i] = hold.state.angles[i];
+const cancelAngles = tossAngles.map((angle) => angle * partWeight * partWeight * (3 - 2 * partWeight));
+hold.state.angles = [...cancelAngles];
+hold.solve(cancel);
 const chain = presented.slice();
 blendPoseH(chain, toss, 0.3, blend, blendParent);
+posed("idle", 0, set.clips[0], set.clips[0].enter + 0.2);
+const chainAngles = hold.state.angles.map((angle, i) => angle + (tossAngles[i] - angle) * 0.3);
+hold.state.angles = [...chainAngles];
+hold.solve(chain);
 const idleHand = posed("idle", 0);
 arm.wrist(idleHand, 1.3, -0.7);
 const frame = arm.frame(idleHand);
 arm.curl(idleHand, "index", [-4, -2, 0], 0, frame);
 arm.curl(idleHand, "pinky", [-3, -1.2, 0], 0, frame);
+hold.solve(idleHand);
 
 const rig = {
   parent: Array.from(vr.parent),
@@ -63,7 +79,8 @@ const rig = {
   blend,
   hand: arm.hand,
   helper: arm.helper,
-  knife: arm.knife,
+  knife: [...arm.knife, ...jointBones],
+  parts,
   fingers: arm.fingers,
   handBone: arm.handBone,
   armBone: arm.armBone,
@@ -121,6 +138,9 @@ await writeFile(
   process.argv[2] ?? "viewmodel-pose-oracle.json",
   JSON.stringify({
     rig,
+    jointBones,
+    cancelAngles,
+    chainAngles,
     poses: {
       slash: Array.from(slash),
       toss: Array.from(toss),
@@ -130,7 +150,7 @@ await writeFile(
       chain: Array.from(chain),
       idleHand: Array.from(idleHand),
     },
-    cancel: { weight, fingers: groups[0].w, knife: groups[1].w },
+    cancel: { weight, parts: groups[0].w, fingers: groups[1].w, knife: groups[2].w },
     chain: specs,
     frames,
   }),

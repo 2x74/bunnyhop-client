@@ -52,6 +52,15 @@ const hfRoll = track([
   [2.25, 0, E.io],
 ]);
 
+/**
+ * The display holds after the catch (v0.0.38, Astra 11-06: the tip crossed the top edge while the carrot is shown):
+ * the arm lowers by LOW.shift and pitches by LOW.pitch through the hold, so the whole carrot stays in frame (default
+ * framing tip margin 0.11 -> 0.27 on the Hop Flip, 0.03 -> 0.19 on the Toss & Catch; knife-frame-probe --timeline).
+ */
+const LOW = { shift: 0.8, pitch: 6 };
+const hfDisp = track([[1.34, 0], [1.72, 1, E.io], [1.98, 1], [2.25, 0, E.io]]);
+const tcDisp = track([[1.62, 0], [1.95, 1, E.io], [2.12, 1], [2.35, 0, E.io]]);
+
 export const hopFlip: InspectClip = {
   id: "hop-flip",
   name: "Hop Flip",
@@ -73,7 +82,7 @@ export const hopFlip: InspectClip = {
     const admire = track([[1.76, 0], [1.96, 1, E.io], [2.25, 0, E.io]])(t);
     // The wrist extends while the carrot is up (drops the cuff away from the spin plane).
     const ext = track([[0.46, 0], [0.62, 1, E.out], [1.08, 1], [1.2, 0, E.io]])(t);
-    arm(W, ctx, p, hfRoll(t), 3 * load - 6 * dip, 0, [0, 0, -0.5 * dip], 10 * load + 9 * dip - 12 * ext, 9 * admire);
+    arm(W, ctx, p, hfRoll(t), 3 * load - 6 * dip - LOW.pitch * hfDisp(t), 0, [0, 0, -0.5 * dip - LOW.shift * hfDisp(t)], 10 * load + 9 * dip - 12 * ext, 9 * admire);
     hands(W, ctx, t, HF.release, HF.catch + 0.03, 7, HF.loop);
     const a = hfSpin(t), h = hfHop(t);
     if (a || h) {
@@ -157,6 +166,8 @@ export const doubleFlip: InspectClip = {
 
 const TC = { len: 3.0, enter: 0.34, exit: 2.35, open: 9, toss: 0.56, catch: 1.42 };
 /** Flight in hand coordinates: up the blade axis (out of the top of the fist) and toward the camera side. */
+// (Apex 12. Astra 11-06 saw the tip cross the top edge at the apex: lower apexes don't fix it (it's the tumble's
+// angle there) and bring the knife into the hand on the way down, inspect-combo.test.ts.)
 const tcUp = (t: number) => hop(t, TC.toss, TC.catch, 12);
 const tcOut = (t: number) => (t <= TC.toss || t >= TC.catch ? 0 : 4.4 * Math.sqrt(Math.sin((Math.PI * (t - TC.toss)) / (TC.catch - TC.toss))));
 /** One end-over-end turn, only while the carrot is well clear of the hand (it rises and falls upright). */
@@ -193,7 +204,7 @@ export const tossCatch: InspectClip = {
     // The hand sinks while the carrot is up and rises to meet it (v0.0.38: the whole arc sits lower on screen, so its top
     // stays in view at the default framing; the flight relative to the hand is unchanged).
     const sink = hop(t, TC.toss + 0.05, TC.catch - 0.03, 1);
-    arm(W, ctx, p, tcRoll(t), 6 * load - 11 * dip - 7 * sink, 0, [0, 0, -0.9 * load - 1.0 * dip - 2.6 * sink], 14 * load + 14 * dip - 14 * ext, 0);
+    arm(W, ctx, p, tcRoll(t), 6 * load - 11 * dip - 7 * sink - LOW.pitch * tcDisp(t), 0, [0, 0, -0.9 * load - 1.0 * dip - 2.6 * sink - LOW.shift * tcDisp(t)], 14 * load + 14 * dip - 14 * ext, 0);
     hands(W, ctx, t, TC.toss - 0.07, TC.catch + 0.04);
     const up = tcUp(t), out = tcOut(t), a = tcTumble(t);
     if (up || a) {

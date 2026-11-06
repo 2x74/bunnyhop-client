@@ -106,14 +106,58 @@ export interface KnifeState {
    * that pose is (the Karrotbit: turned to face you).
    */
   show: number;
+  /**
+   * 0..1: how far the wrist is held at its neutral bend (the procedural idle's hand-on-forearm angle) while the base
+   * action bends it, the rotation taken out of the wrist going to the elbow instead (KnifeHold WRIST_TO_ELBOW): a
+   * sword's cut, swung from the arm with the wrist firm (the Daikon-tana). Reset every frame.
+   */
+  lock: number;
   /** 0..1: the fingers let go of the handle (KnifeHold: middle, ring and little finger open, the index a third), e.g. while a balisong's handle swings round in the draw. Reset every frame. */
   loosen: number;
+  /**
+   * Thumb play (deg added to the held thumb's root / MCP / IP curls; - lifts it off), e.g. the Bunnyfly's idle stroke
+   * over its pin bolt. Reset every frame.
+   */
+  thumb: [number, number, number];
   /**
    * The viewmodel's clock (s) for idle motion (idleSway): set by its owner before the hold poses, never the wall clock,
    * so a replay or an export shows the same idle every time (the viewer resets it on a seek).
    */
   time: number;
 }
+
+/**
+ * HILT SLOT (v0.0.38): the parts of a knife a hilt skin repaints. Every knife has the same three roles, as it has them:
+ *   grip    the handle: scales, liners, wraps, the cane's stem (whatever the hand holds)
+ *   guard   fittings toward the blade: crossguard, bolster, ferrule, tsuba, habaki, pins
+ *   pommel  fittings at the butt: pommel cap, kashira, latch, ring collar
+ * A knife lists its hilt parts by surface name (KnifeDef.hilt): each builder surface that's part of the hilt passes
+ * `name` (SurfaceOpts.name, or the name argument of tube / leaf / loop / bayonet.ts plate / bayonetGrip) and the map says
+ * which role it is. Untagged surfaces (blades, the carrot's leaves, the Whirligig's spinner) never change with the hilt.
+ *
+ * `alt`: paints of that surface that take the skin's second colour (the daikon's same between the cord diamonds, the
+ * candy cane's red stripes, the bunnyfly's lighter ridges), so a two-tone part stays two-tone in any skin. Matched by
+ * accent code + colour, so a palette constant or an equal fixed() both work.
+ *
+ * Example (Daikon-tana): { habaki: "guard", tsuba: { role: "guard", alt: [LEAF_DARK] }, tsuka: { role: "grip", alt: [SAME] }, kashira: "pommel" }
+ *
+ * What it does to the mesh (ctx.ts KnifeCtx.surface): finishUV on those vertices carries x = role code (HILT_ROLE_CODE,
+ * + 0.25 for the second tone), y = knife-local z (units along the knife), w = how far round the surface's sections
+ * (0..1, counting on to 1 at the seam); z stays the part id + material. Nothing reads x / y / w on non-blade parts
+ * unless a hilt skin is equipped (`#define HILT`, viewmodel/hilts/glsl.ts), so the knife's own hilt (the default) draws
+ * exactly as before. One mesh per knife for every skin: the skin is uniforms (loadout.ts HILT_SKIN, hilts/glsl.ts).
+ */
+export type HiltRole = "grip" | "guard" | "pommel";
+export const HILT_ROLES: readonly HiltRole[] = ["grip", "guard", "pommel"];
+/** finishUV.x of a hilt part (types.ts HiltRole); + 0.25 = the part's second tone. 0 = not part of the hilt. */
+export const HILT_ROLE_CODE: Readonly<Record<HiltRole, number>> = { grip: 1, guard: 2, pommel: 3 };
+export interface HiltPart {
+  role: HiltRole;
+  /** Paints of this surface that take the skin's second colour (see above). */
+  alt?: readonly { code: number; color?: number }[];
+}
+/** Surface name -> hilt role (KnifeDef.hilt). */
+export type HiltMap = Readonly<Record<string, HiltRole | HiltPart>>;
 
 export interface KnifeDef {
   /** Registry id ("karrotbit"); the cosmetic id is `knife-<id>` (plan §2.1). */
@@ -143,6 +187,11 @@ export interface KnifeDef {
   pose?(action: VmAction, t: number, s: KnifeState, src: "cs" | "procedural"): void;
   /** Spin pivots for inspects, knife-local: e.g. karrotbit "ring" (centre + hole axis), cleaver "hole". */
   pivots?: Record<string, { p: V3; axis: V3 }>;
+  /**
+   * The knife's hilt parts by surface name (HiltMap above): what a hilt skin repaints. Set through withHilt() (ctx.ts),
+   * which makes build() apply it for every caller (web, the native exporter).
+   */
+  hilt?: HiltMap;
   /** Rough triangle count of the knife alone (first person), filled in by the registry at build time (dev stats). */
   tris?: number;
 }

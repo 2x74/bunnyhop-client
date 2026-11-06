@@ -1,7 +1,7 @@
 // Build-time only: compile the site's original meshes, material recipes and procedural pose clips.
 // Runtime gameplay uses C++/OpenGL and Rust; this compiler is never embedded in the application.
-import { mkdir, writeFile, rm } from "node:fs/promises";
-import type * as THREE from "three";
+import { mkdir, writeFile, rm, readFile } from "node:fs/promises";
+import * as THREE from "three";
 import { deflateSync } from "node:zlib";
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
@@ -42,8 +42,11 @@ import {
 } from "../../web/src/viewmodel/guns/meshes";
 import { fistFrames } from "../../web/src/player/bunny/gun-hold";
 import { holdData } from "./gun-hold-data";
-import { FINISH_STYLE, GLOVE_STYLE, GLOVE_STYLE_IDS, HAIR_DEFAULT } from "../../web/src/loadout";
+import { FINISH_STYLE, GLOVE_STYLE, GLOVE_STYLE_IDS, HAIR_DEFAULT, HILT_SKIN } from "../../web/src/loadout";
 import { FINISH_CODE } from "../../web/src/viewmodel/finishes/shader";
+import { HILT_KIND_CODE } from "../../web/src/viewmodel/hilts/glsl";
+import { camoZoneColor } from "../../web/src/viewmodel/guns/camo";
+import { CAMO_KIND_CODE, CAMO_STAMP_CODE, CAMO_STYLE } from "../../web/src/camo";
 import { clampFingers } from "../../web/src/viewmodel/fingers";
 import { WHIRL_FLICK } from "../../web/src/viewmodel/knives/whirligig";
 // The knives' wall-clock motion (the bayonets' idle sway, the Whirligig's thumb flicks) reads performance.now(). Freeze
@@ -61,7 +64,7 @@ const DRY_FIRE_SECONDS = 0.5;
 const GRIP_INDEX_OFF = 0.28;
 const GRIP_LEFT_OPEN = 0.3;
 // Floats per vertex: position 3, normal 3, partColor 3, skinIndex 4, skinWeight 4, accent 1, finishUV 4, headwear 1.
-const STRIDE = 23;
+const STRIDE = 26;
 const pieces: Buffer[] = [];
 let byteOffset = 0;
 const put = (data: Float32Array) => {
@@ -91,7 +94,8 @@ function geometry(name: string, g: any) {
     ids = g.getAttribute("skinIndex"),
     weights = g.getAttribute("skinWeight"),
     finish = g.getAttribute("finishUV"),
-    headwear = g.getAttribute("headwear");
+    headwear = g.getAttribute("headwear"),
+    gunCamo = g.getAttribute("gunCamo");
   // Body meshes are weapon-free: selected TP weapons render as separate parts.
   if (name.startsWith("body:")) {
     const knifeBone = bunnyRig().index("bunny.Knife");
@@ -114,6 +118,9 @@ function geometry(name: string, g: any) {
     }
     vertices[at + 17] = a.getX(i);
     vertices[at + 22] = headwear?.getX(i) ?? 0;
+    vertices[at + 23] = gunCamo?.array[i * 3] ?? 0;
+    vertices[at + 24] = gunCamo?.array[i * 3 + 1] ?? 1;
+    vertices[at + 25] = gunCamo?.array[i * 3 + 2] ?? 1;
   }
   // Index identical vertices; source builders intentionally emit triangle soup.
   const unique: number[] = [],
@@ -216,6 +223,8 @@ function bakeInspect(
 ) {
   const frames = Math.ceil(c.len * 60) + 1,
     baked = new Float32Array(frames * S.length);
+  const jointBones = (def.joints ?? []).map((name) => vr.bone(name));
+  const angles = new Float32Array(frames * jointBones.length);
   for (let f = 0; f < frames; f++) {
     const t = Math.min(c.len, f / 60);
     proc.pose("idle", 0, W);
@@ -223,10 +232,11 @@ function bakeInspect(
     hold.apply(W, "idle", 0, "procedural");
     c.apply(W, t, { arm, knife: def, state: hold.state });
     finishPose(hold, W);
+    angles.set(hold.state.angles, f * jointBones.length);
     for (let i = 0; i < vr.names.length; i++) concat(W, i * 12, vr.inv, i * 12, S, i * 12);
     baked.set(S, f * S.length);
   }
-  return { name, duration: c.len, frames, offset: putUnique(baked) };
+  return { name, duration: c.len, frames, offset: putUnique(baked), jointBones, angleOffset: putUnique(angles) };
 }
 /**
  * Poses the gun's idle with one grip-idle field held at `value` (the animator writes its pose each update; this sets
@@ -266,15 +276,17 @@ function withoutRecoil(anim: GunAnimator) {
 /** What native needs to blend knife poses and move the hand (inspects/kit.ts Arm, inspects/runtime.ts blends). */
 function knifeRig() {
   const arm = new Arm(vr);
+  const parts = [...new Set(KNIVES.flatMap((def) => def.joints ?? []))].map((name) => vr.bone(name));
   const knife = new Set(arm.knife);
   return {
     parent: Array.from(vr.parent),
     bind: Array.from(vr.bind),
     inv: Array.from(vr.inv),
-    blend: [...arm.all.filter((i) => !knife.has(i)).sort((a, b) => a - b), ...arm.knife],
+    blend: [...arm.all.filter((i) => !knife.has(i)).sort((a, b) => a - b), ...arm.knife, ...parts],
     hand: arm.hand,
     helper: arm.helper,
-    knife: arm.knife,
+    knife: [...arm.knife, ...parts],
+    parts,
     fingers: arm.fingers,
     handBone: arm.handBone,
     armBone: arm.armBone,
@@ -287,14 +299,42 @@ for (const glove of GLOVE_STYLE_IDS) {
   buildFpHands(b, glove);
   geometry(`hands:${glove}`, b.geometry());
 }
+const knifeStages: Record<string, { center: number[]; size: number[]; hiltCenter: number[]; hiltSize: number[] }> = {};
 for (const def of KNIVES) {
   const b = new Builder();
   def.build(fpCtx(b));
-  geometry(`fpknife:${def.id}`, b.geometry());
+  const shape = b.geometry();
+  const positions = shape.getAttribute("position"),
+    finish = shape.getAttribute("finishUV");
+  const box = new THREE.Box3(),
+    hilt = new THREE.Box3();
+  const point = new THREE.Vector3(),
+    inv = vr.inv.subarray(vr.bone("Knife_Handle") * 12);
+  for (let i = 0; i < positions.count; i++) {
+    const x = positions.getX(i),
+      y = positions.getY(i),
+      z = positions.getZ(i);
+    point.set(
+      inv[0] * x + inv[1] * y + inv[2] * z + inv[3],
+      inv[4] * x + inv[5] * y + inv[6] * z + inv[7],
+      inv[8] * x + inv[9] * y + inv[10] * z + inv[11],
+    );
+    box.expandByPoint(point);
+    if (finish && finish.getZ(i) >= 1.5 && finish.getX(i) >= 0.5) hilt.expandByPoint(point);
+  }
+  if (hilt.isEmpty()) hilt.copy(box);
+  knifeStages[def.id] = {
+    center: box.getCenter(new THREE.Vector3()).toArray(),
+    size: box.getSize(new THREE.Vector3()).toArray(),
+    hiltCenter: hilt.getCenter(new THREE.Vector3()).toArray(),
+    hiltSize: hilt.getSize(new THREE.Vector3()).toArray(),
+  };
+  geometry(`fpknife:${def.id}`, shape);
   const tp = new Builder();
   def.build(tpCtx(tp, def.tp));
   geometry(`tpknife:${def.id}`, tp.geometry());
 }
+const gunStages: Record<string, { center: number[]; radius: number; size: number[] }> = {};
 for (const def of GUNS) {
   const b = new Builder();
   const ctx = gunFpCtx(b);
@@ -303,12 +343,22 @@ for (const def of GUNS) {
   // The website bakes soft occlusion into the gun's recesses (guns/ao.ts); hands neither give nor take it.
   const gun = b.geometry();
   bakeGunAO(gun);
+  gun.computeBoundingBox();
+  gunStages[def.id] = {
+    center: gun.boundingBox!.getCenter(new THREE.Vector3()).toArray(),
+    radius: gun.boundingBox!.getSize(new THREE.Vector3()).length() / 2,
+    size: gun.boundingBox!.getSize(new THREE.Vector3()).toArray(),
+  };
   geometry(`fpgun:${def.id}`, gun);
   geometry(`tpgun:${def.id}`, onGunBones(bunnyGunGeometry(def)));
   geometry(`worldgun:${def.id}`, worldGunGeometry(def).clone());
   const sil = bunnySilencerGeometry(def);
   if (sil) geometry(`tpsilencer:${def.id}`, onGunBones(sil));
 }
+// The web thumb stroke is periodic; keep its source period so the native idle loop closes without a jump.
+const bunnyflySource = await readFile(resolve(import.meta.dir, "../../web/src/viewmodel/knives/bunnyfly.ts"), "utf8");
+const bunnyflyPeriod = Number(bunnyflySource.match(/const IDLE_PERIOD = ([\d.]+)/)?.[1]);
+if (!(bunnyflyPeriod > 0 && bunnyflyPeriod < 15)) throw new Error("Bunnyfly idle period missing");
 for (const glove of GLOVE_STYLE_IDS) {
   for (const def of KNIVES) {
     const proc = new VmProcedural(vr),
@@ -317,12 +367,13 @@ for (const glove of GLOVE_STYLE_IDS) {
       S = new Float32Array(W.length),
       clips = [];
     for (const action of ["idle", "draw", "slash1", "slash2", "stab"] as VmAction[]) {
-      const duration = action === "idle" ? 0 : PROC_DURATION[action],
+      const duration = action === "idle" ? (def.id === "bunnyfly" ? bunnyflyPeriod : 0) : PROC_DURATION[action],
         frames = duration ? Math.ceil(duration * 60) + 1 : 1,
         baked = new Float32Array(frames * S.length);
       for (let f = 0; f < frames; f++) {
         const t = Math.min(duration, f / 60);
-        proc.pose(action, t, W);
+        proc.pose(action, action === "idle" ? 0 : t, W);
+        hold.state.time = t;
         hold.apply(W, action, t, "procedural");
         finishPose(hold, W);
         for (let i = 0; i < vr.names.length; i++) concat(W, i * 12, vr.inv, i * 12, S, i * 12);
@@ -524,6 +575,8 @@ await writeFile(
       ]),
     ),
     actorRig: { names: br.names, parent: Array.from(br.parent), bind: Array.from(br.bind), csBones: br.csBones },
+    gunStages,
+    knifeStages,
     gunHolds: Object.fromEntries(GUNS.map((def) => [def.id, holdData(bunnyHold(def))])),
     fists: Object.fromEntries(Object.entries(fistFrames(br)).map(([key, m]) => [key, Array.from(m)])),
     outfits: COLOURWAYS,
@@ -568,6 +621,32 @@ await writeFile(
     gunLowerSeconds: GUN_LOWER_SECONDS,
     gripIdle: { indexOff: GRIP_INDEX_OFF, leftOpen: GRIP_LEFT_OPEN },
     finishes: Object.fromEntries(Object.entries(FINISH_STYLE).map(([id, spec]) => [id, FINISH_CODE[spec.kind]])),
+    hilts: Object.fromEntries(
+      Object.entries(HILT_SKIN).map(([id, skin]) => [
+        id,
+        skin &&
+          Object.fromEntries(
+            (["grip", "guard", "pommel"] as const).map((role) => {
+              const layer = skin[role];
+              return [role, { kind: HILT_KIND_CODE[layer.kind], color: layer.color, alt: layer.alt }];
+            }),
+          ),
+      ]),
+    ),
+    camos: Object.fromEntries(
+      Object.entries(CAMO_STYLE).map(([id, style]) => [
+        id,
+        {
+          kind: CAMO_KIND_CODE[style.kind],
+          stamp: CAMO_STAMP_CODE[style.stamp ?? "carrot"],
+          sheen: style.sheen === "coat" ? 0 : style.sheen === "metal" ? 1 : 2,
+          colors: style.colors,
+          tpColors: [1, 2, 3].map((zone) => camoZoneColor(style, zone)),
+          p: style.p ?? [0, 0, 0, 0],
+          scale: style.scale,
+        },
+      ]),
+    ),
   }),
 );
 await writePlayerMaterials(directory);

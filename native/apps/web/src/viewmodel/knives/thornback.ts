@@ -7,7 +7,7 @@
 
 import { smoothstep } from "../../player/bunny/builder";
 import type { V3 } from "../../player/bunny/rig";
-import { ACCENT, fixed, type KnifeCtx } from "./ctx";
+import { ACCENT, fixed, withHilt, type KnifeCtx } from "./ctx";
 import { attackFlavour, bayonetBlade, bayonetGrip, bayonetHold, hump, idleSway, localXf, palmNormalLocal, plate, reducedMotion, rise, sawback, type BayonetBladeSpec } from "./bayonet";
 import { KMAT, PART, type KnifeDef } from "./types";
 
@@ -37,7 +37,7 @@ function build(k: KnifeCtx): void {
   else sawback(k, THORNBACK_BLADE, along, 0.1, 0.47, 5, 0.22, TEETH);
   // --- Crossguard: a gunmetal plate, wider on the edge side; a hooked quillon under the edge; the muzzle ring above
   //     the spine (accent).
-  plate(k, [G1, G1 + 0.04, Q1 - 0.04, Q1], [0.36, 0.42, 0.42, 0.36], [0.8, 0.86, 0.86, 0.8], -0.12, GUN);
+  k.hilt("guard", () => plate(k, [G1, G1 + 0.04, Q1 - 0.04, Q1], [0.36, 0.42, 0.42, 0.36], [0.8, 0.86, 0.86, 0.8], -0.12, GUN, PART.guard, 3.2, "guard"));
   {
     const path: V3[] = [];
     const n = fp ? 6 : 4;
@@ -46,7 +46,7 @@ function build(k: KnifeCtx): void {
       const t = i / n;
       path.push([0, -0.84 - 0.56 * t + 0.06 * t * t, 1.66 + 0.78 * t * t]);
     }
-    k.tube(path, (i) => 0.2 * (1 - i / n) ** 0.9 + 0.02, fp ? 8 : 6, [1, 0, 0], () => GUN, { part: PART.guard });
+    k.hilt("guard", () => k.tube(path, (i) => 0.2 * (1 - i / n) ** 0.9 + 0.02, fp ? 8 : 6, [1, 0, 0], () => GUN, { part: PART.guard, name: "guard" }));
   }
   {
     const n = fp ? 18 : 10, R = 0.36;
@@ -56,12 +56,12 @@ function build(k: KnifeCtx): void {
       const a = (i / n) * Math.PI * 2;
       path.push([Math.cos(a) * R, c[1] + Math.sin(a) * R, c[2]]);
     }
-    k.loop(path, 0.1, fp ? 6 : 5, [0, 0, 1], () => ACCENT, { part: PART.guard });
+    k.hilt("fitting", () => k.loop(path, 0.1, fp ? 6 : 5, [0, 0, 1], () => ACCENT, { part: PART.guard, name: "muzzle" }));
   }
   // --- Ribbed grip and the pommel cap with its release nub.
-  bayonetGrip(k, { z0: G0, z1: G1, rx: 0.37, ry: 0.5, cy: -0.04, ribs: 7, a: GRIP, b: GRIP_RIB });
-  plate(k, [G0 - 0.53, G0 - 0.44, G0 - 0.04, G0], [0.3, 0.44, 0.44, 0.4], [0.42, 0.6, 0.6, 0.55], -0.04, GUN);
-  if (fp) k.tube([[0, 0.5, G0 - 0.24], [0, 0.7, G0 - 0.24]], 0.11, 8, [0, 0, 1], () => ACCENT, { part: PART.guard });
+  k.hilt("handle", () => bayonetGrip(k, { z0: G0, z1: G1, rx: 0.37, ry: 0.5, cy: -0.04, ribs: 7, a: GRIP, b: GRIP_RIB }));
+  k.hilt("pommel", () => plate(k, [G0 - 0.53, G0 - 0.44, G0 - 0.04, G0], [0.3, 0.44, 0.44, 0.4], [0.42, 0.6, 0.6, 0.55], -0.04, GUN, PART.guard, 3.2, "pommel"));
+  if (fp) k.hilt("fitting", () => k.tube([[0, 0.5, G0 - 0.24], [0, 0.7, G0 - 0.24]], 0.11, 8, [0, 0, 1], () => ACCENT, { part: PART.guard, name: "nub" }));
   // A second, smaller thorn on the pommel's edge side, curving back: the bramble motif at both ends of the grip.
   {
     const path: V3[] = [];
@@ -70,17 +70,20 @@ function build(k: KnifeCtx): void {
       const t = i / n;
       path.push([0, -0.5 - 0.34 * t, G0 - 0.28 - 0.3 * t * t]);
     }
-    k.tube(path, (i) => 0.13 * (1 - i / n) ** 0.9 + 0.015, fp ? 7 : 5, [1, 0, 0], () => GUN, { part: PART.guard });
+    k.hilt("pommel", () => k.tube(path, (i) => 0.13 * (1 - i / n) ** 0.9 + 0.015, fp ? 7 : 5, [1, 0, 0], () => GUN, { part: PART.guard, name: "pommel" }));
   }
 }
 
-export const thornback: KnifeDef = {
+export const thornback: KnifeDef = withHilt({
   id: "thornback",
   cosmeticId: "knife-thornback",
   name: "Thornback",
   rarity: 4,
   blurb: "A sawback bayonet with a muzzle ring and a row of thorn teeth on its spine.",
   build,
+  // Crossguard with its thorn quillon, the muzzle ring, the ribbed grip (the ribs the second tone), the pommel cap
+  // with its thorn and release nub.
+  hilt: { guard: "guard", muzzle: { role: "guard", alt: [ACCENT] }, grip: { role: "grip", alt: [GRIP_RIB] }, pommel: "pommel", nub: { role: "pommel", alt: [ACCENT] } },
   pivots: { guard: { p: [0, 0, 1.68], axis: [1, 0, 0] }, balance: { p: [0, 0, 3.2], axis: [1, 0, 0] } },
   tp: { o: [3.16, -1.24, 1.34], z: [0.53, 0.1, -0.84], y: [1, 0, 0], s: 1.6 },
   hold: bayonetHold([0, 0, 0.12]),
@@ -110,6 +113,6 @@ export const thornback: KnifeDef = {
     }
     attackFlavour(action, t, s, { roll: 16, snap: 9, twist: 18 });
   },
-};
+});
 
 const L = new Float32Array(12);

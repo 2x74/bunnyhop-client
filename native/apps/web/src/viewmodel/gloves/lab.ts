@@ -5,6 +5,9 @@
 //   ?mode=open&glove=glove-paws-snow&cells=0,90,180,270                                     bind pose, yaw[/pitch]
 //   ?mode=hand&glove=glove-driver-tan&knife=carrot&cells=0,90,180                          around the posed fist
 //   ?mode=tp&cells=glove-moto-boom:karrotbit:full,glove-moto-boom:karrotbit:hand           glove:knife:shot
+//   &concepts=1: the v0.0.38 set concepts (gloves/concepts.ts) as ids "concept-glove-<id>" / "concept-outfit-<id>";
+//   fp cells take a 6th field and tp cells a 4th: the colourway for that cell (glove:knife:act:t:hand:outfit, glove:knife:shot:outfit);
+//   fp cells a 7th and 8th: a hilt skin and a finish (glove:knife:act:t:hand:outfit:black:sunset); tp cells a 5th: a hilt skin.
 //   &cs=1 (v_knife_t's sequences from the dev content cache) · &cols=3 · &labels=0 · &outfit=outfit-midnight · &dist=12 · fp: &zoom=1.6&cx=0.7&cy=0.7 (crop on the hand)
 
 import * as THREE from "three";
@@ -24,8 +27,10 @@ import { viewmodelGeometry } from "../mesh";
 import type { VmAction } from "../procedural";
 import { vmRig } from "../rig";
 import { Viewmodel, type ViewmodelInput } from "../viewmodel";
+import { conceptName, registerConcepts } from "./concepts";
 
 const q = new URLSearchParams(location.search);
+if (q.get("concepts") === "1") registerConcepts();
 const canvas = document.getElementById("c") as HTMLCanvasElement;
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, preserveDrawingBuffer: true });
 renderer.setPixelRatio(Math.min(2, devicePixelRatio));
@@ -36,8 +41,8 @@ const mode = q.get("mode") ?? "fp";
 const showLabels = q.get("labels") !== "0";
 const outfit = q.get("outfit") ?? "outfit-cream";
 const knifeOf = (id: string | null | undefined): KnifeDef => knifeById(id) ?? KNIVES[0];
-const loadoutOf = (glove: string, knife: KnifeDef): CosmeticLoadout => ({ ...DEFAULT_LOADOUT, knife: knife.cosmeticId, glove });
-const gname = (id: string) => cosmetic(id)?.name ?? id;
+const loadoutOf = (glove: string, knife: KnifeDef, hilt?: string, finish?: string): CosmeticLoadout => ({ ...DEFAULT_LOADOUT, knife: knife.cosmeticId, glove, ...(hilt ? { hilt: hilt.startsWith("hilt-") ? hilt : `hilt-${hilt}` } : {}), ...(finish ? { finish: finish.startsWith("fin-") ? finish : `fin-${finish}` } : {}) });
+const gname = (id: string) => cosmetic(id)?.name ?? conceptName(id) ?? id;
 
 interface Cell {
   label: string;
@@ -105,14 +110,17 @@ async function firstPerson(): Promise<void> {
   const sp = specs("glove-sport-carrot:carrot:idle,glove-sport-carrot:karrotbit:idle");
   cols = Number(q.get("cols") ?? Math.min(sp.length, 3));
   cells = sp.map((s) => {
-    const [glove, kid, act = "idle", t = "0", hand = "right"] = s.split(":");
+    // (7th / 8th fields: a hilt skin and a finish for the cell, "black" or "hilt-black", "sunset" or "fin-sunset".)
+    const [glove, kid, act = "idle", t = "0", hand = "right", cellOutfit, cellHilt, cellFinish] = s.split(":");
     const k = knifeOf(kid);
+    const cellPal = cellOutfit ? paletteOf(colourway(cellOutfit)) : pal;
+    const hl = cellHilt ? loadoutOf(glove, k, cellHilt).hilt : undefined;
     return {
-      label: `<b>${gname(glove)}</b> · ${k.name} · ${act}${Number(t) ? ` ${t} s` : ""}`,
+      label: hl ? `<b>${gname(hl)}</b> · ${k.name}` : `<b>${gname(glove)}</b> · ${k.name} · ${act}${Number(t) ? ` ${t} s` : ""}`,
       draw(_x, _y, w, h) {
-        vm.uniforms.uPalette.value.forEach((c, i) => c.set(pal[i]));
+        vm.uniforms.uPalette.value.forEach((c, i) => c.set(cellPal[i]));
         vm.setKnife(k);
-        vm.setLoadout(loadoutOf(glove, k));
+        vm.setLoadout(loadoutOf(glove, k, cellHilt, cellFinish));
         prefs.get().viewmodel.hand = hand === "left" ? "left" : "right";
         vm.seek(act as VmAction | "inspect", Number(t));
         world.aspect = w / h;
@@ -234,11 +242,11 @@ async function thirdPerson(): Promise<void> {
   const models = new Map<string, PlayerModel>();
   const yaw = Number(q.get("yaw") ?? -35);
   const T = Number(q.get("t") ?? 1.2);
-  const modelFor = (glove: string, k: KnifeDef) => {
-    const id = `${glove}|${k.id}`;
+  const modelFor = (glove: string, k: KnifeDef, cellOutfit?: string, cellHilt?: string) => {
+    const id = `${glove}|${k.id}|${cellOutfit ?? ""}|${cellHilt ?? ""}`;
     let m = models.get(id);
     if (!m) {
-      m = new PlayerModel({ style: "solid", knife: k, model: "bunny", outfit, loadout: loadoutOf(glove, k) });
+      m = new PlayerModel({ style: "solid", knife: k, model: "bunny", outfit: cellOutfit || outfit, loadout: loadoutOf(glove, k, cellHilt) });
       m.setState({ position: [0, 0, 0], velocity: [0, 0, 0], yaw, pitch: 0, crouched: false, grounded: true });
       m.snap();
       m.update(1 / 30);
@@ -269,7 +277,7 @@ async function thirdPerson(): Promise<void> {
   const sp = specs("glove-sport-carrot:carrot:full,glove-sport-carrot:carrot:hand");
   cols = Number(q.get("cols") ?? Math.min(sp.length, 4));
   // Build every model, wait for the CS:S animations (&cs=1), then play T seconds of idle.
-  const all = sp.map((s) => s.split(":")).map(([g, kid]) => modelFor(g, knifeOf(kid)));
+  const all = sp.map((s) => s.split(":")).map(([g, kid, , o, hl]) => modelFor(g, knifeOf(kid), o, hl));
   if (cs) {
     const t0 = performance.now();
     while (all.some((m) => m.bunnyModel?.animSource !== "cs") && performance.now() - t0 < 20000) {
@@ -282,19 +290,20 @@ async function thirdPerson(): Promise<void> {
     for (let i = 0; i < Math.round(T * 30); i++) m.update(1 / 30);
   }
   cells = sp.map((s) => {
-    const [glove, kid, shot = "full"] = s.split(":");
+    const [glove, kid, shot = "full", cellOutfit, cellHilt] = s.split(":");
     const k = knifeOf(kid);
     return {
-      label: `<b>${gname(glove)}</b> · ${k.name} · ${shot}`,
+      label: `<b>${gname(cellHilt ? (loadoutOf(glove, k, cellHilt).hilt ?? glove) : glove)}</b> · ${k.name} · ${shot}`,
       draw(_x, _y, w, h) {
         for (const m of models.values()) m.root.visible = false;
-        const m = modelFor(glove, k);
+        const m = modelFor(glove, k, cellOutfit, cellHilt);
         m.root.visible = true;
         scene.updateMatrixWorld(true);
         const hand = handAt(m.root);
         const shots: Record<string, { at: THREE.Vector3; from: THREE.Vector3; fov: number }> = {
           full: { at: body, from: at(120, 60, 18, body), fov: 30 },
           far: { at: body, from: at(260, 130, 40, body), fov: 30 },
+          body: { at: body, from: at(165, 82, 22, body), fov: 30 },
           hand: { at: hand, from: at(30, 22, 8, hand), fov: 22 },
           side: { at: hand, from: at(4, 38, 4, hand), fov: 22 },
           back: { at: hand, from: at(-24, 26, 10, hand), fov: 22 },

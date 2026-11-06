@@ -36,6 +36,8 @@ struct HudFrame {
     const RacePicker &race_picker;
     const LeaveHold &leave_hold;
     const BhState &curr;
+    float view_pitch;
+    float view_yaw;
     const BhSnapshot &state;
     const BhRunState &display_run;
     const BhRunState &run_state;

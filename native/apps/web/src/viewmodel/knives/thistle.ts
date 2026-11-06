@@ -6,7 +6,7 @@
 
 import { ring, smoothstep, type Paint } from "../../player/bunny/builder";
 import type { V3 } from "../../player/bunny/rig";
-import { ACCENT, fixed, LEAF, LEAF_DARK, type KnifeCtx } from "./ctx";
+import { ACCENT, fixed, LEAF, LEAF_DARK, withHilt, type KnifeCtx } from "./ctx";
 import { attackFlavour, bayonetBlade, bayonetGrip, bayonetHold, hump, idleSway, localXf, palmNormalLocal, plate, reducedMotion, rise, X, Y, type BayonetBladeSpec } from "./bayonet";
 import { KMAT, PART, type KnifeDef } from "./types";
 
@@ -38,14 +38,14 @@ function build(k: KnifeCtx): void {
   const fp = k.view === "fp";
   bayonetBlade(k, THISTLE_BLADE);
   // --- Crossguard: a plain oval plate with a round stub each side, an accent ferrule under it.
-  plate(k, [Q0, Q0 + 0.04, Q1 - 0.04, Q1], [0.32, 0.37, 0.37, 0.32], [0.62, 0.68, 0.68, 0.62], -0.06, SILVER);
+  k.hilt("guard", () => plate(k, [Q0, Q0 + 0.04, Q1 - 0.04, Q1], [0.32, 0.37, 0.37, 0.32], [0.62, 0.68, 0.68, 0.62], -0.06, SILVER, PART.guard, 3.2, "guard"));
   for (const side of [-1, 1]) {
     const y0 = side * 0.6 - 0.06;
-    k.tube([[0, y0, (Q0 + Q1) / 2], [0, y0 + side * 0.2, (Q0 + Q1) / 2], [0, y0 + side * 0.3, (Q0 + Q1) / 2]], (i) => [0.14, 0.15, 0.11][i], fp ? 8 : 6, [1, 0, 0], () => SILVER, { part: PART.guard });
+    k.hilt("guard", () => k.tube([[0, y0, (Q0 + Q1) / 2], [0, y0 + side * 0.2, (Q0 + Q1) / 2], [0, y0 + side * 0.3, (Q0 + Q1) / 2]], (i) => [0.14, 0.15, 0.11][i], fp ? 8 : 6, [1, 0, 0], () => SILVER, { part: PART.guard, name: "guard" }));
   }
-  plate(k, [G1 - 0.02, G1 + 0.04, Q0 - 0.01, Q0 + 0.02], [0.31, 0.37, 0.37, 0.33], [0.42, 0.5, 0.5, 0.46], -0.04, ACCENT, PART.guard, 2.4);
+  k.hilt("fitting", () => plate(k, [G1 - 0.02, G1 + 0.04, Q0 - 0.01, Q0 + 0.02], [0.31, 0.37, 0.37, 0.33], [0.42, 0.5, 0.5, 0.46], -0.04, ACCENT, PART.guard, 2.4, "ferrule"));
   // --- Cord-wrapped grip.
-  bayonetGrip(k, { z0: G0, z1: G1, rx: 0.33, ry: 0.44, cy: -0.04, ribs: 7, a: WRAP, b: WRAP_DARK, wrap: true });
+  k.hilt("wrap", () => bayonetGrip(k, { z0: G0, z1: G1, rx: 0.33, ry: 0.44, cy: -0.04, ribs: 7, a: WRAP, b: WRAP_DARK, wrap: true }));
   // --- Thistle-head pommel: a green bract cup, then the purple tuft.
   {
     const n = fp ? 16 : 10;
@@ -56,7 +56,7 @@ function build(k: KnifeCtx): void {
       star(G0 - 0.3, 0.36, n, 8, 0.26, 0),
       star(G0 - 0.44, 0.27, n, 8, 0.14, 0),
     ];
-    k.surface(cup, { paint: (i): Paint => (i === 1 ? LEAF : LEAF_DARK), part: PART.guard, capStart: LEAF_DARK, capEnd: null });
+    k.hilt("pommel", () => k.surface(cup, { paint: (i): Paint => (i === 1 ? LEAF : LEAF_DARK), part: PART.guard, capStart: LEAF_DARK, capEnd: null, name: "cup" }));
     // The tuft: a bud of long spikes flaring out past the cup (they carry the silhouette side-on), closing to a point.
     const tuft = [
       star(G0 - 0.4, 0.26, n, 8, 0.12, Math.PI / 8),
@@ -65,20 +65,23 @@ function build(k: KnifeCtx): void {
       star(G0 - 1.14, 0.26, n, 8, 0.55, Math.PI / 8),
       star(G0 - 1.26, 0.08, n, 8, 0.25, Math.PI / 8),
     ];
-    k.surface(tuft, { paint: (i): Paint => (i % 2 ? TUFT : TUFT_DARK), part: PART.guard, capStart: null, capEnd: TUFT });
+    k.hilt("pommel", () => k.surface(tuft, { paint: (i): Paint => (i % 2 ? TUFT : TUFT_DARK), part: PART.guard, capStart: null, capEnd: TUFT }));
   }
 }
 
 const L = new Float32Array(12);
 const PIVOT: V3 = [0, 0, Q0];
 
-export const thistle: KnifeDef = {
+export const thistle: KnifeDef = withHilt({
   id: "thistle",
   cosmeticId: "knife-thistle",
   name: "Thistle",
   rarity: 4,
   blurb: "A slim bayonet with a thistle-head pommel, balanced to spin round your fingers.",
   build,
+  // Crossguard and stubs, the ferrule (second tone), the cord grip (the darker cord the second tone), the bract cup
+  // under the thistle head (pommel); the purple tuft stays the thistle's.
+  hilt: { guard: "guard", ferrule: { role: "guard", alt: [ACCENT] }, grip: { role: "grip", alt: [WRAP_DARK] }, cup: { role: "pommel", alt: [LEAF] } },
   // guard: the draw's pinwheel; crook: where it rides on the index finger in its finger spins (under the guard stub).
   pivots: { guard: { p: PIVOT, axis: [1, 0, 0] }, crook: { p: [0, -0.88, 1.0], axis: [1, 0, 0] } },
   tp: { o: [3.16, -1.24, 1.34], z: [0.53, 0.1, -0.84], y: [1, 0, 0], s: 1.6 },
@@ -121,4 +124,4 @@ export const thistle: KnifeDef = {
       s.wrist[0] += k * (-3 * hump(t, 0.02, 0.2) + 4 * lunge);
     } else attackFlavour(action, t, s, { roll: 12, snap: 7, twist: 14 });
   },
-};
+});

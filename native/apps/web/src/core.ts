@@ -173,7 +173,8 @@ export function physicsContent(): [string, Uint8Array][] {
  * func_wall_toggle, disabled func_brush, ...) when the wasm build has `brush_states` (the renderer only applies it to
  * 3D skybox models so far).
  */
-export type BrushTransform = [number, number, number, number, number, number] | [number, number, number, number, number, number, number];
+// Optional fields: visible, then the source prop transform key for a runtime maker copy.
+export type BrushTransform = [number, number, number, number, number, number] | [number, number, number, number, number, number, number] | [number, number, number, number, number, number, number, number];
 /** One overlay volume (`Core.overlayVolumes`): a convex brush as outward planes. */
 export interface OverlayVolume {
   /** OVERLAY_* in crates/core/src/game/overlay.rs (triggers/volumes.ts Kind). */
@@ -314,7 +315,7 @@ export const PHYSICS_V16 = 16;
 /** RNGFix parity: uphill / downhill inclines, edge bugs, trigger jumping and telehops as on RNGFix servers. */
 export const PHYSICS_V17 = 17;
 /** The physics version new runs are played and recorded with. */
-export const PHYSICS_VERSION = 25;
+export const PHYSICS_VERSION = 26;
 /** Climbable surface properties used by bhop_synthetic_fix. */
 export const PHYSICS_V18 = 18;
 /** Scoped entity makers and known velocity-script equivalents. */
@@ -331,6 +332,7 @@ export const PHYSICS_V23 = 23;
 export const PHYSICS_V24 = 24;
 /** Every ground jump starts 1.5 above the floor, as on Momentum Mod and landfix servers: jump heights no longer depend on the landing's sub-tick phase. */
 export const PHYSICS_V25 = 25;
+export const PHYSICS_V26 = 26;
 /** Versions this code knows (the wasm build must support them too, see Core.setSettings). */
 export const isPhysicsVersion = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= PHYSICS_V1 && (v as number) <= PHYSICS_VERSION;
 
@@ -442,6 +444,7 @@ interface Exports {
   player_state(): number;
   brush_origins(): number;
   prop_transforms?(): number;
+  entity_instances?(): number;
   physics_files?(): number;
   physics_missing?(): number;
   physics_reload?(): void;
@@ -776,6 +779,16 @@ export class Core {
     return len;
   }
 
+  /** Runtime maker copies, restored with the core on replay seek. */
+  entityInstances(): { entity: number; source: number; origin: number[]; angles: number[]; visible: boolean }[] {
+    if (!this.x.entity_instances) return [];
+    const n = this.x.entity_instances();
+    const f = this.f32(this.x.scratch_f32_ptr(), n);
+    const out = [];
+    for (let i = 0; i + 9 <= n; i += 9) out.push({ entity: f[i], source: f[i + 1], origin: Array.from(f.subarray(i + 2, i + 5)), angles: Array.from(f.subarray(i + 5, i + 8)), visible: f[i + 8] !== 0 });
+    return out;
+  }
+
   private propAnimCache: { serial: number; states: PropAnimState[] } | null = null;
 
   /**
@@ -886,13 +899,18 @@ export class Core {
       const st = this.f32(this.x.scratch_f32_ptr(), slen);
       for (let i = 0; i + 3 <= st.length; i += 3) {
         const t = out.get(st[i]);
-        if (t && t.length === 6) out.set(st[i], [...t, st[i + 1]] as BrushTransform);
+        if (t && t.length === 6) out.set(st[i], [t[0], t[1], t[2], t[3], t[4], t[5], st[i + 1]] as BrushTransform);
       }
     }
+    const propVisibility = new Map((this.propAnims() ?? []).map(p => [p.entity, !p.hidden && !p.removed]));
     // Moving props (doors) ride along under PROP_TRANSFORM_KEY + entity.
     const plen = this.x.prop_transforms?.() ?? 0;
     const p = this.f32(this.x.scratch_f32_ptr(), plen);
-    for (let i = 0; i < p.length; i += 7) if (!only || only.has(PROP_TRANSFORM_KEY + p[i])) out.set(PROP_TRANSFORM_KEY + p[i], [p[i + 1], p[i + 2], p[i + 3], p[i + 4], p[i + 5], p[i + 6]]);
+    for (let i = 0; i < p.length; i += 7) if (!only || only.has(PROP_TRANSFORM_KEY + p[i])) out.set(PROP_TRANSFORM_KEY + p[i], [p[i + 1], p[i + 2], p[i + 3], p[i + 4], p[i + 5], p[i + 6], propVisibility.get(p[i]) === false ? 0 : 1]);
+    for (const i of this.entityInstances()) {
+      const key = PROP_TRANSFORM_KEY + i.entity;
+      if (!only || only.has(key)) out.set(key, [i.origin[0], i.origin[1], i.origin[2], i.angles[0], i.angles[1], i.angles[2], i.visible ? 1 : 0, PROP_TRANSFORM_KEY + i.source]);
+    }
     return out;
   }
 
@@ -1446,6 +1464,65 @@ export function snapshotBytes(core: Core, handle: number): number {
 export function traceRay(core: Core, start: ArrayLike<number>, end: ArrayLike<number>, radius = 6): number {
   const f = viewerExports(core).trace_ray;
   return f ? f(start[0], start[1], start[2], end[0], end[1], end[2], radius) : 1;
+}
+
+// ---- landing spot (display only; crates/core/src/game/landing.rs, export at the end of crates/core/src/wasm.rs) ----
+
+/** `LandingPrediction.kind`: nothing within the time cap (or the start is embedded). */
+export const LANDING_NONE = 0;
+/** The path reaches a standable surface. */
+export const LANDING_GROUND = 1;
+/** The path enters a teleport or reset volume first. */
+export const LANDING_TELEPORT = 2;
+
+/** Floats per path piece in the core's report: start x, y, z, velocity x, y, z, acceleration x, y, z, seconds. */
+export const LANDING_PIECE = 10;
+
+/**
+ * Where a player would land with no further input (Game::predict_landing). `pieces` (LANDING_PIECE floats each) is a
+ * view into the core's scratch memory: valid until the next core call; copy what you keep.
+ */
+export interface LandingPrediction {
+  kind: number;
+  position: [number, number, number];
+  normal: [number, number, number];
+  seconds: number;
+  /** Hull traces the query took. */
+  traces: number;
+  pieceCount: number;
+  pieces: Float32Array;
+}
+
+interface LandingExports {
+  predict_landing?: (px: number, py: number, pz: number, vx: number, vy: number, vz: number, crouched: number, maxSeconds: number) => number;
+  memory: WebAssembly.Memory;
+  scratch_f32_ptr(): number;
+}
+
+/** True if this wasm build can predict landings. */
+export function hasLandingPrediction(core: Core): boolean {
+  return typeof (core as unknown as { x: LandingExports }).x.predict_landing === "function";
+}
+
+/**
+ * The landing of a player at feet origin `position` moving at `velocity` (crouched hull if `crouched`), searched up to
+ * `maxSeconds` ahead. Read-only: changes nothing in the simulation. Null on a wasm build without it or no map.
+ */
+export function predictLanding(core: Core, position: ArrayLike<number>, velocity: ArrayLike<number>, crouched: boolean, maxSeconds: number, out?: LandingPrediction): LandingPrediction | null {
+  const x = (core as unknown as { x: LandingExports }).x;
+  if (!x.predict_landing) return null;
+  const len = x.predict_landing(position[0], position[1], position[2], velocity[0], velocity[1], velocity[2], crouched ? 1 : 0, maxSeconds);
+  if (len < 10) return null;
+  const s = new Float32Array(x.memory.buffer, x.scratch_f32_ptr(), len);
+  const r = out ?? { kind: 0, position: [0, 0, 0], normal: [0, 0, 0], seconds: 0, traces: 0, pieceCount: 0, pieces: s };
+  r.kind = s[0];
+  r.position[0] = s[1]; r.position[1] = s[2]; r.position[2] = s[3];
+  r.normal[0] = s[4]; r.normal[1] = s[5]; r.normal[2] = s[6];
+  r.seconds = s[7];
+  r.traces = s[8];
+  r.pieceCount = Math.min(s[9], Math.floor((len - 10) / LANDING_PIECE));
+  r.pieces = s.subarray(10, 10 + r.pieceCount * LANDING_PIECE);
+  return r;
 }
 
 // ---- attacks and weapons (physics v4; exports at the end of crates/core/src/wasm.rs) ----

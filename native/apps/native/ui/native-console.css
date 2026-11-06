@@ -1,0 +1,81 @@
+/* The Source console: the web console's solid panel (console/console.css) in the native menu. One hairline border,
+   the scrollback on a darker inset, the command line under it. Opened over the menu, it dims what's behind. */
+dialog.ncon {
+  position: fixed;
+  inset: 8vh 0 auto;
+  width: min(54rem, calc(100vw - 3rem));
+  height: min(30rem, 62vh);
+  max-width: none;
+  max-height: none;
+  box-sizing: border-box;
+  margin: 0 auto;
+  padding: 0;
+  flex-direction: column;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  color: var(--text);
+  background: var(--panel-solid);
+  box-shadow: var(--shadow);
+  font-size: var(--fs-sm);
+  overflow: hidden;
+}
+dialog.ncon[open] { display: flex; }
+dialog.ncon::backdrop { background: rgba(6, 6, 9, 0.72); }
+
+.ncon-head { display: flex; align-items: center; justify-content: space-between; padding: 0.55rem 0.6rem 0.4rem 1rem; }
+.ncon-head h2 { margin: 0; font-size: var(--fs-md); font-weight: var(--w-ui); }
+.ncon-close {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--dim);
+  background: none;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+.ncon-close:hover { color: var(--text); background: var(--raise-2); }
+
+.ncon-log {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden auto;
+  margin: 0 0.6rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--cream-2);
+  font: 500 var(--fs-sm) / 1.45 var(--mono);
+  user-select: text;
+  overscroll-behavior: contain;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+.ncon-row { overflow-wrap: anywhere; white-space: pre-wrap; }
+.ncon-echo { color: var(--cream-3); }
+.ncon-out,
+.ncon-ok { color: var(--cream); }
+.ncon-err { color: var(--loss); }
+.ncon-dim { color: var(--cream-2); }
+
+.ncon-line { display: flex; align-items: center; gap: 0.5rem; padding: 0.6rem 0.6rem 0.6rem 1rem; }
+.ncon-prompt { color: var(--faint); font-family: var(--mono); }
+.ncon-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  outline: none;
+  color: var(--text);
+  background: var(--raise);
+  font: 500 var(--fs-sm) var(--mono);
+}
+.ncon-input:focus { border-color: var(--amber); background: var(--raise-2); }
+.ncon-input::placeholder { color: var(--faint); }
+
+@media (max-width: 44rem) {
+  dialog.ncon { inset: 4vh 0 auto; width: calc(100vw - 1.5rem); height: 70vh; }
+}

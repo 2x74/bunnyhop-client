@@ -462,6 +462,27 @@ typedef struct BhSurfaceProbe {
     float ground_z, water_z;
 } BhSurfaceProbe;
 
+typedef struct BhLandingPiece {
+    float start[3], velocity[3], acceleration[3], seconds;
+} BhLandingPiece;
+
+typedef struct BhLandingPrediction {
+    uint32_t kind, traces, piece_count;
+    float position[3], normal[3], seconds;
+} BhLandingPrediction;
+
+/* Read-only landing predictor. `pieces` holds up to `capacity` path pieces; returns 1 on success. */
+int bh_predict_landing(
+        BhContext *ctx,
+        const float position[3],
+        const float velocity[3],
+        uint32_t crouched,
+        float max_seconds,
+        BhLandingPrediction *out,
+        BhLandingPiece *pieces,
+        size_t capacity
+);
+
 int bh_surface_at(BhContext *ctx, float x, float y, float z, BhSurfaceProbe *out);
 
 /* Practice only: restore/noclip invalidate an active recording. Checkpoints retain GameState,

@@ -11,11 +11,12 @@ import { PART } from "../../knives/types";
 import type { KnifeCtx } from "../../knives/ctx";
 import { box, dome, groove, guard, lathe, pins, plate, slab, trigger, type P2 } from "../shapes";
 import { gunPaint as paint } from "../material";
+import { coat } from "../camo-zones";
 import type { GunDef } from "../types";
 
-const SLIDE = paint(0x4d525c, "dark"), SLIDE_DARK = paint(0x363a42, "dark"), FRAME = paint(0x6f8a6a), FRAME_DARK = paint(0x56705a, "grip");
+const SLIDE = coat(paint(0x4d525c, "dark"), "upper"), SLIDE_DARK = paint(0x363a42, "dark"), FRAME = coat(paint(0x6f8a6a), "lower"), FRAME_DARK = coat(paint(0x56705a, "grip"), "lower", 0.82);
 const ORANGE = paint(0xff7a1a), BORE = paint(0x14161a), PAD = paint(0xf0a8a0), BEAN = paint(0xf7c4bc), STEEL = paint(0x8b9099, "metal");
-const DOT = paint(0xffffff), LEVER = paint(0x2c3036, "dark"), MAG = paint(0x3c4048, "dark"), LINE = paint(0x3f5240), LIP = paint(0x93ad8c);
+const DOT = paint(0xffffff), LEVER = paint(0x2c3036, "dark"), MAG = coat(paint(0x3c4048, "dark"), "mag"), LINE = coat(paint(0x3f5240), "lower", 0.65), LIP = coat(paint(0x93ad8c), "lower", 1.15);
 
 /** Grip rake: the grip's axis leans back 18 degrees from vertical (up = forward). */
 const RAKE = (18 * Math.PI) / 180;
@@ -134,6 +135,9 @@ export const thumper: GunDef = {
   // 0.6 lower than v0.0.28 (-3.6) since the v0.0.29 default framing (viewmodel/defaults.ts) lifts the hands: the support
   // cuff stays under the grip instead of standing up in front of the gloves.
   frame: { o: [18, -5.2, -4.2], a: [0, 6, -5] },
+  // v0.0.38 gun grips: the support elbow where its wrist rests near neutral (about 15 deg extension, 20 ulnar; it sat
+  // at 27 and 28, the hand cocked down off a steep forearm): both arms reach out to the gun.
+  elbows: { R: [10, -20, -24], L: [6.45, -1.3, -7.1] },
   trigger: TRIGGER,
   muzzle: [6.8, 0, 0.78],
   eject: { p: [2.7, -0.3, 1.45], dir: [-0.1, -0.85, 0.5] },

@@ -292,7 +292,7 @@ impl Decoded {
             } else {
                 kind
             };
-            if kind > 3 {
+            if kind > 4 {
                 return Err("bad replay zone kind".into());
             }
             let track = if version == 1 { 0 } else { u32::from(r.u8()?) };
@@ -321,7 +321,7 @@ impl Decoded {
             return Err("replay checkpoint limit exceeded".into());
         }
         settings.checked()?;
-        if !styles::IDS.contains(&style.as_str()) || ![1, 2, 3, 4].contains(&rules) {
+        if !styles::IDS.contains(&style.as_str()) || ![1, 2, 3, 4, 5].contains(&rules) {
             return Err("unsupported replay style/timer rules".into());
         }
         // Every command needs at least one byte per varint column (v10 has four and

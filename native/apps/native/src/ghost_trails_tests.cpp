@@ -51,9 +51,10 @@ int main() {
     assert(path.jump_links.size() == 3);
     assert(path.jump_links[1].to[0] == 59 && path.jump_links[2].from[0] == 60);
     GhostOptions options;
-    options.read({{"ghostWr", false}, {"ghostRouteSource", "pb"}, {"ghostTrail", false}});
+    options.read({{"ghostWr", false}, {"ghostRouteSource", "pb"}, {"ghostTrail", false}, {"ghostRouteOnly", true}});
     assert(options.visible(GhostSource::pb) && !options.visible(GhostSource::wr));
     assert(options.visible(GhostSource::custom) && !options.trail && options.route_source == GhostSource::pb);
+    assert(options.route_only);
     assert(route_priority(GhostSource::custom) < route_priority(GhostSource::pb));
     assert(route_priority(GhostSource::pb) < route_priority(GhostSource::wr));
     const auto wr = ghost_source_color(GhostSource::wr);

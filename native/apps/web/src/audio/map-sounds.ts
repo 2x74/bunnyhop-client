@@ -12,8 +12,8 @@
 // map); the rest are stock game files, fetched one at a time when idle.
 //
 // Following the engine (SDK 2013 game/server/sound.cpp, game/server/soundscape.cpp, game/client/c_soundscape.cpp):
-//   radius -> sound level -> distance falloff: ComputeSoundlevel, then gain = 1 / (distance * mult) from the reference
-//   distance out. A WebAudio panner with the inverse distance model and that reference distance is this curve.
+//   radius -> sound level -> Source distance gain, including foliage loss, near compression and the quiet-end fade.
+//   Panners provide direction only; mono and stereo use the same distance gain.
 //   looping: the file decides (a cue or smpl chunk). The entity's flag only says whether it counts as on.
 //   stereo files: attenuated by distance but not panned; mono files are panned.
 //
@@ -60,8 +60,17 @@ export function referenceDistance(level: number): number {
 /** Gain at `distance` for a sound level. */
 export function distanceGain(level: number, distance: number): number {
   if (!level) return 1;
-  const ref = referenceDistance(level);
-  return distance <= ref ? 1 : ref / distance;
+  const relative = Math.max(0, distance) / referenceDistance(level) * Math.pow(10, (4 * Math.max(0, distance) / 1200) / 20);
+  let gain = 1 / Math.max(0.1, relative);
+  if (gain > 0.5) {
+    const power = level > 90 ? 2.5 + (level - 90) * (0.8 - 2.5) / 50 : 2.5;
+    gain = 1 - 0.5 * Math.pow(0.5 / gain, power);
+  }
+  if (gain < 0.01) {
+    gain = 0.01 * (2 - relative * 0.01);
+    if (gain <= 0) gain = 0.001;
+  }
+  return gain;
 }
 
 // sound.cpp rgdpvpreset: pitch, pitchstart, spinup, spindown, volrun, volstart, fadein, fadeout.
@@ -256,7 +265,9 @@ export class MapSounds {
   private readonly loaded = new Map<string, LoadedFile>();
   private readonly voices: Voice[] = [];
   private readonly ranked: MapSound[] = [];
-  private readonly states: Float32Array;
+  private states: Float32Array;
+  private readonly instanceSources = new Map<number, number>();
+  private readonly entities: Record<string, string>[];
   private readonly movers = new Set<number>();
   private hasMovers = false;
   private ready = false;
@@ -293,7 +304,7 @@ export class MapSounds {
     private readonly random: () => number = Math.random,
   ) {
     this.core = core;
-    const ents = core.entities();
+    const ents = this.entities = core.entities();
     const named = new Map<string, Record<string, string>>();
     for (const e of ents) {
       const n = e.targetname?.toLowerCase();
@@ -386,6 +397,7 @@ export class MapSounds {
         this.hasMovers = true;
       }
     }
+    s.file = this.loaded.get(path) ?? null;
     s.ent = ent;
     s.levels = levels;
     s.volTarget = levels.vol;
@@ -476,6 +488,30 @@ export class MapSounds {
 
   /** The map's state moved: starts, stops, volume and pitch since the last look. */
   private applyState(core: Core, now: number): void {
+    const instances = core.entityInstances?.() ?? [];
+    const live = new Set(instances.map(i => i.entity));
+    for (const [entity, source] of this.instanceSources) {
+      if (live.has(entity) && instances.some(i => i.entity === entity && i.source === source)) continue;
+      const s = this.byEnt.get(entity)!;
+      s.on = false;
+      if (s.voice) this.release(s.voice, now);
+      this.sounds.splice(this.sounds.indexOf(s), 1);
+      this.byEnt.delete(entity);
+      this.instanceSources.delete(entity);
+    }
+    for (const i of instances) {
+      if (this.instanceSources.has(i.entity)) {
+        const s = this.byEnt.get(i.entity)!;
+        [s.x, s.y, s.z] = i.origin;
+        continue;
+      }
+      const e = this.entities[i.source];
+      if (e?.classname?.toLowerCase() !== "ambient_generic") continue;
+      this.addAmbient({ ...e, origin: i.origin.join(" ") }, i.entity, new Map(), null);
+      if (this.byEnt.has(i.entity)) this.instanceSources.set(i.entity, i.source);
+    }
+    const capacity = (this.entities.length + instances.length) * MAP_SOUND_STRIDE;
+    if (this.states.length < capacity) this.states = new Float32Array(capacity);
     const n = core.mapSoundStates(this.states);
     for (let i = 0; i + MAP_SOUND_STRIDE <= n; i += MAP_SOUND_STRIDE) {
       const s = this.byEnt.get(this.states[i]);
@@ -486,7 +522,9 @@ export class MapSounds {
       const volume = this.states[i + 4];
       const pitch = this.states[i + 5];
       if (flags & MAP_SOUND_REMOVED) {
-        if (s.on) this.stopSound(s);
+        s.on = false;
+        s.stopping = false;
+        if (s.voice) this.release(s.voice, now);
         s.removed = true;
         continue;
       }
@@ -811,7 +849,7 @@ export class MapSounds {
       const dy = s.y - ly;
       const dz = s.z - lz;
       const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
-      s.pri = s.level === 0 ? s.vol : s.vol * (distance <= s.ref ? 1 : s.ref / distance);
+      s.pri = s.level === 0 ? s.vol : s.vol * distanceGain(s.level, distance);
       if (s.pri < MIN_AUDIBLE) {
         if (s.voice) this.release(s.voice, now);
         continue;
@@ -853,7 +891,7 @@ export class MapSounds {
       // HRTF is a convolution per voice; the engine's few close-by sounds use it, ambience doesn't need it.
       panner.panningModel = "equalpower";
       panner.distanceModel = "inverse";
-      panner.rolloffFactor = 1;
+      panner.rolloffFactor = 0;
       panner.maxDistance = 1e6;
       panner.connect(gain);
       gain.connect(this.engine.buses.map);
@@ -928,8 +966,8 @@ export class MapSounds {
         p.positionZ.value = s.z;
       } else (p as unknown as { setPosition(x: number, y: number, z: number): void }).setPosition(s.x, s.y, s.z);
     }
-    // Panned voices fall off in the panner, sample accurate; a stereo file by distance here.
-    const g = spatial || s.level === 0 ? s.vol : s.pri;
+    // One Source gain curve for positioned mono and stereo. The panner only supplies direction.
+    const g = s.pri;
     if (Math.abs(g - v.sent) > 0.002) {
       v.gain.gain.setTargetAtTime(g, now, v.sent < 0 ? SWAP_FADE : 0.08);
       v.sent = g;
