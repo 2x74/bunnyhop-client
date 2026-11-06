@@ -1231,11 +1231,11 @@ index c2de027..a94cc83 100644
    return panel;
  }
 diff --git a/apps/web/src/ui/loadout-ui.ts b/apps/web/src/ui/loadout-ui.ts
-index 338a6e9..7d533be 100644
+index 0875842..77ad5fc 100644
 --- a/apps/web/src/ui/loadout-ui.ts
 +++ b/apps/web/src/ui/loadout-ui.ts
 @@ -8,7 +8,7 @@ import { getOutfit } from "../player/cosmetics";
- import { achievement, cosmetic, RARITY, type CosmeticDef } from "../progression";
+ import { achievement, cosmetic, RARITY, staffItem, type CosmeticDef } from "../progression";
  import { availableNow } from "./community";
  import { finishStyle, gloveStyle, hiltSkin, type CosmeticLoadout } from "../loadout";
 -import { knifeById } from "../viewmodel/knives/index";
