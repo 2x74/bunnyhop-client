@@ -155,7 +155,11 @@ test("keys: turn speeds in the host's ranges, and native-only binds take keys fr
     await page.getByLabel("Turn speed value", { exact: true }).press("Enter");
     await page.getByLabel("Fast turn value", { exact: true }).fill("2.5");
     await page.getByLabel("Fast turn value", { exact: true }).press("Enter");
-    expect(await patchesSince(page, from)).toEqual([{ yawSpeed: 300, angleSpeedKey: 2.5 }]);
+    // A slower key event can cross the batching interval; both final values still have to reach the host.
+    expect(Object.assign({}, ...((await patchesSince(page, from)) as object[]))).toEqual({
+      yawSpeed: 300,
+      angleSpeedKey: 2.5,
+    });
 
     await page.locator('details.set-adv[data-sec="keys"] summary').click();
     from = await count(page);

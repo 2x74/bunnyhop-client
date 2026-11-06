@@ -105,3 +105,22 @@ test("settings: HUD scale in whole percents 50–175, keep speed, practice binds
   expect(state.settings.binds.mainMenu).toEqual([]);
   expect(settingsPatch({ binds: { cpSave: ["KeyV"], noclip: ["Escape"] } })).toEqual({ binds: { cpSave: ["KeyV"] } });
 });
+
+test("host settings snapshots keep their publication order across run and map resets", () => {
+  const before = structuredClone(state);
+  try {
+    applyState({ settingsSequence: 2, settings: { cmdBinds: {}, aliases: {}, binds: { turnRight: ["Mouse2"] } } });
+    applyState({
+      map: "bhop_eazy",
+      settingsSequence: 1,
+      settings: { cmdBinds: { Mouse2: "+turnright" }, aliases: { stale: "echo old" } },
+    });
+    expect(state.map).toBe("bhop_eazy");
+    expect(state.settings.cmdBinds).toEqual({});
+    expect(state.settings.aliases).toEqual({});
+    applyState({ settingsSequence: 3, settings: { cmdBinds: { KeyF: "echo newer" } } });
+    expect(state.settings.cmdBinds).toEqual({ KeyF: "echo newer" });
+  } finally {
+    Object.assign(state, before);
+  }
+});

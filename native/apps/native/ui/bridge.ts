@@ -1223,6 +1223,8 @@ function readHostSettings(value: unknown): void {
   state.extraSettings = extra;
 }
 
+let hostSettingsSequence = -1;
+
 export function applyState(value: unknown): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const next = value as Record<string, unknown>;
@@ -1252,7 +1254,10 @@ export function applyState(value: unknown): boolean {
   if (typeof next.paused === "boolean") state.paused = next.paused;
   if (isStyleId(next.style)) state.style = next.style;
   if (Number.isSafeInteger(next.track) && Number(next.track) >= 0) state.track = Number(next.track);
-  if (next.settings) {
+  const sequence = next.settingsSequence;
+  const orderedSettings = Number.isSafeInteger(sequence) && Number(sequence) >= 0;
+  if (next.settings && (!orderedSettings || Number(sequence) > hostSettingsSequence)) {
+    if (orderedSettings) hostSettingsSequence = Number(sequence);
     const patch = settingsPatch(next.settings);
     state.settings = { ...state.settings, ...patch, binds: { ...state.settings.binds, ...patch.binds } };
     state.sensitivity = state.settings.sensitivity;

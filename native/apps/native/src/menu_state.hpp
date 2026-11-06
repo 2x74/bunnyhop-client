@@ -1,5 +1,6 @@
 #pragma once
 #include <nlohmann/json.hpp>
+#include <cstdint>
 #include <string>
 
 namespace native {
@@ -21,6 +22,8 @@ public:
         const bool full = needs_full(visible);
         if (full || (visible && settings_dirty_)) {
             state["settings"] = settings;
+            if (full || !sent_.contains("settings") || sent_.at("settings") != settings)
+                state["settingsSequence"] = ++settings_sequence_;
             settings_dirty_ = false;
         }
         if (full || (visible && replays_dirty_)) {
@@ -35,6 +38,7 @@ public:
                 sent_[field.key()] = std::move(field.value());
             }
         }
+        if (changed.contains("settingsSequence")) changed["settings"] = sent_.at("settings");
         // The world-record receiver validates these fields together.
         if (changed.contains("map") || changed.contains("style") || changed.contains("track")
             || changed.contains("runGeneration") || changed.contains("loading")) {
@@ -63,6 +67,7 @@ private:
         return "window.bunnyhopNativeMenu?.onState(" + encoded + ")";
     }
 
+    uint64_t settings_sequence_ = 0;
     nlohmann::json sent_ = nlohmann::json::object();
     bool full_ = true;
     bool visible_ = false;

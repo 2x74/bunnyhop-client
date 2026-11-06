@@ -144,3 +144,15 @@ test("old native settings files move an untouched Bob and framing to the current
   // In an import an absent value means "keep mine", so a partial old framing is left as it is.
   expect(migrateNativeViewmodel({ viewmodelFov: 54 })).toEqual({ viewmodelFov: 54 });
 });
+
+test("account uploads replace command and alias maps so deletions survive a later import", () => {
+  const remote = buildSettingsDoc(clone(DEFAULT_PREFS));
+  remote.settings.cmdBinds = { KeyA: "echo test; +moveleft", Mouse2: "+turnright" };
+  remote.settings.aliases = { stale: "echo old" };
+  const doc = syncDocument(remote);
+  expect(doc.settings.cmdBinds).toEqual({});
+  expect(doc.settings.aliases).toEqual({});
+  const imported = planSettingsImport(doc, clone(DEFAULT_PREFS));
+  expect(imported.next.cmdBinds).toEqual({});
+  expect(imported.next.aliases).toEqual({});
+});

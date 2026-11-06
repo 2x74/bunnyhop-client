@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.8.2 — Native
+
+- Your binds stay put after finishing a run, changing maps, reopening the menu and restarting the game.
+- Keeping settings with your account no longer brings back command binds or aliases you removed.
+- Thanks to ThrowTop for reporting the resets.
+
 ## v0.8.1 — Native
 
 - Unbinding or rebinding a key that had a command bind now sticks. Updating also restores saved menu binds that

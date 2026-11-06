@@ -74,8 +74,25 @@ void check_foreign_error_text() {
 }
 }  // namespace
 
+void check_settings_sequence() {
+    native::MenuState state;
+    const Json settings{{"cmdBinds", Json::object()}};
+    const auto first = state.publish(host_state("", ""), true, settings, no_replays);
+    check(says(first, "\"settingsSequence\":1"), "initial settings have no order");
+    state.reset();
+    const auto reopened = state.publish(host_state("", ""), true, settings, no_replays);
+    check(says(reopened, "\"settingsSequence\":2"), "menu reset restarted settings order");
+    state.settings_changed();
+    auto next = settings;
+    next["cmdBinds"]["KeyA"] = "echo newer";
+    const auto changed = state.publish(host_state("", ""), true, next, no_replays);
+    check(says(changed, "\"settingsSequence\":3"), "settings change did not advance order");
+    check(says(changed, "\"settings\":"), "ordered settings receipt lost its snapshot");
+}
+
 int main() {
     try {
+        check_settings_sequence();
         check_message_sources();
         check_fast_failure();
         check_settled_while_hidden();
