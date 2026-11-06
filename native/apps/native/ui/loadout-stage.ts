@@ -1,7 +1,7 @@
 // Browser-safe palette/shape previews for the native menu. The equipped model is rendered by the native game.
 // This canvas intentionally uses only the 2D context; importing a model or Three here breaks the menu boundary.
 import authored from "./authored-previews.json";
-import { cosmetic } from "../../web/src/progression";
+import { COSMETICS, cosmetic } from "../../web/src/progression";
 import { packLoadout, type CosmeticLoadout } from "../../web/src/loadout";
 import { requestPreview, cancelPreview, nativePreviewAvailable } from "./loadout-preview";
 import type { PreviewSpec } from "../../web/src/notify/item-preview";
@@ -130,6 +130,14 @@ function stageRenderSize(canvas: HTMLCanvasElement): { width: number; height: nu
     width: Math.max(MIN_RENDER_W, Math.round(width * scale)),
     height: Math.max(MIN_RENDER_H, Math.round(height * scale)),
   };
+}
+
+// Ghost and trail tiles describe the item by its colours (item-preview.ts); the host renders by item id.
+function colourItem(slot: "ghost" | "trail", spec: PreviewSpec): string | null {
+  const match = COSMETICS.find(
+    (c) => c.slot === slot && c.color === spec.color && (c.color2 ?? null) === (spec.color2 ?? null),
+  );
+  return match?.id ?? null;
 }
 
 export class LoadoutStage {
@@ -269,6 +277,7 @@ export class LoadoutStage {
         loadout: packLoadout(this.shown),
         outfit: this.look.outfit ?? "outfit-cream",
         ghost: this.look.ghost ?? "ghost-gold",
+        trail: this.look.trail ?? "trail-gold",
         playerGlow: this.look.playerGlow ?? null,
         view: this.viewMode,
         weapon: [2, 3, 7, 8, 9, 14, 17, 22][this.gunIndex],
@@ -349,14 +358,15 @@ export class LoadoutStage {
         {
           loadout: packLoadout(loadout),
           outfit: spec?.outfit ?? this.look.outfit ?? "outfit-cream",
-          ghost: this.look.ghost ?? "ghost-gold",
+          ghost: (spec?.kind === "ghost" && colourItem("ghost", spec)) || this.look.ghost || "ghost-gold",
+          trail: (spec?.kind === "trail" && colourItem("trail", spec)) || this.look.trail || "trail-gold",
           playerGlow: null,
           view:
             spec?.kind === "gun"
               ? "gunside"
               : spec?.kind === "hat" || spec?.kind === "bunny"
                 ? "bunny"
-                : spec?.kind === "ghost"
+                : spec?.kind === "ghost" || spec?.kind === "trail"
                   ? "ghost"
                   : job.kind === "knife" && job.focus === "hilt"
                     ? "hilt"

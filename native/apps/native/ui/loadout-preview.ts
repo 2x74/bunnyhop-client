@@ -26,6 +26,7 @@ export interface PreviewRequest {
   loadout: string;
   outfit: string;
   ghost: string;
+  trail?: string;
   playerGlow: PlayerGlow | null;
   view: "fp" | "close" | "bunny" | "ghost" | "onboarding" | "gun" | "gunside" | "knife" | "hilt";
   weapon?: number;
