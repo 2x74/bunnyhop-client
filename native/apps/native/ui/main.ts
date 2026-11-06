@@ -1,3 +1,6 @@
+import { NativeRaceGhosts } from "./race-ghosts";
+import { loadPBReplay } from "../../web/src/pb";
+import { base64Bytes } from "./base64";
 import { applyHostSkies } from "./sky-settings";
 import { applySemanticPalette } from "./semantic-palette";
 import { NativeWorldRecord } from "./world-record";
@@ -50,7 +53,7 @@ import { RoomConnection } from "../../web/src/net/room";
 import { leaveRoomBefore } from "./room-message-policy";
 import { setRoomPresence, setRaceTag, currentRoom, currentRace } from "../../web/src/net/presence";
 import { serverBrowser } from "../../web/src/ui/servers";
-import { keyLabel } from "../../web/src/ui/settings";
+import { keyLabel, prefs } from "../../web/src/ui/settings";
 import { setLookMapNow } from "../../web/src/map-look";
 import { roomPanel } from "./rooms-panel";
 import { safeNativeChatUrl } from "./chat-links";
@@ -677,6 +680,31 @@ function refreshAccount(): void {
     () => undefined,
   );
 }
+const raceGhosts = new NativeRaceGhosts({
+  pb: ({ map, style, track }) => loadPBReplay(map, style, track),
+  wr: async ({ map, style, track }) => {
+    if (!api.available()) return null;
+    const top = await worldRecord(map, style, track);
+    return top ? api.replay(top.runId) : null;
+  },
+  base64: base64Bytes,
+  send,
+});
+function updateRaceGhosts(): void {
+  raceGhosts.update(
+    state.map && !state.loading && !state.playback.active && !state.tutorial.active
+      ? { map: state.map, style: state.style, track: state.track, generation: state.ghostGeneration }
+      : null,
+    prefs.get(),
+    state.ghosts,
+    state.replays,
+  );
+}
+prefs.watch(updateRaceGhosts);
+window.addEventListener("bunnyhop:account", () => {
+  raceGhosts.refresh();
+  updateRaceGhosts();
+});
 const nativeWorldRecord = new NativeWorldRecord(worldRecord, (context, seconds) =>
   send({ type: "worldRecord", ...context, seconds }),
 );
@@ -747,6 +775,7 @@ function receive(value: unknown): void {
     ]);
   const pauseBefore = paused();
   const applied = applyState(value);
+  updateRaceGhosts();
   mapZoneWarning.mapChanged(state.map);
   // The vendored Settings and pause rows for this map's own look read it from here (web main.ts sets it per page).
   setLookMapNow(state.map);

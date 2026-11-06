@@ -450,3 +450,55 @@ test("Bar is a Style choice, and hides the rows it ignores", async () => {
     await close();
   }
 }, 30_000);
+
+test("route controls apply live from the pause screen and persist across restart and map state", async () => {
+  const { page, errors, close } = await open();
+  try {
+    const settings = {
+      ...HOST_SETTINGS,
+      ghostRoute: false,
+      ghostRouteOnly: false,
+      ghostRouteSource: "auto",
+      ghostRouteMode: "jumps",
+      ghostPb: true,
+      ghostWr: true,
+      ghostCustom: true,
+    };
+    await host(page, {
+      map: "bhop_0w0__bhop__d-_-b",
+      style: "autohop",
+      track: 0,
+      paused: true,
+      ghostGeneration: 1,
+      settings,
+      settingsKeys: Object.keys(settings),
+    });
+    await openSettings(page, "ghost");
+    let from = await count(page);
+    await row(page, "ghost", "Ghost route").getByRole("switch").click();
+    expect(await patchesSince(page, from)).toEqual([{ ghostRoute: true }]);
+    settings.ghostRoute = true;
+    await host(page, { settings });
+    from = await count(page);
+    await row(page, "ghost", "Route ghost").locator("select").selectOption("wr");
+    expect(await patchesSince(page, from)).toEqual([{ ghostRouteSource: "wr" }]);
+    settings.ghostRouteSource = "wr";
+    await host(page, { settings });
+    from = await count(page);
+    await row(page, "ghost", "Route path").getByRole("radio", { name: "Recorded path", exact: true }).click();
+    expect(await patchesSince(page, from)).toEqual([{ ghostRouteMode: "path" }]);
+    settings.ghostRouteMode = "path";
+    await host(page, { settings });
+    from = await count(page);
+    await row(page, "ghost", "Route only").getByRole("switch").click();
+    expect(await patchesSince(page, from)).toEqual([{ ghostRouteOnly: true }]);
+    settings.ghostRouteOnly = true;
+    await host(page, { settings, runGeneration: 2 });
+    await host(page, { map: "bhop_eazy", ghostGeneration: 2, settings });
+    expect(await row(page, "ghost", "Route only").getByRole("switch").isChecked()).toBe(true);
+    expect(await row(page, "ghost", "Route ghost").locator("select").inputValue()).toBe("wr");
+    expect(errors).toEqual([]);
+  } finally {
+    await close();
+  }
+}, 30_000);

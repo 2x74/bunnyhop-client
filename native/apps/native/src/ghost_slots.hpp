@@ -6,14 +6,30 @@
 #include <array>
 #include <filesystem>
 #include <string>
+#include <memory>
 
 namespace native {
+
+struct GhostRecording {
+    std::vector<BhCmd> commands;
+    std::vector<BhReplayEvents> events;
+};
 
 struct GhostSlot {
     uint32_t handle = 0;
     std::string id;
     bool enabled = false;
     nlohmann::json info;
+    std::shared_ptr<const GhostRecording> recording;
+
+    bool loaded() const { return handle || recording; }
+
+    bool command(BhContext *core, uint32_t tick, BhCmd &out) const {
+        if (!recording) return bh_ghost_command(core, handle, tick, &out);
+        if (tick >= recording->commands.size()) return false;
+        out = recording->commands[tick];
+        return true;
+    }
 };
 
 struct GhostSlots {

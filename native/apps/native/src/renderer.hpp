@@ -225,12 +225,8 @@ class GhostRouteGeometry {
     static constexpr float path_width_points = 2.5f, path_opacity = .85f;
     static constexpr float marker_width_points = 2, marker_opacity = .95f;
     static constexpr float marker_half_width_units = 6, marker_below_units = 1, marker_above_units = 2;
-    static constexpr float route_lift_units = 2;
 
-    struct Vertex {
-        native_render::Vec3 point, other;
-        float side = 0;
-    };
+    using Vertex = native_render::RouteVertex;
 
     struct Mesh {
         GLuint vao = 0, buffer = 0;
@@ -244,8 +240,7 @@ class GhostRouteGeometry {
     GLint projectionLocation = -1, colorLocation = -1, widthLocation = -1, viewportLocation = -1;
 
     void add_segment(const native_render::Vec3 &from, const native_render::Vec3 &to) {
-        const Vertex a{from, to, 1}, b{from, to, -1}, c{to, from, -1}, d{to, from, 1};
-        for (const auto &vertex : {a, b, c, a, c, d})
+        for (const auto &vertex : native_render::route_quad(from, to))
             vertices.push_back(vertex);
     }
 
@@ -255,15 +250,9 @@ class GhostRouteGeometry {
                 add_segment(link.from, link.to);
             return;
         }
-        for (size_t tick = path.start + 1; tick <= path.end && tick < path.frames.size(); ++tick) {
-            if (path.teleports[tick] || !native_render::valid_ghost_position(path.frames[tick - 1])
-                || !native_render::valid_ghost_position(path.frames[tick]))
-                continue;
-            add_segment(
-                    native_render::ghost_feet(path.frames[tick - 1], route_lift_units),
-                    native_render::ghost_feet(path.frames[tick], route_lift_units)
-            );
-        }
+        path.path_segments([&](const native_render::GhostPath::Segment &segment) {
+            add_segment(segment.from, segment.to);
+        });
     }
 
     void add_marker(const native_render::Vec3 &takeoff) {
@@ -1655,26 +1644,12 @@ class Renderer {
     }
 
     int selected_route_slot() const {
-        if (!ghostOptions.route || !ghostRoutes) return -1;
-        int selected = -1;
-        for (size_t slot = 0; slot < ghostPaths.size(); ++slot) {
-            const auto &path = ghostPaths[slot];
-            if (!routeAvailable[slot] || !path.enabled || path.frames.empty() || !ghostOptions.visible(path.source))
-                continue;
-            if (ghostOptions.route_source != native_render::GhostSource::none
-                && path.source != ghostOptions.route_source)
-                continue;
-            if (selected < 0
-                || native_render::route_priority(path.source)
-                           < native_render::route_priority(ghostPaths[size_t(selected)].source))
-                selected = int(slot);
-        }
-        return selected;
+        return ghostRoutes ? native_render::select_route_slot(ghostOptions, ghostPaths, routeAvailable) : -1;
     }
 
     void draw_ghost_route(const native::Matrix &projection) {
         const int selected = selected_route_slot();
-        if (selected < 0) return;
+        if (selected < 0 || !toolsVisible) return;
         const auto &path = ghostPaths[size_t(selected)];
         const auto color = path.source == native_render::GhostSource::pb
                                    ? ghostRouteColor
@@ -1832,8 +1807,7 @@ public:
     void route_context(uint32_t track, const std::string &style, bool visible) {
         for (size_t slot = 0; slot < ghostPaths.size(); ++slot) {
             const auto &path = ghostPaths[slot];
-            routeAvailable[slot] = visible && path.track == track
-                                   && (path.source == native_render::GhostSource::custom || path.style == style);
+            routeAvailable[slot] = visible && path.track == track && (path.style == "*" || path.style == style);
         }
     }
 

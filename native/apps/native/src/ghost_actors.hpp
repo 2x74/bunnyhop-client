@@ -36,8 +36,10 @@ inline const native_render::Actor *find_primary_ghost(const std::vector<native_r
 
 inline bool
 ghost_slot_races(const GhostSlot &slot, const Renderer &renderer, unsigned index, const GhostFrameContext &context) {
-    return slot.handle && slot.enabled && renderer.ghost_visible(index) && slot.info.value("track", 0u) == context.track
-           && slot.info.value("style", std::string("autohop")) == context.style;
+    return slot.loaded() && slot.enabled && renderer.ghost_visible(index)
+           && slot.info.value("track", 0u) == context.track
+           && (slot.info.value("style", std::string("autohop")) == context.style
+               || slot.info.value("style", std::string("autohop")) == "*");
 }
 
 // Each slot's route for the HUD's comparison, while that ghost races on this track.
@@ -75,7 +77,7 @@ inline PrimaryGhost append_ghost_actors(
         if (index == 0) {
             primary.shown = true;
             if (actor.frame.tick <= renderer.ghost_path(0).end)
-                bh_ghost_command(context.core, slot.handle, actor.frame.tick, &primary.command);
+                slot.command(context.core, actor.frame.tick, primary.command);
         }
         if (int(index) == route_only_slot) continue;
         actor.name = renderer.ghost_name(index);

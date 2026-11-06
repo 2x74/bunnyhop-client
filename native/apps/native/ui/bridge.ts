@@ -121,6 +121,7 @@ export type MenuMessage =
       type: "replay";
       action: "play" | "ghost" | "export" | "delete" | "screenshot";
       ghostSlot?: number;
+      source?: "pb" | "wr" | "custom";
       id: string;
       confirmed?: boolean;
     }
@@ -128,6 +129,7 @@ export type MenuMessage =
       type: "replayData";
       action: "play" | "ghost";
       ghostSlot?: number;
+      source?: "pb" | "wr" | "custom";
       name: string;
       map: string;
       replayBase64: string;
@@ -156,6 +158,7 @@ export type MenuMessage =
   /** A second replay as a ghost on the one being watched (replay-host.ts); needs the host's "compare" feature. */
   | { type: "replayCompare"; action: "set"; kind: "pb" | "wr" | "custom"; name: string; replayBase64: string }
   | { type: "replayCompare"; action: "clear" }
+  | import("./race-ghosts").RaceGhostRequest
   | { type: "ghost"; enabled: boolean }
   | { type: "ghostControl"; action: "remove" | "clear" | "toggle"; slot?: number; enabled?: boolean }
   | { type: "tutorial"; action: "start" | "demo"; lesson: LessonId }
@@ -504,6 +507,7 @@ export function runSeconds(run: { seconds?: number; timeMs?: unknown }): number 
 export const REPLAY_CAMERAS = ["eye", "chase", "free", "flyby", "auto", "orbit"] as const;
 export type ReplayCamera = (typeof REPLAY_CAMERAS)[number];
 export interface NativeGhost {
+  source?: "pb" | "wr" | "custom";
   slot: number;
   id: string;
   name: string;
@@ -618,6 +622,7 @@ export interface NativeMenuState {
   settings: NativeSettings;
   replays: NativeReplay[];
   ghosts: NativeGhost[];
+  ghostGeneration: number;
   discord: { state: DiscordState; message: string };
   playback: PlaybackState;
   ghost: { enabled: boolean; id: string; name: string };
@@ -882,6 +887,7 @@ export const state: NativeMenuState = {
 
   replays: [],
   ghosts: [],
+  ghostGeneration: 0,
   discord: { state: "disabled", message: "" },
   playback: { active: false, id: "", tick: 0, totalTicks: 0, paused: true, speed: 1 },
   ghost: { enabled: false, id: "", name: "" },
@@ -1328,6 +1334,7 @@ export function applyState(value: unknown): boolean {
           : 1,
     };
   }
+  if (Number.isSafeInteger(next.ghostGeneration)) state.ghostGeneration = Number(next.ghostGeneration);
   if (Array.isArray(next.ghosts))
     state.ghosts = next.ghosts
       .slice(0, 4)
