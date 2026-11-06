@@ -23,6 +23,7 @@ export interface OnboardingPose {
   clock: number;
 }
 export interface PreviewRequest {
+  thumbnail?: boolean;
   loadout: string;
   outfit: string;
   ghost: string;
@@ -48,6 +49,7 @@ export function cancelPreview(id: number): void {
   const job = pending.get(id);
   if (job) clearTimeout(job.timer);
   pending.delete(id);
+  if (job) window.webkit?.messageHandlers?.bunnyhop?.postMessage(JSON.stringify({ type: "loadoutPreviewCancel", id }));
 }
 export function requestPreview(request: PreviewRequest, done: (png: string) => void, timeoutMs = 3000): number {
   const host = window.webkit?.messageHandlers?.bunnyhop;
@@ -55,7 +57,8 @@ export function requestPreview(request: PreviewRequest, done: (png: string) => v
   (window as PreviewWindow).bunnyhopNativeLoadoutPreview = (frame) => {
     const job = pending.get(frame.id);
     if (!job) return;
-    cancelPreview(frame.id);
+    clearTimeout(job.timer);
+    pending.delete(frame.id);
     job.done(typeof frame.png === "string" && frame.png.startsWith("data:image/png;base64,") ? frame.png : "");
   };
   const id = ++serial;

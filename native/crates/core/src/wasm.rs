@@ -952,6 +952,7 @@ pub extern "C" fn prop_anim_states() -> usize {
                 c.scratch_str.push_str(&p.anim);
                 c.scratch_str.push('\t');
                 c.scratch_str.push_str(&p.default_anim);
+                c.scratch_str.push_str(&format!("\t{}\t{}", p.body, p.skin));
                 c.scratch_str.push('\n');
             }
         }

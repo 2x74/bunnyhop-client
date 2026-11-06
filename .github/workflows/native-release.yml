@@ -33,7 +33,11 @@ jobs:
         working-directory: .
     outputs:
       version: ${{ steps.version.outputs.version }}
+      macos_absent: ${{ steps.version.outputs.macos_absent }}
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: Validate exact native release version
         id: version
         env:
@@ -47,6 +51,7 @@ jobs:
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          node .github/scripts/native-release/platform-policy.mjs "$version" >> "$GITHUB_OUTPUT"
   automation:
     needs: version
     runs-on: ubuntu-24.04
@@ -161,10 +166,12 @@ jobs:
       artifact_digest: ${{ steps.package-upload.outputs.artifact-digest }}
       parity_artifact_id: ${{ steps.parity-upload.outputs.artifact-id }}
       parity_artifact_digest: ${{ steps.parity-upload.outputs.artifact-digest }}
-    if: github.event_name == 'push' || inputs.platform == 'all' || inputs.platform == 'macos'
+    if: >-
+      (github.event_name == 'push' || inputs.platform == 'all' || inputs.platform == 'macos') &&
+      (inputs.platform == 'macos' || needs.version.outputs.macos_absent != 'true')
     needs: [version, resources]
     timeout-minutes: 45
-    runs-on: macos-15
+    runs-on: macos-26
     env:
       MACOSX_DEPLOYMENT_TARGET: "14.0"
     steps:
@@ -287,10 +294,7 @@ jobs:
   evidence:
     if: >-
       always() && needs.version.result == 'success' && needs.resources.result == 'success' &&
-      needs.automation.result == 'success' &&
-      (needs.windows.result == 'success' || needs.windows.result == 'skipped') &&
-      (needs.macos.result == 'success' || needs.macos.result == 'skipped') &&
-      (needs.linux.result == 'success' || needs.linux.result == 'skipped')
+      needs.automation.result == 'success'
     needs: [version, automation, resources, windows, macos, linux]
     runs-on: ubuntu-24.04
     timeout-minutes: 10

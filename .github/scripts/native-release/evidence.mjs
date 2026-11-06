@@ -4,6 +4,7 @@ import { readFileSync, readdirSync, lstatSync, writeFileSync, openSync, readSync
 import { join } from 'node:path';
 import { validateParityReport, parityArtifactName, PINNED_WASM_SHA256, PINNED_PHYSICS, PINNED_RULES } from './parity-contract.mjs';
 import { pathToFileURL } from 'node:url';
+import { configuredAbsentPlatforms } from './platform-policy.mjs';
 
 export const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const MAX_ARCHIVE_BYTES = 512 * 1024 * 1024;
@@ -55,6 +56,15 @@ export function validateReport(report, version, platform) {
   return report;
 }
 
+function selectedTargets(evidence) {
+  const absent = evidence.absentPlatforms ?? [];
+  requireThat(Array.isArray(absent) && new Set(absent).size === absent.length &&
+    absent.every(platform => Object.values(targets).includes(platform)) && absent.length < Object.keys(targets).length,
+    'Invalid absent platforms');
+  requireThat(evidence.platform === 'all' || absent.length === 0, 'Absence requires an all-platform release');
+  return Object.keys(targets).filter(key => (evidence.platform === 'all' || evidence.platform === key) && !absent.includes(targets[key]));
+}
+
 export function validateEvidence(evidence) {
   requireThat(evidence.schema === 1 && evidence.kind === 'native-candidate', 'Invalid evidence schema');
   requireThat(evidence.repository === '2x74/bunnyhop-client' && /^[0-9a-f]{40}$/.test(evidence.sourceSha), 'Invalid source');
@@ -66,7 +76,7 @@ export function validateEvidence(evidence) {
   requireThat(evidence.event !== 'push' || evidence.ref === `refs/tags/v${evidence.version}`, 'Tag/version mismatch');
   requireThat(evidence.logsUrl === `https://api.github.com/repos/${evidence.repository}/actions/runs/${evidence.runId}/attempts/${evidence.runAttempt}/logs`, 'Missing exact run-attempt logs');
   requireThat(evidence.gates?.resources === 'success' && evidence.gates?.automation === 'success', 'Failed deterministic gates');
-  const keys = Object.keys(targets).filter(key => evidence.platform === 'all' || evidence.platform === key);
+  const keys = selectedTargets(evidence);
   requireThat(keys.length > 0 && evidence.artifacts?.length === keys.length, 'Missing/extra platform evidence');
   const ids = new Set();
   for (const key of keys) {
@@ -94,7 +104,7 @@ export function collectEvidence(directory, context, needs) {
   const evidence = { schema: 1, kind: 'native-candidate', ...context, logsUrl: `https://api.github.com/repos/${context.repository}/actions/runs/${context.runId}/attempts/${context.runAttempt}/logs`, gates: {}, artifacts: [] };
   for (const job of ['resources', 'automation', ...Object.keys(targets)]) evidence.gates[job] = needs[job]?.result;
   for (const [target, platform] of Object.entries(targets)) {
-    if (context.platform !== 'all' && context.platform !== target) continue;
+    if (!selectedTargets(context).includes(target)) continue;
     const output = needs[target]?.outputs;
     requireThat(output, `No outputs for ${target}`);
     const name = artifactName(target, context.runId, context.runAttempt);
@@ -138,6 +148,7 @@ export function serializeEvidence(evidence) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const context = { repository: process.env.GITHUB_REPOSITORY, sourceSha: process.env.GITHUB_SHA, ref: process.env.GITHUB_REF, workflowRef: process.env.GITHUB_WORKFLOW_REF, event: process.env.GITHUB_EVENT_NAME, runId: process.env.GITHUB_RUN_ID, runAttempt: process.env.GITHUB_RUN_ATTEMPT, version: process.env.PACKAGE_VERSION, platform: process.env.PACKAGE_PLATFORM || 'all' };
+  context.absentPlatforms = configuredAbsentPlatforms(context.version, context.platform);
   const evidence = collectEvidence(process.argv[2], context, JSON.parse(process.env.CANDIDATE_NEEDS));
   const bytes = serializeEvidence(evidence);
   writeFileSync(process.argv[3], bytes, { flag: 'wx' });

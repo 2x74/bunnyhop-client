@@ -58,7 +58,9 @@ fn lists_animated_props_with_their_states_and_transforms() {
                 flags: 0,
                 base: 0.0,
                 since: 0.0,
-                rate: 1.0
+                rate: 1.0,
+                body: 0,
+                skin: 0,
             }
         );
         assert_eq!(states[1].entity, 3);
@@ -280,4 +282,156 @@ fn random_animation_props_get_their_animators() {
         }
         bh_destroy(c);
     }
+}
+
+#[test]
+fn render_only_parent_props_keep_their_owner_and_scale() {
+    let entities = r#"{"classname" "worldspawn"}
+        {"classname" "func_tracktrain" "targetname" "train"}
+        {"classname" "prop_dynamic" "parentname" "train" "model" "models/with spaces/tomb.mdl"
+         "DefaultAnim" "Hop" "modelscale" "1.5"}
+        {"classname" "prop_dynamic" "parentname" "train" "model" "models/hidden.mdl" "rendermode" "10"}"#;
+    let fixture = Fixture::new();
+    let path = fixture.file("parents.bsp", &bsp_with_entities(&[], entities));
+    unsafe {
+        let c = bh_create();
+        assert_eq!(bh_load_map(c, path.as_ptr(), ptr::null()), 1);
+        let map = (*c).map.as_ref().unwrap();
+        let mut props = bunnyhop_core::props::StaticProps::default();
+        bunnyhop_core::props::add_game_props(&mut props, &map.game, true);
+        assert_eq!(props.props.len(), 1);
+        assert_eq!((props.props[0].owner, props.props[0].scale), (3, 1.5));
+        assert_eq!(props.models[0], "models/with spaces/tomb.mdl");
+        bh_destroy(c);
+    }
+}
+
+#[test]
+#[ignore = "requires BH_CRASH_EGYPT_BSP pointing at the exact production BSP"]
+fn crash_egypt_render_observations_restore_copies_and_train_props() {
+    let fixture = Fixture::new();
+    let bytes =
+        std::fs::read(std::env::var("BH_CRASH_EGYPT_BSP").expect("BH_CRASH_EGYPT_BSP")).unwrap();
+    let path = fixture.file("bhop_crash_egypt.bsp", &bytes);
+    unsafe {
+        let c = bh_create();
+        assert_eq!(bh_load_map(c, path.as_ptr(), fixture.root().as_ptr()), 1);
+        let mut count = 0;
+        let props = bh_animated_props(c, &mut count);
+        let props = std::slice::from_raw_parts(props, count);
+        for entity in [1222, 1226, 1231, 1234, 1239] {
+            let tomb = props.iter().find(|p| p.entity == entity).unwrap();
+            assert_ne!(tomb.studio, 0, "embedded tomb model failed to load");
+            assert_eq!(tomb.model_scale, 1.5);
+        }
+        let material_groups: Vec<_> = (*c)
+            .map
+            .as_ref()
+            .unwrap()
+            .assets
+            .prop_groups
+            .iter()
+            .filter(|g| [968, 971, 974].contains(&g.entity))
+            .copied()
+            .collect();
+        assert!(!material_groups.is_empty());
+        for group in material_groups {
+            let material = (*c).map.as_ref().unwrap().material_abi[group.material as usize];
+            assert_ne!(material.kind, 1, "crate material is missing");
+            assert!(material.texture >= 0);
+            let mut image = BhImage::default();
+            assert_eq!(bh_texture(c, material.texture as u32, &mut image), 1);
+            assert!(image.width > 8 && image.height > 8);
+        }
+        let saved = (*c).map.as_ref().unwrap().game.save_state();
+        let mut rows = vec![BhEntityInstance::default(); 4096];
+        assert_eq!(bh_entity_instances(c, rows.as_mut_ptr(), rows.len()), 0);
+        let map = (*c).map.as_mut().unwrap();
+        map.game.place_player([96.0, 1408.0, -255.0]);
+        for _ in 0..75 {
+            map.game.step(Cmd::default()).unwrap();
+        }
+        let state = map.game.snapshot_bytes();
+        let count = bh_entity_instances(c, rows.as_mut_ptr(), rows.len());
+        assert!(
+            rows[..count]
+                .iter()
+                .any(|r| r.source == 965 && r.visible == 1)
+        );
+        assert!(rows[..count].iter().any(|r| r.source == 958));
+        assert_eq!((*c).map.as_ref().unwrap().game.snapshot_bytes(), state);
+        assert!(!(*c).map.as_ref().unwrap().game.entity_visible(968));
+        let moved = (*c)
+            .map
+            .as_ref()
+            .unwrap()
+            .game
+            .entity_transform(1222)
+            .unwrap();
+        assert_ne!(moved.0, [-1856.0, 6624.0, 96.0]);
+        (*c).map.as_mut().unwrap().game.restore_state(&saved);
+        assert_eq!(bh_entity_instances(c, rows.as_mut_ptr(), rows.len()), 0);
+        assert!((*c).map.as_ref().unwrap().game.entity_visible(968));
+        assert_eq!(
+            (*c).map
+                .as_ref()
+                .unwrap()
+                .game
+                .entity_transform(1222)
+                .unwrap()
+                .0,
+            [-1856.0, 6624.0, 96.0]
+        );
+        bh_destroy(c);
+    }
+}
+
+#[test]
+fn mounted_content_only_claims_real_material_candidates() {
+    let fixture = Fixture::new();
+    let root_path = fixture.0.join("content");
+    std::fs::create_dir_all(root_path.join("materials/loose")).unwrap();
+    std::fs::write(
+        root_path.join("materials/loose/actual.vmt"),
+        b"VertexLitGeneric {}",
+    )
+    .unwrap();
+    let mut fs = vfs::Vfs::default();
+    let material = "models/crash bandicoot game/props/crates/crate";
+    fs.mount(vfs::Source::loose(
+        "pak",
+        HashMap::from([(
+            format!("materials/{material}.vmt"),
+            Rc::<[u8]>::from(&b"VertexLitGeneric {}"[..]),
+        )]),
+    ));
+    fs.mount(vfs::Source::listing(Rc::new(
+        crate::assets::loose_listing(&root_path, &|| Ok(())).unwrap(),
+    )));
+    let textures = bunnyhop_core::props::MdlTextures {
+        textures: vec![material.into(), "actual".into()],
+        cdmaterials: vec![
+            "models/crash bandicoot game/props/crates".into(),
+            "".into(),
+            "loose".into(),
+        ],
+        skins: Vec::new(),
+    };
+    assert_eq!(
+        bunnyhop_core::props::model_material_names(&fs, &textures),
+        vec![material, "loose/actual"]
+    );
+    let pending = fs.take_pending();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].path, "materials/loose/actual.vmt");
+    let loaded = HashMap::from([(
+        "materials/loose/actual.vmt".to_string(),
+        Rc::<[u8]>::from(&b"VertexLitGeneric {}"[..]),
+    )]);
+    crate::remount(&mut fs, &loaded);
+    assert_eq!(
+        bunnyhop_core::props::model_material_names(&fs, &textures),
+        vec![material, "loose/actual"]
+    );
+    assert!(fs.take_pending().is_empty());
 }

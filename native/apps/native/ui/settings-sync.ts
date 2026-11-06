@@ -14,11 +14,19 @@ import { buildSettingsDoc, planSettingsImport, type SettingsDoc } from "../../we
 import { prefs } from "../../web/src/ui/settings";
 import { VERSION } from "../../web/src/version";
 import { state, type SettingsPatch } from "./bridge";
-import { MAPPINGS, onNativeSettings, sendNativeSettings, takingFirstHostSettings } from "./prefs-bridge";
+import {
+  MAPPINGS,
+  onNativeSettings,
+  onBindSettings,
+  sendNativeSettings,
+  takingFirstHostSettings,
+  whenHostSettingsReady,
+} from "./prefs-bridge";
 
 const AT_KEY = "bunnyhop:settings-at";
 const OPT_KEY = "bunnyhop:settings-sync";
 const SAVE_DELAY_MS = 4000;
+const DIRTY_KEY = "bunnyhop:settings-dirty";
 /** Native-only settings that belong to this computer, not the player. */
 const DEVICE_KEYS = [
   "windowMode",
@@ -80,6 +88,9 @@ export function mergeSettings(remote: unknown, local: Obj): Obj {
 export function syncDocument(remote: SettingsDoc | null): SettingsDoc {
   const doc = buildSettingsDoc(prefs.get(), { app: VERSION });
   const settings = mergeSettings(remote?.settings, doc.settings as Obj);
+  // These maps describe the complete current set; missing entries are deletions.
+  settings.cmdBinds = doc.settings.cmdBinds;
+  settings.aliases = doc.settings.aliases;
   settings.native = nativeOnlySettings();
   return { ...doc, settings: settings as SettingsDoc["settings"] };
 }
@@ -90,23 +101,60 @@ let remoteDoc: SettingsDoc | null = null;
 let applying = false;
 let timer = 0;
 let watching = false;
+let revision = 0;
+let syncGeneration = 0;
+let lastDocument = "";
+let uploadInFlight: Promise<void> | null = null;
+let uploadAgain = false;
+
+const documentSignature = (): string => JSON.stringify([prefs.get(), nativeOnlySettings()]);
+const dirty = (): boolean => localStorage.getItem(DIRTY_KEY) === "1";
 
 const eligible = (user: User | null): user is User => !!user && user.provider !== "guest";
 
 async function upload(): Promise<void> {
   if (!settingsSyncOn() || !eligible(player)) return;
-  const doc = syncDocument(remoteDoc);
+  uploadAgain = true;
+  if (uploadInFlight) return uploadInFlight;
+  uploadInFlight = (async () => {
+    while (uploadAgain && settingsSyncOn() && eligible(player)) {
+      uploadAgain = false;
+      const owner: User = player;
+      const sentRevision = revision;
+      const doc = syncDocument(remoteDoc);
+      try {
+        const result = await api.saveSettings(doc);
+        if (player !== owner) continue;
+        remoteDoc = doc;
+        if (revision === sentRevision) {
+          setLocalAt(Math.max(localAt(), result.updatedAt));
+          localStorage.removeItem(DIRTY_KEY);
+        } else uploadAgain = true;
+      } catch {
+        /* Keep the dirty marker for the next change or launch. */
+        break;
+      }
+    }
+  })();
   try {
-    await api.saveSettings(doc);
-    remoteDoc = doc;
-  } catch {
-    /* offline or rate limited: the next change tries again */
+    await uploadInFlight;
+  } finally {
+    uploadInFlight = null;
   }
 }
 
-function changedHere(): void {
-  if (applying || takingFirstHostSettings()) return;
-  setLocalAt(Date.now());
+function changedHere(bindEdit = false): void {
+  const signature = documentSignature();
+  if (!bindEdit && signature === lastDocument) return;
+  lastDocument = signature;
+  if (applying || (!bindEdit && takingFirstHostSettings())) return;
+  revision++;
+  setLocalAt(Math.max(Date.now(), localAt() + 1));
+  try {
+    localStorage.setItem(DIRTY_KEY, "1");
+  } catch {
+    /* Still ordered in memory when storage is blocked. */
+  }
   clearTimeout(timer);
   timer = window.setTimeout(() => void upload(), SAVE_DELAY_MS);
 }
@@ -114,12 +162,14 @@ function changedHere(): void {
 function watchChanges(): void {
   if (watching) return;
   watching = true;
+  lastDocument = documentSignature();
   let first = true;
   prefs.watch(() => {
     if (first) return void (first = false);
     changedHere();
   });
   onNativeSettings(changedHere);
+  onBindSettings(() => changedHere(true));
 }
 
 /** Applies the account's copy here: the website's settings checked value by value, then the native ones. */
@@ -129,33 +179,44 @@ function applyRemote(doc: SettingsDoc): void {
   try {
     if (plan.changed.length) prefs.update((p) => Object.assign(p, plan.next));
     const native = doc.settings.native;
-    if (isObj(native)) sendNativeSettings(native as SettingsPatch);
+    if (isObj(native)) {
+      const allowed = new Set(Object.keys(nativeOnlySettings()));
+      sendNativeSettings(
+        Object.fromEntries(Object.entries(native).filter(([key]) => allowed.has(key))) as SettingsPatch,
+      );
+    }
   } finally {
     applying = false;
+    lastDocument = documentSignature();
   }
 }
 
 /** Brings this device and the account in step for `user` (the newer copy wins). */
 export async function syncSettings(user: User | null): Promise<void> {
+  const generation = ++syncGeneration;
+  if (player?.id !== user?.id) remoteDoc = null;
   player = user;
   watchChanges();
   // The account panel's "Keep settings with my account" switch shows from now on: the document it keeps is this one.
   syncReady();
   if (!settingsSyncOn() || !eligible(user)) return;
+  await whenHostSettingsReady();
+  if (generation !== syncGeneration) return;
+  const startedRevision = revision;
   let saved: { doc: unknown; updatedAt?: number };
   try {
     saved = await api.savedSettings();
   } catch {
     return;
   }
-  if (player !== user) return;
+  if (player !== user || generation !== syncGeneration) return;
   const doc = isObj(saved.doc) && isObj(saved.doc.settings) ? (saved.doc as unknown as SettingsDoc) : null;
   remoteDoc = doc;
   const remoteAt = saved.updatedAt ?? 0;
-  if (doc && remoteAt > localAt()) {
+  if (doc && remoteAt > localAt() && revision === startedRevision && !dirty()) {
     applyRemote(doc);
     setLocalAt(remoteAt || Date.now());
-  } else if (!doc || localAt() > remoteAt) {
+  } else if (!doc || dirty() || revision !== startedRevision || localAt() > remoteAt) {
     await upload();
   }
 }
@@ -181,6 +242,7 @@ let installed = false;
 export function installSettingsSync(ready: () => void): void {
   if (installed || typeof window === "undefined") return;
   installed = true;
+  watchChanges();
   syncReady = ready;
   const refresh = (): void => {
     void api.me().then(

@@ -204,6 +204,8 @@ export const OVERLAY_STATE_VISIBLE = 2;
  * time, `base + (visualSeconds - since) * rate` seconds; `defaultAnim` is what a non-looping sequence goes back to.
  */
 export interface PropAnimState {
+  body?: number;
+  skin?: number;
   entity: number;
   anim: string;
   defaultAnim: string;
@@ -806,8 +808,8 @@ export class Core {
     const names = this.str(this.x.scratch_str_ptr(), this.x.prop_anim_names_len?.() ?? 0).split("\n");
     const states: PropAnimState[] = [];
     for (let i = 0, k = 0; i + 5 <= f.length; i += 5, k++) {
-      const [anim, def] = (names[k] ?? "").split("\t");
-      states.push({ entity: f[i], hidden: (f[i + 1] & 1) !== 0, removed: (f[i + 1] & 2) !== 0, set: (f[i + 1] & 4) !== 0, base: f[i + 2], since: f[i + 3], rate: f[i + 4], anim: anim ?? "", defaultAnim: def ?? "" });
+      const [anim, def, body, skin] = (names[k] ?? "").split("\t");
+      states.push({ body: Number(body) || 0, skin: skin === undefined ? undefined : Number(skin) || 0, entity: f[i], hidden: (f[i + 1] & 1) !== 0, removed: (f[i + 1] & 2) !== 0, set: (f[i + 1] & 4) !== 0, base: f[i + 2], since: f[i + 3], rate: f[i + 4], anim: anim ?? "", defaultAnim: def ?? "" });
     }
     this.propAnimCache = { serial, states };
     return states;

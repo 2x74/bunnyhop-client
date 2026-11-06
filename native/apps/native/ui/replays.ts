@@ -73,13 +73,14 @@ export function sendReplay(
   map = "",
   preserveWatch = false,
   ghostSlot = selectedGhostSlot,
+  source: "pb" | "wr" | "custom" = "custom",
 ): void {
   if (!bytes.length || bytes.length > MAX_BYTES) throw new Error("Replay must be between 1 byte and 8 MiB.");
   if (action === "play" && !preserveWatch) playing();
   send({
     type: "replayData",
     action,
-    ...(action === "ghost" ? { ghostSlot } : {}),
+    ...(action === "ghost" ? { ghostSlot, source } : {}),
     name: name.slice(0, 128),
     map,
     replayBase64: base64Bytes(bytes),
@@ -332,12 +333,12 @@ export function replayPanel(notice: (value: string) => void): HTMLElement {
       if (source === "pb") {
         const bytes = await loadPBReplay(map, style, track);
         if (!bytes) throw new Error("No replay is saved for this PB.");
-        sendReplay(bytes, "ghost", `${map} PB`, map, false, slot);
+        sendReplay(bytes, "ghost", `${map} PB`, map, false, slot, "pb");
       } else {
         const board = await api.leaderboard(map, style, { track, limit: 1 });
         const wr = board.wr ?? board.entries.find((entry) => entry.rank === 1);
         if (!wr) throw new Error("This board has no world-record replay.");
-        sendReplay(await serverReplays.get(wr.runId), "ghost", `${wr.player.name} WR`, map, false, slot);
+        sendReplay(await serverReplays.get(wr.runId), "ghost", `${wr.player.name} WR`, map, false, slot, "wr");
       }
     } catch (error) {
       notice((error as Error).message);

@@ -38,6 +38,7 @@ export interface AnimatedPropEntity {
   entity: number;
   model: string;
   skin: number;
+  scale?: number;
   defaultAnim: string;
   startDisabled: boolean;
   /** RandomAnimation: switches between its ACT_IDLE sequences every MinAnimTime..MaxAnimTime s (`RandomAnimator`). */
@@ -60,6 +61,7 @@ export function animatedPropEntities(entities: Record<string, string>[]): Animat
     out.push({
       entity,
       model,
+      ...(num("modelscale") > 0 && num("modelscale") !== 1 ? { scale: num("modelscale") } : {}),
       skin: parseInt(kv("skin") ?? "0", 10) || 0,
       defaultAnim: (kv("defaultanim") ?? "").trim(),
       startDisabled: (parseInt(kv("startdisabled") ?? "0", 10) || 0) !== 0,
@@ -269,7 +271,7 @@ interface Model {
   data: StudioData;
   setup: BoneSetup;
   /** Per skin family: geometry with its material groups (null: no drawable group). */
-  geos: Map<number, THREE.BufferGeometry | null>;
+  geos: Map<string, THREE.BufferGeometry | null>;
   /** Bind-pose mesh radius around the model origin. */
   meshRadius: number;
   /** Per sequence: cycles per second (NaN until asked), and the farthest bone origin over the sequence. */
@@ -338,7 +340,7 @@ export interface AnimatedPropsInput {
 
 const tmpVec = new THREE.Vector3();
 
-function buildGeometry(d: StudioData, skin: number, matIndex: Map<string, number>, materials: THREE.Material[]): THREE.BufferGeometry | null {
+function buildGeometry(d: StudioData, skin: number, body: number, matIndex: Map<string, number>, materials: THREE.Material[]): THREE.BufferGeometry | null {
   const v = d.vertices;
   const n = v.length / VERTEX_FLOATS;
   if (!n || !d.indices.length) return null;
@@ -369,9 +371,10 @@ function buildGeometry(d: StudioData, skin: number, matIndex: Map<string, number
   const skins = (d.info as { skins?: number[][] }).skins ?? [];
   const fam0 = skins[0];
   const fam = skins[skin] ?? fam0;
-  for (const [tex, first, count] of d.info.groups) {
+  for (const [tex, first, count] of d.info.bodies?.[body % d.info.bodies.length] ?? d.info.groups) {
     let t = tex;
-    if (fam && fam0 && fam !== fam0) {
+    if (d.info.bodies) t = fam?.[tex] ?? tex;
+    else if (fam && fam0 && fam !== fam0) {
       const ref = fam0.indexOf(tex);
       if (ref >= 0 && fam[ref] !== undefined) t = fam[ref];
     }
@@ -449,8 +452,8 @@ export function animatedProps(o: AnimatedPropsInput): AnimatedProps | null {
       frozen.push({ entity: info.entity, fallback, info, state: null });
       continue;
     }
-    let geo = model.geos.get(info.skin);
-    if (geo === undefined) model.geos.set(info.skin, (geo = buildGeometry(model.data, info.skin, matIndex, o.materials)));
+    let geo = model.geos.get(`${info.skin}:0`);
+    if (geo === undefined) model.geos.set(`${info.skin}:0`, (geo = buildGeometry(model.data, info.skin, 0, matIndex, o.materials)));
     if (!geo) {
       frozen.push({ entity: info.entity, fallback, info, state: null });
       continue;
@@ -467,6 +470,7 @@ export function animatedProps(o: AnimatedPropsInput): AnimatedProps | null {
     mesh.raycast = () => {};
     mesh.position.copy(fallback.position);
     mesh.rotation.copy(fallback.rotation);
+    mesh.scale.setScalar(info.scale ?? 1);
     const inst: Instance = { entity: info.entity, model, mesh, skeleton, fallback, info, state: null, stamp: NaN, stillAt: null, seq: -1, sizedFor: -2, random: null };
     if (info.random) inst.random = new RandomAnimator(hashSeed(model.data.info.path, (o.mapSeed ?? 0) ^ Math.imul(info.entity + 1, 0x9e3779b1)), info.random.min, info.random.max, randomSource(model));
     skeleton.compute = () => pose(inst);
@@ -595,6 +599,13 @@ export function animatedProps(o: AnimatedPropsInput): AnimatedProps | null {
       }
       applyVisibility();
       for (const inst of instances) {
+        const skin = inst.state?.skin ?? inst.info.skin;
+        const body = inst.state?.body ?? 0;
+        const key = `${skin}:${body}`;
+        let geo = inst.model.geos.get(key);
+        if (geo === undefined) inst.model.geos.set(key, geo = buildGeometry(inst.model.data, skin, body, matIndex, o.materials));
+        if (geo) inst.mesh.geometry = geo;
+        else inst.mesh.visible = false;
         // Parented props move with their parent (world.update placed the frozen group).
         inst.mesh.position.copy(inst.fallback.position);
         inst.mesh.rotation.copy(inst.fallback.rotation);

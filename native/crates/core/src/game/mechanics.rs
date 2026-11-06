@@ -296,6 +296,7 @@ impl Game {
                 j
             };
             self.map_sound_spawn(i);
+            self.prop_anim_spawn(i);
             members.push(i);
         }
         for &i in &members {

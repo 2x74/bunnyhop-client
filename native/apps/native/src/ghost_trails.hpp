@@ -69,7 +69,7 @@ struct GhostPath {
     };
 
     std::vector<BhGhostFrame> frames;
-    std::vector<uint8_t> teleports;
+    std::vector<uint8_t> teleports, motion_events;
     std::vector<Segment> jump_links;
     std::vector<Vec3> jumps;
     uint32_t start = 0, end = 0, track = 0;
@@ -79,32 +79,52 @@ struct GhostPath {
     bool enabled = false;
     uint64_t revision = 0;
 
+    bool cut_at(size_t tick) const {
+        return (tick < teleports.size() && teleports[tick]) || !valid_ghost_position(frames[tick])
+               || !valid_ghost_position(frames[tick - 1]);
+    }
+
+    bool jumped_at(size_t tick) const {
+        if (motion_events.size() == frames.size()) return (motion_events[tick] & 2) != 0;
+        return (frames[tick - 1].flags & 2) && !(frames[tick].flags & 2)
+               && frames[tick].position[2] > frames[tick - 1].position[2];
+    }
+
+    size_t route_start() const {
+        return start > 0 && start < frames.size() && !cut_at(start) && jumped_at(start) ? start - 1 : start;
+    }
+
+    template <class Add>
+    void path_segments(Add add) const {
+        if (frames.empty() || start >= frames.size() || end < start) return;
+        const size_t last = std::min(size_t(end), frames.size() - 1);
+        for (size_t tick = route_start() + 1; tick <= last; ++tick) {
+            if (!cut_at(tick) && ghost_feet(frames[tick - 1]) != ghost_feet(frames[tick]))
+                add(Segment{ghost_feet(frames[tick - 1], 2), ghost_feet(frames[tick], 2)});
+        }
+    }
+
     void build_route() {
         jump_links.clear();
         jumps.clear();
-        if (frames.empty() || start >= frames.size()) {
-            return;
-        }
-        size_t anchor = start;
+        if (frames.empty() || start >= frames.size() || end < start) return;
+        size_t anchor = route_start();
         const size_t last = std::min(size_t(end), frames.size() - 1);
-        for (size_t tick = start + 1; tick <= last; ++tick) {
-            const bool cut =
-                    teleports[tick] || !valid_ghost_position(frames[tick]) || !valid_ghost_position(frames[tick - 1]);
-            const bool jumped = (frames[tick - 1].flags & 2) && !(frames[tick].flags & 2)
-                                && frames[tick].position[2] > frames[tick - 1].position[2];
+        const auto link = [&](size_t from, size_t to) {
+            if (from < to && valid_ghost_position(frames[from]) && valid_ghost_position(frames[to])
+                && ghost_feet(frames[from]) != ghost_feet(frames[to]))
+                jump_links.push_back({ghost_feet(frames[from], 2), ghost_feet(frames[to], 2)});
+        };
+        for (size_t tick = anchor + 1; tick <= last; ++tick) {
+            const bool cut = cut_at(tick);
+            const bool jumped = !cut && jumped_at(tick);
             if (cut || jumped) {
-                if (tick - 1 > anchor) {
-                    jump_links.push_back({ghost_feet(frames[anchor], 2), ghost_feet(frames[tick - 1], 2)});
-                }
+                link(anchor, tick - 1);
                 anchor = cut ? tick : tick - 1;
-                if (!cut && jumped) {
-                    jumps.push_back(ghost_feet(frames[tick - 1], 2));
-                }
+                if (jumped) jumps.push_back(ghost_feet(frames[tick - 1], 2));
             }
         }
-        if (last > anchor) {
-            jump_links.push_back({ghost_feet(frames[anchor], 2), ghost_feet(frames[last], 2)});
-        }
+        link(anchor, last);
     }
 
     void load(BhContext *core, uint32_t handle, const nlohmann::json &info, GhostSource kind) {
@@ -199,5 +219,32 @@ trail_color(const std::array<std::array<float, 3>, 2> &colors, float progress, f
 
 inline int route_priority(GhostSource source) {
     return source == GhostSource::custom ? 0 : source == GhostSource::pb ? 1 : 2;
+}
+}  // namespace native_render
+
+namespace native_render {
+struct RouteVertex {
+    Vec3 point, other;
+    float side = 0;
+};
+
+// Endpoint direction reverses at the far end, so its side reverses too.
+inline std::array<RouteVertex, 6> route_quad(const Vec3 &from, const Vec3 &to) {
+    const RouteVertex a{from, to, 1}, b{from, to, -1}, c{to, from, -1}, d{to, from, 1};
+    return {a, b, c, b, d, c};
+}
+
+inline int
+select_route_slot(const GhostOptions &options, std::span<const GhostPath> paths, std::span<const bool> available) {
+    if (!options.route) return -1;
+    int selected = -1;
+    for (size_t slot = 0; slot < paths.size(); ++slot) {
+        const auto &path = paths[slot];
+        if (!available[slot] || !path.enabled || path.frames.empty() || !options.visible(path.source)) continue;
+        if (options.route_source != GhostSource::none && path.source != options.route_source) continue;
+        if (selected < 0 || route_priority(path.source) < route_priority(paths[size_t(selected)].source))
+            selected = int(slot);
+    }
+    return selected;
 }
 }  // namespace native_render

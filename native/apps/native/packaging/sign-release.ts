@@ -1,6 +1,6 @@
 // Signs native releases for the in-game updater. It runs where the release key lives (a server timer), never in CI.
 //
-// For each published GitHub release that has all three platform archives and their package reports, it checks every
+// For each published GitHub release with a complete declared platform set, it checks every
 // archive against its report, writes a signed update-manifest.json and attaches it to the release. It then points the
 // update channel (update-manifest.json on the native-update-channel branch) at the newest signed release, and re-signs
 // the channel before it expires. The client reads the channel through raw.githubusercontent.com.
@@ -23,6 +23,7 @@ import { parseArgs } from "node:util";
 import { verifiedManifest, type ReleaseArtifact, type ReleaseManifest, type Trust } from "./update";
 
 export const MANIFEST_ASSET = "update-manifest.json";
+export const PLATFORM_POLICY_ASSET = "release-platforms.json";
 export const CHANNEL_BRANCH = "native-update-channel";
 export const PLATFORMS = ["darwin/arm64", "linux/x64", "win32/x64"] as const;
 /** The client accepts at most 31 days between createdAt and expiresAt. */
@@ -74,7 +75,7 @@ export interface GitHub {
   releaseTags(): string[];
   release(tag: string): Release;
   download(tag: string, asset: string, folder: string): string;
-  upload(tag: string, file: string): void;
+  upload(tag: string, file: string, replace?: boolean): void;
   channel(): { text: string; sha: string } | null;
   putChannel(text: string, sha: string | null, message: string): void;
 }
@@ -230,6 +231,7 @@ export interface SignerOptions {
   since: string;
   log: (line: string) => void;
   now?: number;
+  resign?: string;
 }
 
 interface PendingRelease {
@@ -237,6 +239,9 @@ interface PendingRelease {
   version: string;
   release: Release;
   reports: Map<string, PackageReport>;
+  reportNames: Map<string, string>;
+  absentPlatforms: string[];
+  hasPolicy: boolean;
 }
 
 function downloadJson(github: GitHub, tag: string, asset: ReleaseAsset, folder: string): unknown {
@@ -248,26 +253,85 @@ function downloadJson(github: GitHub, tag: string, asset: ReleaseAsset, folder: 
   }
 }
 
-/** All three platforms present with matching reports, or null while the release is still being assembled. */
-function completeRelease(github: GitHub, tag: string, version: string, folder: string): PendingRelease | null {
+/** Missing platforms require an explicit, version-bound policy; undeclared omissions stay incomplete. */
+export function releasePlatforms(value: unknown, version: string): string[] {
+  if (value === undefined) return [];
+  const policy = value as { schema?: number; version?: string; absentPlatforms?: unknown };
+  const absent = policy?.absentPlatforms;
+  if (
+    policy?.schema !== 1 ||
+    policy.version !== version ||
+    !Array.isArray(absent) ||
+    absent.length >= PLATFORMS.length ||
+    new Set(absent).size !== absent.length ||
+    !absent.every((platform) => PLATFORMS.includes(platform))
+  )
+    throw new Error("Invalid absent-platform policy");
+  return absent;
+}
+
+function completeRelease(
+  github: GitHub,
+  tag: string,
+  version: string,
+  folder: string,
+  resign = false,
+): PendingRelease | null {
   const release = github.release(tag);
-  if (release.draft || release.assets.some((asset) => asset.name === MANIFEST_ASSET)) return null;
+  if (release.draft || (!resign && release.assets.some((asset) => asset.name === MANIFEST_ASSET))) return null;
+  const policy = release.assets.find((asset) => asset.name === PLATFORM_POLICY_ASSET);
+  const absentPlatforms = releasePlatforms(policy ? downloadJson(github, tag, policy, folder) : undefined, version);
   const reports = new Map<string, PackageReport>();
-  for (const asset of release.assets.filter((entry) => entry.name.endsWith(".json"))) {
+  const reportNames = new Map<string, string>();
+  for (const asset of release.assets.filter((entry) => entry.name.endsWith(".json") && entry.name !== MANIFEST_ASSET)) {
     const report = downloadJson(github, tag, asset, folder) as PackageReport | null;
-    if (report?.schema === 1 && typeof report.platform === "string") reports.set(report.platform, report);
+    if (report?.schema !== 1 || typeof report.platform !== "string") continue;
+    if (!PLATFORMS.includes(report.platform as (typeof PLATFORMS)[number]) || reports.has(report.platform))
+      throw new Error("Unknown or duplicate package platform");
+    if (absentPlatforms.includes(report.platform)) throw new Error("An absent platform has a package report");
+    reports.set(report.platform, report);
+    reportNames.set(report.platform, asset.name);
   }
   for (const platform of PLATFORMS) {
+    if (absentPlatforms.includes(platform)) {
+      const prefix = `bunnyhop-native-${version}-${platform.replace("/", "-")}.`;
+      if (release.assets.some((asset) => asset.name.startsWith(prefix)))
+        throw new Error("An absent platform has a package asset");
+      continue;
+    }
     const report = reports.get(platform);
     if (!report || !release.assets.some((asset) => asset.name === report.archive)) return null;
   }
-  return { tag, version, release, reports };
+  if (!release.assets.some((asset) => asset.name === "SHA256SUMS")) return null;
+  return { tag, version, release, reports, reportNames, absentPlatforms, hasPolicy: Boolean(policy) };
+}
+
+function checkChecksums(github: GitHub, pending: PendingRelease, folder: string): void {
+  const asset = pending.release.assets.find((entry) => entry.name === "SHA256SUMS")!;
+  if (asset.size > MAX_REPORT_BYTES) throw new Error("Checksum file too large");
+  const text = readFileSync(github.download(pending.tag, "SHA256SUMS", folder), "utf8");
+  const actual = new Map<string, string>();
+  for (const line of text.trimEnd().split("\n")) {
+    const match = /^([a-f0-9]{64})  ([A-Za-z0-9][A-Za-z0-9_.-]*)$/.exec(line);
+    if (!match || actual.has(match[2])) throw new Error("Invalid or duplicate release checksum");
+    actual.set(match[2], match[1]);
+  }
+  const expected = new Map<string, string>();
+  for (const [platform, report] of pending.reports) {
+    expected.set(report.archive, report.sha256);
+    const name = pending.reportNames.get(platform)!;
+    expected.set(name, sha256(readFileSync(join(folder, name))));
+  }
+  if (pending.hasPolicy) expected.set(PLATFORM_POLICY_ASSET, sha256(readFileSync(join(folder, PLATFORM_POLICY_ASSET))));
+  if (actual.size !== expected.size || [...expected].some(([name, digest]) => actual.get(name) !== digest))
+    throw new Error("Release checksums differ from the declared platform set");
 }
 
 async function signRelease(options: SignerOptions, pending: PendingRelease, folder: string): Promise<string> {
   const { github, key, keyId } = options;
   const artifacts: ReleaseArtifact[] = [];
-  for (const platform of PLATFORMS) {
+  checkChecksums(github, pending, folder);
+  for (const platform of PLATFORMS.filter((entry) => !pending.absentPlatforms.includes(entry))) {
     const report = checkReport(pending.reports.get(platform), pending.version);
     const asset = pending.release.assets.find((entry) => entry.name === report.archive)!;
     if (asset.size !== report.bytes) throw new Error(`${report.archive}: uploaded size differs from its report`);
@@ -283,6 +347,7 @@ async function signRelease(options: SignerOptions, pending: PendingRelease, fold
     });
   }
   const manifest = buildManifest(pending.version, pending.release.body, artifacts, options.now);
+  if (pending.hasPolicy) Object.assign(manifest, { absentPlatforms: pending.absentPlatforms });
   const envelope = signManifest(manifest, key, keyId);
   checkLikeClient(envelope, key, keyId, options.origins, options.now);
   return JSON.stringify(envelope, null, 2) + "\n";
@@ -304,13 +369,13 @@ export async function signPending(options: SignerOptions): Promise<number> {
   try {
     let newest: { tag: string; text: string } | null = null;
     for (const { tag, version } of newestFirst(github.releaseTags(), options.since)) {
-      const release = completeRelease(github, tag, version, folder);
+      const release = completeRelease(github, tag, version, folder, options.resign === tag);
       if (release) {
         const text = await signRelease(options, release, folder);
         const file = join(folder, `${version}-${MANIFEST_ASSET}`);
         writeFileSync(file, text);
         changes++;
-        if (upload) uploadAs(github, tag, text, folder);
+        if (upload) uploadAs(github, tag, text, folder, options.resign === tag);
         log(upload ? `signed ${tag}: attached ${MANIFEST_ASSET}` : `would sign ${tag} and attach ${MANIFEST_ASSET}`);
         newest ??= { tag, text };
       }
@@ -323,10 +388,10 @@ export async function signPending(options: SignerOptions): Promise<number> {
   }
 }
 
-function uploadAs(github: GitHub, tag: string, text: string, folder: string): void {
+function uploadAs(github: GitHub, tag: string, text: string, folder: string, replace = false): void {
   const exact = join(mkdtempSync(join(folder, "upload-")), MANIFEST_ASSET);
   writeFileSync(exact, text);
-  github.upload(tag, exact);
+  github.upload(tag, exact, replace);
 }
 
 function signedManifest(github: GitHub, tag: string, folder: string): { tag: string; text: string } | null {
@@ -346,6 +411,19 @@ function updateChannel(options: SignerOptions, newest: { tag: string; text: stri
     const live = current ? openEnvelope(current.text, key, keyId) : null;
     if (!live) reason = "no channel yet";
     else if (live.version !== target.version) reason = `was ${live.version}`;
+    else if (
+      JSON.stringify([
+        live.artifacts,
+        live.notes,
+        (live as ReleaseManifest & { absentPlatforms?: string[] }).absentPlatforms,
+      ]) !==
+      JSON.stringify([
+        target.artifacts,
+        target.notes,
+        (target as ReleaseManifest & { absentPlatforms?: string[] }).absentPlatforms,
+      ])
+    )
+      reason = "release assets changed";
     else if (Date.parse(live.expiresAt) - now < CHANNEL_REFRESH_DAYS * DAY_MS) reason = "expiring soon";
   } catch {
     reason = "channel file unreadable";
@@ -438,7 +516,8 @@ export function ghCli(repo: string): GitHub {
       gh(["release", "download", tag, "-R", repo, "--pattern", asset, "--dir", folder, "--clobber"]);
       return join(folder, asset);
     },
-    upload: (tag, file) => void gh(["release", "upload", tag, file, "-R", repo]),
+    upload: (tag, file, replace) =>
+      void gh(["release", "upload", tag, file, "-R", repo, ...(replace ? ["--clobber"] : [])]),
     channel: () => {
       try {
         const file = JSON.parse(gh(["api", `${contents}?ref=${CHANNEL_BRANCH}`]));
@@ -519,7 +598,7 @@ function processAlive(pid: number): boolean {
 }
 
 const usage = `Usage:
-  bun sign-release.ts --pending [--upload] --repo OWNER/REPO --key PEM --key-id ID [--since 0.6.2]
+  bun sign-release.ts --pending [--upload] [--resign vX.Y.Z] --repo OWNER/REPO --key PEM --key-id ID [--since 0.6.2]
   bun sign-release.ts --local FOLDER --tag vX.Y.Z --repo OWNER/REPO --key PEM --key-id ID [--out FILE]
 The key may also come from BH_NATIVE_RELEASE_KEY (a file path).`;
 
@@ -528,6 +607,7 @@ async function main(): Promise<void> {
     args: Bun.argv.slice(2),
     options: {
       pending: { type: "boolean" },
+      resign: { type: "string" },
       upload: { type: "boolean" },
       local: { type: "string" },
       tag: { type: "string" },
@@ -545,6 +625,8 @@ async function main(): Promise<void> {
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(values.repo)) throw new Error("--repo must be OWNER/REPO");
   const trust = JSON.parse(readFileSync(values.keys!, "utf8")) as Trust;
   const key = loadKey(values.key, values["key-id"], trust);
+  if (values.resign && (!values.pending || !versionOfTag(values.resign)))
+    throw new Error("--resign requires --pending and an exact version tag");
   if (values.local) {
     if (!values.tag) throw new Error("--local needs --tag");
     const notes = values.notes ? readFileSync(values.notes, "utf8") : "";
@@ -572,6 +654,7 @@ async function main(): Promise<void> {
       origins: trust.downloadOrigins,
       upload: Boolean(values.upload),
       since: values.since!,
+      resign: values.resign,
       log: (line) => console.log(line),
     });
   } finally {

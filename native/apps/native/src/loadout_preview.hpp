@@ -25,7 +25,8 @@ public:
 
     // Call on the owning GL thread before the normal scene draw. Restores target and viewport;
     // standard renderer draw rebinds shader/textures/depth/blending afterwards.
-    std::string render(const nlohmann::json &job, double now) {
+    template <class Capture>
+    bool capture(const nlohmann::json &job, double now, Capture take_pixels) {
         if (!job.is_object() || job.dump().size() > 8192) return {};
         const auto id = job.value("id", 0u);
         const auto view = job.value("view", std::string("fp"));
@@ -126,6 +127,13 @@ public:
             models.draw_menu_preview(
                     w, h, view, 2 + std::max(0., now - started), yaw, pitch, presses, job.value("held", false), weapon
             );
-        return backbuffer_png(gl, w, h, 2000000);
+        take_pixels(w, h);
+        return true;
+    }
+
+    std::string render(const nlohmann::json &job, double now) {
+        std::string png;
+        capture(job, now, [&](int w, int h) { png = backbuffer_png(gl, w, h); });
+        return png;
     }
 };

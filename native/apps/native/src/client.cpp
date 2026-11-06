@@ -14,6 +14,7 @@
 #include "base64.hpp"
 #include "replay_practice.hpp"
 #include "ghost_actors.hpp"
+#include "race_ghost_imports.hpp"
 #include "video_request.hpp"
 #include "display_defaults.hpp"
 #include "json_file_writer.hpp"
@@ -26,7 +27,7 @@
 #include "console_bind_host.hpp"
 #include "replay_player.hpp"
 #include "menu_backdrop.hpp"
-#include "loadout_preview.hpp"
+#include "loadout_preview_service.hpp"
 #include "avatar_service.hpp"
 #include "menu_gamepad.hpp"
 #include "hud.hpp"
@@ -194,8 +195,14 @@ int run(const native::Options &opt) {
     native::HudDemoState hud_demo;
     std::vector<std::string> hud_editor_bind;
     native::MenuGamepad menu_gamepad;
-    std::unique_ptr<NativeLoadoutPreview> loadout_preview;
-    std::deque<nlohmann::json> preview_requests;
+    std::unique_ptr<LoadoutPreviewService> loadout_preview;
+    if (!opt.no_menu) {
+        try {
+            loadout_preview = std::make_unique<LoadoutPreviewService>(assets);
+        } catch (const std::exception &error) {
+            std::cerr << "Loadout preview: " << error.what() << '\n';
+        }
+    }
     native::avatar::AvatarService avatar_service(gl, assets);
     native::NativeHud::Layout hud_layout;
     // Resolved before the audio device so the custom sound/ and bgm/ folders
@@ -337,7 +344,8 @@ int run(const native::Options &opt) {
     // The equipped loadout holding the knife pool's pick: what the viewmodel, your bunny and the replay trailer show.
     native::HeldKnife held_knife;
     auto next_knife_event = native::KnifePoolEvent::restart;
-    native::RoomBridge room_bridge;
+    const auto room_bridge_owner = std::make_unique<native::RoomBridge>();
+    auto &room_bridge = *room_bridge_owner;
     auto &room = room_bridge.room;
     auto &room_modes = room_bridge.room_modes;
     auto &observed_spectator = room_bridge.observed_spectator;
@@ -347,6 +355,7 @@ int run(const native::Options &opt) {
     auto &room_events = room_bridge.room_events;
     uint32_t active_track = 0;
     native::GhostSlots ghosts;
+    native::RaceGhostImports race_ghost_imports;
     native::GhostCompare ghost_compare;
     unsigned pending_ghost_slot = 0;
     std::string pending_replay, pending_action, score_notice;
@@ -931,6 +940,7 @@ int run(const native::Options &opt) {
         ghosts.enabled = false;
         ghosts.id.clear();
         ghosts.info = nullptr;
+        race_ghost_imports.reset();
         ghosts.slots = {};
         gauntlet_id.clear();
         gauntlet_map.clear();
@@ -1005,6 +1015,7 @@ int run(const native::Options &opt) {
         if (pending_action != "play" && opt.replay.empty() && !opt.frames && opt.runtime_smoke.empty())
             activity.loaded(id);
         kept_weapons.forget();
+        race_ghost_imports.reset();
         ghosts.slots = {};
         zones = next_zones;
         renderer->set_zones(zones);
@@ -1130,15 +1141,24 @@ int run(const native::Options &opt) {
         run_event(heartbeat.invalidate(native::RunHeartbeat::Reset::start));
         audio.reset();
         if (action == "ghost") {
-            ghosts.load(core.get(), path, ghost_slot);
-            const auto &slot = ghosts.slots[ghost_slot];
-            renderer->register_ghost(ghost_slot, slot.handle, slot.info, ghosts.sources[ghost_slot]);
-            if (ghost_slot == 0) {
-                ghosts.select_primary();
-                hud.extras.ghost(ghosts.info);
-            }
-            active_track = slot.info.value("track", 0u);
-            selected_style = slot.info.value("style", std::string("autohop"));
+            const auto info = replay_metadata.read(path);
+            active_track = info.value("track", 0u);
+            selected_style = info.value("style", std::string("autohop"));
+            const auto source = ghosts.sources[ghost_slot];
+            const nlohmann::json request = {
+                    {"ghostSlot", ghost_slot},
+                    {"source",
+                     source == native_render::GhostSource::pb   ? "pb"
+                     : source == native_render::GhostSource::wr ? "wr"
+                                                                : "custom"},
+                    {"track", active_track},
+                    {"style", selected_style},
+                    {"replace", true},
+                    {"id", data_location::utf8(path.filename())}
+            };
+            race_ghost_imports.request(
+                    request, game.map_path, game.content_root, path.parent_path(), native::decode_base64
+            );
             reset();
             show_menu(false);
         } else {
@@ -2302,9 +2322,13 @@ int run(const native::Options &opt) {
                         refresh_command_holds();
                         continue;
                     }
+                    if (type == "loadoutPreviewCancel") {
+                        if (loadout_preview) loadout_preview->cancel(message.value("id", 0u));
+                        continue;
+                    }
                     if (type == "loadoutPreview") {
-                        if (menu->visible() && raw.size() <= 8192 && preview_requests.size() < 240)
-                            preview_requests.push_back(std::move(message));
+                        if (loadout_preview && menu->visible() && raw.size() <= 8192)
+                            loadout_preview->request(std::move(message));
                         continue;
                     }
                     if (type == "avatarRender") {
@@ -2785,7 +2809,21 @@ int run(const native::Options &opt) {
                     } else if (type == "ghost") {
                         ghosts.toggle(message);
                         if (renderer) renderer->ghost_enabled(0, ghosts.enabled);
+                    } else if (type == "raceGhost") {
+                        if (core && renderer && !viewer.active && !tutorial_runner.demo
+                            && race_ghost_imports.accepts(message, ghosts, map_id, active_style, active_track)) {
+                            message["replace"] = true;
+                            race_ghost_imports.request(
+                                    message, game.map_path, game.content_root, cache / "replays", native::decode_base64
+                            );
+                        }
                     } else if (type == "ghostControl") {
+                        if (message.at("action") == "clear") {
+                            for (unsigned slot = 0; slot < ghosts.slots.size(); ++slot)
+                                race_ghost_imports.cancel(slot);
+                        } else {
+                            race_ghost_imports.cancel(message.value("slot", 0u));
+                        }
                         if (ghosts.control(core.get(), message)) hud.extras.ghost(ghosts.info);
                         if (renderer) native::sync_ghost_visibility(*renderer, ghosts.slots);
                         if (renderer) renderer->reset_presentation();
@@ -3235,26 +3273,17 @@ int run(const native::Options &opt) {
         if (!running) break;
         replay_timeline.poll(menu.get(), menu_ready, viewer.id, viewer.active);
         replay_compare_import.poll(replay_compare, viewer.id, viewer.active, chat, epoch_ms() / 1000.);
+        if (race_ghost_imports.poll(
+                    ghosts, core.get(), renderer.get(), active_track, active_style, chat, epoch_ms() / 1000.
+            ))
+            hud.extras.ghost(ghosts.info);
         if (menu && menu_ready) {
             if (const auto state = menu_gamepad.sample(menu->visible() && focused))
                 menu->evaluate_js("window.bunnyhopNativeMenu?.onGamepad?.(" + state->dump() + ")");
-            if (!preview_requests.empty()) {
-                auto job = std::move(preview_requests.front());
-                preview_requests.pop_front();
-                std::string png;
-                try {
-                    if (menu->visible()) {
-                        if (!loadout_preview) loadout_preview = std::make_unique<NativeLoadoutPreview>(gl, assets);
-                        png = loadout_preview->render(job, double(SDL_GetTicksNS()) / 1e9);
-                    }
-                } catch (const std::exception &e) {
-                    std::cerr << "Loadout preview: " << e.what() << '\n';
-                }
-                const nlohmann::json result = {
-                        {"id", job.value("id", 0u)},
-                        {"png", png.empty() ? std::string() : "data:image/png;base64," + native::base64(png)}
-                };
-                menu->evaluate_js("window.bunnyhopNativeLoadoutPreview?.(" + result.dump() + ")");
+            if (loadout_preview) {
+                if (!menu->visible()) loadout_preview->cancel_all();
+                for (const auto &reply : loadout_preview->take_replies())
+                    menu->evaluate_js(reply);
             }
             if (menu->visible()) avatar_service.frame();
             for (const auto &reply : avatar_service.take_replies())
@@ -3762,7 +3791,9 @@ int run(const native::Options &opt) {
                         heartbeat.generation,
                         run_state,
                         world_record_generation == heartbeat.generation ? known_world_record : std::nullopt,
-                        hud.extras.ghost_target(map_id, active_style, active_track, ghosts.enabled && ghosts.handle),
+                        hud.extras.ghost_target(
+                                map_id, active_style, active_track, ghosts.enabled && ghosts.slots[0].loaded()
+                        ),
                         practice.active || turn_admission.local_only || viewer.active || room_modes.has_race()
                                 || (tutorial_runner.lesson && tutorial_runner.lesson->is_active()) || !captured
                 )) {
@@ -3909,6 +3940,8 @@ int run(const native::Options &opt) {
                 eye_camera.skip_frame();
             if (spectator) room.spectator_run(display_run, display_style, *spectator, steady_seconds, epoch_ms());
             if (hide_players) actors.clear();
+            // The selected route also decides which actor route-only hides on this first frame.
+            renderer->route_context(active_track, active_style, !viewer.active && !spectator && !tutorial_runner.demo);
             native::PrimaryGhost primary_ghost;
             native::GhostCompare::Racing racing_ghosts{};
             if (!viewer.active && !spectator && !tutorial_runner.demo && prefs.show_ghost) {
@@ -3997,7 +4030,6 @@ int run(const native::Options &opt) {
                 if (spectated_actor && !external_camera) audio.spatial_actor(*spectated_actor, frame_seconds, false);
             }
             native::update_compare_actor(*renderer, replay_compare, curr.tick, viewer.session.range, viewer.active);
-            renderer->route_context(active_track, active_style, !viewer.active && !spectator && !tutorial_runner.demo);
             renderer->surface_tools_frame(
                     curr, input, simulation_active && captured && !viewer.active && !spectator, spectator.has_value()
             );
@@ -4397,12 +4429,17 @@ int run(const native::Options &opt) {
                                     }}
                 };
                 native::render_playback_state(state, replay_compare, viewer.session.range.tick_interval, curr);
+                state["ghostGeneration"] = race_ghost_imports.generation();
                 state["ghosts"] = nlohmann::json::array();
                 for (unsigned slot = 0; slot < 4; slot++) {
                     const auto &g = ghosts.slots[slot];
-                    if (g.handle)
+                    if (g.loaded())
                         state["ghosts"].push_back(
                                 {{"slot", slot},
+                                 {"source",
+                                  ghosts.sources[slot] == native_render::GhostSource::pb   ? "pb"
+                                  : ghosts.sources[slot] == native_render::GhostSource::wr ? "wr"
+                                                                                           : "custom"},
                                  {"id", g.id},
                                  {"name", g.info.value("player", std::string("Ghost"))},
                                  {"enabled", g.enabled},

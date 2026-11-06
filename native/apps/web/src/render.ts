@@ -35,6 +35,7 @@ import { markGammaBlend, outputsLinear } from "./graphics/gamma-blend";
 import { glassMaterial, setWaterVisualTime, updateWaterUniforms, waterSurfaceMaterial, waterVolumes, withWaterFog } from "./water";
 import { mapSmoke, brushBounds, materialName } from "./map-effects/smoke";
 import { spriteTrails } from "./sprite-trails";
+import { crashExplosions, CRASH_BSP_SHA } from "./map-effects/crash-explosions";
 import { smokeStacks } from "./smokestacks";
 import { applyLightStyles } from "./lightstyles";
 import { averageColor, potatoGeometry, withGrid, type PotatoSlot } from "./potato";
@@ -962,6 +963,11 @@ export async function buildWorld(
     const desc = index < 0 ? undefined : built.descs[materials.length + index];
     return desc && desc.texture >= 0 ? built.texture(desc.texture) : null;
   };
+  const explosions = opts.bsp && await sha256Hex(opts.bsp) === CRASH_BSP_SHA ? crashExplosions(core.entities(), effectTexture, path => {
+    const payload = core.texturePath(`materials/${path}.vtf`, support.s3tc, true);
+    return payload ? textureFromPayload(payload, support, THREE.NoColorSpace) : null;
+  }) : null;
+  if (explosions) root.add(explosions.root);
   const trails = spriteTrails(core.entities(), effectTexture);
   if (trails) root.add(trails.root);
   // env_smokestack puffs (bhop_absolutebhop_v4's sky level: the clouds are the only visible part of its platforms).
@@ -1250,6 +1256,7 @@ export async function buildWorld(
       smokeVolumes?.update(visualTime, transforms, effectStates);
       // After the transforms: animated props follow their frozen group's place.
       animProps?.update(visualTime, propAnims);
+      explosions?.update(transforms, visualTime, propAnims);
     },
     trailHistory() {
       return trails && !potatoOn ? { span: trails.maxLifetime, models: trails.models, entities: trails.entities } : null;
@@ -1270,6 +1277,7 @@ export async function buildWorld(
     setFullbright(on) { fullbright.set(on); },
     cull(camera) {
       culler.cull(camera);
+      explosions?.sort(camera);
       animProps?.setViewer(camera.getWorldPosition(viewerPos));
     },
     setPotato(on) {

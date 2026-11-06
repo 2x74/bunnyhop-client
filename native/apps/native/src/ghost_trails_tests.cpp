@@ -57,6 +57,69 @@ int main() {
     assert(options.route_only);
     assert(route_priority(GhostSource::custom) < route_priority(GhostSource::pb));
     assert(route_priority(GhostSource::pb) < route_priority(GhostSource::wr));
+    // Both triangles wind alike and share a diagonal, leaving no gaps or double-blended halves.
+    const auto quad = route_quad({0, 0, 0}, {10, 0, 0});
+    const auto area = [&](int at) {
+        const auto point = [&](int i) {
+            const auto &v = quad[size_t(i)];
+            return std::array<float, 2>{v.point[0], v.point[0] == 0 ? v.side : -v.side};
+        };
+        const auto a = point(at), b = point(at + 1), c = point(at + 2);
+        return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+    };
+    assert(area(0) * area(3) > 0);
+    assert(std::abs(area(0) + area(3)) == 40);
+    auto first_jump = recorded_path();
+    first_jump.start = 40;
+    first_jump.end = 50;
+    first_jump.motion_events.resize(first_jump.frames.size());
+    first_jump.motion_events[40] = 2;
+    first_jump.teleports[45] = 1;  // Even a one-unit teleport must break both route modes.
+    first_jump.build_route();
+    assert(first_jump.jumps.size() == 1 && first_jump.jumps[0][0] == 39);
+    assert(first_jump.jump_links.size() == 2);
+    unsigned segments = 0;
+    first_jump.path_segments([&](const GhostPath::Segment &segment) {
+        assert(segment.from[0] != 44 && segment.to[0] != 45);
+        ++segments;
+    });
+    assert(segments == 10);
+    first_jump.frames[42].position[0] = NAN;
+    first_jump.build_route();
+    for (const auto &link : first_jump.jump_links)
+        assert(std::isfinite(link.from[0]) && std::isfinite(link.to[0]));
+    std::array<GhostPath, 3> paths = {recorded_path(), recorded_path(), recorded_path()};
+    paths[0].source = GhostSource::pb;
+    paths[1].source = GhostSource::wr;
+    paths[2].source = GhostSource::custom;
+    std::array<bool, 3> available = {true, true, true};
+    for (const auto *source : {"auto", "pb", "wr", "custom"})
+        for (const auto *mode : {"jumps", "path"})
+            for (bool route : {false, true})
+                for (bool only : {false, true}) {
+                    options.read(
+                            {{"ghostRoute", route},
+                             {"ghostRouteOnly", only},
+                             {"ghostRouteSource", source},
+                             {"ghostRouteMode", mode}}
+                    );
+                    const int expected = !route                        ? -1
+                                         : std::string(source) == "pb" ? 0
+                                         : std::string(source) == "wr" ? 1
+                                                                       : 2;
+                    assert(select_route_slot(options, paths, available) == expected);
+                }
+    options.read({{"ghostRoute", true}, {"ghostRouteSource", "pb"}, {"ghostPb", false}});
+    assert(select_route_slot(options, paths, available) == -1);  // Explicit sources never fall back.
+    options.read({{"ghostRoute", true}, {"showGhost", false}});
+    assert(select_route_slot(options, paths, available) == -1);
+    options.read({{"ghostRoute", true}});
+    paths[2].enabled = false;
+    assert(select_route_slot(options, paths, available) == 0);
+    available[0] = false;
+    assert(select_route_slot(options, paths, available) == 1);
+    available.fill(false);
+    assert(select_route_slot(options, paths, available) == -1);
     const auto wr = ghost_source_color(GhostSource::wr);
     const auto custom = ghost_source_color(GhostSource::custom);
     assert(wr[0] == 79.f / 255 && wr[1] == 168.f / 255 && wr[2] == 1);

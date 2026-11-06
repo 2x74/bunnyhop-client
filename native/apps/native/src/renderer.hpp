@@ -24,6 +24,7 @@
 #include "inspect_cues.hpp"
 #include "first_person_weapons.hpp"
 #include "map_props.hpp"
+#include "runtime_prop_copies.hpp"
 #include "texture_motion.hpp"
 #include <span>
 #include "nlohmann/json.hpp"
@@ -55,6 +56,11 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+
+#include <condition_variable>
+#include <mutex>
+#include "native_model_data.hpp"
+#include "hidden_gl_context.hpp"
 
 namespace native {
 // All GL entry points come from the active SDL context, including on Linux.
@@ -161,7 +167,17 @@ struct Gl {
 #undef LOAD
     }
 
-    void load() { load(SDL_GL_GetProcAddress); }
+    void(APIENTRY *MaxShaderCompilerThreadsKHR)(GLuint) = nullptr;
+
+    void load() {
+        load(SDL_GL_GetProcAddress);
+        if (SDL_GL_ExtensionSupported("GL_KHR_parallel_shader_compile")) {
+            MaxShaderCompilerThreadsKHR = reinterpret_cast<decltype(MaxShaderCompilerThreadsKHR)>(
+                    SDL_GL_GetProcAddress("glMaxShaderCompilerThreadsKHR")
+            );
+            if (MaxShaderCompilerThreadsKHR) MaxShaderCompilerThreadsKHR(2);
+        }
+    }
 };
 
 inline GLuint shader(Gl &gl, GLenum kind, const char *source) {
@@ -209,6 +225,7 @@ inline GLuint link_program(Gl &gl, const char *vertex_source, const char *fragme
 #include "native_presentation.hpp"
 #include "landing_render.hpp"
 #include "native_viewmodel.hpp"
+#include "actor_warmup.hpp"
 #include "native_map_effects.hpp"
 // Standard headers must be included at file scope before these GL-dependent definitions.
 #include "source_hdr.hpp"
@@ -216,6 +233,7 @@ inline GLuint link_program(Gl &gl, const char *vertex_source, const char *fragme
 #include "sun_shadows.hpp"
 #include "water_reflection.hpp"
 #include "map_prop_meshes.hpp"
+#include "crash_explosions.hpp"
 
 // The website's route guide (apps/web/src/ghost-route.ts): the path in the ghost's colour and a white wire box on
 // every takeoff, as screen-space lines of a fixed pixel width. Segments are expanded to quads once, at upload.
@@ -223,12 +241,8 @@ class GhostRouteGeometry {
     static constexpr float path_width_points = 2.5f, path_opacity = .85f;
     static constexpr float marker_width_points = 2, marker_opacity = .95f;
     static constexpr float marker_half_width_units = 6, marker_below_units = 1, marker_above_units = 2;
-    static constexpr float route_lift_units = 2;
 
-    struct Vertex {
-        native_render::Vec3 point, other;
-        float side = 0;
-    };
+    using Vertex = native_render::RouteVertex;
 
     struct Mesh {
         GLuint vao = 0, buffer = 0;
@@ -242,8 +256,7 @@ class GhostRouteGeometry {
     GLint projectionLocation = -1, colorLocation = -1, widthLocation = -1, viewportLocation = -1;
 
     void add_segment(const native_render::Vec3 &from, const native_render::Vec3 &to) {
-        const Vertex a{from, to, 1}, b{from, to, -1}, c{to, from, -1}, d{to, from, 1};
-        for (const auto &vertex : {a, b, c, a, c, d})
+        for (const auto &vertex : native_render::route_quad(from, to))
             vertices.push_back(vertex);
     }
 
@@ -253,15 +266,9 @@ class GhostRouteGeometry {
                 add_segment(link.from, link.to);
             return;
         }
-        for (size_t tick = path.start + 1; tick <= path.end && tick < path.frames.size(); ++tick) {
-            if (path.teleports[tick] || !native_render::valid_ghost_position(path.frames[tick - 1])
-                || !native_render::valid_ghost_position(path.frames[tick]))
-                continue;
-            add_segment(
-                    native_render::ghost_feet(path.frames[tick - 1], route_lift_units),
-                    native_render::ghost_feet(path.frames[tick], route_lift_units)
-            );
-        }
+        path.path_segments([&](const native_render::GhostPath::Segment &segment) {
+            add_segment(segment.from, segment.to);
+        });
     }
 
     void add_marker(const native_render::Vec3 &takeoff) {
@@ -434,6 +441,8 @@ class Renderer {
     std::unordered_map<int32_t, std::array<float, 3>> textureAverages;
     std::vector<BhGroup> groups, skyGroups;
     std::vector<BhPropGroup> propGroups;
+    RuntimePropCopies propCopies;
+    std::unique_ptr<CrashExplosions> crashExplosions;
     std::vector<GLuint> normals;
     std::array<float, 3> sunDirection{.35f, .45f, .82f};
     bool hasSun = false;
@@ -445,6 +454,7 @@ class Renderer {
     bool hasSky = false;
     NativeMapEffects mapEffects;
     std::unique_ptr<NativePresentation> presentation;
+    std::unique_ptr<ActorWarmup> actorWarmup;
     std::unique_ptr<NativeViewmodel> viewmodel;
     bool viewmodelVisible = true, floorWeaponsVisible = true;
     std::optional<uint32_t> viewmodelWeapon;
@@ -687,6 +697,8 @@ class Renderer {
                     channel /= std::max(size_t(1), count);
                 textureAverages[index] = average;
             }
+        } else {
+            std::cerr << "Map texture " << index << " uses the checkerboard: " << bh_last_error(core) << '\n';
         }
         textures.emplace(key, id);
     }
@@ -1105,6 +1117,7 @@ class Renderer {
         worldTime = -1;
         textureMotion.update(worldSeconds);
         refresh_prop_transforms();
+        propCopies.refresh(core);
         if (mapPropMeshes) {
             mapPropMeshes->set_enabled(!graphics.potato);
             mapPropMeshes->refresh(core);
@@ -1144,7 +1157,8 @@ class Renderer {
             bool reflection
     ) {
         auto &instance = mapPropMeshes->props.instances()[d.skinned - 1];
-        const float radius = float(mapPropMeshes->props.radius(instance, worldSeconds));
+        const float radius = float(mapPropMeshes->props.radius(instance, worldSeconds))
+                             * mapPropMeshes->scale(int32_t(instance.entity));
         native_render::Bounds bounds;
         for (int k = 0; k < 3; k++) {
             bounds.lo[k] = t.origin[k] - radius;
@@ -1202,7 +1216,17 @@ class Renderer {
         if (cached.scene != sceneNumber) {
             cached.value = {};
             cached.value.visible = 1;
+            const auto *copy = prop ? propCopies.find(entity) : nullptr;
             const auto *moving = prop ? frame_prop_transform(entity) : nullptr;
+            if (copy) {
+                cached.value = {
+                        {copy->origin[0], copy->origin[1], copy->origin[2]},
+                        {copy->angles[0], copy->angles[1], copy->angles[2]},
+                        copy->visible
+                };
+                cached.scene = sceneNumber;
+                return cached.value;
+            }
             if (moving)
                 cached.value = {
                         {moving->origin[0], moving->origin[1], moving->origin[2]},
@@ -1216,6 +1240,27 @@ class Renderer {
             cached.scene = sceneNumber;
         }
         return cached.value;
+    }
+
+    native::Matrix scene_model(bool prop, int32_t entity, uint32_t model) {
+        auto matrix = native::model_matrix(scene_transform(prop, entity, model));
+        if (prop && frozen_prop_replaced(entity)) {
+            const float scale = mapPropMeshes->scale(entity);
+            for (size_t column = 0; column < 3; ++column)
+                for (size_t row = 0; row < 3; ++row)
+                    matrix[column * 4 + row] *= scale;
+        }
+        return matrix;
+    }
+
+    void add_copy_draws() {
+        for (const auto &copy : propCopies.instances()) {
+            if (!copy.visible) continue;
+            for (const auto &group : propCopies.groups(copy.source))
+                sceneDrawList.add(
+                        {group.material, group.first_index, group.index_count, true, int32_t(copy.entity), 0}
+                );
+        }
     }
 
     // reflection: the mirrored scene for the water reflection, without the water itself.
@@ -1277,7 +1322,10 @@ class Renderer {
         for (const auto &g : propGroups)
             if (bool(g.sky3d) == sky && !frozen_prop_replaced(g.entity))
                 sceneDrawList.add({g.material, g.first_index, g.index_count, true, g.entity, 0});
-        if (!sky) add_map_prop_draws();
+        if (!sky) {
+            add_map_prop_draws();
+            add_copy_draws();
+        }
         if (profiling) frameProfile.groups += draws.size();
         // Cull transformed bounds before submission; sort translucency from current, transformed centres.
         draws.erase(
@@ -1288,7 +1336,7 @@ class Renderer {
                             const auto &transform = scene_transform(d.prop, d.entity, d.model);
                             if (!transform.visible) return true;
                             if (d.skinned) return !map_prop_in_view(d, transform, vp, eye, reflection);
-                            const auto model = native::model_matrix(transform);
+                            const auto model = scene_model(d.prop, d.entity, d.model);
                             const uint64_t key = (uint64_t(d.prop) << 63) | d.first;
                             const auto at = groupBounds.find(key);
                             if (at != groupBounds.end()) {
@@ -1340,7 +1388,7 @@ class Renderer {
                 if (transparent(m) != (pass != 0) || (reflection && m.kind == 2)) continue;
                 const auto &transform = scene_transform(d.prop, d.entity, d.model);
                 if (!transform.visible) continue;
-                const auto model = native::model_matrix(transform);
+                const auto model = scene_model(d.prop, d.entity, d.model);
                 gl.UniformMatrix4fv(materialUniforms.model, 1, GL_FALSE, model.data());
                 if (boundMaterial != std::pair(d.material, d.prop)) {
                     bind_material(d.material, d.prop);
@@ -1572,6 +1620,24 @@ class Renderer {
         profile_elapsed(frameProfile.presentationWaterUniforms, presentationStart);
         presentationStart = profile_now();
         presentation->draw(vp, eye);
+        if (crashExplosions)
+            crashExplosions->draw(
+                    vp,
+                    core,
+                    propCopies,
+                    right,
+                    up,
+                    eye,
+                    worldSeconds,
+                    effectsVisible && !graphics.potato,
+                    viewportWidth,
+                    viewportHeight,
+                    frameLook || hdr_pass(),
+                    [&]() {
+                        capture_refraction();
+                        return refractColor;
+                    }
+            );
         profile_elapsed(frameProfile.presentationSubmit, presentationStart);
     }
 
@@ -1595,26 +1661,12 @@ class Renderer {
     }
 
     int selected_route_slot() const {
-        if (!ghostOptions.route || !ghostRoutes) return -1;
-        int selected = -1;
-        for (size_t slot = 0; slot < ghostPaths.size(); ++slot) {
-            const auto &path = ghostPaths[slot];
-            if (!routeAvailable[slot] || !path.enabled || path.frames.empty() || !ghostOptions.visible(path.source))
-                continue;
-            if (ghostOptions.route_source != native_render::GhostSource::none
-                && path.source != ghostOptions.route_source)
-                continue;
-            if (selected < 0
-                || native_render::route_priority(path.source)
-                           < native_render::route_priority(ghostPaths[size_t(selected)].source))
-                selected = int(slot);
-        }
-        return selected;
+        return ghostRoutes ? native_render::select_route_slot(ghostOptions, ghostPaths, routeAvailable) : -1;
     }
 
     void draw_ghost_route(const native::Matrix &projection) {
         const int selected = selected_route_slot();
-        if (selected < 0) return;
+        if (selected < 0 || !toolsVisible) return;
         const auto &path = ghostPaths[size_t(selected)];
         const auto color = path.source == native_render::GhostSource::pb
                                    ? ghostRouteColor
@@ -1772,8 +1824,7 @@ public:
     void route_context(uint32_t track, const std::string &style, bool visible) {
         for (size_t slot = 0; slot < ghostPaths.size(); ++slot) {
             const auto &path = ghostPaths[slot];
-            routeAvailable[slot] = visible && path.track == track
-                                   && (path.source == native_render::GhostSource::custom || path.style == style);
+            routeAvailable[slot] = visible && path.track == track && (path.style == "*" || path.style == style);
         }
     }
 
@@ -2091,6 +2142,7 @@ public:
             );
             co_yield "resource";
         }
+        propCopies.load(propGroups);
         prepare_prop_transforms();
         auto animated = load_map_props();
         while (!animated.step())
@@ -2146,8 +2198,20 @@ public:
         return material < wireframeMaterials.size() && wireframeMaterials[material];
     }
 
+    void log_missing_materials() {
+        size_t bytes = 0;
+        const char *raw = bh_material_names_json(core, &bytes);
+        const auto names = raw && bytes ? nlohmann::json::parse(raw, raw + bytes) : nlohmann::json::array();
+        for (size_t i = 0; i < materials.size(); ++i) {
+            if (materials[i].kind != 1) continue;
+            const auto name = i < names.size() ? names[i].get<std::string>() : std::to_string(i);
+            std::cerr << "Map material uses the checkerboard: " << name << '\n';
+        }
+    }
+
     ResourceLoading prepare_textures() {
         prepare_wireframes();
+        log_missing_materials();
         for (const auto &m : materials)
             if (m.flags & (material_translucent | material_alpha_test)) cutoutTextures.insert(m.texture);
         co_yield "resource";
@@ -2318,6 +2382,24 @@ public:
         gl.Uniform1i(loc(program, "sunActive"), 0);
         presentation = std::make_unique<NativePresentation>(gl);
         mapEffects.load(core);
+        crashExplosions = std::make_unique<CrashExplosions>(gl);
+        size_t materialBytes = 0;
+        const char *rawNames = bh_material_names_json(core, &materialBytes);
+        const auto particleNames = rawNames && materialBytes ? nlohmann::json::parse(rawNames, rawNames + materialBytes)
+                                                             : nlohmann::json::array();
+        crashExplosions->load(core, assetRoot, [&](const std::string &name, bool normal) -> GLuint {
+            if (normal) {
+                const auto path = "materials/" + name + ".vtf";
+                BhImage image{};
+                return bh_texture_path(core, path.c_str(), &image) ? upload(image, false, true, false) : 0;
+            }
+            for (size_t i = 0; i < particleNames.size() && i < materials.size(); ++i) {
+                if (particleNames[i] != name || materials[i].texture < 0) continue;
+                const auto id = texture(materials[i].texture);
+                return id == checker ? 0 : id;
+            }
+            return 0;
+        });
 
         anisotropySupported = SDL_GL_ExtensionSupported("GL_EXT_texture_filter_anisotropic");
         co_yield "viewmodel";
@@ -2326,6 +2408,12 @@ public:
         else
             viewmodel = std::make_unique<NativeViewmodel>(gl, assetRoot);
         viewmodel->set_inspect_style(inspectQuiet);
+        viewmodel->prepare_room_fallback();
+        try {
+            actorWarmup = std::make_unique<ActorWarmup>(assetRoot);
+        } catch (const std::exception &error) {
+            std::cerr << "Player warm-up context: " << error.what() << '\n';
+        }
         co_yield "resource";
         gl.Enable(GL_DEPTH_TEST);
         gl.DepthFunc(GL_LEQUAL);
@@ -2341,6 +2429,7 @@ public:
         presentation.reset();
         hdr.reset();
         viewmodel.reset();
+        actorWarmup.reset();
         mapPropMeshes.reset();
         destroy(worldMesh);
         destroy(propMesh);
@@ -2570,6 +2659,21 @@ public:
         }
         if (!compareActor) compareActor.emplace();
         *compareActor = *actor;
+    }
+
+    void draw_room_actor(
+            const native_render::Actor &actor, const native::Matrix &projection, const float eye[3], double seconds
+    ) {
+        if (actorWarmup)
+            actorWarmup->draw(*viewmodel, actor, projection, eye, seconds);
+        else
+            viewmodel->draw_actor(actor, projection, eye, seconds);
+    }
+
+    bool room_actors_ready() const {
+        return !actorWarmup || std::all_of(roomActors.begin(), roomActors.end(), [&](const auto &actor) {
+            return actorWarmup->ready(actor);
+        });
     }
 
     void set_room_actors(const std::vector<native_render::Actor> &actors) {
@@ -2907,7 +3011,8 @@ public:
         auto &prop = mapPropMeshes->props.instances()[instance];
         const auto &transform = scene_transform(true, int32_t(prop.entity), 0);
         if (!transform.visible) return false;
-        const float radius = float(mapPropMeshes->props.radius(prop, worldSeconds));
+        const float radius =
+                float(mapPropMeshes->props.radius(prop, worldSeconds)) * mapPropMeshes->scale(int32_t(prop.entity));
         native_render::Bounds bounds;
         for (int k = 0; k < 3; k++) {
             bounds.lo[k] = transform.origin[k] - radius;
@@ -2931,7 +3036,7 @@ public:
         for (size_t i = 0; i < count; ++i) {
             if (!castingProps[i]) continue;
             const auto &prop = mapPropMeshes->props.instances()[i];
-            const auto model = native::model_matrix(scene_transform(true, int32_t(prop.entity), 0));
+            const auto model = scene_model(true, int32_t(prop.entity), 0);
             for (const auto &g : mapPropMeshes->groups(i)) {
                 const auto kind = caster(g.material);
                 if (kind == Caster::none || (kind == Caster::cutout) != cutouts) continue;
@@ -2987,11 +3092,27 @@ public:
                             range,
                             cutouts
                     );
+            for (const auto &copy : propCopies.instances()) {
+                if (!copy.visible) continue;
+                for (const auto &g : propCopies.groups(copy.source))
+                    cast_group(
+                            propMesh,
+                            true,
+                            g.material,
+                            g.first_index,
+                            g.index_count,
+                            int32_t(copy.entity),
+                            0,
+                            lightVp,
+                            range,
+                            cutouts
+                    );
+            }
             cast_map_props(lightVp, range, cutouts, shader);
         }
         if (!viewmodel) return;
         for (const auto &actor : roomActors)
-            if (actor.ghost_slot < 0) viewmodel->draw_actor(actor, lightVp, eye, seconds);
+            if (actor.ghost_slot < 0) draw_room_actor(actor, lightVp, eye, seconds);
     }
 
     // The sun's depth map around the camera and the world shader's sun terms for this frame.
@@ -3093,7 +3214,7 @@ public:
         if (replayActor) viewmodel->draw_actor(*replayActor, vp, eye, seconds);
         if (compareActor) viewmodel->draw_actor(*compareActor, vp, eye, seconds);
         for (const auto &actor : roomActors)
-            viewmodel->draw_actor(actor, vp, eye, seconds);
+            draw_room_actor(actor, vp, eye, seconds);
     }
 
     // The world mirrored through the chosen water plane, clipped to what is above it, into the half-size reflection
@@ -3163,6 +3284,7 @@ public:
         lastPitch = input.pitch;
         if (viewmodel) viewmodel->view_angles(float(lastYaw), float(lastPitch));
         if (viewmodel) viewmodel->set_actor_context(core, reducedMotion);
+        if (actorWarmup && viewmodel) actorWarmup->frame(roomActors, *viewmodel);
         actorVolumes.poll();
         actorVolumes.annotate(roomActors, seconds);
         if (compareActor) actorVolumes.annotate_recorded(*compareActor);
@@ -3250,7 +3372,7 @@ public:
             if (replayActor) viewmodel->draw_actor(*replayActor, vp, eye, seconds);
             if (compareActor) viewmodel->draw_actor(*compareActor, vp, eye, seconds);
             for (const auto &actor : roomActors)
-                viewmodel->draw_actor(actor, vp, eye, seconds);
+                draw_room_actor(actor, vp, eye, seconds);
             profile_elapsed(frameProfile.actorDraw, detailStart);
         }
         BhSnapshot landingState{};

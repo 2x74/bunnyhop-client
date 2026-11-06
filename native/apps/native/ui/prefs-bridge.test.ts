@@ -302,3 +302,39 @@ test("the first-sync repair removes stale host commands and aliases and restores
   expect(saved.binds.left).toContain("KeyA");
   expect(bindRepairPatch(saved, repaired)).toEqual({});
 });
+
+test("every route combination crosses the pause-menu bridge and survives the host echo", () => {
+  state.settingsKeys = [
+    ...Object.keys(state.settings),
+    "ghostRoute",
+    "ghostRouteOnly",
+    "ghostRouteSource",
+    "ghostRouteMode",
+  ];
+  const current = host({ ghostRoute: false, ghostRouteOnly: false, ghostRouteSource: "auto", ghostRouteMode: "jumps" });
+  for (const route of [false, true])
+    for (const routeOnly of [false, true])
+      for (const routeSource of ["auto", "pb", "wr", "custom"] as const)
+        for (const routeMode of ["jumps", "path"] as const) {
+          const p = clone(DEFAULT_PREFS);
+          Object.assign(p.ghost, { route, routeOnly, routeSource, routeMode });
+          const view = nativeView(p, current);
+          expect(view).toMatchObject({
+            ghostRoute: route,
+            ghostRouteOnly: routeOnly,
+            ghostRouteSource: routeSource,
+            ghostRouteMode: routeMode,
+          });
+          const echoed = clone(DEFAULT_PREFS);
+          pullHost(echoed, host({ ...current, ...view }));
+          expect(echoed.ghost).toMatchObject({ route, routeOnly, routeSource, routeMode });
+        }
+  const { c, patches } = consoleWithPatches();
+  c.run("cl_ghost_route 1; cl_ghost_routesource wr; cl_ghost_routemode path; cl_ghost_routeonly 1");
+  expect(Object.assign({}, ...patches)).toMatchObject({
+    ghostRoute: true,
+    ghostRouteSource: "wr",
+    ghostRouteMode: "path",
+    ghostRouteOnly: true,
+  });
+});

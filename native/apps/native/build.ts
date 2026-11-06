@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { packageIdentity, treeHash } from "./package";
@@ -35,6 +35,11 @@ if (values["prebuilt-resources"]) {
   run(["bun", "apps/native/src/export-viewmodels.ts"]);
   run(["bun", "apps/native/src/export-presentation.ts"]);
 }
+// Keep authored particle data tied to the frozen web tree for native and packaged builds.
+copyFileSync(
+  join(root, "apps/web/src/map-effects/crash-particles.json"),
+  join(root, "target/native-assets/crash-particles.json"),
+);
 // Use the pinned SDL when packaging/sdl.ts has built it; otherwise CMake finds a system SDL3 >= 3.4.
 const sdl = pinnedSdlInstall();
 const configure = [

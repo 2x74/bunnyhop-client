@@ -446,11 +446,16 @@ function validPatch(patch: Record<string, unknown>): SettingsPatch {
 const KNOWN_KEYS = "bunnyhop:native-host-keys";
 /** Changes go out together: a dragged slider sends one patch per this many ms, not one per pixel. */
 const SEND_DELAY_MS = 60;
-/** A change the host hasn't echoed after this long was refused (the host shows why); its value comes back. */
+/** Ordinary settings fall back after refusal; bind edits wait for an explicit host acknowledgement. */
 const PENDING_MS = 3000;
 
 // v0.8.0 could save a deletion in the menu without sending it to the host. Capture it before the initial
 // host pull, which otherwise replaces that evidence. Only installs with saved command binds need repair.
+// Until the host acknowledges an edit, this journal owns it, including across menu or app restarts.
+const BIND_JOURNAL = "bunnyhop:native-pending-binds";
+const BIND_KEYS = ["binds", "cmdBinds", "aliases"] as const;
+const isBindKey = (key: string): boolean =>
+  BIND_KEYS.includes(key as (typeof BIND_KEYS)[number]) || key.startsWith("binds.");
 const BIND_REPAIR = "bunnyhop:native-bind-repair-081";
 function savedBindRepair(): Prefs | null {
   try {
@@ -463,6 +468,21 @@ function savedBindRepair(): Prefs | null {
   }
 }
 let bindRepair = savedBindRepair();
+let bindJournal: SettingsPatch = {};
+try {
+  bindJournal = validPatch(JSON.parse(localStorage.getItem(BIND_JOURNAL) ?? "{}"));
+} catch {
+  /* No recoverable pending edit. */
+}
+
+function saveBindJournal(): void {
+  try {
+    if (Object.keys(bindJournal).length) localStorage.setItem(BIND_JOURNAL, JSON.stringify(bindJournal));
+    else localStorage.removeItem(BIND_JOURNAL);
+  } catch {
+    /* The live bridge still retains edits when storage is unavailable. */
+  }
+}
 let bindRepairPending = true;
 
 /** The saved menu owns this one-time repair; native-only action bindings still come from the host. */
@@ -478,7 +498,9 @@ export function bindRepairPatch(saved: Prefs, host: HostSettings): SettingsPatch
 function repairSavedBinds(): void {
   if (!state.settingsKeys || !bindRepairPending) return;
   bindRepairPending = false;
-  const patch = bindRepair ? bindRepairPatch(bindRepair, hostSettings()) : {};
+  const repair = bindRepair ? bindRepairPatch(bindRepair, hostSettings()) : {};
+  const patch: SettingsPatch = { ...repair, ...bindJournal };
+  if (repair.binds || bindJournal.binds) patch.binds = { ...repair.binds, ...bindJournal.binds };
   bindRepair = null;
   if (Object.keys(patch).length) {
     rememberPatch(patch);
@@ -505,6 +527,19 @@ let sendTimer: ReturnType<typeof setTimeout> | undefined;
 const pending = new Map<string, { value: unknown; at: number }>();
 const hostListeners = new Set<() => void>();
 const nativeListeners = new Set<() => void>();
+const readyListeners = new Set<() => void>();
+const bindListeners = new Set<() => void>();
+
+/** Local bind edits, including startup recovery, must reach account sync before it imports a remote copy. */
+export function onBindSettings(listener: () => void): void {
+  bindListeners.add(listener);
+}
+
+/** Account imports wait until saved host settings have arrived. */
+export function whenHostSettingsReady(): Promise<void> {
+  if (pulledOnce) return Promise.resolve();
+  return new Promise((resolve) => readyListeners.add(resolve));
+}
 let lastNativeOnly = "";
 
 /**
@@ -584,6 +619,7 @@ function pushPrefs(p: Prefs): void {
   const patch = patchBetween(view, next);
   view = next;
   if (!Object.keys(patch).length) return;
+  if (bindRepairPending && BIND_KEYS.some((key) => key in patch)) bindRepair = structuredClone(p);
   rememberPatch(patch);
   queuePatch(patch);
   dropUnreadableBinds(p);
@@ -593,6 +629,15 @@ function pushPrefs(p: Prefs): void {
 function rememberPatch(patch: SettingsPatch): void {
   const { binds: changedBinds, ...rest } = patch;
   const now = Date.now();
+  const bindingPatch = Object.fromEntries(Object.entries(patch).filter(([key]) => isBindKey(key))) as SettingsPatch;
+  if (Object.keys(bindingPatch).length) {
+    bindJournal = {
+      ...bindJournal,
+      ...bindingPatch,
+      ...(changedBinds ? { binds: { ...bindJournal.binds, ...changedBinds } } : {}),
+    };
+    saveBindJournal();
+  }
   const native: Record<string, unknown> = {};
   const extra: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(rest)) {
@@ -607,6 +652,7 @@ function rememberPatch(patch: SettingsPatch): void {
   state.extraSettings = { ...state.extraSettings, ...extra };
   lastSettings = state.settings;
   lastExtra = state.extraSettings;
+  if (Object.keys(bindingPatch).length) for (const listener of bindListeners) listener();
 }
 
 /**
@@ -620,7 +666,7 @@ function effectiveHost(): HostSettings {
   for (const [key, entry] of pending) {
     const action = key.startsWith("binds.") ? key.slice(6) : null;
     const current = action ? hostBinds[action] : host[key];
-    if (sameValue(current, entry.value) || now - entry.at > PENDING_MS) {
+    if (!isBindKey(key) && (sameValue(current, entry.value) || now - entry.at > PENDING_MS)) {
       pending.delete(key);
       continue;
     }
@@ -647,13 +693,35 @@ function dropUnreadableBinds(p: Prefs): void {
   toast(`${names} can't be bound in the desktop client.`);
 }
 
+function acknowledgeHost(receivedSettings: boolean): void {
+  if (!receivedSettings) return;
+  const received = hostSettings();
+  for (const [key, entry] of pending) {
+    const action = key.startsWith("binds.") ? key.slice(6) : null;
+    if (sameValue(action ? received.binds[action] : received[key], entry.value)) pending.delete(key);
+  }
+  const matches = Object.entries(bindJournal).every(([key, value]) =>
+    key === "binds"
+      ? Object.entries(value as Record<string, string[]>).every(([action, codes]) =>
+          sameValue(received.binds[action], codes),
+        )
+      : sameValue(received[key], value),
+  );
+  if (!matches) return;
+  bindJournal = {};
+  saveBindJournal();
+}
+
 function receiveHost(): void {
+  if (!state.settingsKeys) return;
   const shape = JSON.stringify([state.settingsKeys, state.bindActions, state.capabilities]);
   const changedShape = shape !== lastShape;
-  if (state.settings === lastSettings && state.extraSettings === lastExtra && !changedShape) return;
+  const receivedSettings = state.settings !== lastSettings || state.extraSettings !== lastExtra;
+  if (!receivedSettings && !changedShape) return;
   lastSettings = state.settings;
   lastExtra = state.extraSettings;
   lastShape = shape;
+  acknowledgeHost(receivedSettings);
   repairSavedBinds();
   const fresh = newHostKeys();
   const host = effectiveHost();
@@ -669,7 +737,9 @@ function receiveHost(): void {
   view = nativeView(prefs.get(), effectiveHost());
   if (fresh.size) sendNewKeys(fresh);
   const changed = JSON.stringify(prefs.get()) !== before;
-  if (state.settingsKeys) pulledOnce = true;
+  pulledOnce = true;
+  for (const listener of readyListeners) listener();
+  readyListeners.clear();
   if (changed || changedShape) for (const listener of hostListeners) listener();
   const nativeOnly = nativeOnlySignature();
   if (nativeOnly === lastNativeOnly) return;

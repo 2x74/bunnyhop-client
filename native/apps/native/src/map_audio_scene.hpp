@@ -34,12 +34,14 @@ public:
     struct Sound {
         int file = -1;
         int entity = -1;
+        int source = -1;
         int model = -1;
         MapPoint position{}, offset{};
         double level = 0, volume = 0, target_volume = 0, volume_step = 0;
         double rate = 1, target_rate = 1, rate_step = 0, started = 0, priority = 0;
         uint32_t starts = 0, stops = 0;
         bool on = false, removed = false, stopping = false, transient = false, used = false;
+        bool external_source = false;
         MapAmbientLevels levels;
     };
 
@@ -95,6 +97,9 @@ public:
     std::array<uint8_t, 16384> commands{};
     std::array<size_t, map_sound_slot_limit> ranked{};
     std::vector<int> ambient;
+    std::vector<Sound> ambient_templates;
+    std::vector<BhEntityInstance> instance_rows;
+    std::array<bool, map_sound_slot_limit> copy_seen{};
     BhContext *observed_core = nullptr;
     uint32_t serial = ~0u, random_state = 977;
     double last_assign = -1, last_scape = -1;
@@ -118,6 +123,7 @@ public:
           bool live,
           float gain,
           double pitch = 0);
+    void sync_instances(MapAudioMixer &mixer, std::span<const BhEntityInstance> rows);
     void apply_state(MapAudioMixer &mixer, std::span<const BhMapSoundState> rows, double now, bool live);
     void play_command(MapAudioMixer &mixer, std::string_view command, double now, bool live);
     void
