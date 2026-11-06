@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.8.1 — Native
+
+- Unbinding or rebinding a key that had a command bind now sticks. Updating also restores saved menu binds that
+  v0.8.0 failed to send to the game.
+- Keys bound to chains with `+moveleft`, `+jump`, `+duck` and other held commands work with null binds enabled.
+- Thanks to ThrowTop for reporting both problems.
+
 ## v0.8.0 — Native
 
 Matches website v0.0.38. Update from Settings → Updates: press Update, then Restart. Your settings, replays and maps
