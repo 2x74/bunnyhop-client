@@ -115,6 +115,23 @@ function paint(canvas: HTMLCanvasElement, spec: PreviewSpec, hero = false, zoom 
   }
 }
 
+// The host renders at most 960×600 (loadout_preview.hpp). Scale both sides together so a stage that isn't 16:10
+// still gets a picture of its own shape rather than a squashed or letterboxed one.
+const MAX_RENDER_W = 960,
+  MAX_RENDER_H = 600,
+  MIN_RENDER_W = 384,
+  MIN_RENDER_H = 240;
+function stageRenderSize(canvas: HTMLCanvasElement): { width: number; height: number } {
+  const ratio = devicePixelRatio || 1;
+  const width = Math.max(1, canvas.clientWidth * ratio);
+  const height = Math.max(1, canvas.clientHeight * ratio);
+  const scale = Math.min(1, MAX_RENDER_W / width, MAX_RENDER_H / height);
+  return {
+    width: Math.max(MIN_RENDER_W, Math.round(width * scale)),
+    height: Math.max(MIN_RENDER_H, Math.round(height * scale)),
+  };
+}
+
 export class LoadoutStage {
   readonly canvas = document.createElement("canvas");
   onView: ((view: StageView) => void) | null = null;
@@ -128,7 +145,6 @@ export class LoadoutStage {
   private active = false;
   private request = 0;
   private host: HTMLElement;
-  private note: HTMLElement;
   private shown: CosmeticLoadout;
   private look: StageLook = {};
   private viewMode: StageView = "fp";
@@ -149,11 +165,6 @@ export class LoadoutStage {
     if (nativePreviewAvailable()) host.dataset.nativeHost = "true";
     this.canvas.setAttribute("role", "img");
     host.append(this.canvas);
-    const note = document.createElement("p");
-    note.className = "native-loadout-preview-note";
-    note.textContent = "Native-rendered item samples · combinations shown in game";
-    host.append(note);
-    this.note = note;
     this.canvas.tabIndex = 0;
     this.canvas.addEventListener("pointerdown", this.down);
     this.canvas.addEventListener("pointermove", this.move);
@@ -214,7 +225,7 @@ export class LoadoutStage {
           : character
             ? name(this.look.outfit, "Bunny")
             : name(this.shown.knife, "Knife") + " · " + name(this.shown.finish, "Finish");
-    this.canvas.setAttribute("aria-label", label + " authored native-rendered item preview");
+    this.canvas.setAttribute("aria-label", label);
     // Close-up (web loadout-view.ts, the hands' categories): the same sample, framed closer.
     const zoom = this.viewMode === "close" && !character ? CLOSE_UP_ZOOM : 1;
     paint(this.canvas, spec, true, zoom);
@@ -265,8 +276,7 @@ export class LoadoutStage {
         pitch: this.pitch,
         inspect: this.inspectCount,
         held: this.held,
-        width: Math.min(960, Math.max(384, Math.round(this.canvas.clientWidth * (devicePixelRatio || 1)))),
-        height: Math.min(600, Math.max(240, Math.round(this.canvas.clientHeight * (devicePixelRatio || 1)))),
+        ...stageRenderSize(this.canvas),
       },
       (png) => {
         this.request = 0;
@@ -281,7 +291,6 @@ export class LoadoutStage {
             this.canvas.getContext("2d")?.drawImage(image, 0, 0);
             this.host.dataset.nativeStatic = "false";
             this.host.dataset.nativeInteractive = "true";
-            this.note.textContent = "Native live preview · drag or use arrow keys to turn";
           };
           image.src = png;
         }
@@ -304,9 +313,8 @@ export class LoadoutStage {
   flourish(_kind: string): void {
     this.inspect();
   }
-  tint(color: string | null, _strength = 1): void {
-    this.canvas.style.borderColor = color ?? "transparent";
-  }
+  // The caption names the rarity in its colour. A coloured frame round the picture only read as a debug outline.
+  tint(_color: string | null, _strength = 1): void {}
   requestThumb(job: ThumbJob, done: (canvas: HTMLCanvasElement) => void): void {
     if (this.disposed) return;
     let canvas = thumbs.get(job.key);
@@ -400,7 +408,6 @@ export class LoadoutStage {
     this.canvas.removeEventListener("pointerup", this.up);
     this.canvas.removeEventListener("pointercancel", this.up);
     this.canvas.removeEventListener("keydown", this.key);
-    this.note.remove();
     this.canvas.remove();
   }
 }
