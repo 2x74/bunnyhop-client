@@ -7,6 +7,7 @@ Menus are the website's own UI in an embedded web view: WKWebView on macOS, WebK
 window) and WebView2 on Windows. The menu bundle refuses the web game entry point, Three and the live simulation
 (`build-menu.ts`, `menu-boundary.ts`). There is no Electron dependency; the old Electron client lives at the
 repository root.
+On Windows, the menu shows a still of the map behind it.
 
 The vendored game sources come from web `hotfix/0030-wasm` at `6a37d059`, physics 20, timer rules 2. Historical
 physics 1–19 remain available for replays. See [the v0.0.30 integration notes](../../docs/v0.0.30-native-integration.md).

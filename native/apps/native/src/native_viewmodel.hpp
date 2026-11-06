@@ -442,9 +442,6 @@ class NativeViewmodel {
             pose[i] = x + (y - x) * f;
         }
         native_render::turn_spinner(pose, spinner, spinDegrees);
-        gl.ActiveTexture(GL_TEXTURE0);
-        gl.BindTexture(GL_TEXTURE_2D, bonesTexture);
-        gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, 3, entry.bones, 0, GL_RGBA, GL_FLOAT, pose.data());
     }
 
     void load_gun_holds(const nlohmann::json &metadata, size_t cs_bones) {
@@ -1265,7 +1262,6 @@ public:
                 const float amount = std::min(std::abs(frame.pitch) / 60.f, 1.f);
                 for (size_t i = 0; i < pose.size(); i++)
                     pose[i] = basePose[i] + (pose[i] - basePose[i]) * amount;
-                gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, 3, entry.bones, 0, GL_RGBA, GL_FLOAT, pose.data());
             }
             if (actorAnimationData) {
                 auto &state = actor_state(actor.id);
