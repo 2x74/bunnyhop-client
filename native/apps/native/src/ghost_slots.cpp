@@ -31,7 +31,7 @@ void GhostSlots::load(BhContext *core, const std::filesystem::path &path, unsign
     size_t bytes = 0;
     const auto raw = bh_ghost_info(core, next, &bytes);
     require(raw != nullptr, core, "Reading ghost");
-    slot = {next, data_location::utf8(path.filename()), true, nlohmann::json::parse(raw, raw + bytes)};
+    slot = {next, data_location::utf8(path.filename()), true, nlohmann::json::parse(raw, raw + bytes), {}};
 }
 
 void GhostSlots::select_primary() {
@@ -61,7 +61,7 @@ bool GhostSlots::control(BhContext *core, const nlohmann::json &message) {
         if (action == "clear" || i == slot) {
             auto &ghost = slots[i];
             if (action == "toggle")
-                ghost.enabled = ghost.handle && message.value("enabled", !ghost.enabled);
+                ghost.enabled = ghost.loaded() && message.value("enabled", !ghost.enabled);
             else {
                 if (core && ghost.handle) bh_ghost_free(core, ghost.handle);
                 ghost = {};
@@ -72,7 +72,7 @@ bool GhostSlots::control(BhContext *core, const nlohmann::json &message) {
 }
 
 void GhostSlots::toggle(const nlohmann::json &message) {
-    enabled = handle && message.at("enabled").get<bool>();
+    enabled = slots[0].loaded() && message.at("enabled").get<bool>();
     slots[0].enabled = enabled;
 }
 
@@ -85,7 +85,7 @@ bool GhostSlots::present(
 ) {
     const auto &slot = slots.at(index);
     native_render::GhostPose pose;
-    if (!slot.handle || !native_render::pose_ghost(path, elapsed, pose)) return false;
+    if (!slot.loaded() || !native_render::pose_ghost(path, elapsed, pose)) return false;
     actor.frame = pose.frame;
     actor.frame.tick = uint32_t(pose.tick);
     actor.attack = 0;
@@ -97,10 +97,22 @@ bool GhostSlots::present(
     // The strafe key, for the bank into strafes (ghost.ts sample).
     BhCmd command{};
     const uint32_t shown_tick = actor.frame.tick;
-    if (pose.moving && shown_tick > 0 && bh_ghost_command(core, slot.handle, shown_tick, &command))
-        actor.sidemove = command.side;
+    if (pose.moving && shown_tick > 0 && slot.command(core, shown_tick, command)) actor.sidemove = command.side;
     BhReplayEvents events{};
-    if (range && bh_ghost_events(core, slot.handle, range->first, range->second, &events)) {
+    bool read_events = false;
+    if (range && slot.recording) {
+        const auto &recorded = slot.recording->events;
+        const auto last = std::min(range->second, uint32_t(recorded.size() - 1));
+        for (uint32_t tick = range->first + 1; tick <= last; ++tick) {
+            if (recorded[tick].cosmetic) events.cosmetic = recorded[tick].cosmetic;
+            if (recorded[tick].inspect_signal) events.inspect_signal = recorded[tick].inspect_signal;
+        }
+        events.inspect_held = recorded[last].inspect_held;
+        read_events = true;
+    } else if (range) {
+        read_events = bh_ghost_events(core, slot.handle, range->first, range->second, &events);
+    }
+    if (read_events) {
         actor.attack = events.cosmetic;
         actor.inspect = events.inspect_signal;
         actor.inspectHeld = events.inspect_held != 0;

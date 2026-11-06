@@ -974,6 +974,12 @@ if(BUILD_TESTING)
 endif()
 
 if(BUNNYHOP_BUILD_CLIENT)
+    add_executable(bunnyhop-native-ghost-route-smoke EXCLUDE_FROM_ALL src/ghost_route_smoke.cpp src/ghost_slots.cpp)
+    target_include_directories(bunnyhop-native-ghost-route-smoke PRIVATE include vendor src)
+    target_link_libraries(bunnyhop-native-ghost-route-smoke PRIVATE
+        bunnyhop_core_native SDL3::SDL3 OpenGL::GL ZLIB::ZLIB)
+    target_compile_definitions(bunnyhop-native-ghost-route-smoke PRIVATE
+        BUNNYHOP_NATIVE_ASSET_ROOT="target/native-assets")
     add_executable(bunnyhop-native-effects-render-smoke EXCLUDE_FROM_ALL src/effects_render_smoke.cpp)
     target_include_directories(bunnyhop-native-effects-render-smoke PRIVATE include vendor src)
     target_link_libraries(bunnyhop-native-effects-render-smoke PRIVATE
@@ -1010,4 +1016,11 @@ if(BUILD_TESTING)
         add_test(NAME native_landing_marker_web COMMAND bunnyhop-native-landing-marker-tests "${LANDING_ORACLE}")
         set_tests_properties(native_landing_marker_web PROPERTIES FIXTURES_REQUIRED landing_oracle)
     endif()
+endif()
+
+if(BUILD_TESTING)
+    add_executable(bunnyhop-native-race-ghost-imports-tests src/race_ghost_imports_tests.cpp src/ghost_slots.cpp)
+    target_include_directories(bunnyhop-native-race-ghost-imports-tests PRIVATE include vendor src)
+    target_link_libraries(bunnyhop-native-race-ghost-imports-tests PRIVATE bunnyhop_core_native ZLIB::ZLIB)
+    add_test(NAME native_race_ghost_imports COMMAND bunnyhop-native-race-ghost-imports-tests)
 endif()
