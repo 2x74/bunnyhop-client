@@ -1,28 +1,33 @@
 # Changelog
 
-## v0.8.0 — Native (Phase 1 draft)
+## v0.8.0 — Native (draft)
 
-Not released. This draft records the parity work started against the interim v0.0.38 snapshot; final content and
-release notes will be updated after the frozen web sync.
+Not released. Matches website v0.0.38.
 
 **Ranked and replays**
-- Physics v26 and timer rules 5, including the new map fixes and ordered checkpoint rules. Existing replays keep
-  their recorded physics version.
-- Route guide can hide its selected ghost while keeping the route and takeoff boxes; HUD comparisons still count it.
+- Physics v26 and timer rules 5, with the new map fixes and ordered checkpoints. Existing replays keep their
+  recorded physics version.
+- Opening and closing a replay keeps you connected to your lobby.
+- Route only hides the selected ghost while keeping its route and the HUD comparison.
+
+**Loadout and weapons**
+- Five new knives, hilt skins and gun camos, in first person, on other players and in the Loadout preview.
+- More glove styles and colourways, the Tidepool Supporter set, and Contributor sets with the Ruler and Linework
+  finishes and Pencil hat. Staff items appear in the Loadout only for their holders.
+- The Bunnyfly's handles and Whirligig's spinner move in third person. Inspect cancels bring the moving parts home
+  before the fingers close. Leek Saber hilt skins keep its leaf guard green.
+- Guns use the website's updated grips, wrist ranges and elbow-led recoil.
 
 **Controls and console**
-- The Source-style console accepts the web config format, binds, aliases, command chains and chat commands. The
-  native panel follows the game's own menu styling.
-- Hold-jump toggle, Crouch jump, mouse yaw/pitch scaling and the three `cl_showpos` modes are available.
-- `!landing` opens the landing predictor setting; landing prediction is off by default.
+- The Source-style console accepts web configs, binds, aliases, command chains and guarded chat binds. `wait` runs
+  after the next command or menu frame.
+- Hold jump, Crouch jump, mouse yaw/pitch scaling, the sensitivity converter and `cl_showpos`.
+- Landing spot draws a low dome and ground ring where you'd land with no further input. Off by default, with
+  Practice and Always modes, an optional dotted path, colour and `!landing`.
 
 **Native performance and windowing**
-- Ghost actor animation reuses pose buffers and caches animation data. Three-ghost frame-time samples improved by
-  39–44% in ThrowTop's benchmark; pose identity stays unchanged.
-- Windows borderless windows no longer retain the title bar or show the original 1280×720 WebView seam.
-
-Phase 1 still needs the frozen web content pass, including knife part bones, hilt and gun-camo rendering, the final
-landing marker shape, role visibility, and the two-handed gun wrist pose. See `/tmp/bh-0038/native-report.md`.
+- ThrowTop's actor animation changes reuse pose buffers and cache animation data.
+- ThrowTop's Windows borderless fix removes the title bar and the original 1280×720 WebView seam.
 
 ## v0.7.3 — Native
 
