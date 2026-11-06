@@ -14,6 +14,18 @@ type Params = Record<string, string>;
 interface Definition {
   material: string;
   additive?: boolean;
+  radius?: string;
+  color?: string;
+  spriteCard?: boolean;
+  addSelf?: number;
+  overbright?: number;
+  blendFrames?: boolean;
+  startFadeSize?: number;
+  endFadeSize?: number;
+  maxSize?: number;
+  normalMap?: string;
+  refractAmount?: number;
+  "Sort particles"?: string;
   initializers: Record<string, Params>;
   operators: Record<string, Params>;
   emitters: Record<string, Params>;
@@ -51,6 +63,8 @@ export interface ParticleSample {
   color: number[];
   roll: number;
   uv: number[];
+  uvNext: number[];
+  frameBlend: number;
   trail: number;
 }
 
@@ -159,13 +173,19 @@ export function sampleCrashParticle(
   const travel = drag > 0 ? -Math.expm1(-drag * age) / drag : age;
   for (let i = 0; i < 3; i++)
     position[i] += velocity[i] * travel + (gravity[i] * age * age) / 2;
-  const radius = range(I["Radius Random"], "radius_min", "radius_max", 14, 5);
+  const radius = range(
+    I["Radius Random"],
+    "radius_min",
+    "radius_max",
+    14,
+    Number(s.radius ?? 5),
+  );
   const scale = O["Radius Scale"];
   let rt = fraction(t, num(scale, "start_time"), num(scale, "end_time", 1));
   if (num(scale, "ease_in_and_out")) rt = ease(rt);
   else {
     const bias = num(scale, "scale_bias", 0.5);
-    if (bias > 0 && bias < 1) rt = rt ** (Math.log(bias) / Math.log(0.5));
+    if (bias > 0 && bias < 1) rt = rt / ((1 / bias - 2) * (1 - rt) + 1);
   }
   const r =
     radius *
@@ -186,12 +206,14 @@ export function sampleCrashParticle(
     num(A, "end_fade_out_time", 1),
   );
   let alpha = range(I["Alpha Random"], "alpha_min", "alpha_max", 15, 255) / 255;
-  alpha *=
-    lerp(num(A, "start_alpha", 1), 1, fadeIn) *
-    lerp(1, num(A, "end_alpha"), fadeOut);
+  // Source fades are splines; the fade-out operator overwrites the fade-in result.
+  if (t < num(A, "end_fade_in_time"))
+    alpha *= lerp(num(A, "start_alpha", 1), 1, ease(fadeIn));
+  else if (t >= num(A, "start_fade_out_time", 1))
+    alpha *= lerp(1, num(A, "end_alpha"), ease(fadeOut));
   const C = I["Color Random"],
-    c1 = vec(C?.color1, "255 255 255"),
-    c2 = vec(C?.color2, "255 255 255");
+    c1 = vec(C?.color1, s.color ?? "255 255 255"),
+    c2 = vec(C?.color2, s.color ?? "255 255 255");
   const color = c1.map((v, i) => lerp(v, c2[i], rand(16)) / 255);
   const fade = O["Color Fade"],
     target = vec(fade?.color_fade, "255 255 255");
@@ -230,22 +252,33 @@ export function sampleCrashParticle(
       ) +
         num(spin, "rotation_speed_constant") +
         num(O["Rotation Spin Roll"], "spin_rate_degrees"));
-  let uv = [0, 0, 1, 1];
+  let uv = [0, 0, 1, 1],
+    uvNext = uv,
+    frameBlend = 0;
   const sequence = Math.floor(
     range(I["Sequence Random"], "sequence_min", "sequence_max", 20) + 0.5,
   );
   const sheet = s.sheet?.[String(sequence)];
   if (sheet?.frames.length) {
     const render = s.renderers.render_animated_sprites;
-    const frame = num(render, "animation_fit_lifetime")
-      ? Math.floor(t * sheet.frames.length)
-      : Math.floor(age * num(render, "animation rate", 1));
-    uv =
-      sheet.frames[
-        sheet.clamp
-          ? Math.min(sheet.frames.length - 1, frame)
-          : frame % sheet.frames.length
-      ].slice(1);
+    let cycles = num(render, "animation_fit_lifetime")
+      ? t
+      : age * num(render, "animation rate", 1);
+    if (
+      !num(render, "animation_fit_lifetime") &&
+      num(render, "use animation rate as FPS")
+    )
+      cycles /= sheet.duration;
+    let at = (sheet.clamp ? clamp(cycles) : cycles % 1) * sheet.duration;
+    let frame = 0;
+    while (frame < sheet.frames.length - 1 && at >= sheet.frames[frame][0])
+      at -= sheet.frames[frame++][0];
+    uv = sheet.frames[frame].slice(1);
+    const next = sheet.clamp
+      ? Math.min(frame + 1, sheet.frames.length - 1)
+      : (frame + 1) % sheet.frames.length;
+    uvNext = sheet.frames[next].slice(1);
+    frameBlend = s.blendFrames ? clamp(at / sheet.frames[frame][0]) : 0;
   }
   return {
     position,
@@ -255,29 +288,191 @@ export function sampleCrashParticle(
     color,
     roll: (roll * Math.PI) / 180,
     uv,
+    uvNext,
+    frameBlend,
     trail: range(I["Trail Length Random"], "length_min", "length_max", 21),
   };
 }
 
+/** Source sprite trails have a head at the particle and a single tail, not a centred card. */
+export function crashTrailShape(name: string, p: ParticleSample, age: number) {
+  const r = systems[name].renderers.render_sprite_trail;
+  if (!r) return { length: 0, width: p.radius * 2 };
+  const fade = num(r, "length fade in time");
+  const raw =
+    Math.hypot(...p.velocity) *
+    p.trail *
+    (fade > 0 ? Math.min(1, age / fade) : 1);
+  const length =
+    raw > 0
+      ? Math.min(num(r, "max length", 512), Math.max(num(r, "min length"), raw))
+      : 0;
+  return { length, width: Math.min(p.radius, length) };
+}
 const vertex = `
-attribute vec3 center; attribute vec4 tint; attribute vec4 rect; attribute vec4 shape; attribute vec3 velocity;
-varying vec2 vUv; varying vec4 vTint;
+attribute vec3 center; attribute vec4 tint; attribute vec4 rect; attribute vec4 rectNext; attribute float frameBlend; attribute vec4 shape; attribute vec3 velocity;
+uniform vec3 sizeFade;
+varying vec2 vUv; varying vec2 vUvNext; varying float vFrameBlend; varying vec4 vTint;
 void main(){
  vec4 c=modelViewMatrix*vec4(center,1.); vec2 q=position.xy;
- float cs=cos(shape.y), sn=sin(shape.y); q=mat2(cs,-sn,sn,cs)*q;
- if(shape.z>0.){ vec2 d=(modelViewMatrix*vec4(velocity,0.)).xy; float len=length(d); d=len>0.?d/len:vec2(0.,1.); q=vec2(-d.y,d.x)*q.x+d*q.y*max(1.,shape.z/max(shape.x,.01)); }
- if(shape.w>0.) gl_Position=projectionMatrix*(modelViewMatrix*vec4(center+vec3(q*shape.x,0.),1.));
- else {c.xy+=q*shape.x;gl_Position=projectionMatrix*c;}
- vUv=mix(rect.xy,rect.zw,vec2(uv.x,1.-uv.y));vTint=tint;
+ // SpriteCard receives gamma-encoded particle tint; texture samples are linear.
+ vTint=vec4(pow(max(tint.rgb,vec3(0.)),vec3(2.2)),tint.a);
+ float radius=shape.x;
+ float distanceToEye=length(c.xyz);
+ float fade=1.-clamp((radius-sizeFade.x*distanceToEye)/max(.0001,(sizeFade.y-sizeFade.x)*distanceToEye),0.,1.);
+ vTint*=fade;
+ radius=min(radius,sizeFade.z*distanceToEye);
+ if(shape.z>0.){
+   vec2 d=(modelViewMatrix*vec4(velocity,0.)).xy; float len=length(d); d=len>0.?d/len:vec2(0.,1.);
+   c.xy+=vec2(-d.y,d.x)*q.x*shape.x*.5+d*(q.y-1.)*.5*shape.z;
+   gl_Position=projectionMatrix*c;
+ } else {
+   float cs=cos(shape.y), sn=sin(shape.y); q=mat2(cs,-sn,sn,cs)*q;
+   if(shape.w>0.) gl_Position=projectionMatrix*(modelViewMatrix*vec4(center+vec3(q*radius,0.),1.));
+   else {c.xy+=q*radius;gl_Position=projectionMatrix*c;}
+ }
+ vec2 tex=vec2(uv.x,1.-uv.y);
+ vUv=mix(rect.xy,rect.zw,tex);vUvNext=mix(rectNext.xy,rectNext.zw,tex);vFrameBlend=frameBlend;
 }`;
-const fragment = `uniform sampler2D map; varying vec2 vUv; varying vec4 vTint; void main(){vec4 p=texture2D(map,vUv)*vTint;if(p.a<.002)discard;gl_FragColor=p;
+const fragment = `uniform sampler2D map; uniform float addSelf; uniform float overbright;
+varying vec2 vUv; varying vec2 vUvNext; varying float vFrameBlend; varying vec4 vTint;
+void main(){
+ vec4 p=mix(texture2D(map,vUv),texture2D(map,vUvNext),vFrameBlend);
+ p.rgb*=overbright;
+ p.a*=vTint.a;
+ if(addSelf>0.) p.rgb*=p.a*(1.+overbright*addSelf*vTint.a);
+ p.rgb*=vTint.rgb;
+ if(p.a<.002)discard;gl_FragColor=p;
 #include <tonemapping_fragment>
 #include <colorspace_fragment>
 }`;
 
+// One shared GPU colour resolve per view, even when several crates explode together. Works with the multisampled HDR/export target too.
+// This deliberately refracts the actual scene, with no invented magenta tint or extra scene render.
+const warpFragment = `uniform sampler2D map; uniform sampler2D sceneMap; uniform vec2 sceneSize;
+uniform float refractAmount; uniform bool sceneSrgb;
+varying vec2 vUv; varying vec4 vTint;
+void main(){
+ vec4 normal=texture2D(map,vUv);
+ vec2 coord=gl_FragCoord.xy/sceneSize;
+ vec2 offset=(normal.rg*2.-1.)*normal.a*refractAmount*vTint.a;
+ vec4 p=texture2D(sceneMap,clamp(coord+offset,vec2(0.),vec2(1.)));
+ if(sceneSrgb) p=sRGBTransferEOTF(p);
+ gl_FragColor=vec4(p.rgb,1.);
+ #include <colorspace_fragment>
+}`;
+function sceneWarp() {
+  let copy: THREE.WebGLRenderTarget | undefined;
+  let users = 0,
+    frame = -1;
+  let lastRenderer: THREE.WebGLRenderer | undefined;
+  let lastCamera: THREE.Camera | undefined;
+  let lastTarget: THREE.WebGLRenderTarget | null | undefined;
+  return (
+    mesh: THREE.Mesh<THREE.InstancedBufferGeometry, THREE.ShaderMaterial>,
+  ) => {
+    users++;
+    mesh.material.addEventListener("dispose", () => {
+      if (--users === 0) {
+        copy?.dispose();
+        copy = undefined;
+        frame = -1;
+      }
+    });
+    mesh.onBeforeRender = (renderer, _scene, camera) => {
+      const target = renderer.getRenderTarget();
+      const size = target
+        ? new THREE.Vector2(target.width, target.height)
+        : renderer.getDrawingBufferSize(new THREE.Vector2());
+      const type = target?.texture.type ?? THREE.UnsignedByteType;
+      if (
+        !copy ||
+        copy.width !== size.x ||
+        copy.height !== size.y ||
+        copy.texture.type !== type
+      ) {
+        copy?.dispose();
+        frame = -1;
+        copy = new THREE.WebGLRenderTarget(size.x, size.y, {
+          type,
+          depthBuffer: false,
+          stencilBuffer: false,
+        });
+      }
+      if (
+        lastRenderer !== renderer ||
+        frame !== renderer.info.render.frame ||
+        lastCamera !== camera ||
+        lastTarget !== target
+      ) {
+        const gl = renderer.getContext() as WebGL2RenderingContext,
+          draw = gl.getParameter(gl.DRAW_FRAMEBUFFER_BINDING),
+          read = gl.getParameter(gl.READ_FRAMEBUFFER_BINDING);
+        const face = renderer.getActiveCubeFace(),
+          mip = renderer.getActiveMipmapLevel();
+        renderer.setRenderTarget(copy);
+        // FRAMEBUFFER binds change READ too; explicitly synchronize Three's separate READ cache.
+        renderer.state.bindFramebuffer(
+          gl.READ_FRAMEBUFFER,
+          gl.getParameter(gl.DRAW_FRAMEBUFFER_BINDING),
+        );
+        renderer.state.bindFramebuffer(gl.READ_FRAMEBUFFER, draw);
+        gl.blitFramebuffer(
+          0,
+          0,
+          size.x,
+          size.y,
+          0,
+          0,
+          size.x,
+          size.y,
+          gl.COLOR_BUFFER_BIT,
+          gl.NEAREST,
+        );
+        renderer.setRenderTarget(target, face, mip);
+        renderer.state.bindFramebuffer(gl.READ_FRAMEBUFFER, read);
+        lastRenderer = renderer;
+        frame = renderer.info.render.frame;
+        lastCamera = camera;
+        lastTarget = target;
+      }
+      mesh.material.uniforms.sceneMap.value = copy.texture;
+      mesh.material.uniforms.sceneSize.value.copy(size);
+      mesh.material.uniforms.sceneSrgb.value =
+        !target && renderer.outputColorSpace === THREE.SRGBColorSpace;
+    };
+  };
+}
+// Sort only the PCF leaves that request it, separately for each render/export camera.
+function sortParticles(
+  mesh: THREE.Mesh<THREE.InstancedBufferGeometry, THREE.ShaderMaterial>,
+  camera: THREE.Camera,
+) {
+  const matrix = new THREE.Matrix4(),
+    point = new THREE.Vector3();
+  matrix.multiplyMatrices(camera.matrixWorldInverse, mesh.matrixWorld);
+  const geo = mesh.geometry,
+    centers = geo.attributes.center;
+  const order = Array.from({ length: geo.instanceCount }, (_, i) => ({
+    i,
+    z: point.fromBufferAttribute(centers, i).applyMatrix4(matrix).z,
+  }));
+  order.sort((a, b) => a.z - b.z || a.i - b.i);
+  for (const a of Object.values(geo.attributes))
+    if (a instanceof THREE.InstancedBufferAttribute) {
+      const original = a.array.slice();
+      order.forEach(({ i }, j) => {
+        for (let k = 0; k < a.itemSize; k++)
+          a.array[j * a.itemSize + k] = original[i * a.itemSize + k];
+      });
+      a.needsUpdate = true;
+    }
+}
+
 export function crashExplosions(
   entities: Record<string, string>[],
   texture: (material: string) => THREE.Texture | null,
+  normalTexture?: (path: string) => THREE.Texture | null,
 ) {
   const source = new Map<number, string>();
   entities.forEach((e, i) => {
@@ -299,6 +494,7 @@ export function crashExplosions(
       leaves(c.child, delay + Number(c.delay)),
     ),
   ];
+  const attachWarp = sceneWarp();
   const events = new Map<
     number,
     {
@@ -324,8 +520,10 @@ export function crashExplosions(
     for (const leaf of leaves(name)) {
       const d = systems[leaf.name],
         births = particleBirths(leaf.name),
-        map = texture(materialName(d.material.replaceAll("\\", "/")));
-      if (!births.length || !map) continue; // no invented texture for unavailable/refractive materials
+        map = d.normalMap
+          ? normalTexture?.(d.normalMap)
+          : texture(materialName(d.material.replaceAll("\\", "/")));
+      if (!births.length || !map) continue; // no invented texture for unavailable materials
       const base = new THREE.PlaneGeometry(2, 2),
         geo = new THREE.InstancedBufferGeometry();
       geo.index = base.index;
@@ -334,6 +532,8 @@ export function crashExplosions(
         ["center", 3],
         ["tint", 4],
         ["rect", 4],
+        ["rectNext", 4],
+        ["frameBlend", 1],
         ["shape", 4],
         ["velocity", 3],
       ] as const)
@@ -347,17 +547,49 @@ export function crashExplosions(
       geo.instanceCount = births.length;
       const additive = d.additive === true;
       const mat = new THREE.ShaderMaterial({
-        uniforms: { map: { value: map } },
+        uniforms: {
+          map: { value: map },
+          addSelf: { value: d.addSelf ?? 0 },
+          overbright: { value: d.overbright ?? 1 },
+          sizeFade: {
+            value: new THREE.Vector3(
+              d.startFadeSize ?? 10,
+              d.endFadeSize ?? 20,
+              d.maxSize ?? 20,
+            ),
+          },
+          sceneMap: { value: null },
+          sceneSize: { value: new THREE.Vector2() },
+          sceneSrgb: { value: false },
+          refractAmount: { value: d.refractAmount ?? 0 },
+        },
         vertexShader: vertex,
-        fragmentShader: fragment,
+        fragmentShader: d.normalMap ? warpFragment : fragment,
+        toneMapped: !d.normalMap,
         transparent: true,
         depthWrite: false,
-        blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
+        blending: d.normalMap
+          ? THREE.NoBlending
+          : d.addSelf
+            ? THREE.CustomBlending
+            : additive
+              ? THREE.AdditiveBlending
+              : THREE.NormalBlending,
+        blendSrc: THREE.OneFactor,
+        blendDst: THREE.OneMinusSrcAlphaFactor,
         side: THREE.DoubleSide,
       });
       const mesh = new THREE.Mesh(geo, mat);
+      mesh.name = leaf.name;
+      // Preserve the PCF child order across differing material blend modes.
+      mesh.renderOrder = 10 + batches.length;
       mesh.frustumCulled = false;
       mesh.raycast = () => {};
+      if (d.normalMap) {
+        mat.userData.ownedTextures = [map];
+        mat.addEventListener("dispose", () => map.dispose());
+        attachWarp(mesh);
+      }
       group.add(mesh);
       batches.push({ ...leaf, births, geo });
     }
@@ -379,6 +611,16 @@ export function crashExplosions(
   };
   return {
     root,
+    // Called by world.cull / scene.onBeforeRender, before Three uploads geometry buffers.
+    sort(camera: THREE.Camera) {
+      root.traverse((o) => {
+        if (
+          o instanceof THREE.Mesh &&
+          systems[o.name]?.["Sort particles"] === "1"
+        )
+          sortParticles(o, camera);
+      });
+    },
     update(
       transforms: Map<number, BrushTransform>,
       now: number,
@@ -453,21 +695,28 @@ export function crashExplosions(
               p.uv[2],
               p.uv[3],
             );
+            (attrs.rectNext as THREE.InstancedBufferAttribute).setXYZW(
+              count,
+              p.uvNext[0],
+              p.uvNext[1],
+              p.uvNext[2],
+              p.uvNext[3],
+            );
+            (attrs.frameBlend as THREE.InstancedBufferAttribute).setX(
+              count,
+              p.frameBlend,
+            );
             const R = systems[batch.name].renderers;
-            const trail = R.render_sprite_trail
-              ? Math.min(
-                  num(R.render_sprite_trail, "max length", 512),
-                  Math.max(
-                    num(R.render_sprite_trail, "min length", 0),
-                    Math.hypot(...p.velocity) * p.trail,
-                  ),
-                )
-              : 0;
+            const trail = crashTrailShape(
+              batch.name,
+              p,
+              now - state.since - batch.delay - born,
+            );
             (attrs.shape as THREE.InstancedBufferAttribute).setXYZW(
               count,
-              p.radius,
+              R.render_sprite_trail ? trail.width : p.radius,
               p.roll,
-              trail,
+              trail.length,
               num(R.render_animated_sprites, "orientation_type") === 2 ? 1 : 0,
             );
             count++;

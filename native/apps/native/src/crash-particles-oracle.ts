@@ -1,5 +1,10 @@
 import { writeFileSync } from "node:fs";
-import { CRASH_BSP_SHA, particleBirths, sampleCrashParticle } from "../../web/src/map-effects/crash-explosions";
+import {
+  CRASH_BSP_SHA,
+  particleBirths,
+  sampleCrashParticle,
+  crashTrailShape,
+} from "../../web/src/map-effects/crash-explosions";
 import definitions from "../../web/src/map-effects/crash-particles.json";
 
 const rows = [];
@@ -12,13 +17,15 @@ for (const system of Object.keys(definitions)) {
           [-90, 0, 0],
           [10, 20, 30],
         ]) {
+          const sample = sampleCrashParticle(system, index, age, seed, angles);
           rows.push({
             system,
             seed,
             index,
             age,
             angles,
-            sample: sampleCrashParticle(system, index, age, seed, angles),
+            sample,
+            trailShape: sample && crashTrailShape(system, sample, age),
           });
         }
       }

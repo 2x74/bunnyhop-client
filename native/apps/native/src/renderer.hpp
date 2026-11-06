@@ -1615,7 +1615,23 @@ class Renderer {
         presentationStart = profile_now();
         presentation->draw(vp, eye);
         if (crashExplosions)
-            crashExplosions->draw(vp, core, propCopies, right, up, worldSeconds, effectsVisible && !graphics.potato);
+            crashExplosions->draw(
+                    vp,
+                    core,
+                    propCopies,
+                    right,
+                    up,
+                    eye,
+                    worldSeconds,
+                    effectsVisible && !graphics.potato,
+                    viewportWidth,
+                    viewportHeight,
+                    frameLook || hdr_pass(),
+                    [&]() {
+                        capture_refraction();
+                        return refractColor;
+                    }
+            );
         profile_elapsed(frameProfile.presentationSubmit, presentationStart);
     }
 
@@ -2380,7 +2396,12 @@ public:
         const char *rawNames = bh_material_names_json(core, &materialBytes);
         const auto particleNames = rawNames && materialBytes ? nlohmann::json::parse(rawNames, rawNames + materialBytes)
                                                              : nlohmann::json::array();
-        crashExplosions->load(core, assetRoot, [&](const std::string &name) -> GLuint {
+        crashExplosions->load(core, assetRoot, [&](const std::string &name, bool normal) -> GLuint {
+            if (normal) {
+                const auto path = "materials/" + name + ".vtf";
+                BhImage image{};
+                return bh_texture_path(core, path.c_str(), &image) ? upload(image, false, true, false) : 0;
+            }
             for (size_t i = 0; i < particleNames.size() && i < materials.size(); ++i) {
                 if (particleNames[i] != name || materials[i].texture < 0) continue;
                 const auto id = texture(materials[i].texture);

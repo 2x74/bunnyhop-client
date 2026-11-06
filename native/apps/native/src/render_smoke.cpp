@@ -15,7 +15,7 @@ int main(int argc, char **argv) {
         bool zoneGold = false;
         bool simulateFire = false, aura = true, firstPersonGlow = true;
         bool flashlight = false, triggers = false, msaa = false, sourceLook = false, requireWater = false;
-        int frames = 2, ticks = 0, restoreTicks = -1;
+        int frames = 2, ticks = 0, restoreTicks = -1, captureWidth = 1280, captureHeight = 720;
         bool explicitPlayer = false, reset = false, replayPractice = false;
         float player[3] = {};
         std::string stateOutput, replay;
@@ -58,6 +58,10 @@ int main(int argc, char **argv) {
                 seconds = number();
             else if (arg == "--water-quality")
                 waterQuality = value();
+            else if (arg == "--width")
+                captureWidth = int(number());
+            else if (arg == "--height")
+                captureHeight = int(number());
             else if (arg == "--frames")
                 frames = int(number());
             else if (arg == "--zone-file")
@@ -150,6 +154,8 @@ int main(int argc, char **argv) {
             );
         if (frames < 1 || frames > 10000 || seconds < 0)
             throw std::runtime_error("frames must be 1..10000 and seconds nonnegative");
+        if (captureWidth < 256 || captureWidth > 4096 || captureHeight < 256 || captureHeight > 4096)
+            throw std::runtime_error("capture dimensions must be 256..4096");
         if (waterQuality != "simple" && waterQuality != "refracted")
             throw std::runtime_error("water-quality must be simple or refracted");
         if (!SDL_Init(SDL_INIT_VIDEO)) throw std::runtime_error(SDL_GetError());
@@ -162,7 +168,9 @@ int main(int argc, char **argv) {
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
         SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
-        auto *window = SDL_CreateWindow("Native render evidence", 1280, 720, SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN);
+        auto *window = SDL_CreateWindow(
+                "Native render evidence", captureWidth, captureHeight, SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN
+        );
         if (!window) throw std::runtime_error(SDL_GetError());
 
         struct Window {

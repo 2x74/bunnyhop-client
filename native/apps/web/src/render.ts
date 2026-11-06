@@ -963,7 +963,10 @@ export async function buildWorld(
     const desc = index < 0 ? undefined : built.descs[materials.length + index];
     return desc && desc.texture >= 0 ? built.texture(desc.texture) : null;
   };
-  const explosions = opts.bsp && await sha256Hex(opts.bsp) === CRASH_BSP_SHA ? crashExplosions(core.entities(), effectTexture) : null;
+  const explosions = opts.bsp && await sha256Hex(opts.bsp) === CRASH_BSP_SHA ? crashExplosions(core.entities(), effectTexture, path => {
+    const payload = core.texturePath(`materials/${path}.vtf`, support.s3tc, true);
+    return payload ? textureFromPayload(payload, support, THREE.NoColorSpace) : null;
+  }) : null;
   if (explosions) root.add(explosions.root);
   const trails = spriteTrails(core.entities(), effectTexture);
   if (trails) root.add(trails.root);
@@ -1274,6 +1277,7 @@ export async function buildWorld(
     setFullbright(on) { fullbright.set(on); },
     cull(camera) {
       culler.cull(camera);
+      explosions?.sort(camera);
       animProps?.setViewer(camera.getWorldPosition(viewerPos));
     },
     setPotato(on) {

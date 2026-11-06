@@ -94,21 +94,26 @@ inline Point rotate(Point v, Point angles) {
 
 struct Sheet {
     bool clamp = false;
+    double duration = 1;
+    std::vector<double> times;
     std::vector<std::array<double, 4>> frames;
 };
 
 struct Definition {
-    std::string name, material;
+    std::string name, material, normal_map;
     bool additive = false, box = false, offset = false, local_offset = false, color_fade = false;
     bool radius_ease = false, color_ease = false, oscillate = false, fit_lifetime = false;
-    bool trail_renderer = false, horizontal = false;
+    bool trail_renderer = false, horizontal = false, sort_particles = false, blend_frames = false,
+         animation_fps = false;
+    double add_self = 0, overbright = 1, start_fade_size = 10, end_fade_size = 20, max_size = 20, refract_amount = 0;
     Range life, distance, speed, radius, alpha, rotation, spin, sequence, trail, oscillation;
     Point bias{1, 1, 1}, local_min{}, local_max{}, box_min{}, box_max{}, offset_min{}, offset_max{}, gravity{};
     Point color_min{255, 255, 255}, color_max{255, 255, 255}, color_target{255, 255, 255};
     double drag = 0, radius_start_time = 0, radius_end_time = 1, radius_start = 1, radius_end = 1, radius_bias = .5;
     double fade_in_start = 0, fade_in_end = 0, fade_out_start = 1, fade_out_end = 1, alpha_start = 1, alpha_end = 0;
     double color_start = 0, color_end = 1, frequency = 0, multiplier = 2, phase = 0;
-    double initial_roll = 0, constant_spin = 0, spin_rate = 0, animation_rate = 1, min_trail = 0, max_trail = 512;
+    double initial_roll = 0, constant_spin = 0, spin_rate = 0, animation_rate = 1, min_trail = 0, max_trail = 512,
+           trail_fade = 0;
     std::vector<double> births;
     std::vector<Sheet> sheets;
     std::vector<std::pair<std::string, double>> children;
@@ -130,10 +135,10 @@ inline void compile_initializers(Definition &d, const Json &initializers) {
     d.local_offset = number(offset, "offset in local space 0/1") != 0;
     d.offset_min = vector(offset, "offset min");
     d.offset_max = vector(offset, "offset max");
-    d.radius = range(group(initializers, "Radius Random"), "radius_min", "radius_max", 5);
+    d.radius = range(group(initializers, "Radius Random"), "radius_min", "radius_max", d.radius.low);
     d.alpha = range(group(initializers, "Alpha Random"), "alpha_min", "alpha_max", 255);
-    d.color_min = vector(group(initializers, "Color Random"), "color1", {255, 255, 255});
-    d.color_max = vector(group(initializers, "Color Random"), "color2", {255, 255, 255});
+    d.color_min = vector(group(initializers, "Color Random"), "color1", d.color_min);
+    d.color_max = vector(group(initializers, "Color Random"), "color2", d.color_max);
     const auto &rotation = group(initializers, "Rotation Random");
     d.rotation = range(rotation, "rotation_offset_min", "rotation_offset_max");
     d.initial_roll = number(rotation, "rotation_initial");
@@ -187,6 +192,17 @@ inline Definition compile(const std::string &name, const Json &data) {
     if (d.material.ends_with(".vmt")) d.material.resize(d.material.size() - 4);
     if (d.material.starts_with("materials/")) d.material.erase(0, 10);
     d.additive = data.value("additive", false);
+    d.normal_map = data.value("normalMap", "");
+    d.refract_amount = number(data, "refractAmount");
+    d.add_self = number(data, "addSelf");
+    d.overbright = number(data, "overbright", 1);
+    d.start_fade_size = number(data, "startFadeSize", 10);
+    d.end_fade_size = number(data, "endFadeSize", 20);
+    d.max_size = number(data, "maxSize", 20);
+    d.blend_frames = data.value("blendFrames", false);
+    d.sort_particles = number(data, "Sort particles") == 1;
+    d.radius.low = number(data, "radius", 5);
+    d.color_min = d.color_max = vector(data, "color", {255, 255, 255});
     compile_initializers(d, group(data, "initializers"));
     compile_operators(d, group(data, "operators"));
     for (const auto &[kind, params] : group(data, "emitters").items()) {
@@ -201,18 +217,24 @@ inline Definition compile(const std::string &name, const Json &data) {
         const auto index = size_t(std::stoul(sequence));
         if (index > 255) throw std::runtime_error("Crash particle sheet sequence exceeds budget");
         if (d.sheets.size() <= index) d.sheets.resize(index + 1);
-        d.sheets[index].clamp = sheet.value("clamp", false);
-        for (const auto &frame : sheet.at("frames"))
-            d.sheets[index].frames.push_back({frame[1], frame[2], frame[3], frame[4]});
+        auto &out = d.sheets[index];
+        out.clamp = sheet.value("clamp", false);
+        out.duration = number(sheet, "duration", 1);
+        for (const auto &frame : sheet.at("frames")) {
+            out.times.push_back(frame[0]);
+            out.frames.push_back({frame[1], frame[2], frame[3], frame[4]});
+        }
     }
     for (const auto &child : group(data, "children"))
         d.children.emplace_back(child.at("child").get<std::string>(), number(child, "delay"));
     const auto &sprite = group(group(data, "renderers"), "render_animated_sprites");
     d.fit_lifetime = number(sprite, "animation_fit_lifetime") != 0;
     d.animation_rate = number(sprite, "animation rate", 1);
+    d.animation_fps = number(sprite, "use animation rate as FPS") != 0;
     d.horizontal = number(sprite, "orientation_type") == 2;
     const auto &trail = group(group(data, "renderers"), "render_sprite_trail");
     d.trail_renderer = group(data, "renderers").contains("render_sprite_trail");
+    d.trail_fade = number(trail, "length fade in time");
     d.min_trail = number(trail, "min length");
     d.max_trail = number(trail, "max length", 512);
     return d;
@@ -220,8 +242,8 @@ inline Definition compile(const std::string &name, const Json &data) {
 
 struct Sample {
     Point position{}, velocity{}, color{};
-    double radius = 0, alpha = 0, roll = 0, trail = 0;
-    std::array<double, 4> uv{0, 0, 1, 1};
+    double radius = 0, alpha = 0, roll = 0, trail = 0, frame_blend = 0;
+    std::array<double, 4> uv{0, 0, 1, 1}, uv_next{0, 0, 1, 1};
 };
 
 inline void motion(const Definition &d, Random random, double age, Point angles, Sample &p) {
@@ -245,16 +267,36 @@ inline void motion(const Definition &d, Random random, double age, Point angles,
     }
 }
 
+inline void atlas(const Definition &d, Random random, double age, double t, Sample &p) {
+    const auto sequence = size_t(std::floor(d.sequence.sample(random, 20) + .5));
+    if (sequence >= d.sheets.size() || d.sheets[sequence].frames.empty()) return;
+    const auto &sheet = d.sheets[sequence];
+    double cycles = d.fit_lifetime ? t : age * d.animation_rate;
+    if (!d.fit_lifetime && d.animation_fps) cycles /= sheet.duration;
+    double at = (sheet.clamp ? std::clamp(cycles, 0., 1.) : std::fmod(cycles, 1.)) * sheet.duration;
+    size_t frame = 0;
+    while (frame < sheet.frames.size() - 1 && at >= sheet.times[frame])
+        at -= sheet.times[frame++];
+    const auto next = sheet.clamp ? std::min(frame + 1, sheet.frames.size() - 1) : (frame + 1) % sheet.frames.size();
+    p.uv = sheet.frames[frame];
+    p.uv_next = sheet.frames[next];
+    p.frame_blend = d.blend_frames ? std::clamp(at / sheet.times[frame], 0., 1.) : 0;
+}
+
 inline void appearance(const Definition &d, Random random, double age, double t, Sample &p) {
     double rt = fraction(t, d.radius_start_time, d.radius_end_time);
     if (d.radius_ease)
         rt = ease(rt);
     else if (d.radius_bias > 0 && d.radius_bias < 1)
-        rt = std::pow(rt, std::log(d.radius_bias) / std::log(.5));
+        rt = rt / ((1 / d.radius_bias - 2) * (1 - rt) + 1);
     p.radius = d.radius.sample(random, 14) * lerp(d.radius_start, d.radius_end, rt);
     const double fade_in = fraction(t, d.fade_in_start, d.fade_in_end);
     const double fade_out = fraction(t, d.fade_out_start, d.fade_out_end);
-    p.alpha = d.alpha.sample(random, 15) / 255 * lerp(d.alpha_start, 1, fade_in) * lerp(1, d.alpha_end, fade_out);
+    p.alpha = d.alpha.sample(random, 15) / 255;
+    if (t < d.fade_in_end)
+        p.alpha *= lerp(d.alpha_start, 1, ease(fade_in));
+    else if (t >= d.fade_out_start)
+        p.alpha *= lerp(1, d.alpha_end, ease(fade_out));
     double ct = fraction(t, d.color_start, d.color_end);
     if (d.color_ease) ct = ease(ct);
     for (size_t i = 0; i < 3; ++i) {
@@ -269,13 +311,88 @@ inline void appearance(const Definition &d, Random random, double age, double t,
     p.roll = (d.rotation.sample(random, 18) + d.initial_roll
               + age * (d.spin.sample(random, 19) + d.constant_spin + d.spin_rate))
              * pi / 180;
-    const auto sequence = size_t(std::floor(d.sequence.sample(random, 20) + .5));
-    if (sequence < d.sheets.size() && !d.sheets[sequence].frames.empty()) {
-        const auto &sheet = d.sheets[sequence];
-        const auto frame = size_t(std::floor(d.fit_lifetime ? t * sheet.frames.size() : age * d.animation_rate));
-        p.uv = sheet.frames[sheet.clamp ? std::min(sheet.frames.size() - 1, frame) : frame % sheet.frames.size()];
-    }
+    atlas(d, random, age, t, p);
     p.trail = d.trail.sample(random, 21);
+}
+
+struct TrailShape {
+    double length, width;
+};
+
+inline TrailShape trail_shape(const Definition &d, const Sample &p, double age) {
+    if (!d.trail_renderer) return {0, p.radius * 2};
+    const double fade = d.trail_fade > 0 ? std::min(1., age / d.trail_fade) : 1;
+    const double raw = std::hypot(p.velocity[0], p.velocity[1], p.velocity[2]) * p.trail * fade;
+    const double length = raw > 0 ? std::clamp(raw, d.min_trail, d.max_trail) : 0;
+    return {length, std::min(p.radius, length)};
+}
+
+struct CardShape {
+    double radius, fade;
+    TrailShape trail;
+};
+
+inline CardShape card_shape(const Definition &d, const Sample &p, double age, double distance) {
+    const auto trail = trail_shape(d, p, age);
+    const double radius = d.trail_renderer ? trail.width : p.radius;
+    const double fade = 1
+                        - std::clamp(
+                                (radius - d.start_fade_size * distance)
+                                        / std::max(.0001, (d.end_fade_size - d.start_fade_size) * distance),
+                                0.,
+                                1.
+                        );
+    return {std::min(radius, d.max_size * distance), fade, trail};
+}
+
+inline double dot(Point a, Point b) {
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+inline Point card_offset(
+        const Definition &d,
+        const Sample &p,
+        const CardShape &shape,
+        std::array<double, 2> corner,
+        Point right,
+        Point up
+) {
+    double x = corner[0], y = corner[1];
+    if (shape.trail.length > 0) {
+        const double vx = dot(right, p.velocity), vy = dot(up, p.velocity), length = std::hypot(vx, vy);
+        const double dx = length > 0 ? vx / length : 0, dy = length > 0 ? vy / length : 1;
+        const double width = x * shape.trail.width * .5, tail = (y - 1) * .5 * shape.trail.length;
+        x = -dy * width + dx * tail;
+        y = dx * width + dy * tail;
+    } else {
+        const double cs = std::cos(p.roll), sn = std::sin(p.roll);
+        x = (cs * corner[0] + sn * corner[1]) * shape.radius;
+        y = (-sn * corner[0] + cs * corner[1]) * shape.radius;
+        if (d.horizontal) return {x, y, 0};
+    }
+    return {right[0] * x + up[0] * y, right[1] * x + up[1] * y, right[2] * x + up[2] * y};
+}
+
+struct OrderedSample {
+    Sample particle;
+    double age;
+    uint32_t index;
+    double depth;
+};
+
+inline double view_depth(const Sample &p, Point eye, Point right, Point up) {
+    const Point back{
+            right[1] * up[2] - right[2] * up[1],
+            right[2] * up[0] - right[0] * up[2],
+            right[0] * up[1] - right[1] * up[0]
+    };
+    return dot(back, {p.position[0] - eye[0], p.position[1] - eye[1], p.position[2] - eye[2]});
+}
+
+inline void sort_samples(std::vector<OrderedSample> &samples) {
+    std::sort(samples.begin(), samples.end(), [](const auto &a, const auto &b) {
+        return a.depth != b.depth ? a.depth < b.depth : a.index < b.index;
+    });
 }
 
 inline std::optional<Sample> sample(const Definition &d, uint32_t index, double age, uint32_t seed, Point angles = {}) {
