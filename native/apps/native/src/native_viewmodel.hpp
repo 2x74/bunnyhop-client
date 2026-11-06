@@ -20,6 +20,7 @@ class NativeViewmodel {
         GLuint vao = 0, vbo = 0, ebo = 0;
         size_t vertices = 0, offset = 0, indices = 0, indexOffset = 0, glowOffset = 0;
         GLuint glowVbo = 0;
+        bool borrowed = false;
     };
 
     struct HeadwearFit {
@@ -77,8 +78,12 @@ class NativeViewmodel {
     std::unordered_map<std::string, Entry> entries;
     std::unordered_map<std::string, Mesh> meshes;
     std::vector<std::string> weapons;
-    std::vector<float> data, pose;
-    nlohmann::json metadata;
+    std::shared_ptr<const native_vm::ModelData> modelData;
+    const std::vector<float> &data;
+    const nlohmann::json &metadata;
+    std::vector<float> pose;
+    std::unordered_set<int> borrowedPrograms;
+    std::unordered_map<int, PlayerProgram> handedOffPrograms;
     native_render::KnifeSpinner spinner;
     native_render::InspectCueQueue inspectCueQueue;
     // The first-person weapons pass (first_person_weapons.hpp): what the knife or gun in hand shows each frame.
@@ -316,9 +321,31 @@ class NativeViewmodel {
         return cached.look;
     }
 
-    PlayerProgram link_player_program(
-            int finish, bool glove, bool detail, bool hilt, int camo, int stamp, int sheen, PlayerMaterial material
-    ) {
+    struct ProgramSpec {
+        int finish, camo, stamp, sheen;
+        bool glove, detail, hilt;
+        PlayerMaterial material;
+
+        int key() const {
+            return native_render::player_program_key(finish, glove, detail, hilt, camo, stamp, sheen, material);
+        }
+    };
+
+    static ProgramSpec program_spec(const Look &look, PlayerMaterial material, bool detail) {
+        const bool solid = material == PlayerMaterial::solid;
+        const int camo = material == PlayerMaterial::gun || solid ? look.camoKind : -1;
+        return {solid ? look.finish : 0,
+                camo,
+                camo >= 0 ? look.camoStamp : 0,
+                camo >= 0 ? look.camoSheen : 0,
+                look.glove != "knit",
+                detail,
+                solid && look.hiltOn,
+                material};
+    }
+
+    std::pair<std::string, std::string> program_sources(const ProgramSpec &spec) const {
+        const auto [finish, camo, stamp, sheen, glove, detail, hilt, material] = spec;
         const auto defines = native_render::player_defines(finish, glove, detail, hilt, camo, stamp, sheen, material);
         const bool gun = material == PlayerMaterial::gun || material == PlayerMaterial::world_gun;
         const auto vertex = defines + (gun ? shaders->gunVertex : shaders->vertex);
@@ -326,8 +353,12 @@ class NativeViewmodel {
                               + (material == PlayerMaterial::ghost ? shaders->ghost
                                  : gun                             ? shaders->gun
                                                                    : shaders->solid);
+        return {vertex, fragment};
+    }
+
+    PlayerProgram reflect_program(GLuint id) {
         PlayerProgram p;
-        p.id = link_program(gl, vertex.c_str(), fragment.c_str());
+        p.id = id;
         auto at = [&](const char *name) {
             return gl.GetUniformLocation(p.id, name);
         };
@@ -393,31 +424,110 @@ class NativeViewmodel {
     }
 
     const PlayerProgram &program(const Look &look, PlayerMaterial material, bool detail = false) {
-        const bool glove = look.glove != "knit";
-        // Guns take no finish (the knife's finish stays on the knife), as on the website.
-        const int finish = material == PlayerMaterial::solid ? look.finish : 0;
-        const bool hilt = material == PlayerMaterial::solid && look.hiltOn;
-        const int camo = material == PlayerMaterial::gun || material == PlayerMaterial::solid ? look.camoKind : -1;
-        const int stamp = camo >= 0 ? look.camoStamp : 0;
-        const int sheen = camo >= 0 ? look.camoSheen : 0;
-        const int key = native_render::player_program_key(finish, glove, detail, hilt, camo, stamp, sheen, material);
-        if (const auto found = programs.find(key); found != programs.end()) return found->second;
-        return programs.emplace(key, link_player_program(finish, glove, detail, hilt, camo, stamp, sheen, material))
-                .first->second;
+        const auto spec = program_spec(look, material, detail);
+        if (const auto found = programs.find(spec.key()); found != programs.end()) return found->second;
+        const auto [vertex, fragment] = program_sources(spec);
+        const auto id = link_program(gl, vertex.c_str(), fragment.c_str());
+        return programs.emplace(spec.key(), reflect_program(id)).first->second;
     }
 
-    void mesh(const std::string &name, int instances = 1) {
+    struct PendingProgram {
+        int key;
+        GLuint id = 0, vertex = 0, fragment = 0;
+        bool fragment_compiled = false;
+    };
+
+    std::optional<PendingProgram> pendingProgram;
+
+    void link_pending_program() {
+        auto &pending = *pendingProgram;
+        pending.id = gl.CreateProgram();
+        gl.AttachShader(pending.id, pending.vertex);
+        gl.AttachShader(pending.id, pending.fragment);
+        gl.LinkProgram(pending.id);
+        gl.DeleteShader(pending.vertex);
+        gl.DeleteShader(pending.fragment);
+        pending.vertex = pending.fragment = 0;
+    }
+
+    void submit_warm_program(const ProgramSpec &spec) {
+        const auto [vertex, fragment] = program_sources(spec);
+        PendingProgram pending{spec.key()};
+        pending.vertex = gl.CreateShader(GL_VERTEX_SHADER);
+        pending.fragment = gl.CreateShader(GL_FRAGMENT_SHADER);
+        const char *v = vertex.c_str(), *f = fragment.c_str();
+        gl.ShaderSource(pending.vertex, 1, &v, nullptr);
+        gl.ShaderSource(pending.fragment, 1, &f, nullptr);
+        gl.CompileShader(pending.vertex);
+        pendingProgram = pending;
+        if (gl.MaxShaderCompilerThreadsKHR) {
+            gl.CompileShader(pending.fragment);
+            pendingProgram->fragment_compiled = true;
+            link_pending_program();
+        }
+    }
+
+    void finish_warm_program() {
+        const auto pending = *pendingProgram;
+        pendingProgram.reset();
+        GLint linked = GL_FALSE;
+        gl.GetProgramiv(pending.id, GL_LINK_STATUS, &linked);
+        if (!linked) {
+            char log[4096]{};
+            gl.GetProgramInfoLog(pending.id, sizeof(log), nullptr, log);
+            gl.DeleteProgram(pending.id);
+            throw std::runtime_error(std::string("Player shader link failed: ") + log);
+        }
+        programs.emplace(pending.key, reflect_program(pending.id));
+    }
+
+    bool warm_program(const Look &look, PlayerMaterial material, bool detail = false) {
+        constexpr GLenum completion_status_khr = 0x91B1;
+        const auto spec = program_spec(look, material, detail);
+        if (programs.contains(spec.key())) return true;
+        if (!pendingProgram) {
+            submit_warm_program(spec);
+            return false;
+        }
+        if (!pendingProgram->fragment_compiled) {
+            gl.CompileShader(pendingProgram->fragment);
+            pendingProgram->fragment_compiled = true;
+            return false;
+        }
+        if (!pendingProgram->id) link_pending_program();
+        if (gl.MaxShaderCompilerThreadsKHR) {
+            GLint complete = GL_FALSE;
+            gl.GetProgramiv(pendingProgram->id, completion_status_khr, &complete);
+            if (!complete) return false;
+        }
+        finish_warm_program();
+        return false;
+    }
+
+    void upload_mesh(const std::string &name) {
         auto at = meshes.find(name);
         if (at == meshes.end()) return;
         auto &m = at->second;
-        if (!m.vao) {
-            gl.GenVertexArrays(1, &m.vao);
-            gl.BindVertexArray(m.vao);
+        if (m.vao) return;
+        gl.GenVertexArrays(1, &m.vao);
+        gl.BindVertexArray(m.vao);
+        if (!m.vbo) {
             gl.GenBuffers(1, &m.vbo);
             gl.BindBuffer(GL_ARRAY_BUFFER, m.vbo);
             gl.BufferData(
                     GL_ARRAY_BUFFER, m.vertices * vertex_floats * sizeof(float), data.data() + m.offset, GL_STATIC_DRAW
             );
+            gl.GenBuffers(1, &m.glowVbo);
+            gl.BindBuffer(GL_ARRAY_BUFFER, m.glowVbo);
+            gl.BufferData(GL_ARRAY_BUFFER, m.vertices * 3 * sizeof(float), data.data() + m.glowOffset, GL_STATIC_DRAW);
+            if (m.indices) {
+                gl.GenBuffers(1, &m.ebo);
+                gl.BindBuffer(GL_ELEMENT_ARRAY_BUFFER, m.ebo);
+                gl.BufferData(GL_ELEMENT_ARRAY_BUFFER, m.indices * 4, data.data() + m.indexOffset, GL_STATIC_DRAW);
+            }
+        }
+        {
+            gl.BindBuffer(GL_ARRAY_BUFFER, m.vbo);
             // position, normal, partColor, skinIndex, skinWeight, accent, finishUV, then headwear at location 8
             // (location 7 is the glow's smooth normal, in its own buffer).
             constexpr std::array<GLuint, 9> location = {0, 1, 2, 3, 4, 5, 6, 8, 9};
@@ -433,17 +543,18 @@ class NativeViewmodel {
                         reinterpret_cast<void *>(size_t(offset[a]) * 4)
                 );
             }
-            gl.GenBuffers(1, &m.glowVbo);
             gl.BindBuffer(GL_ARRAY_BUFFER, m.glowVbo);
-            gl.BufferData(GL_ARRAY_BUFFER, m.vertices * 3 * sizeof(float), data.data() + m.glowOffset, GL_STATIC_DRAW);
             gl.EnableVertexAttribArray(7);
             gl.VertexAttribPointer(7, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), nullptr);
-            if (m.indices) {
-                gl.GenBuffers(1, &m.ebo);
-                gl.BindBuffer(GL_ELEMENT_ARRAY_BUFFER, m.ebo);
-                gl.BufferData(GL_ELEMENT_ARRAY_BUFFER, m.indices * 4, data.data() + m.indexOffset, GL_STATIC_DRAW);
-            }
+            if (m.indices) gl.BindBuffer(GL_ELEMENT_ARRAY_BUFFER, m.ebo);
         }
+    }
+
+    void mesh(const std::string &name, int instances = 1) {
+        upload_mesh(name);
+        const auto at = meshes.find(name);
+        if (at == meshes.end()) return;
+        const auto &m = at->second;
         gl.BindVertexArray(m.vao);
         if (instances > 1) {
             if (m.indices)
@@ -735,36 +846,20 @@ class NativeViewmodel {
     }
 
 public:
+    enum class GraphicsMode { full, actor_only };
+
     explicit NativeViewmodel(
-            Gl &g, const std::filesystem::path &assetRoot = BUNNYHOP_NATIVE_ASSET_ROOT, bool cpu_only = false
+            Gl &g,
+            const std::filesystem::path &assetRoot = BUNNYHOP_NATIVE_ASSET_ROOT,
+            bool cpu_only = false,
+            GraphicsMode mode = GraphicsMode::full
     )
-        : gl(g) {
+        : gl(g)
+        , modelData(native_vm::ModelData::load(assetRoot))
+        , data(modelData->vertices)
+        , metadata(modelData->metadata) {
         if (std::filesystem::exists(assetRoot / "actor-animations.json"))
             actorAnimationData = std::make_shared<native_actor_anim::Data>(assetRoot.string());
-        std::ifstream file(assetRoot / "viewmodels.json");
-        if (!file) throw std::runtime_error("Native asset bundle absent; run native asset compiler");
-        file >> metadata;
-        if (metadata.at("version") != 3 || metadata.at("stride") != vertex_floats)
-            throw std::runtime_error("Unsupported native asset format");
-        const size_t bytes = metadata.value("bytes", size_t(0));
-        if (bytes) {
-            if (bytes > 768 * 1024 * 1024 || bytes % 4) throw std::runtime_error("Invalid native asset length");
-            std::ifstream binary(assetRoot / "viewmodels.bin.z", std::ios::binary);
-            std::vector<uint8_t> compressed(std::istreambuf_iterator<char>(binary), {});
-            data.resize(bytes / 4);
-            uLongf count = bytes;
-            if (uncompress(reinterpret_cast<Bytef *>(data.data()), &count, compressed.data(), compressed.size()) != Z_OK
-                || count != bytes)
-                throw std::runtime_error("Invalid compressed native assets");
-        } else {
-            std::ifstream binary(assetRoot / "viewmodels.bin", std::ios::binary | std::ios::ate);
-            const auto n = binary.tellg();
-            if (!binary || n < 0 || n > 768 * 1024 * 1024 || n % 4) throw std::runtime_error("Invalid native assets");
-            data.resize(size_t(n) / 4);
-            binary.seekg(0);
-            binary.read(reinterpret_cast<char *>(data.data()), n);
-            if (!binary) throw std::runtime_error("Truncated native assets");
-        }
         {
             std::ifstream tracks(assetRoot / "tp-inspects.json");
             if (!tracks) throw std::runtime_error("Native inspect tracks absent; run native asset compiler");
@@ -827,10 +922,10 @@ public:
                 native_vm::FirstPersonConfig::from_metadata(metadata), data
         );
         shaders = std::make_unique<native_render::PlayerShaderSources>(assetRoot);
-        if (!cpu_only) prepare_graphics();
+        if (!cpu_only) prepare_graphics(mode);
     }
 
-    void prepare_graphics() {
+    void prepare_graphics(GraphicsMode mode = GraphicsMode::full) {
         gl.GenTextures(1, &reflectionCube);
         gl.BindTexture(GL_TEXTURE_CUBE_MAP, reflectionCube);
         const uint8_t black[4] = {0, 0, 0, 255};
@@ -840,7 +935,7 @@ public:
             );
         gl.TexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         gl.TexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        gunFx = std::make_unique<NativePresentation>(gl);
+        if (mode == GraphicsMode::full) gunFx = std::make_unique<NativePresentation>(gl);
         gl.GenTextures(1, &bonesTexture);
         gl.BindTexture(GL_TEXTURE_2D, bonesTexture);
         gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -857,7 +952,7 @@ public:
         pose.reserve(256 * 12);
         basePose.reserve(256 * 12);
         equipped = look("outfit-cream", "");
-        program(equipped, PlayerMaterial::solid);
+        if (mode == GraphicsMode::full) program(equipped, PlayerMaterial::solid);
         std::cout << "Native models: " << meshes.size() << " original meshes, " << entries.size()
                   << " pose sets, GPU skinning/cosmetics\n";
     }
@@ -865,16 +960,104 @@ public:
     ~NativeViewmodel() {
         gunFx.reset();
         for (auto &[name, m] : meshes) {
+            if (m.borrowed) {
+                if (m.vao) gl.DeleteVertexArrays(1, &m.vao);
+                continue;
+            }
             if (m.glowVbo) gl.DeleteBuffers(1, &m.glowVbo);
             if (m.ebo) gl.DeleteBuffers(1, &m.ebo);
             if (m.vbo) gl.DeleteBuffers(1, &m.vbo);
             if (m.vao) gl.DeleteVertexArrays(1, &m.vao);
         }
         for (const auto &[key, p] : programs)
-            gl.DeleteProgram(p.id);
+            if (!borrowedPrograms.contains(key)) gl.DeleteProgram(p.id);
+        if (pendingProgram) {
+            if (pendingProgram->id) gl.DeleteProgram(pendingProgram->id);
+            if (pendingProgram->vertex) gl.DeleteShader(pendingProgram->vertex);
+            if (pendingProgram->fragment) gl.DeleteShader(pendingProgram->fragment);
+        }
+        for (const auto &[key, program] : handedOffPrograms)
+            gl.DeleteProgram(program.id);
         if (reflectionCube) gl.DeleteTextures(1, &reflectionCube);
         if (bonesTexture) gl.DeleteTextures(1, &bonesTexture);
         if (identityBonesTexture) gl.DeleteTextures(1, &identityBonesTexture);
+    }
+
+    struct ActorGraphics {
+        int key;
+        PlayerProgram program;
+
+        struct Buffers {
+            std::string name;
+            GLuint vertices, glow, indices;
+        };
+
+        std::vector<Buffers> meshes;
+    };
+
+    // The worker spends one frame budget on a link/reflection or a mesh, then warms the actual draw separately.
+    bool warm_actor_step(const native_render::Actor &actor) {
+        const auto &appearance = look(actor.outfit, actor.loadout);
+        const auto material = ghost_source_of(actor) == native_render::GhostSource::none ? PlayerMaterial::solid
+                                                                                         : PlayerMaterial::ghost;
+        if (!warm_program(appearance, material)) return false;
+        for (const auto &name : parts_for(actor, appearance)) {
+            const auto at = meshes.find(name);
+            if (at != meshes.end() && !at->second.vao) {
+                upload_mesh(name);
+                return false;
+            }
+        }
+        return true;
+    }
+
+    ActorGraphics export_actor_graphics(const native_render::Actor &actor) {
+        const auto &appearance = look(actor.outfit, actor.loadout);
+        const auto material = ghost_source_of(actor) == native_render::GhostSource::none ? PlayerMaterial::solid
+                                                                                         : PlayerMaterial::ghost;
+        const int key = program_spec(appearance, material, false).key();
+        const auto [exported, first] = handedOffPrograms.try_emplace(key, programs.at(key));
+        ActorGraphics result{key, exported->second, {}};
+        // Uniform values are shared too. Keep a separate worker program when later looks reuse this key.
+        if (first) programs.erase(key);
+        for (const auto &name : parts_for(actor, appearance)) {
+            const auto at = meshes.find(name);
+            if (at == meshes.end()) continue;
+            const auto &mesh = at->second;
+            result.meshes.push_back({name, mesh.vbo, mesh.glowVbo, mesh.ebo});
+        }
+        return result;
+    }
+
+    void prepare_room_fallback() {
+        native_render::Actor actor;
+        actor.id = "warm-fallback";
+        actor.outfit = "outfit-cream";
+        actor.opacity = 1;
+        actor.frame.weapon = 1;
+        actor.frame.flags = 2;
+        actor.playerGlow = native_render::Glow{};
+        actor.playerGlow->enabled = actor.playerGlow->aura = true;
+        const float eye[3] = {110, 0, 40};
+        const auto projection = native::camera_matrix(eye, 180, 8, 1);
+        draw_actor(actor, projection, eye, 2.);
+        actor.source = native_render::GhostSource::pb;
+        draw_actor(actor, projection, eye, 2.);
+        forget_actor(actor.id);
+    }
+
+    // VAOs belong to their context. Programs and immutable buffers belong to the share group and stay worker-owned.
+    void import_actor_graphics(const ActorGraphics &ready) {
+        if (programs.try_emplace(ready.key, ready.program).second) borrowedPrograms.insert(ready.key);
+        for (const auto &buffers : ready.meshes) {
+            auto at = meshes.find(buffers.name);
+            if (at == meshes.end() || at->second.vbo) continue;
+            auto &mesh = at->second;
+            mesh.vbo = buffers.vertices;
+            mesh.glowVbo = buffers.glow;
+            mesh.ebo = buffers.indices;
+            mesh.borrowed = true;
+        }
     }
 
     std::array<std::array<float, 3>, 2> cosmetic_colors(const std::string &id) const {
