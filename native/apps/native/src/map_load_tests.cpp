@@ -3,6 +3,7 @@
 #include "map_download.hpp"
 #include "room_state.hpp"
 #include "bunnyhop_native.h"
+#include <memory>
 #include <chrono>
 #include <fstream>
 #include <iostream>
@@ -117,7 +118,8 @@ void check_manifest_refresh() {
 }
 
 void check_room_reconnect() {
-    native::RoomState room;
+    const auto room_owner = std::make_unique<native::RoomState>();
+    auto &room = *room_owner;
     const Json welcome = {
             {"generation", 1},
             {"id", "test"},

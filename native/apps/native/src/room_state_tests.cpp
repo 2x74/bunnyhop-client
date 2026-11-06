@@ -1,4 +1,5 @@
 #include "room_state.hpp"
+#include <memory>
 #include <cassert>
 #include <algorithm>
 #include <cmath>
@@ -39,7 +40,8 @@ void feed(native::RoomState &room, J samples, double now, J meta = nullptr, bool
 // drawn at 1000 FPS: the drawn speed stays close to 300, without the jumps each clock estimate change used to cause.
 void test_smooth_under_jitter() {
     constexpr double radius = 400, speed = 300, jitter_seconds = .03, frame_seconds = .001;
-    native::RoomState room;
+    const auto room_owner = std::make_unique<native::RoomState>();
+    auto &room = *room_owner;
     room.event(envelope(
             {{"t", "welcome"},
              {"you", 0},
@@ -103,7 +105,8 @@ void test_smooth_under_jitter() {
 
 // A roster patch with a new outfit or loadout (the room re-stamping a player who changed cosmetics) shows at once.
 void test_live_cosmetics() {
-    native::RoomState room;
+    const auto room_owner = std::make_unique<native::RoomState>();
+    auto &room = *room_owner;
     room.event(envelope(
             {{"t", "welcome"},
              {"you", 0},
@@ -136,7 +139,8 @@ void test_live_cosmetics() {
 
 // Room roster cosmetics use the same packed field positions as profile/replay loadouts: hilt 10, camo 11.
 void test_full_room_loadout_encoding() {
-    native::RoomState room;
+    const auto room_owner = std::make_unique<native::RoomState>();
+    auto &room = *room_owner;
     J loadout = {
             {"knife", "knife-bunnyfly"},
             {"finish", "fin-sunset"},
@@ -169,7 +173,8 @@ int main() {
     test_full_room_loadout_encoding();
     test_live_cosmetics();
     test_smooth_under_jitter();
-    native::RoomState room;
+    const auto room_owner = std::make_unique<native::RoomState>();
+    auto &room = *room_owner;
     room.event(envelope(
             {{"t", "welcome"},
              {"you", 1},
