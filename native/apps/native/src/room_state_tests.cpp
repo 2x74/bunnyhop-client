@@ -169,7 +169,23 @@ void test_full_room_loadout_encoding() {
               "camo-gold-vein");
 }
 
+void test_null_loadout_fields_use_defaults() {
+    const auto room = std::make_unique<native::RoomState>();
+    room->event(envelope(
+            {{"t", "welcome"},
+             {"you", 0},
+             {"map", {{"name", "m"}}},
+             {"players", J::array({{{"slot", 2}, {"name", "them"},
+                                    {"loadout", {{"knife", nullptr}, {"finish", 42}, {"glove", nullptr}}}}})}}
+    ));
+    feed(*room, J::array({sample(100, 0), sample(105, 5)}), 1);
+    const auto actors = room->actors(2);
+    assert(actors.size() == 1);
+    assert(actors[0].loadout == "2;knife-carrot;finish-default;glove-default;;;body-a;;;;;");
+}
+
 int main() {
+    test_null_loadout_fields_use_defaults();
     test_full_room_loadout_encoding();
     test_live_cosmetics();
     test_smooth_under_jitter();
