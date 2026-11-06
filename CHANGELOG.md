@@ -3,10 +3,11 @@
 ## v0.8.2 — Native
 
 - Joining a multiplayer server no longer crashes on Windows. Thanks to PonyTrap for the report.
-
 - Your binds stay put after finishing a run, changing maps, reopening the menu and restarting the game.
 - Keeping settings with your account no longer brings back command binds or aliases you removed.
 - Thanks to ThrowTop for reporting the resets.
+- The route guide works again: PB and WR routes show, turning it on from the pause menu loads the ghost,
+  and the first takeoff is drawn. Thanks to man for the report.
 - bhop_crash_egypt's crates show their wood texture instead of grey checkerboards and splinter when they break.
 - TNT counts down before exploding, nitro explodes green, and the moving tombs are drawn.
 
