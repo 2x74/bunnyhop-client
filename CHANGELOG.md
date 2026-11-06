@@ -5,6 +5,8 @@
 - Your binds stay put after finishing a run, changing maps, reopening the menu and restarting the game.
 - Keeping settings with your account no longer brings back command binds or aliases you removed.
 - Thanks to ThrowTop for reporting the resets.
+- bhop_crash_egypt's crates show their wood texture instead of grey checkerboards and splinter when they break.
+- TNT counts down before exploding, nitro explodes green, and the moving tombs are drawn.
 
 ## v0.8.1 — Native
 
