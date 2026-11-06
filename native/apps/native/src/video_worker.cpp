@@ -182,6 +182,7 @@ void configure_renderer(Renderer &renderer, const Json &player_settings, const V
     const auto settings = export_graphics_settings(player_settings, options);
     const auto prefs = Preferences::from_settings(settings);
     renderer.graphics_settings(settings);
+    renderer.landing_context(!options.hud, false, true);
     renderer.set_fov(prefs.fov);
     renderer.set_viewmodel(
             settings.at("viewmodelFov").get<float>(),

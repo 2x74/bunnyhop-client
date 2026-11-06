@@ -3985,6 +3985,12 @@ int run(const native::Options &opt) {
             renderer->surface_tools_frame(
                     curr, input, simulation_active && captured && !viewer.active && !spectator, spectator.has_value()
             );
+            renderer->landing_context(
+                    spectator.has_value() || practice.noclip || practice.infinite_flight.flying(),
+                    practice.active || tutorial_practice(),
+                    viewer.active,
+                    steady_seconds
+            );
             renderer->set_room_actors(actors);
             renderer->set_world_time(native::world_visual_seconds(prev.tick, curr.tick, blend, step_dt, viewer.active));
             renderer->draw(
