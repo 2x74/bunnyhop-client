@@ -25,8 +25,8 @@ pub use map_motion::{
 };
 mod map_props;
 pub use map_props::{
-    BhAnimatedProp, BhPropAnimState, BhPropTransform, bh_animated_props, bh_prop_anim_names, bh_prop_anim_serial,
-    bh_prop_anim_states, bh_prop_transforms,
+    BhAnimatedProp, BhEntityInstance, BhPropAnimState, BhPropTransform, bh_animated_props, bh_entity_instances,
+    bh_prop_anim_names, bh_prop_anim_serial, bh_prop_anim_states, bh_prop_transforms,
 };
 mod look;
 mod v29;
@@ -433,6 +433,7 @@ impl Map {
         // Animated props get their own groups for the renderer to pose (map_props.rs), baked in their frozen pose for
         // when it can't. It has to run before mark_props, which keeps the 3D skybox's animated props frozen.
         bunnyhop_core::props::add_game_props(&mut sp, &game, true);
+        let presentation_parents = map_props::add_parented_props(&mut sp, &game);
         bunnyhop_core::skybox::mark_props(&bsp, &mut sp, n_static);
         let props = loop {
             check()?;
@@ -536,6 +537,7 @@ impl Map {
             floor: Vec::new(),
             props,
             prop_groups,
+            presentation_parents,
             water: CString::new(
                 serde_json::json!({"volumes":mesh.water,"planes":mesh.water_planes}).to_string(),
             )

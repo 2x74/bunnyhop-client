@@ -347,6 +347,45 @@ void progressive_files() {
     close(scene->sounds[0].started, 21);
 }
 
+void copied_ambient_lifecycle() {
+    auto scene = std::make_unique<MapAudioScene>();
+    scene->files.push_back(loop_file());
+    Json entities = {
+            {{"classname", "ambient_generic"},
+             {"message", "a.wav"},
+             {"spawnflags", "48"},
+             {"health", "10"},
+             {"radius", "1250"},
+             {"fadeoutsecs", "5"}}
+    };
+    scene->build(entities, Json::array(), Json::object());
+    MapAudioMixer mixer;
+    const BhEntityInstance copies[] = {{100, 0, {10, 20, 30}, {}, 1}, {101, 0, {40, 50, 60}, {}, 1}};
+    scene->sync_instances(mixer, copies);
+    const auto first = size_t(scene->ambient[100]);
+    const auto second = size_t(scene->ambient[101]);
+    require(first != second, "ambient copies share a channel");
+    close(scene->sounds[first].position[0], 10);
+    close(scene->sounds[second].position[0], 40);
+    const BhMapSoundState starts[] = {{100, 5, 1, 0, 100, 100}, {101, 5, 1, 0, 100, 100}};
+    scene->apply_state(mixer, starts, 0, true);
+    require(scene->sounds[first].on && scene->sounds[second].on, "copy starts ignored");
+    scene->assign(nullptr, mixer, {}, 0, 0, 0, 1);
+    require(voices(mixer) == 2, "ambient copies did not acquire independent voices");
+    const BhMapSoundState killed = {100, 2, 1, 0, 100, 100};
+    scene->apply_state(mixer, {&killed, 1}, .1, true);
+    require(!scene->sounds[first].on && !scene->sounds[first].stopping, "Kill left an audible fade tail");
+    require(scene->sounds[second].on, "Kill stopped a sibling copy");
+    require(voices(mixer) == 1, "Kill released the wrong copied voice");
+    scene->sync_instances(mixer, {});
+    require(scene->ambient[100] == -1 && scene->ambient[101] == -1, "seek retained copied channels");
+    require(!scene->sounds[first].used && !scene->sounds[second].used, "reset leaked copy slots");
+    require(voices(mixer) == 0, "seek retained copied voices");
+    scene->sync_instances(mixer, copies);
+    scene->apply_state(mixer, starts, 1, true);
+    require(scene->sounds[size_t(scene->ambient[100])].on, "restored copy did not restart");
+}
+
 }  // namespace
 
 void *operator new(std::size_t size) {
@@ -390,6 +429,7 @@ int main(int argc, char **argv) {
         scape_oracle(directory);
         progressive_files();
         moving_listener();
+        copied_ambient_lifecycle();
         std::cout << "Map audio: " << checks << " checks passed; 1000 frames/mixes allocated 0 times\n";
     } catch (const std::exception &error) {
         std::cerr << "Map audio after " << checks << " checks: " << error.what() << '\n';

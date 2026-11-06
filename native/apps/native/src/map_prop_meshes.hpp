@@ -55,6 +55,10 @@ public:
         return enabled_ && entity >= 0 && size_t(entity) < replaced_.size() && replaced_[size_t(entity)];
     }
 
+    float scale(int32_t entity) const {
+        return entity >= 0 && size_t(entity) < scales_.size() ? scales_[size_t(entity)] : 1.f;
+    }
+
     bool active() const { return enabled_ && !props.instances().empty(); }
 
     // Potato draws the frozen groups.
@@ -142,6 +146,7 @@ private:
     std::vector<size_t> instanceMeshes_;
     std::vector<uint32_t> byMesh_;
     std::vector<bool> owners_, replaced_;
+    std::vector<float> scales_;
     std::unordered_map<std::string, uint32_t> propMaterials_;
     std::vector<BhPropAnimState> states_;
     std::array<char, 2048> names_{};
@@ -177,6 +182,7 @@ private:
             owners_[size_t(g.entity)] = true;
         }
         replaced_.assign(owners_.size(), false);
+        scales_.assign(owners_.size(), 1.f);
     }
 
     // map-props.ts matches studio material names against the prop mesh's materials, as written and lower case.
@@ -340,6 +346,7 @@ private:
         props.add_instance(prop.entity, *models_[meshes_[mesh].model].rig, std::move(random));
         instanceMeshes_.push_back(mesh);
         replaced_[prop.entity] = true;
+        scales_[prop.entity] = prop.model_scale > 0 ? prop.model_scale : 1.f;
     }
 
     void create_bone_texture() {

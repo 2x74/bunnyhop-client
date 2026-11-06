@@ -2,6 +2,7 @@
 // and texture scrolls and flipbooks from texture-scroll.ts (src/map-props-oracle.ts), against the C++ ports. Then what
 // the website's tests and Source pin down: activity picks, shared poses, distance steps and one-frame sequences.
 #include "map_props.hpp"
+#include "runtime_prop_copies.hpp"
 #include "texture_motion.hpp"
 #ifdef NDEBUG
 #undef NDEBUG
@@ -233,6 +234,25 @@ void check_random_animators(const nlohmann::json &vectors) {
     }
 }
 
+void check_runtime_copies() {
+    native::RuntimePropCopies copies;
+    const BhPropGroup groups[] = {{4, 10, 30, 0, 2}, {5, 40, 60, 0, 3}};
+    copies.load(groups);
+    const BhEntityInstance fruit = {100, 2, {12, 13, 14}, {0, 90, 0}, 1};
+    copies.observe({&fruit, 1});
+    assert(copies.find(100)->source == 2);
+    assert(copies.groups(2)[0].first_index == 10);
+    assert(copies.find(100)->origin[1] == 13);
+    const BhEntityInstance crate = {100, 3, {20, 21, 22}, {}, 0};
+    copies.observe({&crate, 1});
+    assert(copies.find(100)->source == 3 && copies.find(100)->visible == 0);
+    assert(copies.groups(3)[0].material == 5);
+    copies.observe({});
+    assert(copies.instances().empty() && !copies.find(100));
+    copies.observe({&fruit, 1});
+    assert(copies.find(100)->source == 2 && copies.find(100)->visible == 1);
+}
+
 void check_visual_time() {
     // Play: the newest tick and the frame's blend. A replay: the tick shown between the two.
     assert(std::abs(native::world_visual_seconds(9, 10, .25f, .01, false) - .1025) < 1e-12);
@@ -275,6 +295,7 @@ int main(int argc, char **argv) {
     check_shared_and_still_poses(*oracle);
     check_distance_steps(*oracle);
     check_visual_time();
+    check_runtime_copies();
     std::cout << "Map props and moving textures match the web reference across " << compared << " answers\n";
     return 0;
 }

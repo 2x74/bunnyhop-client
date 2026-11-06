@@ -69,6 +69,7 @@ pub struct Assets {
     pub floor: Vec<BhFloorWeapon>,
     pub props: props::PropMesh,
     pub prop_groups: Vec<BhPropGroup>,
+    pub presentation_parents: Vec<usize>,
     pub water: CString,
     pub bytes: Vec<u8>,
     pub models: Vec<studio::StudioModel>,

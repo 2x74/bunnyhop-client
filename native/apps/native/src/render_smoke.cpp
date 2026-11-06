@@ -4,6 +4,7 @@
 #include "weapon_commands.hpp"
 #include <cstdlib>
 #include <optional>
+#include <thread>
 
 int main(int argc, char **argv) {
     try {
@@ -14,12 +15,15 @@ int main(int argc, char **argv) {
         bool zoneGold = false;
         bool simulateFire = false, aura = true, firstPersonGlow = true;
         bool flashlight = false, triggers = false, msaa = false, sourceLook = false, requireWater = false;
-        int frames = 2;
+        int frames = 2, ticks = 0, restoreTicks = -1;
+        bool explicitPlayer = false, reset = false;
+        float player[3] = {};
+        std::string stateOutput;
         bool actor = false;
         float opacity = .45, actorYaw = 0, actorPitch = 0, actorSpeed = 0;
         uint32_t actorFlags = 2;
         float eye[3] = {};
-        bool explicitEye = false, worldOnly = false;
+        bool explicitEye = false, worldOnly = false, prepared = false;
         double yaw = 0, pitch = 0, seconds = 2;
         int weapon = -1;
         for (int i = 1; i < argc; i++) {
@@ -77,6 +81,20 @@ int main(int argc, char **argv) {
                 triggers = true;
             else if (arg == "--weapon")
                 weapon = int(number());
+            else if (arg == "--ticks")
+                ticks = int(number());
+            else if (arg == "--restore-ticks")
+                restoreTicks = int(number());
+            else if (arg == "--reset")
+                reset = true;
+            else if (arg == "--state-json")
+                stateOutput = value();
+            else if (arg == "--player") {
+                for (float &n : player)
+                    n = number();
+                explicitPlayer = true;
+            } else if (arg == "--prepared")
+                prepared = true;
             else if (arg == "--world-only")
                 worldOnly = true;
             else if (arg == "--water-json")
@@ -161,8 +179,18 @@ int main(int argc, char **argv) {
         gl.load();
         using Core = std::unique_ptr<BhContext, decltype(&bh_destroy)>;
         Core core(bh_create(), &bh_destroy);
-        if (!core || !bh_load_map(core.get(), map.c_str(), content.empty() ? nullptr : content.c_str()))
-            throw std::runtime_error(core ? bh_last_error(core.get()) : "native core creation failed");
+        if (!core) throw std::runtime_error("native core creation failed");
+        const char *contentRoot = content.empty() ? nullptr : content.c_str();
+        if (prepared) {
+            if (!bh_load_map_begin(core.get(), map.c_str(), contentRoot))
+                throw std::runtime_error(bh_last_error(core.get()));
+            int status = 0;
+            while ((status = bh_load_map_poll(core.get())) == 0)
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            if (status < 0) throw std::runtime_error(bh_last_error(core.get()));
+        } else if (!bh_load_map(core.get(), map.c_str(), contentRoot)) {
+            throw std::runtime_error(bh_last_error(core.get()));
+        }
         if (!waterOutput.empty()) {
             size_t n = 0;
             const char *json = bh_water_json(core.get(), &n);
@@ -173,6 +201,57 @@ int main(int argc, char **argv) {
         BhSettings settings{};
         bh_default_settings(&settings);
         if (!bh_set_settings(core.get(), &settings)) throw std::runtime_error(bh_last_error(core.get()));
+        if (explicitPlayer) {
+            BhNoclipState placement{};
+            for (size_t k = 0; k < 3; ++k)
+                placement.position[k] = player[k];
+            if (!bh_practice_enter(core.get(), 1)) throw std::runtime_error(bh_last_error(core.get()));
+            BhSnapshot placed{};
+            if (!bh_practice_noclip_exit(core.get(), &placement, float(yaw), float(pitch), &placed))
+                throw std::runtime_error("smoke player placement is stuck");
+        }
+        if (ticks < 0 || ticks > 100000 || restoreTicks > 100000) throw std::runtime_error("invalid smoke tick count");
+        const auto saved = restoreTicks >= 0 ? bh_practice_save(core.get(), float(yaw), float(pitch)) : 0;
+        auto step = [&](int count) {
+            BhCmd command{};
+            BhState state{};
+            for (int tick = 0; tick < count; ++tick)
+                if (!bh_step(core.get(), &command, &state)) throw std::runtime_error(bh_last_error(core.get()));
+        };
+        step(ticks);
+        if (restoreTicks >= 0) {
+            BhCmd view{};
+            BhSnapshot restored{};
+            if (!saved || !bh_practice_restore(core.get(), saved, &view, &restored))
+                throw std::runtime_error(bh_last_error(core.get()));
+            step(restoreTicks);
+        }
+        if (reset && !bh_reset(core.get())) throw std::runtime_error(bh_last_error(core.get()));
+        if (!stateOutput.empty()) {
+            std::vector<BhEntityInstance> instances(native::RuntimePropCopies::entity_limit);
+            const size_t count = bh_entity_instances(core.get(), instances.data(), instances.size());
+            nlohmann::json evidence = {{"instances", nlohmann::json::array()}, {"props", nlohmann::json::array()}};
+            for (size_t i = 0; i < count; ++i) {
+                const auto &copy = instances[i];
+                evidence["instances"].push_back(
+                        {{"entity", copy.entity},
+                         {"source", copy.source},
+                         {"origin", copy.origin},
+                         {"visible", copy.visible}}
+                );
+            }
+            std::vector<BhPropTransform> transforms(native::RuntimePropCopies::entity_limit);
+            const size_t props = bh_prop_transforms(core.get(), transforms.data(), transforms.size());
+            for (size_t i = 0; i < props; ++i) {
+                const auto &prop = transforms[i];
+                evidence["props"].push_back(
+                        {{"entity", prop.entity}, {"origin", prop.origin}, {"visible", prop.visible}}
+                );
+            }
+            std::ofstream file(stateOutput);
+            file << evidence.dump(2) << '\n';
+            if (!file) throw std::runtime_error("cannot write smoke state");
+        }
         BhSnapshot snapshot{};
         bh_snapshot(core.get(), &snapshot);
         if (!explicitEye)

@@ -24,6 +24,7 @@
 #include "inspect_cues.hpp"
 #include "first_person_weapons.hpp"
 #include "map_props.hpp"
+#include "runtime_prop_copies.hpp"
 #include "texture_motion.hpp"
 #include <span>
 #include "nlohmann/json.hpp"
@@ -434,6 +435,7 @@ class Renderer {
     std::unordered_map<int32_t, std::array<float, 3>> textureAverages;
     std::vector<BhGroup> groups, skyGroups;
     std::vector<BhPropGroup> propGroups;
+    RuntimePropCopies propCopies;
     std::vector<GLuint> normals;
     std::array<float, 3> sunDirection{.35f, .45f, .82f};
     bool hasSun = false;
@@ -687,6 +689,8 @@ class Renderer {
                     channel /= std::max(size_t(1), count);
                 textureAverages[index] = average;
             }
+        } else {
+            std::cerr << "Map texture " << index << " uses the checkerboard: " << bh_last_error(core) << '\n';
         }
         textures.emplace(key, id);
     }
@@ -1105,6 +1109,7 @@ class Renderer {
         worldTime = -1;
         textureMotion.update(worldSeconds);
         refresh_prop_transforms();
+        propCopies.refresh(core);
         if (mapPropMeshes) {
             mapPropMeshes->set_enabled(!graphics.potato);
             mapPropMeshes->refresh(core);
@@ -1144,7 +1149,8 @@ class Renderer {
             bool reflection
     ) {
         auto &instance = mapPropMeshes->props.instances()[d.skinned - 1];
-        const float radius = float(mapPropMeshes->props.radius(instance, worldSeconds));
+        const float radius = float(mapPropMeshes->props.radius(instance, worldSeconds))
+                             * mapPropMeshes->scale(int32_t(instance.entity));
         native_render::Bounds bounds;
         for (int k = 0; k < 3; k++) {
             bounds.lo[k] = t.origin[k] - radius;
@@ -1202,7 +1208,17 @@ class Renderer {
         if (cached.scene != sceneNumber) {
             cached.value = {};
             cached.value.visible = 1;
+            const auto *copy = prop ? propCopies.find(entity) : nullptr;
             const auto *moving = prop ? frame_prop_transform(entity) : nullptr;
+            if (copy) {
+                cached.value = {
+                        {copy->origin[0], copy->origin[1], copy->origin[2]},
+                        {copy->angles[0], copy->angles[1], copy->angles[2]},
+                        copy->visible
+                };
+                cached.scene = sceneNumber;
+                return cached.value;
+            }
             if (moving)
                 cached.value = {
                         {moving->origin[0], moving->origin[1], moving->origin[2]},
@@ -1216,6 +1232,27 @@ class Renderer {
             cached.scene = sceneNumber;
         }
         return cached.value;
+    }
+
+    native::Matrix scene_model(bool prop, int32_t entity, uint32_t model) {
+        auto matrix = native::model_matrix(scene_transform(prop, entity, model));
+        if (prop && frozen_prop_replaced(entity)) {
+            const float scale = mapPropMeshes->scale(entity);
+            for (size_t column = 0; column < 3; ++column)
+                for (size_t row = 0; row < 3; ++row)
+                    matrix[column * 4 + row] *= scale;
+        }
+        return matrix;
+    }
+
+    void add_copy_draws() {
+        for (const auto &copy : propCopies.instances()) {
+            if (!copy.visible) continue;
+            for (const auto &group : propCopies.groups(copy.source))
+                sceneDrawList.add(
+                        {group.material, group.first_index, group.index_count, true, int32_t(copy.entity), 0}
+                );
+        }
     }
 
     // reflection: the mirrored scene for the water reflection, without the water itself.
@@ -1277,7 +1314,10 @@ class Renderer {
         for (const auto &g : propGroups)
             if (bool(g.sky3d) == sky && !frozen_prop_replaced(g.entity))
                 sceneDrawList.add({g.material, g.first_index, g.index_count, true, g.entity, 0});
-        if (!sky) add_map_prop_draws();
+        if (!sky) {
+            add_map_prop_draws();
+            add_copy_draws();
+        }
         if (profiling) frameProfile.groups += draws.size();
         // Cull transformed bounds before submission; sort translucency from current, transformed centres.
         draws.erase(
@@ -1288,7 +1328,7 @@ class Renderer {
                             const auto &transform = scene_transform(d.prop, d.entity, d.model);
                             if (!transform.visible) return true;
                             if (d.skinned) return !map_prop_in_view(d, transform, vp, eye, reflection);
-                            const auto model = native::model_matrix(transform);
+                            const auto model = scene_model(d.prop, d.entity, d.model);
                             const uint64_t key = (uint64_t(d.prop) << 63) | d.first;
                             const auto at = groupBounds.find(key);
                             if (at != groupBounds.end()) {
@@ -1340,7 +1380,7 @@ class Renderer {
                 if (transparent(m) != (pass != 0) || (reflection && m.kind == 2)) continue;
                 const auto &transform = scene_transform(d.prop, d.entity, d.model);
                 if (!transform.visible) continue;
-                const auto model = native::model_matrix(transform);
+                const auto model = scene_model(d.prop, d.entity, d.model);
                 gl.UniformMatrix4fv(materialUniforms.model, 1, GL_FALSE, model.data());
                 if (boundMaterial != std::pair(d.material, d.prop)) {
                     bind_material(d.material, d.prop);
@@ -2091,6 +2131,7 @@ public:
             );
             co_yield "resource";
         }
+        propCopies.load(propGroups);
         prepare_prop_transforms();
         auto animated = load_map_props();
         while (!animated.step())
@@ -2146,8 +2187,20 @@ public:
         return material < wireframeMaterials.size() && wireframeMaterials[material];
     }
 
+    void log_missing_materials() {
+        size_t bytes = 0;
+        const char *raw = bh_material_names_json(core, &bytes);
+        const auto names = raw && bytes ? nlohmann::json::parse(raw, raw + bytes) : nlohmann::json::array();
+        for (size_t i = 0; i < materials.size(); ++i) {
+            if (materials[i].kind != 1) continue;
+            const auto name = i < names.size() ? names[i].get<std::string>() : std::to_string(i);
+            std::cerr << "Map material uses the checkerboard: " << name << '\n';
+        }
+    }
+
     ResourceLoading prepare_textures() {
         prepare_wireframes();
+        log_missing_materials();
         for (const auto &m : materials)
             if (m.flags & (material_translucent | material_alpha_test)) cutoutTextures.insert(m.texture);
         co_yield "resource";
@@ -2907,7 +2960,8 @@ public:
         auto &prop = mapPropMeshes->props.instances()[instance];
         const auto &transform = scene_transform(true, int32_t(prop.entity), 0);
         if (!transform.visible) return false;
-        const float radius = float(mapPropMeshes->props.radius(prop, worldSeconds));
+        const float radius =
+                float(mapPropMeshes->props.radius(prop, worldSeconds)) * mapPropMeshes->scale(int32_t(prop.entity));
         native_render::Bounds bounds;
         for (int k = 0; k < 3; k++) {
             bounds.lo[k] = transform.origin[k] - radius;
@@ -2931,7 +2985,7 @@ public:
         for (size_t i = 0; i < count; ++i) {
             if (!castingProps[i]) continue;
             const auto &prop = mapPropMeshes->props.instances()[i];
-            const auto model = native::model_matrix(scene_transform(true, int32_t(prop.entity), 0));
+            const auto model = scene_model(true, int32_t(prop.entity), 0);
             for (const auto &g : mapPropMeshes->groups(i)) {
                 const auto kind = caster(g.material);
                 if (kind == Caster::none || (kind == Caster::cutout) != cutouts) continue;
@@ -2987,6 +3041,22 @@ public:
                             range,
                             cutouts
                     );
+            for (const auto &copy : propCopies.instances()) {
+                if (!copy.visible) continue;
+                for (const auto &g : propCopies.groups(copy.source))
+                    cast_group(
+                            propMesh,
+                            true,
+                            g.material,
+                            g.first_index,
+                            g.index_count,
+                            int32_t(copy.entity),
+                            0,
+                            lightVp,
+                            range,
+                            cutouts
+                    );
+            }
             cast_map_props(lightVp, range, cutouts, shader);
         }
         if (!viewmodel) return;

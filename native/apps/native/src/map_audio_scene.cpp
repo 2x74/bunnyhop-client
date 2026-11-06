@@ -199,6 +199,7 @@ void MapAudioScene::build_ambient(
     ramp_up(sound);
     const auto *source = named_entity(entities, entity.value("sourceentityname", std::string()));
     if (source) {
+        sound.external_source = true;
         sound.position = source->contains("origin") ? point(*source) : sound.position;
         sound.model = model_index(*source);
         if (sound.model >= 0 && size_t(sound.model) < models.size()) {
@@ -209,13 +210,18 @@ void MapAudioScene::build_ambient(
         }
     }
     const auto slot = add_sound(sound);
-    if (slot != SIZE_MAX) ambient[index] = int(slot);
+    if (slot != SIZE_MAX) {
+        ambient[index] = int(slot);
+        ambient_templates[index] = sound;
+    }
 }
 
 void MapAudioScene::build(const Json &entities, const Json &models, const Json &group) {
     if (!entities.is_array() || entities.size() > map_entity_limit || !models.is_array())
         throw std::runtime_error("map audio entity limit exceeded");
-    ambient.assign(entities.size(), -1);
+    ambient.assign(map_entity_limit, -1);
+    ambient_templates.resize(entities.size());
+    instance_rows.resize(map_entity_limit);
     for (size_t i = 0; i < entities.size(); ++i) {
         const auto &entity = entities[i];
         const auto classname = lower(entity.value("classname", std::string()));
@@ -379,6 +385,41 @@ void MapAudioScene::stop_sound(MapAudioMixer &mixer, size_t index) {
     mixer.release(index);
 }
 
+void MapAudioScene::sync_instances(MapAudioMixer &mixer, std::span<const BhEntityInstance> rows) {
+    copy_seen.fill(false);
+    for (const auto &row : rows) {
+        if (row.entity >= ambient.size() || row.source >= ambient_templates.size()) continue;
+        const auto &original = ambient_templates[row.source];
+        if (original.file < 0) continue;
+        int slot = ambient[row.entity];
+        if (slot >= 0 && sounds[size_t(slot)].source != int(row.source)) {
+            mixer.release(size_t(slot));
+            sounds[size_t(slot)].used = false;
+            slot = -1;
+        }
+        if (slot < 0) {
+            auto copy = original;
+            copy.entity = int(row.entity);
+            copy.source = int(row.source);
+            const auto added = add_sound(copy);
+            if (added == SIZE_MAX) continue;
+            slot = int(added);
+            ambient[row.entity] = slot;
+        }
+        auto &sound = sounds[size_t(slot)];
+        if (!sound.external_source) sound.position = {row.origin[0], row.origin[1], row.origin[2]};
+        copy_seen[size_t(slot)] = true;
+    }
+    for (size_t i = 0; i < sounds.size(); ++i) {
+        auto &sound = sounds[i];
+        if (!sound.used || sound.source < 0 || copy_seen[i]) continue;
+        mixer.release(i);
+        ambient[size_t(sound.entity)] = -1;
+        sound.used = false;
+        sound.on = false;
+    }
+}
+
 void MapAudioScene::apply_state(MapAudioMixer &mixer, std::span<const BhMapSoundState> rows, double now, bool live) {
     constexpr uint32_t active = 1, removed = 2, last_start = 4;
     for (const auto &row : rows) {
@@ -386,7 +427,9 @@ void MapAudioScene::apply_state(MapAudioMixer &mixer, std::span<const BhMapSound
         const size_t index = size_t(ambient[row.entity]);
         auto &sound = sounds[index];
         if (row.flags & removed) {
-            if (sound.on) stop_sound(mixer, index);
+            mixer.release(index);
+            sound.on = false;
+            sound.stopping = false;
             sound.removed = true;
             continue;
         }
@@ -721,6 +764,8 @@ void MapAudioScene::frame(
     const auto next_serial = bh_map_sound_serial(core);
     if (next_serial != serial) {
         serial = next_serial;
+        const size_t instances = bh_entity_instances(core, instance_rows.data(), instance_rows.size());
+        sync_instances(mixer, {instance_rows.data(), instances});
         const size_t count = bh_map_sound_states(core, states.data(), states.size());
         apply_state(mixer, {states.data(), count}, now, live);
         const size_t length = bh_map_sound_commands(core, commands.data(), commands.size());
