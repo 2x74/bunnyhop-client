@@ -414,7 +414,8 @@ struct Input {
 template <class Timeline>
 bool apply_null_binds(Input &input, const Timeline &timeline, bool enabled, std::string_view style, bool practice) {
     if (!enabled || !null_binds_allowed(style, practice)) return false;
-    input.held = null_bind_buttons(timeline, input.null_presses) & ~turn_mask;
+    // Command holds have no physical action-key entry. Preserve them after resolving the physical keys.
+    input.held = (null_bind_buttons(timeline, input.null_presses) | timeline.command_held()) & ~turn_mask;
     return true;
 }
 }  // namespace native

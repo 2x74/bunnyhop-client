@@ -1,4 +1,5 @@
 #include "native_input.hpp"
+#include "console_bind_queue.hpp"
 #include "input_timeline.hpp"
 #include "native_math.hpp"
 #include "turn_settings.hpp"
@@ -85,7 +86,58 @@ void test_core_teleport_view() {
     }
 }
 
+void test_command_chain_tick_buttons() {
+    using namespace native;
+    for (const bool timed : {false, true}) {
+        for (const bool null_binds : {false, true}) {
+            auto timeline = std::make_unique<InputTimeline>();
+            auto queue = std::make_unique<ConsoleBindQueue>();
+            Input input;
+            const std::set<std::string> physical;
+            timeline->set_timed(timed, input, physical);
+            // The TS planner sends echo once and the named holds at key-down, then unholds at key-up.
+            const auto chain = [&](const char *kind, std::initializer_list<const char *> actions) {
+                auto ops = nlohmann::json::array();
+                for (const auto *action : actions)
+                    ops.push_back({{"kind", kind}, {"code", "KeyA"}, {"action", action}, {"step", 0}, {"own", true}});
+                queue->enqueue({{"ops", ops}});
+                timeline->set_command_held(queue->bits());
+            };
+            const auto tick = [&]() {
+                uint64_t simulation = 0;
+                timeline->take_tick(input, simulation, 10'000'000, false);
+                TurnSettings{}.apply(input, timeline->held(physical), .01, true);
+                apply_null_binds(input, *timeline, null_binds, "autohop", false);
+                return input.command();
+            };
+            chain("hold", {"left"});
+            for (unsigned i = 0; i < 4; ++i) {
+                const auto command = tick();
+                assert(command.buttons == left && command.side == -450 && command.forward == 0);
+            }
+            chain("unhold", {"left"});
+            assert(tick().buttons == 0 && tick().side == 0);
+            chain("hold", {"jump", "duck"});
+            for (unsigned i = 0; i < 4; ++i)
+                assert(tick().buttons == (jump | duck));
+            chain("unhold", {"jump", "duck"});
+            assert(tick().buttons == 0);
+            chain("hold", {"left", "right"});
+            const auto opposing = tick();
+            assert(opposing.buttons == (left | right) && opposing.side == 0);
+            chain("unhold", {"left", "right"});
+            assert(tick().buttons == 0 && tick().side == 0);
+            chain("hold", {"left", "jump", "duck"});
+            queue->release_all();
+            timeline->set_command_held(queue->bits());
+            assert(tick().buttons == 0);
+        }
+    }
+    std::cout << "Command chains: key-down/up, four held ticks, null binds on/off, timed/legacy, focus release\n";
+}
+
 int main() {
+    test_command_chain_tick_buttons();
     test_core_teleport_view();
     test_null_binds_per_tick();
     static_assert(sizeof(BhLookSample) == 40 && offsetof(BhLookSample, count) == 16);

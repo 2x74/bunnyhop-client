@@ -25,3 +25,20 @@ test("a nested move plus turn plan contains no executable operations", () => {
     error: "Moving and turning on one key isn't allowed.",
   });
 });
+
+test("ThrowTop's echo chain and Source holds press on keydown and release on keyup", () => {
+  for (const [command, actions] of [
+    ["echo test; +moveleft", ["left"]],
+    ["+jump; +duck", ["jump", "duck"]],
+    ["+moveleft; +moveright", ["left", "right"]],
+  ] as const) {
+    const press = commandBindPlan("KeyA", true, command, {});
+    expect(press.error).toBeUndefined();
+    expect(press.ops.filter((op) => op.kind === "hold")).toEqual(
+      actions.map((action) => ({ kind: "hold", code: "KeyA", action, step: 0, own: true })),
+    );
+    expect(commandBindPlan("KeyA", false, command, {}).ops).toEqual(
+      actions.map((action) => ({ kind: "unhold", code: "KeyA", action, step: 0, own: true })),
+    );
+  }
+});

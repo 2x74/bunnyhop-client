@@ -1,7 +1,17 @@
 import { afterEach, expect, test } from "bun:test";
 import { DEFAULT_PREFS, type Prefs } from "../../web/src/ui/settings";
+import { ConsoleRunner, uncommand } from "../../web/src/console/exec";
 import { state } from "./bridge";
-import { MAPPINGS, hostCan, hostSettings, nativeView, patchBetween, pullHost, type HostSettings } from "./prefs-bridge";
+import {
+  bindRepairPatch,
+  MAPPINGS,
+  hostCan,
+  hostSettings,
+  nativeView,
+  patchBetween,
+  pullHost,
+  type HostSettings,
+} from "./prefs-bridge";
 import { REQUESTED_KEYS, followsRule, nativeKeyFor, readPath, requestedDefault } from "./settings-keys";
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
@@ -175,4 +185,120 @@ test("website settings the host adds later map by name, with the website's value
   const before = nativeView(prefs, host());
   prefs.hud.keys.opacity = 0.4;
   expect(patchBetween(before, nativeView(prefs, host()))).toEqual({ hudKeysOpacity: 0.4 });
+});
+
+function consoleWithPatches() {
+  const p = clone(DEFAULT_PREFS);
+  let current = host();
+  let view = nativeView(p, current);
+  const patches: Record<string, unknown>[] = [];
+  const update = (fn: (p: Prefs) => void) => {
+    fn(p);
+    const next = nativeView(p, current);
+    const patch = patchBetween(view, next);
+    patches.push(patch);
+    current = host({ ...current, ...patch });
+    view = next;
+  };
+  const c = new ConsoleRunner({ get: () => p, update, print: () => {}, clear: () => {} });
+  const echo = () => {
+    pullHost(p, current);
+    view = nativeView(p, current);
+  };
+  return { p, c, patches, update, echo };
+}
+
+test("ThrowTop's rebind survives the host echo and unbind/rebind sequence", () => {
+  const { p, c, patches, echo } = consoleWithPatches();
+  c.run('bind a "echo test; +moveleft"');
+  echo();
+  c.run("bind a +moveleft");
+  expect(patches.at(-1)).toMatchObject({ cmdBinds: {}, binds: { left: ["KeyA"] } });
+  echo();
+  expect(p.cmdBinds).not.toHaveProperty("KeyA");
+  expect(p.binds.left).toContain("KeyA");
+  c.run('bind a "echo test; +moveleft"');
+  echo();
+  c.run("unbind a");
+  expect(patches.at(-1)).toMatchObject({ cmdBinds: {} });
+  c.run("bind a +moveleft");
+  echo();
+  expect(p.cmdBinds).not.toHaveProperty("KeyA");
+});
+
+test("command unbind, unalias, Settings row removal and defaults send deletions", () => {
+  for (const command of ["unbind a", "binds_default"]) {
+    const { c, patches, echo } = consoleWithPatches();
+    c.run('bind a "echo test; +moveleft"');
+    echo();
+    if (command === "binds_default") {
+      c.run("unbind a");
+      expect(patches.at(-1)).toMatchObject({ cmdBinds: {} });
+    }
+    c.run(command);
+    echo();
+    expect(patches.some((patch) => "cmdBinds" in patch && !Object.hasOwn(patch.cmdBinds as object, "KeyA"))).toBe(true);
+  }
+  const { c, patches, update, echo, p } = consoleWithPatches();
+  c.run('alias test "echo test"');
+  echo();
+  c.run("unalias test");
+  expect(patches.at(-1)).toMatchObject({ aliases: {} });
+  echo();
+  expect(p.aliases).not.toHaveProperty("test");
+  for (const text of ["say gg", "echo test; +moveleft"]) {
+    c.run(`bind a "${text}"`);
+    echo();
+    // The Settings -> Keys row's Remove handler calls this same mutation.
+    update((next) => uncommand(next, "KeyA"));
+    expect(patches.at(-1)).toMatchObject({ cmdBinds: {} });
+    echo();
+    expect(p.cmdBinds).not.toHaveProperty("KeyA");
+  }
+});
+
+test("all object-valued mappings isolate snapshots and host-to-prefs writes", () => {
+  const p = clone(DEFAULT_PREFS);
+  p.cmdBinds.KeyA = "echo test";
+  p.aliases.test = "echo test";
+  p.mapLooks = { bhop_eazy: { brightness: 1.2, fullbright: false } };
+  const current = host({ hudLayout: { timer: { x: 30, y: 40 } } });
+  const before = nativeView(p, current);
+  const frozen = clone(before);
+  delete p.cmdBinds.KeyA;
+  delete p.aliases.test;
+  p.landing.color = "#123456";
+  p.mapLooks.bhop_eazy.brightness = 2;
+  p.audio.announcer.pb = "holyshit";
+  current.hudLayout.timer!.x = 90;
+  expect(before).toEqual(frozen);
+  for (const mapping of MAPPINGS) {
+    const theirs = { ...current, ...mapping.toNative(clone(DEFAULT_PREFS), current) } as HostSettings;
+    const originalHost = clone(theirs);
+    const mine = clone(DEFAULT_PREFS);
+    mapping.toPrefs(mine, theirs);
+    // Mutate every nested prefs value, catching shared arrays and objects at any depth.
+    const mutate = (value: unknown): void => {
+      if (!value || typeof value !== "object") return;
+      for (const [key, entry] of Object.entries(value)) {
+        if (entry && typeof entry === "object") mutate(entry);
+        else (value as Record<string, unknown>)[key] = null;
+      }
+    };
+    mutate(mine);
+    expect([mapping.keys, theirs]).toEqual([mapping.keys, originalHost]);
+  }
+});
+
+test("the first-sync repair removes stale host commands and aliases and restores saved actions", () => {
+  const saved = clone(DEFAULT_PREFS);
+  const stale = host({ cmdBinds: { KeyA: "echo test; +moveleft" }, aliases: { old: "echo old" }, binds: { left: [] } });
+  const patch = bindRepairPatch(saved, stale);
+  expect(patch).toMatchObject({ cmdBinds: {}, aliases: {}, binds: { left: ["KeyA"] } });
+  const repaired = host({ ...stale, ...patch });
+  pullHost(saved, repaired);
+  expect(saved.cmdBinds).toEqual({});
+  expect(saved.aliases).toEqual({});
+  expect(saved.binds.left).toContain("KeyA");
+  expect(bindRepairPatch(saved, repaired)).toEqual({});
 });

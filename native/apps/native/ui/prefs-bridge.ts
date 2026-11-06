@@ -8,7 +8,15 @@
 // "hud:<web element id>"). Before the host has said, the menu assumes this build's native keys (bridge.ts).
 
 import { CLASSIC, type HudLayout as WebHudLayout } from "../../web/src/hud/layout";
-import { DEFAULT_PREFS, keyLabel, prefs, type Action, type Prefs } from "../../web/src/ui/settings";
+import {
+  DEFAULT_PREFS,
+  keyLabel,
+  prefs,
+  parsePrefs,
+  PREFS_KEY,
+  type Action,
+  type Prefs,
+} from "../../web/src/ui/settings";
 import { toast } from "../../web/src/notify";
 import { paintPrefs } from "../../web/src/paint/prefs";
 import { NATIVE_BIND_ACTIONS, nativeKeyCode, send, settingsPatch, state, type SettingsPatch } from "./bridge";
@@ -32,9 +40,9 @@ export interface Mapping {
 function direct(path: string, key: string): Mapping {
   return {
     keys: [key],
-    toNative: (p) => ({ [key]: readPath(p, path) }),
+    toNative: (p) => ({ [key]: structuredClone(readPath(p, path)) }),
     toPrefs: (p, host) => {
-      if (host[key] !== undefined) writePath(p, path, host[key]);
+      if (host[key] !== undefined) writePath(p, path, structuredClone(host[key]));
     },
   };
 }
@@ -375,7 +383,7 @@ export const sameValue = (a: unknown, b: unknown): boolean => canonical(a) === c
 export function nativeView(p: Prefs, host: HostSettings): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const mapping of activeMappings()) Object.assign(out, mapping.toNative(p, host));
-  return out;
+  return structuredClone(out);
 }
 
 function activeMappings(): Mapping[] {
@@ -395,7 +403,7 @@ export function pullHost(p: Prefs, host: HostSettings): string[] {
   for (const mapping of activeMappings()) {
     const mine = mapping.toNative(p, host);
     if (mapping.keys.every((key) => sameValue(mine[key], host[key]))) continue;
-    mapping.toPrefs(p, host);
+    mapping.toPrefs(p, structuredClone(host));
     pulled.push(...mapping.keys);
   }
   return pulled;
@@ -440,6 +448,49 @@ const KNOWN_KEYS = "bunnyhop:native-host-keys";
 const SEND_DELAY_MS = 60;
 /** A change the host hasn't echoed after this long was refused (the host shows why); its value comes back. */
 const PENDING_MS = 3000;
+
+// v0.8.0 could save a deletion in the menu without sending it to the host. Capture it before the initial
+// host pull, which otherwise replaces that evidence. Only installs with saved command binds need repair.
+const BIND_REPAIR = "bunnyhop:native-bind-repair-081";
+function savedBindRepair(): Prefs | null {
+  try {
+    if (localStorage.getItem(BIND_REPAIR)) return null;
+    const raw = localStorage.getItem(PREFS_KEY);
+    if (!raw || !Object.hasOwn(JSON.parse(raw), "cmdBinds")) return null;
+    return parsePrefs(raw);
+  } catch {
+    return null;
+  }
+}
+let bindRepair = savedBindRepair();
+let bindRepairPending = true;
+
+/** The saved menu owns this one-time repair; native-only action bindings still come from the host. */
+export function bindRepairPatch(saved: Prefs, host: HostSettings): SettingsPatch {
+  const mine = nativeView(saved, host);
+  const keys = ["binds", "cmdBinds", "aliases"];
+  return patchBetween(
+    Object.fromEntries(keys.map((key) => [key, host[key]])),
+    Object.fromEntries(keys.map((key) => [key, mine[key]])),
+  );
+}
+
+function repairSavedBinds(): void {
+  if (!state.settingsKeys || !bindRepairPending) return;
+  bindRepairPending = false;
+  const patch = bindRepair ? bindRepairPatch(bindRepair, hostSettings()) : {};
+  bindRepair = null;
+  if (Object.keys(patch).length) {
+    rememberPatch(patch);
+    queuePatch(patch);
+    flushSettings();
+  }
+  try {
+    localStorage.setItem(BIND_REPAIR, "1");
+  } catch {
+    /* Repeat the repair next launch if storage is unavailable. */
+  }
+}
 
 let installed = false;
 let applying = false;
@@ -603,6 +654,7 @@ function receiveHost(): void {
   lastSettings = state.settings;
   lastExtra = state.extraSettings;
   lastShape = shape;
+  repairSavedBinds();
   const fresh = newHostKeys();
   const host = effectiveHost();
   const before = JSON.stringify(prefs.get());
