@@ -109,7 +109,13 @@ int main(int argc, char **argv) {
             native::GhostFrameContext frame{core.get(), run, 0, 1, route_track, style, outfit, .55f};
             native::append_ghost_actors(ghosts, renderer, frame, actors);
             renderer.set_room_actors(actors);
-            renderer.draw(1280, 720, eye, input, &snapshot, 0);
+            const auto deadline = SDL_GetTicks() + 10'000;
+            do {
+                renderer.draw(1280, 720, eye, input, &snapshot, 0);
+                if (renderer.room_actors_ready()) break;
+                SDL_Delay(4);
+            } while (SDL_GetTicks() < deadline);
+            if (!renderer.room_actors_ready()) throw std::runtime_error("Route actor preparation timed out: " + name);
             if (gl.GetError() != GL_NO_ERROR) throw std::runtime_error("Route GL error: " + name);
             renderer.screenshot((output / (name + ".ppm")).string(), 1280, 720);
             const auto racing = native::racing_ghost_paths(ghosts, renderer, frame);

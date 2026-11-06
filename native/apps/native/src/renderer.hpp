@@ -2670,6 +2670,12 @@ public:
             viewmodel->draw_actor(actor, projection, eye, seconds);
     }
 
+    bool room_actors_ready() const {
+        return !actorWarmup || std::all_of(roomActors.begin(), roomActors.end(), [&](const auto &actor) {
+            return actorWarmup->ready(actor);
+        });
+    }
+
     void set_room_actors(const std::vector<native_render::Actor> &actors) {
         roomActors = actors;
         if (roomActors.size() > 64) roomActors.resize(64);
