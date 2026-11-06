@@ -51,15 +51,32 @@ void join_and_update(native::RoomState &room) {
         players.push_back({{"slot", slot}, {"name", name}, {"spec", nullptr}, {"loadout", nullptr}});
         rows.push_back({{"slot", slot}, {"name", name}, {"rank", nullptr}, {"pb", nullptr}, {"ping", nullptr}});
     }
-    dispatch(room, envelope({{"t", "welcome"}, {"you", 0}, {"room", {{"name", "Easy"}}},
-                             {"map", {{"name", "bhop_mixtape"}}}, {"players", players}}), 1);
+    dispatch(
+            room,
+            envelope(
+                    {{"t", "welcome"},
+                     {"you", 0},
+                     {"room", {{"name", "Easy"}}},
+                     {"map", {{"name", "bhop_mixtape"}}},
+                     {"players", players}}
+            ),
+            1
+    );
     assert(room.id == "easy" && room.display().count == player_count);
-    Json board = {{"type", "scoreboard"}, {"generation", 1}, {"id", "easy"},
-                  {"head", {{"room", "Easy"}, {"map", "bhop_mixtape"}, {"max", 20}}}, {"rows", rows}};
+    Json board = {
+            {"type", "scoreboard"},
+            {"generation", 1},
+            {"id", "easy"},
+            {"head", {{"room", "Easy"}, {"map", "bhop_mixtape"}, {"max", 20}}},
+            {"rows", rows}
+    };
     dispatch(room, board, 1);
     assert(room.display().count == player_count && room.display().head.room == "Easy");
-    dispatch(room, {{"type", "roomSnapshot"}, {"generation", 1}, {"id", "easy"},
-                    {"snapshot", {{"blocks", Json::array()}}}}, 2);
+    dispatch(
+            room,
+            {{"type", "roomSnapshot"}, {"generation", 1}, {"id", "easy"}, {"snapshot", {{"blocks", Json::array()}}}},
+            2
+    );
     board["rows"][0]["name"] = "Renamed";
     dispatch(room, board, 2);
     assert(room.player_name(0) == "Player 0");
@@ -110,8 +127,9 @@ void *thread_entry(void *) {
 int main(int argc, char **argv) {
     if (argc > 1) recording_path = argv[1];
 #ifdef _WIN32
-    const HANDLE thread = CreateThread(nullptr, thread_stack_bytes, thread_entry, nullptr,
-                                       STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr);
+    const HANDLE thread = CreateThread(
+            nullptr, thread_stack_bytes, thread_entry, nullptr, STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr
+    );
     assert(thread);
     assert(WaitForSingleObject(thread, INFINITE) == WAIT_OBJECT_0);
     DWORD result = 1;

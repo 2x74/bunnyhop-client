@@ -175,8 +175,12 @@ void test_null_loadout_fields_use_defaults() {
             {{"t", "welcome"},
              {"you", 0},
              {"map", {{"name", "m"}}},
-             {"players", J::array({{{"slot", 2}, {"name", "them"},
-                                    {"loadout", {{"knife", nullptr}, {"finish", 42}, {"glove", nullptr}}}}})}}
+             {"players",
+              J::array(
+                      {{{"slot", 2},
+                        {"name", "them"},
+                        {"loadout", {{"knife", nullptr}, {"finish", 42}, {"glove", nullptr}}}}}
+              )}}
     ));
     feed(*room, J::array({sample(100, 0), sample(105, 5)}), 1);
     const auto actors = room->actors(2);

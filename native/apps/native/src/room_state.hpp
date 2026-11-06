@@ -122,8 +122,8 @@ class RoomState {
                 auto text = [&](const char *key, std::string fallback = {}) {
                     return l.contains(key) && l[key].is_string() ? l[key].get<std::string>() : fallback;
                 };
-                peer.actor.loadout = "2;" + text("knife", "knife-carrot") + ";"
-                                     + text("finish", "finish-default") + ";" + text("glove", "glove-default") + ";";
+                peer.actor.loadout = "2;" + text("knife", "knife-carrot") + ";" + text("finish", "finish-default") + ";"
+                                     + text("glove", "glove-default") + ";";
                 if (l.contains("crown") && l["crown"].is_number_integer())
                     peer.actor.loadout += std::to_string(l["crown"].get<int>());
                 auto number = [&](const char *key) -> std::string {
