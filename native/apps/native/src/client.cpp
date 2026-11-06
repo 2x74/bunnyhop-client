@@ -337,7 +337,8 @@ int run(const native::Options &opt) {
     // The equipped loadout holding the knife pool's pick: what the viewmodel, your bunny and the replay trailer show.
     native::HeldKnife held_knife;
     auto next_knife_event = native::KnifePoolEvent::restart;
-    native::RoomBridge room_bridge;
+    const auto room_bridge_owner = std::make_unique<native::RoomBridge>();
+    auto &room_bridge = *room_bridge_owner;
     auto &room = room_bridge.room;
     auto &room_modes = room_bridge.room_modes;
     auto &observed_spectator = room_bridge.observed_spectator;

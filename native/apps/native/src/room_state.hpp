@@ -119,14 +119,13 @@ class RoomState {
         if (p.contains("loadout")) {
             if (p["loadout"].is_object()) {
                 const auto &l = p["loadout"];
-                peer.actor.loadout = "2;" + l.value("knife", std::string("knife-carrot")) + ";"
-                                     + l.value("finish", std::string("finish-default")) + ";"
-                                     + l.value("glove", std::string("glove-default")) + ";";
-                if (l.contains("crown") && l["crown"].is_number_integer())
-                    peer.actor.loadout += std::to_string(l["crown"].get<int>());
                 auto text = [&](const char *key, std::string fallback = {}) {
                     return l.contains(key) && l[key].is_string() ? l[key].get<std::string>() : fallback;
                 };
+                peer.actor.loadout = "2;" + text("knife", "knife-carrot") + ";"
+                                     + text("finish", "finish-default") + ";" + text("glove", "glove-default") + ";";
+                if (l.contains("crown") && l["crown"].is_number_integer())
+                    peer.actor.loadout += std::to_string(l["crown"].get<int>());
                 auto number = [&](const char *key) -> std::string {
                     if (!l.contains(key) || !l[key].is_number_integer()) return {};
                     return std::to_string(l[key].get<int>());

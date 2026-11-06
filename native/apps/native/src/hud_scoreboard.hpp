@@ -8,6 +8,7 @@
 #include <limits>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace native {
 inline size_t hud_message_limit(std::string_view type, size_t fallback) {
@@ -95,7 +96,8 @@ inline std::optional<double> parse_hud_time(std::string_view text) {
 class HudScoreboard {
 public:
     ScoreHead head;
-    std::array<ScoreRow, 256> rows;
+    // The roster is about 340 KiB. Both the live board and contract()'s replacement must stay off the stack.
+    std::vector<ScoreRow> rows = std::vector<ScoreRow>(256);
     size_t count = 0;
 
     void clear() {

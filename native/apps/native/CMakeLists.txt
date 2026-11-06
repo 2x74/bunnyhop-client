@@ -288,7 +288,8 @@ if(BUNNYHOP_BUILD_CLIENT)
         # main() stays the entry point rather than WinMain.
         set_target_properties(bunnyhop-native PROPERTIES WIN32_EXECUTABLE TRUE)
         if(MSVC)
-            target_link_options(bunnyhop-native PRIVATE /ENTRY:mainCRTStartup)
+            # Leave room for platform/driver calls as well as the client's own bounded frames.
+            target_link_options(bunnyhop-native PRIVATE /ENTRY:mainCRTStartup /STACK:8388608)
         endif()
         # AMD's Anti-Lag 2 header relies on MSVC extensions (a pure virtual destructor with a body, static_cast from
         # void* to a function pointer). Build it only when this compiler takes it; otherwise there is no Anti-Lag 2.
@@ -455,6 +456,14 @@ if(BUNNYHOP_BUILD_CLIENT)
     endif()
 endif()
 if(BUILD_TESTING)
+    find_package(Threads REQUIRED)
+    add_executable(bunnyhop-native-room-stack-tests src/room_stack_tests.cpp)
+    target_include_directories(bunnyhop-native-room-stack-tests PRIVATE include vendor src)
+    target_link_libraries(bunnyhop-native-room-stack-tests PRIVATE Threads::Threads)
+    target_compile_options(bunnyhop-native-room-stack-tests PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
+    add_test(NAME native_room_stack COMMAND bunnyhop-native-room-stack-tests)
+    set_tests_properties(native_room_stack PROPERTIES TIMEOUT 30)
     foreach(parity_test IN ITEMS scene_draw_list graphics_settings zone_effects native_chat render_math water_capture texture_bleed room_state gameplay data_location sniper_zoom music_envelope weapon_menu ghost_trails actor_ticks activity cosmetics window_settings window_modes display_modes hud_theme replay_controls ghost_compare)
         add_executable(bunnyhop-native-${parity_test}-tests src/${parity_test}_tests.cpp)
         target_include_directories(bunnyhop-native-${parity_test}-tests PRIVATE include vendor src)
