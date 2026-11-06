@@ -383,7 +383,7 @@ impl Map {
             }
             fs.mount(vfs::Source::loose("loose", loose.clone()));
             fs.mount(vfs::Source::listing(Rc::new(
-                vfs::Listing::everything_under("disk", ""),
+                assets::loose_listing(root, check)?,
             )));
         }
         // Match the verifier's physics manifest: loose collision models belong to
@@ -735,11 +735,11 @@ impl Map {
 }
 fn remount(fs: &mut vfs::Vfs, loose: &HashMap<String, Rc<[u8]>>) {
     fs.unmount("loose");
-    fs.unmount("disk");
+    let disk = fs.unmount("disk");
     fs.mount(vfs::Source::loose("loose", loose.clone()));
-    fs.mount(vfs::Source::listing(Rc::new(
-        vfs::Listing::everything_under("disk", ""),
-    )));
+    if let Some(disk) = disk {
+        fs.mount(disk);
+    }
 }
 fn read_loose(root: &Path, name: &str) -> Option<Vec<u8>> {
     let path = Path::new(name);

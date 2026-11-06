@@ -318,7 +318,7 @@ fn crash_egypt_render_observations_restore_copies_and_train_props() {
     let path = fixture.file("bhop_crash_egypt.bsp", &bytes);
     unsafe {
         let c = bh_create();
-        assert_eq!(bh_load_map(c, path.as_ptr(), ptr::null()), 1);
+        assert_eq!(bh_load_map(c, path.as_ptr(), fixture.root().as_ptr()), 1);
         let mut count = 0;
         let props = bh_animated_props(c, &mut count);
         let props = std::slice::from_raw_parts(props, count);
@@ -387,4 +387,54 @@ fn crash_egypt_render_observations_restore_copies_and_train_props() {
         );
         bh_destroy(c);
     }
+}
+
+#[test]
+fn mounted_content_only_claims_real_material_candidates() {
+    let fixture = Fixture::new();
+    let root_path = fixture.0.join("content");
+    std::fs::create_dir_all(root_path.join("materials/loose")).unwrap();
+    std::fs::write(
+        root_path.join("materials/loose/actual.vmt"),
+        b"VertexLitGeneric {}",
+    )
+    .unwrap();
+    let mut fs = vfs::Vfs::default();
+    let material = "models/crash bandicoot game/props/crates/crate";
+    fs.mount(vfs::Source::loose(
+        "pak",
+        HashMap::from([(
+            format!("materials/{material}.vmt"),
+            Rc::<[u8]>::from(&b"VertexLitGeneric {}"[..]),
+        )]),
+    ));
+    fs.mount(vfs::Source::listing(Rc::new(
+        crate::assets::loose_listing(&root_path, &|| Ok(())).unwrap(),
+    )));
+    let textures = bunnyhop_core::props::MdlTextures {
+        textures: vec![material.into(), "actual".into()],
+        cdmaterials: vec![
+            "models/crash bandicoot game/props/crates".into(),
+            "".into(),
+            "loose".into(),
+        ],
+        skins: Vec::new(),
+    };
+    assert_eq!(
+        bunnyhop_core::props::model_material_names(&fs, &textures),
+        vec![material, "loose/actual"]
+    );
+    let pending = fs.take_pending();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].path, "materials/loose/actual.vmt");
+    let loaded = HashMap::from([(
+        "materials/loose/actual.vmt".to_string(),
+        Rc::<[u8]>::from(&b"VertexLitGeneric {}"[..]),
+    )]);
+    crate::remount(&mut fs, &loaded);
+    assert_eq!(
+        bunnyhop_core::props::model_material_names(&fs, &textures),
+        vec![material, "loose/actual"]
+    );
+    assert!(fs.take_pending().is_empty());
 }

@@ -76,6 +76,34 @@ pub struct Assets {
     pub model_info: Vec<CString>,
     pub anim: Vec<f32>,
 }
+// A wildcard remote listing claims nonexistent $cdmaterials candidates and masks valid later paths in the pakfile.
+pub(super) fn loose_listing(
+    root: &Path,
+    check: &dyn Fn() -> Result<(), String>,
+) -> Result<vfs::Listing, String> {
+    let mut directories = vec![root.to_path_buf()];
+    let mut paths = Vec::new();
+    while let Some(directory) = directories.pop() {
+        check()?;
+        for entry in
+            std::fs::read_dir(&directory).map_err(|e| format!("{}: {e}", directory.display()))?
+        {
+            check()?;
+            let entry = entry.map_err(|e| e.to_string())?;
+            let kind = entry.file_type().map_err(|e| e.to_string())?;
+            if kind.is_dir() {
+                directories.push(entry.path());
+            } else if kind.is_file() {
+                let path = entry.path();
+                if let Some(relative) = path.strip_prefix(root).ok().and_then(Path::to_str) {
+                    paths.push(relative.to_string());
+                }
+            }
+        }
+    }
+    Ok(vfs::Listing::new("disk", paths))
+}
+
 pub fn fetch_pending(
     fs: &mut vfs::Vfs,
     root: Option<&Path>,
