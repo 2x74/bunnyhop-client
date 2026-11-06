@@ -92,7 +92,7 @@
   {
     "path": "apps/web/src/ui/loadout-ui.ts",
     "classification": "native patch",
-    "baseline": "08758425740973583fdf02815b456e0a3ca57b20"
+    "baseline": "338a6e9b7b561eebca51f71adf7504bd009d80be"
   },
   {
     "path": "apps/web/src/ui/player-glow-controls.ts",
