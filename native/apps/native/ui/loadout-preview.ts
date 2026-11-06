@@ -27,7 +27,8 @@ export interface PreviewRequest {
   outfit: string;
   ghost: string;
   playerGlow: PlayerGlow | null;
-  view: "fp" | "close" | "bunny" | "ghost" | "onboarding";
+  view: "fp" | "close" | "bunny" | "ghost" | "onboarding" | "gun" | "gunside" | "knife" | "hilt";
+  weapon?: number;
   stage?: OnboardingPose;
   yaw: number;
   pitch: number;
@@ -47,7 +48,7 @@ export function cancelPreview(id: number): void {
   if (job) clearTimeout(job.timer);
   pending.delete(id);
 }
-export function requestPreview(request: PreviewRequest, done: (png: string) => void): number {
+export function requestPreview(request: PreviewRequest, done: (png: string) => void, timeoutMs = 3000): number {
   const host = window.webkit?.messageHandlers?.bunnyhop;
   if (!host) return 0;
   (window as PreviewWindow).bunnyhopNativeLoadoutPreview = (frame) => {
@@ -62,7 +63,7 @@ export function requestPreview(request: PreviewRequest, done: (png: string) => v
     timer: setTimeout(() => {
       cancelPreview(id);
       done("");
-    }, 3000),
+    }, timeoutMs),
   });
   host.postMessage(JSON.stringify({ type: "loadoutPreview", id, ...request }));
   return id;

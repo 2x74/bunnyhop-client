@@ -22,10 +22,11 @@ interface CJob {
   kind: string;
   outfit: string;
   loadout: string;
+  weapon?: number;
 }
 for (const c of COSMETICS) {
   if (staffItem(c)) continue;
-  if (!["knife", "finish", "glove", "outfit", "hat", "body", "ghost"].includes(c.slot)) continue;
+  if (!["knife", "finish", "hilt", "camo", "glove", "outfit", "hat", "body", "ghost"].includes(c.slot)) continue;
   if (c.slot === "knife" && !metadata.meshes["fpknife:" + c.id.replace(/^knife-/, "")]) continue;
   if (c.slot === "hat" && !metadata.hats[c.id]) continue;
   if (Object.hasOwn(kept, c.id)) continue;
@@ -37,15 +38,20 @@ for (const c of COSMETICS) {
   jobs.push({
     id: c.id,
     kind:
-      c.slot === "ghost"
-        ? "ghost"
-        : c.slot === "hat"
-          ? "hat"
-          : c.slot === "outfit" || c.slot === "body"
-            ? "actor"
-            : "fp",
+      c.slot === "hilt"
+        ? "hilt"
+        : c.slot === "camo"
+          ? "gunside"
+          : c.slot === "ghost"
+            ? "ghost"
+            : c.slot === "hat"
+              ? "hat"
+              : c.slot === "outfit" || c.slot === "body"
+                ? "actor"
+                : "fp",
     outfit,
-    loadout: `2;${knife};${finish};${glove};;${hat};${c.slot === "body" ? c.id : "body-a"}`,
+    loadout: `2;${knife};${finish};${glove};;${hat};${c.slot === "body" ? c.id : "body-a"};;;;${c.slot === "hilt" ? c.id : ""};${c.slot === "camo" ? c.id : ""}`,
+    weapon: c.slot === "camo" ? 17 : 1,
   });
 }
 await writeFile(resolve(temp, "jobs.json"), JSON.stringify(jobs));
@@ -116,7 +122,7 @@ function filterRows(pixels: Buffer, width: number, height: number): Buffer {
 const images: Record<string, string> = {};
 let pngBytes = 0;
 // Kept pictures stay in the catalog's order, still for items the website has; new ones follow.
-const shipped = new Set(COSMETICS.map((c) => c.id));
+const shipped = new Set(COSMETICS.filter((c) => !staffItem(c)).map((c) => c.id));
 for (const [id, image] of Object.entries(kept)) {
   if (!shipped.has(id)) continue;
   images[id] = image;
@@ -130,7 +136,7 @@ for (const job of jobs) {
   if (job.kind !== "actor") {
     // Catalogue additions are occasional. Keep their thumbnails smaller than the original hand-tuned catalog so
     // Contributor and future role items fit the embedded 4 MiB menu limit without dropping previews.
-    const scale = missingOnly ? 8 : 2,
+    const scale = missingOnly ? 8 : job.kind === "gunside" || job.loadout.split(";")[10] ? 4 : 2,
       outW = 1024 / scale,
       outH = 768 / scale;
     const small = Buffer.alloc(outW * outH * 4);

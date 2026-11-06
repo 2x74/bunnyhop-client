@@ -74,7 +74,11 @@ const BEGIN_NORMAL = `
 
 const BEGIN_VERTEX = `
   vec3 transformed = vec3(position);
+#if defined(GUN_CAMO) || defined(CAMO_TP)
   vGunCamo = gunCamo;
+#else
+  vGunCamo = vec3(0.0, 1.0, 1.0);
+#endif
   vHalo = auraPass > 1.5 ? 1.0 : 0.0;
   vGlowAlpha = 1.5;
   vAuraCoord = vec2(transformed.x + transformed.y * 0.47, transformed.z);
@@ -184,12 +188,14 @@ ${glow}
 
 function solidFragment(source: string, glow: string): string {
   let fragment = replaceChunks(source, FRAGMENT_CHUNKS);
+  // Web compiles separate material sources with/without camo; native caches both from this shared source.
+  fragment = fragment.replace(
+    "  vec3 camoAlb = gunCamoAlbedo();\n  if (vCamo.x > 0.5) albedo = camoAlb;",
+    "#ifdef GUN_CAMO\n  vec3 camoAlb = gunCamoAlbedo();\n  if (vCamo.x > 0.5) albedo = camoAlb;\n#endif",
+  );
   const colorInput = /((?:varying|in) vec3 vColor;)/;
   if (!colorInput.test(fragment)) throw new Error("Native material colour input missing");
-  fragment = fragment.replace(
-    colorInput,
-    "$1\nvarying vec3 vGunCamo;\nuniform vec3 uCamoC[4];\nuniform bool uCamoTpSolid;",
-  );
+  fragment = fragment.replace(colorInput, "$1\nvarying vec3 vGunCamo;\nuniform vec3 uCamoTp[3];");
   // The glow function reads vNormalW / vWorldPos, so it goes after the solid material's own declarations.
   fragment = fragment.replace("void main() {", `${glow}\nvoid main() {`);
   fragment = insertAfter(
@@ -206,11 +212,10 @@ function solidFragment(source: string, glow: string): string {
 #ifdef CAMO_TP
   float zone = floor(vGunCamo.x + 0.5);
   if (zone >= 1.0) {
-    vec3 paint = uCamoTpSolid ? uCamoC[int(clamp(zone - 1.0, 0.0, 2.0))]
-                              : (zone == 2.0 ? mix(uCamoC[0], uCamoC[1], 0.35) : uCamoC[0]);
+    vec3 paint = uCamoTp[int(clamp(zone - 1.0, 0.0, 2.0))];
     float edge = clamp(vGunCamo.x - zone, 0.0, 0.5);
     float shade = vGunCamo.y * vGunCamo.z;
-    nativePlayerColor = (paint + (vec3(1.0) - paint) * edge * 0.35 + paint * edge * 0.25) * shade;
+    nativePlayerColor = min(vec3(1.0), (paint + (vec3(1.0) - paint) * edge * 0.35 + paint * edge * 0.25) * shade);
   }
 #endif`,
   );

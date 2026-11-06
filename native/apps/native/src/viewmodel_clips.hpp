@@ -2,6 +2,7 @@
 // The baked pose clips of the native asset bundle (export-viewmodels.ts): per rig entry, its meshes and its clips,
 // each a run of frames of skinning matrices (12 floats a bone) sampled with linear interpolation.
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <span>
 #include <string>
@@ -13,6 +14,8 @@ struct PoseClip {
     std::string name;
     double duration = 0;
     size_t frames = 0, offset = 0;
+    size_t joint_count = 0, angle_offset = 0;
+    std::array<int, 4> joint_bones{};
 };
 
 struct PoseEntry {

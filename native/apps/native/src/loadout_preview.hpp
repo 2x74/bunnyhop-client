@@ -29,7 +29,9 @@ public:
         if (!job.is_object() || job.dump().size() > 8192) return {};
         const auto id = job.value("id", 0u);
         const auto view = job.value("view", std::string("fp"));
-        if (!id || (view != "fp" && view != "close" && view != "bunny" && view != "ghost" && view != "onboarding"))
+        if (!id
+            || (view != "fp" && view != "close" && view != "bunny" && view != "ghost" && view != "onboarding"
+                && view != "gun" && view != "gunside" && view != "knife" && view != "hilt"))
             return {};
         const int w = std::clamp(job.value("width", 768), 384, 960), h = std::clamp(job.value("height", 480), 240, 600);
         const float yaw = job.value("yaw", 0.f), pitch = job.value("pitch", 0.f);
@@ -58,7 +60,10 @@ public:
                 if (!s.contains(key) || !s[key].is_number() || !std::isfinite(s[key].get<double>())) return {};
             if (std::abs(s["squash"].get<double>()) > .2 || s["clock"].get<double>() < 0) return {};
         }
-        const auto next = onboarding ? view : outfit + ";" + packed + ";" + view + ";" + ghost;
+        const auto weapon = job.value("weapon", 17u);
+        if (weapon < 2 || weapon > 25) return {};
+        const auto next =
+                onboarding ? view : outfit + ";" + packed + ";" + view + ";" + ghost + ";" + std::to_string(weapon);
         const bool changed = signature != next;
         if (changed) {
             signature = next;
@@ -112,14 +117,14 @@ public:
         // Settle the weapon draw clip before delivering the first frame; otherwise the first
         // request can capture hands still below the camera and no animation is requested yet.
         if (changed && !onboarding) {
-            models.draw_menu_preview(w, h, view, 0, yaw, pitch, 0, false);
+            models.draw_menu_preview(w, h, view, 0, yaw, pitch, 0, false, weapon);
             gl.Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         }
         if (onboarding)
             models.draw_onboarding_preview(w, h, job["stage"], job["stage"]["clock"], presses ? 1 : 0);
         else
             models.draw_menu_preview(
-                    w, h, view, 2 + std::max(0., now - started), yaw, pitch, presses, job.value("held", false)
+                    w, h, view, 2 + std::max(0., now - started), yaw, pitch, presses, job.value("held", false), weapon
             );
         return backbuffer_png(gl, w, h, 2000000);
     }

@@ -16,6 +16,7 @@ public:
         int soft = 0;
         float distance = 0;
         std::array<std::array<float, 2>, 4> texcoords{};
+        std::array<float, 4> alpha{1, 1, 1, 1};
     };
 
 private:
@@ -74,8 +75,12 @@ void main(){float a=vColor.a;if(uv.y>=paintUvOffset){
 
     void clear() { quads.clear(); }
 
-    void quad(const std::array<native_render::Vec3, 4> &p, const std::array<float, 4> &c, int soft = 0) {
-        if (quads.size() < 8192 && c[3] > .001f) quads.push_back({p, c, soft, 0});
+    void
+    quad(const std::array<native_render::Vec3, 4> &p,
+         const std::array<float, 4> &c,
+         int soft = 0,
+         std::array<float, 4> alpha = {1, 1, 1, 1}) {
+        if (quads.size() < 8192 && c[3] > .001f) quads.push_back({p, c, soft, 0, {}, alpha});
     }
 
     void
@@ -147,6 +152,7 @@ void main(){float a=vColor.a;if(uv.y>=paintUvOffset){
                 Vertex v{};
                 std::copy(q.p[i].begin(), q.p[i].end(), v.p);
                 std::copy(q.color.begin(), q.color.end(), v.c);
+                v.c[3] *= q.alpha[i];
                 if (q.soft == paint_decal) {
                     v.uv[0] = q.texcoords[i][0];
                     v.uv[1] = q.texcoords[i][1] + paint_uv_offset;

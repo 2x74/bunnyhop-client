@@ -23,6 +23,7 @@ export const THUMB_W = 384,
   THUMB_H = 240;
 const CLOSE_UP_ZOOM = 1.3;
 const thumbs = new Map<string, HTMLCanvasElement>();
+let lastGunIndex = 6;
 const color = (id: string | undefined | null, fallback: string) => cosmetic(id)?.color ?? fallback;
 const name = (id: string | undefined | null, fallback: string) => cosmetic(id)?.name ?? fallback;
 const paintRevisions = new WeakMap<HTMLCanvasElement, number>();
@@ -39,6 +40,9 @@ function imageFor(id: string): HTMLImageElement | null {
   return image;
 }
 function previewId(spec: PreviewSpec): string {
+  if (spec.kind === "gun") return spec.camo ?? "camo-none";
+  if (spec.kind === "knife" && spec.key.startsWith("h|") && spec.hilt && spec.hilt !== "hilt-original")
+    return spec.hilt;
   if (spec.kind === "bunny") return spec.body === "body-b" ? "body-b" : (spec.outfit ?? "outfit-cream");
   if (spec.kind === "ghost") return spec.key.startsWith("ghost-") ? spec.key : (spec.outfit ?? "outfit-cream");
   if (spec.kind === "hat") return spec.hat ?? "";
@@ -128,7 +132,8 @@ export class LoadoutStage {
   private shown: CosmeticLoadout;
   private look: StageLook = {};
   private viewMode: StageView = "fp";
-  private gunIndex = 0;
+  private gunIndex = lastGunIndex;
+  private thumbRequests = new Map<string, number>();
   private disposed = false;
   static acquire(host: HTMLElement, initial: CosmeticLoadout): LoadoutStage {
     return new LoadoutStage(host, initial);
@@ -171,8 +176,10 @@ export class LoadoutStage {
     this.onView?.(view);
   }
   stepGun(by: number): string {
-    const guns = ["Beanpole", "Broadfork", "Cottontail", "Hedgerow", "Jackrabbit", "Seeddrill", "Thumper"];
+    const guns = ["Thumper", "Cottontail", "Jackrabbit", "Broadfork", "Hedgerow", "Seed Drill", "Furrow", "Beanpole"];
     this.gunIndex = (this.gunIndex + (by % guns.length) + guns.length) % guns.length;
+    lastGunIndex = this.gunIndex;
+    this.draw();
     return guns[this.gunIndex];
   }
   private draw(): void {
@@ -185,6 +192,8 @@ export class LoadoutStage {
       key: this.look.ghost ?? "stage",
       knife: this.shown.knife,
       finish: this.shown.finish,
+      hilt: this.shown.hilt,
+      camo: this.shown.camo,
       glove: this.shown.glove,
       body: this.shown.body,
       outfit: this.look.outfit ?? undefined,
@@ -193,6 +202,7 @@ export class LoadoutStage {
       color2: this.viewMode === "ghost" ? cosmetic(this.look.ghost)?.color2 : undefined,
       veil: this.look.veil,
     };
+    if (slot === "camo") spec = { ...spec, kind: "gun" };
     if (slot === "glove") spec = { ...spec, kind: "glove" };
     if (slot === "hat") spec = { ...spec, kind: "hat" };
     if (slot === "finish") spec = { ...spec, kind: "knife", knife: "knife-carrot" };
@@ -249,7 +259,8 @@ export class LoadoutStage {
         outfit: this.look.outfit ?? "outfit-cream",
         ghost: this.look.ghost ?? "ghost-gold",
         playerGlow: this.look.playerGlow ?? null,
-        view: this.viewMode === "gun" || this.viewMode === "gunside" ? "fp" : this.viewMode,
+        view: this.viewMode,
+        weapon: [2, 3, 7, 8, 9, 14, 17, 22][this.gunIndex],
         yaw: this.yaw,
         pitch: this.pitch,
         inspect: this.inspectCount,
@@ -306,20 +317,84 @@ export class LoadoutStage {
           ? job.spec
           : job.kind === "glove"
             ? { kind: "glove", key: job.key, glove: job.loadout.glove }
-            : { kind: "knife", key: job.key, knife: job.knife, finish: job.loadout.finish };
+            : { kind: "knife", key: job.key, knife: job.knife, finish: job.loadout.finish, hilt: job.loadout.hilt };
       paint(canvas, spec);
       if (thumbs.size >= 240) thumbs.delete(thumbs.keys().next().value!);
       thumbs.set(job.key, canvas);
     }
     done(canvas);
+    if (nativePreviewAvailable() && !this.thumbRequests.has(job.key)) {
+      const spec = job.kind === "item" ? job.spec : null;
+      const loadout =
+        job.kind === "item"
+          ? {
+              ...this.shown,
+              ...(spec?.knife ? { knife: spec.knife } : {}),
+              ...(spec?.finish ? { finish: spec.finish } : {}),
+              ...(spec?.glove ? { glove: spec.glove } : {}),
+              ...(spec?.hilt ? { hilt: spec.hilt } : {}),
+              ...(spec?.camo ? { camo: spec.camo } : {}),
+              ...(spec?.hat ? { hat: spec.hat } : {}),
+            }
+          : job.loadout;
+      const request = requestPreview(
+        {
+          loadout: packLoadout(loadout),
+          outfit: spec?.outfit ?? this.look.outfit ?? "outfit-cream",
+          ghost: this.look.ghost ?? "ghost-gold",
+          playerGlow: null,
+          view:
+            spec?.kind === "gun"
+              ? "gunside"
+              : spec?.kind === "hat" || spec?.kind === "bunny"
+                ? "bunny"
+                : spec?.kind === "ghost"
+                  ? "ghost"
+                  : job.kind === "knife" && job.focus === "hilt"
+                    ? "hilt"
+                    : job.kind === "knife" || spec?.kind === "knife"
+                      ? "knife"
+                      : "fp",
+          weapon: 17,
+          yaw: 0,
+          pitch: 0,
+          inspect: 0,
+          held: false,
+          width: THUMB_W,
+          height: THUMB_H,
+        },
+        (png) => {
+          this.thumbRequests.delete(job.key);
+          if (this.disposed || !png) return;
+          const image = new Image();
+          image.onload = () => {
+            if (this.disposed) return;
+            paintRevisions.set(canvas!, (paintRevisions.get(canvas!) ?? 0) + 1);
+            canvas!.dataset.nativeThumbnail = "true";
+            canvas!.width = image.naturalWidth;
+            canvas!.height = image.naturalHeight;
+            canvas!.getContext("2d")?.drawImage(image, 0, 0);
+            done(canvas!);
+          };
+          image.src = png;
+        },
+        10000,
+      );
+      this.thumbRequests.set(job.key, request);
+    }
   }
-  cancelThumbs(_keep: (key: string) => boolean): void {
-    /* All software thumbnails finish synchronously. */
+  cancelThumbs(keep: (key: string) => boolean): void {
+    for (const [key, request] of this.thumbRequests) {
+      if (keep(key)) continue;
+      cancelPreview(request);
+      this.thumbRequests.delete(key);
+    }
   }
   dispose(): void {
     this.disposed = true;
     clearTimeout(this.frame);
     cancelPreview(this.request);
+    this.cancelThumbs(() => false);
     this.canvas.removeEventListener("pointerdown", this.down);
     this.canvas.removeEventListener("pointermove", this.move);
     this.canvas.removeEventListener("pointerup", this.up);

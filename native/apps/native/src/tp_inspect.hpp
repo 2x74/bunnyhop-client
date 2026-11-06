@@ -371,4 +371,83 @@ apply(const Combo &combo,
         D[k] = float(D[k] * tp["s"].get<double>());
     pre(knife, mul(mul(F, D), inverse(F)));
 }
+
+// Knife-local pivots conjugated through the scaled third-person bind frame (knives/tp-parts.ts).
+struct PartPose {
+    struct Joint {
+        int bone = -1, parent = -1;
+        V pivot{};
+    };
+
+    M frame = identity(), inverse_frame = identity();
+    std::array<Joint, 4> joints{};
+    size_t count = 0;
+    int knife = -1, spinner = -1;
+
+    PartPose() = default;
+
+    PartPose(const J &spec, const std::vector<std::string> &names, const std::vector<float> &bind) {
+        if (!spec.contains("parts")) return;
+        const auto &raw = spec.at("parts");
+        const auto hand_at = std::find(names.begin(), names.end(), "ValveBiped.Bip01_R_Hand");
+        const auto knife_at = std::find(names.begin(), names.end(), "bunny.Knife");
+        if (hand_at == names.end() || knife_at == names.end()) return;
+        knife = int(knife_at - names.begin());
+        M hand;
+        std::copy_n(bind.data() + (hand_at - names.begin()) * 12, 12, hand.data());
+        const M placement = raw.at("frame").get<M>();
+        frame = mul(hand, placement);
+        M placement_inverse = inverse(placement);
+        const double scale = spec.at("tp").at("s");
+        for (int r = 0; r < 3; r++) {
+            for (int c = 0; c < 3; c++)
+                placement_inverse[r * 4 + c] = float(placement[c * 4 + r] / (scale * scale));
+            placement_inverse[r * 4 + 3] = float(
+                    -dot({placement_inverse[r * 4], placement_inverse[r * 4 + 1], placement_inverse[r * 4 + 2]},
+                         pos(placement))
+            );
+        }
+        inverse_frame = mul(placement_inverse, inverse(hand));
+        count = std::min(joints.size(), raw.at("chain").size());
+        spinner = raw.at("spinner");
+        for (size_t i = 0; i < count; i++) {
+            const auto &chain = raw.at("chain")[i];
+            joints[i] = {raw.at("bones")[i], chain.at("parent"), chain.at("pivot").get<V>()};
+        }
+    }
+
+    static double sample_angle(const J &clip, double seconds, size_t joint) {
+        const size_t width = clip.value("J", 0u);
+        if (joint >= width) return 0;
+        const int samples = clip.at("n");
+        const double f = std::clamp(seconds * 60, 0., double(samples - 1));
+        const int i = std::min(samples - 2, int(std::floor(f)));
+        const double u = std::max(0., f - i);
+        const auto &angles = clip.at("a");
+        const double a = angles[size_t(i) * width + joint];
+        return a + (angles[size_t(i + 1) * width + joint].get<double>() - a) * u;
+    }
+
+    void apply(const Combo &combo, const J &spec, double idle_angle, std::vector<float> &skin) const {
+        if (knife < 0) return;
+        std::array<M, 4> deforms;
+        const double weight = smooth((combo.weight() - .5) / .5), mix = combo.mix();
+        for (size_t i = 0; i < count; i++) {
+            double angle = int(i) == spinner ? idle_angle : 0;
+            if (combo.cur && weight > 0) {
+                const auto &clips = spec.at("clips");
+                angle += weight * mix * sample_angle(clips[combo.cur->trick], combo.cur->t, i);
+                if (combo.prev && mix < 1)
+                    angle += weight * (1 - mix) * sample_angle(clips[combo.prev->trick], combo.prev->t, i);
+            }
+            const auto &joint = joints[i];
+            const M rotated = rotation({1, 0, 0}, -angle * 3.141592653589793 / 180, joint.pivot);
+            deforms[i] = joint.parent >= 0 ? mul(deforms[size_t(joint.parent)], rotated) : rotated;
+            if (joint.bone < 0 || size_t(joint.bone + 1) * 12 > skin.size()) continue;
+            const M deform = mul(mul(frame, deforms[i]), inverse_frame);
+            concat(skin.data() + knife * 12, deform.data(), skin.data() + joint.bone * 12);
+        }
+    }
+};
+
 }  // namespace native_tp

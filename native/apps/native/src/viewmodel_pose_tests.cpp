@@ -43,11 +43,16 @@ void test_blends(const native_vm::KnifeRig &rig, const Json &oracle) {
     auto cancelled = floats(poses.at("slash"));
     const auto toss = floats(poses.at("toss"));
     const auto &weights = oracle.at("cancel");
-    const native_vm::CancelWeights groups{weights.at("fingers"), weights.at("knife")};
+    const native_vm::CancelWeights groups{weights.at("fingers"), weights.at("knife"), weights.at("parts")};
     native_vm::blend_hierarchy(rig, cancelled, toss, weights.at("weight"), work, &groups);
+    const auto joint_bones = oracle.at("jointBones").get<std::vector<int>>();
+    const auto cancel_angles = oracle.at("cancelAngles").get<std::vector<double>>();
+    const auto chain_angles = oracle.at("chainAngles").get<std::vector<double>>();
+    native_vm::apply_part_angles(rig, cancelled, joint_bones, cancel_angles);
     expect_pose(cancelled, poses.at("cancel"), "cancel blend");
     auto chained = floats(poses.at("presented"));
     native_vm::blend_hierarchy(rig, chained, toss, .3, work);
+    native_vm::apply_part_angles(rig, chained, joint_bones, chain_angles);
     expect_pose(chained, poses.at("chain"), "chain crossfade");
     // Through the skinning matrices the baked clips hold and back.
     std::vector<float> skin(chained.size()), world(chained.size());

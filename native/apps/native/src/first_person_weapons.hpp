@@ -595,7 +595,14 @@ private:
     void pose_knife(WeaponState &state, const FirstPersonInput &in) {
         const auto *clip = state.clip();
         if (!state.entry || !clip) return;
-        sample_clip(data_, *state.entry, *clip, time_in(state, in.seconds), false, state.pose);
+        sample_clip(
+                data_,
+                *state.entry,
+                *clip,
+                state.action == Action::idle ? in.seconds : time_in(state, in.seconds),
+                state.action == Action::idle,
+                state.pose
+        );
         if (!config_.knife_rig || config_.knife_rig->bones() != state.entry->bones) {
             blend_inspect_flat(state);
             return;
@@ -634,10 +641,36 @@ private:
         if (pose.weight < 1) {
             constexpr double knife_from = .45;
             groups.fingers = std::min(1., pose.weight * 2);
+            groups.parts = smooth_step((pose.weight - .5) / .5);
             groups.knife = smooth_step((pose.weight - knife_from) / (1 - knife_from));
         }
         blend_hierarchy(rig, world_, inspect_world_, pose.weight, work_, pose.weight < 1 ? &groups : nullptr);
+        if (current->joint_count) {
+            std::array<double, 4> angles{};
+            const double weight = pose.weight < 1 ? groups.parts : 1;
+            sample_joint_angles(*current, pose.current.t, weight * pose.mix, angles);
+            if (pose.crossfading && pose.mix < 1)
+                sample_joint_angles(
+                        *clips[size_t(pose.previous.trick)], pose.previous.t, weight * (1 - pose.mix), angles
+                );
+            apply_part_angles(
+                    rig,
+                    world_,
+                    std::span(current->joint_bones).first(current->joint_count),
+                    std::span(angles).first(current->joint_count)
+            );
+        }
         return true;
+    }
+
+    void sample_joint_angles(const PoseClip &clip, double seconds, double weight, std::array<double, 4> &angles) const {
+        const double f = std::clamp(seconds * 60, 0., double(clip.frames - 1));
+        const size_t i = size_t(f), next = std::min(i + 1, clip.frames - 1);
+        for (size_t joint = 0; joint < clip.joint_count; joint++) {
+            const double a = data_[clip.angle_offset + i * clip.joint_count + joint];
+            const double b = data_[clip.angle_offset + next * clip.joint_count + joint];
+            angles[joint] += (a + (b - a) * (f - double(i))) * weight;
+        }
     }
 
     // Without the knife rig (an older asset bundle): the inspect blended bone by bone over the base pose.

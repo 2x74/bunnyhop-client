@@ -9,7 +9,7 @@ test("embedded authored previews cover every shipped knife, finish, glove, outfi
   const images = catalog.images as Record<string, string>;
   for (const knife of KNIVES) expect(images[knife.cosmeticId]).toStartWith("data:image/png;base64,");
   for (const c of COSMETICS.filter(
-    (c) => !staffItem(c) && ["finish", "glove", "outfit", "hat", "body", "ghost"].includes(c.slot),
+    (c) => !staffItem(c) && ["finish", "hilt", "camo", "glove", "outfit", "hat", "body", "ghost"].includes(c.slot),
   ))
     expect(images[c.id], c.id).toStartWith("data:image/png;base64,");
   for (const c of COSMETICS.filter(staffItem)) expect(images[c.id], c.id).toBeUndefined();

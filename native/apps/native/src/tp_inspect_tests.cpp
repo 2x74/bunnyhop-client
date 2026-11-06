@@ -16,6 +16,7 @@ int main(int argc, char **argv) {
         for (const auto &test : oracle["cases"]) {
             Combo combo;
             const auto &spec = tracks["knives"][test["knife"].get<std::string>()];
+            const PartPose parts(spec, names, bind);
             for (const auto &f : test["frames"]) {
                 if (f.contains("seek")) {
                     combo.reset();
@@ -28,6 +29,10 @@ int main(int argc, char **argv) {
                 combo.update(f["dt"], f.value("held", false), spec);
                 auto pose = f["base"].get<std::vector<float>>(), expected = f["expected"].get<std::vector<float>>();
                 apply(combo, spec, names, parent, bind, pose);
+                const double time = f.at("time");
+                const double into = time - std::floor(time / 6.5) * 6.5;
+                const double idle = 1800 * ((1 - std::exp(-into / .85)) / (1 - std::exp(-6.5 / .85)));
+                parts.apply(combo, spec, idle, pose);
                 for (size_t i = 0; i < pose.size(); i++) {
                     if (!std::isfinite(pose[i])) throw std::runtime_error("nonfinite gesture");
                     error = std::max(error, std::abs(double(pose[i] - expected[i])));
