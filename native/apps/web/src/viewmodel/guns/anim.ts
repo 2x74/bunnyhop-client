@@ -83,7 +83,7 @@ export interface GunPose {
   leftOpen: number;
   /**
    * 0..1: the left hand is away from the gun (carrying the can below the screen, fetching a magazine), so its wrist
-   * may bend toward the elbow (guns/pose.ts arm: FREE_WRIST instead of ARM.bendL). Without it a hand rolled far over
+   * may bend toward the elbow (guns/pose.ts arm: WRIST.work instead of WRIST.support). Without it a hand rolled far over
    * keeps its forearm on its own line, which then stands up through the middle of the screen.
    */
   leftArm: number;
@@ -248,6 +248,15 @@ export class GunAnimator {
 
   get clipDuration(): number {
     return this.base.dur;
+  }
+
+  /**
+   * The recoil springs' share of the pose (guns/pose.ts carries it onto the forearms: the kick moves the arms, not the
+   * wrists): angles (pitch, yaw, roll; deg) and offset (forward, left, up; units), as added to `pose`.
+   */
+  recoilPart(a: V3, o: V3): void {
+    (a[0] = -this.rx[0]), (a[1] = this.rx[3]), (a[2] = this.rx[2]);
+    (o[0] = -this.rx[1]), (o[1] = 0), (o[2] = this.rx[4]);
   }
 
   /** Seconds since the last shot (Infinity: none yet). */
@@ -955,7 +964,7 @@ const CV: ((t: number) => number)[] = [
   /* 7 */ track([[0.06, 0], [0.16, 1, E.io], [0.88, 1], [0.98, 0, E.io]]),
   /* 8 */ track([[0.2, 0], [0.3, 1, E.in2]]),
   /* 9 */ track([[0.28, 0], [0.42, 1, E.in2]]),
-  /* 10 */ track([[0.46, 0], [0.6, 1, E.out]]),
+  /* 10 */ track([[0.5, 0], [0.6, 1, E.out]]), // (from 0.5, where the new pod is taken: it began at 0.46 and the hand jumped 7 units into view)
   /* 11 */ track([[0.6, 0], [0.7, 1, E.in2]]),
   /* 12 */ track([[0.74, 0], [0.8, 1, E.out], [0.83, 1], [0.86, 0, E.in2]]),
   /* 13 */ track([[0, 0], [0.18, 1, E.in2], [0.3, 1], [0.55, 0, E.out]]),

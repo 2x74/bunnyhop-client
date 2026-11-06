@@ -135,6 +135,9 @@ export const thumper: GunDef = {
   // 0.6 lower than v0.0.28 (-3.6) since the v0.0.29 default framing (viewmodel/defaults.ts) lifts the hands: the support
   // cuff stays under the grip instead of standing up in front of the gloves.
   frame: { o: [18, -5.2, -4.2], a: [0, 6, -5] },
+  // v0.0.38 gun grips: the support elbow where its wrist rests near neutral (about 15 deg extension, 20 ulnar; it sat
+  // at 27 and 28, the hand cocked down off a steep forearm): both arms reach out to the gun.
+  elbows: { R: [10, -20, -24], L: [6.45, -1.3, -7.1] },
   trigger: TRIGGER,
   muzzle: [6.8, 0, 0.78],
   eject: { p: [2.7, -0.3, 1.45], dir: [-0.1, -0.85, 0.5] },

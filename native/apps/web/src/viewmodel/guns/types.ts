@@ -13,6 +13,7 @@
 import type { V3 } from "../../player/bunny/rig";
 import type { KnifeCtx } from "../knives/ctx";
 import type { Curl } from "../knives/types";
+import type { WristRange } from "./wrist";
 
 /**
  * The core's weapon ids that have a model of their own (research/WEAPONS.md): the six map guns, plus the rifle and
@@ -136,6 +137,11 @@ export interface SilencerSpec {
   tip: V3;
   /** The support hand around the can (gun-local, the can seated), solved onto it like a hold (guns/hold.ts). */
   grip: HandGrip;
+  /**
+   * The support wrist isn't held to its natural range while the hand is on the can (guns/pose.ts WRIST): a clip whose
+   * twists need more than a wrist gives (the Cottontail's and the M4A1's, for now).
+   */
+  freeWrist?: boolean;
   /** Its choreography (guns/silencer.ts): the Cottontail's pistol screw-on (default) or a rifle's (the M4A1's). */
   style?: "pistol" | "rifle";
 }
@@ -161,10 +167,10 @@ export interface GunDef {
   /** Rest framing in view space (before the viewmodel offsets). */
   frame: Framing;
   /**
-   * The most each wrist may bend (deg) between the hand's line and its forearm (guns/pose.ts ARM.bendR / bendL by
-   * default): a grip that needs the wrist turned (a bullpup's thumbhole) allows more, so its forearm leaves the screen.
+   * A wrist range of its own (deg; guns/pose.ts WristRange, on top of WRIST.grip / WRIST.support): a grip that needs the
+   * wrist set (a bullpup's thumbhole) allows that much more, so its forearm leaves the screen where it should.
    */
-  wrist?: { R?: number; L?: number };
+  wrist?: { R?: Partial<WristRange>; L?: Partial<WristRange> };
   /** Elbow anchors (view space) the forearms aim toward; default guns/viewmodel.ts ELBOW (the pistols'). */
   elbows?: { R: V3; L: V3 };
   /** The support elbow while its hand works away from the grip (guns/pose.ts WORK_ELBOW). */
@@ -175,6 +181,11 @@ export interface GunDef {
    * seated position is Aux's), "tail" (the Cottontail's tail). "bolt" is the RIGHT hand's: a bolt action's knob.
    */
   places: Partial<Record<"mag" | "rack" | "port" | "tail" | "bolt", HandPlace>>;
+  /**
+   * Third person's own support grip / targets where first person's are posed for its camera (player/bunny/gun-hold.ts):
+   * the Seed Drill's, turned in first person for the wrist (v0.0.38 gun grips), stay as they were on the bunny.
+   */
+  tpPlaces?: Partial<Record<"left" | "mag" | "rack", HandPlace>>;
   /** A screw-on silencer (the Cottontail): its model, thread, tip and the support hand's grip on it. */
   silencer?: SilencerSpec;
   /** The trigger's pivot (gun-local, the top of its blade): the Trig bone swings back about it with the squeeze. */

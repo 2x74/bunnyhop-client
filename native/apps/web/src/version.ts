@@ -45,7 +45,7 @@
    two words, and VERSION stays below 0.1.0 while STAGE is alpha.
    ============================================================ */
 
-export const VERSION = "0.0.37";
+export const VERSION = "0.0.38";
 
 /** Release stage, printed after the number ("v0.0.4 alpha"). */
 export const STAGE = "alpha";
@@ -67,7 +67,7 @@ export interface ChangelogEntry {
 
 /** Notes for the next release, unpublished until promoted into CHANGELOG. */
 export const UPCOMING: ChangelogEntry = {
-  version: "0.0.38",
+  version: "0.0.39",
   date: "2026-11-05",
   kind: "minor",
   title: "Next update",
@@ -76,6 +76,37 @@ export const UPCOMING: ChangelogEntry = {
 
 /** Newest first. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "0.0.38",
+    date: "2026-11-05",
+    kind: "minor",
+    title: "Hilts, gun camos, a console and five new knives",
+    notes: [
+      "Five new knives: the Carrot Bayonet, Parsnip Stiletto and Radish Kukri for everyone, and the Leek Saber and Twin Sprouts for supporters. Each has its own draw, swings and inspects.",
+      "The Bunnyfly works like a real balisong now. The handles swing on their own pins and a latch locks them, the draw flips it open, and its inspects are real tricks: Flip Check, Flip Flops (hold F to keep flipping) and Aerial. It moves like that in third person too.",
+      "The Daikon-tana cuts from the arm with a steady wrist and ends its Twirl with a blade-cleaning flick. The Clover Cleaver, Candy Cane Shiv and Whirligig got their own motion, and the Whirligig spins the same in replays and videos as in game.",
+      "New Loadout slot, Hilt: put any of 27 hilts on any knife, in wood, leather and cord wraps, enamel, bone, antler, sea glass and more. Most unlock from goals that didn't give anything before.",
+      "New Loadout slot, Gun camo: 32 camos for every gun you pick up, from woodland and desert to picnic, finish line and riptide. Sights and barrels stay plain.",
+      "Three new glove styles, Dress, Aviator and Flip Mitts, with colourways for your first T7, T8, T9 and T10 clears, Level 25, 50 PBs and more.",
+      "Supporters get the Tidepool set (Flip Mitts · Tidepool, the Starfish hat and the Beachcomber title among others), a new glove each for High Roller and Borealis, a hilt and a camo for every set, and two more knives.",
+      "Contributors get a second set, Draftsman, in blueprint blue, and the Workbench set adds the Ruler finish and the Pencil hat.",
+      "The Loadout lists what you earn by playing first, then supporter items by set, and the preview stays put while you scroll. Your player glow shows on the Colourway and Hat previews and on your hands in first person (Settings → Ghosts & players → First-person glow).",
+      "Press ` to open the console. It speaks CS:S: bind, alias, exec and writecfg, fps_max (or maxfps), cl_showpos, net_graph, the cl_crosshair settings, kill, retry, map and more, and help and find list everything. Paste your CS:S config to bring your binds over. One key can't both move and turn.",
+      "Bind keys to chat: bind k \"say gg\" sends a message and bind f \"say !r\" runs a command. Settings → Keys → Chat and command keys does the same without the console.",
+      "New binds under Settings → Keys: Hold jump (press once to keep jumping, again to stop) and Crouch jump.",
+      "m_yaw and m_pitch are under Settings → Mouse & view, with a converter for your sensitivity from CS2, Valorant, Apex, Overwatch 2, Fortnite or Quake. Thanks to dusterfan301 and tuqed.",
+      "Landing spot (Settings → HUD → Advanced, or !landing): a small half circle shows where you'll land if you stop strafing, and turns red if you're heading into a reset. It's off by default. Thanks to leo124531 for the idea and jahgea4a for the shape.",
+      "Route only (Settings → Ghosts & players → Route guide): follow a ghost's route and takeoff boxes without the ghost itself in the way. The split still compares you with that ghost.",
+      "Two-handed guns are held more naturally. The support hand wraps the handguard with a straight wrist, recoil comes from the arms instead of the wrists, and pistols and the Seed Drill's reload no longer bend or jump the hand.",
+      "ahop_coast is in: the Momentum Mod map at T1, with its checkpoints. Thanks to worldspawn.",
+      "The frankerz maps now go as fast as on CS:S servers, so their boosters launch you all the way. Runs set at the old speed stay on the boards.",
+      "bhop_gofuckyourself is ranked again. Riding the side walls past the pillars now stops your run; pillar runs and Infinite runs through the middle stayed on the board.",
+      "bhop_crash_egypt's crates break, bounce you and drop fruit like in CS:S, and picking up fruit makes its sound. On every map, sounds now fade with distance like in CS:S, so far-away effects are quieter, and props a map removes no longer stay on screen.",
+      "Maps added since the last update: bhop_frankerz_999xl_extreme, bhop_frankerz_2500xl_easyxtreme, bhop_frankerz_999xl_extreme_sr, bhop_insanelyserz (T4), bhop_desertbus, bhop_tatmt_long1_s and bhop_monster_jam_xmas. Thanks to nixii, worldspawn and serialexperimentslain1998.",
+      "┃world-records on Discord posts at most one record per player per map every 30 minutes, so a run of style records on one map doesn't flood the channel.",
+      "Your existing runs don't change. The desktop client gets all of this in v0.8.0. Until you update, it can't submit runs on ahop_coast, the frankerz maps, bhop_crash_egypt or bhop_gofuckyourself.",
+    ],
+  },
   {
     version: "0.0.37",
     date: "2026-11-05",

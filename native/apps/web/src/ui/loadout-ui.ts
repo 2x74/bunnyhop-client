@@ -8,8 +8,7 @@ import { getOutfit } from "../player/cosmetics";
 import { achievement, cosmetic, RARITY, staffItem, type CosmeticDef } from "../progression";
 import { availableNow } from "./community";
 import { finishStyle, gloveStyle, hiltSkin, type CosmeticLoadout } from "../loadout";
-// Native uses its data-only catalogue here so the menu never imports the Three.js knife builders.
-import { knifeById } from "../../../native/ui/knife-catalog";
+import { knifeById } from "../viewmodel/knives/index";
 import { h } from "./dom";
 
 /** Knives the registry hasn't built yet stay hidden everywhere (they appear, as new, once they ship). */

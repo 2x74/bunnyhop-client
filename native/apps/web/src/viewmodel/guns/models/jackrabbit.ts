@@ -124,6 +124,11 @@ export const jackrabbit: GunDef = {
   // 0.6 lower than v0.0.28 (-3.8) since the v0.0.29 default framing (viewmodel/defaults.ts) lifts the hands: the support
   // cuff stays under the grip instead of standing up in front of the gloves.
   frame: { o: [18.5, -5.2, -4.4], a: [0, 6, -5] },
+  // v0.0.38 gun grips: the support elbow where its wrist rests near neutral (about 15 deg extension, 20 ulnar; it sat
+  // at 27 and 28, the hand cocked down off a steep forearm): both arms reach out to the gun.
+  elbows: { R: [10, -20, -24], L: [5.85, -1.3, -6.05] },
+  // Its support hand leaves the grip for the magazine at 30 deg ulnar (a real wrist's range; 25 kept its sleeve in view).
+  wrist: { L: { uln: 30 } },
   trigger: TRIGGER,
   muzzle: [7.9, 0, 0.8],
   eject: { p: [2.8, -0.3, 1.58], dir: [-0.1, -0.85, 0.5] },

@@ -120,10 +120,14 @@ export const broadfork: GunDef = {
   },
   // The support hand under the handguard (riding the pump), palm up, fingers over its right side (placement from
   // tools/viewmodel/gun-grip-fit.ts); its forearm drops toward the elbow anchor below it, out of view.
+  // v0.0.38 gun grips: the support hand turned so the handguard runs across its palm (knuckles 18 deg forward, 30 up),
+  // its elbow down, back and in where that leaves the wrist near neutral (about 10 deg extension, 8 ulnar): the forearm
+  // comes up diagonally from the bottom of the screen and does the holding, instead of standing straight under the
+  // handguard with the wrist bent back 42 deg. The firing elbow likewise sits in line with a pistol-grip wrist.
   left: {
     o: [11.6, 0.0, -0.05],
-    up: [1, 0, 0],
-    fwd: [0.0, -0.707, 0.707],
+    up: [0.976, 0.195, -0.098],
+    fwd: [0.218, -0.873, 0.436],
     index: { c: [60, 80, 60] },
     middle: { c: [64, 84, 64] },
     ring: { c: [68, 86, 64] },
@@ -138,8 +142,7 @@ export const broadfork: GunDef = {
   },
   frame: { o: [16, -6.2, -5.9], a: [-1, 4, -4] },
   trigger: TRIGGER,
-  elbows: { R: [8, -18, -18], L: [24, -6, -26] },
-  wrist: { L: 34 },
+  elbows: { R: [7.7, -12.3, -15.1], L: [22.2, 1.85, -13.45] },
   muzzle: [24.1, 0, BZ],
   eject: { p: [2.4, -0.8, 1.2], dir: [-0.15, -0.9, 0.4] },
   shell: "shotgun",

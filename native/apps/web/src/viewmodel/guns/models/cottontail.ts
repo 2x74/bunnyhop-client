@@ -60,6 +60,11 @@ function buildSilencer(k: KnifeCtx): void {
 
 const silencer: SilencerSpec = {
   build: buildSilencer,
+  // v0.0.38 gun grips: the twists turn the hand round the can further than a wrist goes with the forearm from below the
+  // screen; every grip round the can that keeps the wrist in range brings the forearm across the view instead (the
+  // owner's 10-28 bug). The hand and the gun hide the bend from the camera, so the wrist stays free on the can until
+  // the screw-on is re-choreographed (owner call).
+  freeWrist: true,
   axis: [0, BORE_Z],
   seat: SEAT,
   thread: THREAD,
@@ -173,6 +178,9 @@ export const cottontail: GunDef = {
   // 0.6 lower than v0.0.28 (-3.65) since the v0.0.29 default framing (viewmodel/defaults.ts) lifts the hands: the
   // support cuff stays under the grip instead of standing up in front of the gloves.
   frame: { o: [18, -5.2, -4.25], a: [0, 6, -5] },
+  // v0.0.38 gun grips: the support elbow where its wrist rests near neutral (about 15 deg extension, 20 ulnar; it sat
+  // at 27 and 28, the hand cocked down off a steep forearm): both arms reach out to the gun.
+  elbows: { R: [10, -20, -24], L: [6.3, -3.05, -6.3] },
   silencer,
   trigger: TRIGGER,
   muzzle: [5.85, 0, 0.8],
