@@ -23,6 +23,7 @@
 #include "menu_webview.hpp"
 #include "online.hpp"
 #include "renderer.hpp"
+#include "console_bind_host.hpp"
 #include "replay_player.hpp"
 #include "menu_backdrop.hpp"
 #include "loadout_preview.hpp"
@@ -263,7 +264,6 @@ int run(const native::Options &opt) {
     auto &smoke_requested = menu_smoke.requested;
     auto &smoke_pass = menu_smoke.passed;
     bool captured = false, focused = true, running = true, menu_ready = false, resume_wanted = false;
-    bool console_wait_pending = false;
     // Settings and other small JSON files are written off the frame loop.
     native::JsonFileWriter json_writer;
     auto preferences = startup_data.settings;
@@ -377,10 +377,11 @@ int run(const native::Options &opt) {
     // Keys as last polled (actions, turnbinds, overlays). Timed ticks use their own key state (input.queue.keys).
     std::set<std::string> held_codes;
     native::InputTimeline input_timeline;
+    native::ConsoleBindQueue console_binds;
     std::unordered_map<std::string, unsigned> console_holds;
     std::unordered_map<std::string, std::string> active_command_binds;
     auto command_hold_bits = [&]() {
-        uint32_t bits = 0;
+        uint32_t bits = console_binds.bits();
         for (const auto &[action, count] : console_holds)
             if (count) bits |= native::movement_bit(action);
         return bits;
@@ -601,6 +602,7 @@ int run(const native::Options &opt) {
             input_timeline.keyboard_focus_lost();
             console_holds.clear();
             active_command_binds.clear();
+            console_binds.release_all();
             input_timeline.set_command_held(0);
         }
         if (on) {
@@ -2294,8 +2296,10 @@ int run(const native::Options &opt) {
                     if (raw.size() > 12 * 1024 * 1024) throw std::runtime_error("Menu command too large");
                     auto message = nlohmann::json::parse(raw);
                     const auto type = message.at("type").get<std::string>();
-                    if (type == "consoleWait") {
-                        console_wait_pending = true;
+                    if (type == "consoleChain") {
+                        console_binds.enqueue(message);
+                        native::dispatch_console_pulses(console_binds, menu.get(), act, renderer.get(), core.get());
+                        refresh_command_holds();
                         continue;
                     }
                     if (type == "loadoutPreview") {
@@ -2666,6 +2670,10 @@ int run(const native::Options &opt) {
                                 --count;
                             if (!count) console_holds.erase(action);
                             refresh_command_holds();
+                        } else if (action == "inspect") {
+                            if (down) act(action, false, true);
+                            if (renderer) renderer->inspect_held(down);
+                            if (core) bh_record_inspect(core.get(), down ? 3 : 4);
                         } else if (down) {
                             act(action, false, true);
                         }
@@ -2708,6 +2716,7 @@ int run(const native::Options &opt) {
                         input_timeline.settings_changed(input, held_codes);
                         console_holds.clear();
                         active_command_binds.clear();
+                        console_binds.release_all();
                         input_timeline.set_command_held(0);
                         apply_preferences();
                         error.clear();
@@ -3304,6 +3313,12 @@ int run(const native::Options &opt) {
                 && ((focused && (captured || (viewer.active && (!menu || !menu->visible() || viewer.ui_shown))))
                     || opt.frames)
                 && (!viewer.active || (!viewer.paused && !viewer.controls.dragging));
+        native::dispatch_console_pulses(console_binds, menu.get(), act, renderer.get(), core.get());
+        if (!simulation_active && console_binds.waiting()) {
+            console_binds.advance();
+            native::dispatch_console_pulses(console_binds, menu.get(), act, renderer.get(), core.get());
+            refresh_command_holds();
+        }
         if (heartbeat.start && !simulation_active) heartbeat.paused = true;
         const double frame_seconds = input_clock.elapsed(now);
         const bool activity_active = core && !download.valid() && focused && captured && !viewer.active && !spectator
@@ -3456,9 +3471,10 @@ int run(const native::Options &opt) {
                 hud.movement.tick_jump(cmd, curr);
             hud.tick(curr);
             hud.command_tick(cmd, curr.tick);
-            if (console_wait_pending && menu && menu_ready) {
-                console_wait_pending = false;
-                menu->evaluate_js("window.dispatchEvent(new Event('bunnyhop:native-console-tick'))");
+            if (console_binds.waiting()) {
+                console_binds.advance();
+                native::dispatch_console_pulses(console_binds, menu.get(), act, renderer.get(), core.get());
+                refresh_command_holds();
             }
             if (input_log && !viewer.active) {
                 const double moved = mouse_counts;

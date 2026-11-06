@@ -1,6 +1,6 @@
 // The Source console runs the web's DOM-free parser and cvar table, with a compact native shell.
 import { ConsoleRunner, complete, setConfigNames, type ConfigStore, type LineKind } from "../../web/src/console/exec";
-import { mixesMoveAndTurn, MOVE_TURN_REFUSAL, runPress, runRelease } from "../../web/src/console/bind-run";
+import { commandBindPlan } from "./command-bind-runtime";
 import { DEFAULT_PREFS, prefs, type Action } from "../../web/src/ui/settings";
 import { h } from "../../web/src/ui/dom";
 import { isTextField } from "../../web/src/input";
@@ -64,7 +64,6 @@ class NativeConsole {
   private draft = "";
   private maps: string[] = [];
   private openedInGame = false;
-  private waitStages: Array<Array<() => void>> = [];
 
   constructor() {
     this.log = h("div.ncon-log", { role: "log", "aria-live": "polite" });
@@ -202,44 +201,16 @@ class NativeConsole {
 
   dispatchBind(detail: { code: string; down: boolean; command: string }): void {
     if (!detail.command || !detail.code) return;
-    if (detail.down && mixesMoveAndTurn(detail.command, prefs.get().aliases ?? {})) {
-      this.print(MOVE_TURN_REFUSAL, "err");
-      hooks?.notice(MOVE_TURN_REFUSAL);
-      return;
+    const plan = commandBindPlan(detail.code, detail.down, detail.command, prefs.get().aliases ?? {});
+    if (plan.error) {
+      this.print(plan.error, "err");
+      hooks?.notice(plan.error);
     }
-    let stage = 0;
-    let usedWait = false;
-    const later = (fn: () => void) => {
-      if (stage > 0) (this.waitStages[stage - 1] ??= []).push(fn);
-      else fn();
-    };
-    const ops = {
-      hold: (action: Action) => later(() => hooks?.action(action, true)),
-      unhold: (action: Action) => later(() => hooks?.action(action, false)),
-      once: (command: string) => later(() => this.runner.runBound(command)),
-      error: (text: string) => {
-        this.print(text, "err");
-        hooks?.notice(text);
-      },
-      wait: () => {
-        usedWait = true;
-        stage++;
-      },
-    };
-    if (detail.down) runPress(detail.command, prefs.get().aliases ?? {}, ops);
-    else runRelease(detail.command, prefs.get().aliases ?? {}, ops);
-    if (usedWait && this.waitStages.length < stage) this.waitStages.length = stage;
-    this.scheduleWaitTick();
+    if (plan.ops.length) send({ type: "consoleChain", ops: plan.ops });
   }
 
-  private scheduleWaitTick(): void {
-    if (this.waitStages.length) send({ type: "consoleWait" });
-  }
-
-  advanceWaitTick(): void {
-    const stage = this.waitStages.shift();
-    for (const run of stage ?? []) run();
-    this.scheduleWaitTick();
+  runBound(command: string): void {
+    this.runner.runBound(command);
   }
 }
 
@@ -266,7 +237,9 @@ export function installNativeConsole(h: NativeConsoleHooks): void {
     true,
   );
   window.addEventListener("bunnyhop:native-console-bind", (event) => view?.dispatchBind((event as CustomEvent).detail));
-  window.addEventListener("bunnyhop:native-console-tick", () => view?.advanceWaitTick());
+  window.addEventListener("bunnyhop:native-console-command", (event) =>
+    view?.runBound((event as CustomEvent<string>).detail),
+  );
   // Ensure an old config with no binds gets the same Source console default as the web.
   if (!prefs.get().binds.console)
     prefs.update((p) => {

@@ -2,6 +2,7 @@
 #include "timed_input_harness.hpp"
 #include "replay_controls.hpp"
 #include "turn_settings.hpp"
+#include "console_bind_queue.hpp"
 #ifdef NDEBUG
 #undef NDEBUG
 #endif
@@ -724,7 +725,69 @@ void test_x11_motion_uses_arrival_time() {
 }
 }  // namespace
 
+// A release after wait belongs to the command boundary, even if one rendered frame catches up four ticks.
+void test_console_wait_at_command_boundaries() {
+    using namespace native;
+    using namespace native::test;
+    LoopHarness loop;
+    ConsoleBindQueue queue;
+    queue.enqueue(
+            {{"ops",
+              nlohmann::json::array(
+                      {{{"kind", "hold"}, {"code", "KeyF"}, {"action", "jump"}, {"step", 0}},
+                       {{"kind", "hold"}, {"code", "KeyF"}, {"action", "duck"}, {"step", 0}},
+                       {{"kind", "unhold"}, {"code", "KeyF"}, {"action", "jump"}, {"step", 1}},
+                       {{"kind", "unhold"}, {"code", "KeyF"}, {"action", "duck"}, {"step", 2}}}
+              )}}
+    );
+    loop.timeline.set_command_held(queue.bits());
+    loop.after_tick = [&](Input &, size_t) {
+        queue.advance();
+        loop.timeline.set_command_held(queue.bits());
+    };
+    loop.frame(0);
+    loop.frame(40 * ms);
+    assert(loop.rows.size() == 4);
+    assert(loop.rows[0].held == (jump | duck));
+    assert(loop.rows[1].held == duck);
+    assert(loop.rows[2].held == 0 && loop.rows[3].held == 0);
+    // Two keys hold the same action. A top-level minus releases only its key; an alias minus releases both.
+    queue.enqueue(
+            {{"ops",
+              nlohmann::json::array(
+                      {{{"kind", "hold"}, {"code", "KeyF"}, {"action", "forward"}, {"step", 0}},
+                       {{"kind", "hold"}, {"code", "KeyG"}, {"action", "forward"}, {"step", 0}},
+                       {{"kind", "unhold"}, {"code", "KeyF"}, {"action", "forward"}, {"step", 0}}}
+              )}}
+    );
+    assert(queue.bits() == forward);
+    queue.enqueue(
+            {{"ops",
+              nlohmann::json::array(
+                      {{{"kind", "unhold"}, {"code", "KeyF"}, {"action", "forward"}, {"own", false}, {"step", 0}},
+                       {{"kind", "hold"}, {"code", "KeyF"}, {"action", "jump"}, {"step", 1}}}
+              )}}
+    );
+    assert(queue.bits() == 0);
+    queue.enqueue(
+            {{"ops",
+              nlohmann::json::array(
+                      {{{"kind", "once"}, {"code", "KeyF"}, {"command", std::string(128, 'x')}, {"step", 1}}}
+              )}}
+    );
+    allocation_count = 0;
+    count_allocations = true;
+    queue.advance();
+    const auto due = queue.take_pulses();
+    count_allocations = false;
+    assert(allocation_count == 0 && due.size() == 1 && due[0].command.size() == 128);
+    queue.release_all();
+    queue.advance();
+    assert(queue.bits() == 0 && !queue.waiting());
+}
+
 int main() {
+    test_console_wait_at_command_boundaries();
     test_capped_gap_with_remainder_and_holdback();
     test_long_stall_preserves_event_clock();
     test_backlog_storage_is_bounded();

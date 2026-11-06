@@ -91,7 +91,7 @@ export type MenuMessage =
     }
   | { type: "settings"; patch: SettingsPatch }
   | { type: "consoleAction"; action: string; down: boolean }
-  | { type: "consoleWait" }
+  | { type: "consoleChain"; ops: import("./command-bind-runtime").CommandOperation[] }
   | { type: "window"; action: "center" | "minimize" | "maximize" | "toggleFullscreen" }
   /** The HUD colours and element styles resolved from Custom CSS (custom-css/hud-theme.ts). */
   | { type: "hudTheme"; theme: import("./custom-css/hud-theme").HudTheme }
