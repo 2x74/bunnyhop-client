@@ -5,7 +5,7 @@ import { existsSync } from "node:fs";
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { deflateSync } from "node:zlib";
-import { COSMETICS } from "../../web/src/progression";
+import { COSMETICS, staffItem } from "../../web/src/progression";
 const missingOnly = process.argv.includes("--missing");
 const args = process.argv.slice(2).filter((arg) => arg !== "--missing");
 const executable = args[0] ?? "/tmp/bunnyhop-export-previews",
@@ -24,6 +24,7 @@ interface CJob {
   loadout: string;
 }
 for (const c of COSMETICS) {
+  if (staffItem(c)) continue;
   if (!["knife", "finish", "glove", "outfit", "hat", "body", "ghost"].includes(c.slot)) continue;
   if (c.slot === "knife" && !metadata.meshes["fpknife:" + c.id.replace(/^knife-/, "")]) continue;
   if (c.slot === "hat" && !metadata.hats[c.id]) continue;

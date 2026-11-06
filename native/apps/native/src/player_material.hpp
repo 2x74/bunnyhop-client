@@ -28,7 +28,7 @@ struct PlayerProgram {
     GLint glowEnabled = -1, glowColor = -1, glowIntensity = -1, glowOpacity = -1, glowAxisA = -1, glowAxisB = -1,
           glowNearFade = -1, glowDistance = -1;
     GLint ghost = -1, ghostRim = -1, opacity = -1, axisA = -1, axisB = -1, nearFade = -1, contour = -1;
-    GLint hiltA = -1, hiltB = -1, hiltM = -1, camoC = -1, camoP = -1, camoScale = -1;
+    GLint hiltA = -1, hiltB = -1, hiltM = -1, camoC = -1, camoP = -1, camoScale = -1, camoTpSolid = -1;
 };
 
 // Source (x, y, z) -> three.js (x, z, -y).
@@ -106,6 +106,8 @@ inline std::string player_defines(
         defines += "#define GUN_CAMO " + std::to_string(camo) + "\n";
         defines += "#define CAMO_STAMP " + std::to_string(stamp) + "\n";
         defines += "#define CAMO_SHEEN " + std::to_string(sheen) + "\n";
+    } else if (camo >= 0 && material == PlayerMaterial::solid) {
+        defines += "#define CAMO_TP 1\n";
     }
     if (material == PlayerMaterial::gun) defines += "#define GUN_SHADE 1\n#define GUN_FLASH 1\n";
     if (material == PlayerMaterial::world_gun) defines += "#define GUN_SHADE 1\n#define GUN_NO_ENV 1\n";

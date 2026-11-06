@@ -35,6 +35,7 @@ uniform vec3 cameraPosition, offset;
 uniform float mirror, auraPass, auraSize, glowTime;
 out float vGlowAlpha, vHalo;
 out vec2 vAuraCoord;
+out vec3 vGunCamo;
 `;
 
 const FRAGMENT_PRELUDE = `
@@ -73,6 +74,7 @@ const BEGIN_NORMAL = `
 
 const BEGIN_VERTEX = `
   vec3 transformed = vec3(position);
+  vGunCamo = gunCamo;
   vHalo = auraPass > 1.5 ? 1.0 : 0.0;
   vGlowAlpha = 1.5;
   vAuraCoord = vec2(transformed.x + transformed.y * 0.47, transformed.z);
@@ -148,7 +150,8 @@ function insertAfter(source: string, anchor: string, addition: string): string {
 
 function vertexShader(source: string, glowNoise: string): string {
   const prelude = VERTEX_PRELUDE + glowNoise;
-  return glsl330(prelude + nativeAttributes(replaceChunks(source, VERTEX_CHUNKS)), "vertex");
+  const tagged = source.includes("attribute vec3 gunCamo;") ? source : `attribute vec3 gunCamo;\n${source}`;
+  return glsl330(prelude + nativeAttributes(replaceChunks(tagged, VERTEX_CHUNKS)), "vertex");
 }
 
 /** The player glow (player/glow.ts auraFragment) as a function the solid program calls on its aura passes. */
@@ -181,6 +184,12 @@ ${glow}
 
 function solidFragment(source: string, glow: string): string {
   let fragment = replaceChunks(source, FRAGMENT_CHUNKS);
+  const colorInput = /((?:varying|in) vec3 vColor;)/;
+  if (!colorInput.test(fragment)) throw new Error("Native material colour input missing");
+  fragment = fragment.replace(
+    colorInput,
+    "$1\nvarying vec3 vGunCamo;\nuniform vec3 uCamoC[4];\nuniform bool uCamoTpSolid;",
+  );
   // The glow function reads vNormalW / vWorldPos, so it goes after the solid material's own declarations.
   fragment = fragment.replace("void main() {", `${glow}\nvoid main() {`);
   fragment = insertAfter(
@@ -188,7 +197,42 @@ function solidFragment(source: string, glow: string): string {
     `${glow}\nvoid main() {`,
     "\n  if (playerGlowEnabled && auraPass > 0.5) {\n    fragColor = glowShade();\n    return;\n  }",
   );
-  return glsl330(FRAGMENT_PRELUDE + fragment, "fragment");
+  const mainAt = fragment.indexOf("void main() {");
+  if (mainAt < 0) throw new Error("Native solid material main() missing");
+  const main = fragment.slice(mainAt).replace(
+    "void main() {",
+    `void main() {
+  vec3 nativePlayerColor = NATIVE_COLOR_INPUT;
+#ifdef CAMO_TP
+  float zone = floor(vGunCamo.x + 0.5);
+  if (zone >= 1.0) {
+    vec3 paint = uCamoTpSolid ? uCamoC[int(clamp(zone - 1.0, 0.0, 2.0))]
+                              : (zone == 2.0 ? mix(uCamoC[0], uCamoC[1], 0.35) : uCamoC[0]);
+    float edge = clamp(vGunCamo.x - zone, 0.0, 0.5);
+    float shade = vGunCamo.y * vGunCamo.z;
+    nativePlayerColor = (paint + (vec3(1.0) - paint) * edge * 0.35 + paint * edge * 0.25) * shade;
+  }
+#endif`,
+  );
+  const opening = main.indexOf("{");
+  let depth = 0,
+    end = -1;
+  for (let i = opening; i < main.length; i++) {
+    if (main[i] === "{") depth++;
+    else if (main[i] === "}" && --depth === 0) {
+      end = i + 1;
+      break;
+    }
+  }
+  if (end < 0) throw new Error("Native solid material main() is unbalanced");
+  const rewrittenMain = main
+    .slice(0, end)
+    .replace(/\bvColor\b/g, "nativePlayerColor")
+    .replace("NATIVE_COLOR_INPUT", "vColor");
+  return glsl330(
+    FRAGMENT_PRELUDE + fragment.slice(0, mainAt) + rewrittenMain + fragment.slice(mainAt + end),
+    "fragment",
+  );
 }
 
 function ghostFragment(source: string): string {

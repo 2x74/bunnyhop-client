@@ -134,7 +134,39 @@ void test_live_cosmetics() {
     assert(actors[0].loadout.find("knife-bayonet") != std::string::npos);
 }
 
+// Room roster cosmetics use the same packed field positions as profile/replay loadouts: hilt 10, camo 11.
+void test_full_room_loadout_encoding() {
+    native::RoomState room;
+    J loadout = {
+            {"knife", "knife-bunnyfly"},
+            {"finish", "fin-sunset"},
+            {"glove", "glove-aviator"},
+            {"crown", 3},
+            {"hat", "hat-starfish"},
+            {"body", "body-a"},
+            {"outfit", "outfit-cream"},
+            {"hairColor", 0xf29bbf},
+            {"hairLength", 120},
+            {"hilt", "hilt-daikon"},
+            {"camo", "camo-gold-vein"}
+    };
+    J players = J::array(
+            {{{"slot", 0}, {"name", "me"}},
+             {{"slot", 2}, {"name", "them"}, {"outfit", "outfit-cream"}, {"loadout", loadout}}}
+    );
+    room.event(envelope(
+            {{"t", "welcome"}, {"you", 0}, {"room", {{"name", "r"}}}, {"map", {{"name", "m"}}}, {"players", players}}
+    ));
+    feed(room, J::array({sample(100, 0), sample(105, 5)}), 1);
+    const auto actors = room.actors(2);
+    assert(actors.size() == 1);
+    assert(actors[0].loadout
+           == "2;knife-bunnyfly;fin-sunset;glove-aviator;3;hat-starfish;body-a;outfit-cream;f29bbf;120;hilt-daikon;"
+              "camo-gold-vein");
+}
+
 int main() {
+    test_full_room_loadout_encoding();
     test_live_cosmetics();
     test_smooth_under_jitter();
     native::RoomState room;

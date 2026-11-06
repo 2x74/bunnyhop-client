@@ -383,6 +383,7 @@ class NativeViewmodel {
         p.camoC = at("uCamoC");
         p.camoP = at("uCamoP");
         p.camoScale = at("uCamoScale");
+        p.camoTpSolid = at("uCamoTpSolid");
         return p;
     }
 
@@ -391,7 +392,7 @@ class NativeViewmodel {
         // Guns take no finish (the knife's finish stays on the knife), as on the website.
         const int finish = material == PlayerMaterial::solid ? look.finish : 0;
         const bool hilt = material == PlayerMaterial::solid && look.hiltOn;
-        const int camo = material == PlayerMaterial::gun ? look.camoKind : -1;
+        const int camo = material == PlayerMaterial::gun || material == PlayerMaterial::solid ? look.camoKind : -1;
         const int stamp = camo >= 0 ? look.camoStamp : 0;
         const int sheen = camo >= 0 ? look.camoSheen : 0;
         const int key = native_render::player_program_key(finish, glove, detail, hilt, camo, stamp, sheen, material);
@@ -676,6 +677,7 @@ class NativeViewmodel {
         gl.Uniform3fv(p.camoC, 4, look.camoColors.data());
         gl.Uniform4fv(p.camoP, 1, look.camoParams.data());
         gl.Uniform1f(p.camoScale, look.camoScale);
+        gl.Uniform1i(p.camoTpSolid, look.camoKind == 0);
         gl.Uniform3fv(p.hairColor, 1, look.hairColor.data());
         gl.Uniform3fv(p.headwearScale, 1, look.fit.scale.data());
         gl.Uniform3fv(p.headwearOffset, 1, look.fit.offset.data());
