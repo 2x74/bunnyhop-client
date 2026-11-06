@@ -200,7 +200,8 @@ export async function runGate(runner: string | string[], output: string, wasmPat
       const simulations = await Promise.all(
         fixture.versions.map(async (physics) => [physics, await simulate(fixture, wasm, physics)] as const),
       );
-      const previous = simulations.find(([physics]) => physics === 16)![1],
+      const contrast = fixture.name === "material-ladder" ? 17 : 16;
+      const previous = simulations.find(([physics]) => physics === contrast)![1],
         current = simulations.find(([physics]) => physics === CANONICAL_PHYSICS)![1];
       const item: any = {
         name: fixture.name,

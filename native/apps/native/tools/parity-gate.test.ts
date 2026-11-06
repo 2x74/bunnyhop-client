@@ -9,7 +9,7 @@ const runner =
   process.env.NATIVE_PARITY_RUNNER ??
   join(root, `apps/native/build/bunnyhop-native-runner${process.platform === "win32" ? ".exe" : ""}`);
 const wasm = process.env.NATIVE_PARITY_WASM ?? join(root, "apps/web/src/wasm/bunnyhop_core.wasm");
-const { fixtureHashes, validateParityReport } = await import(
+const { fixtureHashes, fixtureVersions, validateParityReport } = await import(
   resolve(root, "../.github/scripts/native-release/parity-contract.mjs")
 );
 
@@ -18,7 +18,7 @@ test("procedural BSP bytes are stable and cover the pinned non-flat suite", () =
     b = createFixtures();
   expect(a.map((f) => f.name)).toEqual(["incline", "edge", "thin-trigger", "telehop", "material-ladder"]);
   for (let i = 0; i < a.length; i++) {
-    expect(a[i].versions).toEqual(a[i].name === "material-ladder" ? [17, 18, 24, 25] : [16, 17, 23, 24, 25]);
+    expect(a[i].versions).toEqual(fixtureVersions(a[i].name));
     expect(hash(a[i].bsp)).toBe(fixtureHashes[a[i].name]);
     expect(a[i].bsp).toEqual(b[i].bsp);
   }
@@ -32,6 +32,23 @@ test("exact row comparator rejects finite bits, signed zero, flags and missing s
   expect(same(a, { ...a, flags: [0, 0, 0, 128, 0] })).toBe(false);
   expect(same(a, undefined)).toBe(false);
 });
+test("the healthy gate validates the ladder contrast at v17 and every final pinned version", async () => {
+  const output = mkdtempSync(join(tmpdir(), "native-parity-healthy-"));
+  try {
+    const report = await runGate(runner, output, wasm);
+    expect(report.pass).toBe(true);
+    expect(report.fixtures).toHaveLength(5);
+    expect(report.mismatchRows).toBe(0);
+    const ladder = report.fixtures.find((fixture: { name: string }) => fixture.name === "material-ladder");
+    expect(ladder.divergentStates).toBeGreaterThan(0);
+    expect(ladder.versions.map((version: { physics: number }) => version.physics)).toEqual(
+      fixtureVersions("material-ladder"),
+    );
+  } finally {
+    rmSync(output, { recursive: true, force: true });
+  }
+}, 120_000);
+
 for (const [from, to] of [
   [17, 16],
   [18, 17],
