@@ -49,9 +49,9 @@ void card_and_sort_contract(const std::map<std::string, native_crash::Definition
     close(tail[1], -150);
     p.radius = 40;
     const auto &sphere = definitions.at("Nitro_Fire_Sphere");
-    const auto near = card_shape(sphere, p, .1, 20), middle = card_shape(sphere, p, .1, 100);
-    close(near.fade, 0);
-    close(near.radius, 8);
+    const auto near_camera = card_shape(sphere, p, .1, 20), middle = card_shape(sphere, p, .1, 100);
+    close(near_camera.fade, 0);
+    close(near_camera.radius, 8);
     close(middle.fade, .5);
     close(sphere.add_self, .5);
     close(sphere.overbright, 5);
