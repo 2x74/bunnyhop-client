@@ -159,11 +159,16 @@ try {
       const identityPath = join(root, "apps/native/packaging/release_identity.hpp");
       const identity = await readFile(identityPath, "utf8");
       const refreshedIdentity = identity
-        .replace(/release_wasm_sha256="[a-f0-9]{64}"/, `release_wasm_sha256="${wasmSha256}"`)
-        .replace(/release_physics=\d+,release_rules=\d+/, `release_physics=${physics},release_rules=${rules}`);
+        .replace(/release_wasm_sha256\s*=\s*"[a-f0-9]{64}"/, `release_wasm_sha256 = "${wasmSha256}"`)
+        .replace(
+          /release_physics\s*=\s*\d+\s*,\s*release_rules\s*=\s*\d+/,
+          `release_physics = ${physics}, release_rules = ${rules}`,
+        );
       if (
-        !refreshedIdentity.includes(`release_wasm_sha256="${wasmSha256}"`) ||
-        !refreshedIdentity.includes(`release_physics=${physics},release_rules=${rules}`)
+        !refreshedIdentity.match(new RegExp(`release_wasm_sha256\\s*=\\s*"${wasmSha256}"`)) ||
+        !refreshedIdentity.match(
+          new RegExp(`release_physics\\s*=\\s*${physics}\\s*,\\s*release_rules\\s*=\\s*${rules}`),
+        )
       )
         throw new Error("Cannot refresh the native C++ verifier identity");
       await writeFile(identityPath, refreshedIdentity);

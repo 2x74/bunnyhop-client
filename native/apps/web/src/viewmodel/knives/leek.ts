@@ -139,7 +139,8 @@ export const leek: KnifeDef = withHilt({
       s.arm.o[2] += k * -0.2 * lunge;
     }
   },
-  // The ferrule, the cupped leaf guard and its collar (the collar's rim the second tone), the fibre core and its
-  // spiral wrap (the darker fibre the second tone), the root cap (pommel); the root tuft stays the leek's.
-  hilt: { fitting: "guard", guard: { role: "guard", alt: [LEAF_DARK] }, leaves: "guard", handle: "grip", wrap: { role: "grip", alt: [FIBRE_DARK] }, pommel: "pommel" },
+  // Grip and pommel only (owner, v0.0.38): the fibre core and its spiral wrap (the darker fibre the second tone) and the
+  // root cap. The cupped leaf guard, its collar and the ferrule keep the leek's own colours, like the carrot's and the
+  // Daikon's leaves; so does the root tuft.
+  hilt: { handle: "grip", wrap: { role: "grip", alt: [FIBRE_DARK] }, pommel: "pommel" },
 });

@@ -127,18 +127,23 @@ for (const job of jobs) {
     h = 768;
   // Keep high resolution where the original character crops were only ~70px wide.
   if (job.kind !== "actor") {
-    const small = Buffer.alloc(512 * 384 * 4);
-    for (let y = 0; y < 384; y++)
-      for (let x = 0; x < 512; x++)
+    // Catalogue additions are occasional. Keep their thumbnails smaller than the original hand-tuned catalog so
+    // Contributor and future role items fit the embedded 4 MiB menu limit without dropping previews.
+    const scale = missingOnly ? 8 : 2,
+      outW = 1024 / scale,
+      outH = 768 / scale;
+    const small = Buffer.alloc(outW * outH * 4);
+    for (let y = 0; y < outH; y++)
+      for (let x = 0; x < outW; x++)
         for (let c = 0; c < 4; c++) {
           let sum = 0;
-          for (let dy = 0; dy < 2; dy++)
-            for (let dx = 0; dx < 2; dx++) sum += raw[((y * 2 + dy) * 1024 + x * 2 + dx) * 4 + c];
-          small[(y * 512 + x) * 4 + c] = Math.round(sum / 4);
+          for (let dy = 0; dy < scale; dy++)
+            for (let dx = 0; dx < scale; dx++) sum += raw[((y * scale + dy) * 1024 + x * scale + dx) * 4 + c];
+          small[(y * outW + x) * 4 + c] = Math.round(sum / (scale * scale));
         }
     raw = small;
-    w = 512;
-    h = 384;
+    w = outW;
+    h = outH;
   }
   let x0 = w,
     y0 = h,

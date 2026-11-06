@@ -47,6 +47,7 @@ import { installTutorialProgress } from "./tutorial-entry";
 import { watchGauntletSplit } from "./gauntlet-watch";
 import { NativeRoomService } from "./room-service";
 import { RoomConnection } from "../../web/src/net/room";
+import { leaveRoomBefore } from "./room-message-policy";
 import { setRoomPresence, setRaceTag, currentRoom, currentRace } from "../../web/src/net/presence";
 import { serverBrowser } from "../../web/src/ui/servers";
 import { keyLabel } from "../../web/src/ui/settings";
@@ -855,13 +856,9 @@ roomService.subscribe(() => {
   scoreboardFeed.update(hostScoreboard(roomService.view, clock, chatKeyLabel()));
 });
 onBeforeSend((message) => {
-  if (
-    roomService.view.id &&
-    ((message.type === "replay" && ["play", "ghost"].includes(message.action)) ||
-      message.type === "replayData" ||
-      (message.type === "tutorial" && message.action !== "stop"))
-  )
-    roomService.leave();
+  // Replay playback and !spec keep the room transport alive. The native viewer overlays the current screen;
+  // detaching the room here made every replay opened from a room look like an explicit leave.
+  if (roomService.view.id && leaveRoomBefore(message)) roomService.leave();
 });
 setRaceTag((board) => {
   const race = roomService.view.race;

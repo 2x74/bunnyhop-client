@@ -153,6 +153,12 @@ body.potato .pc { transform: none; }
    owner's violet lit carrot orange from below, a cyan glint. */
 .pc-bg-lookout { --bg-card: linear-gradient(118deg, transparent 38%, rgba(200, 245, 58, 0.16) 46%, rgba(200, 245, 58, 0.03) 60%, transparent 70%), radial-gradient(60% 40% at 20% 0%, rgba(216, 222, 232, 0.14), transparent 70%), linear-gradient(170deg, #1b2740 0%, #111a2c 55%, #0a101c 100%); }
 .pc-bg-workbench { --bg-card: repeating-linear-gradient(90deg, rgba(63, 212, 198, 0.12) 0 1px, transparent 1px 12px) 0 100% / 100% 14px no-repeat, repeating-linear-gradient(90deg, rgba(63, 212, 198, 0.18) 0 1px, transparent 1px 60px) 0 100% / 100% 24px no-repeat, radial-gradient(60% 45% at 85% 110%, rgba(201, 162, 74, 0.28), transparent 70%), linear-gradient(165deg, #2b3448 0%, #18202f 60%, #0e1420 100%); }
+/* Draftsman (Contributor): a technical drawing. Blueprint blue paper, a fine grid with a heavier line every fifth, a title
+   block in the bottom right corner. */
+.pc-bg-draftsman { --bg-card: linear-gradient(#f0f6ff, #f0f6ff) right 14px bottom 40px / 120px 1.5px no-repeat, linear-gradient(#f0f6ff, #f0f6ff) right 14px bottom 84px / 120px 1.5px no-repeat, linear-gradient(rgba(240, 246, 255, 0.6), rgba(240, 246, 255, 0.6)) right 14px bottom 62px / 120px 1px no-repeat, linear-gradient(rgba(240, 246, 255, 0.6), rgba(240, 246, 255, 0.6)) right 74px bottom 40px / 1px 22px no-repeat, linear-gradient(#f0f6ff, #f0f6ff) right 14px bottom 40px / 1.5px 45px no-repeat, linear-gradient(#f0f6ff, #f0f6ff) right 132.5px bottom 40px / 1.5px 45px no-repeat, linear-gradient(90deg, rgba(240, 246, 255, 0.2) 1px, transparent 1px) 0 0 / 60px 60px, linear-gradient(0deg, rgba(240, 246, 255, 0.2) 1px, transparent 1px) 0 0 / 60px 60px, linear-gradient(90deg, rgba(240, 246, 255, 0.08) 1px, transparent 1px) 0 0 / 12px 12px, linear-gradient(0deg, rgba(240, 246, 255, 0.08) 1px, transparent 1px) 0 0 / 12px 12px, linear-gradient(160deg, #1f5599 0%, #1a4884 55%, #12355f 100%); }
+.pc-bg-draftsman .pc-stats > div, .pc-bg-draftsman .pc-feat-tile { background: rgba(5, 20, 45, 0.5); }
+.pc-bg-draftsman .pc-band { background: rgba(5, 20, 45, 0.55); }
+.pc-bg-draftsman { --dim: #d6e4f7; --faint: #b3c6e0; }
 .pc-bg-keyholder { --bg-card: radial-gradient(70% 45% at 50% -10%, rgba(232, 237, 243, 0.22), transparent 70%), radial-gradient(60% 50% at 10% 110%, rgba(192, 40, 60, 0.3), transparent 70%), linear-gradient(170deg, #5a1420 0%, #2a0a10 60%, #16050a 100%); }
 .pc-bg-founder { --bg-card: radial-gradient(80% 50% at 50% 118%, rgba(255, 122, 26, 0.42), transparent 70%), radial-gradient(40% 30% at 88% 6%, rgba(63, 240, 255, 0.22), transparent 70%), linear-gradient(170deg, #241450 0%, #1a0f3a 55%, #0e0822 100%); }
 /* v0.0.37 top tiers: Flare (Deep End) burns up pink and orange from the bottom; Riptide (Sleepless) is deep water lit
@@ -181,6 +187,7 @@ body.potato .pc { transform: none; }
 .pc-frame-tidepool { --frame: linear-gradient(135deg, #2f8f86 0%, #9ff2e2 24%, #f3ece2 42%, #ff7f6e 58%, #9ff2e2 78%, #2f8f86 100%); }
 .pc-frame-lookout { --frame: repeating-linear-gradient(135deg, #c8f53a 0 14px, #d8dee8 14px 20px, #1b2740 20px 26px); }
 .pc-frame-workbench { --frame: linear-gradient(135deg, #c9a24a 0%, #3fd4c6 16%, #1f8f86 50%, #3fd4c6 84%, #c9a24a 100%); }
+.pc-frame-draftsman { --frame: linear-gradient(135deg, #ffffff 0%, #bfe0ff 22%, #3f86e0 50%, #bfe0ff 78%, #ffffff 100%); }
 .pc-frame-keyholder { --frame: linear-gradient(135deg, #5a1420 0%, #cfd6e0 22%, #8c96a6 44%, #ffffff 60%, #a9b2c0 80%, #5a1420 100%); }
 /* Rank-held frames (overall top 3 / #1; revoked with the place). */
 .pc-crown { display: inline-block; width: 1.05em; height: 0.75em; margin-right: 0.3em; vertical-align: 0.02em; filter: drop-shadow(0 0 0.35em currentColor); }

@@ -29,7 +29,13 @@ class NativeViewmodel {
     struct Look {
         std::string outfit = "outfit-cream", knife = "carrot", glove = "knit", gloveId = "glove-knit", hat,
                     body = "classic", bodyLook = "bunny", hatMesh;
-        int finish = 0, crown = 0;
+        int finish = 0, crown = 0, camoKind = -1, camoStamp = 0, camoSheen = 0;
+        bool hiltOn = false;
+        std::array<float, 9> hiltA{}, hiltB{};
+        std::array<float, 3> hiltM{};
+        std::array<float, 12> camoColors{};
+        std::array<float, 4> camoParams{};
+        float camoScale = 1;
         // The standard bunny lowers its hood for a wig (loadout.ts isWig).
         bool hoodDown = false;
         std::array<float, 24> palette{};
@@ -58,7 +64,7 @@ class NativeViewmodel {
     Gl &gl;
     using PlayerProgram = native_render::PlayerProgram;
     using PlayerMaterial = native_render::PlayerMaterial;
-    static constexpr size_t vertex_floats = 23;
+    static constexpr size_t vertex_floats = 26;
     // The metals' scene reflection sampler: a black cube on its own unit, read only when a look turns reflections on.
     static constexpr GLint reflection_unit = 9;
     GLuint bonesTexture = 0, identityBonesTexture = 0, reflectionCube = 0;
@@ -261,6 +267,29 @@ class NativeViewmodel {
                 if (f.size() > 5 && metadata.at("hats").contains(f[5])) out.hat = f[5];
                 if (f.size() > 6 && f[6] == "body-b") out.body = "feminine";
                 read_hair(f, out);
+                if (f.size() > 10 && metadata.at("hilts").contains(f[10])
+                    && metadata.at("hilts").at(f[10]).is_object()) {
+                    const auto &skin = metadata.at("hilts").at(f[10]);
+                    const char *roles[] = {"grip", "guard", "pommel"};
+                    for (size_t i = 0; i < 3; ++i) {
+                        const auto &layer = skin.at(roles[i]);
+                        out.hiltM[i] = layer.at("kind").get<float>();
+                        linearColor(layer.at("color").get<uint32_t>(), out.hiltA.data() + i * 3);
+                        linearColor(layer.at("alt").get<uint32_t>(), out.hiltB.data() + i * 3);
+                    }
+                    out.hiltOn = true;
+                }
+                if (f.size() > 11 && metadata.at("camos").contains(f[11])) {
+                    const auto &style = metadata.at("camos").at(f[11]);
+                    out.camoKind = style.at("kind").get<int>();
+                    out.camoStamp = style.at("stamp").get<int>();
+                    out.camoSheen = style.at("sheen").get<int>();
+                    out.camoScale = style.at("scale").get<float>();
+                    for (size_t i = 0; i < 4; ++i) {
+                        linearColor(style.at("colors").at(i).get<uint32_t>(), out.camoColors.data() + i * 3);
+                        out.camoParams[i] = style.at("p").at(i).get<float>();
+                    }
+                }
             }
         }
         // These two character outfits ship with matching paws in the site's default loadout.
@@ -282,8 +311,10 @@ class NativeViewmodel {
         return cached.look;
     }
 
-    PlayerProgram link_player_program(int finish, bool glove, bool detail, PlayerMaterial material) {
-        const auto defines = native_render::player_defines(finish, glove, detail, material);
+    PlayerProgram link_player_program(
+            int finish, bool glove, bool detail, bool hilt, int camo, int stamp, int sheen, PlayerMaterial material
+    ) {
+        const auto defines = native_render::player_defines(finish, glove, detail, hilt, camo, stamp, sheen, material);
         const bool gun = material == PlayerMaterial::gun || material == PlayerMaterial::world_gun;
         const auto vertex = defines + (gun ? shaders->gunVertex : shaders->vertex);
         const auto fragment = defines
@@ -346,6 +377,12 @@ class NativeViewmodel {
         p.axisB = at("uAxisB");
         p.nearFade = at("uNearFade");
         p.contour = at("uContour");
+        p.hiltA = at("uHiltA");
+        p.hiltB = at("uHiltB");
+        p.hiltM = at("uHiltM");
+        p.camoC = at("uCamoC");
+        p.camoP = at("uCamoP");
+        p.camoScale = at("uCamoScale");
         return p;
     }
 
@@ -353,9 +390,14 @@ class NativeViewmodel {
         const bool glove = look.glove != "knit";
         // Guns take no finish (the knife's finish stays on the knife), as on the website.
         const int finish = material == PlayerMaterial::solid ? look.finish : 0;
-        const int key = native_render::player_program_key(finish, glove, detail, material);
+        const bool hilt = material == PlayerMaterial::solid && look.hiltOn;
+        const int camo = material == PlayerMaterial::gun ? look.camoKind : -1;
+        const int stamp = camo >= 0 ? look.camoStamp : 0;
+        const int sheen = camo >= 0 ? look.camoSheen : 0;
+        const int key = native_render::player_program_key(finish, glove, detail, hilt, camo, stamp, sheen, material);
         if (const auto found = programs.find(key); found != programs.end()) return found->second;
-        return programs.emplace(key, link_player_program(finish, glove, detail, material)).first->second;
+        return programs.emplace(key, link_player_program(finish, glove, detail, hilt, camo, stamp, sheen, material))
+                .first->second;
     }
 
     void mesh(const std::string &name, int instances = 1) {
@@ -372,8 +414,8 @@ class NativeViewmodel {
             );
             // position, normal, partColor, skinIndex, skinWeight, accent, finishUV, then headwear at location 8
             // (location 7 is the glow's smooth normal, in its own buffer).
-            constexpr std::array<GLuint, 8> location = {0, 1, 2, 3, 4, 5, 6, 8};
-            constexpr std::array<int, 8> size = {3, 3, 3, 4, 4, 1, 4, 1}, offset = {0, 3, 6, 9, 13, 17, 18, 22};
+            constexpr std::array<GLuint, 9> location = {0, 1, 2, 3, 4, 5, 6, 8, 9};
+            constexpr std::array<int, 9> size = {3, 3, 3, 4, 4, 1, 4, 1, 3}, offset = {0, 3, 6, 9, 13, 17, 18, 22, 23};
             for (size_t a = 0; a < location.size(); a++) {
                 gl.EnableVertexAttribArray(location[a]);
                 gl.VertexAttribPointer(
@@ -628,6 +670,12 @@ class NativeViewmodel {
         gl.Uniform3fv(p.palette, 8, look.palette.data());
         gl.Uniform3fv(p.accent, 1, look.accent.data());
         gl.Uniform3fv(p.glove, 5, look.gloveColors.data());
+        gl.Uniform3fv(p.hiltA, 3, look.hiltA.data());
+        gl.Uniform3fv(p.hiltB, 3, look.hiltB.data());
+        gl.Uniform3fv(p.hiltM, 1, look.hiltM.data());
+        gl.Uniform3fv(p.camoC, 4, look.camoColors.data());
+        gl.Uniform4fv(p.camoP, 1, look.camoParams.data());
+        gl.Uniform1f(p.camoScale, look.camoScale);
         gl.Uniform3fv(p.hairColor, 1, look.hairColor.data());
         gl.Uniform3fv(p.headwearScale, 1, look.fit.scale.data());
         gl.Uniform3fv(p.headwearOffset, 1, look.fit.offset.data());

@@ -96,6 +96,8 @@ export const CAMO_STYLE: Readonly<Record<string, CamoStyle>> = {
   // --- Role sets.
   "camo-lookout": S("digital", [0x1b2740, 0x2e3d5c, 0x5d6b86, 0xc8f53a], 3.0, "coat", [0.53, 0.6, 0.7, 0.42]),
   "camo-workbench": S("grid", [0x2b3448, 0x3fd4c6, 0xc9a24a, 0x3fd4c6], 0.5, "coat", [4, 0.55, 0, 0.045]),
+  // Draftsman (Contributor): a blueprint, white lines on blueprint blue, a heavier line every fifth.
+  "camo-draftsman": S("grid", [0x1d4f91, 0xbfe0ff, 0xf4f8ff, 0x1d4f91], 0.5, "coat", [5, 0.4, 0, 0.04]),
   "camo-keyholder": S("veins", [0x5a1420, 0xcfd6e0, 0x3a0c14, 0], 2.6, "metal", [3.6, 1.6, 0.04, 0]),
   "camo-founder": S("stamps", [0x241450, 0xffc23d, 0xff7a1a, 0x3a2470], 1.6, "gloss", [0.7, 0.35, 0, 0], "carrot"),
 };

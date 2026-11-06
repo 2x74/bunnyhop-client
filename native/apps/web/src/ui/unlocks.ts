@@ -174,9 +174,9 @@ export function lockInfo(c: CosmeticDef, level: LevelView, progress: Profile["pr
       return { hint: `${rankHint(u)}${where}`, goal: rankHint(u), fraction: null };
     }
     case "role":
-      if (c.unlock.role === "contributor")
-        return { hint: "Contributor: for players who worked on the game", goal: "Contributor", fraction: null };
-      // Staff cosmetics are only listed for players who hold the role (shownCosmetic).
+      // Contributor items are listed for everyone: the goal says whose they are. Staff items are only ever listed for
+      // players who hold the role (shownCosmetic), so for them this is the rare "role removed" case.
+      if (c.unlock.role === "contributor") return { hint: "Contributor: for players who worked on the game", goal: "Contributor", fraction: null };
       return { hint: roleHint(c.unlock.role), goal: roleHint(c.unlock.role), fraction: null };
   }
 }

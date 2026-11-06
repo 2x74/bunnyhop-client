@@ -73,23 +73,32 @@ export function profileTarget(tab: string | null | undefined, slot: string | nul
   return { tab: "overview", slot: null, edit: null };
 }
 
+/** A section's tile: the item and the line under its name (its set's name). */
+export interface SectionItem {
+  c: CosmeticDef;
+  group: string;
+}
+
 /**
  * The Loadout grid's sections (loadout-view.ts drawGrid), keeping the order given within each: items earned by playing
- * (and everything else not in the two below), Supporter items (set by set in SUPPORTER_SETS order, then the ones in no
- * set) and role-held items (ROLE_SETS order). `group`: the line a tile shows under its name (the set's name, else
- * "Supporter" / the role's set).
+ * (and everything else not in the ones below), Supporter items (set by set in SUPPORTER_SETS order, then the ones in no
+ * set), Contributor items (their role sets in ROLE_SETS order; listed for everyone, locked for non-contributors) and
+ * staff items (the moderator, admin and owner sets; the caller passes only the ones its player holds: loadout-ui.ts
+ * shownCosmetic). `group`: the line a tile shows under its name (the set's name, else "Supporter" / "Contributor" /
+ * "Staff").
  */
-export function loadoutSections(items: readonly CosmeticDef[]): { earned: CosmeticDef[]; supporter: { c: CosmeticDef; group: string }[]; contributor: CosmeticDef[]; staff: { c: CosmeticDef; group: string }[] } {
-  const earned = items.filter((c) => !supporterItem(c) && (c.unlock.kind !== "role" || c.unlock.role === "contributor"));
+export function loadoutSections(items: readonly CosmeticDef[]): { earned: CosmeticDef[]; supporter: SectionItem[]; contributor: SectionItem[]; staff: SectionItem[] } {
+  const earned = items.filter((c) => !supporterItem(c) && c.unlock.kind !== "role");
   const supporter = [
     ...SUPPORTER_SETS.flatMap((st) => items.filter((c) => supporterItem(c) && c.set === st.id).map((c) => ({ c, group: st.name }))),
     ...items.filter((c) => supporterItem(c) && !c.set).map((c) => ({ c, group: "Supporter" })),
   ];
-  const contributor = earned.filter((c) => c.unlock.kind === "role" && c.unlock.role === "contributor");
-  const playable = earned.filter((c) => c.unlock.kind !== "role");
-  const staff = [
-    ...ROLE_SETS.flatMap((st) => items.filter((c) => c.unlock.kind === "role" && c.unlock.role !== "contributor" && c.roleSet === st.id).map((c) => ({ c, group: st.name }))),
-    ...items.filter((c) => c.unlock.kind === "role" && c.unlock.role !== "contributor" && !c.roleSet).map((c) => ({ c, group: "Staff" })),
-  ];
-  return { earned: playable, supporter, contributor, staff };
+  const held = (contributor: boolean): SectionItem[] => {
+    const mine = items.filter((c) => c.unlock.kind === "role" && (c.unlock.role === "contributor") === contributor);
+    return [
+      ...ROLE_SETS.flatMap((st) => mine.filter((c) => c.roleSet === st.id).map((c) => ({ c, group: st.name }))),
+      ...mine.filter((c) => !c.roleSet).map((c) => ({ c, group: contributor ? "Contributor" : "Staff" })),
+    ];
+  };
+  return { earned, supporter, contributor: held(true), staff: held(false) };
 }

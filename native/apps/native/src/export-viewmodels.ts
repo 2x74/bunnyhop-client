@@ -42,8 +42,10 @@ import {
 } from "../../web/src/viewmodel/guns/meshes";
 import { fistFrames } from "../../web/src/player/bunny/gun-hold";
 import { holdData } from "./gun-hold-data";
-import { FINISH_STYLE, GLOVE_STYLE, GLOVE_STYLE_IDS, HAIR_DEFAULT } from "../../web/src/loadout";
+import { FINISH_STYLE, GLOVE_STYLE, GLOVE_STYLE_IDS, HAIR_DEFAULT, HILT_SKIN } from "../../web/src/loadout";
 import { FINISH_CODE } from "../../web/src/viewmodel/finishes/shader";
+import { HILT_KIND_CODE } from "../../web/src/viewmodel/hilts/glsl";
+import { CAMO_KIND_CODE, CAMO_STAMP_CODE, CAMO_STYLE } from "../../web/src/camo";
 import { clampFingers } from "../../web/src/viewmodel/fingers";
 import { WHIRL_FLICK } from "../../web/src/viewmodel/knives/whirligig";
 // The knives' wall-clock motion (the bayonets' idle sway, the Whirligig's thumb flicks) reads performance.now(). Freeze
@@ -61,7 +63,7 @@ const DRY_FIRE_SECONDS = 0.5;
 const GRIP_INDEX_OFF = 0.28;
 const GRIP_LEFT_OPEN = 0.3;
 // Floats per vertex: position 3, normal 3, partColor 3, skinIndex 4, skinWeight 4, accent 1, finishUV 4, headwear 1.
-const STRIDE = 23;
+const STRIDE = 26;
 const pieces: Buffer[] = [];
 let byteOffset = 0;
 const put = (data: Float32Array) => {
@@ -91,7 +93,8 @@ function geometry(name: string, g: any) {
     ids = g.getAttribute("skinIndex"),
     weights = g.getAttribute("skinWeight"),
     finish = g.getAttribute("finishUV"),
-    headwear = g.getAttribute("headwear");
+    headwear = g.getAttribute("headwear"),
+    gunCamo = g.getAttribute("gunCamo");
   // Body meshes are weapon-free: selected TP weapons render as separate parts.
   if (name.startsWith("body:")) {
     const knifeBone = bunnyRig().index("bunny.Knife");
@@ -114,6 +117,9 @@ function geometry(name: string, g: any) {
     }
     vertices[at + 17] = a.getX(i);
     vertices[at + 22] = headwear?.getX(i) ?? 0;
+    vertices[at + 23] = gunCamo?.array[i * 3] ?? 0;
+    vertices[at + 24] = gunCamo?.array[i * 3 + 1] ?? 1;
+    vertices[at + 25] = gunCamo?.array[i * 3 + 2] ?? 1;
   }
   // Index identical vertices; source builders intentionally emit triangle soup.
   const unique: number[] = [],
@@ -568,6 +574,31 @@ await writeFile(
     gunLowerSeconds: GUN_LOWER_SECONDS,
     gripIdle: { indexOff: GRIP_INDEX_OFF, leftOpen: GRIP_LEFT_OPEN },
     finishes: Object.fromEntries(Object.entries(FINISH_STYLE).map(([id, spec]) => [id, FINISH_CODE[spec.kind]])),
+    hilts: Object.fromEntries(
+      Object.entries(HILT_SKIN).map(([id, skin]) => [
+        id,
+        skin &&
+          Object.fromEntries(
+            (["grip", "guard", "pommel"] as const).map((role) => {
+              const layer = skin[role];
+              return [role, { kind: HILT_KIND_CODE[layer.kind], color: layer.color, alt: layer.alt }];
+            }),
+          ),
+      ]),
+    ),
+    camos: Object.fromEntries(
+      Object.entries(CAMO_STYLE).map(([id, style]) => [
+        id,
+        {
+          kind: CAMO_KIND_CODE[style.kind],
+          stamp: CAMO_STAMP_CODE[style.stamp ?? "carrot"],
+          sheen: style.sheen === "coat" ? 0 : style.sheen === "metal" ? 1 : 2,
+          colors: style.colors,
+          p: style.p ?? [0, 0, 0, 0],
+          scale: style.scale,
+        },
+      ]),
+    ),
   }),
 );
 await writePlayerMaterials(directory);

@@ -8,8 +8,7 @@
 
 namespace native {
 inline constexpr int release_physics = 26, release_rules = 5;
-inline constexpr std::string_view release_wasm_sha256 =
-        "791871b0244dff3603e5f88366afaa94392c301dc64af46d8db4f26eed2b6ca0";
+inline constexpr std::string_view release_wasm_sha256 = "791871b0244dff3603e5f88366afaa94392c301dc64af46d8db4f26eed2b6ca0";
 
 inline std::string release_platform() {
 #if defined(__APPLE__)

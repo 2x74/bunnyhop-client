@@ -15,7 +15,7 @@ import { registerChatCommand } from "../chat-commands";
 import { LANDING_GROUND, LANDING_TELEPORT, predictLanding, type Core, type LandingPrediction } from "../core";
 import { palette } from "../palette";
 import { prefs } from "../ui/settings";
-import { ARC_DOTS, ARC_SKIP, ARC_SPACING, arcPoints, LandingMarker, minSizeScale } from "./marker";
+import { ARC_DOTS, ARC_SKIP, ARC_SPACING, arcPoints, LandingMarker, minSizeScale, type LandingShape } from "./marker";
 import { landingEnabled } from "./prefs";
 
 /** How far ahead the path is searched, seconds (a long drop; past it nothing shows). */
@@ -48,6 +48,8 @@ let marker: LandingMarker | null = null;
 let airAt = -Infinity;
 const arc = new Float32Array(ARC_DOTS * 3);
 let result: LandingPrediction | undefined;
+/** The half circle; the flat ring is the comparison variant (dev hook __landing.setShape). */
+let shape: LandingShape = "dome";
 
 /** Per-frame cost (the query and the drawing update), for the dev hook and the perf check. */
 export const landingStats = { frames: 0, totalMs: 0, maxMs: 0, lastMs: 0, lastTraces: 0, lastPieces: 0, lastKind: 0 };
@@ -55,12 +57,19 @@ export const landingStats = { frames: 0, totalMs: 0, maxMs: 0, lastMs: 0, lastTr
 /** main.ts, once the world is built: the world's container. The marker is built the first time it shows. */
 export function initLanding(root: THREE.Object3D): void {
   parent = root;
-  if (import.meta.env?.DEV) Object.assign(window, { __landing: { stats: landingStats, marker: () => marker } });
+  if (import.meta.env?.DEV) Object.assign(window, { __landing: { stats: landingStats, marker: () => marker, setShape: setLandingShape } });
+}
+
+/** The marker's shape: the half circle (default) or the flat ring. */
+export function setLandingShape(s: LandingShape): void {
+  shape = s;
+  marker?.setShape(s);
 }
 
 function built(): LandingMarker | null {
   if (!marker && parent) {
     marker = new LandingMarker();
+    marker.setShape(shape);
     parent.add(marker.root);
   }
   return marker;

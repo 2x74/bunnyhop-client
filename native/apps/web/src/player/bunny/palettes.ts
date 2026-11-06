@@ -55,6 +55,8 @@ export const COLOURWAYS: Record<string, Colourway> = {
   // Keyholder (admins): oxblood hoodie, polished silver trim and stripes, a cold white glow.
   "outfit-lookout": { hoodie: 0x1b2740, trim: 0xc8f53a, pants: 0x121a2b, pantsTrim: 0xd8dee8, shoe: 0xf2f4f7, face: 0x070a12, glove: 0x141a26, detail: 0xd8dee8, accent: 0xc8f53a },
   "outfit-workbench": { hoodie: 0x2b3448, trim: 0x3fd4c6, pants: 0x1a2030, pantsTrim: 0xc9a24a, shoe: 0xefe8d8, face: 0x0e1428, glove: 0x2b3448, detail: 0xf1e9d6, accent: 0x3fd4c6 },
+  // Draftsman (Contributor, v0.0.38): blueprint-blue hoodie, white trim and stripes, deep blue pants, a pale blue glow.
+  "outfit-draftsman": { hoodie: 0x1d4f91, trim: 0xffffff, pants: 0x10284a, pantsTrim: 0xffffff, shoe: 0xf4f8ff, face: 0x050d1c, glove: 0x1d4f91, detail: 0xffffff, accent: 0xbfe0ff },
   "outfit-keyholder": { hoodie: 0x5a1420, trim: 0xcfd6e0, pants: 0x1c0d12, pantsTrim: 0xcfd6e0, shoe: 0xf3f1ee, face: 0x0d0507, glove: 0x3a0c14, detail: 0xffffff, accent: 0xe8edf3 },
   "outfit-geode": { hoodie: 0x1d6b74, trim: 0x7a5ce8, pants: 0x23232e, pantsTrim: 0x7a5ce8, shoe: 0xe6fbf8, face: 0x081417, glove: 0x23232e, detail: 0xd6fff8, accent: 0x5ff2df },
   // Batch 1 (progression.ts, research/PROGRESSION-BATCH1.md), earned by playing.

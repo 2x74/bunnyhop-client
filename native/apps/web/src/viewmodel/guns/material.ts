@@ -67,7 +67,7 @@ varying vec3 vGunP;
 #ifndef GUN_NO_ENV
 #define GUN_ENV 1
 #ifdef FINISH
-#if FINISH >= 22
+#if FINISH >= 22 && FINISH <= 27
 #ifndef FINISH_LOD
 #define GUN_ENV_DECLARED 1
 #endif

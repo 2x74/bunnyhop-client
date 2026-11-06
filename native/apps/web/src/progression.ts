@@ -822,8 +822,9 @@ export type Unlock =
   | { kind: "rank"; max: number; scope: "all" | "style" }
   /**
    * Role-held: yours while you hold the role (RoleNeed, holdsRole). Checked server-side on save and on every read like
-   * rank-held items, so a removed admin or a revoked Contributor badge reads back as the default. Never shown as a
-   * locked goal to players who can't hold it.
+   * rank-held items, so a removed admin or a revoked Contributor badge reads back as the default. Staff items are never
+   * listed or previewed for players who don't hold the role (staffItem); Contributor items are listed for everyone,
+   * locked and marked Contributor.
    */
   | { kind: "role"; role: RoleNeed };
 
@@ -874,6 +875,20 @@ export function holdsRole(need: RoleNeed, who: Holder): boolean {
     case "contributor":
       return role === "owner" || !!contributor;
   }
+}
+
+/**
+ * A staff item (v0.0.38, owner 11-06): held through a staff role (moderator, admin / "staff", owner). Nobody who doesn't
+ * hold that role may browse or preview it: it's left out of every selector, Loadout section, tab count, unlock list and
+ * preview, and the API answers for it like for an id that doesn't exist (cosmeticsProblem "unknown item"). Someone
+ * wearing one still shows it to everyone (rooms, replays, their card). Contributor items aren't staff items: they stay
+ * listed for everyone as a locked goal, marked Contributor.
+ */
+export const staffItem = (c: Pick<CosmeticDef, "unlock">): boolean => c.unlock.kind === "role" && c.unlock.role !== "contributor";
+
+/** Whether `who` may see `c` listed or previewed anywhere (selectors, counts, unlock lists, API lists): see staffItem. */
+export function listedFor(c: Pick<CosmeticDef, "unlock">, who: Holder): boolean {
+  return c.unlock.kind !== "role" || c.unlock.role === "contributor" || holdsRole(c.unlock.role, who);
 }
 
 /** "Owner only", "Staff only", "Moderators only", "Contributors only". */
@@ -1394,7 +1409,27 @@ COSMETICS.push(
   { id: "bg-founder", slot: "background", name: "Founder", unlock: role("owner"), color: "#1a0f3a", rarity: 5 },
 );
 
-export type RoleSetId = "lookout" | "workbench" | "keyholder" | "founder";
+// Contributor items, round two (v0.0.38, owner 11-06: "a cool contributor cosmetic or few"). Shown to everyone as a
+// locked goal (staffItem), so they are the role's showpiece. Workbench gains the two slots it lacked: Ruler, a teal
+// anodised blade with a brass ruler along it, and Pencil, a carpenter's pencil tucked behind the left ear.
+// Draftsman, the second Contributor set: blueprint blue with white linework, a technical drawing to wear. Its finish,
+// Linework, draws the blade's own outline, a grid and a dimension line in white on blueprint blue.
+COSMETICS.push(
+  { id: "fin-ruler", slot: "finish", name: "Ruler", unlock: role("contributor"), color: "#2fb8ab", rarity: 5 },
+  { id: "hat-pencil", slot: "hat", name: "Pencil", unlock: role("contributor"), color: "#ffc23d", rarity: 5 },
+
+  { id: "fin-linework", slot: "finish", name: "Linework", unlock: role("contributor"), color: "#1d4f91", rarity: 5 },
+  { id: "glove-dress-draftsman", slot: "glove", name: "Dress · Draftsman", unlock: role("contributor"), color: "#1d4f91", rarity: 5 },
+  { id: "hilt-draftsman", slot: "hilt", name: "Draftsman", unlock: role("contributor"), color: "#1d4f91", rarity: 5 },
+  { id: "camo-draftsman", slot: "camo", name: "Draftsman", unlock: role("contributor"), color: "#1d4f91", rarity: 5, roleSet: "draftsman" },
+  { id: "outfit-draftsman", slot: "outfit", name: "Draftsman", unlock: role("contributor"), color: "#1d4f91", rarity: 5 },
+  { id: "ghost-draftsman", slot: "ghost", name: "Draftsman", unlock: role("contributor"), color: "#bfe0ff", color2: "#ffffff", rarity: 5 },
+  { id: "trail-draftsman", slot: "trail", name: "Draftsman", unlock: role("contributor"), color: "#ffffff", color2: "#3f86e0", rarity: 5 },
+  { id: "bg-draftsman", slot: "background", name: "Draftsman", unlock: role("contributor"), color: "#1d4f91", rarity: 5 },
+  { id: "frame-draftsman", slot: "frame", name: "Draftsman", unlock: role("contributor"), color: "#bfe0ff", rarity: 5 },
+);
+
+export type RoleSetId = "lookout" | "workbench" | "draftsman" | "keyholder" | "founder";
 /**
  * The role sets: a theme per role, for the Loadout's grouping. `role`: who holds it (holdsRole: higher staff roles hold
  * the sets under them, the owner all of them). `look`: the whole set worn at once (null = the set has none in that slot).
@@ -1425,8 +1460,15 @@ export const ROLE_SETS: readonly { id: RoleSetId; name: string; role: RoleNeed; 
     id: "workbench",
     name: "Workbench",
     role: "contributor",
-    items: ["glove-garden-workbench", "hilt-workbench", "outfit-workbench", "ghost-workbench", "trail-workbench", "bg-workbench", "frame-workbench", "title-contributor"],
-    look: { finish: null, glove: "glove-garden-workbench", hilt: "hilt-workbench", outfit: "outfit-workbench", hat: null, ghost: "ghost-workbench", trail: "trail-workbench", background: "bg-workbench", frame: "frame-workbench", title: "title-contributor" },
+    items: ["fin-ruler", "glove-garden-workbench", "hilt-workbench", "outfit-workbench", "hat-pencil", "ghost-workbench", "trail-workbench", "bg-workbench", "frame-workbench", "title-contributor"],
+    look: { finish: "fin-ruler", glove: "glove-garden-workbench", hilt: "hilt-workbench", outfit: "outfit-workbench", hat: "hat-pencil", ghost: "ghost-workbench", trail: "trail-workbench", background: "bg-workbench", frame: "frame-workbench", title: "title-contributor" },
+  },
+  {
+    id: "draftsman",
+    name: "Draftsman",
+    role: "contributor",
+    items: ["fin-linework", "glove-dress-draftsman", "hilt-draftsman", "camo-draftsman", "outfit-draftsman", "ghost-draftsman", "trail-draftsman", "bg-draftsman", "frame-draftsman"],
+    look: { finish: "fin-linework", glove: "glove-dress-draftsman", hilt: "hilt-draftsman", outfit: "outfit-draftsman", hat: null, ghost: "ghost-draftsman", trail: "trail-draftsman", background: "bg-draftsman", frame: "frame-draftsman", title: "title-contributor" },
   },
 ];
 for (const set of ROLE_SETS) for (const id of set.items) {
@@ -1500,7 +1542,7 @@ COSMETICS.push(
   { id: "camo-crab", slot: "camo", name: "Crab Shell", unlock: ach("sideways_10"), color: "#f08a4b", rarity: 3 },
   { id: "camo-backrooms", slot: "camo", name: "Backrooms", unlock: ach(TRUE_ARCHITECT), color: "#d9c46a", rarity: 3 },
   { id: "camo-devgrid", slot: "camo", name: "Dev Grid", unlock: ach("gauntlet_classic"), color: "#e8862a", rarity: 4 },
-  { id: "camo-gilded", slot: "camo", name: "Gilded", unlock: ach("wr_5"), color: "#e0b13a", rarity: 4 },
+  { id: "camo-gilded", slot: "camo", name: "Gold Vein", unlock: ach("wr_5"), color: "#e0b13a", rarity: 4 },
   { id: "camo-gold-weave", slot: "camo", name: "Gold Weave", unlock: ach("wr_10"), color: "#b8902e", rarity: 5 },
   // The high tiers' sweeps, in their tier's colours (the Lapis, Flare, Riptide and Whiteout sets).
   { id: "camo-lapis", slot: "camo", name: "Lapis", unlock: ach("sweep_7"), color: "#26307a", rarity: 5 },
@@ -1795,7 +1837,8 @@ export function cosmeticsProblem(raw: unknown, level: number, achievements: read
     if (!(slot in DEFAULT_COSMETICS)) return { slot, reason: "unknown slot" };
     if (v === null && (slot === "title" || slot === "hat" || slot === "camo")) continue;
     const c = typeof v === "string" ? cosmetic(v) : null;
-    if (!c || c.slot !== slot) return { slot, reason: "unknown item" };
+    // A staff item its sender doesn't hold reads exactly like an id that doesn't exist (staffItem).
+    if (!c || c.slot !== slot || !listedFor(c, staff)) return { slot, reason: "unknown item" };
     if (!isUnlocked(c, level, achievements, ranks, staff)) return { slot, reason: `locked (${unlockHint(c)})` };
   }
   return null;

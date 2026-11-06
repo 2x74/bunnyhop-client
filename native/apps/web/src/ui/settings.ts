@@ -243,7 +243,7 @@ export interface Prefs {
     trail: boolean;
     /** Persistent jump-to-jump/recorded path and white takeoff markers for one selected race ghost. */
     route: boolean;
-    /** Hide the selected route ghost while retaining its route and HUD comparison. */
+    /** With route: hide the route ghost itself (model, trail, tag, sounds) and keep its route. Other ghosts stay. */
     routeOnly: boolean;
     routeSource: GhostRouteSource;
     /** The ghost the HUD's split and speed difference compare with. Auto: PB, else WR, else custom. */

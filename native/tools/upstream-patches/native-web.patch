@@ -578,6 +578,15 @@ index e223267..b0302b0 100644
      push({ at: Date.now(), kind: "rejection", msg: describe(e.reason), stack: e.reason instanceof Error ? e.reason.stack : undefined });
    });
    const orig = console.error;
+diff --git a/apps/web/src/hud/hud.css b/apps/web/src/hud/hud.css
+index 34b19f7..93a8363 100644
+--- a/apps/web/src/hud/hud.css
++++ b/apps/web/src/hud/hud.css
+@@ -226,4 +226,3 @@ body.hud-editing .fdock, body.hud-editing #music-now, body.hud-editing #audio-bt
+ .share-msg:empty { display: none; }
+ .btn.on { border-color: var(--accent); color: var(--accent); }
+ #hud-edit-bar.bottom { top: auto; bottom: 0.8rem; }
+-
 diff --git a/apps/web/src/native-input.ts b/apps/web/src/native-input.ts
 new file mode 100644
 index 0000000..85be589
@@ -1230,19 +1239,6 @@ index c2de027..a94cc83 100644
    refresh();
    return panel;
  }
-diff --git a/apps/web/src/ui/loadout-ui.ts b/apps/web/src/ui/loadout-ui.ts
-index 338a6e9..7d533be 100644
---- a/apps/web/src/ui/loadout-ui.ts
-+++ b/apps/web/src/ui/loadout-ui.ts
-@@ -8,7 +8,7 @@ import { getOutfit } from "../player/cosmetics";
- import { achievement, cosmetic, RARITY, type CosmeticDef } from "../progression";
- import { availableNow } from "./community";
- import { finishStyle, gloveStyle, hiltSkin, type CosmeticLoadout } from "../loadout";
--import { knifeById } from "../viewmodel/knives/index";
-+import { knifeById } from "../../../native/ui/knife-catalog";
- import { h } from "./dom";
- 
- /** Knives the registry hasn't built yet stay hidden everywhere (they appear, as new, once they ship). */
 diff --git a/apps/web/src/ui/player-glow-controls.ts b/apps/web/src/ui/player-glow-controls.ts
 index d7b3460..e4ab93c 100644
 --- a/apps/web/src/ui/player-glow-controls.ts

@@ -123,7 +123,7 @@ const audioDetail: Cvar[] = [
 /** Ghost routes, trigger kinds and colours, paint, inspect, the look's extra switches. */
 const otherDetail: Cvar[] = [
   sw("cl_ghost_route", "The selected ghost's route and takeoff marks.", (p) => p.ghost.route, (p, v) => (p.ghost.route = v)),
-  sw("cl_ghost_routeonly", "Hide the route ghost while keeping its route and takeoff marks.", (p) => p.ghost.routeOnly, (p, v) => (p.ghost.routeOnly = v)),
+  sw("cl_ghost_routeonly", "Hide the route ghost and keep its route.", (p) => p.ghost.routeOnly, (p, v) => (p.ghost.routeOnly = v)),
   pick("cl_ghost_routesource", "Whose route: auto, pb, wr or custom.", ["auto", "pb", "wr", "custom"] as const, (p) => p.ghost.routeSource, (p, v) => (p.ghost.routeSource = v)),
   pick("cl_ghost_routemode", "Route as jumps or path.", ["jumps", "path"] as const, (p) => p.ghost.routeMode, (p, v) => (p.ghost.routeMode = v)),
   pick("cl_ghost_compare", "The ghost the split compares with: auto, pb, wr or custom.", ["auto", "pb", "wr", "custom"] as const, (p) => p.ghost.compare, (p, v) => (p.ghost.compare = v)),

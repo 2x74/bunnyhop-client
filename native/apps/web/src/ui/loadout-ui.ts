@@ -5,9 +5,10 @@
 import "./loadout-ui.css";
 import { colourway } from "../player/bunny/palettes";
 import { getOutfit } from "../player/cosmetics";
-import { achievement, cosmetic, RARITY, type CosmeticDef } from "../progression";
+import { achievement, cosmetic, RARITY, staffItem, type CosmeticDef } from "../progression";
 import { availableNow } from "./community";
 import { finishStyle, gloveStyle, hiltSkin, type CosmeticLoadout } from "../loadout";
+// Native uses its data-only catalogue here so the menu never imports the Three.js knife builders.
 import { knifeById } from "../../../native/ui/knife-catalog";
 import { h } from "./dom";
 
@@ -17,16 +18,14 @@ export function listedCosmetic(c: CosmeticDef): boolean {
 }
 
 /**
- * Listed AND worth showing to this player: role-held items (the owner's / staff items) only appear for whoever owns
- * them, never as a locked goal for everyone else; so do items from achievements that can't be earned right now
- * (Early Hopper; the Discord server rewards while the bot is off: ui/community.ts availableNow).
+ * Listed AND worth showing to this player. Staff items (moderator, admin and owner items: progression.ts staffItem) only
+ * appear for whoever holds the role, never as a locked goal for anyone else, and so never in a tab count or a preview;
+ * so do items from achievements that can't be earned right now (Early Hopper; the Discord server rewards while the bot
+ * is off: ui/community.ts availableNow). Contributor items show for everyone, locked and marked Contributor.
  */
 export function shownCosmetic(c: CosmeticDef, owned: ReadonlySet<string> | ((c: CosmeticDef) => boolean)): boolean {
   if (!listedCosmetic(c)) return false;
-  // Contributor cosmetics are public catalogue entries, locked in place until the badge is held. Staff cosmetics are
-  // omitted entirely for non-holders so the catalogue does not expose their names or counts.
-  if (c.unlock.kind === "role" && c.unlock.role === "contributor") return true;
-  const ownOnly = c.unlock.kind === "role" || (c.unlock.kind === "achievement" && !availableNow(achievement(c.unlock.id)));
+  const ownOnly = staffItem(c) || (c.unlock.kind === "achievement" && !availableNow(achievement(c.unlock.id)));
   if (!ownOnly) return true;
   return typeof owned === "function" ? owned(c) : owned.has(c.id);
 }
@@ -99,6 +98,12 @@ export function finishBackground(id: string | null | undefined): string {
       return "repeating-linear-gradient(90deg, #3b3a40 0 1.5px, transparent 1.5px 5px, #3b3a40 5px 6.5px, transparent 6.5px 10px, #3b3a40 10px 11.5px, transparent 11.5px 15px, #3b3a40 15px 16.5px, transparent 16.5px 26px) 0 30% / 100% 40% no-repeat, #efe9dc";
     case "devgrid":
       return "linear-gradient(90deg, rgba(255, 255, 255, 0.9) 1px, transparent 1px) 0 0 / 8px 8px, linear-gradient(0deg, rgba(255, 255, 255, 0.9) 1px, transparent 1px) 0 0 / 8px 8px, linear-gradient(90deg, #f08a24 0 50%, #8f9296 50%)";
+    // Contributor: Workbench's Ruler (a brass rule with ink ticks over teal steel), Draftsman's Linework (white lines on
+    // blueprint blue).
+    case "ruler":
+      return "repeating-linear-gradient(90deg, #1a1816 0 1px, transparent 1px 6px) 0 0 / 100% 22% no-repeat, repeating-linear-gradient(90deg, #1a1816 0 1px, transparent 1px 24px) 0 0 / 100% 36% no-repeat, linear-gradient(180deg, #cba24c 0 38%, #1a1816 38% 40%, #2a9d94 40%, #1f8178 100%)";
+    case "linework":
+      return "linear-gradient(180deg, transparent 18%, #f0f6ff 18% 21%, transparent 21% 79%, #f0f6ff 79% 82%, transparent 82%), linear-gradient(90deg, rgba(255, 255, 255, 0.18) 1px, transparent 1px) 0 0 / 7px 7px, linear-gradient(0deg, rgba(255, 255, 255, 0.18) 1px, transparent 1px) 0 0 / 7px 7px, #1d4f91";
     default:
       return "repeating-linear-gradient(90deg, #ff7a1a 0 9px, #d95a0c 9px 11px)";
   }

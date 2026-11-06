@@ -28,6 +28,7 @@ struct PlayerProgram {
     GLint glowEnabled = -1, glowColor = -1, glowIntensity = -1, glowOpacity = -1, glowAxisA = -1, glowAxisB = -1,
           glowNearFade = -1, glowDistance = -1;
     GLint ghost = -1, ghostRim = -1, opacity = -1, axisA = -1, axisB = -1, nearFade = -1, contour = -1;
+    GLint hiltA = -1, hiltB = -1, hiltM = -1, camoC = -1, camoP = -1, camoScale = -1;
 };
 
 // Source (x, y, z) -> three.js (x, z, -y).
@@ -84,17 +85,28 @@ struct PlayerShaderSources {
         , gun(read(root / "player-gun.glsl")) {}
 };
 
-inline int player_program_key(int finish, bool glove, bool detail, PlayerMaterial material) {
-    return finish | (glove ? 64 : 0) | (detail ? 128 : 0) | (int(material) << 8);
+inline int player_program_key(
+        int finish, bool glove, bool detail, bool hilt, int camo, int stamp, int sheen, PlayerMaterial material
+) {
+    return (finish & 63) | (glove ? 1 << 6 : 0) | (detail ? 1 << 7 : 0) | (hilt ? 1 << 8 : 0) | ((camo + 1) << 9)
+           | (stamp << 13) | (sheen << 15) | (int(material) << 17);
 }
 
 // The #defines three.js would give the same material (viewmodel/finishes/shader.ts lookDefines, guns/material.ts).
-inline std::string player_defines(int finish, bool glove, bool detail, PlayerMaterial material) {
+inline std::string player_defines(
+        int finish, bool glove, bool detail, bool hilt, int camo, int stamp, int sheen, PlayerMaterial material
+) {
     std::string defines = "#version 330 core\n";
     if (material == PlayerMaterial::ghost) return defines;
     if (finish) defines += "#define FINISH " + std::to_string(finish) + "\n";
     if (glove || detail) defines += "#define GLOVE 1\n";
     if (detail) defines += "#define VM_DETAIL 1\n";
+    if (hilt && material == PlayerMaterial::solid) defines += "#define HILT 1\n";
+    if (camo >= 0 && material == PlayerMaterial::gun) {
+        defines += "#define GUN_CAMO " + std::to_string(camo) + "\n";
+        defines += "#define CAMO_STAMP " + std::to_string(stamp) + "\n";
+        defines += "#define CAMO_SHEEN " + std::to_string(sheen) + "\n";
+    }
     if (material == PlayerMaterial::gun) defines += "#define GUN_SHADE 1\n#define GUN_FLASH 1\n";
     if (material == PlayerMaterial::world_gun) defines += "#define GUN_SHADE 1\n#define GUN_NO_ENV 1\n";
     return defines;

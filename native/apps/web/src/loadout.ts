@@ -110,7 +110,7 @@ export const DEFAULT_LOADOUT: CosmeticLoadout = Object.freeze({ knife: DEFAULT_K
  * Shader finish designs (viewmodel/finishes/shader.ts FINISH_CODE): one per finish, each a fixed design baked into its
  * GLSL. "founder": Founder's Gold, the owner's finish (role-held in progression.ts).
  */
-export type FinishKind = "none" | "sunset" | "ember" | "tigerlily" | "nebula" | "dewweb" | "frost" | "heartbeet" | "fourleaf" | "founder" | "geode" | "rift" | "spectrum" | "goldleaf" | "aurora" | "contour" | "meteor" | "hourglass" | "lantern" | "wildflower" | "tally" | "devgrid" | "emerald" | "ruby" | "sapphire" | "pearl" | "chromatic" | "chrome";
+export type FinishKind = "none" | "sunset" | "ember" | "tigerlily" | "nebula" | "dewweb" | "frost" | "heartbeet" | "fourleaf" | "founder" | "geode" | "rift" | "spectrum" | "goldleaf" | "aurora" | "contour" | "meteor" | "hourglass" | "lantern" | "wildflower" | "tally" | "devgrid" | "emerald" | "ruby" | "sapphire" | "pearl" | "chromatic" | "chrome" | "ruler" | "linework";
 
 export interface FinishStyle {
   kind: FinishKind;
@@ -149,6 +149,9 @@ export const FINISH_STYLE: Record<string, FinishStyle> = {
   "fin-wildflower": { kind: "wildflower" },
   "fin-tally": { kind: "tally" },
   "fin-devgrid": { kind: "devgrid" },
+  // Contributor (progression.ts ROLE_SETS): Workbench's Ruler, Draftsman's Linework.
+  "fin-ruler": { kind: "ruler" },
+  "fin-linework": { kind: "linework" },
 };
 
 /** Render data of a finish id (retired ids resolve to their replacement; unknown -> the plain carrot). */
@@ -259,6 +262,8 @@ export const GLOVE_STYLE: Record<string, GloveStyle> = {
   "glove-garden-workbench": G("garden", 0x2b3448, 0x2b3448, 0x3fd4c6, 0xc9a24a, 0x8a7a5a),
   "glove-dress-keyholder": G("dress", 0x5a1420, 0x5a1420, 0xcfd6e0, 0x3a0c14, 0xe8edf3),
   "glove-aviator-founder": G("aviator", 0x241450, 0xff7a1a, 0xffc23d, 0xfff4dc, 0x3ff0ff),
+  // Draftsman (Contributor): blueprint-blue dress gloves, white points and cuff, a pale blue button.
+  "glove-dress-draftsman": G("dress", 0x1d4f91, 0x1d4f91, 0xffffff, 0xf4f8ff, 0xbfe0ff),
 };
 
 export const gloveStyle = (id: string | null | undefined): GloveStyle => (id && GLOVE_STYLE[id]) || GLOVE_STYLE[DEFAULT_GLOVE];
@@ -322,6 +327,8 @@ export const HILT_SKIN: Record<string, HiltSkin | null> = {
   "hilt-lookout": HS(HL("rubber", 0x1b2740, 0xc8f53a), HL("satin", 0xd8dee8, 0xb8c0cc)),
   "hilt-workbench": HS(HL("wood", 0x2f6e6a, 0x1d4442), HL("polished", 0xc9a24a, 0xa8832f)),
   "hilt-keyholder": HS(HL("enamel", 0x5a1420, 0x3a0c14), HL("polished", 0xdfe5ea, 0xc3cbd2)),
+  // Draftsman: blueprint-blue cord over white (the drawing's lines), white enamel fittings.
+  "hilt-draftsman": HS(HL("cord", 0x1d4f91, 0xf4f8ff), HL("enamel", 0xf4f8ff, 0xbfe0ff)),
   "hilt-founder": { grip: HL("leather", 0x3a1e7a, 0xff7a1a), guard: HL("polished", 0xffc23d, 0xe8a92e), pommel: HL("enamel", 0xff7a1a, 0xffc23d) },
 };
 

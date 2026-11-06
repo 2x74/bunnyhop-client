@@ -33,7 +33,7 @@ import { trackName } from "./zones";
 import { SpatialMover } from "./audio";
 import { GhostRoute } from "./ghost-route";
 import { warmPrograms } from "./graphics/warm-programs";
-import { routeGhostKind, type GhostRouteMode } from "./ghost-route-data";
+import { ghostPlan, type GhostRouteMode } from "./ghost-route-data";
 import { ClosestPos } from "./closest-pos";
 
 /** A PB is always your own run: your account name, not the replay file's (the native client's say "native-player"). */
@@ -79,6 +79,8 @@ export interface GhostLook {
   /** Persistent route for this ghost (independent of the fading trail). Off in menu/viewer ghosts by default. */
   route?: boolean;
   routeMode?: GhostRouteMode;
+  /** Route only: hide the model, trail, tag and sounds; the route (with `route`) and the split stay. */
+  routeOnly?: boolean;
 }
 
 const TRAIL_SECONDS = 2.5;
@@ -276,6 +278,8 @@ export class Ghost {
     // touched: any frame tick since the last frame on the ground (footsteps: a bhop's contact lasts one tick).
     let touched = false;
     if (live) for (let k = Math.floor(this.lastT) + 1; k <= Math.floor(t) && !touched; k++) touched = (d.frames[k * FRAME_STRIDE + 3] & FRAME_GROUNDED) !== 0;
+    const only = o.routeOnly === true;
+    this.model.root.visible = !only;
     this.model.setOpacity(o.opacity);
     this.model.setNearFade(o.nearFade ? 14 : 0, o.nearFade ? 64 : 0);
     if (moving) {
@@ -295,7 +299,7 @@ export class Ghost {
       this.model.setState(pose);
       this.model.update(dt);
     }
-    if (this.audible && moving && prefs.get().audio.ghosts) (this.sound ??= new SpatialMover(0.45)).update(dt, this.pose.position, this.pose.velocity, touched, pose.crouched, false, snapped || this.lastT < 0);
+    if (this.audible && moving && !only && prefs.get().audio.ghosts) (this.sound ??= new SpatialMover(0.45)).update(dt, this.pose.position, this.pose.velocity, touched, pose.crouched, false, snapped || this.lastT < 0);
     else this.sound?.moves.reset();
     this.lastT = t;
     this.tick = Math.floor(t);
@@ -311,7 +315,7 @@ export class Ghost {
     } else if (this.route) this.route.root.visible = false;
 
     // Trail: the last few seconds of path (since the ghost's start), cut at teleports.
-    if (o.trail && running) {
+    if (o.trail && running && !only) {
       const from = Math.max(d.startTick, t - TRAIL_SECONDS / d.tickInterval);
       const pts = this.trailPts;
       let count = 0;
@@ -344,7 +348,7 @@ export class Ghost {
       this.tagDelta = shown;
       this.tag.set(d.track ? `${d.name} · ${trackName(d.track)}` : d.name, formatTime(this.time), shown === null ? null : formatDelta(shown), shown !== null && shown <= 0);
     }
-    const seen = o.tag === false ? 0 : this.sight.update(dt, camera, this.tagPos, this.trace, prefs.get().tags.throughWalls);
+    const seen = o.tag === false || only ? 0 : this.sight.update(dt, camera, this.tagPos, this.trace, prefs.get().tags.throughWalls);
     this.tag.place(this.tagPos, camera, seen * Math.min(1, Math.max(0, (dist - 50) / 90)) * (elapsed === null ? 0.85 : 1));
   }
 
@@ -704,7 +708,9 @@ export class GhostManager {
     const gp = p.ghost;
     const track = timer.track;
     const style = this.styleFor(track);
-    if (gp.wr && p.showGhost && api.available() && !this.wr.has(`${style}:${track}`) && !this.hidden) void this.ensureWR(track);
+    const hideUi = uiHidden();
+    const plan = ghostPlan(p, KIND_ORDER.filter((kind) => !!this.get(kind, track)), this.hidden, hideUi);
+    if (plan.fetchWR && api.available() && !this.wr.has(`${style}:${track}`)) void this.ensureWR(track);
 
     // Elapsed ticks: running = live timer; finished = keep the ghosts running to their own finish; idle = parked.
     if (timer.status === "finished" && this.lastStatus !== "finished") {
@@ -721,9 +727,8 @@ export class GhostManager {
     if (doSplit) this.lastSplitTick = timer.ticks();
     let primary: Ghost | null = null;
     // No name tags while the UI is hidden (ui/hide-ui.ts); the ghosts themselves stay.
-    const hideUi = uiHidden();
-    const look = hideUi ? { ...gp, tag: false } : gp;
-    const routeKind = gp.route && !hideUi && !this.hidden && p.showGhost ? routeGhostKind(gp.routeSource, KIND_ORDER.filter((kind) => gp[kind] && !!this.get(kind, track))) : null;
+    const look: GhostLook = hideUi ? { ...gp, tag: false } : gp;
+    const { routeKind, routeOnlyKind } = plan;
     const compare = gp.compare;
     for (const g of this.ghosts.values()) {
       const vis = !this.hidden && p.showGhost && gp[g.kind] && g.track === track && (g.d.style === "*" || g.d.style === style);
@@ -736,7 +741,7 @@ export class GhostManager {
       } else if (timer.status === "finished") {
         g.delta = (timer.ticks() - g.ticks) * timer.tickInterval;
       } else if (timer.status === "idle") g.delta = null;
-      g.update(elapsed, dt, this.camPos, gp.route ? { ...look, route: g.kind === routeKind } : look);
+      g.update(elapsed, dt, this.camPos, gp.route || gp.routeOnly ? { ...look, route: g.kind === routeKind, routeOnly: g.kind === routeOnlyKind } : look);
       if (compare === "auto" ? !primary || KIND_ORDER.indexOf(g.kind) < KIND_ORDER.indexOf(primary.kind) : g.kind === compare) primary = g;
     }
     this.primaryDelta = primary?.delta ?? null;

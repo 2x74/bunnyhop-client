@@ -37,7 +37,7 @@ export { HILT_FRAGMENT_ALBEDO, HILT_FRAGMENT_LIGHT } from "../hilts/glsl";
 export { GLOVE_FRAGMENT_ALBEDO, GLOVE_FRAGMENT_LIGHT } from "../gloves/glsl";
 
 /** `#define FINISH n` per design (0 = no finish code at all). */
-export const FINISH_CODE: Record<FinishKind, number> = { none: 0, sunset: 1, ember: 2, tigerlily: 3, nebula: 4, dewweb: 5, frost: 6, heartbeet: 7, fourleaf: 8, founder: 9, geode: 10, rift: 11, spectrum: 12, goldleaf: 13, aurora: 14, contour: 15, meteor: 16, hourglass: 17, lantern: 18, wildflower: 19, tally: 20, devgrid: 21, emerald: 22, ruby: 23, sapphire: 24, pearl: 25, chromatic: 26, chrome: 27 };
+export const FINISH_CODE: Record<FinishKind, number> = { none: 0, sunset: 1, ember: 2, tigerlily: 3, nebula: 4, dewweb: 5, frost: 6, heartbeet: 7, fourleaf: 8, founder: 9, geode: 10, rift: 11, spectrum: 12, goldleaf: 13, aurora: 14, contour: 15, meteor: 16, hourglass: 17, lantern: 18, wildflower: 19, tally: 20, devgrid: 21, emerald: 22, ruby: 23, sapphire: 24, pearl: 25, chromatic: 26, chrome: 27, ruler: 28, linework: 29 };
 
 /** One finished item, as the shader sees it: which design. */
 export interface FinishSpec {
@@ -242,6 +242,10 @@ uniform float uFinTime;
 vec2 finRot(vec2 p, float a) { float c = cos(a), s = sin(a); return vec2(c * p.x - s * p.y, s * p.x + c * p.y); }
 // The carrot blade's half width along it (viewmodel/knives carrot): turns across -1..1 back into pattern units.
 float finRad(float u) { return 0.8 * pow(max(1.0 - u, 0.0), 0.85) + 0.04; }
+#if FINISH == 28 || FINISH == 29
+// A line of half width w (pattern units) at distance d, antialiased over a pixel (the drawn finishes, Ruler and Linework).
+float finLine(float d, float w) { float aa = max(fwidth(d), 1e-4); return 1.0 - smoothstep(w - aa, w + aa, d); }
+#endif
 
 // Every recipe: (u along 0..1, v across -1..1, P = pattern units: x 2.3 .. 11.2 along, y about -0.84 .. 0.84 across)
 // -> linear albedo, plus how metallic it is and any sparkle. All placements are fixed constants.
@@ -732,12 +736,51 @@ vec3 finishAlbedo(float u, float v, vec2 P, out float metal, out float sparkle, 
   c = mix(c, mix(vec3(1.0), vec3(0.85, 0.86, 0.88), grey), grid * 0.85);
   metal = 0.2;
   return c * c;
+#elif FINISH == 28
+  // RULER (Workbench, contributors): teal anodised steel with a fine brushed grain, and a brass rule over one half of
+  // the blade with ink ticks: a short one every quarter unit, a longer one every half, the longest every unit.
+  vec3 c = mix(vec3(0.10, 0.50, 0.48), vec3(0.17, 0.66, 0.62), smoothstep(-0.5, 0.5, fbm3(vec2(P.x * 0.35, P.y * 1.8) + 4.0)));
+  c *= 0.93 + 0.07 * gnoise(vec2(P.x * 0.5, P.y * 64.0));
+  float rule = smoothstep(-0.08, -0.04, v);
+  c = mix(c, vec3(0.80, 0.64, 0.30) * (0.95 + 0.05 * gnoise(vec2(P.x * 0.4, P.y * 80.0))), rule);
+  float x = P.x * 4.0;
+  float n = floor(x + 0.5);
+  float len = mod(n, 4.0) < 0.5 ? 0.62 : mod(n, 2.0) < 0.5 ? 0.42 : 0.24;
+  float tick = finLine(abs(fract(x + 0.5) - 0.5) * 0.25, 0.016) * step(1.0 - len, v) * step(2.7, P.x) * step(P.x, 10.2);
+  float edge = finLine(abs(v + 0.06) * finRad(u), 0.01);
+  c = mix(c, vec3(0.10, 0.09, 0.08), clamp(max(tick * rule, edge), 0.0, 1.0) * 0.92);
+  metal = mix(0.6, 0.8, rule);
+  return c * c;
+#elif FINISH == 29
+  // LINEWORK (Draftsman, contributors): a technical drawing of the blade on blueprint blue. A fine grid with a heavier
+  // line every unit, the blade's own outline drawn just inside its edges, a dash-dot centre line, a dimension line
+  // with arrowheads and end ticks, and one hole callout (a circle and its cross).
+  float r = finRad(u);
+  vec3 c = mix(vec3(0.10, 0.27, 0.52), vec3(0.13, 0.33, 0.60), smoothstep(-0.5, 0.5, fbm3(P * 0.9 + 7.0)));
+  vec3 ink = vec3(0.94, 0.97, 1.0);
+  vec2 gq = abs(fract(P * 4.0 + 0.5) - 0.5) * 0.25, gm = abs(fract(P + 0.5) - 0.5);
+  float grid = max(finLine(min(gq.x, gq.y), 0.004) * 0.16, finLine(min(gm.x, gm.y), 0.007) * 0.30);
+  float outline = finLine(abs(abs(v) - 0.84) * r, 0.012) * step(2.55, P.x);
+  float dash = fract(P.x * 1.25);
+  float centre = finLine(abs(v) * r, 0.007) * (step(dash, 0.62) + step(0.72, dash) * step(dash, 0.8)) * step(2.9, P.x) * step(P.x, 10.4);
+  // The dimension line (v = -0.5), from x0 to x1, with filled arrowheads and the end ticks.
+  float x0 = 3.1, x1 = 8.9, dy = abs(v + 0.5) * r;
+  float dim = finLine(dy, 0.007) * step(x0, P.x) * step(P.x, x1);
+  float head = step(dy, 0.32 * max(0.0, 0.34 - (P.x - x0))) * step(x0, P.x) + step(dy, 0.32 * max(0.0, 0.34 - (x1 - P.x))) * step(P.x, x1);
+  float ends = (finLine(abs(P.x - x0), 0.008) + finLine(abs(P.x - x1), 0.008)) * step(abs(v + 0.5), 0.2);
+  // The hole callout.
+  vec2 h = P - vec2(4.3, 0.28 * finRad(0.225));
+  float hole = max(finLine(abs(length(h) - 0.15), 0.008), finLine(min(abs(h.x), abs(h.y)), 0.006) * step(length(h), 0.24));
+  float lines = clamp(max(max(grid, outline * 0.95), max(max(centre, dim), max(head, max(ends, hole)) * 0.9)), 0.0, 1.0);
+  c = mix(c, ink, lines);
+  metal = 0.25;
+  return c * c;
 #else
   return vColor;
 #endif
 }
 
-#if FINISH >= 22
+#if FINISH >= 22 && FINISH <= 27
 // POLISHED METALS (22..27, the Supporter's metals): no painted pattern, the look is the metal itself, so it lives in
 // the reflection. Per graphics look:
 //   Enhanced / Cinematic (the composer): the real scene, world-anchored (environment.ts cube, finSceneMetal below):
@@ -908,7 +951,7 @@ vec3 polishedShade(float u, float v, vec2 P, vec3 n, vec3 V, vec3 L, vec3 ambien
 vec3 finishShade(vec3 n, vec3 V, vec3 L, vec3 ambient, float key) {
   float u = clamp(vFin.x, 0.0, 1.0), v = clamp(vFin.y, -1.0, 1.0);
   vec2 P = vec2(2.3 + u * 8.9, v * finRad(u));
-#if FINISH >= 22
+#if FINISH >= 22 && FINISH <= 27
   return polishedShade(u, v, P, n, V, L, ambient, key);
 #else
   float metal, sparkle;

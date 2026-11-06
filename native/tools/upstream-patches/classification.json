@@ -30,6 +30,11 @@
     "baseline": "e22326759b7b43d27f3aadb0ec36001b033f0cd1"
   },
   {
+    "path": "apps/web/src/hud/hud.css",
+    "classification": "native patch",
+    "baseline": "34b19f7d4b6d784cedde5bc0d99f33730b4279bc"
+  },
+  {
     "path": "apps/web/src/native-input.ts",
     "classification": "native transport patch",
     "baseline": "absent"
@@ -92,7 +97,7 @@
   {
     "path": "apps/web/src/ui/loadout-ui.ts",
     "classification": "native patch",
-    "baseline": "338a6e9b7b561eebca51f71adf7504bd009d80be"
+    "baseline": "08758425740973583fdf02815b456e0a3ca57b20"
   },
   {
     "path": "apps/web/src/ui/player-glow-controls.ts",

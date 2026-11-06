@@ -7,6 +7,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { ghostMaterial, playerUniforms, solidMaterial } from "../../web/src/player/materials";
 import { gunMaterial } from "../../web/src/viewmodel/guns/material";
+import { CAMO_STYLE } from "../../web/src/camo";
 import { NO_LOOK } from "../../web/src/viewmodel/finishes/shader";
 
 /** Vertex attribute locations, matching NativeViewmodel's vertex layout. */
@@ -20,6 +21,7 @@ const ATTRIBUTE_LOCATIONS: Record<string, number> = {
   finishUV: 6,
   glowNormal: 7,
   headwear: 8,
+  gunCamo: 9,
 };
 
 const VERTEX_PRELUDE = `
@@ -209,7 +211,9 @@ export async function writePlayerMaterials(directory: string): Promise<void> {
   const uniforms = playerUniforms();
   const solid = solidMaterial(uniforms, NO_LOOK);
   const ghost = ghostMaterial(uniforms, false);
-  const gun = gunMaterial(uniforms, NO_LOOK, { flash: true });
+  const camo = Object.values(CAMO_STYLE)[0];
+  if (!camo) throw new Error("Native camo shader catalogue is empty");
+  const gun = gunMaterial(uniforms, NO_LOOK, { flash: true, camo });
   const glow = await glowSources();
   const files: [string, string][] = [
     ["player-vertex.glsl", vertexShader(solid.vertexShader, glow.noise)],

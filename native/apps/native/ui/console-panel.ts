@@ -64,8 +64,7 @@ class NativeConsole {
   private draft = "";
   private maps: string[] = [];
   private openedInGame = false;
-  private delayed: Array<() => void> = [];
-  private waitTimer = 0;
+  private waitStages: Array<Array<() => void>> = [];
 
   constructor() {
     this.log = h("div.ncon-log", { role: "log", "aria-live": "polite" });
@@ -82,7 +81,7 @@ class NativeConsole {
       h(
         "header.ncon-head",
         null,
-        h("div", null, h("span.ncon-kicker", null, "BUNNYHOP / NATIVE"), h("h2", null, "Console")),
+        h("div", null, h("h2", null, "Console")),
         h("button.ncon-close", { type: "button", "aria-label": "Close console", onclick: () => this.close() }, "×"),
       ),
       this.log,
@@ -208,9 +207,10 @@ class NativeConsole {
       hooks?.notice(MOVE_TURN_REFUSAL);
       return;
     }
-    let waiting = false;
+    let stage = 0;
+    let usedWait = false;
     const later = (fn: () => void) => {
-      if (waiting) this.delayed.push(fn);
+      if (stage > 0) (this.waitStages[stage - 1] ??= []).push(fn);
       else fn();
     };
     const ops = {
@@ -222,16 +222,24 @@ class NativeConsole {
         hooks?.notice(text);
       },
       wait: () => {
-        waiting = true;
-        if (this.waitTimer) return;
-        this.waitTimer = window.setTimeout(() => {
-          this.waitTimer = 0;
-          for (const run of this.delayed.splice(0)) run();
-        }, 16);
+        usedWait = true;
+        stage++;
       },
     };
     if (detail.down) runPress(detail.command, prefs.get().aliases ?? {}, ops);
     else runRelease(detail.command, prefs.get().aliases ?? {}, ops);
+    if (usedWait && this.waitStages.length < stage) this.waitStages.length = stage;
+    this.scheduleWaitTick();
+  }
+
+  private scheduleWaitTick(): void {
+    if (this.waitStages.length) send({ type: "consoleWait" });
+  }
+
+  advanceWaitTick(): void {
+    const stage = this.waitStages.shift();
+    for (const run of stage ?? []) run();
+    this.scheduleWaitTick();
   }
 }
 
@@ -258,6 +266,7 @@ export function installNativeConsole(h: NativeConsoleHooks): void {
     true,
   );
   window.addEventListener("bunnyhop:native-console-bind", (event) => view?.dispatchBind((event as CustomEvent).detail));
+  window.addEventListener("bunnyhop:native-console-tick", () => view?.advanceWaitTick());
   // Ensure an old config with no binds gets the same Source console default as the web.
   if (!prefs.get().binds.console)
     prefs.update((p) => {

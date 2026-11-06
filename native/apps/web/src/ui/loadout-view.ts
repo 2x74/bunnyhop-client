@@ -641,8 +641,9 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
     // Locked: nearest first, a secret one last.
     const locked = items.filter((c) => !m.owns(c)).sort((a, b) => Number(veiled(a)) - Number(veiled(b)) || lockOf(b) - lockOf(a));
     const ordered = [...mine, ...locked];
-    // Three sections: what's earned by playing (yours first, then the nearest goals), then every Supporter item under
-    // one heading, set by set (the sets in their order, then the ones in no set), then the role sets you hold.
+    // Four sections: what's earned by playing (yours first, then the nearest goals), then every Supporter item under
+    // one heading, set by set (the sets in their order, then the ones in no set), then the Contributor sets (shown to
+    // everyone), then the staff sets you hold (no one else ever sees those: shownCosmetic).
     const sections = loadoutSections(ordered);
     const headed = !o.only;
     const els: HTMLElement[] = [];
@@ -661,8 +662,9 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
       sections.supporter.forEach((x) => add(x.c, x.group));
     }
     if (sections.contributor.length) {
-      if (headed) els.push(h("h4.lo-set-h", null, h("span", null, "Contributor"), h("small", null, "For players who worked on the game")));
-      sections.contributor.forEach((c) => add(c, c.roleSet ? c.roleSet[0].toUpperCase() + c.roleSet.slice(1) : "Contributor"));
+      const holder = sections.contributor.some((x) => m.owns(x.c));
+      if (headed) els.push(h("h4.lo-set-h", null, h("span", null, "Contributor"), !holder && !o.previewOnly ? h("span.lo-set-note", null, "For players who worked on the game") : ""));
+      sections.contributor.forEach((x) => add(x.c, x.group));
     }
     if (sections.staff.length) {
       if (headed) els.push(h("h4.lo-set-h", null, h("span", null, "Staff")));
@@ -944,3 +946,4 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
 export function focusEquipped(view: HTMLElement): void {
   (view.querySelector<HTMLElement>(".lo-tile.on") ?? view.querySelector<HTMLElement>(".lo-tile"))?.focus({ preventScroll: false });
 }
+

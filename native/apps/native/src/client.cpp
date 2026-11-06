@@ -263,6 +263,7 @@ int run(const native::Options &opt) {
     auto &smoke_requested = menu_smoke.requested;
     auto &smoke_pass = menu_smoke.passed;
     bool captured = false, focused = true, running = true, menu_ready = false, resume_wanted = false;
+    bool console_wait_pending = false;
     // Settings and other small JSON files are written off the frame loop.
     native::JsonFileWriter json_writer;
     auto preferences = startup_data.settings;
@@ -2293,6 +2294,10 @@ int run(const native::Options &opt) {
                     if (raw.size() > 12 * 1024 * 1024) throw std::runtime_error("Menu command too large");
                     auto message = nlohmann::json::parse(raw);
                     const auto type = message.at("type").get<std::string>();
+                    if (type == "consoleWait") {
+                        console_wait_pending = true;
+                        continue;
+                    }
                     if (type == "loadoutPreview") {
                         if (menu->visible() && raw.size() <= 8192) preview_request = std::move(message);
                         continue;
@@ -3450,6 +3455,10 @@ int run(const native::Options &opt) {
                 hud.movement.tick_jump(cmd, curr);
             hud.tick(curr);
             hud.command_tick(cmd, curr.tick);
+            if (console_wait_pending && menu && menu_ready) {
+                console_wait_pending = false;
+                menu->evaluate_js("window.dispatchEvent(new Event('bunnyhop:native-console-tick'))");
+            }
             if (input_log && !viewer.active) {
                 const double moved = mouse_counts;
                 input_log << curr.tick << ',' << input_frame << ',' << input_frame_ms << ',' << double(sim_ns) / 1e6

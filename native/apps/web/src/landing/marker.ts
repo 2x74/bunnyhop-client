@@ -1,6 +1,8 @@
-// The landing spot's look (landing/index.ts decides when it shows): the player hull's footprint where the path ends, a
-// short column rising from it that fades out, and optionally the path there as a faint dotted arc. A path that ends in
-// a teleport or reset volume shows the footprint with a cross instead, in the palette's loss colour, and no column.
+// The landing spot's look (landing/index.ts decides when it shows): a little translucent half circle (a low dome) on the
+// spot where the path ends, with a soft ring where it meets the ground, and optionally the path there as a faint dotted
+// arc. A path that ends in a teleport or reset volume shows in the palette's loss colour with a cross on the ground.
+// The flat variant ("flat": a ring and a faint disc on the ground, no dome) is kept for comparison (dev hook
+// __landing.setShape).
 //
 // Built in Source units (z up) under a group turned into three's space (x, z, -y), like the trigger overlay. Drawn after
 // the world's translucent faces, never writing depth, tested against it (a ledge in front hides it).
@@ -13,11 +15,57 @@ import { LANDING_PIECE } from "../core";
 
 /** The player hull's half width (32 x 32 footprint). */
 export const HULL_HALF = 16;
-/** Column height, units (a third of a standing player). */
-const COLUMN = 20;
-const COLUMN_ALPHA = 0.32;
-const FILL_ALPHA = 0.1;
-/** The footprint is never drawn smaller than this on screen, CSS px across (far landings stay readable). */
+/** The spot's radius, units: a touch inside the hull's footprint (28 across). */
+export const SPOT_RADIUS = 14;
+/** The dome's height, units: a squashed half circle, low enough not to hide the surface. */
+export const DOME_HEIGHT = 9;
+/** Dome alpha at its rim and at its top (a soft bubble: the edge reads, the middle shows the surface through it). */
+const DOME_RIM_ALPHA = 0.42;
+const DOME_TOP_ALPHA = 0.08;
+/** The flat variant's disc. */
+const DISC_ALPHA = 0.16;
+/** Segments around the circle. */
+const SEGMENTS = 48;
+
+export type LandingShape = "dome" | "flat";
+
+/**
+ * A squashed hemisphere of `radius` and `height` on z = 0, as triangles (x, y, z per vertex) with an alpha per vertex
+ * fading from `rimAlpha` at the ground to `topAlpha` at the top. `rings` bands up, `segments` around.
+ */
+export function domeGeometry(radius: number, height: number, rings = 6, segments = SEGMENTS, rimAlpha = DOME_RIM_ALPHA, topAlpha = DOME_TOP_ALPHA): { positions: Float32Array; alpha: Float32Array } {
+  const pos: number[] = [];
+  const alpha: number[] = [];
+  const at = (ring: number, seg: number) => {
+    const phi = (ring / rings) * (Math.PI / 2);
+    const theta = (seg / segments) * Math.PI * 2;
+    const r = radius * Math.cos(phi);
+    return { x: r * Math.cos(theta), y: r * Math.sin(theta), z: height * Math.sin(phi), a: rimAlpha + (topAlpha - rimAlpha) * Math.sin(phi) };
+  };
+  for (let ring = 0; ring < rings; ring++) {
+    for (let seg = 0; seg < segments; seg++) {
+      const q = [at(ring, seg), at(ring, seg + 1), at(ring + 1, seg + 1), at(ring + 1, seg)];
+      for (const v of [q[0], q[1], q[2], q[0], q[2], q[3]]) {
+        pos.push(v.x, v.y, v.z);
+        alpha.push(v.a);
+      }
+    }
+  }
+  return { positions: new Float32Array(pos), alpha: new Float32Array(alpha) };
+}
+
+/** A circle of `radius` at height `z` as line segment pairs (x, y, z, x, y, z per segment). */
+export function ringSegments(radius: number, z: number, segments = SEGMENTS): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < segments; i++) {
+    const a = (i / segments) * Math.PI * 2;
+    const b = ((i + 1) / segments) * Math.PI * 2;
+    out.push(radius * Math.cos(a), radius * Math.sin(a), z, radius * Math.cos(b), radius * Math.sin(b), z);
+  }
+  return out;
+}
+
+/** The spot is never drawn smaller than this on screen, CSS px across (far landings stay readable). */
 export const MIN_PX = 14;
 /** Most dots the arc draws, and their spacing along the path, units. */
 export const ARC_DOTS = 96;
@@ -64,11 +112,11 @@ export function arcPoints(pieces: ArrayLike<number>, count: number, spacing: num
 }
 
 /**
- * How much to scale the marker so its footprint stays at least `MIN_PX` across: 1 when it's that big already.
+ * How much to scale the marker so the spot stays at least `MIN_PX` across: 1 when it's that big already.
  * `pxPerUnit`: CSS px per unit at distance 1 (viewport height / (2 tan(fov / 2))).
  */
 export function minSizeScale(distance: number, pxPerUnit: number): number {
-  const px = (2 * HULL_HALF * pxPerUnit) / Math.max(1, distance);
+  const px = (2 * SPOT_RADIUS * pxPerUnit) / Math.max(1, distance);
   return px >= MIN_PX ? 1 : MIN_PX / px;
 }
 
@@ -93,44 +141,36 @@ function dotTexture(): THREE.Texture {
 export class LandingMarker {
   readonly root = new THREE.Group();
   private readonly spot = new THREE.Group();
-  private readonly column: THREE.Mesh;
-  private readonly fill: THREE.Mesh;
-  private readonly outline: LineSegments2;
+  private readonly dome: THREE.Mesh;
+  private readonly disc: THREE.Mesh;
+  private readonly ring: LineSegments2;
   private readonly cross: LineSegments2;
   private readonly dots: THREE.Points;
   private readonly dotPositions = new Float32Array(ARC_DOTS * 3);
   private readonly colors = { spot: new THREE.Color(), fail: new THREE.Color() };
   private readonly up = new THREE.Vector3(0, 0, 1);
   private readonly normal = new THREE.Vector3();
+  private shape: LandingShape = "dome";
 
   constructor() {
     this.root.name = "landing-spot";
     this.root.rotation.x = -Math.PI / 2;
     this.root.visible = false;
-    const h = HULL_HALF;
-    // Column: four sides, opaque-ish at the floor, gone at the top (RGBA vertex colours times the material colour).
-    const sides: number[] = [];
-    const rgba: number[] = [];
-    const corners = [[-h, -h], [h, -h], [h, h], [-h, h]];
-    for (let i = 0; i < 4; i++) {
-      const [ax, ay] = corners[i];
-      const [bx, by] = corners[(i + 1) % 4];
-      sides.push(ax, ay, 0, bx, by, 0, bx, by, COLUMN, ax, ay, 0, bx, by, COLUMN, ax, ay, COLUMN);
-      rgba.push(...[COLUMN_ALPHA, COLUMN_ALPHA, 0, COLUMN_ALPHA, 0, 0].flatMap((a) => [1, 1, 1, a]));
-    }
-    const columnGeo = new THREE.BufferGeometry();
-    columnGeo.setAttribute("position", new THREE.Float32BufferAttribute(sides, 3));
-    columnGeo.setAttribute("color", new THREE.Float32BufferAttribute(rgba, 4));
-    this.column = this.add(this.spot, new THREE.Mesh(columnGeo, this.basic({ vertexColors: true, side: THREE.DoubleSide })));
-    const fillGeo = new THREE.PlaneGeometry(2 * h, 2 * h);
-    this.fill = this.add(this.spot, new THREE.Mesh(fillGeo, this.basic({ opacity: FILL_ALPHA })));
-    this.fill.position.z = 0.25;
-    const square = [-h, -h, h, -h, h, h, -h, h];
-    const ring: number[] = [];
-    for (let i = 0; i < 4; i++) ring.push(square[i * 2], square[i * 2 + 1], 0.5, square[((i + 1) % 4) * 2], square[((i + 1) % 4) * 2 + 1], 0.5);
-    this.outline = this.add(this.spot, this.lines(ring, 2));
-    const x = h * 0.7;
-    this.cross = this.add(this.spot, this.lines([-x, -x, 0.5, x, x, 0.5, -x, x, 0.5, x, -x, 0.5], 2));
+    const r = SPOT_RADIUS;
+    // Dome: RGBA vertex colours (white, alpha fading up) times the material colour; front faces only, so the far side
+    // doesn't double up through the near one.
+    const d = domeGeometry(r, DOME_HEIGHT);
+    const rgba = new Float32Array((d.alpha.length) * 4);
+    d.alpha.forEach((a, i) => rgba.set([1, 1, 1, a], i * 4));
+    const domeGeo = new THREE.BufferGeometry();
+    domeGeo.setAttribute("position", new THREE.BufferAttribute(d.positions, 3));
+    domeGeo.setAttribute("color", new THREE.BufferAttribute(rgba, 4));
+    this.dome = this.add(this.spot, new THREE.Mesh(domeGeo, this.basic({ vertexColors: true, side: THREE.FrontSide })));
+    this.disc = this.add(this.spot, new THREE.Mesh(new THREE.CircleGeometry(r, SEGMENTS), this.basic({ opacity: DISC_ALPHA })));
+    this.disc.position.z = 0.25;
+    this.ring = this.add(this.spot, this.lines(ringSegments(r, 0.5), 2, 0.75));
+    const x = r * 0.55;
+    this.cross = this.add(this.spot, this.lines([-x, -x, 0.6, x, x, 0.6, -x, x, 0.6, x, -x, 0.6], 2, 0.95));
     const dotGeo = new THREE.BufferGeometry();
     dotGeo.setAttribute("position", new THREE.BufferAttribute(this.dotPositions, 3).setUsage(THREE.DynamicDrawUsage));
     this.dots = this.add(
@@ -140,12 +180,17 @@ export class LandingMarker {
     this.root.add(this.spot);
   }
 
+  /** The half circle (default) or the flat ring and disc. */
+  setShape(shape: LandingShape): void {
+    this.shape = shape;
+  }
+
   private basic(o: THREE.MeshBasicMaterialParameters): THREE.MeshBasicMaterial {
     return new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, toneMapped: false, fog: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4, ...o });
   }
 
-  private lines(positions: number[], width: number): LineSegments2 {
-    const m = new LineMaterial({ linewidth: width, transparent: true, opacity: 0.9, depthWrite: false, toneMapped: false });
+  private lines(positions: number[], width: number, opacity: number): LineSegments2 {
+    const m = new LineMaterial({ linewidth: width, transparent: true, opacity, depthWrite: false, toneMapped: false });
     return new LineSegments2(new LineSegmentsGeometry().setPositions(positions), m);
   }
 
@@ -168,19 +213,19 @@ export class LandingMarker {
   }
 
   /**
-   * Shows the spot at feet origin `at` on a surface with normal `normal` (`fail`: the path enters a teleport there;
-   * the cross, no column), `scale` times its size, and the arc's first `dots` points from `arc` (null: no arc).
+   * Shows the spot at feet origin `at` on a surface with normal `normal` (`fail`: the path enters a teleport there; the
+   * cross on the ground), `scale` times its size, and the arc's first `dots` points from `arc` (null: no arc).
    */
   show(at: ArrayLike<number>, normal: ArrayLike<number>, fail: boolean, scale: number, arc: Float32Array | null, dots: number): void {
     this.root.visible = true;
     const color = fail ? this.colors.fail : this.colors.spot;
-    for (const o of [this.column, this.fill]) (o.material as THREE.MeshBasicMaterial).color.copy(color);
-    for (const o of [this.outline, this.cross]) o.material.color.copy(color);
+    for (const o of [this.dome, this.disc]) (o.material as THREE.MeshBasicMaterial).color.copy(color);
+    for (const o of [this.ring, this.cross]) o.material.color.copy(color);
     (this.dots.material as THREE.PointsMaterial).color.copy(color);
-    this.column.visible = !fail;
-    this.fill.visible = !fail;
+    this.dome.visible = this.shape === "dome";
+    this.disc.visible = this.shape === "flat";
     this.cross.visible = fail;
-    // On a ramp the hull touches with its uphill edge: the footprint lies on the surface under its centre.
+    // On a ramp the hull touches with its uphill edge: the spot lies on the surface under its centre.
     const flat = fail || !(normal[2] > 0.01);
     this.spot.position.set(at[0], at[1], at[2] - (flat ? 0 : centreDrop(normal)));
     if (flat) this.spot.quaternion.identity();
