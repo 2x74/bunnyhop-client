@@ -12,6 +12,7 @@ import {
   loadKey,
   MANIFEST_ASSET,
   PLATFORMS,
+  PLATFORM_POLICY_ASSET,
   reportBuild,
   signManifest,
   signPending,
@@ -74,7 +75,19 @@ class FakeGitHub implements GitHub {
       assets.set(entry.archive, options.tamper ? bytes.toUpperCase() : bytes);
       assets.set(`package-report-${platform.split("/")[0]}.json`, JSON.stringify(entry));
     }
-    assets.set("SHA256SUMS", "sums");
+    const sums = new Map([...assets].map(([name, bytes]) => [name, sha256(bytes)]));
+    for (const [name, bytes] of assets)
+      if (name.endsWith(".json")) {
+        const entry = JSON.parse(bytes) as PackageReport;
+        sums.set(entry.archive, entry.sha256);
+      }
+    assets.set(
+      "SHA256SUMS",
+      [...sums]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([name, digest]) => `${digest}  ${name}\n`)
+        .join(""),
+    );
     this.releases.set(`v${version}`, { draft: options.draft ?? false, body: `Notes for ${version}`, assets });
   }
   releaseTags(): string[] {
@@ -89,10 +102,10 @@ class FakeGitHub implements GitHub {
     writeFileSync(join(folder, asset), this.releases.get(tag)!.assets.get(asset)!);
     return join(folder, asset);
   }
-  upload(tag: string, file: string): void {
+  upload(tag: string, file: string, replace = false): void {
     const assets = this.releases.get(tag)!.assets;
     const name = file.split(/[\\/]/).pop()!;
-    if (assets.has(name)) throw new Error("asset exists");
+    if (assets.has(name) && !replace) throw new Error("asset exists");
     assets.set(name, readFileSync(file, "utf8"));
     this.uploads.push(`${tag}/${name}`);
   }
@@ -245,4 +258,68 @@ test("the shipped trust pins the k8plus key, the channel and GitHub's download h
   expect(shipped.keys.map((key) => key.id)).toEqual(["native-k8plus-2026-10"]);
   expect(shipped.manifestUrl).toBe(`https://raw.githubusercontent.com/${repo}/${CHANNEL_BRANCH}/${MANIFEST_ASSET}`);
   expect(shipped.downloadOrigins).toEqual(origins);
+});
+
+function declareAbsent(github: FakeGitHub, version: string, absentPlatforms: string[]): void {
+  const assets = github.releases.get(`v${version}`)!.assets;
+  assets.set(PLATFORM_POLICY_ASSET, JSON.stringify({ schema: 1, version, absentPlatforms }));
+  const sums = [...assets]
+    .filter(([name]) => name !== "SHA256SUMS" && name !== MANIFEST_ASSET)
+    .map(([name, bytes]) => `${sha256(bytes)}  ${name}\n`)
+    .sort()
+    .join("");
+  assets.set("SHA256SUMS", sums);
+}
+
+test("partial releases require explicit absence, keep Mac out, and add it only on a verified re-sign", async () => {
+  const github = new FakeGitHub();
+  github.add("0.8.2", ["linux/x64", "win32/x64"]);
+  expect(await signPending(options(github))).toBe(0);
+  expect(github.channelFile).toBeNull();
+  declareAbsent(github, "0.8.2", ["darwin/arm64"]);
+  expect(await signPending(options(github))).toBe(2);
+  expect(channelManifest(github).artifacts.map((a) => a.platform)).toEqual(["linux/x64", "win32/x64"]);
+  const payload = JSON.parse(Buffer.from(JSON.parse(github.channelFile!.text).payload, "base64").toString());
+  expect(payload.absentPlatforms).toEqual(["darwin/arm64"]);
+  expect(await signPending(options(github))).toBe(0);
+  const oldChannel = github.channelFile!.sha;
+  const signed = github.releases.get("v0.8.2")!.assets.get(MANIFEST_ASSET)!;
+  github.add("0.8.2", PLATFORMS);
+  github.releases.get("v0.8.2")!.assets.set(MANIFEST_ASSET, signed);
+  declareAbsent(github, "0.8.2", []);
+  expect(await signPending({ ...options(github), resign: "v0.8.2" })).toBe(2);
+  expect(channelManifest(github).artifacts.map((a) => a.platform)).toEqual([...PLATFORMS]);
+  expect(github.channelFile!.sha).not.toBe(oldChannel);
+});
+
+test("partial releases refuse contradictory platforms, malformed absence and bad checksums", async () => {
+  for (const absent of [["darwin/arm64", "darwin/arm64"], ["unknown/x64"], [...PLATFORMS]]) {
+    const github = new FakeGitHub();
+    github.add("0.8.2", ["linux/x64", "win32/x64"]);
+    declareAbsent(github, "0.8.2", absent);
+    await expect(signPending(options(github))).rejects.toThrow("absent-platform");
+    expect(github.uploads).toEqual([]);
+  }
+  const contradictory = new FakeGitHub();
+  contradictory.add("0.8.2", PLATFORMS);
+  declareAbsent(contradictory, "0.8.2", ["darwin/arm64"]);
+  await expect(signPending(options(contradictory))).rejects.toThrow("absent platform");
+  const bad = new FakeGitHub();
+  bad.add("0.8.2", ["linux/x64", "win32/x64"]);
+  declareAbsent(bad, "0.8.2", ["darwin/arm64"]);
+  bad.releases.get("v0.8.2")!.assets.set("SHA256SUMS", "0".repeat(64) + "  wrong.zip\n");
+  await expect(signPending(options(bad))).rejects.toThrow("checksums");
+  expect(bad.channelFile).toBeNull();
+});
+
+test("an explicitly partial platform still needs its archive, report and checksums", async () => {
+  for (const missing of ["bunnyhop-native-0.8.2-linux-x64.tar.gz", "package-report-linux.json", "SHA256SUMS"]) {
+    const github = new FakeGitHub();
+    github.add("0.8.2", ["linux/x64", "win32/x64"]);
+    declareAbsent(github, "0.8.2", ["darwin/arm64"]);
+    github.releases.get("v0.8.2")!.assets.delete(missing);
+    expect(await signPending(options(github))).toBe(0);
+    expect(github.uploads).toEqual([]);
+    expect(github.channelFile).toBeNull();
+  }
 });

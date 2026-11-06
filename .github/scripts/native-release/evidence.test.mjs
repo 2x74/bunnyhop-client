@@ -144,3 +144,26 @@ test('both workflows require movement gates, evidence and immediate Windows exit
   assert.deepEqual(JSON.parse(bytes), e);
   assert.throws(() => serializeEvidence({ ...e, oversized: 'x'.repeat(MAX_EVIDENCE_BYTES) }), /input limit/);
 }));
+
+test('explicit partial evidence retains all checks for present platforms', () => {
+  const f = fixture();
+  try {
+    f.needs.macos = { result: 'cancelled' };
+    const partial = collectEvidence(f.root, { ...context, absentPlatforms: ['darwin/arm64'] }, f.needs);
+    assert.deepEqual(partial.absentPlatforms, ['darwin/arm64']);
+    assert.deepEqual(partial.artifacts.map(a => a.target), ['windows', 'linux']);
+    assert.throws(() => validateEvidence({ ...partial, absentPlatforms: [] }), /Missing\/extra/);
+    for (const absentPlatforms of [['unknown/x64'], ['darwin/arm64', 'darwin/arm64'], Object.values(targets)])
+      assert.throws(() => validateEvidence({ ...partial, absentPlatforms }), /Invalid absent/);
+    partial.gates.windows = 'failure';
+    assert.throws(() => validateEvidence(partial), /Failed platform gate/);
+  } finally { f.clean(); }
+});
+
+test('version-bound absence skips no other release and permits an explicit Mac follow-up', async () => {
+  const { configuredAbsentPlatforms } = await import('./platform-policy.mjs');
+  const policy = JSON.parse(readFileSync(new URL('../../../native/apps/native/packaging/release-platforms.json', import.meta.url)));
+  assert.deepEqual(configuredAbsentPlatforms(policy.version), policy.absentPlatforms);
+  assert.deepEqual(configuredAbsentPlatforms('0.0.0'), []);
+  assert.deepEqual(configuredAbsentPlatforms(policy.version, 'macos'), []);
+});

@@ -68,7 +68,7 @@ const servicePort = 47613;
 const serviceOrigin = `http://127.0.0.1:${servicePort}`;
 const packageBody = "native package bytes";
 const packageSha256 = createHash("sha256").update(packageBody).digest("hex");
-function release(version: string, platforms: string[], sha256 = packageSha256) {
+function release(version: string, platforms: string[], sha256 = packageSha256, absentPlatforms: string[] = []) {
   const created = Date.now() - 60_000;
   return envelope({
     schema: 1,
@@ -76,6 +76,7 @@ function release(version: string, platforms: string[], sha256 = packageSha256) {
     createdAt: new Date(created).toISOString(),
     expiresAt: new Date(created + 7 * 86400_000).toISOString(),
     notes: `Notes for ${version}`,
+    ...(absentPlatforms.length ? { absentPlatforms } : {}),
     artifacts: platforms.map((platform) => ({
       platform,
       filename: `bunnyhop-native-${version}-${platform.replace("/", "-")}.zip`,
@@ -96,6 +97,7 @@ const service = {
     newer: release("9.0.0", everywhere),
     older: release("0.0.1", everywhere),
     otherPlatform: release("9.0.0", ["linux/arm64"]),
+    partialMacAbsent: release("0.8.2", ["win32/x64", "linux/x64"], packageSha256, ["darwin/arm64"]),
     tampered: release("9.0.0", everywhere, "0".repeat(64)),
   },
 };

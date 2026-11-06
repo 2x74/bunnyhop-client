@@ -2,6 +2,8 @@
 
 ## v0.8.2 — Native
 
+The macOS build follows once GitHub can provide a build runner.
+
 - Joining a multiplayer server no longer crashes on Windows. Thanks to PonyTrap for the report.
 - Your binds stay put after finishing a run, changing maps, reopening the menu and restarting the game.
 - Keeping settings with your account no longer brings back command binds or aliases you removed.

@@ -110,6 +110,18 @@ void service_against_local_releases(const Json &fixture) {
     service.check();
     assert(settle(service).at("status") == "error");
 
+    if (native::updates::platform() == "darwin/arm64") {
+        native::updates::Service mac081(trust, folder / "mac081", "0.8.1", "bunnyhop-native/" + std::string(24, 'a'));
+        server.publish(releases.at("partialMacAbsent"));
+        mac081.check();
+        const auto absent = settle(mac081);
+        assert(absent.at("status") == "error");
+        assert(absent.at("message") == "No release is available for this platform.");
+        mac081.download();
+        assert(mac081.state().at("status") == "error");
+        assert(!mac081.state().value("packageSaved", false));
+    }
+
     server.publish(releases.at("tampered"));
     service.check();
     assert(settle(service).at("status") == "available");
