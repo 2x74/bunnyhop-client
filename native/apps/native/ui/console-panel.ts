@@ -3,6 +3,7 @@ import { ConsoleRunner, complete, setConfigNames, type ConfigStore, type LineKin
 import { commandBindPlan } from "./command-bind-runtime";
 import { DEFAULT_PREFS, prefs, type Action } from "../../web/src/ui/settings";
 import { h } from "../../web/src/ui/dom";
+import { icon } from "../../web/src/ui/icons";
 import { isTextField } from "../../web/src/input";
 import { state, send } from "./bridge";
 import { installPrefsBridge } from "./prefs-bridge";
@@ -72,7 +73,7 @@ class NativeConsole {
       spellcheck: "false",
       autocomplete: "off",
       "aria-label": "Console command",
-      placeholder: "help · find · paste a config",
+      placeholder: "help, bind, sensitivity… paste a config to import it",
     }) as HTMLInputElement;
     this.dialog = h(
       "dialog.ncon",
@@ -80,8 +81,12 @@ class NativeConsole {
       h(
         "header.ncon-head",
         null,
-        h("div", null, h("h2", null, "Console")),
-        h("button.ncon-close", { type: "button", "aria-label": "Close console", onclick: () => this.close() }, "×"),
+        h("h2", null, "Console"),
+        h(
+          "button.ncon-close",
+          { type: "button", "aria-label": "Close console", onclick: () => this.close() },
+          icon("close"),
+        ),
       ),
       this.log,
       h(
@@ -89,9 +94,8 @@ class NativeConsole {
         { onsubmit: (e: Event) => (e.preventDefault(), this.submit()) },
         h("span.ncon-prompt", { "aria-hidden": "true" }, "]"),
         this.input,
-        h("button.ncon-run", { type: "submit" }, "Run"),
+        h("button.btn.btn-sm.ncon-run", { type: "submit" }, "Run"),
       ),
-      h("footer.ncon-foot", null, "↑/↓ history", h("span", null, "Tab complete"), h("span", null, "Esc close")),
     ) as HTMLDialogElement;
     this.runner = new ConsoleRunner({
       get: () => prefs.get(),
@@ -147,7 +151,7 @@ class NativeConsole {
         })
         .catch(() => {});
     if (!this.log.childElementCount)
-      this.print("Source syntax · shared web cvars and config format · type help", "dim");
+      this.print("Source-style console. help lists the commands, find searches, Tab completes.", "dim");
   }
 
   close(): void {
