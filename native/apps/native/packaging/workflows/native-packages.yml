@@ -35,6 +35,9 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       macos_absent: ${{ steps.version.outputs.macos_absent }}
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: Validate exact native release version
         id: version
         env:

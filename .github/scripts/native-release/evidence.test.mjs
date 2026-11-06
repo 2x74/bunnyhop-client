@@ -167,3 +167,11 @@ test('version-bound absence skips no other release and permits an explicit Mac f
   assert.deepEqual(configuredAbsentPlatforms('0.0.0'), []);
   assert.deepEqual(configuredAbsentPlatforms(policy.version, 'macos'), []);
 });
+
+test('version policy is available in a fresh hosted job before it is read', () => {
+  const workflow = readFileSync(new URL('../../workflows/native-release.yml', import.meta.url), 'utf8');
+  const version = workflow.slice(workflow.indexOf('  version:'), workflow.indexOf('  automation:'));
+  assert.match(version, /actions\/checkout@11d5960a326750d5838078e36cf38b85af677262/);
+  assert.ok(version.indexOf('actions/checkout@') < version.indexOf('node .github/scripts/native-release/platform-policy.mjs'));
+  assert.match(version, /persist-credentials: false/);
+});
