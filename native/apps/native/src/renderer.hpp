@@ -1501,7 +1501,9 @@ class Renderer {
         if (zonesVisible)
             for (size_t zi = 0; zi < timerZones.size(); ++zi) {
                 const auto &z = timerZones[zi];
-                const auto base = semanticPalette.zones[z.kind >= 2 ? 4 : z.kind + (z.track ? 2 : 0)];
+                // Anti-skip zones use the website's fixed red (zone-editor.ts zoneColor).
+                const auto base = z.kind == 4 ? native::semantic_rgb(0xff4f5e)
+                                              : semanticPalette.zones[z.kind >= 2 ? 4 : z.kind + (z.track ? 2 : 0)];
                 auto color = zoneEffects.color(zi, base, seconds);
                 const float level = zoneEffects.level(zi);
                 const float f = z.mins[2] + .5f,

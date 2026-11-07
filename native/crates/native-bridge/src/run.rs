@@ -52,7 +52,7 @@ impl BhZone {
         if self.track != 0 {
             v["track"] = self.track.into();
         }
-        if self.kind >= 2 {
+        if self.kind == 2 || self.kind == 3 {
             v["index"] = self.index.into();
         }
         v
