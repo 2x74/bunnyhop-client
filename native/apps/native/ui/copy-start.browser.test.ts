@@ -10,6 +10,7 @@ test("native leaderboard Copy start and room PB picks reach the host without ope
     import {leaderboardPanel} from ${module("../../web/src/ui/leaderboard.ts")};
     import {NativeCopyStart} from ${module("./copy-start.ts")};
     import {NativeRoomService} from ${module("./room-service.ts")};
+    import {installGamepadNavigation} from ${module("./gamepad.ts")};
     const messages = [], replies = [], queries = [];
     const context = {map:'fixture',style:'legit',track:0,loading:false};
     const entry = {rank:1,runId:'run-1',player:{id:'hopper',name:'Hopper',provider:'guest',rank:null},
@@ -27,8 +28,12 @@ test("native leaderboard Copy start and room PB picks reach the host without ope
     const service=new NativeCopyStart({context:()=>context,room,send:message=>messages.push(message),
       reply:text=>replies.push(text),replay:async()=>new Uint8Array([1,2,3])});
     service.update();
-    document.body.append(leaderboardPanel('fixture','autohop'));
-    window.fixture={messages,replies,queries,service,context,leaderboardPanel};
+    const menu = document.createElement('main'); menu.id='menu';
+    menu.append(leaderboardPanel('fixture','autohop')); document.body.append(menu);
+    const pad = installGamepadNavigation(()=>true);
+    let escapes = 0;
+    document.addEventListener('keydown', e=>{if(e.key==='Escape'&&!e.defaultPrevented) escapes++});
+    window.fixture={messages,replies,queries,service,context,leaderboardPanel,pad,get escapes(){return escapes}};
   `;
   const modules = new Set<string>();
   const built = await Bun.build({
@@ -57,18 +62,48 @@ test("native leaderboard Copy start and room PB picks reach the host without ope
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage();
+    page.setDefaultTimeout(5000);
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.route("**/*", (route) =>
       route.request().url() === "https://bunnyhop.lol/copy-start-test"
         ? route.fulfill({
             contentType: "text/html",
-            body: `<html><body><script>${script.replaceAll("</script", "<\\/script")}</script></body></html>`,
+            body: `<html><head><meta charset="utf-8"></head><body><script>${script.replaceAll("</script", "<\\/script")}</script></body></html>`,
           })
         : route.abort(),
     );
     await page.goto("https://bunnyhop.lol/copy-start-test");
-    await page.getByRole("button", { name: "Copy Hopper's start point", exact: true }).click();
+    const more = page.getByRole("button", { name: "More for Hopper's run", exact: true });
+    await more.focus();
+    await page.keyboard.press("ArrowDown");
+    await expect(
+      page.getByRole("menuitem", { name: "Copy start", exact: true }).evaluate((el) => el === document.activeElement),
+    ).resolves.toBe(true);
+    await page.keyboard.press("End");
+    await page.keyboard.press("Home");
+    await page.keyboard.press("Escape");
+    expect(await page.getByRole("menu").count()).toBe(0);
+    expect(await more.evaluate((el) => el === document.activeElement)).toBe(true);
+    expect(await page.evaluate("window.fixture.escapes")).toBe(0);
+    const pad = async (button: number) =>
+      page.evaluate(`{
+        const buttons = Array(16).fill(0); buttons[${button}] = 1;
+        window.fixture.pad({ buttons, axes: [] });
+        window.fixture.pad({ buttons: [], axes: [] });
+      }`);
+    await pad(0);
+    await pad(13);
+    expect(
+      await page
+        .getByRole("menuitem", { name: "Copy link", exact: true })
+        .evaluate((el) => el === document.activeElement),
+    ).toBe(true);
+    await pad(1);
+    expect(await page.getByRole("menu").count()).toBe(0);
+    expect(await page.evaluate("window.fixture.escapes")).toBe(0);
+    await pad(0);
+    await pad(0);
     await page.waitForFunction("window.fixture.messages.length === 1");
     expect(await page.evaluate("window.fixture.messages[0]")).toMatchObject({
       type: "copyStart",
@@ -87,7 +122,8 @@ test("native leaderboard Copy start and room PB picks reach the host without ope
     });
     await page.evaluate("document.body.replaceChildren(window.fixture.leaderboardPanel('other','autohop'))");
     await page.getByRole("button", { name: "Watch Hopper's run", exact: true }).waitFor();
-    expect(await page.getByRole("button", { name: "Copy Hopper's start point", exact: true }).count()).toBe(0);
+    await page.getByRole("button", { name: "More for Hopper's run", exact: true }).click();
+    expect(await page.getByRole("menuitem", { name: "Copy start", exact: true }).count()).toBe(0);
     expect(errors).toEqual([]);
   } finally {
     await browser.close();

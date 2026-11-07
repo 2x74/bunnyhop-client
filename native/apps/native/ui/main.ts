@@ -1,3 +1,4 @@
+import { closeMenus } from "../../web/src/social/menu";
 import { roomRaceTag } from "./room-race";
 import { NativeRaceGhosts } from "./race-ghosts";
 import { loadPBReplay } from "../../web/src/pb";
@@ -281,6 +282,7 @@ interface BackEntry {
 let backStack: BackEntry[] = [];
 const BACK_LIMIT = 16;
 function show(next: Screen, o: { back?: boolean; slot?: string | null } = {}): void {
+  closeMenus();
   if (screen === "ranks" && next !== "ranks") leaveRanksUrl();
   if (next !== "gauntlets" && next !== "gauntlet" && next !== "profile") leaveGauntletUrl();
   if (next === "home") backStack = [];
