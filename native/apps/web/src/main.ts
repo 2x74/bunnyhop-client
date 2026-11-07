@@ -80,6 +80,7 @@ import { RestartGuard, type GuardedAction } from "./restart-guard";
 import { CONFIRM_MS, LeaveHold } from "./leave-confirm";
 import { SoloChat } from "./solo-chat";
 import { chatGame } from "./chat-game";
+import { copyRunStart, setCopyStartHandler } from "./copy-start-request";
 import { initChunkRecovery, initUpdateCheck, setUpdateBusy } from "./update";
 import { WAVEDASH } from "./platform/env";
 import { initPlatform } from "./platform/hooks";
@@ -815,6 +816,16 @@ const mp = serverId ? (await import("./net/mp")).startMultiplayer({ serverId, ma
 // Not on the tutorial map, whose lessons own the restart keys.
 const soloChat = mp || tutorial ? null : new SoloChat({ input, session, restart: (t) => restart(t), enabled: () => !replayViewer.active, game });
 session.multiplayer = mp !== null;
+// Copy start on this map's leaderboard rows (copy-start-request.ts): the answer is a toast over the menu, like Race's.
+if (!tutorial)
+  setCopyStartHandler({
+    map: mapName,
+    copy: (runId, who) => {
+      const say = (text: string) => session.hud.toast(text, 3000, "start-point");
+      if (mp?.isSpectating) return say("You're spectating. !r to play.");
+      void copyRunStart(runId, who, (replay, name) => session.copyStartPoint(replay, name), say);
+    },
+  });
 // The console in this map: it pauses like a menu and goes back in when closed; chat commands and bound actions run
 // here (console/view.ts). Settings it changes go through prefs like the Settings page.
 setConsoleHooks({

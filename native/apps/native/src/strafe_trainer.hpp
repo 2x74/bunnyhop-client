@@ -376,6 +376,15 @@ struct MovementFeedback {
         incomplete_history = incomplete;
     }
 
+    // A checkpoint or replay takeover moves the pre-state without discarding the hop chain.
+    void moved(bool in_start, bool noclip) {
+        strafe_trainer.reset();
+        strafe_reading.reset();
+        strafe_ground_ticks = 0;
+        ssj_was_in_start = in_start;
+        ssj_was_noclip = noclip;
+    }
+
     bool history_ready(bool grounded, bool in_start, bool noclip) {
         if (!incomplete_history) return true;
         history_ground_ticks = grounded && !noclip ? history_ground_ticks + 1 : 0;

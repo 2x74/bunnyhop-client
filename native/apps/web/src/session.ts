@@ -39,6 +39,7 @@ import { openReplayViewer } from "./viewer/request";
 import { mapTier } from "./ui/maps";
 import { announce, announcerPolicy, runSounds, sfx } from "./audio";
 import { restartTarget, withRestartNames } from "./restart";
+import { copiedMessage, runStartPoint } from "./copy-start";
 import { checkStartPoint, clearPracticeSpawns, clearStartPoint, loadStartPoint, resolveStartPoint, savedMessage, saveStartPoint, type StartPoint } from "./start-point";
 import { getHeldLoadout, getOutfit, knownOutfitUnlocks } from "./player/cosmetics";
 import { cosmetic } from "./progression";
@@ -499,6 +500,33 @@ export class RunSession {
     const text = back ? "Start point cleared. You're back at the real one." : had ? "Start point cleared" : "No start point to clear";
     if (reply) reply(text);
     else this.hud.toast(text, 2000, "start-point");
+  }
+
+  /**
+   * Copy start (copy-start.ts): `replay`'s starting point saved as your start point for its track, checked and stored
+   * exactly like !setstart's (a spot you could have stood on and saved). Not mid-run, you're put there straight away,
+   * as you'd be standing there after !setstart; mid-run the run goes on and the next restart uses it. `who` names the
+   * run in the answer ("hopper", "#3 · hopper"). `reply`: as setStartPoint.
+   */
+  copyStartPoint(replay: Replay, who: string, reply?: (text: string) => void): boolean {
+    const say = (text: string, ms: number) => (reply ? reply(text) : this.hud.toast(text, ms, "start-point"));
+    const { core, map } = this.o;
+    const zones = this.zones?.zones;
+    if (!zones) return say("This map's zones aren't loaded yet.", 2500), false;
+    const r = withRestoredState(core, () => {
+      const s = runStartPoint(core, replay, zones, map);
+      if (!s.ok) return s;
+      // The same check as a spot you saved yourself (setStartPoint's `usable`): in the track's start zone here, a
+      // restart there settles where it should and the verifier accepts it.
+      return resolveStartPoint(core, styleSettings(this.styleFor(s.track)), map, s.track, s.point, zones) ? s : { ok: false as const, reason: "That run's start isn't a spot a restart can use any more." };
+    });
+    if (!r) return say("Copying a start needs a newer game build. Reload the page.", 3000), false;
+    if (!r.ok) return say(r.reason, 3000), false;
+    saveStartPoint(map, r.track, r.point);
+    const go = this.timer.status !== "running" && (r.track === this.timer.track || !this.modeLock);
+    if (go) this.o.restart(r.track);
+    say(copiedMessage(who, r.track, go), 3000);
+    return true;
   }
 
   /** This attempt began on a practice spawn and that's all that makes it practice (practice mode says so itself). */
@@ -1055,7 +1083,7 @@ export class RunSession {
     this.newRecording();
     this.hud.resetTicks();
     const s = this.o.core.state();
-    this.ssj.reset(s);
+    this.ssj.moved(s); // (a teleport: jump stats carry on, as in CS:S)
     this.movementStats.reset(s);
     this.pushFrame(s, { forward: 0, side: 0, yaw: s.teleportAngles[1], pitch: s.teleportAngles[0], buttons: 0 });
     this.updateInfo(this.timer.track);
@@ -1120,7 +1148,7 @@ export class RunSession {
     this.segLog.load(m, s, this.recorder, (tick, frame, events) => this.putFrame(tick, frame, events));
     this.clientResult++; // a finished run's pending archive no longer describes the run on screen (as onReset)
     this.hud.resetTicks();
-    this.ssj.reset(s);
+    this.ssj.moved(s); // (a checkpoint load is a teleport: jump stats carry on, as in CS:S)
     this.movementStats.reset(s);
     this.ghosts.onReset();
     // A load into a running run from a stopped timer (back from the start zone, or a checkpoint of an attempt before a

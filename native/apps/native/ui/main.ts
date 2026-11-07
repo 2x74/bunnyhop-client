@@ -1054,6 +1054,10 @@ window.bunnyhopNativeMenu = {
   settle,
   onLeaveMap: teardownMap,
   onReplayTimeline: applyReplayTimeline,
+  onCopyStartResult: (value) => chatService.copyStart.receive(value),
+  onCopyStartPlayer: (slot) => {
+    void chatService.copyStart.player(slot);
+  },
   onPracticeFromReplayResult: (value) => practiceFromReplay.receive(value),
   joinRoom: (id) => {
     if (typeof id !== "string" || !/^(?:[a-z0-9][a-z0-9-]{0,31}|p-[a-z2-7]{10})$/.test(id)) return;
@@ -1322,3 +1326,5 @@ send({
   webglContexts: graphics?.contexts ?? 0,
   webglAttempts: graphics?.attempts ?? 0,
 });
+
+window.addEventListener("bunnyhop:host-state", () => chatService.copyStart.update());

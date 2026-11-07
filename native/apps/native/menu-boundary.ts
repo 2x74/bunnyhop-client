@@ -36,6 +36,7 @@ const adapters: Record<string, string> = {
   "audio/ui": "audio.ts",
   "audio/announcer": "audio.ts",
   "tutorial/entry": "tutorial-entry.ts",
+  "copy-start": "copy-start-rules.ts",
   "player/race": "race-bus.ts",
   "play-lock": "play-lock.ts",
   hud: "hud-types.ts",

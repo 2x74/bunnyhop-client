@@ -157,7 +157,7 @@ if (import.meta.main) {
         tracker.tick(
           { position: [t.px, t.py, t.pz], velocity: [t.vx, t.vy, t.vz], grounded: t.grounded, onLadder: t.onLadder },
           { forward: t.forward, side: t.side, yaw: t.yaw, buttons: t.buttons },
-          { jumped: t.jumped, teleported: t.teleported, inStart: t.inStart, noclip: t.noclip, time: t.time },
+          { jumped: t.jumped, inStart: t.inStart, noclip: t.noclip, time: t.time },
         ),
       );
       return { mode, seed, ticks, reports };

@@ -25,6 +25,7 @@ const adapters: Record<string, string> = {
   "audio/index": "audio",
   "audio/ui": "audio",
   "tutorial/entry": "tutorial-entry",
+  "copy-start": "copy-start-rules",
   "player/race": "race-bus",
   "play-lock": "play-lock",
   hud: "hud-types",
@@ -53,6 +54,7 @@ for (const file of files) {
     if (!specifier.startsWith(".")) return all;
     const base = resolve(dirname(file), specifier),
       key = relative(join(root, "apps/web/src"), base).replace(/\.ts$/, "");
+    if (file.endsWith("apps/native/src/copy-start-oracle.ts") && key === "copy-start") return all;
     if (!adapters[key] || (file.endsWith("apps/native/ui/race-bus.ts") && key === "player/race")) return all;
     const target = join(root, "apps/native/ui", adapters[key]);
     let path = relative(dirname(file), target).replaceAll("\\", "/");

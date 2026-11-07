@@ -10,8 +10,7 @@
 //     horizontal speed) (ticks without a turn count as 0), averaged over the jump's air ticks. 100% is the ideal turn;
 //     over is too fast.
 //   colours: the speed table for the first jumps (it asks "is this speed on pace for jump N?"), gain after that.
-// One thing differs from "every jump" in !ssj: a map's teleport doesn't start the count over, as neither plugin's does.
-// On a map that teleports between levels you'd lose a jump's gain each time, and jump 1 at 800 u/s means nothing.
+// The count carries on through teleports and checkpoints, as in !ssj and both CS:S plugins.
 #include "hud_text.hpp"
 #include "semantic_palette.hpp"
 #include "ssj.hpp"
@@ -77,7 +76,6 @@ public:
     /** One tick, as SsjTracker::tick (a teleport doesn't count: above). Returns the jump this tick took off for, if
      * any. */
     std::optional<JhudReport> tick(const SsjState &pre, const SsjCmd &cmd, SsjTick info) {
-        info.teleported = false;
         const auto report = ssj_.tick(pre, cmd, info);
         double turn = double(cmd.yaw) - yaw_;
         yaw_ = cmd.yaw;

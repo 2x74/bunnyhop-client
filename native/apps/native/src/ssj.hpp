@@ -63,7 +63,7 @@ struct SsjCmd {
 
 struct SsjTick {
     bool jumped = false;
-    /** The count starts over after a teleport. */
+    /** Only start prespeed uses this flag; jump chains carry on through teleports. */
     bool teleported = false;
     /** Stood in a start zone before the tick: a jump from there starts the count over. */
     bool in_start = false;
@@ -143,7 +143,7 @@ public:
         reset();
     }
 
-    /** Restart, teleport, a new replay: forget everything. */
+    /** A restart or a new replay starts the chain over. */
     void reset() {
         clear_chain();
         ground_ticks_ = 0;
@@ -176,7 +176,6 @@ public:
         }
         std::optional<SsjReport> report;
         if (t.jumped) report = on_jump(pre, t.time);
-        if (t.teleported) reset();
         return report;
     }
 

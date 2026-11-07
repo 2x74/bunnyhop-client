@@ -3,7 +3,7 @@
 
 import { SsjTracker, type SsjCmd, type SsjMode, type SsjReport, type SsjState, type SsjTick } from "../ssj/stats";
 import { JhudTracker, type JhudReport } from "../ssj/jhud";
-import { F_GROUNDED, F_JUMPED, F_LADDER, F_TELEPORTED, STATUS_RUNNING, type RunData } from "./player";
+import { F_GROUNDED, F_JUMPED, F_LADDER, STATUS_RUNNING, type RunData } from "./player";
 
 /**
  * Jump stats (!ssj) over a whole replay, from its cached ticks exactly as the live game computes them (ssj/index.ts
@@ -24,7 +24,7 @@ export function replayJhud(d: RunData): { tick: number; report: JhudReport }[] {
   const t = new JhudTracker();
   const out: { tick: number; report: JhudReport }[] = [];
   eachReplayTick(d, (k, pre, cmd, at) => {
-    const r = t.tick(pre, cmd, { jumped: at.jumped, inStart: at.inStart, time: at.time });
+    const r = t.tick(pre, cmd, at);
     if (r) out.push({ tick: k, report: r });
   });
   return out;
@@ -44,7 +44,6 @@ function eachReplayTick(d: RunData, fn: (k: number, pre: SsjState, cmd: SsjCmd, 
     cmd.buttons = d.buttons[k];
     fn(k, pre, cmd, {
       jumped: (d.flags[k] & F_JUMPED) !== 0,
-      teleported: (d.flags[k] & F_TELEPORTED) !== 0,
       inStart: d.inStart[p] === 1,
       time: d.status[p] === STATUS_RUNNING ? d.runTicks[p] * d.interval : null,
     });

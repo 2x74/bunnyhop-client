@@ -260,6 +260,18 @@ int main(int argc, char **argv) {
     }
     check_cut_digits();
     check_readout_hold_and_cutoff();
+    {
+        native::JhudReadout readout;
+        native::JhudReport report;
+        report.jump = 3;
+        readout.show(report, 200, .01);
+        readout.expire(240);
+        readout.moved(10);
+        readout.expire(69);
+        assert(readout.shown());
+        readout.expire(70);
+        assert(!readout.shown());
+    }
     check_ticks_do_not_allocate();
     std::cout << "JHUD port matches the web reference across " << compared << " reports\n";
     return 0;

@@ -785,13 +785,13 @@ public:
         amber = theme_.accent.value_or(kAmber);
     }
 
-    void reset_history(bool keep_jump_stats = false) {
+    void reset_history(bool keep_jump_stats = false, bool keep_jhud = false) {
         if (!keep_jump_stats) {
             ssj_last_.reset();
             ssj_line_.assign("");
         }
         ssj_pending_ = false;
-        jhud.clear();
+        if (!keep_jhud) jhud.clear();
         movement.reset();
         result.reset();
         keys_latest_ = keys_edges_ = 0;

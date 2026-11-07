@@ -59,6 +59,7 @@ export interface VideoExportState {
   musicTracks: { id: string; title: string }[];
 }
 export type MenuMessage =
+  | { type: "copyStart"; id: number; map: string; style: StyleId; who: string; replayBase64: string }
   | { type: "mapLoad"; action: "cancel" | "retry" }
   /** A line for the game's log file (menu-log.ts). */
   | { type: "menuLog"; text: string }
@@ -678,6 +679,8 @@ declare global {
       /** The watched replay's speed graph and markers (replay-host.ts), once per replay. */
       onReplayTimeline?: (value: unknown) => void;
       /** The host's answer to Practice from here (replay-practice.ts). */
+      onCopyStartResult?: (value: unknown) => void;
+      onCopyStartPlayer?: (slot: number | null) => void;
       onPracticeFromReplayResult?: (value: unknown) => void;
       settle?: (timeoutMs?: number) => Promise<{ ended: number; pendingImages: number }>;
     };

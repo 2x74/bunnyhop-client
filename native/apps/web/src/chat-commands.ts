@@ -85,6 +85,11 @@ export interface RoomChat {
   race(arg: string): void;
   /** Opens a gift preview; never spends credits from chat. */
   gift?(arg: string): void;
+  /**
+   * !copystart in a room (net/mp.ts): no argument opens the pick menu, a player here copies their PB's start. False
+   * when it isn't for the room (a rank, a name nobody here has): the board takes it (ChatGame.copyStart).
+   */
+  copyStart?(arg: string): boolean;
   /** !report [player] (social/commands.ts): the report form on a player in this room (their name), else the form asks. */
   report?(arg: string): void;
 }
@@ -106,6 +111,8 @@ export interface ChatGame {
   record(kind: "wr" | "pb", reply: (text: string) => void): void;
   /** !freecam: toggles freecam (freecam.ts), or the free look while spectating in a room. */
   freecam?(): void;
+  /** !copystart [player|#rank] on the current map, track and style's board (copy-start-request.ts boardRunFor). */
+  copyStart?(arg: string, reply: (text: string) => void): void;
 }
 
 export interface ChatCommand {
@@ -422,6 +429,21 @@ const BUILT_IN: ChatCommand[] = [
     where: "both",
     run: (ctx) => {
       if (!spectating(ctx)) ctx.clearStartPoint();
+    },
+  },
+  {
+    name: "copystart",
+    args: "[player|#rank]",
+    help: "copy a run's start point",
+    about: "saves where a run on this board started as your start point, as if you'd stood there and typed !setstart. No name copies the world record's (in a server, pick a player); #3 copies third place's.",
+    group: "run",
+    panelOnly: true,
+    where: "both",
+    run: (ctx, arg) => {
+      if (spectating(ctx)) return ctx.reply("You're spectating. !r to play.");
+      if (ctx.room?.copyStart?.(arg)) return;
+      if (!ctx.game?.copyStart) return ctx.reply(NO_GAME);
+      ctx.game.copyStart(arg, (text) => ctx.reply(text));
     },
   },
   // Practice (practice-mode/controller.ts command), bhoptimer's / KZ timers' names. Solo and in rooms. The

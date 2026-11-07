@@ -9,8 +9,7 @@
 //     horizontal speed) (ticks without a turn count as 0), averaged over the jump's air ticks. 100% is the ideal turn;
 //     over is too fast. JumpStats' formula (blankbhop/jhud uses asin and the 3D speed, see research/SSJ.md).
 //   colours: the speed table for the first jumps (it asks "is this speed on pace for jump N?"), gain after that.
-// One thing differs from "every jump" in !ssj: a map's teleport doesn't start the count over, as neither plugin's does.
-// On a map that teleports between levels you'd lose a jump's gain each time, and jump 1 at 800 u/s means nothing.
+// The count starts over as in !ssj: standing still, or a jump from a start zone. A teleport doesn't, as in neither plugin.
 
 import { SsjTracker, type SsjCmd, type SsjState, type SsjTick } from "./stats";
 
@@ -72,8 +71,8 @@ export class JhudTracker {
     this.jssSum = this.ticks = 0;
   }
 
-  /** One tick, as SsjTracker.tick (a teleport doesn't count: above). Returns the jump this tick took off for, if any. */
-  tick(pre: SsjState, cmd: SsjCmd, t: Omit<SsjTick, "teleported">): JhudReport | null {
+  /** One tick, as SsjTracker.tick. Returns the jump this tick took off for, if any. */
+  tick(pre: SsjState, cmd: SsjCmd, t: SsjTick): JhudReport | null {
     const r = this.ssj.tick(pre, cmd, t);
     let dy = cmd.yaw - this.yaw;
     this.yaw = cmd.yaw;

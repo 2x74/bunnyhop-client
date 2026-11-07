@@ -23,13 +23,21 @@ public:
 
     void show(const JhudReport &report, uint32_t tick, double tick_interval) {
         report_ = report;
+        last_tick_ = tick;
         until_tick_ = tick + uint32_t(std::ceil(jhud_hold_seconds / tick_interval));
         rebuild();
     }
 
     void clear() { report_.reset(); }
 
+    void moved(uint32_t tick) {
+        const auto remaining = until_tick_ > last_tick_ ? until_tick_ - last_tick_ : 0;
+        until_tick_ = tick + remaining;
+        last_tick_ = tick;
+    }
+
     void expire(uint32_t tick) {
+        last_tick_ = tick;
         if (report_ && tick >= until_tick_) report_.reset();
     }
 
@@ -50,7 +58,7 @@ private:
     JhudPrefs prefs_;
     JhudLines lines_;
     SemanticColor color_{};
-    uint32_t until_tick_ = 0;
+    uint32_t until_tick_ = 0, last_tick_ = 0;
 };
 
 /** The speed difference as whole units: the text is made only when that number changes. */

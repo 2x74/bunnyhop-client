@@ -232,6 +232,24 @@ void test_race_pages_click() {
     assert(next_page == (menus->race.available() > 8));
 }
 
+void test_copy_start_menu_owns_its_rows() {
+    const auto menus = std::make_unique<Menus>();
+    menus->open(Menu::guns);
+    menus->numbered.copy_start.show(menus->board);
+    menus->numbered.opened(Menu::copy_start);
+    assert(!menus->guns.open && menus->numbered.chat_menu_open());
+    assert(menus->numbered.owns("Digit1", true, false));
+    const auto rows = menus->numbered.copy_start.rows(1920, 1080, 100);
+    const auto &row = rows.rows[1];
+    const auto click = menus->numbered.click(1920, 1080, 100, {rows.left + 30, row.top + row.height / 2});
+    assert(click.code == "Digit2");
+    const auto pick = menus->numbered.copy_start.key(*click.code, true, false);
+    assert(pick.chosen && pick.slot == 4 && !menus->numbered.chat_menu_open());
+    menus->numbered.copy_start.show(menus->board);
+    menus->open(Menu::race);
+    assert(!menus->numbered.copy_start.open());
+}
+
 }  // namespace
 
 int main() {
@@ -243,5 +261,6 @@ int main() {
     test_look_menu_takes_the_digits();
     test_clicks_pick_rows();
     test_race_pages_click();
+    test_copy_start_menu_owns_its_rows();
     std::puts("numbered menus passed");
 }
