@@ -7,6 +7,7 @@ import {
 } from "./chat-input";
 import { dispatchNativeChat } from "./chat-routing";
 import { NativeCopyStart } from "./copy-start";
+import { prefs } from "../../web/src/ui/settings";
 import { api } from "../../web/src/api";
 import {
   findChatCommand,
@@ -262,6 +263,10 @@ export class NativeChatService {
       setStartPoint: () => emit({ type: "chatAction", action: "setStart" }),
       clearStartPoint: () => emit({ type: "chatAction", action: "clearStart" }),
       game: {
+        landfix: (enabled) => {
+          prefs.update((p) => (p.landfix = enabled ?? !p.landfix));
+          return prefs.get().landfix;
+        },
         key: (action) => state.settings.binds[action]?.[0] ?? null,
         copyStart: (arg, answer) => {
           void this.copyStart.command(arg, answer);

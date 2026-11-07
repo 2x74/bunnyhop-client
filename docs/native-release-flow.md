@@ -13,7 +13,9 @@ no secrets.
    the shared resources.
 2. Each platform job builds the client and runs the movement parity gate (`apps/native/tools/parity-gate.ts`):
    generated maps, identical commands through the native core and the pinned WASM, every state compared bit for
-   bit at physics 17 and 16. A mutation check confirms the gate catches a version mix-up.
+   bit at physics 16, 17, 18, 23, 24, 25, 26 and 27 as applicable to each fixture. A mutation check confirms the gate
+   catches a version mix-up. The optional landfix identity proof adds every physics version 1–27 and mid-run toggles
+   (see `native/apps/native/tools/README.md`).
 3. Each platform also runs CTest, the bridge and physics tests, the packaging tests and `release-check.ts`. Linux
    and Windows also start the packaged executable.
 4. The evidence job writes `candidate-evidence.json`: source SHA, run and attempt, job results, and for each

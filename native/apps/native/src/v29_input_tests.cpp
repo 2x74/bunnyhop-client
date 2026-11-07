@@ -574,9 +574,52 @@ void test_invalid_start_point_preserves_default_spawn() {
     assert(header.at("spawn").is_null());
 }
 
+void test_landfix_does_not_change_infinite_flight_or_air_jumps() {
+    Fixture on, off;
+    const auto prepare = [](Fixture &fixture) {
+        auto *core = fixture.core.get();
+        check(bh_style_set(core, "infinite"), core);
+        check(bh_reset(core), core);
+        check(bh_set_position(core, 200, 20, 100, 0), core);
+    };
+    prepare(on);
+    prepare(off);
+    check(bh_flight_set(on.core.get(), 1), on.core.get());
+    check(bh_flight_set(off.core.get(), 1), off.core.get());
+    bool air_jumped = false;
+    constexpr uint32_t jumped = 1u << 1;
+    for (unsigned tick = 0; tick < 30; ++tick) {
+        if (tick == 10) {
+            check(bh_flight_set(on.core.get(), 0), on.core.get());
+            check(bh_flight_set(off.core.get(), 0), off.core.get());
+        }
+        if (tick == 20) {
+            prepare(on);
+            prepare(off);
+        }
+        const BhCmd command{450, 0, 0, 0, native::forward | (tick == 22 ? native::jump : 0)};
+        auto without_lift = command;
+        native::apply_landfix(without_lift, false);
+        BhState a{}, b{};
+        check(bh_step(on.core.get(), &command, &a), on.core.get());
+        check(bh_step(off.core.get(), &without_lift, &b), off.core.get());
+        assert(a.events == b.events && a.tick == b.tick);
+        if (tick == 22) air_jumped = (a.events & jumped) != 0;
+        for (unsigned axis = 0; axis < 3; ++axis) {
+            assert(a.position[axis] == b.position[axis]);
+            assert(a.velocity[axis] == b.velocity[axis]);
+        }
+        BhCmd actual{};
+        check(bh_last_command(off.core.get(), &actual), off.core.get());
+        assert(actual.buttons & native::no_landfix);
+    }
+    assert(air_jumped);
+}
+
 }  // namespace
 
 int main() {
+    test_landfix_does_not_change_infinite_flight_or_air_jumps();
     test_restart_placement_and_recorded_names();
     test_invalid_start_point_preserves_default_spawn();
     test_replay_library_cache();

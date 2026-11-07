@@ -3541,6 +3541,7 @@ int run(const native::Options &opt) {
                 }
                 // R1: while freecam flies, the body gets the command of a player who let go of everything.
                 cmd = freecam_on ? native::neutral_command(input) : input.command(w_release);
+                native::apply_landfix(cmd, hud.preferences().landfix);
                 if (practice.noclip) {
                     BhSnapshot snapshot{};
                     require(bh_noclip_move(&practice.flight, &cmd, dt, selected_style.c_str()),

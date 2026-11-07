@@ -157,6 +157,7 @@ const ROWS: Record<string, Gate> = {
   "keys/Tools/Console and configs": needs("bind:console"),
   "keys/Movement/Null binds": needs("nullBinds"),
   "keys/Movement/Release W on jump": needs("wRelease"),
+  "keys/Movement/Landfix": needs("landfix"),
   "hud/JHUD/JHUD": needs("hud:jhud"),
   "hud/JHUD/Sync": needs("hudJhudSync"),
   "hud/JHUD/JSS": needs("hudJhudJss"),

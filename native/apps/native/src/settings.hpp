@@ -246,6 +246,7 @@ inline Json default_settings() {
             {"hudMovementLjChat", true},
             {"nullBinds", false},
             {"wRelease", false},
+            {"landfix", true},
             {"autoRestartWhen", "off"},
             {"autoRestartAction", "restart"},
             {"sfxPack", "default"},
@@ -390,6 +391,7 @@ inline Json hud_capabilities() {
              "hudMovementLjChat",
              "nullBinds",
              "wRelease",
+             "landfix",
              "autoRestartWhen",
              "autoRestartAction"}
     );

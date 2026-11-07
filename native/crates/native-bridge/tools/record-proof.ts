@@ -3,7 +3,7 @@ import { encodeNativeExpected } from "./native-replay-format";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { resolve, basename, dirname, join } from "node:path";
 import { parseArgs } from "node:util";
-import { Core, applyRestartPoint, PHYSICS_VERSION } from "../../../apps/web/src/core";
+import { Core, applyRestartPoint, IN_NO_LANDFIX, PHYSICS_VERSION } from "../../../apps/web/src/core";
 import { decodeReplay, encodeReplay, ReplayRecorder } from "../../../apps/web/src/replay";
 import { makeTimer, beforeStep, afterStep, replayCommand, simulate } from "../../../apps/web/src/sim";
 import { gunzipSync } from "node:zlib";
@@ -56,6 +56,18 @@ const decoded=await decodeReplay(readFileSync(nativeBhr));const checked=simulate
 if(!checked.checkpointsMatch||checked.timer.status!=="finished"||checked.timer.startTick!==summary.timer.startTick||checked.timer.endTick!==summary.timer.endTick)throw new Error("native BHR failed canonical replay verification");
 const verified=verifyReplay(core,decoded,decoded.header.zones,{mapSha256:hash,ranked:true});
 if(!verified.valid)throw new Error("native BHR rejected by shared ranked verifier: "+verified.problems.join("; "));
+const offTicks = Array.from(decoded.buttons).filter(buttons => buttons & IN_NO_LANDFIX).length;
+if (offTicks) {
+  const removed = structuredClone(decoded);
+  removed.buttons = removed.buttons.map(buttons => buttons & ~IN_NO_LANDFIX);
+  if (verifyReplay(core, removed, removed.header.zones, { mapSha256: hash, ranked: true }).valid)
+    throw new Error("Verifier accepted removal of the recorded landfix flag");
+  const legacy = structuredClone(decoded);
+  legacy.header.settings.physics = 26;
+  const refusal = verifyReplay(core, legacy, legacy.header.zones, { mapSha256: hash, ranked: true });
+  if (refusal.valid || !refusal.problems.some(problem => problem.toLowerCase().includes("landfix")))
+    throw new Error("Verifier did not refuse the landfix flag under a legacy header");
+}
 // The ranked verifier re-times rules-1 replays by the current start-zone rules, so an old fixture's ranked time can
 // differ from its recorded timer. New native runs record rules 2, where the two must match exactly.
 const retimedLegacy=(decoded.header.timerRules??1)<2;
@@ -67,4 +79,5 @@ if(mutation.valid||mutation.checkpointsMatch)throw new Error("shared verifier ac
 const report={pass:true,nativeHeartbeats,nativeReplayPlayback:true,nativeReplaySeek:true,ghostStatePreserved:true,offlineVerifierValid:verified.valid,rankedVerifier:true,mutatedCheckpointRejected:!mutation.valid,verifierProblems:verified.problems,physics:PHYSICS_VERSION,wasmSha256:new Bun.CryptoHasher("sha256").update(wasm).digest("hex"),mapSha256:hash,recording,bhr:nativeBhr,nativeRawBytes: nativeRaw.length,nativeRawEqualsSharedEncoderPlusBhts:true,runHash:hashHex(runHash),statesCompared:commands.length,timerRowsCompared:commands.length,
  checkpointsChecked:checked.checkpointsChecked,startTick:checked.timer.startTick,endTick:checked.timer.endTick,time:checked.timer.time(),
  nativeTimeMs:summary.timer.timeMs,timingPolicy:summary.timer.timingPolicy,webTimeMs:verified.timeMs,serverVerified:false,submissionEnabled:false};
-writeFileSync(join(output,"proof.json"),JSON.stringify(report,null,2)+"\n");console.log(JSON.stringify(report,null,2));
+const landfixProof = { ...report, offTicks, flagRemovalRejected: offTicks ? true : null, legacyFlagRejected: offTicks ? true : null };
+writeFileSync(join(output,"proof.json"),JSON.stringify(landfixProof,null,2)+"\n");console.log(JSON.stringify(landfixProof,null,2));

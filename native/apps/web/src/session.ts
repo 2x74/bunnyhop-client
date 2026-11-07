@@ -11,7 +11,7 @@ import { keepRunOffer } from "./ui/keep-run";
 
 import * as THREE from "three";
 import { clientResultSettled, saveClientRun, type ClientRunSummary } from "./client-bridge";
-import { EVENT_FLIGHT, EVENT_FLIGHT_LANDED, EVENT_JUMPED, EVENT_TELEPORTED, IN_FLIGHT, applyRestartPoint, restartPoint, withRestoredState, type Core, type PlayerState, type RestartPoint, type Settings } from "./core";
+import { EVENT_FLIGHT, EVENT_FLIGHT_LANDED, EVENT_JUMPED, EVENT_TELEPORTED, IN_FLIGHT, IN_NO_LANDFIX, applyRestartPoint, restartPoint, withRestoredState, type Core, type PlayerState, type RestartPoint, type Settings } from "./core";
 import { GhostManager } from "./ghost";
 import { formatDelta, Hud, type SubmissionView } from "./hud";
 import type { UserCmd, Input } from "./input";
@@ -368,6 +368,8 @@ export class RunSession {
         // the neutral command, this keeps any other path from feeding keys).
         if (this.freecam !== null) sample = neutralCommand(sample);
         c = quantize(sample.forwardmove, sample.sidemove, sample.yaw, sample.pitch, sample.buttons);
+        // Landfix is a per-command choice, so mid-run changes replay exactly. Scripted inputs keep their own bits.
+        c = { ...c, buttons: (prefs.get().landfix ? c.buttons & ~IN_NO_LANDFIX : c.buttons | IN_NO_LANDFIX) >>> 0 };
         // Infinite flight: the bit rides in the recorded command (before the style filter, which keeps it).
         if (this.flightOn) c = { ...c, buttons: (c.buttons | IN_FLIGHT) >>> 0 };
       }

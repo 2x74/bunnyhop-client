@@ -17,6 +17,10 @@ export function chatGame(o: { map: string; session: RunSession; practice: Practi
   const { map, session, practice } = o;
   return {
     freecam: o.freecam,
+    landfix: (enabled) => {
+      prefs.update((p) => (p.landfix = enabled ?? !p.landfix));
+      return prefs.get().landfix;
+    },
     key: (action) => {
       const code = prefs.get().binds[action as Action]?.[0];
       return code ? keyLabel(code) : null;

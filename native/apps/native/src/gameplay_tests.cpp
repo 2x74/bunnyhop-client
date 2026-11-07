@@ -98,6 +98,12 @@ void test_viewmodel_migration() {
 }
 
 int main() {
+    const auto enabled = native::default_settings();
+    assert(enabled.at("landfix") == true);
+    const auto disabled = native::patch_settings(enabled, {{"landfix", false}});
+    assert(disabled.at("landfix") == false);
+    assert(native::patch_settings(enabled, native::Json::parse(disabled.dump())) == disabled);
+    rejects([&] { native::patch_settings(enabled, {{"landfix", 0}}); });
     test_start_point_snap();
     const auto defaults = native::default_settings();
     // Old persisted objects merge with new defaults without wiping user binds.

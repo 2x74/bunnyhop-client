@@ -192,7 +192,7 @@ pub const PHYSICS_V16: u32 = 16;
 /// slope or a ledge no longer depends on where inside a tick the player meets it.
 pub const PHYSICS_V17: u32 = 17;
 /// The version new recordings use.
-pub const PHYSICS_LATEST: u32 = PHYSICS_V26;
+pub const PHYSICS_LATEST: u32 = PHYSICS_V27;
 /// v18: ladder surface properties, preserving historical replay behavior.
 pub const PHYSICS_V18: u32 = 18;
 /// v19: scoped map mechanics (template instances and explicit velocity scripts). No new movement fix bits.
@@ -235,6 +235,11 @@ pub const PHYSICS_V24: u32 = 24;
 pub const PHYSICS_V25: u32 = 25;
 /// v26: Source !player name filters; exact-build coast resets, frankerz caps, and Crash Egypt makers/timers/jump I/O.
 pub const PHYSICS_V26: u32 = 26;
+/// v27: per-command landfix opt-out. Unset preserves v26's jump lift exactly.
+pub const PHYSICS_V27: u32 = 27;
+/// Command bit 25: stock ground jump, without the 1.5-unit landfix lift (physics 27+ only).
+/// The state is carried on every command, so replay seeking and mid-run toggles need no side channel.
+pub const IN_NO_LANDFIX: u32 = 1 << 25;
 /// Diagnostic pseudo-versions (never valid in a replay, whose field is a u8): `PHYSICS_DIAG | fix bits` turns on only
 /// the listed fixes, to tell which fix changes a replay (tools: /tmp physics-v2 analysis). The fix bits are the low 31
 /// (`PHYSICS_DIAG_FIXES`); before v18 the base was 1 << 30 with 30 fix bits; before v17 the base was 1 << 26 with 26 fix bits, before v16 1 << 25 with 25, before v15
@@ -542,7 +547,7 @@ pub fn physics_fixes(version: u32) -> Option<u32> {
         PHYSICS_V15 => Some(PHYSICS_FIX_V15),
         PHYSICS_V16 => Some(PHYSICS_FIX_V16),
         PHYSICS_V17 => Some(PHYSICS_FIX_V17),
-        PHYSICS_V18 | PHYSICS_V19 | PHYSICS_V20 | PHYSICS_V21 | PHYSICS_V22 | PHYSICS_V23 | PHYSICS_V24 | PHYSICS_V25 | PHYSICS_V26 => Some(PHYSICS_FIX_ALL),
+        PHYSICS_V18 | PHYSICS_V19 | PHYSICS_V20 | PHYSICS_V21 | PHYSICS_V22 | PHYSICS_V23 | PHYSICS_V24 | PHYSICS_V25 | PHYSICS_V26 | PHYSICS_V27 => Some(PHYSICS_FIX_ALL),
         v if v & !PHYSICS_DIAG_FIXES == PHYSICS_DIAG && v & PHYSICS_DIAG_FIXES & !PHYSICS_FIX_ALL == 0 => Some(v & PHYSICS_DIAG_FIXES),
         _ => None,
     }
@@ -2344,6 +2349,9 @@ impl Game {
             // Infinite's midair jump needs a real button edge, not the jump latch: with autohop the latch is
             // rearmed every tick jump is held (v20+, above), which would turn a held jump into continuous flight.
             let mut policy = self.policy;
+            if (PHYSICS_V27..=PHYSICS_LATEST).contains(&self.settings.physics_version) && cmd.buttons & IN_NO_LANDFIX != 0 {
+                policy.jump_z_offset = None;
+            }
             if pressed & IN_JUMP == 0 {
                 policy.air_jump_impulse = None;
             }

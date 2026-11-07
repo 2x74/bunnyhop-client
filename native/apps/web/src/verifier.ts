@@ -2,7 +2,7 @@
 // consumer (apps/api). DOM-free. The map must already be loaded into `core` (loadMap or loadMapPhysics).
 // Never trusts the time stored in the replay: re-simulates the commands against authoritative zones.
 
-import { isPhysicsVersion, type Core, type PlayerState, type Settings } from "./core";
+import { IN_NO_LANDFIX, PHYSICS_V27, isPhysicsVersion, type Core, type PlayerState, type Settings } from "./core";
 import { FLIGHT_PHYSICS_FROM, FLIGHT_RULES_FROM, firstFlightCommand, flightAllowed, replayPhysics, replayStyle, replayTimerRules, styleReplayProblem, type Replay } from "./replay";
 import { restartNamesAllowed, restartPointProblem } from "./restart";
 import { SimRun, type SimOptions, type SimResult } from "./sim";
@@ -183,6 +183,9 @@ function beginVerify(core: Core, replay: Replay, zones: readonly Zone[], opts: V
     problems.push(`flight command at tick ${flight + 1} in a ${def?.name ?? style} run: only Infinite runs on physics v${FLIGHT_PHYSICS_FROM} and timer rules ${FLIGHT_RULES_FROM} or later fly`);
   }
   const physics = replayPhysics(h);
+  if (physics < PHYSICS_V27 && replay.buttons.some((b) => (b & IN_NO_LANDFIX) !== 0)) {
+    problems.push(`landfix commands require physics v${PHYSICS_V27} or later`);
+  }
   if (!isPhysicsVersion(physics)) {
     // Not simulable by this build (a newer client's replay, or a forged field): reject without simulating.
     problems.unshift(`unknown physics version ${physics}`);

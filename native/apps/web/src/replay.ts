@@ -48,7 +48,9 @@
 //                  forward  zigzag varint of delta vs previous (i16 domain)
 //                  side     zigzag varint of delta vs previous (i16 domain)
 //                  buttons  varint of (buttons XOR previous): u16 before physics v7; v7 adds a weapon command id in
-//                           bits 16..20 (input.ts IN_GIVE_*), so v7 buttons are u32 (the same bytes when unused)
+//                           bits 16..20 (input.ts IN_GIVE_*), so v7 buttons are u32 (the same bytes when unused).
+//                           Physics 27 adds IN_NO_LANDFIX in bit 25: set on each tick with the jump lift OFF;
+//                           unset keeps ON. Mid-run changes need no new container version or header field.
 //                  yaw      zigzag varint of int32 delta of the raw f32 bit pattern
 //                  pitch    zigzag varint of int32 delta of the raw f32 bit pattern
 //                v8 (counted yaw): the yaw column is replaced by the mouse counts it was made from (see "v8" below).

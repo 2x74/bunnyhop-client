@@ -6,9 +6,8 @@ import { graphicsPreset as lookPreset, type GraphicsPreset as LookPreset } from 
 import { DEFAULT_MOUSE_DPI } from "../mouse-settings";
 import { M_YAW, M_YAW_RANGE } from "../sens-convert";
 import { sanitizeAliases, sanitizeCmdBinds } from "../console/bind-store";
-// Client preferences (localStorage, applied live). Nothing here feeds the simulation's physics:
-// tick rate / airaccelerate / autohop are fixed per style (styles.ts, picked in the menus or with the cycleStyle
-// key) and recorded in replays.
+// Client preferences (localStorage, applied live). Landfix is recorded on every command; movement constants
+// remain fixed per style (styles.ts) and recorded in replay headers.
 
 import { DEFAULT_BINDS } from "../binds";
 import { CLASSIC, DEFAULT_KEYS, HUD_ELEMENTS, HUD_SCALE, moveRetiredPlaces, type HudLayout, type KeysPrefs } from "../hud/layout";
@@ -408,6 +407,8 @@ export interface Prefs {
   aliases: Record<string, string>;
   /** Practice mode (practice-mode/): a checkpoint teleport keeps the speed you saved it with (bhoptimer does), or stops you. */
   practice: { keepVelocity: boolean };
+  /** Physics 27+: the 1.5-unit jump lift, recorded per tick so it can change during a run. */
+  landfix: boolean;
   /** Restart keys (R / B / M) need a short hold (restart-hold.ts HOLD_MS) so a stray press can't end a run (restart-guard.ts). */
   holdRestart: boolean;
   /** Auto restart (auto-restart.ts): once a run passes your PB / the WR / the custom ghost, restart it or play a sound. Off by default. */
@@ -585,6 +586,7 @@ export const DEFAULT_PREFS: Prefs = {
   cmdBinds: {},
   aliases: {},
   practice: { keepVelocity: true },
+  landfix: true,
   holdRestart: false,
   autoRestart: { when: "off", action: "restart" },
   mouseNames: MOUSE_NAMES,

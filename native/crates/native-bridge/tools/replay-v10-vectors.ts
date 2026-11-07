@@ -90,7 +90,10 @@ const empty = { ...replay, header: { ...replay.header, totalTicks: 0 },
   forward: new Int16Array(), side: new Int16Array(), buttons: new Uint32Array(),
   yaw: new Float32Array(), pitch: new Float32Array(), checkpoints: [], cosmetic: [], inspect: [],
   counted: { count: new Float64Array(), rebases: [], frames: new Uint16Array(), events: new Uint16Array(), reports: new Uint16Array() } };
-const vectors = [vector("turns", replay), vector("stamina", recording(true)),
+const landfix = structuredClone(replay);
+landfix.header.settings.physics = 27;
+for (let i = 3; i < 12; ++i) landfix.buttons[i] |= 1 << 25;
+const vectors = [vector("landfix-toggle", landfix), vector("turns", replay), vector("stamina", recording(true)),
   vector("checkpoints", withCheckpoints), vector("duplicate-base", duplicate), vector("empty", empty)];
 
 const malformed: { name: string; raw: number[]; error: string }[] = [];

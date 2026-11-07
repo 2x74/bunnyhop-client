@@ -338,3 +338,18 @@ test("every route combination crosses the pause-menu bridge and survives the hos
     ghostRouteOnly: true,
   });
 });
+
+test("landfix defaults ON and crosses the requested-key bridge in both directions", () => {
+  state.settingsKeys = [...Object.keys(state.settings), "landfix"];
+  expect(DEFAULT_PREFS.landfix).toBe(true);
+  expect(requestedDefault(REQUESTED_KEYS.find((key) => key.key === "landfix")!)).toBe(true);
+  const current = host({ landfix: false });
+  const p = clone(DEFAULT_PREFS);
+  pullHost(p, current);
+  expect(p.landfix).toBe(false);
+  p.landfix = true;
+  expect(nativeView(p, current).landfix).toBe(true);
+  expect(patchBetween(nativeView({ ...p, landfix: false }, current), nativeView(p, current))).toEqual({
+    landfix: true,
+  });
+});

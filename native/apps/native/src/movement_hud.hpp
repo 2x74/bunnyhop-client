@@ -111,6 +111,7 @@ struct HudPreferences {
     bool trainer_enabled = false;
     bool null_binds = false;
     bool w_release = false;
+    bool landfix = true;
     bool triggers_visible = false;
     bool clips_visible = false;
     std::string auto_restart_when;
@@ -183,6 +184,7 @@ struct HudPreferences {
         result.trainer_enabled = strafe_trainer_enabled(settings);
         result.null_binds = settings.at("nullBinds");
         result.w_release = settings.at("wRelease");
+        result.landfix = settings.at("landfix");
         result.triggers_visible = settings.at("triggersVisible");
         result.clips_visible = settings.at("clipsVisible");
         result.auto_restart_when = settings.at("autoRestartWhen");

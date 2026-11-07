@@ -10,6 +10,7 @@ import { gunzipSync } from "node:zlib";
 import { parseArgs, isDeepStrictEqual } from "node:util";
 import {
   Core,
+  IN_NO_LANDFIX,
   applyRestartPoint,
   restartPoint,
   snapshotState,
@@ -20,6 +21,7 @@ import {
 import { ReplayRecorder, encodeRaw, type LookSample } from "../apps/web/src/replay";
 import { beforeStep, afterStep, makeTimer, quantize } from "../apps/web/src/sim";
 import { styleSettings, styleDef, stylePrespeedCap } from "../apps/web/src/styles";
+import { TIMER_RULES } from "../apps/web/src/timer";
 import { SegmentLog, type SegmentMark } from "../apps/web/src/practice-mode/segments";
 import { saveTimer, loadTimer, type TimerSnapshot } from "../apps/web/src/practice-mode/checkpoints";
 import type { Zone } from "../apps/web/src/zones";
@@ -82,6 +84,8 @@ const assert = (condition: unknown, message: string): asserts condition => {
 };
 const keyed = (tick: number): Command => {
   const c = botCommand(tick);
+  // A restored checkpoint keeps its old inputs; new inputs use the current choice.
+  if (tick >= 50 && tick < 150) c[4] |= IN_NO_LANDFIX;
   c[4] |= c[1] < 0 ? 1 << 9 : c[1] > 0 ? 1 << 10 : 0;
   const yaw = Math.round(c[2] * 64) / 64;
   c[2] = yaw < 0 ? yaw + 360 : yaw;
@@ -157,7 +161,7 @@ for (const { map, spawn } of cases.filter((c) => !values.only || c.map === value
         ] as Zone[])
       : [zone("start", start, 20), zone("end", end, 1)];
   const core = await newCore();
-  const timer = makeTimer(zones, settings, stylePrespeedCap("segmented"), styleDef("segmented"), 2);
+  const timer = makeTimer(zones, settings, stylePrespeedCap("segmented"), styleDef("segmented"), TIMER_RULES);
   timer.reset();
   const rec = new ReplayRecorder(10);
   rec.turnSpeed = { yawSpeed: 210, angleSpeedKey: 2 };
@@ -268,7 +272,7 @@ for (const { map, spawn } of cases.filter((c) => !values.only || c.map === value
     settings,
     style: "segmented",
     prespeedCap: 290,
-    timerRules: 3,
+    timerRules: TIMER_RULES,
     startTick: timer.startTick,
     endTick: timer.endTick,
     track: 0,
@@ -280,7 +284,7 @@ for (const { map, spawn } of cases.filter((c) => !values.only || c.map === value
   });
   const specPath = join(output, fixture.map + ".json");
   const bhrPath = join(output, fixture.map + ".bhr");
-  writeFileSync(specPath, JSON.stringify({ zones, spawn: fixture.spawn, actions }));
+  writeFileSync(specPath, JSON.stringify({ zones, spawn: fixture.spawn, actions, timerRules: TIMER_RULES }));
   const driver = Bun.spawn([join(root, "target/debug/segmented-proof"), mapPath, specPath, bhrPath], {
     cwd: root,
     stdout: "pipe",

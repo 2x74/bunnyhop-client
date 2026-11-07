@@ -66,7 +66,7 @@ for (const [name, mutate] of [
   ['absent thin-trigger contact', e => { e.artifacts[0].parity.report.fixtures[2].behavior.v17.teleported = 0; }],
   ['absent telehop fall restoration', e => { e.artifacts[0].parity.report.fixtures[3].behavior.v17.fallRestored = 0; }],
   ['missing latest RNGFix version', e => { e.artifacts[0].parity.report.fixtures[0].versions.pop(); }],
-  ['absent latest RNGFix speed preservation', e => { e.artifacts[0].parity.report.fixtures[0].behavior.v26.speedKept = 0; }],
+  ['absent latest RNGFix speed preservation', e => { e.artifacts[0].parity.report.fixtures[0].behavior.v27.speedKept = 0; }],
   ['absent material ladder fixture', e => { e.artifacts[0].parity.report.fixtures.pop(); }],
   ['absent material ladder contrast', e => { e.artifacts[0].parity.report.fixtures[4].divergentStates = 0; }],
   ['absent material ladder attachment', e => { e.artifacts[0].parity.report.fixtures[4].behavior.v18.attached = 0; }],

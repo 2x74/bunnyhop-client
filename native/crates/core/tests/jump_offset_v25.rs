@@ -49,7 +49,7 @@ fn jump_peak(scene: &Scene, version: u32, position: [f32; 3], crouched: bool) ->
 
 #[test]
 fn v25_is_the_latest_and_only_v25_lifts() {
-    assert_eq!(PHYSICS_LATEST, 26);
+    assert_eq!(PHYSICS_LATEST, 27);
     let scene = Scene::new(vec![floor()]);
     for version in 1..=PHYSICS_LATEST {
         let (lift, _) = jump_peak(&scene, version, [0.0, 0.0, 0.7], false);

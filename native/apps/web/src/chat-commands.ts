@@ -113,6 +113,8 @@ export interface ChatGame {
   freecam?(): void;
   /** !copystart [player|#rank] on the current map, track and style's board (copy-start-request.ts boardRunFor). */
   copyStart?(arg: string, reply: (text: string) => void): void;
+  /** Per-player landfix, shared with Settings and the console. */
+  landfix?(enabled?: boolean): boolean;
 }
 
 export interface ChatCommand {
@@ -367,6 +369,21 @@ export function styleByName(q: string): StyleId | null {
 }
 
 const BUILT_IN: ChatCommand[] = [
+  {
+    name: "landfix",
+    args: "[on|off]",
+    help: "landfix on / off",
+    group: "run",
+    panelOnly: true,
+    where: "both",
+    run: (ctx, arg) => {
+      const mode = arg.toLowerCase();
+      if (mode && mode !== "on" && mode !== "off") return ctx.reply("Use !landfix [on|off]");
+      if (!ctx.game?.landfix) return ctx.reply("Landfix is available in a map");
+      const enabled = ctx.game.landfix(mode ? mode === "on" : undefined);
+      ctx.reply(`Landfix ${enabled ? "on" : "off"}`);
+    },
+  },
   {
     name: "r",
     aliases: ["restart", "start"],
