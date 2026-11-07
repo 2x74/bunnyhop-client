@@ -7,6 +7,8 @@ A native desktop client for [bunnyhop.lol](https://bunnyhop.lol). The game runs 
 the same Rust movement, collision and timer code as the website. Menus, accounts, maps and leaderboards are the
 website's own UI in an embedded web view (WKWebView, WebKitGTK or WebView2). There is no Electron.
 
+All Linux distros using `glibc` are supported.
+
 ## Play
 
 1. Download the archive for your platform from [Releases](https://github.com/2x74/bunnyhop-client/releases).
