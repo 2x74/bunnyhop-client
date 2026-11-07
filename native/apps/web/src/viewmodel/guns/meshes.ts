@@ -7,6 +7,8 @@ import { xform, type V3 } from "../../player/bunny/rig";
 import { gunHoldData, type GunHoldData } from "../../player/bunny/gun-hold";
 import { KnifeCtx } from "../knives/ctx";
 import type { GunDef } from "./types";
+import { camoTpGeometry } from "./camo";
+import { camoStyle } from "../../camo";
 import { bakeGunAO } from "./ao";
 
 const geos = new Map<string, THREE.BufferGeometry>();
@@ -87,4 +89,22 @@ function bunnyGeometry(def: GunDef, build: GunDef["build"], tag: string): THREE.
   g = b.geometry();
   tpGeos.set(key, g);
   return g;
+}
+
+const dressed = new Map<string, { gun: THREE.BufferGeometry; silencer: THREE.BufferGeometry | null }>();
+export const dressedGunKey = (id: string, camo?: string | null): string => `${id}|${camo ?? ""}`;
+export const hasDressedGun = (key: string): boolean => dressed.has(key);
+export function seedDressedGun(key: string, gun: THREE.BufferGeometry, silencer: THREE.BufferGeometry | null): void {
+  if (!dressed.has(key)) dressed.set(key, { gun, silencer });
+}
+/** Third-person gun and camo, prebuilt in the worker for room joiners. */
+export function dressedGunGeometry(def: GunDef, camo?: string | null) {
+  const key = dressedGunKey(def.id, camo);
+  let hit = dressed.get(key);
+  if (!hit) {
+    const sil = bunnySilencerGeometry(def);
+    hit = { gun: camoTpGeometry(bunnyGunGeometry(def), camo, camoStyle(camo)), silencer: sil && camoTpGeometry(sil, camo, camoStyle(camo)) };
+    dressed.set(key, hit);
+  }
+  return hit;
 }

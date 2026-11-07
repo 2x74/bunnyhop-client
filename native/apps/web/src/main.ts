@@ -460,6 +460,7 @@ let bsp: Uint8Array | undefined;
 let wasmBytes: Uint8Array<ArrayBuffer>;
 let content: ReturnType<typeof contentLoading> | null = null;
 let worldPrograms: Promise<void> = Promise.resolve();
+let sharedPlayerPrograms: Promise<void> | null = null;
 try {
   let lastPaint = 0;
   const cached = attract?.takeBsp(mapName);
@@ -498,6 +499,11 @@ try {
   // Every program the map draws with, culled parts included, for the screen and the look's render targets (water
   // captures, the HDR scene target): started now, compiling in parallel while the run is set up (awaited before Ready).
   worldPrograms = warmPrograms(renderer, world.root, camera, scene).catch(() => {});
+  if (params.get("server") && !renderer.extensions.has("KHR_parallel_shader_compile")) {
+    sharedPlayerPrograms = import("./player/bunny/prewarm-shared")
+      .then(pre => pre.prewarmSharedPlayers(renderer, scene))
+      .catch(e => console.warn("shared player warm-up:", e));
+  }
 } catch (e) {
   console.error(e);
   content?.done();
@@ -538,12 +544,12 @@ applyTeleportAngles(curr);
 if (import.meta.env.DEV) Object.assign(window, { bunnyhop: { input, core, camera, scene, renderer, graphicsPipeline, world: w } });
 
 /** R / B / M / style switches: reset onto `track` (default: current) at its start-zone restart point. */
-function restart(track?: number, at?: RestartPoint | null) {
+function restart(track?: number, at?: RestartPoint | null, canonical = false) {
   setFreecam(false); // R / B / M, a style switch, spectating: back in your eyes, keys released
   input.setJumpToggle(false); // Hold jump (toggle) ends with the attempt (style and map changes restart too)
   liveCapture.stop(); // a core/world reset ends this independently reproducible segment
   if (liveCapture.status.stopping) liveCapture.fail("Restart during command application requires a new capture");
-  const view = run!.resetCore(track, at ?? null);
+  const view = run!.resetCore(track, at ?? null, canonical);
   // Knife pool swap "restart": the next knife comes up with the new attempt.
   advanceKnifePool("restart");
   playerAudio.reset();
@@ -724,6 +730,7 @@ await Promise.race([
     .catch((e) => console.warn("warm draw:", e)),
   new Promise((r) => setTimeout(r, 10_000)),
 ]);
+if (sharedPlayerPrograms) await sharedPlayerPrograms;
 await loading.stage("Ready", 1);
 // A new player's first look (until their first finish on a real map, and always in the tutorial): the world and one
 // "Click to start" line, not the pause menu with its empty leaderboard. Esc opens the menu. Returning players get the

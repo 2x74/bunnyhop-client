@@ -630,6 +630,23 @@ export interface RaceView {
   outcome?: RaceOutcome;
 }
 
+/** Additive room-race control message; all timestamps are server epoch milliseconds. */
+export interface RoomRaceView {
+  id: string;
+  state: "joining" | "countdown" | "live" | "settling" | "over";
+  map: string;
+  style: StyleId;
+  track: number;
+  joinUntil: number;
+  goAt: number | null;
+  endsAt: number | null;
+  /** Index into racers; -1 for a nonparticipant. */
+  you: number;
+  racers: { name: string; slot: number | null; place: number | null; dnf: "forfeit" | "left" | "timeout" | null;
+    finish: { time: number; real: number } | null; checking: boolean }[];
+  outcome?: "finish" | "timeout" | "cancelled";
+}
+
 export type ServerMsg =
   | {
       t: "welcome";
@@ -654,6 +671,7 @@ export type ServerMsg =
       weapons?: Record<number, number>;
       /** Your race (0.0.16), when you're in one (a reconnect). Absent from older servers. */
       race?: RaceView | null;
+      roomRace?: RoomRaceView | null;
     }
   | { t: "join"; player: RosterPlayer; quiet?: boolean }
   | { t: "leave"; slot: number; name: string; reason?: string; quiet?: boolean }
@@ -682,6 +700,7 @@ export type ServerMsg =
   | { t: "host"; slot: number | null }
   /** To a racer (0.0.16 `!race`): their race changed (null: none). An "over" race comes once. Older clients ignore it. */
   | { t: "race"; race: RaceView | null }
+  | { t: "roomRace"; race: RoomRaceView | null }
   | { t: "error"; code: string; message: string };
 
 export type ClientMsg =

@@ -414,11 +414,11 @@ export class RunSession {
    * restartTarget(track)), then onReset(). main.ts's restart() calls this and resyncs its interpolation state.
    * Returns the start point's view pitch when one was used (the core only takes the yaw).
    */
-  resetCore(track = this.timer.track, at: RestartPoint | null = null): { pitch: number } | null {
+  resetCore(track = this.timer.track, at: RestartPoint | null = null, canonical = false): { pitch: number } | null {
     this.setRunStyle(this.styleFor(track));
     const core = this.o.core;
     // The player's start point for this track (start-point.ts), if it's still valid here; else the usual target.
-    const sp = at ? null : this.startPointFor(track);
+    const sp = at || canonical ? null : this.startPointFor(track);
     core.setSettings(this.settings);
     core.reset();
     const p = at ?? sp?.point ?? this.restartTarget(track);

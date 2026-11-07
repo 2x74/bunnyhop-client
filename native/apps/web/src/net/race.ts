@@ -16,6 +16,7 @@
 //   - runs: while live, finished runs on the race's map / style / track are submitted with ?race=<id> (net/presence.ts
 //     raceTag): the room ties them to the race. Their verification decides it.
 
+import { RoomRaceClient, type RoomRaceEvent } from "./room-race";
 import { clear, h } from "../ui/dom";
 import { formatTime } from "../timer";
 import { STYLE_DEFS, styleLabel, type StyleId } from "../styles";
@@ -33,6 +34,7 @@ const RACE_OFF_KEY = "bunnyhop:race-off";
 
 export interface RaceHost {
   menu: NumberMenu;
+  roomRestart(track: number): void;
   banner: Banner;
   /** Other players who could race (not spectating), by slot. */
   others(): { slot: number; name: string }[];
@@ -61,6 +63,7 @@ const desc = (r: Pick<RaceView, "map" | "style" | "track">) => (r.track ? trackN
 export class RaceUi {
   /** The race you're in (null: none). */
   race: RaceView | null = null;
+  readonly room: RoomRaceClient;
   readonly el = h("div#mp-race", { hidden: true, role: "status" });
   /** 3, 2, 1, GO at crosshair height. */
   private count = h("div#mp-count", { hidden: true, "aria-hidden": "true" });
@@ -70,13 +73,17 @@ export class RaceUi {
   private preparedFor = "";
   private lastBeep = -1;
   private resultUntil = 0;
+  private roomEffects = false;
 
   constructor(
     parent: HTMLElement,
     private o: RaceHost,
   ) {
     parent.append(this.el, this.count);
+    this.room = new RoomRaceClient({ ...o, restart: (track) => o.roomRestart(track), event: (event) => this.roomEvent(event) });
     setRaceTag((run) => {
+      const room = this.room.tag(run);
+      if (room) return room;
       const r = this.race;
       return r && r.state === "live" && run.map === r.map && run.style === r.style && run.track === r.track ? r.id : null;
     });
@@ -90,7 +97,7 @@ export class RaceUi {
   /** Movement is held during the countdown (net/mp.ts filterInput). */
   get frozen(): boolean {
     const r = this.race;
-    return !!r && r.state === "countdown" && this.preparedFor === r.id;
+    return this.room.frozen || (!!r && r.state === "countdown" && this.preparedFor === r.id);
   }
 
   // -------------------------------------------------------------------------------------------
@@ -195,10 +202,11 @@ export class RaceUi {
       else localStorage.removeItem(RACE_OFF_KEY);
       return this.o.send(`/race ${a.toLowerCase()}`);
     }
+    const all = /^all(?:\s|$)/i.test(a);
     const others = this.o.others();
     const low = a.toLowerCase();
     // The longest name the line starts with (names have spaces), else a unique prefix of the first word, else #slot.
-    let who = others.filter((p) => low === p.name.toLowerCase() || low.startsWith(`${p.name.toLowerCase()} `)).sort((x, y) => y.name.length - x.name.length)[0];
+    let who = all ? { slot: -1, name: "all" } : others.filter((p) => low === p.name.toLowerCase() || low.startsWith(`${p.name.toLowerCase()} `)).sort((x, y) => y.name.length - x.name.length)[0];
     let rest = who ? a.slice(who.name.length) : "";
     if (!who) {
       const [first, ...more] = a.split(/\s+/);
@@ -222,7 +230,8 @@ export class RaceUi {
       }
     }
     if (track && !this.o.bonusTracks().includes(track)) return this.o.reply(this.o.bonusTracks().length ? `This map has no ${trackName(track)}.` : "This map has no bonus.");
-    this.send(who.slot, style, track);
+    if (all) this.o.send(`/race all ${style} ${track}`);
+    else this.send(who.slot, style, track);
   }
 
   private send(slot: number, style: StyleId, track: number): void {
@@ -231,6 +240,7 @@ export class RaceUi {
 
   /** Menu 1: who. */
   pickPlayer(page = 0): void {
+    if (this.room.participating) return this.o.reply("You’re in the room race (!leave to withdraw).");
     if (this.race && this.race.state !== "over") return this.o.reply(this.race.state === "challenge" && this.race.you === "a" ? "You have a challenge out (!race cancel to withdraw)." : "You're in a race (!forfeit to give up).");
     const all = this.o.others();
     if (!all.length) return this.o.reply("Nobody here to race.");
@@ -283,6 +293,7 @@ export class RaceUi {
   // HUD (net/mp.ts refreshUi, 5 Hz)
 
   refresh(): void {
+    this.room.refresh();
     const r = this.race;
     if (r?.state === "challenge" && r.you === "b" && this.o.menu.id.current === "race-prompt") this.prompt();
     if (r?.state === "countdown" && r.goAt !== null && !this.o.changing()) {
@@ -293,7 +304,7 @@ export class RaceUi {
         this.o.banner.set(`Race vs ${this.opponent(r).name}`, `${r.map}, ${desc(r)}`, "change");
         this.showCount(String(s));
       }
-    } else if (r?.state !== "live" && this.countShown && this.countShown !== "GO") this.showCount(null);
+    } else if (!this.room.frozen && r?.state !== "live" && this.countShown && this.countShown !== "GO") this.showCount(null);
     if (r?.state === "over" && Date.now() > this.resultUntil) this.race = null;
     this.render();
   }
@@ -321,6 +332,16 @@ export class RaceUi {
   private render(): void {
     const r = this.race;
     document.getElementById("hud")?.classList.toggle("race-result", r?.state === "over");
+    const room = this.room.race;
+    if (room && room.you >= 0 && (!r || r.state === "over")) {
+      document.getElementById("hud")?.classList.toggle("race-result", false);
+      const me = room.racers[room.you];
+      this.el.hidden = false;
+      this.el.className = "";
+      const clock = room.goAt === null ? `${Math.max(0, Math.ceil((this.o.toLocal(room.joinUntil) - Date.now()) / 1000))} s to join` : room.state === "settling" ? "checking" : room.state === "over" ? "over" : formatTime(Math.max(0, (Date.now() - this.o.toLocal(room.goAt)) / 1000)).slice(0, -2);
+      this.el.textContent = `Room race · ${room.racers.length} racers · ${me.place ? `Place ${me.place} · ${formatTime(me.finish!.real)}` : me.dnf ? "DNF" : me.checking ? "checking" : clock}`;
+      return;
+    }
     if (!r || r.state === "challenge" || r.state === "countdown") {
       this.el.hidden = true;
       return;
@@ -366,6 +387,32 @@ export class RaceUi {
     landIn(a, "translateY(-8px)");
     landIn(b, "translateY(-8px)", 200);
     stamp(v, 360);
+  }
+
+  /** Visual pass hook: typed lifecycle events also dispatched on the existing HUD element. */
+  private roomEvent(event: RoomRaceEvent): void {
+    this.el.dispatchEvent(new CustomEvent("room-race", { detail: event, bubbles: true }));
+    if (event.kind === "state") {
+      const entered = !!event.race && event.race.you >= 0;
+      const hadEffects = this.roomEffects;
+      this.roomEffects = entered;
+      // Room-wide observer updates must not disturb an unrelated duel's countdown/banner.
+      if (!entered && !hadEffects) return this.render();
+    }
+    if (event.kind === "countdown") {
+      if (!this.o.changing()) this.o.banner.set("Room race", `${event.race.map} · ${desc(event.race)}`, "change");
+      sfx("countdown_tick");
+      this.showCount(String(event.seconds));
+    } else if (event.kind === "go") {
+      if (!this.o.changing()) this.o.banner.set(null);
+      sfx("countdown_go");
+      this.showCount("GO");
+    } else if (event.kind === "finish") sfx("finish_pb");
+    else if (event.kind === "state" && (!event.race || event.race.state !== "countdown" || !this.room.participating)) {
+      if (this.countShown !== "GO") this.showCount(null);
+      if (!this.o.changing()) this.o.banner.set(null);
+    }
+    this.render();
   }
 
   dispose(): void {

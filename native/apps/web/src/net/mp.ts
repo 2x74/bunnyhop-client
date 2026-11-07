@@ -84,7 +84,7 @@ export interface MultiplayerInit {
   input: Input;
   session: RunSession;
   /** main.ts restart (resets the run onto a track's start). */
-  restart: (track?: number) => void;
+  restart: (track?: number, at?: null, canonical?: boolean) => void;
   /** The live game's gun impacts (main.ts GunPresenter): other players' shots draw their tracers with them. */
   impacts?: GunImpacts | null;
   /** The game behind the chat commands (chat-game.ts): keys for !help, practice, styles, records. */
@@ -203,6 +203,7 @@ export class Multiplayer {
       setStyle: (id) => o.session.setStyle(id),
       bonusTracks: () => o.session.bonusTracks(),
       restart: (track) => o.restart(track),
+      roomRestart: (track) => o.restart(track, null, true),
       spectating: () => this.spectating !== null,
       stopSpectating: () => this.stopSpectating(),
       changing: () => !!this.change || this.navigating,
@@ -515,6 +516,7 @@ export class Multiplayer {
         if (m.map.name !== this.o.map) return this.goto(m.map.name);
         setRoomPresence({ id: m.room.id, name: m.room.name });
         this.race.onState(m.race ?? null);
+        this.race.room.onState(m.roomRace ?? null);
         this.race.connected();
         this.setChange(m.change);
         this.chat.add({ kind: "local", text: `Connected to ${m.room.name} (${m.players.length}/${m.room.maxPlayers}) · ${m.map.name}. ${bindLabel("chat") ?? "Settings → Keys →"} chat · Tab scores · N spectate · type rtv / nominate / timeleft` });
@@ -627,6 +629,9 @@ export class Multiplayer {
         if (m.slot === this.you && !was && !this.change && !this.navigating) this.chat.add({ kind: "local", text: `You're the host now: ${HOST_COMMANDS}.` });
         break;
       }
+      case "roomRace":
+        this.race.room.onState(m.race);
+        break;
       case "race":
         this.race.onState(m.race);
         break;

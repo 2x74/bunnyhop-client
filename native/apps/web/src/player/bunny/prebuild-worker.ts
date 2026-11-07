@@ -11,6 +11,10 @@
 // (clouds: the knives' point clouds for the grip solver, knives/hold.ts knifeCloud.)
 
 import type * as THREE from "three";
+import { ensureHeadwear } from "../hat-detail";
+import { shellGeometry } from "../glow-geometry";
+import { dressedGunGeometry, dressedGunKey, bunnyHold } from "../../viewmodel/guns/meshes";
+import { gunById } from "../../viewmodel/guns";
 import type { CosmeticLoadout } from "../../loadout";
 import { ensureBunnyLayout, ensureViewmodelLayout } from "../../viewmodel/finishes/layout";
 import { carrot } from "../../viewmodel/knives/carrot";
@@ -24,10 +28,10 @@ import { bunnyGeometry } from "./mesh";
 import { bunnyParts } from "./prebuild-parts";
 import type { PlainGeometry } from "./prebuild";
 
-type InMsg = { id: number; outfit: string | null; loadout: CosmeticLoadout; body: boolean; hat: boolean; crown: boolean } | { id: number; vm: [string, GloveStyleId][]; clouds: string[] };
+type InMsg = { id: number; outfit: string | null; loadout: CosmeticLoadout; body: boolean; hat: boolean; crown: boolean; glow: boolean } | { id: number; gunId: string; camo?: string | null } | { id: number; vm: [string, GloveStyleId][]; clouds: string[] };
 const ctx = self as unknown as { onmessage: ((e: MessageEvent<InMsg>) => void) | null; postMessage(m: unknown, transfer: Transferable[]): void };
 
-function plain(g: THREE.BufferGeometry, transfer: Transferable[]): PlainGeometry {
+function plain(g: THREE.BufferGeometry, transfer: Transferable[], glow = false): PlainGeometry {
   const attributes: PlainGeometry["attributes"] = {};
   for (const [name, a] of Object.entries(g.attributes) as [string, THREE.BufferAttribute][]) {
     // Copies: the worker's caches keep theirs (a later build here reuses them), the copies are transferred.
@@ -36,7 +40,13 @@ function plain(g: THREE.BufferGeometry, transfer: Transferable[]): PlainGeometry
     attributes[name] = { array, itemSize: a.itemSize, normalized: a.normalized };
   }
   const b = g.boundingBox, s = g.boundingSphere;
+  let glowNormals: Float32Array | undefined;
+  if (glow) {
+    glowNormals = (shellGeometry(g).getAttribute("glowNormal").array as Float32Array).slice();
+    transfer.push(glowNormals.buffer);
+  }
   return {
+    glowNormals,
     attributes,
     box: b ? [b.min.x, b.min.y, b.min.z, b.max.x, b.max.y, b.max.z] : null,
     sphere: s ? [s.center.x, s.center.y, s.center.z, s.radius] : null,
@@ -45,6 +55,17 @@ function plain(g: THREE.BufferGeometry, transfer: Transferable[]): PlainGeometry
 
 ctx.onmessage = (e) => {
   const m = e.data;
+  if ("gunId" in m) {
+    try {
+      const def = gunById(m.gunId);
+      if (!def) throw new Error(`unknown gun ${m.gunId}`);
+      const transfer: Transferable[] = [];
+      const dressed = dressedGunGeometry(def, m.camo);
+      const { def: _, ...hold } = bunnyHold(def);
+      ctx.postMessage({ id: m.id, gunKey: dressedGunKey(m.gunId, m.camo), gunId: m.gunId, gun: plain(dressed.gun, transfer), silencer: dressed.silencer && plain(dressed.silencer, transfer), hold }, transfer);
+    } catch (err) { ctx.postMessage({ id: m.id, error: String(err) }, []); }
+    return;
+  }
   if ("vm" in m) {
     try {
       const transfer: Transferable[] = [];
@@ -73,11 +94,13 @@ ctx.onmessage = (e) => {
     if (m.body) {
       const g = bunnyGeometry(p.knife, p.glove, p.look, p.body, p.hood);
       ensureBunnyLayout(g); // BunnyModel.applyLook does this on the main thread; done here it's a no-op there
-      body = plain(g, transfer);
+      body = plain(g, transfer, m.glow);
     }
     const hat = m.hat && p.hat ? hatGeometry(p.hat) : null;
     const crown = m.crown && p.crown ? crownGeometry(p.crown) : null;
-    ctx.postMessage({ id: m.id, key: p.key, body, hat: hat && plain(hat, transfer), crown: crown && plain(crown, transfer) }, transfer);
+    if (hat) ensureHeadwear(hat);
+    if (crown) ensureHeadwear(crown);
+    ctx.postMessage({ id: m.id, key: p.key, body, hat: hat && plain(hat, transfer, m.glow), crown: crown && plain(crown, transfer, m.glow) }, transfer);
   } catch (err) {
     ctx.postMessage({ id: m.id, error: String(err) }, []);
   }

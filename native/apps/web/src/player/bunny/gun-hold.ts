@@ -153,6 +153,9 @@ export function fistFrames(r: Rig = rig()): { R: M34; L: M34; Rinv: M34; Linv: M
 
 const placeM = (p: HandPlace | undefined): M34 | null => (p ? frameM(p.o, p.up, p.fwd) : null);
 const cache = new Map<GunDef, GunHoldData>();
+export function seedGunHold(def: GunDef, data: Omit<GunHoldData, "def">): void {
+  if (!cache.has(def)) cache.set(def, { ...data, def });
+}
 
 /**
  * The hold data of a gun. `extent` gives the gun's bounding box in gun-local units (the world model's), for the butt;

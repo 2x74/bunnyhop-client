@@ -325,6 +325,9 @@ export class LoadoutStage {
   }
   // The caption names the rarity in its colour. A coloured frame round the picture only read as a debug outline.
   tint(_color: string | null, _strength = 1): void {}
+  cachedThumb(key: string): HTMLCanvasElement | null {
+    return thumbs.get(key) ?? null;
+  }
   requestThumb(job: ThumbJob, done: (canvas: HTMLCanvasElement) => void): void {
     if (this.disposed) return;
     let canvas = thumbs.get(job.key);

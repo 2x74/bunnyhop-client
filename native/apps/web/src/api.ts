@@ -1439,6 +1439,7 @@ export const api = {
     u.searchParams.set("v", String(version));
     u.searchParams.set("style", style);
     // The wire styles this build decodes (protocol.ts LEGACY_META_STYLES): without it the room sends the legacy form.
+    u.searchParams.set("roomrace", "1");
     u.searchParams.set("wire", String(WIRE_STYLES.length));
     return u.toString();
   },
