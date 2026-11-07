@@ -160,6 +160,14 @@ jobs:
           path: native/target/native-parity
           if-no-files-found: error
           retention-days: 30
+      - name: Preserve landfix identity, recording and Segmented traces
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: native-landfix-windows-${{ github.run_id }}-${{ github.run_attempt }}
+          path: native/target/native-landfix
+          if-no-files-found: error
+          retention-days: 30
       - id: package-upload
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -222,6 +230,14 @@ jobs:
         with:
           name: native-parity-macos-${{ github.run_id }}-${{ github.run_attempt }}
           path: native/target/native-parity
+          if-no-files-found: error
+          retention-days: 30
+      - name: Preserve landfix identity, recording and Segmented traces
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: native-landfix-macos-${{ github.run_id }}-${{ github.run_attempt }}
+          path: native/target/native-landfix
           if-no-files-found: error
           retention-days: 30
       - id: package-upload
@@ -296,6 +312,14 @@ jobs:
         with:
           name: native-parity-linux-${{ github.run_id }}-${{ github.run_attempt }}
           path: native/target/native-parity
+          if-no-files-found: error
+          retention-days: 30
+      - name: Preserve landfix identity, recording and Segmented traces
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: native-landfix-linux-${{ github.run_id }}-${{ github.run_attempt }}
+          path: native/target/native-landfix
           if-no-files-found: error
           retention-days: 30
       - id: package-upload

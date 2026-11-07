@@ -65,4 +65,5 @@ The v0.9.0 jobs also stage the hash-pinned `qualification-inputs.tar.gz` release
 `landfix-release.ts --stage`. It holds the retained v26 verifier, three portable BHR fixtures, Eazy BSP and
 only the Git objects needed to archive the pristine v27 proof source. Each platform runs `--proof`: legacy/current
 identity, real-map Rust landfix tests, native recording/verification for ON/OFF/toggle, and Segmented checkpoint
-reuse with forged-input controls. The normal parity artifact retains these additional proofs and traces.
+reuse with forged-input controls. Separate `native-landfix-PLATFORM-RUN-ATTEMPT` artifacts retain these proofs and traces; the standard parity
+artifact keeps its exact file contract.

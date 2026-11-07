@@ -34,7 +34,7 @@ if (Bun.argv.includes("--stage")) {
 } else if (Bun.argv.includes("--proof")) {
   for (const [name, sha] of Object.entries(expectedFiles)) verify(join(inputs, name), sha);
   verify(join(root, "maps/bhop_eazy.bsp"), expectedFiles["bhop_eazy.bsp"]!);
-  const output = "target/native-parity/landfix";
+  const output = "target/native-landfix";
   run([
     "bun",
     "apps/native/tools/landfix-proof.ts",
