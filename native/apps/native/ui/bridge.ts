@@ -611,6 +611,7 @@ export interface MapLoadProgress {
   map?: string;
 }
 export interface NativeMenuState {
+  bonusTracks?: number[];
   loadProgress?: MapLoadProgress | null;
   map: string | null;
   loading: boolean | string;
@@ -1260,6 +1261,10 @@ export function applyState(value: unknown): boolean {
   if (typeof next.paused === "boolean") state.paused = next.paused;
   if (isStyleId(next.style)) state.style = next.style;
   if (Number.isSafeInteger(next.track) && Number(next.track) >= 0) state.track = Number(next.track);
+  if (Array.isArray(next.bonusTracks))
+    state.bonusTracks = next.bonusTracks
+      .filter((track): track is number => Number.isSafeInteger(track) && Number(track) > 0 && Number(track) <= 64)
+      .slice(0, 64);
   const sequence = next.settingsSequence;
   const orderedSettings = Number.isSafeInteger(sequence) && Number(sequence) >= 0;
   if (next.settings && (!orderedSettings || Number(sequence) > hostSettingsSequence)) {

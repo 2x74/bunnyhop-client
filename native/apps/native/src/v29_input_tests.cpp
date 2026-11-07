@@ -481,11 +481,37 @@ void test_restart_placement_and_recorded_names() {
                 BhState player{};
                 check(bh_state(fixture.core.get(), &player), fixture.core.get());
                 native::StartPoints points;
-                if (practice) points.save(map, track, player, 0, 0, true);
+                if (practice) {
+                    auto saved = player;
+                    saved.position[0] = 40;
+                    saved.position[1] = 40;
+                    points.save(map, track, saved, 0, 0, true);
+                }
                 const auto restart = native::RestartPlacement::place(
                         fixture.core.get(), map, track, std::vector<BhZone>(zones.begin(), zones.end()), &points
                 );
                 assert(restart.practice == practice);
+                if (practice) {
+                    check(bh_reset(fixture.core.get()), fixture.core.get());
+                    const auto canonical = native::RestartPlacement::place(
+                            fixture.core.get(),
+                            map,
+                            track,
+                            std::vector<BhZone>(zones.begin(), zones.end()),
+                            &points,
+                            true
+                    );
+                    assert(!canonical.practice);
+                    const auto saved = points.get(map, track);
+                    assert(saved.has_value());
+                    assert(canonical.state.position[0] != saved->position[0]
+                           || canonical.state.position[1] != saved->position[1]);
+                    assert(points.get(map, track).has_value());
+                    native::RestartPlacement::place(
+                            fixture.core.get(), map, track, std::vector<BhZone>(zones.begin(), zones.end()), &points
+                    );
+                }
+
                 const auto evidence = fixture.directory / "restart.jsonl";
                 std::filesystem::remove(evidence);
                 check(bh_record_begin(

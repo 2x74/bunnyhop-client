@@ -3,6 +3,8 @@
 #include "hud_scoreboard.hpp"
 #include "menu_rows.hpp"
 #include "room_styles.hpp"
+#include "room_mode_action.hpp"
+#include "room_race.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -13,14 +15,6 @@
 #include <string>
 
 namespace native {
-struct RoomModeAction {
-    bool restart = false, stop_spectating = false;
-    uint32_t track = 0;
-    // Main-track races apply their style. Bonus races preserve the user's
-    // selected main-track style; reset() chooses autohop for their active track.
-    std::string style;
-};
-
 // Native counterpart of web net/race.ts. All outcomes and transitions come from
 // the existing room protocol. Deadlines are display-only: local time never
 // starts a race, chooses a winner, or releases the countdown's movement hold.
@@ -233,6 +227,7 @@ class RoomModes {
     std::optional<J> race_;
     bool closed_ = false, pending_go_ = false;
     RaceDisplay display_;
+    RoomRaceModes room_race_;
     double clock_offset_ = 0, result_until_ = 0, go_until_ = 0;
 
     static bool number(const J &j) { return j.is_number() && std::isfinite(j.get<double>()); }
@@ -398,6 +393,10 @@ class RoomModes {
 public:
     const RaceDisplay &display() const { return display_; }
 
+    const RoomRaceDisplay &room_race_display() const { return room_race_.display(); }
+
+    bool room_race_tick(double now) { return room_race_.refresh(now); }
+
     bool challenge_key(std::string_view code, bool down, bool repeat) const {
         return down && !repeat && display_.state == RaceDisplay::State::challenge && display_.recipient
                && ((code == "Digit1" && display_.playable) || code == "Digit2");
@@ -407,6 +406,7 @@ public:
     void close(uint64_t generation) {
         generation_ = std::max(generation_, generation);
         reset_race();
+        room_race_.clear();
         room_.clear();
         closed_ = true;
         clock_offset_ = 0;
@@ -425,6 +425,7 @@ public:
             return {};
         if (generation > generation_) {
             reset_race();
+            room_race_.clear();
             room_.clear();
             closed_ = false;
             clock_offset_ = 0;
@@ -437,24 +438,38 @@ public:
             clock_offset_ = e["nativeClockOffsetMs"].get<double>();
         if (type == "nativeLeave") {
             reset_race();
+            room_race_.clear();
             room_.clear();
             closed_ = true;
             return {};
         }
         if (type == "nativeStatus" && e.value("status", std::string()) == "closed") {
             reset_race();
+            room_race_.clear();
             return {};
         }
         if (type == "nativeMap" || type == "map") {
             reset_race();
+            room_race_.clear();
             return {};
         }
-        if (type == "welcome") return apply(e.value("race", J(nullptr)), map, spectating, now_epoch_ms);
+        if (type == "welcome") {
+            auto action = apply(e.value("race", J(nullptr)), map, spectating, now_epoch_ms);
+            auto room_action = room_race_.apply(
+                    e.value("roomRace", J(nullptr)), map, spectating, now_epoch_ms, clock_offset_, true
+            );
+            if (room_action.restart || room_action.room_race_finish || room_action.room_race_over) return room_action;
+            return action;
+        }
+        if (type == "roomRace" && e.contains("race"))
+            return room_race_.apply(e.at("race"), map, spectating, now_epoch_ms, clock_offset_);
         if (type == "race" && e.contains("race")) return apply(e.at("race"), map, spectating, now_epoch_ms);
         return {};
     }
 
     RoomModeAction map_loaded(const std::string &map, bool spectating, double now_epoch_ms) {
+        const auto action = room_race_.map_loaded(map, spectating, now_epoch_ms);
+        if (action.restart) return action;
         if (race_ && pending_go_ && race_->at("state") == "live" && race_->at("map") == map) {
             pending_go_ = false;
             went_ = race_->at("id").get<std::string>();
@@ -464,9 +479,11 @@ public:
         return prepare(map, spectating);
     }
 
-    bool frozen() const { return race_ && race_->at("state") == "countdown" && race_->at("id") == prepared_; }
+    bool frozen() const {
+        return room_race_.frozen() || (race_ && race_->at("state") == "countdown" && race_->at("id") == prepared_);
+    }
 
-    bool has_race() const { return race_.has_value(); }
+    bool has_race() const { return race_.has_value() || room_race_.participating(); }
 
     std::string notice(double now_epoch_ms) const {
         if (!race_) return {};

@@ -1,3 +1,4 @@
+import { roomRaceTag } from "./room-race";
 import { NativeRaceGhosts } from "./race-ghosts";
 import { loadPBReplay } from "../../web/src/pb";
 import { base64Bytes } from "./base64";
@@ -890,6 +891,8 @@ onBeforeSend((message) => {
   if (roomService.view.id && leaveRoomBefore(message)) roomService.leave();
 });
 setRaceTag((board) => {
+  const roomTag = roomRaceTag(roomService.view.roomRace, board);
+  if (roomTag) return roomTag;
   const race = roomService.view.race;
   return race &&
     race.state === "live" &&

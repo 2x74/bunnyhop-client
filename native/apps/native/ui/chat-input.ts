@@ -54,12 +54,13 @@ export function resolveRaceCommand(
   const text = arg.trim(),
     low = text.toLowerCase();
   if (["cancel", "on", "off"].includes(low)) return { text: `/race ${low}` };
+  const room = /^all(?:\s|$)/i.test(text);
   const others = players.filter((p) => p.slot !== you);
   let who = others
     .filter((p) => low === p.name.toLowerCase() || low.startsWith(p.name.toLowerCase() + " "))
     .sort((a, b) => b.name.length - a.name.length)[0];
-  let rest = who ? text.slice(who.name.length) : "";
-  if (!who) {
+  let rest = room ? text.slice(3) : who ? text.slice(who.name.length) : "";
+  if (!who && !room) {
     const [first, ...more] = text.split(/\s+/),
       slot = /^#(\d+)$/.exec(first);
     const matches = slot
@@ -91,7 +92,9 @@ export function resolveRaceCommand(
   if (track > 64) return { error: "Use main or a bonus number up to 64." };
   if (track && bonusTracks && !bonusTracks.includes(track))
     return { error: bonusTracks.length ? `This map has no Bonus ${track}.` : "This map has no bonus." };
-  return { text: `/race #${who.slot} ${style} ${track}` };
+  if (room && style === "segmented" && !track) return { error: "Segmented is not available for room races." };
+  if (room && track) style = "autohop";
+  return { text: `/race ${room ? "all" : `#${who!.slot}`} ${style} ${track}` };
 }
 
 /**

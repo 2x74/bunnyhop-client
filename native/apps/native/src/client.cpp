@@ -548,6 +548,7 @@ int run(const native::Options &opt) {
     };
     native::RunHeartbeat heartbeat;
     auto &zones = game.zones;
+    std::vector<unsigned> bonus_tracks;
     auto &progress_mutex = map_download.mutex;
     auto &download = map_download.jobs;
     native::MapJobs<bool> prefetch;
@@ -716,7 +717,9 @@ int run(const native::Options &opt) {
     };
     // A track-style switch's restart point for the next reset (track_style_switch.hpp).
     std::optional<native::StartPoint> restart_at;
+    bool canonical_race_start = false;
     auto reset = [&]() {
+        const bool canonical = std::exchange(canonical_race_start, false);
         const auto at = std::exchange(restart_at, std::nullopt);
         stop_camera_preparation();
         viewer.controls = {};
@@ -756,7 +759,8 @@ int run(const native::Options &opt) {
                              map_id,
                              active_track,
                              zones,
-                             tutorial_runner.lesson && tutorial_runner.lesson->is_active() ? nullptr : &start_points
+                             tutorial_runner.lesson && tutorial_runner.lesson->is_active() ? nullptr : &start_points,
+                             canonical
                      );
         curr = restart.state;
         if (tutorial_runner.lesson && tutorial_runner.lesson->is_active())
@@ -946,6 +950,7 @@ int run(const native::Options &opt) {
         gauntlet_map.clear();
         gauntlet_progress = nullptr;
         zones.clear();
+        bonus_tracks.clear();
         map_id.clear();
         audio.set_map(nullptr);
         map_audio.stop();
@@ -976,16 +981,27 @@ int run(const native::Options &opt) {
         observed_spectator.reset();
     };
     auto apply_room_mode = [&](const native::RoomModeAction &action) {
-        if (action.stop_spectating && menu && menu_ready)
-            menu->evaluate_js("window.bunnyhopNativeMenu?.onRoomCommand?.({t:'spec',target:null})");
+        if (action.stop_spectating) {
+            room.spectator_target.reset();
+            if (menu && menu_ready)
+                menu->evaluate_js("window.bunnyhopNativeMenu?.onRoomCommand?.({t:'spec',target:null})");
+        }
         if (action.restart && core) {
             if (tutorial_runner.lesson) tutorial_runner.lesson->stop();
             tutorial_runner.demo = false;
             if (!action.style.empty()) selected_style = action.style;
             active_track = action.track;
+            if (action.canonical_start) {
+                restart_at.reset();
+                practice.clear(core.get());
+                third_person = false;
+                canonical_race_start = true;
+            }
             reset();
             show_menu(false);
         }
+        if (action.room_race_go) audio.play("countdown_go");
+        if (action.room_race_finish) audio.play("finish_pb");
     };
     auto load_map = [&](const std::string &path,
                         const std::string &content,
@@ -1018,6 +1034,12 @@ int run(const native::Options &opt) {
         race_ghost_imports.reset();
         ghosts.slots = {};
         zones = next_zones;
+        bonus_tracks.clear();
+        for (const auto &zone : zones) {
+            if (zone.kind == 0 && zone.track
+                && std::find(bonus_tracks.begin(), bonus_tracks.end(), zone.track) == bonus_tracks.end())
+                bonus_tracks.push_back(zone.track);
+        }
         renderer->set_zones(zones);
         viewer.camera.reset();
         hud.reset_history();
@@ -3337,6 +3359,7 @@ int run(const native::Options &opt) {
                     error = e.what();
                     viewer.paused = true;
                 }
+        if (room_modes.room_race_tick(epoch_ms())) audio.play("countdown_tick");
         const bool simulation_active =
                 !video.preparing() && core && !spectator && !room_modes.frozen() && !download.valid()
                 && ((focused && (captured || (viewer.active && (!menu || !menu->visible() || viewer.ui_shown))))
@@ -4543,6 +4566,7 @@ int run(const native::Options &opt) {
                 );
             }
             if (!state.is_null()) {
+                state["bonusTracks"] = bonus_tracks;
                 const auto script = menu_state.publish(std::move(state), visible, preferences, replay_list);
                 if (!script.empty()) menu->evaluate_js(script);
             }

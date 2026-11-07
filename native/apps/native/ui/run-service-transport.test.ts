@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { NativeRunService, RunServiceStatus } from "./run-service";
+import type { NativeRunService, RunServiceStatus, RunContext } from "./run-service";
 import type { api as realApi } from "../../web/src/api";
 
 const identity = {
@@ -106,15 +106,15 @@ afterAll(async () => {
   if (directory) await rm(directory, { recursive: true, force: true });
 });
 
-async function fixture() {
+async function fixture(context: RunContext = {}) {
   let credentials = "alice";
   let confirmAccount = () => Promise.resolve<string | null>(credentials);
   const statuses: RunServiceStatus[] = [];
-  const requests: { path: string; owner: string; init: RequestInit }[] = [];
+  const requests: { url: string; path: string; owner: string; init: RequestInit }[] = [];
   bundled.hooks.deviceHeaders = async () => ({ "x-bh-device": "test-device", "x-bh-fp": "test-fingerprint" });
   bundled.hooks.fetch = async (url, init) => {
     const path = new URL(url).pathname;
-    requests.push({ path, owner: credentials, init });
+    requests.push({ url, path, owner: credentials, init });
     if (path === "/api/runs/beat")
       return Response.json({ sid: `${credentials}-session`, token: `${credentials}-token` });
     if (path === "/api/runs") return Response.json({ id: `${credentials}-run`, status: "verified" });
@@ -122,6 +122,7 @@ async function fixture() {
   };
   const service = new bundled.NativeRunService({
     api: bundled.api,
+    context: () => context,
     account: () => confirmAccount(),
     send: (status) => statuses.push(status),
     origin: () => "https://bunnyhop.lol",
@@ -304,4 +305,31 @@ describe("native ownership through the real HTTP adapter", () => {
     expect((f.requests[0].init.body as FormData).get("beats")).toBe('["alice-token"]');
     expect(f.statuses.at(-1)?.status).toBe("verified");
   });
+});
+
+test("a matching live room-race run reaches POST /runs with both query tags", async () => {
+  const { roomRace } = await import("./fixtures/room-race");
+  const { roomRaceTag } = await import("./room-race");
+  const race = roomRace("live");
+  const f = await fixture({ room: "easy", race: roomRaceTag(race, identity) });
+  await f.service.receive(finish());
+  const request = f.requests.find((request) => request.path === "/api/runs");
+  expect(request).toBeDefined();
+  const url = new URL(request!.url);
+  expect(url.searchParams.get("room")).toBe("easy");
+  expect(url.searchParams.get("race")).toBe(race.id);
+});
+
+test("the native socket URL advertises the room-race capability and existing wire styles", () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "location");
+  Object.defineProperty(globalThis, "location", { value: { href: "https://bunnyhop.lol/" }, configurable: true });
+  try {
+    const url = new URL(bundled.api.roomSocketUrl("easy", 1, "autohop"));
+    expect(url.searchParams.get("v")).toBe("1");
+    expect(url.searchParams.get("roomrace")).toBe("1");
+    expect(Number(url.searchParams.get("wire"))).toBeGreaterThan(0);
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "location", previous);
+    else delete (globalThis as { location?: unknown }).location;
+  }
 });

@@ -304,7 +304,13 @@ export class NativeChatService {
             race: (arg) => {
               // No name: the host's pick menus, as for a plain "!race" it catches itself.
               if (!arg) return emit({ type: "chatAction", action: "raceMenu" });
-              const resolved = resolveRaceCommand(arg, this.room.view.players, this.room.view.you, state.style);
+              const resolved = resolveRaceCommand(
+                arg,
+                this.room.view.players,
+                this.room.view.you,
+                state.style,
+                state.bonusTracks,
+              );
               if ("error" in resolved) return reply(resolved.error);
               this.room.command({ t: "chat", text: resolved.text });
             },

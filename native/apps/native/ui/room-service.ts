@@ -17,10 +17,12 @@ import {
   type VoteView,
   type PoolEntry,
   type RaceView,
+  type RoomRaceView,
 } from "../../web/src/net/protocol";
 import { nativeChatDecoration } from "./chat-decoration";
 import { announceLine, roomChatLines, type RoomChatLine } from "./room-chat-lines";
 import { isStyleId } from "../../web/src/styles";
+import { validRoomRace } from "./room-race";
 import { roomStyleId } from "./room-styles";
 import type { RoomHandlers, RoomStatus } from "../../web/src/net/room";
 import type { MenuMessage } from "./bridge";
@@ -71,6 +73,7 @@ export interface RoomView {
   vote: VoteView | null;
   pool: PoolEntry[];
   race: RaceView | null;
+  roomRace: RoomRaceView | null;
   rtv: { count: number; needed: number };
 }
 const validMap = (map: unknown): map is string => typeof map === "string" && /^[a-zA-Z0-9_.-]{1,128}$/.test(map);
@@ -199,7 +202,8 @@ export function validRoomEvent(message: ServerMsg): boolean {
           message.pool.every((map) => validMap(map?.name)) &&
           (!message.vote || voteValid(message.vote)) &&
           (!message.change || (validMap(message.change.map) && finite(message.change.at))) &&
-          (message.race === undefined || raceValid(message.race))
+          (message.race === undefined || raceValid(message.race)) &&
+          (message.roomRace === undefined || validRoomRace(message.roomRace))
         );
       case "map":
         return validMap(message.map?.name);
@@ -235,6 +239,8 @@ export function validRoomEvent(message: ServerMsg): boolean {
           (message.patch.name === undefined || typeof message.patch.name === "string") &&
           (message.patch.style === undefined || roomStyleId(message.patch.style))
         );
+      case "roomRace":
+        return validRoomRace(message.race);
       case "race":
         return raceValid(message.race);
       case "announce":
@@ -279,6 +285,7 @@ export class NativeRoomService {
     vote: null,
     pool: [],
     race: null,
+    roomRace: null,
     rtv: { count: 0, needed: 0 },
   };
   private transport: RoomTransport | null = null;
@@ -378,6 +385,7 @@ export class NativeRoomService {
       status: (status, detail) => {
         if (!current()) return;
         this.view.status = status;
+        if (status === "closed") this.view.roomRace = null;
         this.view.detail = detail ?? "";
         this.event({ t: "nativeStatus", status, detail: detail ?? "" });
         this.changed();
@@ -442,6 +450,7 @@ export class NativeRoomService {
     this.view.vote = null;
     this.view.pool = [];
     this.view.race = null;
+    this.view.roomRace = null;
     this.view.map = "";
     this.view.mapInfo = null;
     this.view.nextMap = null;
@@ -646,6 +655,7 @@ export class NativeRoomService {
       this.view.pool = message.pool;
       this.view.rtv = message.rtv;
       this.view.race = message.race ?? null;
+      this.view.roomRace = message.roomRace ?? null;
       this.view.nominations = message.nominations ?? [];
       this.view.metas = message.metas ?? {};
       this.view.metaAt = Object.fromEntries(Object.keys(this.view.metas).map((slot) => [slot, this.now()]));
@@ -692,7 +702,8 @@ export class NativeRoomService {
     } else if (message.t === "change") {
       this.view.change = message.change;
       this.scheduleChange(message.change);
-    } else if (message.t === "race") this.view.race = message.race;
+    } else if (message.t === "roomRace") this.view.roomRace = message.race;
+    else if (message.t === "race") this.view.race = message.race;
     else if (message.t === "error") this.view.detail = message.message;
     if (message.t === "announce") this.view.chat.push({ text: announceLine(message.a).text, kind: "announce" });
     if (message.t === "kicked") {
@@ -711,13 +722,15 @@ export class NativeRoomService {
       this.view.players = [];
       this.view.vote = null;
       this.view.race = null;
+      this.view.roomRace = null;
+      this.event({ t: "nativeStatus", status: "closed", detail: message.reason });
     }
     if (message.t === "host" && this.view.room) this.view.room.host = message.slot;
     this.view.chat = this.view.chat.slice(-100);
     for (const line of lines) this.sendLine(line);
     this.event({
       ...message,
-      ...(message.t === "welcome" || message.t === "race" || message.t === "change"
+      ...(message.t === "welcome" || message.t === "race" || message.t === "roomRace" || message.t === "change"
         ? { nativeClockOffsetMs: (this.transport?.serverNow?.() ?? Date.now()) - Date.now() }
         : {}),
     } as unknown as Record<string, unknown>);
