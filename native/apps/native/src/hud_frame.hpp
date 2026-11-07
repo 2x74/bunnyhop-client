@@ -69,6 +69,8 @@ struct HudFrame {
     const LookMenu *look_menu = nullptr;
     std::optional<std::array<float, 2>> menu_pointer;
     const CopyStartPicker *copy_start = nullptr;
+    // The menu's prefers-reduced-motion: race numerals and results fade instead of moving.
+    bool reduced_motion = false;
 
     void draw() const;
 

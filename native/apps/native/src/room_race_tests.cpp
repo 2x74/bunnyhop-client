@@ -5,6 +5,8 @@
 #include <cassert>
 #include <fstream>
 #include <iostream>
+#include <algorithm>
+#include <vector>
 using J = nlohmann::json;
 
 J race(std::string state = "countdown", int you = 0) {
@@ -104,7 +106,9 @@ void observers_forfeits_and_results() {
     assert(action.room_race_finish && action.room_race_over && !action.restart);
     action = racer.event(event(result), "bhop_eazy", false, 21000);
     assert(!action.room_race_finish && !action.room_race_over);
-    assert(racer.room_race_display().line.view() == "Room race · Place 2");
+    // A place that comes with the final result goes in the standings, not under the crosshair.
+    assert(racer.room_race_display().finish_until == 0 && racer.room_race_display().over);
+    assert(racer.room_race_display().verdict.view() == "2nd of 2");
     racer.room_race_tick(28001);
     assert(!racer.room_race_display().visible);
     racer.event(event(race()), "bhop_eazy", false, 30000);
@@ -122,6 +126,178 @@ void observers_forfeits_and_results() {
     assert(bonus_action.restart && bonus_action.track == 2 && bonus_action.style.empty());
     bounded.event(event(nullptr), "bhop_eazy", false, 7000);
     assert(!bounded.frozen() && !bounded.room_race_display().visible);
+}
+
+struct Drawn {
+    std::string text;
+    float x, y, size;
+    native::NameColor color;
+};
+
+// Records what draw_room_race puts on screen (monospace widths, as the HUD font's).
+struct RecordingHud {
+    std::vector<Drawn> drawn;
+
+    void overlay_begin(int, int, float) {}
+
+    void overlay_end(int, int) {}
+
+    void overlay_fade(float) {}
+
+    void overlay_text(float x, float y, std::string_view text, float size, native::NameColor color, bool = false) {
+        drawn.push_back({std::string(text), x, y, size, color});
+    }
+
+    float overlay_text_width(std::string_view text, float size) const { return float(text.size()) * size * .6f; }
+
+    const Drawn *find(std::string_view text) const {
+        for (const auto &d : drawn)
+            if (d.text == text) return &d;
+        return nullptr;
+    }
+
+    const Drawn *last(std::string_view text) const {
+        for (auto d = drawn.rbegin(); d != drawn.rend(); ++d)
+            if (d->text == text) return &*d;
+        return nullptr;
+    }
+};
+
+RecordingHud draw(const native::RoomModes &modes, double now, native::RoomRaceStack stack = {}) {
+    RecordingHud hud;
+    native::draw_room_race(hud, 1600, 900, 100, modes.room_race_display(), now, stack);
+    return hud;
+}
+
+J racer(const char *name, J place = nullptr, J real = nullptr, J dnf = nullptr) {
+    return {{"name", name},
+            {"slot", 1},
+            {"place", place},
+            {"dnf", dnf},
+            {"finish", real.is_null() ? J(nullptr) : J{{"time", real}, {"real", real}}},
+            {"checking", false}};
+}
+
+// What racers see (web net/race.ts): the line, numerals, GO, the place and the standings. Observers see nothing.
+void racer_visuals() {
+    using native::race_ordinal;
+    native::HudLabel<16> ordinal;
+    for (const auto &[n, text] : std::vector<std::pair<unsigned, std::string>>{
+                 {1, "1st"},
+                 {2, "2nd"},
+                 {3, "3rd"},
+                 {4, "4th"},
+                 {11, "11th"},
+                 {12, "12th"},
+                 {13, "13th"},
+                 {21, "21st"},
+                 {22, "22nd"},
+                 {111, "111th"}
+         }) {
+        race_ordinal(ordinal, n);
+        assert(ordinal.view() == text);
+    }
+    native::RoomModes modes;
+    auto joining = race("joining");
+    joining["track"] = 1;
+    modes.event(event(joining), "bhop_eazy", false, 1000);
+    auto hud = draw(modes, 1000);
+    assert(hud.find("Room race") && hud.find("2 racers") && hud.find("starts in ") && hud.find("5 s"));
+    auto countdown = race();
+    countdown["track"] = 1;
+    modes.event(event(countdown), "bhop_eazy", false, 6000);
+    assert(modes.room_race_display().board.view() == "2 racers, Bonus 1");
+    hud = draw(modes, 6500);
+    assert(hud.find("3") && hud.find("2 racers, Bonus 1") && !hud.find("starts in "));
+    // The numeral stamps in: big and faint at first, its own size once landed.
+    const auto landing_hud = draw(modes, 8001), landed_hud = draw(modes, 8400);
+    const auto *landing = landing_hud.find("1");
+    const auto *landed = landed_hud.find("1");
+    assert(landing && landed && landing->size > landed->size && landing->color[3] < landed->color[3]);
+    // "1" holds until the room's GO, with no explainer; no banner while the map is changing.
+    hud = draw(modes, 9500, {false, false, 0});
+    assert(hud.find("1") && !hud.find("Room race") && !hud.find("Waiting for GO"));
+    auto live = countdown;
+    live["state"] = "live";
+    modes.event(event(live), "bhop_eazy", false, 9000);
+    hud = draw(modes, 9200);
+    assert(hud.find("GO") && hud.find("00:00.2") && hud.find("0 of 2 finished"));
+    assert(!draw(modes, 9700).find("GO"));
+    // Reduced motion: GO only fades, it never changes size.
+    for (const double at : {9050., 9200., 9400.}) {
+        const auto calm = draw(modes, at, {true});
+        if (const auto *go = calm.find("GO")) assert(go->size == 88);
+    }
+    auto placed = live;
+    placed["racers"][0] = racer("Alice", 1, 3.51);
+    modes.event(event(placed), "bhop_eazy", false, 12000);
+    hud = draw(modes, 12500);
+    assert(hud.find("1st") && hud.find("00:03.510") && hud.find("you ") && hud.find("1 of 2 finished"));
+    const auto *place = hud.last("1st");
+    // Above the crosshair; under an end card that reaches further down.
+    assert(place->y < 450 && place->color[1] == 1 && place->color[0] < .5f);
+    const auto under_card = draw(modes, 12500, {false, true, 500});
+    const auto *under = under_card.last("1st");
+    assert(under->y + under->size * (1.3f * 42 / 52 - .73f) >= 516 - .01f);
+    // Gone after 2.4 s and its fade.
+    hud = draw(modes, 12000 + 2400 + 401);
+    assert(std::count_if(hud.drawn.begin(), hud.drawn.end(), [](const Drawn &d) { return d.text == "1st"; }) == 1);
+    // Standings: place order, DNFs last, four rows and yours; the winner's time biggest; yours in white.
+    native::RoomModes six;
+    auto over = race("over");
+    over["racers"] = J::array(
+            {racer("Alice", 5, 8.904),
+             racer("Bob", 2, 6.112),
+             racer("Dim", 1, 5.871),
+             racer("keyuu", 3, 7.25),
+             racer("syl", 4, 8.033),
+             racer("leo", nullptr, nullptr, "forfeit")}
+    );
+    six.event(event(over), "bhop_eazy", false, 20000);
+    const auto &standings = six.room_race_display();
+    assert(standings.row_count == 5 && standings.rows[0].name.view() == "Dim" && standings.rows[0].top);
+    assert(standings.rows[4].me && standings.rows[4].name.view() == "you" && standings.rows[4].place.view() == "5th");
+    assert(standings.verdict.view() == "5th of 6" && !standings.won);
+    hud = draw(six, 21500);
+    const auto *top = hud.find("00:05.871");
+    const auto *mine = hud.find("00:08.904");
+    const auto *second = hud.find("00:06.112");
+    assert(top && mine && second && top->size > second->size && mine->color[3] == 1 && second->color[3] < 1);
+    // Times line up on their right edge; places on theirs.
+    assert(std::abs((top->x + top->text.size() * top->size * .6f) - (mine->x + mine->text.size() * mine->size * .6f))
+           < .01f);
+    assert(hud.find("5th of 6") && !hud.find("leo"));
+    assert(native::room_race_result_bottom(standings, 900, 21500) > 150);
+    assert(native::room_race_result_bottom(standings, 900, 28001) == 0);
+    // Verdicts.
+    auto won = over;
+    won["racers"] = J::array({racer("Alice", 1, 3.5), racer("Bob", 2, 4.)});
+    native::RoomModes winner;
+    winner.event(event(won), "bhop_eazy", false, 20000);
+    assert(winner.room_race_display().verdict.view() == "You won" && winner.room_race_display().won);
+    const auto winner_hud = draw(winner, 21500);
+    assert(winner_hud.find("00:03.500")->color[0] < .5f);
+    auto dnf = over;
+    dnf["racers"] = J::array({racer("Alice", nullptr, nullptr, "left"), racer("Bob", 1, 4.)});
+    native::RoomModes left;
+    left.event(event(dnf), "bhop_eazy", false, 20000);
+    assert(left.room_race_display().verdict.view() == "You didn't finish");
+    assert(left.room_race_display().rows[1].place.view() == "DNF"
+           && left.room_race_display().rows[1].time.view() == "left");
+    auto cancelled = race("over");
+    cancelled["outcome"] = "cancelled";
+    native::RoomModes stopped;
+    stopped.event(event(cancelled), "bhop_eazy", false, 20000);
+    assert(stopped.room_race_display().verdict.view() == "Race cancelled");
+    assert(stopped.room_race_display().rows[0].time.view() == "no finish");
+    auto nobody = race("over");
+    native::RoomModes empty;
+    empty.event(event(nobody), "bhop_eazy", false, 20000);
+    assert(empty.room_race_display().verdict.view() == "Nobody finished");
+    // Observers: nothing on screen.
+    native::RoomModes observer;
+    observer.event(event(race("joining", -1)), "bhop_eazy", false, 1000);
+    assert(!observer.room_race_display().visible && draw(observer, 1000).drawn.empty());
 }
 
 void shared_vectors(const char *path) {
@@ -168,5 +344,6 @@ int main(int argc, char **argv) {
     countdown_and_go();
     loading_cancellation_and_reconnect();
     observers_forfeits_and_results();
+    racer_visuals();
     std::cout << "Room-race holds, canonical starts, loading, reconnects, observers and results passed\n";
 }

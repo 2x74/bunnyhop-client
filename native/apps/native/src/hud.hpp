@@ -344,6 +344,11 @@ class NativeHud {
     void rect(float x, float y, float w, float h, Color c) { quad(x, y, w, h, -2, -2, 0, 0, c); }
 
     static constexpr Color text_shadow{0, 0, 0, .85f};
+    // How opaque text drawn while fading is (overlay_fade): its shadow fades with it.
+    float text_fade_ = 1;
+
+    Color faded_shadow() const { return {0, 0, 0, text_shadow[3] * text_fade_}; }
+
     // System-shaped text is rasterized with an em of 1.3 times its size.
     static constexpr float shaped_em_per_size = 1.3f;
     static constexpr float atlas_advance_per_size = .6f;
@@ -403,7 +408,7 @@ class NativeHud {
             const unsigned index = unsigned(character) - ' ';
             const float u = float(index % atlas_columns) * atlas_cell_u;
             const float v = float(index / atlas_columns) * atlas_cell_v;
-            quad(x + 1, y + 1, size, height, u, v, atlas_cell_u, atlas_cell_v, text_shadow);
+            quad(x + 1, y + 1, size, height, u, v, atlas_cell_u, atlas_cell_v, faded_shadow());
             quad(x, y, size, height, u, v, atlas_cell_u, atlas_cell_v, color);
             x += advance;
         }
@@ -418,7 +423,7 @@ class NativeHud {
             const float width = glyphs->width / ratio, height = glyphs->height / ratio;
             if (center) x -= width * .5f;
             current_texture = glyphs->texture;
-            quad(x + 1, y + 1, width, height, 0, 0, 1, 1, text_shadow);
+            quad(x + 1, y + 1, width, height, 0, 0, 1, 1, faded_shadow());
             quad(x, y, width, height, 0, 0, 1, 1, color);
             current_texture = atlas;
             return;
@@ -829,7 +834,11 @@ public:
         pivot_x = pivot_y = 0;
         element_shift_x_ = element_shift_y_ = 0;
         clear_element_style();
+        text_fade_ = 1;
     }
+
+    // Text drawn next is fading in or out (its colour carries the same alpha): the shadow follows. 1 restores it.
+    void overlay_fade(float alpha) { text_fade_ = std::clamp(alpha, 0.f, 1.f); }
 
     void overlay_text(
             float x, float y, std::string_view value, float size, std::array<float, 4> color, bool center = false

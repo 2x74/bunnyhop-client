@@ -4261,7 +4261,8 @@ int run(const native::Options &opt) {
                     free_cameras.flying(spectator.has_value()),
                     &look_menu,
                     menu_cursor.pointer(),
-                    &numbered_menus.copy_start
+                    &numbered_menus.copy_start,
+                    menu_reduced_motion
             }
                     .draw();
         }

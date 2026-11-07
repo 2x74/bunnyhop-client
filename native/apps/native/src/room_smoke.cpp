@@ -2,13 +2,16 @@
 // state, chat and scoreboard over a loaded map, and saves the frames listed in the shot file. The recording comes from
 // a local server; nothing here opens a socket or submits anything.
 // A shot can also draw the spectator bar ("spectating": "eye", "chase" or "free", with "spectateMenu") and the run
-// HUD with freecam's line ("freecam").
+// HUD with freecam's line ("freecam"). Recorded race and room-race events draw as the client draws them; a shot can add
+// the run's end card ("endcard": run seconds, "endcardAt": when it came up, in recording ms) and "reducedMotion".
 #include "client_smoke.hpp"
 #include "options.hpp"
 #include "game_session.hpp"
 #include "renderer.hpp"
 #include "hud.hpp"
 #include "room_state.hpp"
+#include "room_modes.hpp"
+#include "hud_result.hpp"
 #include "native_chat.hpp"
 #include "menu_backdrop.hpp"
 #include "free_cameras.hpp"
@@ -40,6 +43,9 @@ struct RoomShot {
     // Watching the room's spectator target: "eye", "chase" or "free" draws the spectator bar for that camera.
     std::string spectating;
     bool spectate_menu = false, freecam = false;
+    std::optional<double> endcard;
+    double endcard_at = 0;
+    bool reduced_motion = false, run_hud = false;
 };
 
 std::vector<RecordedMessage> read_recording(const std::filesystem::path &path) {
@@ -73,6 +79,10 @@ std::vector<RoomShot> read_shots(const std::filesystem::path &path) {
         shot.spectating = item.value("spectating", std::string());
         shot.spectate_menu = item.value("spectateMenu", false);
         shot.freecam = item.value("freecam", false);
+        if (item.contains("endcard")) shot.endcard = item.at("endcard").get<double>();
+        shot.endcard_at = item.value("endcardAt", 0.) / 1000;
+        shot.reduced_motion = item.value("reducedMotion", false);
+        shot.run_hud = item.value("runHud", false);
         shots.push_back(std::move(shot));
     }
     return shots;
@@ -82,10 +92,13 @@ std::vector<RoomShot> read_shots(const std::filesystem::path &path) {
 class RoomReplay {
 public:
     RoomState room;
+    RoomModes modes;
     Chat chat;
     double epoch_offset_ms = 0;
 
-    explicit RoomReplay(std::vector<RecordedMessage> messages) : messages_(std::move(messages)) {}
+    RoomReplay(std::vector<RecordedMessage> messages, std::string map)
+        : messages_(std::move(messages))
+        , map_(std::move(map)) {}
 
     void advance(double until) {
         for (; next_ < messages_.size() && messages_[next_].at <= until; ++next_)
@@ -96,6 +109,7 @@ public:
 
 private:
     std::vector<RecordedMessage> messages_;
+    std::string map_;
     size_t next_ = 0;
 
     void apply(const RecordedMessage &recorded) {
@@ -107,6 +121,7 @@ private:
                 epoch_offset_ms = event.at("now").get<double>() - recorded.at * 1000;
             room.event(message);
             room.refresh_display(recorded.at);
+            modes.event(message, map_, false, epoch_ms(recorded.at));
         } else if (type == "roomSnapshot") {
             room.snapshot(message, recorded.at);
             room.refresh_display(recorded.at);
@@ -215,7 +230,46 @@ void draw_room_frame(RoomSmokeFrame &frame, const RoomShot &shot, double at, BhS
     if (shot.scoreboard)
         draw_scoreboard(frame.hud, frame.width, frame.height, 100, frame.replay.room.display(), at, epoch_ms);
     if (shot.freecam) draw_freecam_hud(frame.hud, frame.width, frame.height, frame.game.map_id, snapshot);
+    if (shot.run_hud)
+        frame.hud.draw(
+                frame.width,
+                frame.height,
+                snapshot,
+                BhRunState{},
+                BhCmd{},
+                frame.game.map_id,
+                "autohop",
+                "",
+                0,
+                true,
+                true,
+                false,
+                {}
+        );
     if (!shot.spectating.empty()) draw_spectating(frame.hud, frame.width, frame.height, shot, frame.replay.room, at);
+    auto &modes = frame.replay.modes;
+    modes.room_race_tick(epoch_ms);
+    const HudGeometry geometry(frame.width, frame.height, 100);
+    const auto &standings = modes.room_race_display();
+    const float race_bottom = room_race_result_bottom(standings, geometry.height, epoch_ms);
+    auto &result = frame.hud.result;
+    result.reset();
+    if (shot.endcard) {
+        result.finish(1, *shot.endcard, shot.endcard_at, std::nullopt, false);
+        result.status_line.assign("Rank #3");
+        draw_result(frame.hud, frame.width, frame.height, 100, result, at, race_bottom);
+    }
+    draw_race(frame.hud, frame.width, frame.height, 100, modes.display(), epoch_ms);
+    if (modes.display().state == RaceDisplay::State::none)
+        draw_room_race(
+                frame.hud,
+                frame.width,
+                frame.height,
+                100,
+                standings,
+                epoch_ms,
+                {shot.reduced_motion, true, result_bottom(geometry, result, at, race_bottom)}
+        );
 }
 
 }  // namespace
@@ -224,7 +278,7 @@ int run_room_smoke(const Options &opt, SDL_Window *window, Gl &gl, GameSession &
     if (!game.renderer || !game.core) throw std::runtime_error("Room smoke requires a local map");
     bh_record_end(game.core.get());
     const std::filesystem::path directory = opt.room_smoke;
-    RoomReplay replay(read_recording(directory / "room.jsonl"));
+    RoomReplay replay(read_recording(directory / "room.jsonl"), game.map_id);
     NameTagSights sights;
     RoomSmokeFrame frame{gl, game, hud, replay, sights};
     SDL_GetWindowSizeInPixels(window, &frame.width, &frame.height);

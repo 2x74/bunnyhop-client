@@ -184,11 +184,27 @@ void HudFrame::draw_panels() const {
 void HudFrame::draw_notifications() const {
     if (prefs.hud) {
         const float percent = prefs.hud_scale;
-        native::draw_result(hud, width, height, percent, hud.result, double(SDL_GetTicksNS()) / nanoseconds_per_second);
-        native::draw_toasts(hud, width, height, percent, hud.toasts, double(SDL_GetTicksNS()) / nanoseconds_per_second);
-        native::draw_race(hud, width, height, percent, room_modes.display(), epoch_ms());
-        if (room_modes.display().state == native::RaceDisplay::State::none)
-            native::draw_room_race(hud, width, height, percent, room_modes.room_race_display(), epoch_ms());
+        const double seconds = double(SDL_GetTicksNS()) / nanoseconds_per_second, epoch = epoch_ms();
+        const native::HudGeometry geometry(width, height, percent);
+        // A room race's standings sit at the top; the end card and notices step down under them.
+        const bool room_race = room_modes.display().state == native::RaceDisplay::State::none;
+        const auto &standings = room_modes.room_race_display();
+        const float race_bottom = room_race ? native::room_race_result_bottom(standings, geometry.height, epoch) : 0;
+        native::draw_result(hud, width, height, percent, hud.result, seconds, race_bottom);
+        native::draw_toasts(hud, width, height, percent, hud.toasts, seconds, race_bottom);
+        native::draw_race(hud, width, height, percent, room_modes.display(), epoch);
+        if (room_race)
+            native::draw_room_race(
+                    hud,
+                    width,
+                    height,
+                    percent,
+                    standings,
+                    epoch,
+                    {reduced_motion,
+                     room.changing_map.empty(),
+                     native::result_bottom(geometry, hud.result, seconds, race_bottom)}
+            );
         native::draw_race_picker(hud, width, height, percent, race_picker, menu_pointer);
         native::draw_spectator_bar(hud, width, height, percent, spectator_bar);
         spectate_picker.draw(hud, width, height, percent, menu_pointer);
