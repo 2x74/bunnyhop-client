@@ -45,7 +45,7 @@
    two words, and VERSION stays below 0.1.0 while STAGE is alpha.
    ============================================================ */
 
-export const VERSION = "0.0.38";
+export const VERSION = "0.0.39";
 
 /** Release stage, printed after the number ("v0.0.4 alpha"). */
 export const STAGE = "alpha";
@@ -67,8 +67,8 @@ export interface ChangelogEntry {
 
 /** Notes for the next release, unpublished until promoted into CHANGELOG. */
 export const UPCOMING: ChangelogEntry = {
-  version: "0.0.39",
-  date: "2026-11-05",
+  version: "0.0.40",
+  date: "2026-11-06",
   kind: "minor",
   title: "Next update",
   notes: [],
@@ -76,6 +76,20 @@ export const UPCOMING: ChangelogEntry = {
 
 /** Newest first. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "0.0.39",
+    date: "2026-11-06",
+    kind: "minor",
+    title: "Room races, a landfix toggle and Copy start",
+    notes: [
+      "Room races: type !race all in a server (or !roomrace, with a style and track if you like) and everyone has 20 seconds to type !join. Then all racers go back to the start together, count down 3, 2, 1 and GO, and race to the end. Chat calls out each finish with its place and time, and the standings show when everyone's done. !leave drops out before the start. Runs from a race count on the boards like any other, and 1v1 !race still works.",
+      "Landfix is now a choice. It's on by default, as before: every jump starts 1.5 units above the floor, as on SourceJump servers. Turn it off for stock CS:S jumps under Settings → Keys → Landfix, with !landfix, or with cl_landfix in the console. You can switch it during a run and bind it like on CS:S: bind k \"say !landfix\". Both count on the same boards.",
+      "Copy start: leaderboard rows have a Copy start button next to Watch and Race. It sets your start point to the spot and angle that run started from, like standing there and typing !setstart. Or type !copystart for the world record, !copystart #3 for third place, or !copystart and a name. In a server, !copystart lists the players there and copies the start of their best run.",
+      "Jump stats (!ssj and the JHUD) keep counting when a map teleports you or you load a checkpoint, the same as on CS:S servers. A restart still starts them over.",
+      "The main menu shows the latest world records again, under the maps to try: the map, style and time, who set it and when. Click a record to watch it, or the player to open their profile.",
+      "Your existing runs don't change. The desktop client gets all of this in its next update. Until then it can't start or join room races or turn landfix off, and everything else works as before.",
+    ],
+  },
   {
     version: "0.0.38",
     date: "2026-11-05",
