@@ -452,7 +452,7 @@ const BUILT_IN: ChatCommand[] = [
     name: "landfix",
     args: "[on|off]",
     help: "landfix on / off",
-    about: "jumps start 1.5 units up, as on SourceJump servers; off is stock CS:S. !landfix on or off sets it.",
+    about: "jumps start 1.5 units up, as on landfix servers; off is stock CS:S. !landfix on or off sets it.",
     group: "run",
     panelOnly: true,
     where: "both",

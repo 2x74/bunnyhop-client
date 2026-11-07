@@ -9,7 +9,7 @@
 //     turns) with the map-change banner and its countdown beeps. At GO (the room's `live` message, sent at the server's
 //     GO time) you're put on the start again and let go. Never on the local clock: its offset from the room's can be off
 //     by the first ping, and a start before GO would make the run not count (arrival - run time >= GO).
-//   - countdown: big numerals at crosshair height stamp in (3, 2, 1), GO in gold blows outward (#mp-count).
+//   - countdown: big numerals at crosshair height stamp in (3, 2, 1), GO in the accent blows outward (#mp-count).
 //   - live: a line at the top: opponent, the race clock (to tenths: it redraws at 5 Hz), their live timer (snapshot
 //     meta), their finish once in.
 //   - over: both times stacked, the winner's on top, and one line under them ("You won"); the loser's lands a beat later.
@@ -327,7 +327,7 @@ export class RaceUi {
     this.render();
   }
 
-  /** The countdown numeral: each one stamps in at crosshair height; GO is gold and blows outward. null hides it. */
+  /** The countdown numeral: each one stamps in at crosshair height; GO is in the accent and blows outward. null hides it. */
   private showCount(text: string | null): void {
     if (text === this.countShown) return;
     this.countShown = text ?? "";

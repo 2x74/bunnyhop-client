@@ -95,18 +95,20 @@
 #mp-banner.tone-change { --tc: var(--amber); }
 #mp-banner.tone-wr { --tc: var(--wr); }
 #mp-banner.tone-sr { --tc: var(--carrot); }
-/* !race (net/race.ts): 3, 2, 1 stamp in at crosshair height; GO is gold and blows outward. */
-#mp-count { left: 50%; top: 50%; translate: -50% -115%; font-size: calc(5.5rem * var(--hs, 1)); font-weight: 850; font-stretch: 90%; line-height: 1; color: #fff; text-shadow: var(--shadow-text); pointer-events: none; }
-#mp-count.go { color: var(--wr); }
+/* !race (net/race.ts): 3, 2, 1 stamp in at crosshair height; GO is in the accent and blows outward. Colours come from
+   #hud's (white) and the theme variables, so custom CSS restyles them (the /custom-css guide: #mp-count, #mp-place,
+   #mp-race). */
+#mp-count { left: 50%; top: 50%; translate: -50% -115%; font-size: calc(5.5rem * var(--hs, 1)); font-weight: 850; font-stretch: 90%; line-height: 1; text-shadow: var(--shadow-text); pointer-events: none; }
+#mp-count.go { color: var(--amber); }
 /* The race line while racing: plain HUD text at the top (no panel), the clock in tenths. */
 #mp-race { left: 50%; top: 3.2vh; transform: translateX(-50%); display: flex; align-items: baseline; gap: 1.2em; font-size: calc(0.95rem * var(--hs, 1)); font-weight: 650; text-shadow: var(--shadow-text); white-space: nowrap; }
 #mp-race .rc-clock { min-width: 4.6em; text-align: center; font-size: 1.25em; font-weight: 800; font-stretch: 90%; font-variant-numeric: tabular-nums; }
 #mp-race .rc-side { font-variant-numeric: tabular-nums; }
 /* The result: both times stacked, the winner's on top, one line under them. */
 #mp-race.result { top: 4vh; flex-direction: column; align-items: center; gap: 0.1em; }
-#mp-race .rc-row { display: flex; align-items: baseline; gap: 0.7em; color: rgba(255, 255, 255, 0.7); }
+#mp-race .rc-row { display: flex; align-items: baseline; gap: 0.7em; color: color-mix(in srgb, currentColor 70%, transparent); }
 #mp-race .rc-row .rc-t { font-size: 1.5em; font-weight: 800; font-stretch: 90%; font-variant-numeric: tabular-nums; }
-#mp-race .rc-row.top { color: #fff; }
+#mp-race .rc-row.top { color: inherit; }
 #mp-race .rc-row.top .rc-t { font-size: 2.3em; }
 #mp-race.won .rc-row.top .rc-t { color: var(--gain); }
 #mp-race .rc-verdict { display: inline-block; margin-top: 0.25em; font-size: 1.15em; font-weight: 850; }
@@ -116,11 +118,11 @@
 #mp-race.room .rc-row { display: contents; }
 #mp-race.room .rc-pl { justify-self: end; font-weight: 800; font-variant-numeric: tabular-nums; }
 #mp-race.room .rc-t { justify-self: end; }
-#mp-race.room .rc-row.me { color: #fff; }
+#mp-race.room .rc-row.me { color: inherit; }
 #mp-race.room .rc-verdict { grid-column: 1 / -1; justify-self: center; }
 /* A room racer's place as it comes in: the countdown's numeral, smaller, over the race time. 1st in the win colour.
    Just above the crosshair; under the run's end card when that reaches further down (net/race.ts placePlace). */
-#mp-place { left: 50%; top: calc(50% - 7.6rem * var(--hs, 1)); translate: -50% 0; text-align: center; line-height: 1; color: #fff; text-shadow: var(--shadow-text); pointer-events: none; }
+#mp-place { left: 50%; top: calc(50% - 7.6rem * var(--hs, 1)); translate: -50% 0; text-align: center; line-height: 1; text-shadow: var(--shadow-text); pointer-events: none; }
 #mp-place .pl-n { font-size: calc(4rem * var(--hs, 1)); font-weight: 850; font-stretch: 90%; }
 #mp-place .pl-t { margin-top: 0.25em; font-size: calc(1.15rem * var(--hs, 1)); font-weight: 700; font-variant-numeric: tabular-nums; }
 #mp-place.first .pl-n { color: var(--gain); }

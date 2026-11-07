@@ -15,7 +15,8 @@
 // loads the game without it for that visit.
 //
 // PROMISED to CSS authors (the guide: /custom-css, custom-css.html and public-site/custom-css.md): the :root variables in style.css, #hud [data-el="..."] (the HUD
-// element ids are fixed: layout share codes depend on them), #custom-art, the live numbers (live.ts). Everything else
+// element ids are fixed: layout share codes depend on them), #custom-art, the live numbers (live.ts), the main menu's #home-records (ui/home-records.ts: [data-part] rows,
+// --home-records) and the race HUD's #mp-count / #mp-place / #mp-race with their state classes (net/race.ts). Everything else
 // (class names, structure) may change in any release.
 
 import { API_URL } from "../api";

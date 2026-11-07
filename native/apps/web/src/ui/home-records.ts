@@ -3,11 +3,16 @@
 // and the time, then the holder (avatar and name, with the hover card the boards use) and how long ago. The picture and
 // map open the run in the replay viewer; the holder opens their profile.
 //
+// Custom CSS (the /custom-css guide promises these): #home-records, its rows' [data-part="run"] and [data-part="player"],
+// and --home-records: none on :root, which hides the list (the maps to try get their six tiles back, and the list isn't
+// asked for while it's hidden).
+//
 // The list is one saved answer on the server, so the client asks once a minute at most, however often the home screen
 // is rebuilt. While it loads, rows of empty pictures hold its place; with nothing to show it says so. Offline (no API)
 // or when the request fails, there is no list at all.
 
 import { api, type RecentWr } from "../api";
+import { onCssStatus } from "../custom-css";
 import { styleLabel } from "../styles";
 import { clampTier, tierLabel, tierName, tierNum } from "../tiers";
 import { formatTime } from "../timer";
@@ -54,7 +59,7 @@ export function recordRow(r: RecentWr, a: RecordsActions, now = Date.now()): HTM
   const watch = () => (a.watch ?? watchRun)(r);
   const run = h(
     "button.home-rec-run",
-    { type: "button", title: `Watch the ${style} world record on ${r.map}`, onclick: watch },
+    { type: "button", "data-part": "run", title: `Watch the ${style} world record on ${r.map}`, onclick: watch },
     mapArt(r.map, r.thumbnailUrl, { className: "home-rec-art" }),
     h(
       "span.home-rec-text",
@@ -71,6 +76,7 @@ export function recordRow(r: RecentWr, a: RecordsActions, now = Date.now()): HTM
     "a.home-rec-who",
     {
       href,
+      "data-part": "player",
       title: `${p.name}'s profile`,
       onclick: (ev: Event) => {
         const e = ev as MouseEvent;
@@ -103,26 +109,55 @@ function placeholder(): HTMLElement[] {
   );
 }
 
+/** Custom CSS turned the list off (:root { --home-records: none }). */
+const hiddenByCss = () => {
+  try {
+    return getComputedStyle(document.documentElement).getPropertyValue("--home-records").trim() === "none";
+  } catch {
+    return false;
+  }
+};
+
 /** The section: heading, then the rows (or the wait, or "nothing lately"). Hidden offline and on errors. */
 export function recentRecords(a: RecordsActions, load: () => Promise<RecentWr[]> = recentWrs): HTMLElement {
   const list = h("ol.home-recs", { "aria-busy": "true" }, ...placeholder());
-  const box = h("section.home-records", { "aria-label": "Recent world records" }, h("h2.home-recs-head", null, "Recent world records"), list);
+  const box = h("section#home-records.home-records", { "aria-label": "Recent world records" }, h("h2.home-recs-head", null, "Recent world records"), list);
   if (!api.available()) {
     box.hidden = true;
     return box;
   }
-  void load().then(
-    (records) => {
-      list.removeAttribute("aria-busy");
-      if (!records.length) {
-        list.replaceChildren(h("li.home-rec-none", null, "No new world records lately"));
-        return;
-      }
-      const now = Date.now();
-      list.replaceChildren(...records.map((r) => recordRow(r, a, now)));
-      observeThumbs(list);
-    },
-    () => (box.hidden = true),
-  );
+  let asked = false;
+  let failed = false;
+  const ask = () => {
+    if (asked) return;
+    asked = true;
+    void load().then(
+      (records) => {
+        list.removeAttribute("aria-busy");
+        if (!records.length) {
+          list.replaceChildren(h("li.home-rec-none", null, "No new world records lately"));
+          return;
+        }
+        const now = Date.now();
+        list.replaceChildren(...records.map((r) => recordRow(r, a, now)));
+        observeThumbs(list);
+      },
+      () => ((failed = true), (box.hidden = true)),
+    );
+  };
+  // Hidden by custom CSS (also when a hosted theme or an edit sets it after the menu is drawn): hidden, so the maps
+  // to try have their six tiles; shown again (and asked for) when it's taken out.
+  const sync = () => {
+    const off = hiddenByCss();
+    box.hidden = off || failed;
+    if (!off) ask();
+  };
+  sync();
+  let shown = false;
+  const stop = onCssStatus(() => {
+    if (!box.isConnected) return shown && stop();
+    shown = true;
+    sync();
+  });
   return box;
 }

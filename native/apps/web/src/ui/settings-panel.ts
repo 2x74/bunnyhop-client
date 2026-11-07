@@ -884,7 +884,7 @@ function keysSection(ctx: Ctx): SettingsContent {
           }),
           toggle("Landfix", () => P().landfix, (v) => up((p) => (p.landfix = v)), {
             hint: "!landfix",
-            desc: "Jumps start 1.5 units up, as on SourceJump servers. Off: stock CS:S jumps. Works mid-run.",
+            desc: "Jumps start 1.5 units up, as on landfix servers. Off: stock CS:S jumps. Works mid-run.",
             keywords: "landfix jump lift stock source sourcejump cl_landfix !landfix",
           }),
           // The slider moves in 5s; the box takes exact values as CS:S cl_yawspeed and the desktop client do (118.889).
