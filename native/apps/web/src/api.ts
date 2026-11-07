@@ -663,6 +663,21 @@ export interface RecentRecord {
   date: string;
 }
 
+/** GET /records/wrs: the home screen's recent world records (apps/api/src/recent-wrs.ts), newest first, every style. */
+export interface RecentWr {
+  runId: string;
+  map: string;
+  /** The map's tier (clamped), null: unrated. */
+  tier: number | null;
+  thumbnailUrl: string | null;
+  style: string;
+  time: number;
+  ticks: number;
+  /** ISO date the run was set. */
+  date: string;
+  player: ApiPlayer;
+}
+
 /** GET /maps/:name — summary plus the current build and its pinned (ranked) zone set. */
 export interface MapDetail extends MapSummary {
   gamebananaId: number | null;
@@ -1223,6 +1238,10 @@ export const api = {
   /** Linked author names -> the player (apps/api src/mappers.ts), keyed by the lowercased author. */
   async mappers(): Promise<Record<string, { author: string; id: string; name: string }>> {
     return (await json<{ authors: Record<string, { author: string; id: string; name: string }> }>("/mappers")).authors;
+  },
+  /** Standing world records set lately, every style, newest first (the home screen's list). */
+  async recentWrs(limit = 8): Promise<{ at: number; records: RecentWr[] }> {
+    return json<{ at: number; records: RecentWr[] }>(`/records/wrs?limit=${limit}`);
   },
   /** Newest personal bests across all ranked boards (rank 1 = new world record). */
   async recentRecords(style = "autohop", limit = 6): Promise<RecentRecord[]> {

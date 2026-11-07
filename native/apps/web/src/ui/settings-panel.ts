@@ -883,7 +883,9 @@ function keysSection(ctx: Ctx): SettingsContent {
             keywords: "release w jump forward let go auto unpress -forward prestrafe hold w air strafe script wjump",
           }),
           toggle("Landfix", () => P().landfix, (v) => up((p) => (p.landfix = v)), {
-            keywords: "landfix jump lift stock source !landfix",
+            hint: "!landfix",
+            desc: "Jumps start 1.5 units up, as on SourceJump servers. Off: stock CS:S jumps. Works mid-run.",
+            keywords: "landfix jump lift stock source sourcejump cl_landfix !landfix",
           }),
           // The slider moves in 5s; the box takes exact values as CS:S cl_yawspeed and the desktop client do (118.889).
           // Three decimals: the replay stores it as a float32 (turn-binds.ts turnSpeedOf).

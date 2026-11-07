@@ -111,8 +111,26 @@
 #mp-race.won .rc-row.top .rc-t { color: var(--gain); }
 #mp-race .rc-verdict { display: inline-block; margin-top: 0.25em; font-size: 1.15em; font-weight: 850; }
 #mp-race.won .rc-verdict { color: var(--gain); }
-/* The race result sits where the end-of-run result goes; that one steps down under it. */
-#hud.race-result #hud-endcard { top: 24vh; }
+/* A room race's standings: the same stack as three columns (place, name, time) so the times line up; yours in white. */
+#mp-race.result.room { display: grid; grid-template-columns: auto auto auto; justify-content: center; align-items: baseline; column-gap: 0.7em; row-gap: 0.1em; }
+#mp-race.room .rc-row { display: contents; }
+#mp-race.room .rc-pl { justify-self: end; font-weight: 800; font-variant-numeric: tabular-nums; }
+#mp-race.room .rc-t { justify-self: end; }
+#mp-race.room .rc-row.me { color: #fff; }
+#mp-race.room .rc-verdict { grid-column: 1 / -1; justify-self: center; }
+/* A room racer's place as it comes in: the countdown's numeral, smaller, over the race time. 1st in the win colour.
+   Just above the crosshair; under the run's end card when that reaches further down (net/race.ts placePlace). */
+#mp-place { left: 50%; top: calc(50% - 7.6rem * var(--hs, 1)); translate: -50% 0; text-align: center; line-height: 1; color: #fff; text-shadow: var(--shadow-text); pointer-events: none; }
+#mp-place .pl-n { font-size: calc(4rem * var(--hs, 1)); font-weight: 850; font-stretch: 90%; }
+#mp-place .pl-t { margin-top: 0.25em; font-size: calc(1.15rem * var(--hs, 1)); font-weight: 700; font-variant-numeric: tabular-nums; }
+#mp-place.first .pl-n { color: var(--gain); }
+/* The race result sits where the end-of-run result goes; that one steps down under it, and so do the room's record
+   banners (--race-result-bottom: its bottom edge, set by net/race.ts). */
+#hud.race-result #hud-endcard { top: max(24vh, calc(var(--race-result-bottom, 0px) + 5.5rem)); }
+/* With the end card up, notify.css puts banners at the very top, over the race line: the line steps aside meanwhile. */
+body.in-game:not(.menu-open):has(#hud-endcard:not([hidden])):has(#nt-banners .nt-banner) #mp-race:not(.result) { visibility: hidden; }
+/* (#mp-race in the :has outranks notify.css's end-card rule, which would put the banner over the result.) */
+body.in-game:not(.menu-open):has(#hud.race-result > #mp-race) #nt-banners { top: max(8vh, calc(var(--race-result-bottom, 0px) + 0.8rem)); }
 /* Spectating: one line, "Watching hopper"; their speed and timer show in your HUD (hud.ts setSpectated). */
 #mp-specbar { left: 50%; bottom: 2.2rem; transform: translateX(-50%); text-align: center; font-size: calc(1rem * var(--hs, 1)); font-weight: 650; text-shadow: var(--shadow-text); white-space: nowrap; }
 #mp-specbar b { font-weight: 800; }
@@ -120,7 +138,7 @@
 /* Spectating: your own run's readouts would mislead; the speed and timer stay and show the watched player's. */
 body.mp-spectating #hud .hud-el:not([data-el="chat"]):not([data-el="map"]):not([data-el="fps"]):not([data-el="speed"]):not([data-el="timer"]):not([data-el="spectators"]) { visibility: hidden; }
 body.mp-spectating #hud-endcard { display: none; }
-body.menu-open #mp-menu, body.menu-open #mp-scoreboard, body.menu-open #mp-specbar, body.menu-open #mp-race, body.menu-open #mp-count { display: none; }
+body.menu-open #mp-menu, body.menu-open #mp-scoreboard, body.menu-open #mp-specbar, body.menu-open #mp-race, body.menu-open #mp-count, body.menu-open #mp-place { display: none; }
 /* A room menu (vote, nominate, spectate) over the !cp menu: the checkpoints step aside until it closes (menu-view.ts). */
 #hud:has(> #mp-menu:not(.cp-menu):not([hidden])) > #mp-menu.cp-menu { display: none; }
 

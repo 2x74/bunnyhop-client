@@ -15,8 +15,17 @@
 //   - over: both times stacked, the winner's on top, and one line under them ("You won"); the loser's lands a beat later.
 //   - runs: while live, finished runs on the race's map / style / track are submitted with ?race=<id> (net/presence.ts
 //     raceTag): the room ties them to the race. Their verification decides it.
+//
+// Room races (!race all, !join; net/room-race.ts has the lifecycle, research/ROOM-RACE.md the rules) use the same pieces,
+// for racers only (everyone else just reads the chat lines):
+//   - joining: the race line, "Room race · 3 racers · starts in 12 s";
+//   - countdown: the banner (racers and the track) and the same 3, 2, 1, GO numerals;
+//   - live: the race line with the race clock and how many have finished; after your finish, your place and time;
+//   - your place: a numeral at crosshair height, "2nd" over your race time, stamped in like the countdown, for 2.4 s;
+//   - over: the standings stacked like a duel's result (the winner's time on top, yours highlighted), one line under
+//     them ("2nd of 4"), for the 8 s the controller keeps the race.
 
-import { RoomRaceClient, type RoomRaceEvent } from "./room-race";
+import { ordinal, RoomRaceClient, type RoomRaceEvent } from "./room-race";
 import { clear, h } from "../ui/dom";
 import { formatTime } from "../timer";
 import { STYLE_DEFS, styleLabel, type StyleId } from "../styles";
@@ -25,7 +34,7 @@ import { styleByName } from "../chat-commands";
 import { sfx } from "../audio";
 import { landIn, stamp } from "../notify";
 import { setRaceTag } from "./presence";
-import { TIMER_FINISHED, TIMER_RUNNING, TIMER_START, type RaceSide, type RaceView } from "./protocol";
+import { TIMER_FINISHED, TIMER_RUNNING, TIMER_START, type RaceSide, type RaceView, type RoomRaceView } from "./protocol";
 import type { Banner, NumberMenu } from "./hud";
 
 /** What the race needs from the room controller (net/mp.ts). */
@@ -60,6 +69,12 @@ const RESULT_MS = 8000;
 
 const desc = (r: Pick<RaceView, "map" | "style" | "track">) => (r.track ? trackName(r.track) : styleLabel(r.style));
 
+const DNF_TEXT = { forfeit: "forfeited", left: "left", timeout: "time limit" } as const;
+/** Standings rows a room race's result shows (yours is added when it's further down). */
+const ROOM_ROWS = 4;
+/** How long your place stays at crosshair height. */
+const PLACE_MS = 2400;
+
 export class RaceUi {
   /** The race you're in (null: none). */
   race: RaceView | null = null;
@@ -67,6 +82,9 @@ export class RaceUi {
   readonly el = h("div#mp-race", { hidden: true, role: "status" });
   /** 3, 2, 1, GO at crosshair height. */
   private count = h("div#mp-count", { hidden: true, "aria-hidden": "true" });
+  /** A room racer's place when it comes in: "2nd" over the race time, at crosshair height. */
+  private place = h("div#mp-place", { hidden: true, "aria-hidden": "true" });
+  private placeTimer = 0;
   private countShown = "";
   private resultFor = "";
   private wentFor = "";
@@ -79,7 +97,7 @@ export class RaceUi {
     parent: HTMLElement,
     private o: RaceHost,
   ) {
-    parent.append(this.el, this.count);
+    parent.append(this.el, this.count, this.place);
     this.room = new RoomRaceClient({ ...o, restart: (track) => o.roomRestart(track), event: (event) => this.roomEvent(event) });
     setRaceTag((run) => {
       const room = this.room.tag(run);
@@ -324,24 +342,27 @@ export class RaceUi {
     el.hidden = false;
     const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (text === "GO") {
-      const a = el.animate({ transform: ["scale(1.5)", "scale(1)", "scale(1.4)"], opacity: [0, 1, 0], offset: [0, 0.3, 1] }, { duration: calm ? 500 : 650, easing: "ease-out" });
+      // (Reduced motion: GO only fades in and out.)
+      const a = el.animate(calm ? { opacity: [0, 1, 0], offset: [0, 0.3, 1] } : { transform: ["scale(1.5)", "scale(1)", "scale(1.4)"], opacity: [0, 1, 0], offset: [0, 0.3, 1] }, { duration: calm ? 500 : 650, easing: "ease-out" });
       a.finished.then(() => this.countShown === "GO" && this.showCount(null), () => {});
     } else if (!calm) el.animate({ transform: ["scale(1.6)", "scale(0.96)", "none"], opacity: [0, 1, 1], offset: [0, 0.6, 1] }, { duration: 300, easing: "cubic-bezier(0.2, 0.9, 0.3, 1)" });
   }
 
   private render(): void {
+    this.renderLine();
+    // A result (duel or room) sits at the top, where the room's record banners and the run's end card go: they step
+    // down under it while it's up (net.css), by its measured bottom edge (it's 2 to 6 lines).
+    const result = !this.el.hidden && this.el.classList.contains("result");
+    const root = document.documentElement.style;
+    if (result) root.setProperty("--race-result-bottom", `${Math.ceil(this.el.offsetTop + this.el.offsetHeight)}px`);
+    else root.removeProperty("--race-result-bottom");
+  }
+
+  private renderLine(): void {
     const r = this.race;
     document.getElementById("hud")?.classList.toggle("race-result", r?.state === "over");
     const room = this.room.race;
-    if (room && room.you >= 0 && (!r || r.state === "over")) {
-      document.getElementById("hud")?.classList.toggle("race-result", false);
-      const me = room.racers[room.you];
-      this.el.hidden = false;
-      this.el.className = "";
-      const clock = room.goAt === null ? `${Math.max(0, Math.ceil((this.o.toLocal(room.joinUntil) - Date.now()) / 1000))} s to join` : room.state === "settling" ? "checking" : room.state === "over" ? "over" : formatTime(Math.max(0, (Date.now() - this.o.toLocal(room.goAt)) / 1000)).slice(0, -2);
-      this.el.textContent = `Room race · ${room.racers.length} racers · ${me.place ? `Place ${me.place} · ${formatTime(me.finish!.real)}` : me.dnf ? "DNF" : me.checking ? "checking" : clock}`;
-      return;
-    }
+    if (room && room.you >= 0 && (!r || r.state === "over")) return this.renderRoom(room);
     if (!r || r.state === "challenge" || r.state === "countdown") {
       this.el.hidden = true;
       return;
@@ -389,6 +410,118 @@ export class RaceUi {
     stamp(v, 360);
   }
 
+  /**
+   * A room race, for its racers: the race line (joining, live), nothing during the countdown (the banner and the
+   * numerals have it), the standings once it's over.
+   */
+  private renderRoom(room: RoomRaceView): void {
+    const hud = document.getElementById("hud");
+    hud?.classList.toggle("race-result", room.state === "over");
+    if (room.state === "over") return this.renderRoomResult(room);
+    if (room.state === "countdown") {
+      this.el.hidden = true;
+      return;
+    }
+    const me = room.racers[room.you];
+    const n = room.racers.length;
+    const done = room.racers.filter((x) => x.place !== null).length;
+    this.el.hidden = false;
+    this.el.className = "";
+    const what = h("span.rc-what", null, "Room race");
+    if (room.state === "joining") {
+      const left = Math.max(0, Math.ceil((this.o.toLocal(room.joinUntil) - Date.now()) / 1000));
+      clear(this.el, what, h("span.rc-side", null, `${n} ${n === 1 ? "racer" : "racers"}`), h("span.rc-side", null, h("span.dim", null, "starts in "), h("b", null, `${left} s`)));
+      return;
+    }
+    // Live or settling: the race clock in tenths, as a duel's (it redraws at 5 Hz).
+    const clock = room.state === "settling" || room.goAt === null ? "checking" : formatTime(Math.max(0, (Date.now() - this.o.toLocal(room.goAt)) / 1000)).slice(0, -2);
+    const mine = me.place !== null && me.finish ? `${ordinal(me.place)} · ${formatTime(me.finish.real)}` : me.dnf ? DNF_TEXT[me.dnf] : me.checking ? "checking" : null;
+    clear(
+      this.el,
+      what,
+      h("b.rc-clock", null, clock),
+      mine ? h("span.rc-side", null, h("span.dim", null, "you "), mine) : null,
+      h("span.rc-side.dim", null, `${done} of ${n} finished`),
+    );
+  }
+
+  /** The standings: place order, DNFs last, the winner's time big on top, yours in white; one line under them. */
+  private renderRoomResult(room: RoomRaceView): void {
+    const me = room.racers[room.you];
+    const order = room.racers.map((x, i) => ({ x, i })).sort((a, b) => (a.x.place ?? Infinity) - (b.x.place ?? Infinity));
+    // Four rows at most, and yours always (in its place, after a gap when it's further down).
+    const shown = order.slice(0, ROOM_ROWS);
+    if (!shown.some((o) => o.i === room.you)) shown.push(order.find((o) => o.i === room.you)!);
+    const won = me.place === 1;
+    const row = (o: { x: RoomRaceView["racers"][number]; i: number }, k: number) =>
+      h(
+        `div.rc-row${k === 0 && o.x.place !== null ? ".top" : ""}${o.i === room.you ? ".me" : ""}`,
+        null,
+        h("span.rc-pl", null, o.x.place !== null ? ordinal(o.x.place) : o.x.dnf ? "DNF" : "—"),
+        h("span.rc-name", null, o.i === room.you ? "you" : o.x.name),
+        h("b.rc-t", null, o.x.finish ? formatTime(o.x.finish.real) : o.x.dnf ? DNF_TEXT[o.x.dnf] : "no finish"),
+      );
+    const verdict =
+      me.place !== null ? (won ? "You won" : `${ordinal(me.place)} of ${room.racers.length}`)
+      : room.outcome === "cancelled" ? "Race cancelled"
+      : !room.racers.some((x) => x.place !== null) ? "Nobody finished"
+      : "You didn't finish";
+    const rows = shown.map(row);
+    const v = h("div.rc-verdict", null, verdict);
+    this.el.hidden = false;
+    this.el.className = `result room ${won ? "won" : "lost"}`;
+    clear(this.el, ...rows, v);
+    if (this.resultFor === room.id) return;
+    this.resultFor = room.id;
+    // (The rows are grid rows, display: contents, so their cells are what moves.)
+    rows.forEach((el, k) => [...el.children].forEach((c) => landIn(c, "translateY(-8px)", k * 120)));
+    stamp(v, rows.length * 120 + 160);
+  }
+
+  /** Your place as it comes in: stamped in at crosshair height like the countdown, gone after PLACE_MS. */
+  private showPlace(place: number, real: number | null): void {
+    const el = this.place;
+    this.placePlace();
+    window.clearTimeout(this.placeTimer);
+    el.getAnimations().forEach((a) => a.cancel());
+    el.className = place === 1 ? "first" : "";
+    clear(el, h("div.pl-n", null, ordinal(place)), real !== null ? h("div.pl-t", null, formatTime(real)) : null);
+    el.hidden = false;
+    const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (calm) el.animate({ opacity: [0, 1] }, { duration: 160, easing: "ease-out" });
+    else el.animate({ transform: ["scale(1.6)", "scale(0.96)", "none"], opacity: [0, 1, 1], offset: [0, 0.6, 1] }, { duration: 300, easing: "cubic-bezier(0.2, 0.9, 0.3, 1)" });
+    this.placeTimer = window.setTimeout(() => {
+      const out = el.animate(calm ? { opacity: [1, 0] } : { opacity: [1, 0], transform: ["none", "translateY(-10px)"] }, { duration: 400, easing: "ease-in", fill: "forwards" });
+      out.finished.then(() => {
+        el.hidden = true;
+        out.cancel();
+      }, () => {});
+    }, PLACE_MS);
+  }
+
+  /** The standings are up: the place steps aside (quickly; they say it too). */
+  private hidePlace(): void {
+    const el = this.place;
+    if (el.hidden) return;
+    window.clearTimeout(this.placeTimer);
+    el.getAnimations().forEach((a) => a.cancel());
+    const out = el.animate({ opacity: [1, 0] }, { duration: 150, easing: "ease-in", fill: "forwards" });
+    out.finished.then(() => {
+      el.hidden = true;
+      out.cancel();
+    }, () => {});
+  }
+
+  /**
+   * Just above the crosshair (net.css), or under your run's end card when that reaches further down (you usually
+   * finished a moment ago). Read from the card itself: its published --endcard-bottom doesn't follow it when it moves.
+   */
+  private placePlace(): void {
+    const ec = document.getElementById("hud-endcard");
+    const below = ec && !ec.hidden && ec.offsetHeight > 0 ? ec.offsetTop + ec.offsetHeight + 16 : 0;
+    this.place.style.top = below ? `max(calc(50% - 7.6rem * var(--hs, 1)), ${below}px)` : "";
+  }
+
   /** Visual pass hook: typed lifecycle events also dispatched on the existing HUD element. */
   private roomEvent(event: RoomRaceEvent): void {
     this.el.dispatchEvent(new CustomEvent("room-race", { detail: event, bubbles: true }));
@@ -400,14 +533,20 @@ export class RaceUi {
       if (!entered && !hadEffects) return this.render();
     }
     if (event.kind === "countdown") {
-      if (!this.o.changing()) this.o.banner.set("Room race", `${event.race.map} · ${desc(event.race)}`, "change");
+      const n = event.race.racers.length;
+      if (!this.o.changing()) this.o.banner.set("Room race", `${n} racers, ${desc(event.race)}`, "change");
       sfx("countdown_tick");
       this.showCount(String(event.seconds));
     } else if (event.kind === "go") {
       if (!this.o.changing()) this.o.banner.set(null);
       sfx("countdown_go");
       this.showCount("GO");
-    } else if (event.kind === "finish") sfx("finish_pb");
+    } else if (event.kind === "finish") {
+      sfx("finish_pb");
+      // A place that comes with the final result lands in the standings ("3rd of 4") instead.
+      const me = event.race.racers[event.race.you];
+      if (event.race.state !== "over") this.showPlace(event.place, me?.finish?.real ?? null);
+    } else if (event.kind === "over") this.hidePlace();
     else if (event.kind === "state" && (!event.race || event.race.state !== "countdown" || !this.room.participating)) {
       if (this.countShown !== "GO") this.showCount(null);
       if (!this.o.changing()) this.o.banner.set(null);

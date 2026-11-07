@@ -1,5 +1,6 @@
 // Home (title) screen: the menu column over the live map background (attract.ts), and on the right six maps to try
-// (the one behind the menu first, then what to play next) as quick links with their pictures. The tutorial is on the menu for a new player's first two
+// (the one behind the menu first, then what to play next) as quick links with their pictures, with the recent world
+// records under them (ui/home-records.ts; four maps then, unless the window is tall). The tutorial is on the menu for a new player's first two
 // days (tutorialOnHome); after that it's at the top of the map list (tutorial/learn.ts), and the quiet links under the
 // menu keep a way to it for players who hid it there.
 
@@ -20,6 +21,7 @@ import { arrowNav, h } from "./dom";
 import { backgroundPick, featuredArtReady, markFeaturedArtReady } from "./featured";
 import { fetchMapIndex, onlineMaps, prewarmMapRows, tierOf, type MapEntry } from "./maps";
 import { mapArt, observeThumbs, prefetchThumbs } from "./thumbs";
+import { recentRecords } from "./home-records";
 import { landRows } from "./land";
 import { selectedStyle } from "./style-picker";
 import { onlineSummary } from "./servers";
@@ -293,11 +295,12 @@ export function homeScreen(a: HomeActions): HTMLElement {
   arrowNav(menu, "button");
   menu.classList.add("hop-host");
   hopIndicator(menu, ".home-item", { inset: 4, rest: () => menu.querySelector<HTMLElement>(".home-item.primary") });
-  const right = h("aside.home-right", null, mapsToTry(a, (n) => (plateMap = n)));
+  // The maps to try, then the recent world records under them (ui/home-records.ts): online only.
+  const right = h("aside.home-right", null, mapsToTry(a, (n) => (plateMap = n)), recentRecords({ profile: (id) => a.profile(id) }));
   // Right arrow from the menu goes to the maps to try (the grid takes its own arrows, and Left back).
   menu.addEventListener("keydown", (e) => {
     if (e.key !== "ArrowRight" || !(document.activeElement as HTMLElement)?.closest(".home-menu")) return;
-    const t = right.querySelector<HTMLElement>("button:not([disabled]):not([hidden])");
+    const t = right.querySelector<HTMLElement>(".home-grid button:not([disabled]):not([hidden])");
     if (t) (e.preventDefault(), e.stopPropagation(), t.focus());
   }, { capture: true });
   // Prefetch the map list (and, once idle, the slow-to-load thumbnails and the list's rows) so Play opens instantly.

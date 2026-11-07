@@ -50,7 +50,7 @@ test("native console say binds toggle landfix privately in solo and rooms", () =
       expect(messages.at(-1)?.text).toBe("Landfix on");
       console.run("say !landfix invalid");
       expect(prefs.get().landfix).toBe(true);
-      expect(messages.at(-1)?.text).toBe("Use !landfix [on|off]");
+      expect(messages.at(-1)?.text).toBe("Usage: !landfix [on|off]");
       console.run("cl_landfix 0");
       expect(prefs.get().landfix).toBe(false);
       console.run("cl_landfix 1");

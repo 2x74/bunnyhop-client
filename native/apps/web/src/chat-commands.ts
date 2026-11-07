@@ -370,21 +370,6 @@ export function styleByName(q: string): StyleId | null {
 
 const BUILT_IN: ChatCommand[] = [
   {
-    name: "landfix",
-    args: "[on|off]",
-    help: "landfix on / off",
-    group: "run",
-    panelOnly: true,
-    where: "both",
-    run: (ctx, arg) => {
-      const mode = arg.toLowerCase();
-      if (mode && mode !== "on" && mode !== "off") return ctx.reply("Use !landfix [on|off]");
-      if (!ctx.game?.landfix) return ctx.reply("Landfix is available in a map");
-      const enabled = ctx.game.landfix(mode ? mode === "on" : undefined);
-      ctx.reply(`Landfix ${enabled ? "on" : "off"}`);
-    },
-  },
-  {
     name: "r",
     aliases: ["restart", "start"],
     help: "restart",
@@ -461,6 +446,22 @@ const BUILT_IN: ChatCommand[] = [
       if (ctx.room?.copyStart?.(arg)) return;
       if (!ctx.game?.copyStart) return ctx.reply(NO_GAME);
       ctx.game.copyStart(arg, (text) => ctx.reply(text));
+    },
+  },
+  {
+    name: "landfix",
+    args: "[on|off]",
+    help: "landfix on / off",
+    about: "jumps start 1.5 units up, as on SourceJump servers; off is stock CS:S. !landfix on or off sets it.",
+    group: "run",
+    panelOnly: true,
+    where: "both",
+    run: (ctx, arg) => {
+      const mode = arg.toLowerCase();
+      if (mode && mode !== "on" && mode !== "off") return ctx.reply("Usage: !landfix [on|off]");
+      if (!ctx.game?.landfix) return ctx.reply(NO_GAME);
+      const enabled = ctx.game.landfix(mode ? mode === "on" : undefined);
+      ctx.reply(`Landfix ${enabled ? "on" : "off"}`);
     },
   },
   // Practice (practice-mode/controller.ts command), bhoptimer's / KZ timers' names. Solo and in rooms. The

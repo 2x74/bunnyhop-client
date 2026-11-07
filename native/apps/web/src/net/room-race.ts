@@ -3,6 +3,8 @@ import type { RoomRaceView } from "./protocol";
 import type { StyleId } from "../styles";
 import type { RunBoard } from "./presence";
 
+/** 1st, 2nd, 3rd, 4th, ... 11th, 12th, 13th, 21st: places as the room's chat lines say them (apps/api rooms/room-race.ts). */
+export const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? "th" : ({ 1: "st", 2: "nd", 3: "rd" } as Record<number, string>)[n % 10] ?? "th"}`;
 export type RoomRaceEvent =
   | { kind: "state"; race: RoomRaceView | null }
   | { kind: "countdown"; race: RoomRaceView; seconds: number }
