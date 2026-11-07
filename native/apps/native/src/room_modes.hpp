@@ -22,10 +22,18 @@ struct RaceDisplay {
     enum class State { none, challenge, countdown, live, settling, over };
     State state = State::none;
     HudLabel<128> opponent;
+    HudLabel<128> map;
     HudLabel<96> board;
+    // The verdict under the result: "You won", "keyuu won", "Draw", "Nobody finished", "Race over".
     HudLabel<128> result;
-    HudLabel<128> first_time;
-    HudLabel<128> second_time;
+    // The live line's finishes: yours ("00:05.402 (checking)") and theirs (a finish, "forfeited" or "left"). Empty
+    // while running; theirs is then the opponent's live timer (hud_frame.cpp).
+    HudLabel<64> mine, theirs;
+    std::optional<unsigned> opponent_slot;
+    // The result: both times stacked, the leader's on top.
+    HudLabel<128> top_name, second_name;
+    HudLabel<48> top_time, second_time;
+    bool won = false;
     double deadline = 0;
     double go_at = 0;
     double result_until = 0;
@@ -34,44 +42,198 @@ struct RaceDisplay {
     bool playable = true;
 };
 
+namespace race_look {
+inline constexpr double result_ms = 8000, second_row_ms = 200, verdict_delay_ms = 360;
+inline constexpr float row_size = 16, top_time_size = 36, time_size = 24, verdict_size = 19;
+
+inline float row_size_of(bool top) {
+    return top ? top_time_size : time_size;
+}
+}  // namespace race_look
+
+// Where a duel's result ends (HUD units), so the end card and notices sit under it. 0 while it's not up.
+inline float race_result_bottom(const RaceDisplay &race, float screen_height, double now) {
+    using namespace room_race_look;
+    if (race.state != RaceDisplay::State::over || now > race.result_until) return 0;
+    const float base = screen_height * result_top + cap * race_look::top_time_size + 1.1f * race_look::time_size;
+    return base + 4 + race_look::verdict_size * 1.2f + race_look::verdict_size * (1.3f - baseline) + 6;
+}
+
+// The opponent's running timer for the race line (tenths, as the website's), "start zone" before they leave it, or
+// nothing once their finish (or exit) is in the race itself. `now`: the room's sample clock (steady seconds).
+// (`Run` is BhRunState; this header stays free of the core's C API.)
+template <class Run, class Room>
+HudLabel<48> race_opponent_live(const Room &room, const RaceDisplay &race, double now, double epoch_ms) {
+    HudLabel<48> out;
+    if (race.state != RaceDisplay::State::live || !race.theirs.empty() || !race.opponent_slot) return out;
+    Run run{};
+    std::string style;
+    room.spectator_run(run, style, *race.opponent_slot, now, epoch_ms);
+    if (run.status == 1 || run.status == 2) {
+        format_hud_time(out, run.seconds);
+        out.bytes[std::max<size_t>(out.view().size(), 2) - 2] = '\0';
+    } else if (run.in_start)
+        out.assign("start zone");
+    return out;
+}
+
+// The challenge to you: a numbered menu like Spectate's (1 Accept, 2 Decline; the keys are RoomModes::challenge_key).
 template <class Hud>
-void draw_race(Hud &hud, int width, int height, float percent, const RaceDisplay &race, double now) {
+void draw_race_challenge(Hud &hud, const HudGeometry &geometry, const RaceDisplay &race, double now) {
+    constexpr NameColor cream = {.94f, .91f, .86f, 1}, dim = {.63f, .65f, .70f, 1}, amber = {1, .71f, .24f, 1};
+    constexpr float panel_width = 440, first_row = 52, row_height = 28, footer_height = 30, inset = 18;
+    const float height = first_row + 2 * row_height + footer_height;
+    const float left = geometry.width / 2 - panel_width / 2, top = geometry.height / 2 - height / 2;
+    hud.overlay_rect(left, top, panel_width, height, {.025f, .027f, .04f, .96f});
+    HudLabel<192> label;
+    label.format("Race challenge from %.*s", int(race.opponent.view().size()), race.opponent.view().data());
+    hud.overlay_text(left + inset, top + 16, label.view(), 20, amber);
+    const float accept = top + first_row, decline = accept + row_height;
+    hud.overlay_text(left + inset, accept + 6, "1. Accept", 14, race.playable ? cream : dim);
+    if (race.playable)
+        label.format(
+                "%.*s \xC2\xB7 %.*s",
+                int(race.map.view().size()),
+                race.map.view().data(),
+                int(race.board.view().size()),
+                race.board.view().data()
+        );
+    else
+        label.assign("Not in this version yet");
+    hud.overlay_text(left + inset + hud.overlay_text_width("1. Accept  ", 14), accept + 7, label.view(), 12, dim);
+    hud.overlay_text(left + inset, decline + 6, "2. Decline", 14, cream);
+    const int seconds = int(std::clamp(std::ceil((race.deadline - now) / 1000), 0., 999.));
+    label.format("%d s", seconds);
+    hud.overlay_text(left + inset, top + height - footer_height + 8, label.view(), 12, dim);
+}
+
+// Native counterpart of web net/race.ts's duel HUD, with the room race's pieces (room_race.hpp): the countdown banner
+// and numerals, GO in the accent, the race line at the top, then both times stacked with one line under them. The
+// challenger sees nothing until the countdown (chat says it), as on the website. `opponent_live`: their running timer.
+template <class Hud>
+void draw_race(
+        Hud &hud,
+        int width,
+        int height,
+        float percent,
+        const RaceDisplay &race,
+        double now,
+        const RoomRaceStack &stack = {},
+        std::string_view opponent_live = {}
+) {
+    using namespace room_race_look;
     using State = RaceDisplay::State;
     if (race.state == State::none || (race.state == State::over && now > race.result_until)) return;
+    if (race.state == State::challenge && !race.recipient) return;
     const HudGeometry geometry(width, height, percent);
-    const float x = geometry.width / 2;
-    float y = geometry.height * .09f;
-    const NameColor cream = {.94f, .91f, .86f, 1};
-    const NameColor gold = {1, .71f, .24f, 1};
+    const float x = geometry.width / 2, middle = geometry.height / 2;
+    const bool calm = stack.reduced_motion;
+    const NameColor text = stack.colors.text, dim = stack.colors.dim, accent = stack.colors.accent;
+    const NameColor gain = stack.colors.gain, quiet = alpha(text, .7f);
     hud.overlay_begin(width, height, percent);
-    HudLabel<256> label;
-    if (race.state == State::countdown) {
-        const int left = int(std::clamp(std::ceil((race.go_at - now) / 1000), 0., 99.));
-        label.format(left > 0 ? "%d" : "Waiting for GO", left);
-        hud.overlay_text(x, geometry.height * .4f, label.view(), 55, gold, true);
-    }
-    hud.overlay_rect(x - 250, y - 10, 500, race.state == State::over ? 146 : 87, {.025f, .027f, .04f, .92f});
-    label.format("Race vs %.*s", int(race.opponent.view().size()), race.opponent.view().data());
-    hud.overlay_text(x, y, label.view(), 17, cream, true);
-    hud.overlay_text(x, y + 27, race.board.view(), 13, gold, true);
+    const float numeral_middle = middle - 30 - numeral_size * cap / 2;
     if (race.state == State::challenge) {
-        const int left = int(std::clamp(std::ceil((race.deadline - now) / 1000), 0., 999.));
-        if (race.recipient && !race.playable)
-            label.format("Not in this version yet   2 Decline | %ds", left);
-        else
-            label.format(race.recipient ? "1 Accept   2 Decline | %ds" : "Challenge sent | %ds", left);
-    } else if (race.state == State::over) {
-        hud.overlay_text(x, y + 51, race.first_time.view(), 13, cream, true);
-        hud.overlay_text(x, y + 77, race.second_time.view(), 13, cream, true);
-        label.assign(race.result.view());
-        y += 52;
-    } else if (race.state == State::settling) {
-        label.assign("Checking server results");
+        draw_race_challenge(hud, geometry, race, now);
+    } else if (race.state == State::countdown) {
+        if (stack.banner) {
+            HudLabel<192> label;
+            label.format("Race vs %.*s", int(race.opponent.view().size()), race.opponent.view().data());
+            hud.overlay_text(x, 58, label.view(), 16, accent, true);
+            label.format(
+                    "%.*s, %.*s",
+                    int(race.map.view().size()),
+                    race.map.view().data(),
+                    int(race.board.view().size()),
+                    race.board.view().data()
+            );
+            hud.overlay_text(x, 80, label.view(), 13, dim, true);
+        }
+        // 3, 2, 1 stamp in; "1" holds until the room's GO.
+        const int seconds = int(std::clamp(std::ceil((race.go_at - now) / 1000), 1., 99.));
+        HudLabel<8> numeral;
+        numeral.format("%d", seconds);
+        const double since = now - (race.go_at - seconds * 1000.);
+        posed_text(hud, x, numeral_middle, numeral.view(), numeral_size, text, stamp_in(since, calm));
+    } else if (race.state == State::live || race.state == State::settling) {
+        if (race.state == State::live && now >= race.go_at && now < race.go_at + go_ms)
+            posed_text(hud, x, numeral_middle, "GO", numeral_size, accent, go_out(now - race.go_at, calm));
+        HudLabel<48> clock;
+        if (race.state == State::settling)
+            clock.assign("checking");
+        else {
+            // Tenths, as the website's race clock.
+            format_hud_time(clock, std::max(0., (now - race.go_at) / 1000));
+            clock.bytes[std::max<size_t>(clock.view().size(), 2) - 2] = '\0';
+        }
+        HudLabel<160> them;
+        them.format("%.*s ", int(race.opponent.view().size()), race.opponent.view().data());
+        const std::string_view theirs = race.theirs.empty() ? opponent_live : race.theirs.view();
+        const float gap = line_size * 1.2f;
+        std::array<Piece, 7> line{};
+        size_t count = 0;
+        line[count++] = {"Race vs ", line_size, text};
+        line[count++] = {race.opponent.view(), line_size, text};
+        line[count++] = {clock.view(), clock_size, text, gap};
+        if (!race.mine.empty()) {
+            line[count++] = {"you ", line_size, dim, gap};
+            line[count++] = {race.mine.view(), line_size, text};
+        }
+        if (!theirs.empty()) {
+            line[count++] = {them.view(), line_size, dim, gap};
+            line[count++] = {theirs, line_size, text};
+        }
+        pieces(hud, x, geometry.height * line_top + clock_size * baseline, line, count);
     } else {
-        const double elapsed = std::max(0., (now - race.go_at) / 1000);
-        label.format("%s %.1fs", now < race.go_at + 650 && race.state == State::live ? "GO" : "Race clock", elapsed);
+        // Both times stacked, the leader's on top (bigger; green when it's yours), one line under them.
+        const double age = now - (race.result_until - race_look::result_ms);
+        float base = geometry.height * result_top;
+        for (int k = 0; k < 2; ++k) {
+            const bool top = k == 0;
+            const auto name = top ? race.top_name.view() : race.second_name.view();
+            const auto time = top ? race.top_time.view() : race.second_time.view();
+            const float size = race_look::row_size_of(top);
+            base += (top ? cap : 1.1f) * size;
+            const double since = age - k * race_look::second_row_ms;
+            const float a = calm ? 1 : float(std::clamp(since / 160, 0., 1.));
+            if (a <= 0) continue;
+            const float drop = calm ? 0 : -10 * (1 - ease_out(float(since / 350), 3));
+            const NameColor ink = top ? text : quiet;
+            const float gap = race_look::row_size * .7f;
+            const float name_width = hud.overlay_text_width(name, race_look::row_size);
+            const float left = x - (name_width + gap + hud.overlay_text_width(time, size)) / 2;
+            hud.overlay_fade(a);
+            hud.overlay_text(
+                    left, base + drop - race_look::row_size * baseline, name, race_look::row_size, alpha(ink, a)
+            );
+            hud.overlay_text(
+                    left + name_width + gap,
+                    base + drop - size * baseline,
+                    time,
+                    size,
+                    alpha(top && race.won ? gain : ink, a)
+            );
+            hud.overlay_fade(1);
+        }
+        const double verdict_age = age - race_look::verdict_delay_ms;
+        Pose pose{1, 1};
+        if (!calm) {
+            const float e = ease_out(float(verdict_age / verdict_ms), 4);
+            pose = verdict_age < 0 ? Pose{1, 0}
+                   : e < .4f       ? Pose{1.7f - .76f * e / .4f, e / .4f}
+                   : e < .7f       ? Pose{.94f + .08f * (e - .4f) / .3f, 1}
+                                   : Pose{1.02f - .02f * (e - .7f) / .3f, 1};
+        }
+        const float verdict_base = base + 4 + race_look::verdict_size * 1.2f;
+        posed_text(
+                hud,
+                x,
+                verdict_base - race_look::verdict_size * cap / 2,
+                race.result.view(),
+                race_look::verdict_size,
+                race.won ? gain : text,
+                pose
+        );
     }
-    hud.overlay_text(x, y + 53, label.view(), 13, gold, true);
     hud.overlay_end(width, height);
 }
 
@@ -367,16 +529,46 @@ class RoomModes {
         display_.deadline = local("expiresAt", now);
         display_.go_at = local("goAt", now);
         display_.result_until = now + 8000;
+        display_.map.assign(race_->at("map").get<std::string>());
+        const auto &me = race_->at(race_->at("you") == "a" ? "a" : "b");
+        const auto &them = opponent();
+        const auto finished = [](const J &side) {
+            return side.contains("finish") && side["finish"].is_object() && side["finish"].contains("real")
+                   && number(side["finish"]["real"]);
+        };
+        const auto out = [](const J &side) {
+            return side.contains("out") && side["out"].is_string();
+        };
+        display_.mine.assign(finished(me) ? side_time(me) : "");
+        display_.theirs.assign(finished(them) || out(them) ? side_time(them) : "");
+        display_.opponent_slot.reset();
+        if (them.contains("slot") && them["slot"].is_number_unsigned() && them["slot"].get<uint64_t>() < 256)
+            display_.opponent_slot = them["slot"].get<unsigned>();
         if (display_.state == State::over) {
-            const auto &me = race_->at(race_->at("you") == "a" ? "a" : "b");
-            display_.first_time.assign("You | " + side_time(me));
-            display_.second_time.assign(opponent().at("name").get<std::string>() + " | " + side_time(opponent()));
             const auto winner = race_->value("winner", J(nullptr));
+            const auto outcome = race_->value("outcome", std::string());
+            const auto name = them.at("name").get<std::string>();
+            const auto real = [&](const J &side) {
+                return finished(side) ? side["finish"]["real"].get<double>() : INFINITY;
+            };
+            const auto result_time = [&](const J &side) {
+                return finished(side)                          ? time(side["finish"]["real"].get<double>())
+                       : out(side) && side["out"] == "forfeit" ? std::string("forfeited")
+                       : out(side)                             ? std::string("left")
+                                                               : std::string("no finish");
+            };
+            display_.won = winner == race_->at("you");
+            const bool me_first = display_.won || (!winner.is_string() && real(me) <= real(them));
+            display_.top_name.assign(me_first ? std::string("you") : name);
+            display_.top_time.assign(result_time(me_first ? me : them));
+            display_.second_name.assign(me_first ? name : std::string("you"));
+            display_.second_time.assign(result_time(me_first ? them : me));
             display_.result.assign(
-                    winner == race_->at("you")                         ? "You won"
-                    : winner.is_string()                               ? "Opponent won"
-                    : race_->value("outcome", std::string()) == "draw" ? "Draw"
-                                                                       : "Race over"
+                    display_.won           ? "You won"
+                    : winner.is_string()   ? name + " won"
+                    : outcome == "draw"    ? "Draw"
+                    : outcome == "timeout" ? "Nobody finished"
+                                           : "Race over"
             );
         }
     }

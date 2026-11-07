@@ -144,6 +144,10 @@ struct RecordingHud {
 
     void overlay_fade(float) {}
 
+    size_t rects = 0;
+
+    void overlay_rect(float, float, float, float, native::NameColor) { ++rects; }
+
     void overlay_text(float x, float y, std::string_view text, float size, native::NameColor color, bool = false) {
         drawn.push_back({std::string(text), x, y, size, color});
     }
@@ -315,6 +319,84 @@ void racer_visuals() {
     assert(!observer.room_race_display().visible && draw(observer, 1000).drawn.empty());
 }
 
+J duel(std::string state, J a = nullptr, J b = nullptr, J winner = nullptr) {
+    J race = {
+            {"id", "duel1"},
+            {"state", state},
+            {"map", "bhop_eazy"},
+            {"style", "autohop"},
+            {"track", 0},
+            {"a", a.is_null() ? J{{"name", "keyuu"}, {"slot", 3}, {"finish", nullptr}} : a},
+            {"b", b.is_null() ? J{{"name", "you"}, {"slot", 4}, {"finish", nullptr}} : b},
+            {"you", "b"},
+            {"expiresAt", 31000},
+            {"goAt", 10000},
+            {"endsAt", 610000}
+    };
+    if (!winner.is_null()) race["winner"] = winner;
+    return race;
+}
+
+J duel_event(J race) {
+    return {{"id", "test"}, {"generation", 1}, {"event", {{"t", "race"}, {"race", race}}}};
+}
+
+RecordingHud draw_duel(const native::RoomModes &modes, double now, native::RoomRaceStack stack = {}) {
+    RecordingHud hud;
+    native::draw_race(hud, 1600, 900, 100, modes.display(), now, stack);
+    return hud;
+}
+
+// The 1v1 duel looks like the room race and web's duel: no panel, white numerals, amber GO, the line, the result.
+void duel_visuals() {
+    native::RoomModes modes;
+    modes.event(duel_event(duel("challenge")), "bhop_eazy", false, 1000);
+    auto hud = draw_duel(modes, 1000);
+    assert(hud.find("Race challenge from keyuu") && hud.find("1. Accept") && hud.find("2. Decline")
+           && hud.find("30 s"));
+    assert(hud.rects == 1);
+    modes.event(duel_event(duel("countdown")), "bhop_eazy", false, 7000);
+    hud = draw_duel(modes, 7500);
+    assert(hud.rects == 0 && hud.find("Race vs keyuu") && hud.find("3") && hud.find("3")->color[0] == 1);
+    assert(hud.find("3")->color[2] == 1);
+    hud = draw_duel(modes, 10300);
+    assert(hud.find("1") && !hud.find("Waiting for GO"));
+    modes.event(duel_event(duel("live")), "bhop_eazy", false, 10000);
+    hud = draw_duel(modes, 10100);
+    const auto *go = hud.find("GO");
+    assert(go && go->color[0] == 1 && go->color[2] < .5f && hud.find("Race vs ") && hud.find("keyuu"));
+    assert(hud.find("00:00.1") && hud.rects == 0);
+    const auto calm = draw_duel(modes, 10050, stack(true));
+    assert(calm.find("GO")->size == 88);
+    assert(!draw_duel(modes, 10700).find("GO"));
+    auto finished = duel(
+            "live", nullptr, {{"name", "you"}, {"slot", 4}, {"finish", {{"real", 5.402}, {"status", "verifying"}}}}
+    );
+    modes.event(duel_event(finished), "bhop_eazy", false, 16000);
+    hud = draw_duel(modes, 16000);
+    assert(hud.find("you ") && hud.find("00:05.402 (checking)"));
+    auto over =
+            duel("over",
+                 {{"name", "keyuu"}, {"slot", 3}, {"finish", {{"real", 5.111}}}},
+                 {{"name", "you"}, {"slot", 4}, {"finish", {{"real", 5.402}}}},
+                 "a");
+    modes.event(duel_event(over), "bhop_eazy", false, 20000);
+    const auto &result = modes.display();
+    assert(result.top_name.view() == "keyuu" && result.top_time.view() == "00:05.111");
+    assert(result.second_name.view() == "you" && result.result.view() == "keyuu won" && !result.won);
+    hud = draw_duel(modes, 21000);
+    assert(hud.rects == 0 && hud.find("keyuu won") && hud.find("00:05.111")->size > hud.find("00:05.402")->size);
+    assert(native::race_result_bottom(result, 900, 21000) > 100 && native::race_result_bottom(result, 900, 28001) == 0);
+    native::RoomModes winner;
+    over["winner"] = "b";
+    over["a"] = {{"name", "keyuu"}, {"slot", 3}, {"finish", nullptr}, {"out", "forfeit"}};
+    winner.event(duel_event(over), "bhop_eazy", false, 20000);
+    assert(winner.display().won && winner.display().top_name.view() == "you");
+    assert(winner.display().second_time.view() == "forfeited" && winner.display().result.view() == "You won");
+    const auto won = draw_duel(winner, 21000);
+    assert(won.find("You won")->color[0] < .5f && won.find("00:05.402")->color[0] < .5f);
+}
+
 void shared_vectors(const char *path) {
     std::ifstream input(path);
     assert(input.good());
@@ -360,5 +442,6 @@ int main(int argc, char **argv) {
     loading_cancellation_and_reconnect();
     observers_forfeits_and_results();
     racer_visuals();
+    duel_visuals();
     std::cout << "Room-race holds, canonical starts, loading, reconnects, observers and results passed\n";
 }

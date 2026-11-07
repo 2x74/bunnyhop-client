@@ -76,6 +76,8 @@ struct DrawProbe {
         if (texts < labels.size()) labels[texts++].assign(text);
     }
 
+    void overlay_fade(float) {}
+
     void overlay_rect(float x, float y, float width, float height, native::NameColor) {
         assert(std::isfinite(x) && std::isfinite(y) && width >= 0 && height >= 0);
         particle_after_text |= texts > 0 && width == 3 && height == 5;
@@ -887,7 +889,7 @@ void test_results_toasts_and_room_widgets() {
     race.deadline = 12000;
     DrawProbe race_probe;
     native::draw_race(race_probe, 1280, 720, 100, race, 2000);
-    assert(race_probe.has("1 Accept") && race_probe.has("2 Decline"));
+    assert(race_probe.has("1. Accept") && race_probe.has("2. Decline"));
 }
 
 void test_movement_widgets_and_restart() {

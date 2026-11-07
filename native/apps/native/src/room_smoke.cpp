@@ -262,7 +262,10 @@ void draw_room_frame(RoomSmokeFrame &frame, const RoomShot &shot, double at, BhS
     modes.room_race_tick(epoch_ms);
     const HudGeometry geometry(frame.width, frame.height, 100);
     const auto &standings = modes.room_race_display();
-    const float race_bottom = room_race_result_bottom(standings, geometry.height, epoch_ms);
+    const auto &duel = modes.display();
+    const bool room_race = duel.state == RaceDisplay::State::none;
+    const float race_bottom = room_race ? room_race_result_bottom(standings, geometry.height, epoch_ms)
+                                        : race_result_bottom(duel, geometry.height, epoch_ms);
     auto &result = frame.hud.result;
     result.reset();
     if (shot.endcard) {
@@ -270,20 +273,12 @@ void draw_room_frame(RoomSmokeFrame &frame, const RoomShot &shot, double at, BhS
         result.status_line.assign("Rank #3");
         draw_result(frame.hud, frame.width, frame.height, 100, result, at, race_bottom);
     }
-    draw_race(frame.hud, frame.width, frame.height, 100, modes.display(), epoch_ms);
-    if (modes.display().state == RaceDisplay::State::none)
-        draw_room_race(
-                frame.hud,
-                frame.width,
-                frame.height,
-                100,
-                standings,
-                epoch_ms,
-                {shot.reduced_motion,
-                 true,
-                 result_bottom(geometry, result, at, race_bottom),
-                 room_race_colors(frame.hud)}
-        );
+    const RoomRaceStack stack{
+            shot.reduced_motion, true, result_bottom(geometry, result, at, race_bottom), room_race_colors(frame.hud)
+    };
+    const auto opponent = race_opponent_live<BhRunState>(frame.replay.room, duel, at, epoch_ms);
+    draw_race(frame.hud, frame.width, frame.height, 100, duel, epoch_ms, stack, opponent.view());
+    if (room_race) draw_room_race(frame.hud, frame.width, frame.height, 100, standings, epoch_ms, stack);
 }
 
 // An offscreen colour + depth/stencil target, for shots at a set size (hidden windows can be small).
