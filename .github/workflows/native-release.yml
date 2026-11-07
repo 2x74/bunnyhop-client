@@ -16,6 +16,10 @@ on:
         type: choice
         default: all
         options: [all, windows, linux, macos]
+      qualification_url:
+        description: Temporary read-only URL for the pinned offline input archive (blank uses the published release)
+        required: false
+        type: string
 permissions:
   contents: read
 concurrency:
@@ -80,10 +84,12 @@ jobs:
       - run: bunx playwright install --with-deps chromium
       - name: Download immutable offline qualification inputs
         env:
-          GH_TOKEN: ${{ github.token }}
+          QUALIFICATION_URL: ${{ inputs.qualification_url }}
         run: |
           mkdir -p target
-          gh api repos/2x74/bunnyhop-client/releases/assets/719828724 -H 'Accept: application/octet-stream' > target/qualification-inputs.tar.gz
+          curl --fail --silent --show-error --location --retry-all-errors --retry 6 --retry-delay 10 \
+            "${QUALIFICATION_URL:-https://github.com/2x74/bunnyhop-client/releases/download/v0.9.0/qualification-inputs.tar.gz}" \
+            -o target/qualification-inputs.tar.gz
       - run: bun apps/native/tools/landfix-release.ts --stage
       - run: bun run wasm
       - run: bun run check

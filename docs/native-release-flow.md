@@ -67,3 +67,7 @@ only the Git objects needed to archive the pristine v27 proof source. Each platf
 identity, real-map Rust landfix tests, native recording/verification for ON/OFF/toggle, and Segmented checkpoint
 reuse with forged-input controls. Separate `native-landfix-PLATFORM-RUN-ATTEMPT` artifacts retain these proofs and traces; the standard parity
 artifact keeps its exact file contract.
+
+Before publication, a manual candidate can supply `qualification_url`, a temporary read-only download URL for
+the same archive. Tags use the public release URL. The archive hash stays pinned in either case; no repository
+credential or write permission enters the job.
