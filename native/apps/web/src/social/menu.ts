@@ -60,8 +60,13 @@ export function withMenu<T extends HTMLElement>(btn: T, items: () => MenuItem[],
       buttons.push(b);
       menu.append(b);
     }
-    // Under the button, inside the viewport; above it when there isn't room below.
+    // Under the button, inside the viewport; above it when there isn't room below. A manual popover, so it's in the top
+    // layer: over a modal dialog too (the map browser's leaderboard is one), where a body child would sit behind it.
     document.body.append(menu);
+    if (typeof menu.showPopover === "function") {
+      menu.popover = "manual";
+      menu.showPopover();
+    }
     const r = btn.getBoundingClientRect();
     const m = menu.getBoundingClientRect();
     const left = o.align === "right" ? r.right - m.width : r.left;

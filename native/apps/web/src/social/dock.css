@@ -149,6 +149,8 @@
   border-radius: var(--r-3); background: var(--ink-2); box-shadow: 0 18px 40px -16px rgba(0, 0, 0, 0.7), 0 0 0 1px var(--ink-4);
   animation: sm-drop var(--t-step) var(--ease-glide);
 }
+/* (Shown as a popover: undo the UA's centring and frame; the position comes from social/menu.ts.) */
+.sm-menu[popover] { inset: auto; margin: 0; border: 0; color: inherit; overflow-y: auto; }
 .sm-menu.up { animation-name: sm-rise; }
 @keyframes sm-drop { from { opacity: 0; transform: translateY(-0.3rem); } }
 @keyframes sm-rise { from { opacity: 0; transform: translateY(0.3rem); } }

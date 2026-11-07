@@ -391,10 +391,9 @@ button.pf-count:focus-visible { outline: none; box-shadow: var(--ring); border-r
 .pf-run-pts, .pf-run-when { color: var(--cream-2); font-size: 0.8rem; }
 .pf-run-when { text-align: right; white-space: nowrap; }
 .pf-run-acts { display: flex; justify-content: flex-end; white-space: nowrap; opacity: 0; transition: opacity var(--t-step) var(--ease-glide); }
-.pf-run:hover .pf-run-acts, .pf-run:focus-within .pf-run-acts, .pf-run-acts:has(.pf-pin.on) { opacity: 1; }
+.pf-run:hover .pf-run-acts, .pf-run:focus-within .pf-run-acts, .pf-run-acts:has(.rb-more[aria-expanded="true"]) { opacity: 1; }
 @media (hover: none) { .pf-run-acts { opacity: 1; } }
 .pf-run-acts .link-btn { padding: 0.2em 0.45em; font-size: 0.8rem; }
-.pf-run-acts .pf-pin.on { color: var(--accent); }
 .pf-run-head { position: sticky; top: 0; z-index: 2; height: 1.7rem; background: var(--ink-1); border-bottom-color: var(--ink-4); color: var(--cream-3); font-family: var(--font-text); font-size: var(--fs-xs); font-weight: 600; }
 .pf-run-head::before { display: none; }
 .pf-run-head:hover { background: var(--ink-1); }

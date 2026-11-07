@@ -9,7 +9,7 @@ window) and WebView2 on Windows. The menu bundle refuses the web game entry poin
 repository root.
 On Windows, the menu shows a still of the map behind it.
 
-The vendored game sources come from web `release-0.0.39` at `8b8db7fe`, physics 27, timer rules 5. Historical
+The vendored game sources come from web `main` at `f0d5a96e`, physics 27, timer rules 5. Historical
 physics 1–26 remain available for replays. The exact source and verifier hashes live in `upstream-manifest.json`
 and `upstream-wasm.json`.
 

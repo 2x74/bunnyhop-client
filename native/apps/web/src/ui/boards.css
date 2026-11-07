@@ -96,6 +96,12 @@ td.rb-player { width: 100%; max-width: 0; }
 .rb-acts { width: 1%; text-align: right; }
 .rb-acts .link-btn { padding: 0.15em 0.45em; font-size: var(--fs-sm); color: var(--faint); }
 .rb-acts .link-btn:hover, .rb-row:hover .rb-acts .link-btn, .rb-row:focus-within .rb-acts .link-btn { color: var(--text); }
+/* A run row's ⋯ (ui/row-menu.ts; custom CSS: [data-part="row-menu"]): the row's other actions. As quiet as Watch / Race,
+   lit with them on hover / focus and while its menu is open. */
+.rb-more { display: inline-flex; align-items: center; vertical-align: middle; line-height: 1; }
+.rb-more svg { width: 1.15em; height: 1.15em; fill: currentColor; }
+.rb-acts .rb-more[aria-expanded="true"], .pf-run-acts .rb-more[aria-expanded="true"] { color: var(--text); }
+.rb-row:has(.rb-more[aria-expanded="true"]) .rb-acts .link-btn { color: var(--text); }
 
 /* top three: the rank numeral in gold / silver / bronze */
 tr.top1 td.rb-rank { color: var(--wr); }
