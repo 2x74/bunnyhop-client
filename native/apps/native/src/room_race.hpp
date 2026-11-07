@@ -302,6 +302,28 @@ public:
     }
 };
 
+// The race HUD's colours, as the website's #mp-count / #mp-place / #mp-race take them from the theme: the HUD text
+// colour, the secondary and accent colours and the gain colour (colour-blind palette included). The player's Custom
+// CSS sets them (hud_theme.hpp); the defaults are the website's.
+struct RoomRaceColors {
+    NameColor text = {1, 1, 1, 1};
+    NameColor dim = {.72f, .69f, .64f, 1};
+    NameColor accent = {1, .71f, .24f, 1};
+    NameColor gain = {.3f, 1, .53f, 1};
+};
+
+// The colours from the native HUD's theme (NativeHud::theme / semantic_colors).
+template <class Hud>
+RoomRaceColors room_race_colors(const Hud &hud) {
+    RoomRaceColors colors;
+    const auto &theme = hud.theme();
+    if (theme.text) colors.text = *theme.text;
+    if (theme.secondary) colors.dim = *theme.secondary;
+    if (theme.accent) colors.accent = *theme.accent;
+    colors.gain = hud.semantic_colors().gain;
+    return colors;
+}
+
 // What the room race's drawing shares the screen with (hud_frame.cpp).
 struct RoomRaceStack {
     bool reduced_motion = false;
@@ -309,15 +331,10 @@ struct RoomRaceStack {
     bool banner = true;
     // The run's end card's bottom edge while it's up (HUD units, 0: none): your place goes under it.
     float endcard_bottom = 0;
+    RoomRaceColors colors;
 };
 
 namespace room_race_look {
-inline constexpr NameColor cream = {.94f, .91f, .87f, 1};
-inline constexpr NameColor dim = {.72f, .69f, .64f, 1};
-inline constexpr NameColor white = {1, 1, 1, 1};
-inline constexpr NameColor quiet = {1, 1, 1, .7f};
-inline constexpr NameColor amber = {1, .71f, .24f, 1};
-inline constexpr NameColor gain = {.3f, 1, .53f, 1};
 // The HUD font's baseline and cap height, per unit of text size (hud.hpp atlas metrics, JetBrains Mono).
 inline constexpr float baseline = 1.3f * 42 / 52;
 inline constexpr float cap = .73f;
@@ -423,6 +440,8 @@ void draw_room_race(
     const HudGeometry geometry(width, height, percent);
     const float x = geometry.width / 2, middle = geometry.height / 2;
     const bool calm = stack.reduced_motion;
+    const NameColor text = stack.colors.text, dim = stack.colors.dim, accent = stack.colors.accent;
+    const NameColor gain = stack.colors.gain, quiet = alpha(text, .7f);
     hud.overlay_begin(width, height, percent);
     HudLabel<48> clock, left;
     std::array<Piece, 7> line{};
@@ -433,10 +452,10 @@ void draw_room_race(
         const int seconds = int(std::clamp(std::ceil((race.join_until - now) / 1000), 0., 999.));
         left.format("%d s", seconds);
         clock.format("%zu %s", race.racers, race.racers == 1 ? "racer" : "racers");
-        line[count++] = {"Room race", line_size, cream};
-        line[count++] = {clock.view(), line_size, cream, gap};
+        line[count++] = {"Room race", line_size, text};
+        line[count++] = {clock.view(), line_size, text, gap};
         line[count++] = {"starts in ", line_size, dim, gap};
-        line[count++] = {left.view(), line_size, cream};
+        line[count++] = {left.view(), line_size, text};
         pieces(hud, x, line_base, line, count);
     } else if (race.live) {
         if (race.checking)
@@ -447,15 +466,15 @@ void draw_room_race(
             clock.bytes[std::max<size_t>(clock.view().size(), 2) - 2] = '\0';
         }
         left.format("%zu of %zu finished", race.finished, race.racers);
-        line[count++] = {"Room race", line_size, cream};
-        line[count++] = {clock.view(), clock_size, cream, gap};
+        line[count++] = {"Room race", line_size, text};
+        line[count++] = {clock.view(), clock_size, text, gap};
         if (race.place) {
             line[count++] = {"you ", line_size, dim, gap};
-            line[count++] = {race.place_label.view(), line_size, cream};
-            if (!race.place_time.empty()) line[count++] = {race.place_time.view(), line_size, cream, line_size * .6f};
+            line[count++] = {race.place_label.view(), line_size, text};
+            if (!race.place_time.empty()) line[count++] = {race.place_time.view(), line_size, text, line_size * .6f};
         } else if (!race.mine.empty()) {
             line[count++] = {"you ", line_size, dim, gap};
-            line[count++] = {race.mine.view(), line_size, cream};
+            line[count++] = {race.mine.view(), line_size, text};
         }
         line[count++] = {left.view(), line_size, dim, gap};
         pieces(hud, x, line_base, line, count);
@@ -464,16 +483,16 @@ void draw_room_race(
     const float numeral_middle = middle - 30 - numeral_size * cap / 2;
     if (race.countdown) {
         if (stack.banner) {
-            hud.overlay_text(x, 58, "Room race", 16, amber, true);
+            hud.overlay_text(x, 58, "Room race", 16, accent, true);
             hud.overlay_text(x, 80, race.board.view(), 13, dim, true);
         }
         const int seconds = int(std::clamp(std::ceil((race.go_at - now) / 1000), 1., 99.));
         HudLabel<8> numeral;
         numeral.format("%d", seconds);
         const double since = now - (race.go_at - seconds * 1000.);
-        posed_text(hud, x, numeral_middle, numeral.view(), numeral_size, white, stamp_in(since, calm));
+        posed_text(hud, x, numeral_middle, numeral.view(), numeral_size, text, stamp_in(since, calm));
     } else if (race.go_until > 0 && now < race.go_until) {
-        posed_text(hud, x, numeral_middle, "GO", numeral_size, amber, go_out(now - (race.go_until - go_ms), calm));
+        posed_text(hud, x, numeral_middle, "GO", numeral_size, accent, go_out(now - (race.go_until - go_ms), calm));
     }
     // Your place, just above the crosshair (or under your run's end card), for 2.4 s; the standings take over.
     if (race.place && race.finish_until > 0) {
@@ -489,7 +508,7 @@ void draw_room_race(
         if (pose.alpha > 0) {
             const float top = std::max(middle - 136, stack.endcard_bottom > 0 ? stack.endcard_bottom + 16 : 0.f) - lift;
             const float place_middle = top + place_size * cap / 2;
-            posed_text(hud, x, place_middle, race.place_label.view(), place_size, race.place == 1 ? gain : white, pose);
+            posed_text(hud, x, place_middle, race.place_label.view(), place_size, race.place == 1 ? gain : text, pose);
             if (!race.place_time.empty()) {
                 const float time_top = top + place_size * cap + 14;
                 posed_text(
@@ -498,13 +517,13 @@ void draw_room_race(
                         time_top + place_time_size * cap / 2,
                         race.place_time.view(),
                         place_time_size,
-                        white,
+                        text,
                         {pose.scale, pose.alpha}
                 );
             }
         }
     }
-    // The standings: place, name and time columns, the winner's time big on top, yours in white; one line under.
+    // The standings: place, name and time columns, the winner's time big on top, yours in text; one line under.
     if (race.over && race.row_count) {
         float place_width = 0, name_width = 0, time_width = 0;
         for (size_t k = 0; k < race.row_count; ++k) {
@@ -527,7 +546,7 @@ void draw_room_race(
             if (a <= 0) continue;
             const float drop = calm ? 0 : -10 * (1 - ease_out(float(since / 350), 3));
             hud.overlay_fade(a);
-            const NameColor ink = row.top || row.me ? white : quiet;
+            const NameColor ink = row.top || row.me ? text : quiet;
             const NameColor time_ink = row.top && race.won ? gain : ink;
             const float y = base + drop;
             hud.overlay_text(
@@ -570,7 +589,7 @@ void draw_room_race(
                 verdict_base - verdict_size * cap / 2,
                 race.verdict.view(),
                 verdict_size,
-                race.won ? gain : white,
+                race.won ? gain : text,
                 pose
         );
     }

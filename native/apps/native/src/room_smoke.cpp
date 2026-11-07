@@ -276,7 +276,10 @@ void draw_room_frame(RoomSmokeFrame &frame, const RoomShot &shot, double at, BhS
                 100,
                 standings,
                 epoch_ms,
-                {shot.reduced_motion, true, result_bottom(geometry, result, at, race_bottom)}
+                {shot.reduced_motion,
+                 true,
+                 result_bottom(geometry, result, at, race_bottom),
+                 room_race_colors(frame.hud)}
         );
 }
 

@@ -837,6 +837,16 @@ public:
         text_fade_ = 1;
     }
 
+    // The player's Custom CSS colours (text, secondary, accent), for overlays that follow the theme.
+    const native::HudTheme &theme() const { return theme_; }
+
+    // The gain / loss / sync colours: the colour-blind palette with the theme's on top.
+    native::SemanticPalette semantic_colors() const {
+        auto palette = prefs_.palette;
+        theme_.apply(palette);
+        return palette;
+    }
+
     // Text drawn next is fading in or out (its colour carries the same alpha): the shadow follows. 1 restores it.
     void overlay_fade(float alpha) { text_fade_ = std::clamp(alpha, 0.f, 1.f); }
 

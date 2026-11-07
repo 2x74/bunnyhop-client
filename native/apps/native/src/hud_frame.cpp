@@ -203,7 +203,8 @@ void HudFrame::draw_notifications() const {
                     epoch,
                     {reduced_motion,
                      room.changing_map.empty(),
-                     native::result_bottom(geometry, hud.result, seconds, race_bottom)}
+                     native::result_bottom(geometry, hud.result, seconds, race_bottom),
+                     native::room_race_colors(hud)}
             );
         native::draw_race_picker(hud, width, height, percent, race_picker, menu_pointer);
         native::draw_spectator_bar(hud, width, height, percent, spectator_bar);

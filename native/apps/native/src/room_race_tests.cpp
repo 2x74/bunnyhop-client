@@ -163,6 +163,14 @@ struct RecordingHud {
     }
 };
 
+native::RoomRaceStack stack(bool reduced_motion, bool banner = true, float endcard_bottom = 0) {
+    native::RoomRaceStack value;
+    value.reduced_motion = reduced_motion;
+    value.banner = banner;
+    value.endcard_bottom = endcard_bottom;
+    return value;
+}
+
 RecordingHud draw(const native::RoomModes &modes, double now, native::RoomRaceStack stack = {}) {
     RecordingHud hud;
     native::draw_room_race(hud, 1600, 900, 100, modes.room_race_display(), now, stack);
@@ -215,7 +223,7 @@ void racer_visuals() {
     const auto *landed = landed_hud.find("1");
     assert(landing && landed && landing->size > landed->size && landing->color[3] < landed->color[3]);
     // "1" holds until the room's GO, with no explainer; no banner while the map is changing.
-    hud = draw(modes, 9500, {false, false, 0});
+    hud = draw(modes, 9500, stack(false, false));
     assert(hud.find("1") && !hud.find("Room race") && !hud.find("Waiting for GO"));
     auto live = countdown;
     live["state"] = "live";
@@ -225,9 +233,16 @@ void racer_visuals() {
     assert(!draw(modes, 9700).find("GO"));
     // Reduced motion: GO only fades, it never changes size.
     for (const double at : {9050., 9200., 9400.}) {
-        const auto calm = draw(modes, at, {true});
+        const auto calm = draw(modes, at, stack(true));
         if (const auto *go = calm.find("GO")) assert(go->size == 88);
     }
+    // Theme colours (Custom CSS): GO in the accent, numerals and the line in the text colour.
+    native::RoomRaceStack themed;
+    themed.colors.accent = {0, 0, 1, 1};
+    themed.colors.text = {1, 0, 0, 1};
+    const auto themed_hud = draw(modes, 9200, themed);
+    assert(themed_hud.find("GO")->color[2] == 1 && themed_hud.find("GO")->color[0] == 0);
+    assert(themed_hud.find("Room race")->color[0] == 1 && themed_hud.find("Room race")->color[1] == 0);
     auto placed = live;
     placed["racers"][0] = racer("Alice", 1, 3.51);
     modes.event(event(placed), "bhop_eazy", false, 12000);
@@ -236,7 +251,7 @@ void racer_visuals() {
     const auto *place = hud.last("1st");
     // Above the crosshair; under an end card that reaches further down.
     assert(place->y < 450 && place->color[1] == 1 && place->color[0] < .5f);
-    const auto under_card = draw(modes, 12500, {false, true, 500});
+    const auto under_card = draw(modes, 12500, stack(false, true, 500));
     const auto *under = under_card.last("1st");
     assert(under->y + under->size * (1.3f * 42 / 52 - .73f) >= 516 - .01f);
     // Gone after 2.4 s and its fade.
