@@ -7,7 +7,9 @@
 //
 // Per tick, with the state from BEFORE the tick (the plugin reads it in OnPlayerRunCmd, before the movement runs):
 //   on the ground: count ground ticks; more than BHOP_FRAMES (10) of them start the jump count over. The tick that
-//     jumps (jump held on the first ground tick) is sampled like an air tick.
+//     jumps (jump held on the first ground tick) is sampled like an air tick; a jump from a start zone starts the count
+//     over first (neko-pm/ssj). Nothing else does: teleports, map triggers and checkpoints carry the count on, as on
+//     CS:S servers (research/SSJ.md, "When the count starts over").
 //   in the air (not on a ladder, not noclipping): sample.
 //   sample: horizontal velocity v, wish direction d from the command's forward / side move and yaw:
 //     gain tick = (30 - |v·d|) / 30 when v·d < 30 (Source air acceleration adds speed only then; 30 is its wish speed
@@ -78,8 +80,6 @@ export interface SsjCmd {
 export interface SsjTick {
   /** The tick jumped (EVENT_JUMPED). */
   jumped: boolean;
-  /** Teleported this tick (EVENT_TELEPORTED): the count starts over after it. */
-  teleported?: boolean;
   /** The player stood in a start zone before the tick: a jump from there starts the count over (neko-pm/ssj). */
   inStart?: boolean;
   /** Run time (s) if the timer is running, for the time field. */
@@ -159,7 +159,7 @@ export class SsjTracker {
     this.reset();
   }
 
-  /** Restart, teleport, a new replay: forget everything. */
+  /** A restart, a new replay: forget everything. (Not a teleport: the plugins carry on through those.) */
   reset(): void {
     this.clearChain();
     this.groundTicks = 0;
@@ -200,9 +200,9 @@ export class SsjTracker {
       if (!pre.onLadder) this.sample(pre, cmd);
       this.groundTicks = 0;
     }
-    const report = t.jumped ? this.onJump(pre, t.time ?? null) : null;
-    if (t.teleported) this.reset();
-    return report;
+    // A teleport (a map's trigger, a checkpoint) changes nothing here: in the plugins only ground time and a start zone
+    // start the count over (research/SSJ.md, "When the count starts over").
+    return t.jumped ? this.onJump(pre, t.time ?? null) : null;
   }
 
   private sample(pre: SsjState, cmd: SsjCmd): void {
@@ -335,7 +335,8 @@ export class StartPreTracker {
     this.captured = false;
   }
 
-  tick(pre: SsjState, t: SsjTick): number | null | undefined {
+  /** `teleported`: this tick teleported (EVENT_TELEPORTED); the prespeed is only read on the way out of a zone you walked in. */
+  tick(pre: SsjState, t: SsjTick & { teleported?: boolean }): number | null | undefined {
     if (t.teleported || t.noclip) {
       this.reset();
       return null;

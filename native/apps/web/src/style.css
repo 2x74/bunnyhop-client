@@ -861,6 +861,49 @@ a.home-link, a.home-link:hover { text-decoration: none; }
 .home-tile-times small { font-family: var(--font-text); font-size: var(--fs-xs); color: var(--cream-2); }
 .home-tile-times b { font-weight: 700; color: var(--cream); }
 .home-tile-times b.wr { color: var(--wr); }
+
+/* Recent world records, under the maps to try (ui/home-records.ts). Rows like the tiles: no card, the picture on a tone
+   step, text with a shade. The run (picture, map, time) watches it; the holder opens their profile. With the list, the
+   maps to try are four unless the window is tall, and short windows show fewer records (below). */
+.home-right { display: flex; flex-direction: column; gap: 1.5rem; }
+.home-records { display: var(--home-records, block); min-width: 0; }
+.home-right > .home-records[hidden] { display: none; }
+.home-recs-head { margin: 0 0 0.55rem; padding: 0 0.15rem; font-family: var(--font-ui); font-size: var(--fs-md); font-weight: 700; color: var(--cream); text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8); }
+.home-recs { display: flex; flex-direction: column; gap: 0.45rem; margin: 0; padding: 0; list-style: none; }
+.home-rec { display: grid; grid-template-columns: minmax(0, 15rem) minmax(0, 1fr); align-items: center; column-gap: 1.1rem; min-width: 0; }
+.home-rec-run { display: flex; align-items: center; gap: 0.7rem; min-width: 0; padding: 0; border: 0; background: none; color: var(--cream); text-align: left; cursor: pointer; }
+.home-rec-art { flex: none; width: 4.4rem; aspect-ratio: 16 / 9; border-radius: var(--r-1); background-color: var(--ink-2); box-shadow: 0 0.4rem 1rem -0.6rem rgba(0, 0, 0, 0.7); transition: box-shadow var(--t-step) var(--ease-glide); }
+.home-rec-art::after { display: none; }
+.home-rec-art .card-initials { font-size: 0.8rem; }
+.home-rec-run:hover .home-rec-art, .home-rec-run:focus-visible .home-rec-art { box-shadow: 0 0 0 2px var(--amber); }
+.home-rec-run:focus-visible, .home-rec-who:focus-visible { outline: none; }
+.home-rec-text, .home-rec-whotext { display: flex; flex-direction: column; gap: 0.05rem; min-width: 0; text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8); }
+.home-rec-map { display: flex; align-items: baseline; gap: 0.45rem; min-width: 0; }
+.home-rec-map b { min-width: 0; font-size: var(--fs-sm); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.home-rec-run:hover .home-rec-map b, .home-rec-run:focus-visible .home-rec-map b { color: #fff; }
+.home-rec-time { display: flex; align-items: baseline; gap: 0.4rem; min-width: 0; font-size: var(--fs-sm); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.home-rec-time small { overflow: hidden; text-overflow: ellipsis; font-family: var(--font-text); font-size: var(--fs-xs); color: var(--cream-2); }
+.home-rec-time b { font-weight: 700; color: var(--wr); }
+.home-rec-who { justify-self: start; max-width: 100%; display: flex; align-items: center; gap: 0.55rem; min-width: 0; color: var(--cream); text-decoration: none; }
+a.home-rec-who:hover, a.home-rec-who:focus-visible { text-decoration: none; }
+.home-rec-who .home-rec-av, .home-rec-who .avatar-deco { flex: none; width: 1.75rem; height: 1.75rem; }
+.home-rec-av { display: grid; place-items: center; border-radius: 50%; object-fit: cover; font-size: 0.8rem; }
+.home-rec-name { display: flex; align-items: baseline; gap: 0.3rem; min-width: 0; }
+.home-rec-name b { min-width: 0; font-size: var(--fs-sm); font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.home-rec-name .nm-marks { flex: none; }
+.home-rec-who:hover .home-rec-name b, .home-rec-who:focus-visible .home-rec-name b { text-decoration: underline; text-underline-offset: 0.18em; }
+.home-rec-whotext small { font-family: var(--font-text); font-size: var(--fs-xs); color: var(--cream-2); white-space: nowrap; }
+/* Loading: the rows' own shape, empty. */
+.home-rec-wait .home-rec-run { cursor: default; }
+.home-rec-wait .home-rec-av { background: var(--ink-2); }
+.home-rec-bar { display: block; width: 7rem; max-width: 100%; height: 0.6rem; margin: 0.2rem 0; border-radius: var(--r-1); background: rgba(255, 255, 255, 0.08); }
+.home-rec-bar.short { width: 4.5rem; }
+.home-recs > .home-rec-none { display: block; padding: 0.2rem 0.15rem; font-family: var(--font-text); font-size: var(--fs-sm); color: var(--cream-2); text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8); }
+/* Shorter windows: four maps to try, then fewer records (stacked, below 58rem: all of them, the page scrolls). */
+@media (min-width: 58.01rem) and (max-height: 1260px) { .home-right:has(> #home-records:not([hidden])) .home-grid > :nth-child(n + 5) { display: none; } }
+@media (min-width: 58.01rem) and (max-height: 860px) { .home-rec:nth-child(n + 5) { display: none; } }
+@media (min-width: 58.01rem) and (max-height: 760px) { .home-rec:nth-child(n + 4) { display: none; } }
+@media (max-width: 58rem) { .home-records { width: 100%; max-width: 34rem; } }
 @keyframes mb-pulse { 50% { opacity: 0.55; } }
 
 /* Leaving for a map (menu.ts startLeave): the screen you were on takes off under the loading screen's plate (the home

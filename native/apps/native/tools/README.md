@@ -1,4 +1,21 @@
-# Optional Linux parity harness
+# Native parity tools
+
+## Landfix identity
+
+The landfix identity proof compares all physics versions 1–27 with the current pinned WASM and the built native
+runner. It checks historical states against the retained v26 verifier, v27 ON against v26, and ON/OFF/mid-run toggle
+commands on procedural collision fixtures, including repeated standing and ducking hops. It writes commands and
+state traces to an empty output directory:
+
+```sh
+bun apps/native/tools/landfix-proof.ts --baseline /path/to/v26-verifier.wasm --output target/landfix-identity
+```
+
+The baseline must have SHA-256 `08de4923bdfc4f01678420c1f4e62ca5567c4e2501e4c36bfdef45ebb1871d58`.
+An unpublished current verifier must first be staged through `tools/build-upstream-wasm.ts` or placed in
+`target/upstream-wasm/` under its pinned SHA-256 filename. `ensure-wasm.ts` checks it before use.
+
+## Optional Linux parity harness
 
 `verify-linux.sh` consumes explicitly supplied maps, physics content and saved
 WASM fixtures. It does not depend on a sibling repository or ship maps/replays.

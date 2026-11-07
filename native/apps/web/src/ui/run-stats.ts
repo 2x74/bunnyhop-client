@@ -203,7 +203,8 @@ export function hideRunStats(): void {
 
 function show(row: HTMLElement, x: number): void {
   const id = row.dataset.run;
-  if (!id || !row.isConnected) return;
+  // Not while a menu is open (a row's ⋯, ui/row-menu.ts): the card would cover it.
+  if (!id || !row.isConnected || document.querySelector(".sm-menu")) return;
   const title = row.dataset.runTitle ?? "";
   const pts = livePoints(row);
   const my = ++seq;

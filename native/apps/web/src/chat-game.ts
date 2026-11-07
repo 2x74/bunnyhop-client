@@ -3,6 +3,7 @@
 
 import { api } from "./api";
 import type { ChatGame } from "./chat-commands";
+import { boardRunFor, copyRunStart } from "./copy-start-request";
 import { getPB } from "./pb";
 import { worldRecord } from "./shared-reads";
 import type { Practice } from "./practice-mode/controller";
@@ -16,6 +17,10 @@ export function chatGame(o: { map: string; session: RunSession; practice: Practi
   const { map, session, practice } = o;
   return {
     freecam: o.freecam,
+    landfix: (enabled) => {
+      prefs.update((p) => (p.landfix = enabled ?? !p.landfix));
+      return prefs.get().landfix;
+    },
     key: (action) => {
       const code = prefs.get().binds[action as Action]?.[0];
       return code ? keyLabel(code) : null;
@@ -38,6 +43,12 @@ export function chatGame(o: { map: string; session: RunSession; practice: Practi
           reply(top ? `WR${on}: ${formatTime(top.time)} by ${top.player.name}` : `No record yet${on}. Finish it to set one.`);
         })
         .catch(() => reply("Couldn't load the leaderboard."));
+    },
+    copyStart: (arg, reply) => {
+      // The board !wr reads: the track you're on, in its style.
+      void boardRunFor(map, session.runStyle, session.timer.track, arg).then((r) =>
+        "error" in r ? reply(r.error) : copyRunStart(r.entry.runId, r.who, (replay, who) => session.copyStartPoint(replay, who, reply), reply),
+      );
     },
   };
 }

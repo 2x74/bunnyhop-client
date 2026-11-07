@@ -21,7 +21,7 @@ import { mapTier, tierBadge } from "../../web/src/ui/maps";
 import { mapLookRows } from "../../web/src/ui/map-look-rows";
 import { leaderboardPanel } from "../../web/src/ui/leaderboard";
 import { versionButton } from "../../web/src/ui/changelog";
-import { supportLink } from "../../web/src/ui/community";
+import { discordLink, supportLink } from "../../web/src/ui/community";
 import { openFeedback } from "../../web/src/feedback/state";
 import { openInbox, withInboxBadge } from "../../web/src/inbox/state";
 import { keepRunBlock } from "../../web/src/ui/keep-run";
@@ -517,7 +517,14 @@ export function pauseScreen(a: PauseActions): HTMLElement {
       meta,
     ),
     rail,
-    h("footer.pause-foot", null, accountChip({ quiet: true }), versionButton(), support, legalLinks()),
+    h(
+      "footer.pause-foot",
+      null,
+      accountChip({ quiet: true }),
+      versionButton(),
+      h("div.pause-links", null, support, discordLink("pause-discord", "Discord", { icon: false })),
+      legalLinks(),
+    ),
   );
   const screen = h("section.pause", null, left, panel);
 

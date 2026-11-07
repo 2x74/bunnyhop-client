@@ -230,6 +230,44 @@ int main(int argc, char **argv) {
         f.reset(true, false);
         assert(f.ssj_was_in_start && f.history_ready(false, false, false));
     }
+    {
+        native::MovementFeedback moved;
+        moved.ssj.set_mode(native::SsjMode::every);
+        float position[3]{0, 0, 100}, velocity[3]{300, 0, 0};
+        native::SsjState pre{position, velocity, true, false};
+        const native::SsjCmd jump{0, 450, 90, native::ssj_in_jump | native::ssj_in_moveright};
+        native::SsjTick info;
+        info.jumped = true;
+        moved.ssj.tick(pre, jump, info);
+        moved.jhud.tick(pre, jump, info);
+        pre.grounded = false;
+        info.jumped = false;
+        for (int tick = 0; tick < 8; ++tick) {
+            moved.ssj.tick(pre, jump, info);
+            moved.jhud.tick(pre, jump, info);
+        }
+        auto ssj = moved.ssj;
+        auto jhud = moved.jhud;
+        moved.ssj_gain = 87.5f;
+        moved.moved(false, false);
+        assert(moved.ssj.jump == 1 && moved.ssj_gain == 87.5f);
+        position[0] = 1000;
+        info.teleported = true;
+        moved.ssj.tick(pre, jump, info);
+        moved.jhud.tick(pre, jump, info);
+        ssj.tick(pre, jump, info);
+        jhud.tick(pre, jump, info);
+        pre.grounded = true;
+        info.jumped = true;
+        info.teleported = false;
+        const auto actual = moved.ssj.tick(pre, jump, info), expected = ssj.tick(pre, jump, info);
+        const auto actual_hud = moved.jhud.tick(pre, jump, info), expected_hud = jhud.tick(pre, jump, info);
+        assert(actual && expected && actual->jump == 2 && actual->gain == expected->gain
+               && actual->sync == expected->sync && actual->eff == expected->eff);
+        assert(actual_hud && expected_hud && actual_hud->jump == 2 && actual_hud->gain == expected_hud->gain);
+        moved.reset();
+        assert(moved.ssj.jump == 0);
+    }
     std::cout << "Jump stats interval and strafe trainer checks passed\n";
     return 0;
 }

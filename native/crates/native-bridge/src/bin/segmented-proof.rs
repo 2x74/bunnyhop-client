@@ -38,7 +38,7 @@ fn main() {
             })
             .collect();
         let options = BhRunOptions {
-            rules: 4,
+            rules: spec["timerRules"].as_u64().unwrap_or(4) as u32,
             ..BhRunOptions::default()
         };
         ok(

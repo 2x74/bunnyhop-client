@@ -36,13 +36,24 @@ export class LiveSsj {
     prefs.watch((p) => this.tracker.setMode(p.hud.ssj.mode));
   }
 
-  /** Restart / checkpoint teleport: the count starts over from `state` (the state the next tick starts from). */
+  /** Restart: the count starts over from `state` (the state the next tick starts from). */
   reset(state: PlayerState | null): void {
     this.tracker.reset();
     this.startPre.reset();
     this.reportStartPre(null);
     this.jhud.reset();
     this.reportJhud(null);
+    this.pre = state;
+  }
+
+  /**
+   * A checkpoint teleport, a Segmented load, practice from a replay: play goes on from `state`. The jump count and the
+   * stats carry on, as in CS:S, where only standing still or a jump from a start zone starts them over (shavit's
+   * !tele is a teleport like a map's, and no SSJ plugin hooks it; research/SSJ.md). The start prespeed starts over.
+   */
+  moved(state: PlayerState): void {
+    this.startPre.reset();
+    this.reportStartPre(null);
     this.pre = state;
   }
 
@@ -56,7 +67,7 @@ export class LiveSsj {
     if (!pre) return;
     const startPre = this.startPre.tick(pre, { jumped: (events & EVENT_JUMPED) !== 0, teleported: (events & EVENT_TELEPORTED) !== 0, ...o });
     if (startPre !== undefined) this.reportStartPre(startPre);
-    const r = this.tracker.tick(pre, cmd, { jumped: (events & EVENT_JUMPED) !== 0, teleported: (events & EVENT_TELEPORTED) !== 0, ...o });
+    const r = this.tracker.tick(pre, cmd, { jumped: (events & EVENT_JUMPED) !== 0, ...o });
     if (r) this.report(r);
     const j = this.jhud.tick(pre, cmd, { jumped: (events & EVENT_JUMPED) !== 0, ...o });
     if (j) this.reportJhud(j);

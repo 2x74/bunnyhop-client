@@ -44,6 +44,7 @@
 #include "activity.hpp"
 #include "weapon_menu.hpp"
 #include "start_point.hpp"
+#include "copy_start.hpp"
 #include "restart_placement.hpp"
 #include "track_style_switch.hpp"
 #include "run_timing.hpp"
@@ -412,6 +413,7 @@ int run(const native::Options &opt) {
     native::AutoRestart auto_restart;
     native::RacePicker race_picker;
     native::StartPoints start_points;
+    native::CopyStartImports copy_starts;
     native::KeptWeapons kept_weapons;
     third_camera.set_mode("chase");
     native_render::ThirdPersonEvents third_person_events;
@@ -533,8 +535,9 @@ int run(const native::Options &opt) {
     const bool automatic_updates = !opt.frames && opt.menu_smoke.empty() && opt.runtime_smoke.empty();
     if (automatic_updates) updater.check_if_due();
 
-    auto reset_feedback = [&](bool incomplete_history = false, bool keep_jump_stats = false) {
-        hud.reset_history(keep_jump_stats);
+    auto reset_feedback = [&](bool incomplete_history = false, bool keep_jump_stats = false, bool moved = false) {
+        if (moved) hud.jhud.moved(curr.tick);
+        hud.reset_history(keep_jump_stats || moved, moved);
         ghost_compare.restart();
         const auto gain = feedback.ssj_gain;
         BhRunState timing{};
@@ -543,11 +546,15 @@ int run(const native::Options &opt) {
             bh_run_state(core.get(), &timing);
             bh_snapshot(core.get(), &snapshot);
         }
-        feedback.reset(timing.in_start != 0, snapshot.movement_mode == 1, incomplete_history);
+        if (moved)
+            feedback.moved(timing.in_start != 0, snapshot.movement_mode == 1);
+        else
+            feedback.reset(timing.in_start != 0, snapshot.movement_mode == 1, incomplete_history);
         if (keep_jump_stats) feedback.ssj_gain = gain;
     };
     native::RunHeartbeat heartbeat;
     auto &zones = game.zones;
+    std::vector<unsigned> bonus_tracks;
     auto &progress_mutex = map_download.mutex;
     auto &download = map_download.jobs;
     native::MapJobs<bool> prefetch;
@@ -716,7 +723,9 @@ int run(const native::Options &opt) {
     };
     // A track-style switch's restart point for the next reset (track_style_switch.hpp).
     std::optional<native::StartPoint> restart_at;
+    bool canonical_race_start = false;
     auto reset = [&]() {
+        const bool canonical = std::exchange(canonical_race_start, false);
         const auto at = std::exchange(restart_at, std::nullopt);
         stop_camera_preparation();
         viewer.controls = {};
@@ -756,7 +765,8 @@ int run(const native::Options &opt) {
                              map_id,
                              active_track,
                              zones,
-                             tutorial_runner.lesson && tutorial_runner.lesson->is_active() ? nullptr : &start_points
+                             tutorial_runner.lesson && tutorial_runner.lesson->is_active() ? nullptr : &start_points,
+                             canonical
                      );
         curr = restart.state;
         if (tutorial_runner.lesson && tutorial_runner.lesson->is_active())
@@ -909,7 +919,7 @@ int run(const native::Options &opt) {
                 if (renderer) renderer->reset_presentation();
                 scope.reset();
                 audio.reset();
-                reset_feedback(true);
+                reset_feedback(false, false, true);
                 reset_input_timing();
                 room_events |= 8;
             };
@@ -930,6 +940,7 @@ int run(const native::Options &opt) {
         tutorial_runner.stopped = true;
         replay_compare.clear();
         replay_compare_import.reset();
+        copy_starts.reset();
         game.leave(practice);
         tutorial_runner.lesson.reset();
         viewer.active = false;
@@ -946,6 +957,7 @@ int run(const native::Options &opt) {
         gauntlet_map.clear();
         gauntlet_progress = nullptr;
         zones.clear();
+        bonus_tracks.clear();
         map_id.clear();
         audio.set_map(nullptr);
         map_audio.stop();
@@ -976,21 +988,33 @@ int run(const native::Options &opt) {
         observed_spectator.reset();
     };
     auto apply_room_mode = [&](const native::RoomModeAction &action) {
-        if (action.stop_spectating && menu && menu_ready)
-            menu->evaluate_js("window.bunnyhopNativeMenu?.onRoomCommand?.({t:'spec',target:null})");
+        if (action.stop_spectating) {
+            room.spectator_target.reset();
+            if (menu && menu_ready)
+                menu->evaluate_js("window.bunnyhopNativeMenu?.onRoomCommand?.({t:'spec',target:null})");
+        }
         if (action.restart && core) {
             if (tutorial_runner.lesson) tutorial_runner.lesson->stop();
             tutorial_runner.demo = false;
             if (!action.style.empty()) selected_style = action.style;
             active_track = action.track;
+            if (action.canonical_start) {
+                restart_at.reset();
+                practice.clear(core.get());
+                third_person = false;
+                canonical_race_start = true;
+            }
             reset();
             show_menu(false);
         }
+        if (action.room_race_go) audio.play("countdown_go");
+        if (action.room_race_finish) audio.play("finish_pb");
     };
     auto load_map = [&](const std::string &path,
                         const std::string &content,
                         const std::string &id,
                         const nlohmann::json &detail) {
+        copy_starts.reset();
         game.prepare_workers(path, content, detail);
         auto next = map_preparation.take(path, content, settings, detail);
         const auto &next_zones = next.zones;
@@ -1018,6 +1042,12 @@ int run(const native::Options &opt) {
         race_ghost_imports.reset();
         ghosts.slots = {};
         zones = next_zones;
+        bonus_tracks.clear();
+        for (const auto &zone : zones) {
+            if (zone.kind == 0 && zone.track
+                && std::find(bonus_tracks.begin(), bonus_tracks.end(), zone.track) == bonus_tracks.end())
+                bonus_tracks.push_back(zone.track);
+        }
         renderer->set_zones(zones);
         viewer.camera.reset();
         hud.reset_history();
@@ -1038,6 +1068,7 @@ int run(const native::Options &opt) {
         apply_room_mode(room_modes.map_loaded(map_id, room.spectator_target.has_value(), epoch_ms()));
     };
     auto request_map = [&](const std::string &id) {
+        copy_starts.reset();
         if (!opt.runtime_smoke.empty()) throw std::runtime_error("Offline runtime smoke attempted a map download");
         if (map_download.loading_map(id)) {
             map_download.note_refused(id, "it is already loading");
@@ -1629,6 +1660,14 @@ int run(const native::Options &opt) {
                                 open_chat(std::string(action) == "commandChat");
                                 return;
                             }
+                if (const auto pick = numbered_menus.copy_start.key(code, down, repeat); pick.handled) {
+                    if (pick.chosen && menu && menu_ready)
+                        menu->evaluate_js(
+                                "window.bunnyhopNativeMenu?.onCopyStartPlayer?.("
+                                + (pick.slot ? std::to_string(*pick.slot) : "null") + ")"
+                        );
+                    return;
+                }
                 if (numbered_menus.closes_guns(code, down, repeat, input_timeline.binds())) return;
                 if (const auto action = trigger_menu.key(code, down, repeat)) {
                     if (!action->empty()) act(std::string(*action));
@@ -2502,9 +2541,13 @@ int run(const native::Options &opt) {
                             preferences = native::patch_settings(preferences, native::ssj_chat_patch(message));
                             json_writer.write(cache / "settings.json", preferences);
                             apply_preferences();
-                        } else if (action == "raceMenu" || action == "spectateMenu" || action == "lookMenu") {
+                        } else if (action == "raceMenu" || action == "spectateMenu" || action == "lookMenu"
+                                   || action == "copyStartMenu") {
                             // Opened from chat: the cursor stays out for the menu's rows (menu_cursor.hpp).
-                            if (action == "raceMenu") {
+                            if (action == "copyStartMenu") {
+                                numbered_menus.copy_start.show(room.display());
+                                numbered_menus.opened(native::NumberedMenus::Menu::copy_start);
+                            } else if (action == "raceMenu") {
                                 race_picker.open(room.display(), zones);
                                 numbered_menus.opened(native::NumberedMenus::Menu::race);
                                 if (!race_picker.count) toast("No other players to race.");
@@ -2632,7 +2675,7 @@ int run(const native::Options &opt) {
                             renderer->reset_presentation();
                             scope.reset();
                             audio.reset();
-                            reset_feedback(true);
+                            reset_feedback(false, false, true);
                             reset_input_timing();
                             score_notice = "Practice from replay. Press R for a real run.";
                             menu->evaluate_js(
@@ -2791,7 +2834,19 @@ int run(const native::Options &opt) {
                         sky_library.message(message);
                     else if (type == "hudTheme")
                         hud.set_theme(native::parse_hud_theme(message.at("theme")));
-                    else if (type == "replays")
+                    else if (type == "copyStart") {
+                        const auto id = message.at("id").get<uint64_t>();
+                        try {
+                            if (!core || download.valid()) throw std::runtime_error("Load a map first.");
+                            if (tutorial_runner.lesson && tutorial_runner.lesson->is_active())
+                                throw std::runtime_error("Start points are unavailable in tutorial lessons");
+                            copy_starts.request(
+                                    message, map_id, selected_style, game.map_path, game.content_root, cache, zones
+                            );
+                        } catch (const std::exception &failure) {
+                            menu->evaluate_js(native::copy_start_script(id, failure.what(), false));
+                        }
+                    } else if (type == "replays")
                         refresh_replays();
                     else if ((type == "paint" || type == "measure") && renderer) {
                         score_notice =
@@ -3271,6 +3326,32 @@ int run(const native::Options &opt) {
             if (!menu && core && !opt.hidden) capture(true);
         }
         if (!running) break;
+        if (const auto copied = copy_starts.take(map_id, selected_style); copied && menu && menu_ready) {
+            if (!copied->start)
+                menu->evaluate_js(native::copy_start_script(copied->id, copied->error, false));
+            else if (!copied->start->save(start_points, map_id, zones))
+                menu->evaluate_js(
+                        native::copy_start_script(
+                                copied->id, "That run's start isn't a spot a restart can use any more.", false
+                        )
+                );
+            else {
+                const auto &start = *copied->start;
+                json_writer.write(cache / "start-points.json", start_points.points);
+                BhRunState timing{};
+                if (core) bh_run_state(core.get(), &timing);
+                const bool go = core && start.restart_now(timing.status, !gauntlet_id.empty(), active_track);
+                if (go) {
+                    active_track = start.track;
+                    reset();
+                }
+                menu->evaluate_js(
+                        native::copy_start_script(
+                                copied->id, native::copied_start_message(copied->who, start.track, go), true
+                        )
+                );
+            }
+        }
         replay_timeline.poll(menu.get(), menu_ready, viewer.id, viewer.active);
         replay_compare_import.poll(replay_compare, viewer.id, viewer.active, chat, epoch_ms() / 1000.);
         if (race_ghost_imports.poll(
@@ -3337,6 +3418,7 @@ int run(const native::Options &opt) {
                     error = e.what();
                     viewer.paused = true;
                 }
+        if (room_modes.room_race_tick(epoch_ms())) audio.play("countdown_tick");
         const bool simulation_active =
                 !video.preparing() && core && !spectator && !room_modes.frozen() && !download.valid()
                 && ((focused && (captured || (viewer.active && (!menu || !menu->visible() || viewer.ui_shown))))
@@ -3459,6 +3541,7 @@ int run(const native::Options &opt) {
                 }
                 // R1: while freecam flies, the body gets the command of a player who let go of everything.
                 cmd = freecam_on ? native::neutral_command(input) : input.command(w_release);
+                native::apply_landfix(cmd, hud.preferences().landfix);
                 if (practice.noclip) {
                     BhSnapshot snapshot{};
                     require(bh_noclip_move(&practice.flight, &cmd, dt, selected_style.c_str()),
@@ -3575,7 +3658,6 @@ int run(const native::Options &opt) {
                 if (timing_before.status == 1 && !flight_tick)
                     info.time = (timing_before.last_tick - timing_before.start_tick) * step_dt;
                 hud.configure_feedback(feedback);
-                if (timing.update_flags & 4) reset_feedback(false, true);  // restarted
                 const bool history_ready = feedback.history_ready(pre.grounded, info.in_start, info.noclip);
                 if (history_ready) {
                     if (const auto report = feedback.ssj.tick(pre, ssj_cmd, info)) {
@@ -3606,10 +3688,6 @@ int run(const native::Options &opt) {
                         info.noclip,
                         native::air_speed_gain(core.get())
                 );
-                if (info.teleported) {
-                    feedback.ssj.reset();
-                    feedback.ssj_was_in_start = timing.in_start != 0;
-                }
             }
             BhSurfaceProbe surface{};
             surface.water_z = std::numeric_limits<float>::quiet_NaN();
@@ -4182,7 +4260,9 @@ int run(const native::Options &opt) {
                     spectator_bar,
                     free_cameras.flying(spectator.has_value()),
                     &look_menu,
-                    menu_cursor.pointer()
+                    menu_cursor.pointer(),
+                    &numbered_menus.copy_start,
+                    menu_reduced_motion
             }
                     .draw();
         }
@@ -4543,6 +4623,7 @@ int run(const native::Options &opt) {
                 );
             }
             if (!state.is_null()) {
+                state["bonusTracks"] = bonus_tracks;
                 const auto script = menu_state.publish(std::move(state), visible, preferences, replay_list);
                 if (!script.empty()) menu->evaluate_js(script);
             }

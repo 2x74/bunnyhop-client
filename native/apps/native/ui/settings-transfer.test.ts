@@ -156,3 +156,19 @@ test("account uploads replace command and alias maps so deletions survive a late
   expect(imported.next.cmdBinds).toEqual({});
   expect(imported.next.aliases).toEqual({});
 });
+
+test("account-synced landfix OFF is a shared preference and survives settings export", async () => {
+  const keys = state.settingsKeys;
+  state.settingsKeys = [...Object.keys(state.settings), "landfix"];
+  try {
+    const remote = buildSettingsDoc({ ...clone(DEFAULT_PREFS), landfix: false });
+    const parsed = await parseSettingsText(await encodeSettingsCode(remote));
+    if (!parsed.ok) throw new Error(parsed.error);
+    const imported = planSettingsImport(parsed.doc, clone(DEFAULT_PREFS));
+    expect(imported.next.landfix).toBe(false);
+    expect(nativeView(imported.next, hostSettings()).landfix).toBe(false);
+    expect(nativeOnlySettings().landfix).toBeUndefined();
+  } finally {
+    state.settingsKeys = keys;
+  }
+});

@@ -6,6 +6,8 @@ import {
   resolveRaceCommand,
 } from "./chat-input";
 import { dispatchNativeChat } from "./chat-routing";
+import { NativeCopyStart } from "./copy-start";
+import { prefs } from "../../web/src/ui/settings";
 import { api } from "../../web/src/api";
 import {
   findChatCommand,
@@ -48,6 +50,7 @@ export type ChatAction =
         | "freecam"
         | "spectateMenu"
         | "raceMenu"
+        | "copyStartMenu"
         | "lookMenu";
       track?: number;
       weapon?: string;
@@ -106,11 +109,19 @@ let registered = false;
 export class NativeChatService {
   private hidden = false;
   private accountEpoch = 0;
+  readonly copyStart: NativeCopyStart;
   private suggestions = new ChatSuggestionFence();
   constructor(
     private room: NativeRoomService,
     private openRoom: () => void,
   ) {
+    this.copyStart = new NativeCopyStart({
+      context: () => ({ map: state.map, style: state.style, track: state.track, loading: !!state.loading }),
+      room,
+      send,
+      reply: (text) => this.reply(text),
+    });
+    this.copyStart.update();
     setNativeChatSink((text) => this.reply(text));
     if (!registered) {
       registered = true;
@@ -252,7 +263,14 @@ export class NativeChatService {
       setStartPoint: () => emit({ type: "chatAction", action: "setStart" }),
       clearStartPoint: () => emit({ type: "chatAction", action: "clearStart" }),
       game: {
+        landfix: (enabled) => {
+          prefs.update((p) => (p.landfix = enabled ?? !p.landfix));
+          return prefs.get().landfix;
+        },
         key: (action) => state.settings.binds[action]?.[0] ?? null,
+        copyStart: (arg, answer) => {
+          void this.copyStart.command(arg, answer);
+        },
         style: () => styleSwitch.style(),
         setStyle: (id) => styleSwitch.set(id),
         practice: (action) => send({ type: "practice", action }),
@@ -301,10 +319,17 @@ export class NativeChatService {
                 reply(ok ? "Invite link copied." : "Couldn't copy invite link."),
               );
             },
+            copyStart: (arg) => this.copyStart.roomCommand(arg, reply),
             race: (arg) => {
               // No name: the host's pick menus, as for a plain "!race" it catches itself.
               if (!arg) return emit({ type: "chatAction", action: "raceMenu" });
-              const resolved = resolveRaceCommand(arg, this.room.view.players, this.room.view.you, state.style);
+              const resolved = resolveRaceCommand(
+                arg,
+                this.room.view.players,
+                this.room.view.you,
+                state.style,
+                state.bonusTracks,
+              );
               if ("error" in resolved) return reply(resolved.error);
               this.room.command({ t: "chat", text: resolved.text });
             },

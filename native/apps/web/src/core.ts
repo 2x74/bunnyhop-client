@@ -317,7 +317,7 @@ export const PHYSICS_V16 = 16;
 /** RNGFix parity: uphill / downhill inclines, edge bugs, trigger jumping and telehops as on RNGFix servers. */
 export const PHYSICS_V17 = 17;
 /** The physics version new runs are played and recorded with. */
-export const PHYSICS_VERSION = 26;
+export const PHYSICS_VERSION = 27;
 /** Climbable surface properties used by bhop_synthetic_fix. */
 export const PHYSICS_V18 = 18;
 /** Scoped entity makers and known velocity-script equivalents. */
@@ -335,6 +335,8 @@ export const PHYSICS_V24 = 24;
 /** Every ground jump starts 1.5 above the floor, as on Momentum Mod and landfix servers: jump heights no longer depend on the landing's sub-tick phase. */
 export const PHYSICS_V25 = 25;
 export const PHYSICS_V26 = 26;
+/** Per-command landfix toggle; ON is the unchanged v26 jump lift. */
+export const PHYSICS_V27 = 27;
 /** Versions this code knows (the wasm build must support them too, see Core.setSettings). */
 export const isPhysicsVersion = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= PHYSICS_V1 && (v as number) <= PHYSICS_VERSION;
 
@@ -400,6 +402,8 @@ export const EVENT_FLIGHT_LANDED = 1 << 10;
  * verifier.ts); elsewhere the core ignores it.
  */
 export const IN_FLIGHT = 1 << 24;
+/** Physics 27+: omit the ground jump's 1.5-unit lift on this command. Zero keeps landfix ON. */
+export const IN_NO_LANDFIX = 1 << 25;
 /** Infinite flight's top speed (crates/core FLIGHT_TOP_SPEED; practice-mode/noclip.ts INFINITE_NOCLIP_TOP_SPEED). */
 export const FLIGHT_TOP_SPEED = 3500;
 /** Horizontal speed a flight's landing keeps at most (crates/core FLIGHT_EXIT_CAP; the Infinite start re-entry cap). */

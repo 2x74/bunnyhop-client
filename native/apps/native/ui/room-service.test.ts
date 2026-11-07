@@ -5,7 +5,7 @@ import { decodeSnapshot, type ServerMsg, type NetSample, type Snapshot } from ".
 import { ROOM_WIRE_STYLES } from "./room-styles";
 import type { MenuMessage } from "./bridge";
 const sample: NetSample = { tick: 1, x: 0, y: 0, z: 0, vx: 1, vy: 0, vz: 0, yaw: 0, pitch: 0, flags: 0 };
-const welcome = (id: string, map = "bhop_eazy"): ServerMsg => ({
+const welcome = (id: string, map = "bhop_eazy"): Extract<ServerMsg, { t: "welcome" }> => ({
   t: "welcome",
   v: 1,
   you: 0,
@@ -460,6 +460,49 @@ test("web 0.0.36 welcomes, joins, patches and races with every style pass", asyn
     expect(f.service.view.players).toHaveLength(ROOM_WIRE_STYLES.length);
     expect(f.service.view.players[10]).toMatchObject({ style: "backwards", practice: true });
     expect(f.service.view.metas["10"]).toMatchObject({ style: 10 });
+  } finally {
+    f.service.leave();
+  }
+});
+
+test("room race views, clears, clocks, announcements and reconnects reach the host", async () => {
+  const f = fixture();
+  const { roomRace } = await import("./fixtures/room-race");
+  try {
+    await f.service.join("test");
+    const r = roomRace();
+    f.handlers[0].message({ ...welcome("test"), roomRace: r });
+    expect(f.service.view.roomRace).toEqual(r);
+    const live = { ...r, state: "live" as const };
+    f.handlers[0].message({ t: "roomRace", race: live });
+    expect(f.service.view.roomRace).toEqual(live);
+    const event = [...f.sent].reverse().find((m) => m.type === "roomEvent");
+    expect(event).toMatchObject({ event: { t: "roomRace", race: live } });
+    if (event?.type === "roomEvent") expect(event.event.nativeClockOffsetMs).toBeGreaterThan(4900);
+    f.handlers[0].message({ t: "chat", text: "Room race: GO", kind: "server", at: Date.now() });
+    expect(f.sent.filter((m) => m.type === "chatLine" && m.text === "Room race: GO")).toHaveLength(1);
+    f.handlers[0].message({ t: "roomRace", race: { ...r, you: 200 } });
+    expect(f.service.view.roomRace).toEqual(live);
+    f.handlers[0].message(welcome("test"));
+    expect(f.service.view.roomRace).toBeNull();
+    f.handlers[0].message({ t: "roomRace", race: live });
+    f.handlers[0].message({ t: "roomRace", race: null });
+    expect(f.service.view.roomRace).toBeNull();
+    f.handlers[0].message({ t: "roomRace", race: live });
+    f.handlers[0].status("closed");
+    expect(f.service.view.roomRace).toBeNull();
+    f.handlers[0].message(welcome("test"));
+    f.handlers[0].message({ t: "roomRace", race: live });
+    f.handlers[0].message({ t: "kicked", reason: "Test kick" });
+    expect(f.service.view.roomRace).toBeNull();
+    expect(f.sent).toContainEqual({
+      type: "roomEvent",
+      id: "test",
+      generation: f.service.view.generation,
+      event: { t: "nativeStatus", status: "closed", detail: "Test kick" },
+    });
+    f.service.leave();
+    expect(f.service.view.roomRace).toBeNull();
   } finally {
     f.service.leave();
   }

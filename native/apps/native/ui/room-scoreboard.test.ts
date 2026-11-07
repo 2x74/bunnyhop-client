@@ -66,6 +66,7 @@ const view = (): RoomView => ({
   vote: null,
   pool: [],
   race: null,
+  roomRace: null,
   rtv: { count: 0, needed: 1 },
 });
 test("native scoreboard matches web PB sorting, wire style, marks, host, status and ping", () => {

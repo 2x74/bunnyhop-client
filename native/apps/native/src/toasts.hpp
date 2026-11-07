@@ -47,10 +47,11 @@ public:
 };
 
 template <class Hud>
-void draw_toasts(Hud &hud, int width, int height, float percent, const Toasts &toasts, double now) {
+// `below`: a race result's bottom edge (HUD units); the notices go under it while it's up.
+void draw_toasts(Hud &hud, int width, int height, float percent, const Toasts &toasts, double now, float below = 0) {
     const HudGeometry geometry(width, height, percent);
     hud.overlay_begin(width, height, percent);
-    float y = geometry.height * .12f;
+    float y = std::max(geometry.height * .12f, below > 0 ? below + 12 : 0.f);
     for (size_t i = toasts.count; i > 0; --i) {
         const auto &toast = toasts.items[i - 1];
         if (now >= toast.expires) continue;

@@ -7,7 +7,12 @@ import { state } from "./bridge";
 // The settings screen is the website's, in the native menu with no host: the tests play the host through
 // bunnyhopNativeMenu.onState and read the messages the menu sends it.
 type Message = { type: string; [key: string]: unknown };
-type Init = { storage?: Record<string, string>; me?: unknown; savedSettings?: unknown };
+type Init = {
+  storage?: Record<string, string>;
+  me?: unknown;
+  savedSettings?: unknown;
+  settings?: Record<string, unknown>;
+};
 
 const menu = readFile(new URL("../../../target/native-menu/menu.html", import.meta.url), "utf8");
 const HOST_SETTINGS = JSON.parse(JSON.stringify(state.settings));
@@ -45,7 +50,7 @@ async function open(
     addEventListener("bunnyhop:native-message", (event) => sent.push((event as CustomEvent).detail));
   }, init.storage ?? {});
   await page.goto("https://bunnyhop.lol/settings-test");
-  await host(page, { settings: HOST_SETTINGS });
+  await host(page, { settings: { ...HOST_SETTINGS, ...init.settings } });
   return { page, errors, uploads, close: () => browser.close() };
 }
 
@@ -497,6 +502,28 @@ test("route controls apply live from the pause screen and persist across restart
     await host(page, { map: "bhop_eazy", ghostGeneration: 2, settings });
     expect(await row(page, "ghost", "Route only").getByRole("switch").isChecked()).toBe(true);
     expect(await row(page, "ghost", "Route ghost").locator("select").inputValue()).toBe("wr");
+    expect(errors).toEqual([]);
+  } finally {
+    await close();
+  }
+}, 30_000);
+
+test("Landfix follows the host and sends one shared preference from the movement row", async () => {
+  const { page, errors, close } = await open({ settings: { landfix: false } });
+  try {
+    await openSettings(page, "keys");
+    const control = row(page, "keys", "Landfix").getByRole("switch");
+    expect(await control.isChecked()).toBe(false);
+    const from = await count(page);
+    await control.click();
+    expect(await patchesSince(page, from)).toEqual([{ landfix: true }]);
+    await host(page, { settings: { ...HOST_SETTINGS, landfix: true } });
+    expect(await control.isChecked()).toBe(true);
+    const before = await count(page);
+    await page.evaluate(() =>
+      dispatchEvent(new CustomEvent("bunnyhop:native-console-command", { detail: "cl_landfix 0" })),
+    );
+    expect(await patchesSince(page, before)).toEqual([{ landfix: false }]);
     expect(errors).toEqual([]);
   } finally {
     await close();

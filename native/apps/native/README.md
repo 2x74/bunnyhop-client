@@ -9,8 +9,9 @@ window) and WebView2 on Windows. The menu bundle refuses the web game entry poin
 repository root.
 On Windows, the menu shows a still of the map behind it.
 
-The vendored game sources come from web `hotfix/0030-wasm` at `6a37d059`, physics 20, timer rules 2. Historical
-physics 1–19 remain available for replays. See [the v0.0.30 integration notes](../../docs/v0.0.30-native-integration.md).
+The vendored game sources come from web `main` at `f0d5a96e`, physics 27, timer rules 5. Historical
+physics 1–26 remain available for replays. The exact source and verifier hashes live in `upstream-manifest.json`
+and `upstream-wasm.json`.
 
 ## Build and play
 
@@ -62,6 +63,10 @@ These measure delivered motion, including SDL timestamp estimates, rather than t
 
 Keys → Release W on jump works as on the website: a jump taken holding W lets go of forward until you land or press W
 again. It's off by default, not available in Legit Scroll, W-Only, Sideways or Half-Sideways, and marked in the replay.
+
+Keys → Movement → Landfix defaults on. Use `!landfix`, `!landfix on|off` or `cl_landfix 0|1` to change it, including
+during a run. `bind k "say !landfix"` works in solo and rooms and answers privately. The choice is saved with your
+settings; replays keep each tick's recorded choice.
 
 Mouse → Advanced → Native input selects Auto, SDL or experimental Raw. Auto keeps SDL. Raw reads relative HID
 counts with device timestamps on macOS (requires Input Monitoring) or evdev packets with monotonic kernel times on

@@ -85,6 +85,11 @@ export interface RoomChat {
   race(arg: string): void;
   /** Opens a gift preview; never spends credits from chat. */
   gift?(arg: string): void;
+  /**
+   * !copystart in a room (net/mp.ts): no argument opens the pick menu, a player here copies their PB's start. False
+   * when it isn't for the room (a rank, a name nobody here has): the board takes it (ChatGame.copyStart).
+   */
+  copyStart?(arg: string): boolean;
   /** !report [player] (social/commands.ts): the report form on a player in this room (their name), else the form asks. */
   report?(arg: string): void;
 }
@@ -106,6 +111,10 @@ export interface ChatGame {
   record(kind: "wr" | "pb", reply: (text: string) => void): void;
   /** !freecam: toggles freecam (freecam.ts), or the free look while spectating in a room. */
   freecam?(): void;
+  /** !copystart [player|#rank] on the current map, track and style's board (copy-start-request.ts boardRunFor). */
+  copyStart?(arg: string, reply: (text: string) => void): void;
+  /** Per-player landfix, shared with Settings and the console. */
+  landfix?(enabled?: boolean): boolean;
 }
 
 export interface ChatCommand {
@@ -424,6 +433,37 @@ const BUILT_IN: ChatCommand[] = [
       if (!spectating(ctx)) ctx.clearStartPoint();
     },
   },
+  {
+    name: "copystart",
+    args: "[player|#rank]",
+    help: "copy a run's start point",
+    about: "saves where a run on this board started as your start point, as if you'd stood there and typed !setstart. No name copies the world record's (in a server, pick a player); #3 copies third place's.",
+    group: "run",
+    panelOnly: true,
+    where: "both",
+    run: (ctx, arg) => {
+      if (spectating(ctx)) return ctx.reply("You're spectating. !r to play.");
+      if (ctx.room?.copyStart?.(arg)) return;
+      if (!ctx.game?.copyStart) return ctx.reply(NO_GAME);
+      ctx.game.copyStart(arg, (text) => ctx.reply(text));
+    },
+  },
+  {
+    name: "landfix",
+    args: "[on|off]",
+    help: "landfix on / off",
+    about: "jumps start 1.5 units up, as on landfix servers; off is stock CS:S. !landfix on or off sets it.",
+    group: "run",
+    panelOnly: true,
+    where: "both",
+    run: (ctx, arg) => {
+      const mode = arg.toLowerCase();
+      if (mode && mode !== "on" && mode !== "off") return ctx.reply("Usage: !landfix [on|off]");
+      if (!ctx.game?.landfix) return ctx.reply(NO_GAME);
+      const enabled = ctx.game.landfix(mode ? mode === "on" : undefined);
+      ctx.reply(`Landfix ${enabled ? "on" : "off"}`);
+    },
+  },
   // Practice (practice-mode/controller.ts command), bhoptimer's / KZ timers' names. Solo and in rooms. The
   // tools work in any attempt; a teleport or noclip makes it practice (practice-mode/attempt.ts).
   {
@@ -603,15 +643,18 @@ const BUILT_IN: ChatCommand[] = [
   {
     name: "race",
     aliases: ["duel", "challenge"],
-    args: "[player] [style] [main|bonus]",
+    args: "[player|all] [style] [main|bonus]",
     help: "race a player",
-    about: "challenges a player on this map (no name: a menu). !accept · !decline · !forfeit · !race cancel · !race off / on.",
+    about: "challenges a player on this map (no name: a menu). !accept · !decline · !forfeit · !race cancel · !race off / on. !race all opens a room race; !join to enter, !leave to withdraw.",
     group: "server",
     where: "room",
     elsewhere: "Races are for servers and private lobbies: Play online.",
     server: true,
     run: (ctx, arg) => ctx.room!.race(arg),
   },
+  { name: "roomrace", args: "[style] [main|bonus]", help: "start a room race", panelOnly: true, group: "server", where: "room", server: true, run: (ctx, arg) => ctx.room!.race(`all ${arg}`.trim()) },
+  { name: "join", help: "join the room race", panelOnly: true, group: "server", where: "room", server: true },
+  { name: "leave", help: "leave the room race", panelOnly: true, group: "server", where: "room", server: true },
   { name: "accept", aliases: ["acc"], help: "accept a race", about: "accepts the race challenge you got.", group: "server", panelOnly: true, where: "room", server: true },
   { name: "decline", aliases: ["deny"], help: "decline a race", about: "turns down the race challenge you got.", group: "server", panelOnly: true, where: "room", server: true },
   { name: "forfeit", aliases: ["surrender", "ff"], help: "give up a race", about: "gives up your race (the other racer wins), or withdraws your challenge.", group: "server", panelOnly: true, where: "room", server: true },

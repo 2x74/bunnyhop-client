@@ -18,6 +18,13 @@ constexpr uint32_t left = 1u << 9, right = 1u << 10, attack2 = 1u << 11;
 constexpr uint32_t turn_left = 1u << 7, turn_right = 1u << 8;
 constexpr uint32_t turn_fast = 1u << 6;
 constexpr uint32_t turn_mask = turn_fast | turn_left | turn_right;
+constexpr uint32_t no_landfix = 1u << 25;
+
+// A level on every live command, before style filtering, recording and hashing.
+inline void apply_landfix(BhCmd &command, bool enabled) {
+    command.buttons = enabled ? command.buttons & ~no_landfix : command.buttons | no_landfix;
+}
+
 constexpr double max_turn_rate = 720.0 * 4.0;
 constexpr uint32_t teleported = 1u, angles_changed = 1u << 4;
 // m_yaw and m_pitch: view degrees per mouse count at sensitivity 1.

@@ -33,7 +33,11 @@ const keys: Record<MenuAction, string> = {
   next: "e",
 };
 function activate(action: MenuAction): void {
-  const root = document.querySelector("dialog[open]") ?? document.getElementById("menu") ?? document.body;
+  const root =
+    document.querySelector('.sm-menu[role="menu"]') ??
+    document.querySelector("dialog[open]") ??
+    document.getElementById("menu") ??
+    document.body;
   const controls = () =>
     [
       ...root.querySelectorAll<HTMLElement>(

@@ -43,6 +43,7 @@ import { BunnyScene, type BunnyLook } from "./bunny-preview";
 import { HERO, type PreviewSpec } from "../notify/item-preview";
 import type { ItemScene } from "../notify/item3d-scenes";
 import { compileModel, prebuildBunny, prebuildViewmodels } from "../player/bunny/prebuild";
+import { parallelCompile } from "../graphics/warm-programs";
 import { bunnyParts } from "../player/bunny/prebuild-parts";
 import { hasBunnyGeometry } from "../player/bunny/mesh";
 import { hasHatGeometry } from "../player/bunny/hats";
@@ -66,18 +67,22 @@ export type ThumbJob =
   | { key: string; kind: "knife"; knife: string; loadout: CosmeticLoadout; focus?: "hilt" }
   | { key: string; kind: "glove"; loadout: CosmeticLoadout }
   /** A colourway, ghost colour, trail or hat: the unlock card's model (built on demand, then dropped). */
-  | { key: string; kind: "item"; spec: PreviewSpec; scene?: ItemScene | null };
+  | { key: string; kind: "item"; spec: PreviewSpec; built?: ItemScene | null; scene?: ItemScene | null };
 
 const NO_ATTACK = { primary: false, secondary: false };
 const still = (yaw: number, pitch: number): ViewmodelInput => ({ velocity: [0, 0, 0], grounded: true, viewOffsetZ: 64, sidemove: 0, yaw, pitch, landed: 0 });
 const knifeOf = (id: string | null | undefined): KnifeDef => knifeById(id) ?? carrot;
 const vmKnife = (k: KnifeDef): KnifeDef | null => (k.id === "carrot" ? null : k);
 const FINISH_CODES = [...new Set(Object.values(FINISH_CODE))];
+/** A knife thumbnail's program variant: its finish code and whether a hilt skin is on (KnifeShowcase.material). */
+const knifeProgram = (l: CosmeticLoadout): string => `${FINISH_CODE[specOf(l).kind] ?? 0}|${hiltSkin(l.hilt) ? 1 : 0}`;
 /** Seconds of the idle sequence the hero loops (see drawFirstPerson). */
 const IDLE_LOOP = 4.6;
 
 /** Thumbnails, per page: they only depend on what they show. */
 const thumbCache = new Map<string, HTMLCanvasElement>();
+/** Item models kept drawn per kind (runJob), so their programs stay linked: one, the gun camos all of theirs. */
+const KEEP_ITEMS: Partial<Record<PreviewSpec["kind"], number>> = { gun: 48 };
 const MAX_THUMBS = 240;
 /**
  * Thumbnails are also kept across page loads (thumb-store.ts), as long as this chunk is the same build: its hashed URL
@@ -220,7 +225,7 @@ export class LoadoutStage {
   // Thumbnails.
   private jobs: ThumbJob[] = [];
   /** The last item model drawn per kind (see runJob). */
-  private lastItem = new Map<string, ItemScene>();
+  private lastItem = new Map<string, ItemScene[]>();
   private waiting = new Map<string, ((c: HTMLCanvasElement) => void)[]>();
   /** Thumbnails being looked up in the store (thumb-store.ts). */
   private looking = new Set<string>();
@@ -468,6 +473,11 @@ export class LoadoutStage {
     return thumbCache.get(key) ?? null;
   }
 
+  /** A thumbnail drawn (or loaded) this visit, or null. */
+  cachedThumb(key: string): HTMLCanvasElement | null {
+    return thumbCache.get(key) ?? null;
+  }
+
   requestThumb(job: ThumbJob, done: (c: HTMLCanvasElement) => void): void {
     const hit = thumbCache.get(job.key);
     if (hit) return done(hit);
@@ -499,22 +509,76 @@ export class LoadoutStage {
     for (const cb of cbs) cb(c);
   }
 
+  /**
+   * Knife thumbnails' programs (knifeProgram: the finish and hilt variant), compiled before the first thumbnail that
+   * needs one draws: true once ready, false while compiling. Drawn first in a frame, a new program's first-use check
+   * waited inside that frame for the GPU process (0.1-0.2 s a program on Metal, more on SwiftShader).
+   */
+  private knifeWarm = new Map<string, boolean>();
+  /**
+   * A thumbnail's GPU step under way: a program compiling, or a drawn thumbnail being read back. Without
+   * KHR_parallel_shader_compile (SwiftShader) there's one at a time: each of them ends in a call that waits for
+   * everything queued in the GPU process by then (a first-use check, getBufferSubData), and with another thumbnail's
+   * draw queued that included its shader's first-draw compile, ~1.3 s a program (research/PERF-LOADOUT-0.0.38.md).
+   */
+  private compiling = 0;
+  private serial(): boolean {
+    return !parallelCompile(this.renderer);
+  }
+  /** Whether a thumbnail may start a GPU step now (see compiling). */
+  private gpuFree(): boolean {
+    return !this.reading && !(this.serial() && this.compiling);
+  }
+
+  /** Compiles the next queued thumbnail's programs that aren't ready (one at a time); their thumbnails draw after. */
+  private warmNext(): void {
+    if (this.disposed || this.compiling || (this.serial() && this.reading)) return;
+    for (const job of this.jobs) {
+      if (job.kind === "knife") {
+        const key = knifeProgram(job.loadout);
+        if (this.knifeWarm.has(key)) continue;
+        this.knifeWarm.set(key, false);
+        const [code, hilt] = key.split("|");
+        this.compiling++;
+        void this.thumbShow
+          .precompile(this.renderer, this.thumbCam, [Number(code)], hilt === "1", async () => !this.disposed)
+          .catch(() => {})
+          .finally(() => {
+            this.knifeWarm.set(key, true);
+            this.compiling--;
+            this.kick();
+          });
+        return;
+      }
+      if (job.kind === "item" && job.built && !job.scene) {
+        const built = job.built;
+        this.compiling++;
+        // Its shaders compile in parallel (KHR_parallel_shader_compile) before the thumbnail draws it.
+        void compileModel(this.renderer, built.scene, this.itemCam, built.scene, this.serial() ? 30000 : 1500).finally(() => {
+          this.compiling--;
+          if (this.disposed || !this.jobs.includes(job)) built.dispose();
+          else job.scene = built;
+          this.kick();
+        });
+        return;
+      }
+    }
+  }
+
   /** Builds the next queued item models (two at a time, in idle time); their thumbnails draw once they're ready. */
   private buildItems(): void {
     for (const job of this.jobs) {
-      if (this.building >= 2) return;
-      if (job.kind !== "item" || job.scene !== undefined) continue;
-      job.scene = null;
+      if (this.building >= 2) break;
+      if (job.kind !== "item" || job.built !== undefined) continue;
+      job.built = null;
       this.building++;
       void Promise.all([import("../notify/item3d-scenes"), prebuildItem(job.spec)])
         .then(([m]) => (this.disposed || !this.jobs.includes(job) ? null : m.buildItemScene(job.spec)))
-        // Its shaders compile in parallel (KHR_parallel_shader_compile) before the thumbnail draws it.
-        .then((scene) => (!scene || this.disposed || !this.jobs.includes(job) ? scene : compileModel(this.renderer, scene.scene, this.itemCam, scene.scene, 1500).then(() => scene)))
         .then(
           (scene) => {
             if (!scene) return;
             if (this.disposed || !this.jobs.includes(job)) return scene.dispose();
-            job.scene = scene;
+            job.built = scene;
           },
           () => (this.jobs = this.jobs.filter((j) => j !== job)),
         )
@@ -524,17 +588,18 @@ export class LoadoutStage {
           this.kick();
         });
     }
+    this.warmNext();
   }
 
   /** Drops queued thumbnails nobody shows any more (slot switched). */
   cancelThumbs(keep: (key: string) => boolean): void {
     for (const k of this.looking) if (!keep(k)) this.waiting.delete(k);
-    this.jobs = this.jobs.filter((j) => keep(j.key) || (this.waiting.delete(j.key), j.kind === "item" && j.scene?.dispose(), false));
+    this.jobs = this.jobs.filter((j) => keep(j.key) || (this.waiting.delete(j.key), j.kind === "item" && j.built?.dispose(), false));
   }
 
   /** The next job that can draw now (item models only once built). */
   private nextJob(): ThumbJob | null {
-    const i = this.jobs.findIndex((j) => j.kind !== "item" || !!j.scene);
+    const i = this.jobs.findIndex((j) => (j.kind === "item" ? !!j.scene : j.kind === "knife" ? this.knifeWarm.get(knifeProgram(j.loadout)) === true : true));
     return i < 0 ? null : this.jobs.splice(i, 1)[0];
   }
 
@@ -554,10 +619,13 @@ export class LoadoutStage {
     else if (job.scene) {
       this.drawItemThumb(job.scene, job.spec);
       // Disposed once the next model of its kind has drawn: disposing it now would release its shader programs, and
-      // the next colourway / hat would compile the same ones again.
-      const prev = this.lastItem.get(job.spec.kind);
-      this.lastItem.set(job.spec.kind, job.scene);
-      prev?.dispose();
+      // the next colourway / hat would compile the same ones again. Gun camos keep more: their programs differ by
+      // pattern, stamp and sheen, so the next camo often didn't share the last one's and a later one linked it again
+      // (9 of 30 links on the Gun camo tab). A gun scene is one material on the shared gun geometry.
+      const kept = this.lastItem.get(job.spec.kind) ?? [];
+      kept.push(job.scene);
+      this.lastItem.set(job.spec.kind, kept);
+      while (kept.length > (KEEP_ITEMS[job.spec.kind] ?? 1)) kept.shift()!.dispose();
     }
     const out = document.createElement("canvas");
     out.width = tw;
@@ -565,11 +633,116 @@ export class LoadoutStage {
     // A software canvas, like the tiles it's painted into (loadout-view.ts paintThumb): the copy out of WebGL is the one
     // readback, and painting it into a tile again (a category opened twice, the Loadout reopened) is a CPU blit instead
     // of another GPU readback per tile.
-    out.getContext("2d", { willReadFrequently: true })!.drawImage(this.canvas, 0, bh - th, tw, th, 0, 0, tw, th);
+    const done = () => {
+      if (this.disposed) return;
+      if (THUMB_STORE) saveThumb(THUMB_STORE, storedKey(job), out);
+      this.deliver(job.key, out);
+    };
+    if (!this.readBack(out, tw, th, done)) {
+      out.getContext("2d", { willReadFrequently: true })!.drawImage(this.canvas, 0, bh - th, tw, th, 0, 0, tw, th);
+      done();
+    }
     r.setScissorTest(false);
     r.setViewport(0, 0, bw / pr, bh / pr);
-    if (THUMB_STORE) saveThumb(THUMB_STORE, storedKey(job), out);
-    this.deliver(job.key, out);
+  }
+
+  /** Thumbnail readbacks still in flight (readBack). */
+  private reading = 0;
+  /** Their pixel-pack buffers, each with the fence that follows its frame (fenceReads) once that frame is drawn. */
+  private reads: { buf: WebGLBuffer; w: number; h: number; out: HTMLCanvasElement; done: () => void; sync: WebGLSync | null }[] = [];
+  private readPoll = 0;
+
+  /**
+   * Copies the canvas's bottom-left `w` x `h` (a thumbnail just drawn there) into `out` without waiting on the GPU: the
+   * pixels go into a pixel-pack buffer; a fence goes in after the rest of the frame (the hero) is drawn; and once it has
+   * signaled, at the start of a later frame before anything new is drawn (or between tasks while the stage isn't
+   * drawing), they're read and put into `out`, then `done`. Reading a buffer (getBufferSubData) is a round trip that
+   * waits for everything queued in the GPU process: read then, there's nothing left to wait for.
+   * drawImage(webgl canvas) only recorded the copy: the 2D canvas read the pixels back when it was next used (the
+   * thumbnail's save, the tile's paint), and that read waited on the main thread for everything the GPU process had
+   * queued by then: the hero's frames, other thumbnails, shaders still compiling. On SwiftShader that was seconds per
+   * thumbnail (research/PERF-LOADOUT-0.0.38.md). The pixels are the same: the drawing buffer's (resolved,
+   * premultiplied) values, put back premultiplied (unpremultiplying here and premultiplying in putImageData is exact).
+   * False without WebGL 2 (then the caller copies as before).
+   */
+  private readBack(out: HTMLCanvasElement, w: number, h: number, done: () => void): boolean {
+    const gl = this.renderer.getContext();
+    if (!(typeof WebGL2RenderingContext !== "undefined" && gl instanceof WebGL2RenderingContext) || this.renderer.getRenderTarget()) return false;
+    const buf = gl.createBuffer();
+    if (!buf) return false;
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, buf);
+    gl.bufferData(gl.PIXEL_PACK_BUFFER, w * h * 4, gl.STREAM_READ);
+    gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, 0);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+    this.reading++;
+    this.reads.push({ buf, w, h, out, done, sync: null });
+    return true;
+  }
+
+  /** After a frame is drawn: a fence for the readbacks it started. */
+  private fenceReads(): void {
+    const gl = this.renderer.getContext() as WebGL2RenderingContext;
+    if (!this.reads.some((r) => !r.sync)) return;
+    const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+    gl.flush();
+    for (const r of this.reads) if (!r.sync) r.sync = sync;
+    // While the stage draws, frames collect them (collectReads); this covers a stage that stopped drawing.
+    clearTimeout(this.readPoll);
+    const poll = () => {
+      if (this.raf || !this.reads.length) return;
+      this.collectReads();
+      if (this.reads.length) this.readPoll = window.setTimeout(poll, 16);
+    };
+    this.readPoll = window.setTimeout(poll, 50);
+  }
+
+  /** The readbacks whose fence has signaled: read, into their canvases (call before drawing anything new). */
+  private collectReads(): void {
+    if (!this.reads.length) return;
+    const gl = this.renderer.getContext() as WebGL2RenderingContext;
+    const lost = this.disposed || gl.isContextLost();
+    const signaled = new Map<WebGLSync, boolean>();
+    const left: typeof this.reads = [];
+    for (const r of this.reads) {
+      let ok = false;
+      if (!lost && r.sync) {
+        if (!signaled.has(r.sync)) signaled.set(r.sync, gl.getSyncParameter(r.sync, gl.SYNC_STATUS) === gl.SIGNALED);
+        ok = signaled.get(r.sync)!;
+      }
+      if (!lost && !ok) {
+        left.push(r);
+        continue;
+      }
+      this.reading--;
+      if (lost) continue;
+      const { w, h } = r;
+      const px = new Uint8Array(w * h * 4);
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, r.buf);
+      gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, px);
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+      gl.deleteBuffer(r.buf);
+      const img = new ImageData(w, h);
+      const d = img.data;
+      // GL rows run bottom up; ImageData's top down, unpremultiplied.
+      for (let y = 0; y < h; y++) {
+        let i = (h - 1 - y) * w * 4, o = y * w * 4;
+        for (let x = 0; x < w; x++, i += 4, o += 4) {
+          const a = px[i + 3];
+          if (a === 255) (d[o] = px[i]), (d[o + 1] = px[i + 1]), (d[o + 2] = px[i + 2]);
+          else if (a > 0) {
+            const k = 255 / a;
+            d[o] = Math.min(255, Math.round(px[i] * k));
+            d[o + 1] = Math.min(255, Math.round(px[i + 1] * k));
+            d[o + 2] = Math.min(255, Math.round(px[i + 2] * k));
+          }
+          d[o + 3] = a;
+        }
+      }
+      r.out.getContext("2d", { willReadFrequently: true })!.putImageData(img, 0, 0);
+      r.done();
+    }
+    if (!lost) for (const [sync] of signaled) if (!left.some((r) => r.sync === sync)) gl.deleteSync(sync);
+    this.reads = left;
   }
 
   /** The knife alone, tip up and to the right, its face turned a little to the light (`focus` "hilt": framed on its hilt). */
@@ -734,17 +907,22 @@ export class LoadoutStage {
   private frame(dt: number): void {
     if (this.disposed || this.renderer.getContext().isContextLost()) return;
     this.t += dt;
+    this.collectReads();
     // A few thumbnails first (into a corner, copied out), then the hero over the whole canvas.
     if (this.jobs.length && this.canvas.width >= 160 && this.canvas.height >= 100) {
       this.buildItems();
       const t0 = performance.now();
-      for (let job = this.nextJob(); job; job = performance.now() - t0 < 6 ? this.nextJob() : null) this.runJob(job);
+      // One thumbnail in flight: the next is drawn once the last one's pixels are read. Reading them (getBufferSubData)
+      // is a round trip that waits for everything queued in the GPU process by then; with another thumbnail queued
+      // behind it, that was its shader's first-draw compile too (~1.3 s a program on SwiftShader).
+      for (let job = this.gpuFree() ? this.nextJob() : null; job; job = performance.now() - t0 < 6 && this.gpuFree() ? this.nextJob() : null) this.runJob(job);
     }
     if (this.viewMode === "fp") this.drawFirstPerson(dt);
     else if (this.viewMode === "close") this.drawCloseUp(dt);
     else if (this.viewMode === "gun") this.guns?.drawFirstPerson(this.renderer, dt, this.w, this.h, this.reduced);
     else if (this.viewMode === "gunside") this.guns?.drawSide(this.renderer, dt, this.w, this.h, this.reduced, !!this.dragging);
     else this.drawBunny(dt);
+    this.fenceReads();
   }
 
   private drawBunny(dt: number): void {
@@ -937,8 +1115,13 @@ export class LoadoutStage {
    */
   private warm(): void {
     prewarmLoadout(this.shown, () => {
-      // Shaders: the close-up's finish variants (the viewmodel's share their programs).
-      if (!this.disposed && this.canvas.isConnected && menuIdleAllowed()) void this.show.precompile(this.renderer, this.closeCam, FINISH_CODES).catch(() => {});
+      // Shaders: the close-up's finish variants (the viewmodel's and the thumbnails' share their programs), in the hilt
+      // variant you wear (the Finish tab's thumbnails and hovering show your hilt), one at a time in idle time. Only
+      // where programs compile off the main thread: without KHR_parallel_shader_compile (SwiftShader) each costs ~1 s
+      // of GPU process, and they're compiled when a tile or the stage first shows them instead.
+      if (this.disposed || !parallelCompile(this.renderer)) return;
+      const go = () => new Promise<boolean>((resolve) => ric(() => resolve(!this.disposed && this.canvas.isConnected && menuIdleAllowed())));
+      void this.show.precompile(this.renderer, this.closeCam, FINISH_CODES, !!hiltSkin(this.shown.hilt), go).catch(() => {});
     });
   }
 
@@ -946,7 +1129,7 @@ export class LoadoutStage {
   private dropThumbs(): void {
     for (const cbs of this.waiting.values()) cbs.length = 0;
     this.waiting.clear();
-    for (const j of this.jobs) if (j.kind === "item") j.scene?.dispose();
+    for (const j of this.jobs) if (j.kind === "item") j.built?.dispose();
     this.jobs = [];
   }
 
@@ -965,7 +1148,9 @@ export class LoadoutStage {
     this.offOutfit();
     this.ro.disconnect();
     this.io.disconnect();
-    for (const sc of this.lastItem.values()) sc.dispose();
+    clearTimeout(this.readPoll);
+    this.collectReads();
+    for (const kept of this.lastItem.values()) for (const sc of kept) sc.dispose();
     this.lastItem.clear();
     this.vm.dispose();
     this.probe.dispose();
@@ -1017,6 +1202,9 @@ function scaleRect(r: Rect, s: number): Rect {
   return [cx - hw, cy - hh, cx + hw, cy + hh];
 }
 
+/** An idle callback (or a short timeout where there are none). */
+const ric = (fn: () => void) => ("requestIdleCallback" in window ? requestIdleCallback(fn, { timeout: 400 }) : setTimeout(fn, 30));
+
 let warming: Promise<void> | null = null;
 /**
  * The Loadout's models for this loadout (default: what you wear), built ahead a piece per idle callback, no GL needed:
@@ -1029,7 +1217,6 @@ export function prewarmLoadout(l: CosmeticLoadout = getLoadout(), done?: () => v
   if (!menuIdleAllowed()) return Promise.resolve();
   warming ??= new Promise<void>((resolve) => {
     void prebuildBunny(getOutfit(), l);
-    const ric = (fn: () => void) => ("requestIdleCallback" in window ? requestIdleCallback(fn, { timeout: 400 }) : setTimeout(fn, 30));
     const mine = vmKnife(knifeOf(l.knife)) ?? undefined;
     const glove = gloveStyle(l.glove).style;
     // The first-person geometries below are built in the prebuild worker first (~10 ms each here, several times that

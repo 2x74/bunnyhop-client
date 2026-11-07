@@ -174,3 +174,27 @@ test("a style command says how to get back to Normal, only when the switch takes
   back.line("!n");
   expect(back.replies.some((reply) => reply.includes("goes back to Normal"))).toBe(false);
 });
+
+test("room-race aliases resolve locally and membership commands reach the room", () => {
+  const f = fixture();
+  f.line("!roomrace hsw b2");
+  expect(f.actions).toEqual([["race", "all hsw b2"]]);
+  for (const command of ["!join", "!leave", "!forfeit"]) f.line(command);
+  expect(f.sent).toEqual(["!join", "!leave", "!forfeit"].map((text) => ({ t: "chat", text })));
+});
+
+test("Copy start stays local and gives room picks priority over board lookups", () => {
+  const f = fixture();
+  f.context.game!.copyStart = (arg) => {
+    f.actions.push(["copyStart", arg]);
+  };
+  f.context.room!.copyStart = (arg) => {
+    if (arg) return false;
+    f.actions.push("copyStartMenu");
+    return true;
+  };
+  f.line("!copystart");
+  f.line("!copystart #3");
+  expect(f.actions).toEqual(["copyStartMenu", ["copyStart", "#3"]]);
+  expect(f.sent).toEqual([]);
+});

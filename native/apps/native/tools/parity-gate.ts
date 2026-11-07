@@ -70,7 +70,12 @@ export interface Behavior {
   attached: number;
   climbed: number;
 }
-export async function simulate(fixture: Fixture, wasm: Uint8Array, physics: number) {
+export async function simulate(
+  fixture: Fixture,
+  wasm: Uint8Array,
+  physics: number,
+  buttonsAt?: (tick: number, buttons: number) => number,
+) {
   const core = await Core.create(wasm);
   core.loadMap(fixture.bsp);
   const missingPhysics = core.physicsMissing();
@@ -122,10 +127,11 @@ export async function simulate(fixture: Fixture, wasm: Uint8Array, physics: numb
       climbed = false;
     for (let tick = 0; tick < trial.ticks; tick++) {
       const previous = core.state();
-      const command = [trial.forward ?? 0, 0, trial.yaw ?? 0, trial.pitch ?? 0, trial.buttons];
+      const buttons = buttonsAt ? buttonsAt(tick, trial.buttons) : trial.buttons;
+      const command = [trial.forward ?? 0, 0, trial.yaw ?? 0, trial.pitch ?? 0, buttons];
       const events = core.step(command[0], command[1], command[2], command[3], command[4]);
       const state = core.state();
-      lines.push(`cmd ${command.slice(0, 4).map(number).join(" ")} ${trial.buttons}`, "state");
+      lines.push(`cmd ${command.slice(0, 4).map(number).join(" ")} ${buttons}`, "state");
       rows.push(row(state, events));
       if (!attached && state.onLadder) {
         attached = true;
@@ -165,6 +171,7 @@ export async function simulate(fixture: Fixture, wasm: Uint8Array, physics: numb
       }
     }
   }
+  core.dispose();
   return { rows, commands: lines.join("\n") + "\n", missingPhysics, behavior };
 }
 

@@ -19,6 +19,7 @@ import { arrowNav, h } from "../../web/src/ui/dom";
 import { backgroundPick, featuredArtReady, markFeaturedArtReady } from "../../web/src/ui/featured";
 import { fetchMapIndex, onlineMaps, prewarmMapRows, tierOf, type MapEntry } from "../../web/src/ui/maps";
 import { mapArt, observeThumbs, prefetchThumbs } from "../../web/src/ui/thumbs";
+import { recentRecords, recentWrs } from "../../web/src/ui/home-records";
 import { landRows } from "../../web/src/ui/land";
 import { onlineSummary } from "../../web/src/ui/servers";
 import { openFeedback } from "../../web/src/feedback/state";
@@ -372,12 +373,17 @@ export function homeScreen(a: HomeActions): HTMLElement {
     "aside.home-right",
     null,
     mapsToTry(a, (n) => (plateMap = n)),
+    recentRecords({ profile: a.profile }, async () => {
+      // Populate the same map-name thumbnail registry the native tiles use before drawing missing pictures.
+      const [records] = await Promise.all([recentWrs(), fetchMapIndex()]);
+      return records;
+    }),
   );
   menu.addEventListener(
     "keydown",
     (e) => {
       if (e.key !== "ArrowRight" || !(document.activeElement as HTMLElement)?.closest(".home-menu")) return;
-      const t = right.querySelector<HTMLElement>("button:not([disabled]):not([hidden])");
+      const t = right.querySelector<HTMLElement>(".home-grid button:not([disabled]):not([hidden])");
       if (t) (e.preventDefault(), e.stopPropagation(), t.focus());
     },
     { capture: true },

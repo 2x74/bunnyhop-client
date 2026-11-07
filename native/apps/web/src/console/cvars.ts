@@ -2,7 +2,7 @@
 // the console or a pasted config.cfg changes the same setting as the Settings page. Source's own names where the
 // setting is Source's (sensitivity, m_yaw, fps_max, fov_desired, cl_showfps, cl_crosshair*, viewmodel_*, snd_*...),
 // `cl_` / `hud_` / `r_` / `snd_` names in the same spirit for this game's own. Older names stay as aliases.
-// Client settings only: nothing here reaches the simulation, a room, the server or the anticheat. DOM-free.
+// Landfix is recorded in the command stream; the other cvars are client settings. DOM-free.
 
 import { ANGLE_SPEED_KEY_RANGE, YAW_SPEED_RANGE } from "../turn-binds";
 import { M_YAW_RANGE, SENS_RANGE, sensProblem } from "../sens-convert";
@@ -122,6 +122,7 @@ const audioDetail: Cvar[] = [
 ];
 /** Ghost routes, trigger kinds and colours, paint, inspect, the look's extra switches. */
 const otherDetail: Cvar[] = [
+  sw("cl_landfix", "Landfix jump lift on or off, including during a run.", (p) => p.landfix, (p, v) => (p.landfix = v)),
   sw("cl_ghost_route", "The selected ghost's route and takeoff marks.", (p) => p.ghost.route, (p, v) => (p.ghost.route = v)),
   sw("cl_ghost_routeonly", "Hide the route ghost and keep its route.", (p) => p.ghost.routeOnly, (p, v) => (p.ghost.routeOnly = v)),
   pick("cl_ghost_routesource", "Whose route: auto, pb, wr or custom.", ["auto", "pb", "wr", "custom"] as const, (p) => p.ghost.routeSource, (p, v) => (p.ghost.routeSource = v)),

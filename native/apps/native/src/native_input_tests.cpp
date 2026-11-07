@@ -137,6 +137,24 @@ void test_command_chain_tick_buttons() {
 }
 
 int main() {
+    for (const bool timed : {false, true}) {
+        native::Input input;
+        native::InputTimeline timeline;
+        std::set<std::string> held;
+        timeline.set_timed(timed, input, held);
+        input.held = native::forward | native::jump;
+        const auto original = input.command();
+        for (const bool enabled : {true, false, false, true, false, true}) {
+            auto command = input.command();
+            native::apply_landfix(command, enabled);
+            assert(command.buttons == (original.buttons | (enabled ? 0 : native::no_landfix)));
+            assert(command.forward == original.forward && command.side == original.side);
+            assert(command.yaw == original.yaw && command.pitch == original.pitch);
+            // Changing the live preference must clear a previously sampled OFF command too.
+            native::apply_landfix(command, true);
+            assert(command.buttons == original.buttons);
+        }
+    }
     test_command_chain_tick_buttons();
     test_core_teleport_view();
     test_null_binds_per_tick();

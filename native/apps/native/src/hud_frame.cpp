@@ -184,12 +184,29 @@ void HudFrame::draw_panels() const {
 void HudFrame::draw_notifications() const {
     if (prefs.hud) {
         const float percent = prefs.hud_scale;
-        native::draw_result(hud, width, height, percent, hud.result, double(SDL_GetTicksNS()) / nanoseconds_per_second);
-        native::draw_toasts(hud, width, height, percent, hud.toasts, double(SDL_GetTicksNS()) / nanoseconds_per_second);
-        native::draw_race(hud, width, height, percent, room_modes.display(), epoch_ms());
+        const double seconds = double(SDL_GetTicksNS()) / nanoseconds_per_second, epoch = epoch_ms();
+        const native::HudGeometry geometry(width, height, percent);
+        // A race result (room or duel) sits at the top; the end card and notices step down under it.
+        const auto &duel = room_modes.display();
+        const bool room_race = duel.state == native::RaceDisplay::State::none;
+        const auto &standings = room_modes.room_race_display();
+        const float race_bottom = room_race ? native::room_race_result_bottom(standings, geometry.height, epoch)
+                                            : native::race_result_bottom(duel, geometry.height, epoch);
+        native::draw_result(hud, width, height, percent, hud.result, seconds, race_bottom);
+        native::draw_toasts(hud, width, height, percent, hud.toasts, seconds, race_bottom);
+        const native::RoomRaceStack stack{
+                reduced_motion,
+                room.changing_map.empty(),
+                native::result_bottom(geometry, hud.result, seconds, race_bottom),
+                native::room_race_colors(hud)
+        };
+        const auto opponent = native::race_opponent_live<BhRunState>(room, duel, steady_seconds, epoch);
+        native::draw_race(hud, width, height, percent, duel, epoch, stack, opponent.view());
+        if (room_race) native::draw_room_race(hud, width, height, percent, standings, epoch, stack);
         native::draw_race_picker(hud, width, height, percent, race_picker, menu_pointer);
         native::draw_spectator_bar(hud, width, height, percent, spectator_bar);
         spectate_picker.draw(hud, width, height, percent, menu_pointer);
+        if (copy_start) copy_start->draw(hud, width, height, percent, menu_pointer);
         if (look_menu) look_menu->draw(hud, width, height, percent, menu_pointer);
     }
     room.draw_change(hud, width, height, prefs.hud_scale, epoch_ms());

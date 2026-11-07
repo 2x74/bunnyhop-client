@@ -17,6 +17,7 @@ import { lookOf, setFinishUniforms, setHiltUniforms, type FinishSpec } from "../
 import type { HiltSkin } from "../../loadout";
 import { vmRig } from "../rig";
 import { KnifeCtx } from "./ctx";
+import { warmPrograms } from "../../graphics/warm-programs";
 import { KnifeHold } from "./hold";
 import type { KnifeDef } from "./types";
 
@@ -197,18 +198,28 @@ export class KnifeShowcase {
     this.mesh.material = this.material(this.code, this.hilt);
   }
 
-  /** Every finish kind's program, compiled ahead (KHR_parallel_shader_compile where available). */
-  precompile(renderer: THREE.WebGLRenderer, camera: THREE.Camera, codes: number[]): Promise<unknown> {
+  /**
+   * Every finish kind's program (with `hilt`: the hilt-skin variant), compiled ahead one at a time, each started once the
+   * one before is ready and `go()` still says yes (idle time, the stage still up). All at once, they queued ~30 links of
+   * the 90 kB knife shader in the GPU process: where links run one after another (SwiftShader, some drivers) the next call
+   * needing an answer from the GPU process (a thumbnail's readback, a first-use check) waited for all of them, a freeze of
+   * several seconds (research/PERF-LOADOUT-0.0.38.md). Each is first-use checked outside a frame (warmPrograms).
+   */
+  async precompile(renderer: THREE.WebGLRenderer, camera: THREE.Camera, codes: number[], hilt: boolean, go: () => Promise<boolean>): Promise<void> {
     const scene = new THREE.Scene();
-    const meshes = codes.map((c) => {
-      const m = new THREE.SkinnedMesh(this.mesh.geometry, this.material(c));
+    for (const c of codes) {
+      if (!(await go())) return;
+      const m = new THREE.SkinnedMesh(this.mesh.geometry, this.material(c, hilt));
       m.bindMode = THREE.DetachedBindMode;
       m.bind(this.skeleton, new THREE.Matrix4());
       m.frustumCulled = false;
       scene.add(m);
-      return m;
-    });
-    return renderer.compileAsync(scene, camera).finally(() => meshes.forEach((m) => scene.remove(m)));
+      try {
+        await warmPrograms(renderer, scene, camera, scene);
+      } finally {
+        scene.remove(m);
+      }
+    }
   }
 
   /** Poses the knife's extra bones (balisong halves) at their rest (open) angles. */

@@ -25,7 +25,8 @@ import { bindLabel, prefs, type Action } from "../ui/settings";
 import { formatTime } from "../timer";
 import { IN_WEAPON_COMMAND_MASK } from "../weapon-rules";
 import { ATTACK_STAB } from "../viewmodel/events";
-import { styleLabel } from "../styles";
+import { BONUS_STYLE, styleLabel, type StyleId } from "../styles";
+import { copyRunStart, playerRunOn } from "../copy-start-request";
 import { tierLabel } from "../tiers";
 import { trackName } from "../zones";
 import { FREE_SPEED, freeSpeedStep, SpectatorCamera, type SpectatorMode, type SpectatorTarget } from "../viewer/cameras";
@@ -84,7 +85,7 @@ export interface MultiplayerInit {
   input: Input;
   session: RunSession;
   /** main.ts restart (resets the run onto a track's start). */
-  restart: (track?: number) => void;
+  restart: (track?: number, at?: null, canonical?: boolean) => void;
   /** The live game's gun impacts (main.ts GunPresenter): other players' shots draw their tracers with them. */
   impacts?: GunImpacts | null;
   /** The game behind the chat commands (chat-game.ts): keys for !help, practice, styles, records. */
@@ -203,6 +204,7 @@ export class Multiplayer {
       setStyle: (id) => o.session.setStyle(id),
       bonusTracks: () => o.session.bonusTracks(),
       restart: (track) => o.restart(track),
+      roomRestart: (track) => o.restart(track, null, true),
       spectating: () => this.spectating !== null,
       stopSpectating: () => this.stopSpectating(),
       changing: () => !!this.change || this.navigating,
@@ -515,6 +517,7 @@ export class Multiplayer {
         if (m.map.name !== this.o.map) return this.goto(m.map.name);
         setRoomPresence({ id: m.room.id, name: m.room.name });
         this.race.onState(m.race ?? null);
+        this.race.room.onState(m.roomRace ?? null);
         this.race.connected();
         this.setChange(m.change);
         this.chat.add({ kind: "local", text: `Connected to ${m.room.name} (${m.players.length}/${m.room.maxPlayers}) · ${m.map.name}. ${bindLabel("chat") ?? "Settings → Keys →"} chat · Tab scores · N spectate · type rtv / nominate / timeleft` });
@@ -627,6 +630,9 @@ export class Multiplayer {
         if (m.slot === this.you && !was && !this.change && !this.navigating) this.chat.add({ kind: "local", text: `You're the host now: ${HOST_COMMANDS}.` });
         break;
       }
+      case "roomRace":
+        this.race.room.onState(m.race);
+        break;
       case "race":
         this.race.onState(m.race);
         break;
@@ -752,6 +758,7 @@ export class Multiplayer {
         takeFreeCursor();
         openGiftDialog({ roomId: this.o.serverId, ...(result.kind === "player" ? { recipientId: result.id, recipientName: result.name } : {}) });
       },
+      copyStart: (arg) => this.copyStartCommand(arg),
       report: (arg) => {
         // Someone in this room by name (exact, else the only one it starts with); anyone else is looked up by the server.
         const q = arg.trim().toLowerCase();
@@ -892,6 +899,58 @@ export class Multiplayer {
         else this.stopSpectating();
       },
     });
+  }
+
+  /**
+   * !copystart in the room: no argument opens a menu (the world record, then the players here), a player here copies
+   * their PB's start. The room doesn't know anyone's saved start point (it's kept on their device), so a player's start
+   * is their PB run's on this map. False: not one for the room (a rank, a name nobody here has); the board takes it.
+   */
+  private copyStartCommand(arg: string): boolean {
+    const q = arg.trim().toLowerCase();
+    if (!q) return this.openCopyStartMenu(), true;
+    if (/^#?\d+$/.test(q)) return false;
+    const here = [...this.players.players.values()].filter((p) => p.slot !== this.you);
+    const exact = here.filter((p) => p.info.name.toLowerCase() === q);
+    const starts = here.filter((p) => p.info.name.toLowerCase().startsWith(q));
+    const p = exact.length === 1 ? exact[0] : !exact.length && starts.length === 1 ? starts[0] : null;
+    if (!p) return false;
+    void this.copyPlayerStart(p.slot);
+    return true;
+  }
+
+  private openCopyStartMenu(): void {
+    const list = this.others().slice(0, 8);
+    const reply = this.chatCtx.reply;
+    this.menu.show("copystart", {
+      title: "Copy start",
+      items: [{ label: "World record", detail: "" }, ...list.map((p) => ({ label: p.name, detail: "" }))],
+      onPick: (i) => {
+        this.menu.hide();
+        if (i === 0) this.chatCtx.game?.copyStart?.("", reply);
+        else if (list[i - 1]) void this.copyPlayerStart(list[i - 1].slot);
+      },
+    });
+  }
+
+  /** Their PB on the track you're on: in the style they're playing, else yours, else any style they have a PB in. */
+  private async copyPlayerStart(slot: number): Promise<void> {
+    const p = this.players.players.get(slot);
+    const reply = this.chatCtx.reply;
+    if (!p) return;
+    const sess = this.o.session;
+    const track = sess.timer.track;
+    const theirs = styleAt(p.meta?.style ?? -1) ?? p.info.style;
+    const pbs = (Object.entries(p.info.pb) as [StyleId, number][]).sort((a, b) => a[1] - b[1]).map(([s]) => s);
+    const styles = track > 0 ? [BONUS_STYLE] : [theirs, sess.runStyle, ...pbs];
+    let entry;
+    try {
+      entry = await playerRunOn(this.o.map, track, p.info.id, styles);
+    } catch {
+      return reply("Couldn't load the leaderboard.");
+    }
+    if (!entry) return reply(`${p.info.name} has no time on ${track > 0 ? trackName(track) : "this map"} yet.`);
+    await copyRunStart(entry.runId, p.info.name, (replay, who) => sess.copyStartPoint(replay, who, reply), reply);
   }
 
   /** Once per lobby per tab (every map change reconnects): what a private lobby is, and the host's commands. */

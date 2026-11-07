@@ -1,0 +1,733 @@
+[
+  {
+    "name": "countdown, duplicate GO, final finish",
+    "steps": [
+      {
+        "view": {
+          "id": "roomrace01",
+          "state": "joining",
+          "map": "bhop_eazy",
+          "style": "autohop",
+          "track": 0,
+          "joinUntil": 7000,
+          "goAt": 10000,
+          "endsAt": 610000,
+          "you": 0,
+          "racers": [
+            {
+              "name": "Alice",
+              "slot": 0,
+              "place": null,
+              "dnf": null,
+              "finish": null,
+              "checking": false
+            },
+            {
+              "name": "Bob",
+              "slot": 1,
+              "place": null,
+              "dnf": null,
+              "finish": null,
+              "checking": false
+            }
+          ]
+        },
+        "restart": false,
+        "go": false,
+        "finish": false,
+        "over": false,
+        "frozen": false
+      },
+      {
+        "view": {
+          "id": "roomrace01",
+          "state": "countdown",
+          "map": "bhop_eazy",
+          "style": "autohop",
+          "track": 0,
+          "joinUntil": 7000,
+          "goAt": 10000,
+          "endsAt": 610000,
+          "you": 0,
+          "racers": [
+            {
+              "name": "Alice",
+              "slot": 0,
+              "place": null,
+              "dnf": null,
+              "finish": null,
+              "checking": false
+            },
+            {
+              "name": "Bob",
+              "slot": 1,
+              "place": null,
+              "dnf": null,
+              "finish": null,
+              "checking": false
+            }
+          ]
+        },
+        "restart": true,
+        "go": false,
+        "finish": false,
+        "over": false,
+        "frozen": true
+      },
+      {
+        "view": {
+          "id": "roomrace01",
+          "state": "countdown",
+          "map": "bhop_eazy",
+          "style": "autohop",
+          "track": 0,
+          "joinUntil": 7000,
+          "goAt": 10000,
+          "endsAt": 610000,
+          "you": 0,
+          "racers": [
+            {
+              "name": "Alice",
+              "slot": 0,
+              "place": null,
+              "dnf": null,
+              "finish": null,
+              "checking": false
+            },
+            {
+              "name": "Bob",
+              "slot": 1,
+              "place": null,
+              "dnf": null,
+              "finish": null,
+              "checking": false
+            }
+          ]
+        },
+        "restart": false,
+        "go": false,
+        "finish": false,
+        "over": false,
+        "frozen": true
+      },
+      {
+        "view": {
+          "id": "roomrace01",
+          "state": "live",
+          "map": "bhop_eazy",
+          "style": "autohop",
+          "track": 0,
+          "joinUntil": 7000,
+          "goAt": 10000,
+          "endsAt": 610000,
+          "you": 0,
+          "racers": [
+            {
+              "name": "Alice",
+              "slot": 0,
+              "place": null,
+              "dnf": null,
+              "finish": null,
+              "checking": false
+            },
+            {
+              "name": "Bob",
+              "slot": 1,
+              "place": null,
+              "dnf": null,
+              "finish": null,
+              "checking": false
+            }
+          ]
+        },
+        "restart": true,
+        "go": true,
+        "finish": false,
+        "over": false,
+        "frozen": false
+      },
+      {
+        "view": {
+          "id": "roomrace01",
+          "state": "live",
+          "map": "bhop_eazy",
+          "style": "autohop",
+          "track": 0,
+          "joinUntil": 7000,
+          "goAt": 10000,
+          "endsAt": 610000,
+          "you": 0,
+          "racers": [
+            {
+              "name": "Alice",
+              "slot": 0,
+              "place": null,
+              "dnf": null,
+              "finish": null,
+              "checking": false
+            },
+            {
+              "name": "Bob",
+              "slot": 1,
+              "place": null,
+              "dnf": null,
+              "finish": null,
+              "checking": false
+            }
+          ]
+        },
+        "restart": false,
+        "go": false,
+        "finish": false,
+        "over": false,
+        "frozen": false
+      },
+      {
+        "view": {
+          "id": "roomrace01",
+          "state": "over",
+          "map": "bhop_eazy",
+          "style": "autohop",
+          "track": 0,
+          "joinUntil": 7000,
+          "goAt": 10000,
+          "endsAt": 610000,
+          "you": 0,
+          "racers": [
+            {
+              "name": "Alice",
+              "slot": 0,
+              "place": 1,
+              "dnf": null,
+              "finish": {
+                "real": 12,
+                "time": 11
+              },
+              "checking": false
+            },
+            {
+              "name": "Bob",
+              "slot": 1,
+              "place": null,
+              "dnf": null,
+              "finish": null,
+              "checking": false
+            }
+          ],
+          "outcome": "finish"
+        },
+        "restart": false,
+        "go": false,
+        "finish": true,
+        "over": true,
+        "frozen": false
+      },
+      {
+        "view": {
+          "id": "roomrace01",
+          "state": "over",
+          "map": "bhop_eazy",
+          "style": "autohop",
+          "track": 0,
+          "joinUntil": 7000,
+          "goAt": 10000,
+          "endsAt": 610000,
+          "you": 0,
+          "racers": [
+            {
+              "name": "Alice",
+              "slot": 0,
+              "place": 1,
+              "dnf": null,
+              "finish": {
+                "real": 12,
+                "time": 11
+              },
+              "checking": false
+            },
+            {
+              "name": "Bob",
+              "slot": 1,
+              "place": null,
+              "dnf": null,
+              "finish": null,
+              "checking": false
+            }
+          ],
+          "outcome": "finish"
+        },
+        "restart": false,
+        "go": false,
+        "finish": false,
+        "over": false,
+        "frozen": false
+      },
+      {
+        "view": null,
+        "restart": false,
+        "go": false,
+        "finish": false,
+        "over": false,
+        "frozen": false
+      }
+    ]
+  },
+  {
+    "name": "observer",
+    "steps": [
+      {
+        "view": {
+          "id": "roomrace01",
+          "state": "countdown",
+          "map": "bhop_eazy",
+          "style": "autohop",
+          "track": 0,
+          "joinUntil": 7000,
+          "goAt": 10000,
+          "endsAt": 610000,
+          "you": -1,
+          "racers": [
+            {
+              "name": "Alice",
+              "slot": 0,
+              "place": null,
+              "dnf": null,
+              "finish": null,
+              "checking": false
+            },
+            {
+              "name": "Bob",
+              "slot": 1,
+              "place": null,
+              "dnf": null,
+              "finish": null,
+              "checking": false
+            }
+          ]
+        },
+        "restart": false,
+        "go": false,
+        "finish": false,
+        "over": false,
+        "frozen": false
+      },
+      {
+        "view": {
+          "id": "roomrace01",
+          "state": "live",
+          "map": "bhop_eazy",
+          "style": "autohop",
+          "track": 0,
+          "joinUntil": 7000,
+          "goAt": 10000,
+          "endsAt": 610000,
+          "you": -1,
+          "racers": [
+            {
+              "name": "Alice",
+              "slot": 0,
+              "place": null,
+              "dnf": null,
+              "finish": null,
+              "checking": false
+            },
+            {
+              "name": "Bob",
+              "slot": 1,
+              "place": null,
+              "dnf": null,
+              "finish": null,
+              "checking": false
+            }
+          ]
+        },
+        "restart": false,
+        "go": false,
+        "finish": false,
+        "over": false,
+        "frozen": false
+      },
+      {
+        "view": {
+          "id": "roomrace01",
+          "state": "over",
+          "map": "bhop_eazy",
+          "style": "autohop",
+          "track": 0,
+          "joinUntil": 7000,
+          "goAt": 10000,
+          "endsAt": 610000,
+          "you": -1,
+          "racers": [
+            {
+              "name": "Alice",
+              "slot": 0,
+              "place": null,
+              "dnf": null,
+              "finish": null,
+              "checking": false
+            },
+            {
+              "name": "Bob",
+              "slot": 1,
+              "place": null,
+              "dnf": null,
+              "finish": null,
+              "checking": false
+            }
+          ]
+        },
+        "restart": false,
+        "go": false,
+        "finish": false,
+        "over": false,
+        "frozen": false
+      }
+    ]
+  },
+  {
+    "name": "live reconnect",
+    "steps": [
+      {
+        "view": {
+          "id": "roomrace01",
+          "state": "live",
+          "map": "bhop_eazy",
+          "style": "autohop",
+          "track": 0,
+          "joinUntil": 7000,
+          "goAt": 10000,
+          "endsAt": 610000,
+          "you": 0,
+          "racers": [
+            {
+              "name": "Alice",
+              "slot": 0,
+              "place": null,
+              "dnf": null,
+              "finish": null,
+              "checking": false
+            },
+            {
+              "name": "Bob",
+              "slot": 1,
+              "place": null,
+              "dnf": null,
+              "finish": null,
+              "checking": false
+            }
+          ]
+        },
+        "restart": false,
+        "go": false,
+        "finish": false,
+        "over": false,
+        "frozen": false
+      },
+      {
+        "view": {
+          "id": "roomrace01",
+          "state": "live",
+          "map": "bhop_eazy",
+          "style": "autohop",
+          "track": 0,
+          "joinUntil": 7000,
+          "goAt": 10000,
+          "endsAt": 610000,
+          "you": 0,
+          "racers": [
+            {
+              "name": "Alice",
+              "slot": 0,
+              "place": null,
+              "dnf": null,
+              "finish": null,
+              "checking": false
+            },
+            {
+              "name": "Bob",
+              "slot": 1,
+              "place": null,
+              "dnf": null,
+              "finish": null,
+              "checking": false
+            }
+          ]
+        },
+        "restart": false,
+        "go": false,
+        "finish": false,
+        "over": false,
+        "frozen": false
+      }
+    ]
+  },
+  {
+    "name": "forfeit before GO",
+    "steps": [
+      {
+        "view": {
+          "id": "roomrace01",
+          "state": "countdown",
+          "map": "bhop_eazy",
+          "style": "autohop",
+          "track": 0,
+          "joinUntil": 7000,
+          "goAt": 10000,
+          "endsAt": 610000,
+          "you": 0,
+          "racers": [
+            {
+              "name": "Alice",
+              "slot": 0,
+              "place": null,
+              "dnf": null,
+              "finish": null,
+              "checking": false
+            },
+            {
+              "name": "Bob",
+              "slot": 1,
+              "place": null,
+              "dnf": null,
+              "finish": null,
+              "checking": false
+            }
+          ]
+        },
+        "restart": true,
+        "go": false,
+        "finish": false,
+        "over": false,
+        "frozen": true
+      },
+      {
+        "view": {
+          "id": "roomrace01",
+          "state": "countdown",
+          "map": "bhop_eazy",
+          "style": "autohop",
+          "track": 0,
+          "joinUntil": 7000,
+          "goAt": 10000,
+          "endsAt": 610000,
+          "you": 0,
+          "racers": [
+            {
+              "name": "Alice",
+              "slot": 0,
+              "place": null,
+              "dnf": "forfeit",
+              "finish": null,
+              "checking": false
+            },
+            {
+              "name": "Bob",
+              "slot": 1,
+              "place": null,
+              "dnf": null,
+              "finish": null,
+              "checking": false
+            }
+          ]
+        },
+        "restart": false,
+        "go": false,
+        "finish": false,
+        "over": false,
+        "frozen": false
+      },
+      {
+        "view": {
+          "id": "roomrace01",
+          "state": "live",
+          "map": "bhop_eazy",
+          "style": "autohop",
+          "track": 0,
+          "joinUntil": 7000,
+          "goAt": 10000,
+          "endsAt": 610000,
+          "you": 0,
+          "racers": [
+            {
+              "name": "Alice",
+              "slot": 0,
+              "place": null,
+              "dnf": "forfeit",
+              "finish": null,
+              "checking": false
+            },
+            {
+              "name": "Bob",
+              "slot": 1,
+              "place": null,
+              "dnf": null,
+              "finish": null,
+              "checking": false
+            }
+          ]
+        },
+        "restart": false,
+        "go": false,
+        "finish": false,
+        "over": false,
+        "frozen": false
+      }
+    ]
+  },
+  {
+    "name": "cancel before GO",
+    "steps": [
+      {
+        "view": {
+          "id": "roomrace01",
+          "state": "countdown",
+          "map": "bhop_eazy",
+          "style": "autohop",
+          "track": 0,
+          "joinUntil": 7000,
+          "goAt": 10000,
+          "endsAt": 610000,
+          "you": 0,
+          "racers": [
+            {
+              "name": "Alice",
+              "slot": 0,
+              "place": null,
+              "dnf": null,
+              "finish": null,
+              "checking": false
+            },
+            {
+              "name": "Bob",
+              "slot": 1,
+              "place": null,
+              "dnf": null,
+              "finish": null,
+              "checking": false
+            }
+          ]
+        },
+        "restart": true,
+        "go": false,
+        "finish": false,
+        "over": false,
+        "frozen": true
+      },
+      {
+        "view": {
+          "id": "roomrace01",
+          "state": "over",
+          "map": "bhop_eazy",
+          "style": "autohop",
+          "track": 0,
+          "joinUntil": 7000,
+          "goAt": 10000,
+          "endsAt": 610000,
+          "you": 0,
+          "racers": [
+            {
+              "name": "Alice",
+              "slot": 0,
+              "place": null,
+              "dnf": null,
+              "finish": null,
+              "checking": false
+            },
+            {
+              "name": "Bob",
+              "slot": 1,
+              "place": null,
+              "dnf": null,
+              "finish": null,
+              "checking": false
+            }
+          ],
+          "outcome": "cancelled"
+        },
+        "restart": false,
+        "go": false,
+        "finish": false,
+        "over": true,
+        "frozen": false
+      }
+    ]
+  },
+  {
+    "name": "bonus",
+    "steps": [
+      {
+        "view": {
+          "id": "roomrace01",
+          "state": "countdown",
+          "map": "bhop_eazy",
+          "style": "autohop",
+          "track": 2,
+          "joinUntil": 7000,
+          "goAt": 10000,
+          "endsAt": 610000,
+          "you": 0,
+          "racers": [
+            {
+              "name": "Alice",
+              "slot": 0,
+              "place": null,
+              "dnf": null,
+              "finish": null,
+              "checking": false
+            },
+            {
+              "name": "Bob",
+              "slot": 1,
+              "place": null,
+              "dnf": null,
+              "finish": null,
+              "checking": false
+            }
+          ]
+        },
+        "restart": true,
+        "go": false,
+        "finish": false,
+        "over": false,
+        "frozen": true
+      },
+      {
+        "view": {
+          "id": "roomrace01",
+          "state": "live",
+          "map": "bhop_eazy",
+          "style": "autohop",
+          "track": 2,
+          "joinUntil": 7000,
+          "goAt": 10000,
+          "endsAt": 610000,
+          "you": 0,
+          "racers": [
+            {
+              "name": "Alice",
+              "slot": 0,
+              "place": null,
+              "dnf": null,
+              "finish": null,
+              "checking": false
+            },
+            {
+              "name": "Bob",
+              "slot": 1,
+              "place": null,
+              "dnf": null,
+              "finish": null,
+              "checking": false
+            }
+          ]
+        },
+        "restart": true,
+        "go": true,
+        "finish": false,
+        "over": false,
+        "frozen": false
+      }
+    ]
+  }
+]

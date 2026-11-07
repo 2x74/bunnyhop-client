@@ -28,7 +28,8 @@ struct RestartPlacement {
           const std::string &map,
           uint32_t track,
           const std::vector<BhZone> &zones,
-          const StartPoints *points) {
+          const StartPoints *points,
+          bool canonical = false) {
         RestartPlacement result;
         check(core, bh_state(core, &result.state));
         const auto names = restart_names(map, track);
@@ -57,7 +58,7 @@ struct RestartPlacement {
             if (names) apply_names(core, names);
             check(core, bh_state(core, &result.state));
         }
-        if (points) {
+        if (points && !canonical) {
             if (const auto point = points->get(map, track)) {
                 result.custom(core, map, *point, zones, track, names);
             }

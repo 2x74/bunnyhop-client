@@ -1,19 +1,19 @@
 import { withReplayViews } from "./replay-views";
 // Per-map leaderboard (pause menu Leaderboard tab, the map browser's board dialog): Main | Bonus N and style switches
 // over a paged board (ui/board-pager.ts) sized to its panel. The WR stays pinned above every page and your row below
-// it when it's elsewhere; Watch / Race on every row. Offline / empty / error states included.
+// it when it's elsewhere; Watch / Race on every row and the rest in its ⋯ (ui/row-menu.ts). Offline / empty / error states included.
 
 import { api, ApiUnavailable, type Leaderboard, type LeaderboardEntry } from "../api";
 import { getPB } from "../pb";
 import { formatTime } from "../timer";
 import { h } from "./dom";
 import { requestRace } from "../player/race";
+import { rowMenu } from "./row-menu";
 import { openReplayViewer } from "../viewer/request";
 import { navigate } from "./nav";
 import { BONUS_STYLE, STYLE_DEFS, styleForTrack, styleLabel, type StyleId } from "../styles";
 import { trackName } from "../zones";
 import { fullDate, gapTime, pagedBoard, playerCell, relDate, type BoardPage, type BoardSource } from "./board-pager";
-import { adminLink } from "../staff-lens";
 import { dismissOutside } from "./dismiss";
 import { bindRunStats, runPointsAttr } from "./run-stats";
 import { fmtPoints } from "../ranking";
@@ -87,7 +87,7 @@ export function leaderboardPanel(map: string, style: string, opts: BoardOptions 
         h("th.num.rb-opt", { scope: "col" }, "Sync"),
         h("th.num.rb-opt.lb-pts", { scope: "col" }, "Points"),
         h("th.rb-opt2", { scope: "col" }, "Date"),
-        h("th.rb-opt3", { scope: "col" }, h("span.sr-only", null, "Watch or race")),
+        h("th.rb-opt3", { scope: "col" }, h("span.sr-only", null, "Watch, race and more")),
       ),
     row: (e, c) => {
       const t = track;
@@ -111,7 +111,8 @@ export function leaderboardPanel(map: string, style: string, opts: BoardOptions 
           null,
           withReplayViews(h("button.link-btn", { type: "button", title: `Watch ${e.player.name}'s run in the replay viewer`, "aria-label": `Watch ${e.player.name}'s run`, onclick: () => openReplayViewer({ runId: e.runId, name }) }, "Watch"), e.runId),
           h("button.link-btn", { type: "button", title: `Race ${e.player.name}'s run as a ghost`, "aria-label": `Race ${e.player.name}'s run as a ghost`, onclick: () => race(e, t) }, "Race"),
-          adminLink(e.player.id, "rb-admin", `Open ${e.player.name} in admin`, { icon: true }),
+          // Copy start, Copy link, Report, Open in admin (ui/row-menu.ts).
+          rowMenu({ runId: e.runId, map, time: e.time, player: e.player }, { mine: c.mine }),
         ),
       );
     },

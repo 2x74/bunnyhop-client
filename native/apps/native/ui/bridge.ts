@@ -59,6 +59,7 @@ export interface VideoExportState {
   musicTracks: { id: string; title: string }[];
 }
 export type MenuMessage =
+  | { type: "copyStart"; id: number; map: string; style: StyleId; who: string; replayBase64: string }
   | { type: "mapLoad"; action: "cancel" | "retry" }
   /** A line for the game's log file (menu-log.ts). */
   | { type: "menuLog"; text: string }
@@ -611,6 +612,7 @@ export interface MapLoadProgress {
   map?: string;
 }
 export interface NativeMenuState {
+  bonusTracks?: number[];
   loadProgress?: MapLoadProgress | null;
   map: string | null;
   loading: boolean | string;
@@ -677,6 +679,8 @@ declare global {
       /** The watched replay's speed graph and markers (replay-host.ts), once per replay. */
       onReplayTimeline?: (value: unknown) => void;
       /** The host's answer to Practice from here (replay-practice.ts). */
+      onCopyStartResult?: (value: unknown) => void;
+      onCopyStartPlayer?: (slot: number | null) => void;
       onPracticeFromReplayResult?: (value: unknown) => void;
       settle?: (timeoutMs?: number) => Promise<{ ended: number; pendingImages: number }>;
     };
@@ -1260,6 +1264,10 @@ export function applyState(value: unknown): boolean {
   if (typeof next.paused === "boolean") state.paused = next.paused;
   if (isStyleId(next.style)) state.style = next.style;
   if (Number.isSafeInteger(next.track) && Number(next.track) >= 0) state.track = Number(next.track);
+  if (Array.isArray(next.bonusTracks))
+    state.bonusTracks = next.bonusTracks
+      .filter((track): track is number => Number.isSafeInteger(track) && Number(track) > 0 && Number(track) <= 64)
+      .slice(0, 64);
   const sequence = next.settingsSequence;
   const orderedSettings = Number.isSafeInteger(sequence) && Number(sequence) >= 0;
   if (next.settings && (!orderedSettings || Number(sequence) > hostSettingsSequence)) {

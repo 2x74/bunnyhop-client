@@ -3,6 +3,7 @@ import { whisper } from "../notify";
 import { playerGlowControls } from "./player-glow-controls";
 import { DOTS } from "../social/dock";
 import { withMenu, type MenuItem } from "../social/menu";
+import { rowMenu } from "./row-menu";
 import { profileSocial } from "./profile-social";
 import { openFeedback } from "../feedback/state";
 import { profileGauntlets } from "./profile-gauntlets";
@@ -461,7 +462,6 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
   // --- run rows: tier as a coloured left edge, map, time (gold when it's the world record); Watch / Race show on the
   // hovered or focused row (always on touch).
   const runRow = (run: RunCard, o: { mini?: boolean } = {}) => {
-    const pinned = featuredIds.includes(run.runId);
     const tags = [run.track ? trackName(run.track) : null, styleLabel(run.style), viewsLabel(run.views)].filter(Boolean).join(", ");
     const wr = run.pb && run.rank === 1;
     const t = run.tier ?? null;
@@ -483,9 +483,13 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
         null,
         withReplayViews(h("button.link-btn", { type: "button", onclick: () => a.watch(run, p.player.name), title: "Watch this replay" }, "Watch"), run.runId),
         o.mini ? null : h("button.link-btn", { type: "button", onclick: () => a.race(run, p.player.name), title: "Race this run as a ghost" }, "Race"),
-        !o.mini && p.mine
-          ? h(`button.link-btn.pf-pin${pinned ? ".on" : ""}`, { type: "button", "aria-pressed": String(pinned), onclick: () => void togglePin(run), title: pinned ? "Unpin from featured" : "Pin to featured (up to 5)" }, pinned ? "Pinned" : "Pin")
-          : null,
+        // Pin (yours), Copy start, Copy link, Report (ui/row-menu.ts).
+        o.mini
+          ? null
+          : rowMenu({ runId: run.runId, map: run.map, time: run.time, player: { id: p.player.id, name: p.player.name } }, {
+              mine: p.mine,
+              extra: () => (p.mine ? [{ label: featuredIds.includes(run.runId) ? "Unpin from featured" : "Pin to featured", run: () => togglePin(run) }] : []),
+            }),
       ),
     );
   };

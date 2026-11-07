@@ -5,6 +5,7 @@
 // opens and closes it.
 #include "input_binds.hpp"
 #include "look_menu.hpp"
+#include "copy_start_picker.hpp"
 #include "room_modes.hpp"
 #include "spectate.hpp"
 #include "weapon_menu.hpp"
@@ -16,7 +17,7 @@
 namespace native {
 
 struct NumberedMenus {
-    enum class Menu { guns, triggers, race, spectate, checkpoints, look };
+    enum class Menu { guns, triggers, race, spectate, checkpoints, look, copy_start };
 
     NativeWeaponMenu &guns;
     NativeTriggerMenu &triggers;
@@ -24,9 +25,12 @@ struct NumberedMenus {
     SpectatePicker &spectate;
     bool &checkpoints;
     LookMenu &look;
+    CopyStartPicker copy_start{};
 
     bool is_open(Menu menu) const {
         switch (menu) {
+            case Menu::copy_start:
+                return copy_start.open();
             case Menu::guns:
                 return guns.open;
             case Menu::triggers:
@@ -44,7 +48,9 @@ struct NumberedMenus {
     }
 
     // The menus a chat line opens (!spec, !race, !bright), which keep the cursor out for their rows (menu_cursor.hpp).
-    bool chat_menu_open() const { return is_open(Menu::race) || is_open(Menu::spectate) || is_open(Menu::look); }
+    bool chat_menu_open() const {
+        return is_open(Menu::race) || is_open(Menu::spectate) || is_open(Menu::look) || is_open(Menu::copy_start);
+    }
 
     struct Click {
         // The digit key the clicked row stands for ("Digit3"), to go through the keys' own path.
@@ -102,10 +108,11 @@ struct NumberedMenus {
 
 private:
     static constexpr Menu all[] = {
-            Menu::guns, Menu::triggers, Menu::race, Menu::spectate, Menu::checkpoints, Menu::look
+            Menu::guns, Menu::triggers, Menu::race, Menu::spectate, Menu::checkpoints, Menu::look, Menu::copy_start
     };
 
     std::optional<MenuRows> chat_menu_rows(int width, int height, float percent) const {
+        if (is_open(Menu::copy_start)) return copy_start.rows(width, height, percent);
         if (is_open(Menu::race)) return race.rows(width, height, percent);
         if (is_open(Menu::spectate)) return spectate.rows(width, height, percent);
         if (is_open(Menu::look)) return look.rows(width, height, percent);
@@ -114,6 +121,9 @@ private:
 
     void close(Menu menu) {
         switch (menu) {
+            case Menu::copy_start:
+                copy_start.close();
+                break;
             case Menu::guns:
                 guns.close();
                 break;

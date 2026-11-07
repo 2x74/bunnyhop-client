@@ -3,6 +3,7 @@
 #include "hud_demo.hpp"
 #include "hud_editor.hpp"
 #include "look_menu.hpp"
+#include "copy_start_picker.hpp"
 #include "weapon_menu.hpp"
 #include "preferences.hpp"
 #include "spectate.hpp"
@@ -67,6 +68,9 @@ struct HudFrame {
     // !bright's quick menu, and the cursor over a menu a chat line opened (menu_cursor.hpp), for the row it's on.
     const LookMenu *look_menu = nullptr;
     std::optional<std::array<float, 2>> menu_pointer;
+    const CopyStartPicker *copy_start = nullptr;
+    // The menu's prefers-reduced-motion: race numerals and results fade instead of moving.
+    bool reduced_motion = false;
 
     void draw() const;
 

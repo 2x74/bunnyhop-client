@@ -17,10 +17,11 @@ import { gunForWeapon, GunPresenter } from "../viewmodel/guns/presenter";
 import type { GunImpacts } from "../viewmodel/guns/impacts";
 import { gunSound } from "../viewmodel/guns/sounds";
 import { PlayerModel } from "../player/model";
-import { compileModel, prebuildBunny } from "../player/bunny/prebuild";
+import { compileModel, prebuildBunny, prebuildGun } from "../player/bunny/prebuild";
 import { hasAnimRig, loadAnimRig } from "../player/studio/loader";
 import { DEFAULT_COSMETICS } from "../progression";
 import { cleanLoadout, DEFAULT_LOADOUT } from "../loadout";
+import { stageModelTextures } from "../player/bunny/prebuild";
 import { NameTag, TagSight, type SightTrace } from "../player/tag";
 import { probeFromTrace } from "../player/bunny/legs";
 import { LadderGuess, waterLevelAt } from "../player/map-volumes";
@@ -57,6 +58,11 @@ export interface RemotePlayer {
   prep: Promise<void>;
   /** The model is being made (prep, then its shaders compile); it's drawn once `model` is set. */
   making: boolean;
+  /** Cancels a stale preparation when the roster changes while a look is warming. */
+  appearance: number;
+  /** Latest received weapon, available before the interpolation delay elapses (preparation only). */
+  warmWeapon?: number;
+  warmSilenced?: boolean;
   /** Their pose wasn't updated last frame (behind the camera, see frame()): snapped when they're posed again. */
   unposed?: boolean;
   /** Climbing, inferred from the map and their motion (player/map-volumes.ts LadderGuess). */
@@ -113,18 +119,22 @@ export class RemotePlayers {
       p = undefined;
     }
     if (!p) {
-      p = { slot: info.slot, info, track: new RemoteTrack(), state: blankState(), has: false, meta: null, metaAt: 0, model: null, tag: null, tagAge: 1, sight: new TagSight(2000, 3000), sound: null, prep: info.slot === this.you() ? Promise.resolve() : this.prebuild(info), making: false };
+      p = { slot: info.slot, info, track: new RemoteTrack(), state: blankState(), has: false, meta: null, metaAt: 0, model: null, tag: null, tagAge: 1, sight: new TagSight(2000, 3000), sound: null, prep: info.slot === this.you() ? Promise.resolve() : this.prebuild(info), making: false, appearance: 0 };
       this.players.set(info.slot, p);
     } else {
+      const changed = p.info.outfit !== info.outfit ||
+        JSON.stringify(p.info.loadout) !== JSON.stringify(info.loadout) ||
+        JSON.stringify(p.info.playerGlow) !== JSON.stringify(info.playerGlow);
       p.info = info;
-      // A roster refresh (e.g. they rejoined after changing their loadout): the new look's geometry is built off the
-      // main thread first, then applied (from the roster as it is by then).
-      const q = p;
-      q.prep = this.prebuild(info).then(() => {
-        if (this.players.get(q.slot) !== q || !q.model) return;
-        q.model.setPlayerGlow(q.info.playerGlow ?? null);
-        q.model.setLoadout(cleanLoadout(q.info.loadout) ?? { ...DEFAULT_LOADOUT });
-      });
+      if (changed) {
+        const q = p;
+        const revision = ++q.appearance;
+        q.making = true;
+        q.prep = this.prebuild(info);
+        void q.prep.then(() => {
+          if (q.appearance === revision) return this.makeModel(q);
+        }).catch(e => { q.making = false; console.warn("player model failed", e); });
+      }
     }
     return p;
   }
@@ -152,12 +162,22 @@ export class RemotePlayers {
       p.metaAt = now;
     }
     p.track.push(samples, now);
-    if (weapon !== undefined && samples.length) p.track.pushWeapon(weapon, samples[samples.length - 1].tick, silenced);
+    if (weapon !== undefined && samples.length) {
+      p.track.pushWeapon(weapon, samples[samples.length - 1].tick, silenced);
+      p.warmWeapon = weapon;
+      p.warmSilenced = silenced;
+      // Start alongside the body build, before makeModel needs to attach the gun.
+      void prebuildGun(weapon >= 2 ? (WEAPON_IDS[weapon] ?? null) : null, cleanLoadout(p.info.loadout)?.camo);
+    }
   }
 
   /** The weapon in hand of a slot right now (the welcome's list). */
   setWeapon(slot: number, weapon: number): void {
-    this.players.get(slot)?.track.setWeapon(weapon);
+    const p = this.players.get(slot);
+    if (!p) return;
+    p.track.setWeapon(weapon);
+    p.warmWeapon = weapon;
+    void prebuildGun(weapon >= 2 ? (WEAPON_IDS[weapon] ?? null) : null, cleanLoadout(p.info.loadout)?.camo);
   }
 
   setMeta(slot: number, meta: NetMeta, now: number): void {
@@ -172,7 +192,7 @@ export class RemotePlayers {
     // The CS:S animations every bunny shares (fetched and parsed once): loaded now rather than by the first model's
     // first update, inside a frame.
     if (hasAnimRig()) loadAnimRig().catch(() => {});
-    return prebuildBunny(info.outfit ?? DEFAULT_COSMETICS.outfit!, cleanLoadout(info.loadout) ?? { ...DEFAULT_LOADOUT });
+    return prebuildBunny(info.outfit ?? DEFAULT_COSMETICS.outfit!, cleanLoadout(info.loadout) ?? { ...DEFAULT_LOADOUT }, !!info.playerGlow?.enabled);
   }
 
   /** True once the model is in the scene; otherwise starts making it (prebuilt geometry, compiled shaders). */
@@ -180,27 +200,80 @@ export class RemotePlayers {
     if (p.model) return true;
     if (p.making) return false;
     p.making = true;
+    const revision = p.appearance;
     void p.prep
-      .then(() => this.makeModel(p))
-      .catch((e) => console.warn("player model failed", e));
+      .then(() => { if (p.appearance === revision) return this.makeModel(p); })
+      .catch((e) => {
+        if (p.appearance === revision) p.making = false;
+        console.warn("player model failed", e);
+      });
     return false;
   }
 
   /** The model, once its geometry is cached (prep): built, its shaders compiled, then into the scene. */
   private async makeModel(p: RemotePlayer): Promise<void> {
+    const revision = p.appearance;
     if (this.players.get(p.slot) !== p) return;
+    // Model / name-canvas allocation can wait for idle time while input and the current room keep rendering.
+    await new Promise<void>(resolve => {
+      if (typeof window.requestIdleCallback === "function") window.requestIdleCallback(() => resolve(), { timeout: 100 });
+      else setTimeout(resolve, 0);
+    });
+    if (this.players.get(p.slot) !== p || p.appearance !== revision) return;
     const color = slotColor(p.slot);
     // Their bunny colourway and loadout (knife, finish with their seed, gloves) from the roster (defaults for older
     // servers), accented with their slot colour. The geometry is cached by now (prep), so this is cheap.
     const model = new PlayerModel({ style: "solid", playerGlow: p.info.playerGlow ?? null, color, outfit: p.info.outfit ?? DEFAULT_COSMETICS.outfit!, loadout: cleanLoadout(p.info.loadout) ?? { ...DEFAULT_LOADOUT } });
-    if (this.renderer && this.camera) await compileModel(this.renderer, model.root, this.camera, this.scene);
-    if (this.players.get(p.slot) !== p) return model.dispose();
+    // Glow shells are created lazily by update(), and guns by setGun(). Both must exist when we compile.
+    // Otherwise their first visible frame builds the shell and links its programs synchronously.
+    const serial = !!this.renderer && !this.renderer.extensions.has("KHR_parallel_shader_compile");
+    let weapon = serial ? (p.warmWeapon ?? p.state.weapon) : p.state.weapon;
+    const gun = weapon >= 2 ? (WEAPON_IDS[weapon] ?? null) : null;
+    await prebuildGun(gun, cleanLoadout(p.info.loadout)?.camo);
+    if (this.players.get(p.slot) !== p || p.appearance !== revision) return model.dispose();
+    model.setGun(gun);
+    model.setGunSilencer(serial ? (p.warmSilenced ?? p.state.silenced) : p.state.silenced);
+    if (this.renderer && !this.renderer.extensions.has("KHR_parallel_shader_compile")) {
+      model.setState({position:[0,0,0],yaw:0,pitch:0,grounded:true,crouched:false});
+      model.update(0);
+      model.snap();
+    } else model.bunnyModel?.update(0);
+    const tag = new NameTag(color);
+    tag.set(p.info.name, "", null, false, p.info);
+    const warmRoot = new THREE.Group();
+    warmRoot.add(model.root, tag.sprite);
+    if (this.renderer && this.camera) {
+      await stageModelTextures(this.renderer, warmRoot);
+      await compileModel(this.renderer, warmRoot, this.camera, this.scene);
+    }
+    // A switch while the model was warming must not introduce a fresh gun in its first visible frame.
+    while (weapon !== p.state.weapon && this.players.get(p.slot) === p && p.appearance === revision) {
+      weapon = p.state.weapon;
+      const held = weapon >= 2 ? (WEAPON_IDS[weapon] ?? null) : null;
+      await prebuildGun(held, cleanLoadout(p.info.loadout)?.camo);
+      model.setGun(held);
+      model.setGunSilencer(p.state.silenced);
+      if (serial) {
+        model.setState({position:[0,0,0],yaw:0,pitch:0,grounded:true,crouched:false});
+        model.update(0);
+        model.snap();
+      }
+      if (this.renderer && this.camera) {
+        await stageModelTextures(this.renderer, warmRoot);
+        await compileModel(this.renderer, warmRoot, this.camera, this.scene);
+      }
+    }
+    if (this.players.get(p.slot) !== p || p.appearance !== revision) { model.dispose(); tag.dispose(); return; }
     // Feet plant on slopes (player/bunny/legs.ts) through the same world trace as the tags' line of sight.
     const trace = this.trace;
     if (trace) model.setGroundProbe(probeFromTrace(trace));
+    p.model?.root.removeFromParent();
+    p.model?.dispose();
+    p.tag?.dispose();
     p.model = model;
+    p.making = false;
     this.scene.add(model.root);
-    p.tag = new NameTag(color);
+    p.tag = tag;
     this.scene.add(p.tag.sprite);
   }
 

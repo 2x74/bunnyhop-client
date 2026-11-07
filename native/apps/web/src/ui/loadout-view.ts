@@ -575,14 +575,40 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
     t.thumb.classList.add("ready");
   }
 
+  /**
+   * Tiles in or near the grid's view (a screen of grid either way): only their thumbnails are drawn, the rest as they're
+   * scrolled to (and any already drawn or stored come at once). Every tile drawn on open cost a model build, a GPU
+   * readback and often a new shader for tiles nobody had scrolled to: on SwiftShader the Gun camo and Finish tabs took
+   * 20-40 s of blocked main thread (research/PERF-LOADOUT-0.0.38.md).
+   */
+  const near = new Set<Element>();
+  const nearIo = typeof IntersectionObserver === "function"
+    ? new IntersectionObserver(
+        (es) => {
+          for (const e of es) e.isIntersecting ? near.add(e.target) : near.delete(e.target);
+          requestThumbs();
+        },
+        { root: grid, rootMargin: "100% 0px" },
+      )
+    : null;
+
   function requestThumbs(): void {
     if (!stage) return;
     const keys = new Set<string>();
     for (const t of tiles) {
       const job = t.c ? thumbJob(t.c) : null;
       if (!job) continue;
+      if (job.key === t.key) {
+        keys.add(job.key);
+        continue;
+      }
+      if (nearIo && !near.has(t.el)) {
+        // Off screen: only what's at hand (drawn already this visit); stored or new ones once it's scrolled near.
+        const hit = stage.cachedThumb(job.key);
+        if (hit) (t.key = job.key), paintThumb(t, hit);
+        continue;
+      }
       keys.add(job.key);
-      if (job.key === t.key) continue;
       t.key = job.key;
       stage.requestThumb(job, (src) => t.key === job.key && paintThumb(t, src));
     }
@@ -631,6 +657,7 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
     ) as HTMLButtonElement;
     const t: TileRef = { c, id, el, thumb, canvas, key: "" };
     tileState(t);
+    nearIo?.observe(el);
     return t;
   }
 
@@ -647,6 +674,8 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
     const sections = loadoutSections(ordered);
     const headed = !o.only;
     const els: HTMLElement[] = [];
+    for (const t of tiles) nearIo?.unobserve(t.el);
+    near.clear();
     tiles = [];
     const add = (c: CosmeticDef | null, group?: string) => {
       const t = makeTile(c, group);
@@ -915,7 +944,7 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
 
   // --- model changes (an equip, a save, another device): tiles, tabs, status, stage
   const off = m.on(() => {
-    if (!root.isConnected) return void off();
+    if (!root.isConnected) return void (off(), nearIo?.disconnect());
     for (const t of tiles) tileState(t);
     drawTabs();
     drawStatus();

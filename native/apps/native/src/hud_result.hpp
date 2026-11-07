@@ -174,8 +174,34 @@ void draw_record_burst(Hud &hud, float x, float y, float age) {
     }
 }
 
+// Where the end card's pieces go. It flies up from the middle; `below` (HUD units, from a race result above it) keeps
+// it under that.
+struct ResultLayout {
+    float y = 0, card_top = 0, card_height = 0, bottom = 0;
+};
+
+inline ResultLayout result_layout(const HudGeometry &geometry, const HudResult &result, double now, float below = 0) {
+    constexpr float reward_delay_seconds = .6f;
+    constexpr float hint_delay_seconds = 2;
+    const float age = float(now - result.started);
+    const float flight = std::clamp(age / .45f, 0.f, 1.f);
+    const float start = geometry.height * .44f, end = std::max(geometry.height * .21f, below > 0 ? below + 20 : 0.f);
+    ResultLayout layout;
+    layout.y = start - (start - end) * (1 - std::pow(1 - flight, 3));
+    layout.card_top = layout.y + 106;
+    layout.card_height = result.reward_count && age >= reward_delay_seconds ? 78 : 32;
+    layout.bottom = layout.card_top + layout.card_height
+                    + (age >= hint_delay_seconds && !result.restart_hint.empty() ? 10 + 13 * 1.3f : 0);
+    return layout;
+}
+
+// The end card's bottom edge while it's up, 0 otherwise.
+inline float result_bottom(const HudGeometry &geometry, const HudResult &result, double now, float below = 0) {
+    return result.visible(now) ? result_layout(geometry, result, now, below).bottom : 0;
+}
+
 template <class Hud>
-void draw_result(Hud &hud, int width, int height, float percent, const HudResult &result, double now) {
+void draw_result(Hud &hud, int width, int height, float percent, const HudResult &result, double now, float below = 0) {
     if (!result.visible(now)) return;
     constexpr NameColor cream = {.94f, .91f, .87f, 1};
     constexpr NameColor faded_cream = {.5f, .47f, .43f, 1};
@@ -193,20 +219,20 @@ void draw_result(Hud &hud, int width, int height, float percent, const HudResult
     constexpr float reward_seconds_each = 2.4f;
     const HudGeometry geometry(width, height, percent);
     const float age = float(now - result.started);
-    const float flight = std::clamp(age / .45f, 0.f, 1.f);
     const float x = geometry.width / 2;
-    float y = geometry.height * (.44f - .23f * (1 - std::pow(1 - flight, 3)));
+    const auto layout = result_layout(geometry, result, now, below);
+    float y = layout.y;
     const bool slower = result.delta && *result.delta > 0 && result.stamp != ResultStamp::personal_best;
     const NameColor time_color = result.stamp == ResultStamp::world_record ? record_gold
                                  : result.stamp == ResultStamp::rejected   ? faded_cream
                                  : slower                                  ? slower_white
                                                                            : cream;
     const bool show_reward = result.reward_count && age >= reward_delay_seconds;
-    const float card_height = show_reward ? 78 : 32;
+    const float card_height = layout.card_height;
     hud.overlay_begin(width, height, percent);
     // Confetti and the card go down first so the words always sit on top of them.
     draw_record_burst(hud, x, y + 22, float(now - result.record_started));
-    const float card_top = y + 106;
+    const float card_top = layout.card_top;
     hud.overlay_rect(x - card_width / 2, card_top, card_width, card_height, card_fill);
     HudLabel<48> line;
     // Roll only during the first 300 ms, then hold the exact server/core time.

@@ -1,3 +1,5 @@
+import { closeMenus } from "../../web/src/social/menu";
+import { roomRaceTag } from "./room-race";
 import { NativeRaceGhosts } from "./race-ghosts";
 import { loadPBReplay } from "../../web/src/pb";
 import { base64Bytes } from "./base64";
@@ -280,6 +282,7 @@ interface BackEntry {
 let backStack: BackEntry[] = [];
 const BACK_LIMIT = 16;
 function show(next: Screen, o: { back?: boolean; slot?: string | null } = {}): void {
+  closeMenus();
   if (screen === "ranks" && next !== "ranks") leaveRanksUrl();
   if (next !== "gauntlets" && next !== "gauntlet" && next !== "profile") leaveGauntletUrl();
   if (next === "home") backStack = [];
@@ -890,6 +893,8 @@ onBeforeSend((message) => {
   if (roomService.view.id && leaveRoomBefore(message)) roomService.leave();
 });
 setRaceTag((board) => {
+  const roomTag = roomRaceTag(roomService.view.roomRace, board);
+  if (roomTag) return roomTag;
   const race = roomService.view.race;
   return race &&
     race.state === "live" &&
@@ -1051,6 +1056,10 @@ window.bunnyhopNativeMenu = {
   settle,
   onLeaveMap: teardownMap,
   onReplayTimeline: applyReplayTimeline,
+  onCopyStartResult: (value) => chatService.copyStart.receive(value),
+  onCopyStartPlayer: (slot) => {
+    void chatService.copyStart.player(slot);
+  },
   onPracticeFromReplayResult: (value) => practiceFromReplay.receive(value),
   joinRoom: (id) => {
     if (typeof id !== "string" || !/^(?:[a-z0-9][a-z0-9-]{0,31}|p-[a-z2-7]{10})$/.test(id)) return;
@@ -1319,3 +1328,5 @@ send({
   webglContexts: graphics?.contexts ?? 0,
   webglAttempts: graphics?.attempts ?? 0,
 });
+
+window.addEventListener("bunnyhop:host-state", () => chatService.copyStart.update());

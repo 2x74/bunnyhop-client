@@ -80,6 +80,7 @@ import { RestartGuard, type GuardedAction } from "./restart-guard";
 import { CONFIRM_MS, LeaveHold } from "./leave-confirm";
 import { SoloChat } from "./solo-chat";
 import { chatGame } from "./chat-game";
+import { copyRunStart, setCopyStartHandler } from "./copy-start-request";
 import { initChunkRecovery, initUpdateCheck, setUpdateBusy } from "./update";
 import { WAVEDASH } from "./platform/env";
 import { initPlatform } from "./platform/hooks";
@@ -460,6 +461,7 @@ let bsp: Uint8Array | undefined;
 let wasmBytes: Uint8Array<ArrayBuffer>;
 let content: ReturnType<typeof contentLoading> | null = null;
 let worldPrograms: Promise<void> = Promise.resolve();
+let sharedPlayerPrograms: Promise<void> | null = null;
 try {
   let lastPaint = 0;
   const cached = attract?.takeBsp(mapName);
@@ -498,6 +500,11 @@ try {
   // Every program the map draws with, culled parts included, for the screen and the look's render targets (water
   // captures, the HDR scene target): started now, compiling in parallel while the run is set up (awaited before Ready).
   worldPrograms = warmPrograms(renderer, world.root, camera, scene).catch(() => {});
+  if (params.get("server") && !renderer.extensions.has("KHR_parallel_shader_compile")) {
+    sharedPlayerPrograms = import("./player/bunny/prewarm-shared")
+      .then(pre => pre.prewarmSharedPlayers(renderer, scene))
+      .catch(e => console.warn("shared player warm-up:", e));
+  }
 } catch (e) {
   console.error(e);
   content?.done();
@@ -538,12 +545,12 @@ applyTeleportAngles(curr);
 if (import.meta.env.DEV) Object.assign(window, { bunnyhop: { input, core, camera, scene, renderer, graphicsPipeline, world: w } });
 
 /** R / B / M / style switches: reset onto `track` (default: current) at its start-zone restart point. */
-function restart(track?: number, at?: RestartPoint | null) {
+function restart(track?: number, at?: RestartPoint | null, canonical = false) {
   setFreecam(false); // R / B / M, a style switch, spectating: back in your eyes, keys released
   input.setJumpToggle(false); // Hold jump (toggle) ends with the attempt (style and map changes restart too)
   liveCapture.stop(); // a core/world reset ends this independently reproducible segment
   if (liveCapture.status.stopping) liveCapture.fail("Restart during command application requires a new capture");
-  const view = run!.resetCore(track, at ?? null);
+  const view = run!.resetCore(track, at ?? null, canonical);
   // Knife pool swap "restart": the next knife comes up with the new attempt.
   advanceKnifePool("restart");
   playerAudio.reset();
@@ -724,6 +731,7 @@ await Promise.race([
     .catch((e) => console.warn("warm draw:", e)),
   new Promise((r) => setTimeout(r, 10_000)),
 ]);
+if (sharedPlayerPrograms) await sharedPlayerPrograms;
 await loading.stage("Ready", 1);
 // A new player's first look (until their first finish on a real map, and always in the tutorial): the world and one
 // "Click to start" line, not the pause menu with its empty leaderboard. Esc opens the menu. Returning players get the
@@ -808,6 +816,16 @@ const mp = serverId ? (await import("./net/mp")).startMultiplayer({ serverId, ma
 // Not on the tutorial map, whose lessons own the restart keys.
 const soloChat = mp || tutorial ? null : new SoloChat({ input, session, restart: (t) => restart(t), enabled: () => !replayViewer.active, game });
 session.multiplayer = mp !== null;
+// Copy start on this map's leaderboard rows (copy-start-request.ts): the answer is a toast over the menu, like Race's.
+if (!tutorial)
+  setCopyStartHandler({
+    map: mapName,
+    copy: (runId, who) => {
+      const say = (text: string) => session.hud.toast(text, 3000, "start-point");
+      if (mp?.isSpectating) return say("You're spectating. !r to play.");
+      void copyRunStart(runId, who, (replay, name) => session.copyStartPoint(replay, name), say);
+    },
+  });
 // The console in this map: it pauses like a menu and goes back in when closed; chat commands and bound actions run
 // here (console/view.ts). Settings it changes go through prefs like the Settings page.
 setConsoleHooks({

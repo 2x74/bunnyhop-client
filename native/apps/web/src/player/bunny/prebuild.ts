@@ -12,7 +12,14 @@
 // Any failure (no module workers, a worker error) resolves anyway: the model then builds on the main thread as before.
 
 import * as THREE from "three";
-import { warmPrograms } from "../../graphics/warm-programs";
+import { hasShellGeometry, seedShellGeometry } from "../glow-geometry";
+import { bunnyGeometry } from "./mesh";
+import { hatGeometry } from "./hats";
+import { crownGeometry } from "./crown";
+import { dressedGunKey, hasDressedGun, seedDressedGun } from "../../viewmodel/guns/meshes";
+import { gunById } from "../../viewmodel/guns";
+import { seedGunHold, type GunHoldData } from "./gun-hold";
+import { warmPrograms, drawHiddenPrograms } from "../../graphics/warm-programs";
 import type { CosmeticLoadout } from "../../loadout";
 import { hasCrownGeometry, seedCrownGeometry } from "./crown";
 import { hasHatGeometry, seedHatGeometry } from "./hats";
@@ -27,18 +34,21 @@ import type { GloveStyleId } from "../../loadout";
 /** A BufferGeometry as plain transferable data. */
 export interface PlainGeometry {
   attributes: Record<string, { array: Float32Array | Uint16Array | Uint32Array; itemSize: number; normalized: boolean }>;
+  glowNormals?: Float32Array;
   box: number[] | null;
   sphere: number[] | null;
 }
 
 type VmReply = { id: number; vm: { knife: string; glove: GloveStyleId; geometry: PlainGeometry; tris: number | null }[]; clouds: { knife: string; p: Float32Array; grip: Uint8Array; n: number }[] };
-type Reply = { id: number; key: string; body: PlainGeometry | null; hat: PlainGeometry | null; crown: PlainGeometry | null } | VmReply | { id: number; error: string };
+type GunReply = { id: number; gunKey: string; gunId: string; gun: PlainGeometry; silencer: PlainGeometry | null; hold: Omit<GunHoldData, "def"> };
+type Reply = GunReply | { id: number; key: string; body: PlainGeometry | null; hat: PlainGeometry | null; crown: PlainGeometry | null } | VmReply | { id: number; error: string };
 
 function geometry(p: PlainGeometry): THREE.BufferGeometry {
   const g = new THREE.BufferGeometry();
   for (const [name, a] of Object.entries(p.attributes)) g.setAttribute(name, new THREE.BufferAttribute(a.array, a.itemSize, a.normalized));
   if (p.box) g.boundingBox = new THREE.Box3(new THREE.Vector3(p.box[0], p.box[1], p.box[2]), new THREE.Vector3(p.box[3], p.box[4], p.box[5]));
   if (p.sphere) g.boundingSphere = new THREE.Sphere(new THREE.Vector3(p.sphere[0], p.sphere[1], p.sphere[2]), p.sphere[3]);
+  if (p.glowNormals) seedShellGeometry(g, p.glowNormals);
   return g;
 }
 
@@ -55,8 +65,13 @@ function ensureWorker(): Worker | null {
     const w = new Worker(new URL("./prebuild-worker.ts", import.meta.url), { type: "module" });
     w.onmessage = (e: MessageEvent<Reply>) => {
       const r = e.data;
+      if (!waiting.has(r.id)) return;
       if ("error" in r) console.warn("bunny prebuild failed; building on the main thread", r.error);
-      else if ("vm" in r) {
+      else if ("gunKey" in r) {
+        seedDressedGun(r.gunKey, geometry(r.gun), r.silencer && geometry(r.silencer));
+        const def = gunById(r.gunId);
+        if (def) seedGunHold(def, r.hold);
+      } else if ("vm" in r) {
         for (const v of r.vm) {
           const g = geometry(v.geometry);
           markViewmodelLayout(g); // laid out in the worker (finishUV is part of the geometry)
@@ -66,10 +81,24 @@ function ensureWorker(): Worker | null {
         }
         for (const c of r.clouds) seedKnifeCloud(c.knife, { p: c.p, grip: c.grip, n: c.n });
       } else {
-        if (r.body) seedBunnyGeometry(r.key, geometry(r.body));
-        if (r.hat) seedHatGeometry(hatOf.get(r.id)!, geometry(r.hat));
-        if (r.crown) seedCrownGeometry(crownOf.get(r.id)!, geometry(r.crown));
+        if (r.body) {
+          const g = geometry(r.body);
+          seedBunnyGeometry(r.key, g);
+          const parts = partsOf.get(r.id);
+          if (r.body.glowNormals && parts) seedShellGeometry(bunnyGeometry(parts.knife, parts.glove, parts.look, parts.body, parts.hood), r.body.glowNormals);
+        }
+        if (r.hat) {
+          const key = hatOf.get(r.id)!;
+          seedHatGeometry(key, geometry(r.hat));
+          if (r.hat.glowNormals) seedShellGeometry(hatGeometry(key)!, r.hat.glowNormals);
+        }
+        if (r.crown) {
+          const tier = crownOf.get(r.id)!;
+          seedCrownGeometry(tier, geometry(r.crown));
+          if (r.crown.glowNormals) seedShellGeometry(crownGeometry(tier), r.crown.glowNormals);
+        }
       }
+      partsOf.delete(r.id);
       hatOf.delete(r.id);
       crownOf.delete(r.id);
       waiting.get(r.id)?.();
@@ -81,6 +110,7 @@ function ensureWorker(): Worker | null {
       worker = null;
       for (const done of waiting.values()) done();
       waiting.clear();
+      partsOf.clear();
       hatOf.clear();
       crownOf.clear();
       w.terminate();
@@ -92,6 +122,7 @@ function ensureWorker(): Worker | null {
   return worker;
 }
 
+const partsOf = new Map<number, ReturnType<typeof bunnyParts>>();
 const hatOf = new Map<number, string>();
 const crownOf = new Map<number, 1 | 2 | 3>();
 
@@ -99,31 +130,38 @@ const crownOf = new Map<number, 1 | 2 | 3>();
 const PREBUILD_TIMEOUT_MS = 5000;
 
 /** Builds this look's geometry off the main thread unless it's cached already. Never rejects. */
-export function prebuildBunny(outfit: string | null | undefined, loadout: CosmeticLoadout): Promise<void> {
+export function prebuildBunny(outfit: string | null | undefined, loadout: CosmeticLoadout, glow = false): Promise<void> {
   let p: ReturnType<typeof bunnyParts>;
   try {
     p = bunnyParts(outfit, loadout);
   } catch {
     return Promise.resolve();
   }
-  const needBody = !hasBunnyGeometry(p.key);
-  const needHat = !!p.hat && !hasHatGeometry(p.hat);
-  const needCrown = !!p.crown && !hasCrownGeometry(p.crown);
+  const needBody = !hasBunnyGeometry(p.key) || (glow && !hasShellGeometry(bunnyGeometry(p.knife, p.glove, p.look, p.body, p.hood)));
+  const needHat = !!p.hat && (!hasHatGeometry(p.hat) || (glow && !hasShellGeometry(hatGeometry(p.hat)!)));
+  const needCrown = !!p.crown && (!hasCrownGeometry(p.crown) || (glow && !hasShellGeometry(crownGeometry(p.crown))));
   if (!needBody && !needHat && !needCrown) return Promise.resolve();
-  const flight = `${p.key}|${p.hat ?? ""}|${p.crown ?? ""}`;
+  const flight = `${p.key}|${p.hat ?? ""}|${p.crown ?? ""}|${glow}`;
   const running = inflight.get(flight);
   if (running) return running;
   const w = ensureWorker();
   if (!w) return Promise.resolve();
   const id = ++seq;
+  partsOf.set(id, p);
   if (p.hat) hatOf.set(id, p.hat);
   if (p.crown) crownOf.set(id, p.crown);
   const done = new Promise<void>((resolve) => {
-    const timer = window.setTimeout(resolve, PREBUILD_TIMEOUT_MS);
+    const timer = window.setTimeout(() => {
+      waiting.delete(id);
+      partsOf.delete(id);
+      hatOf.delete(id);
+      crownOf.delete(id);
+      resolve();
+    }, PREBUILD_TIMEOUT_MS);
     waiting.set(id, () => (clearTimeout(timer), resolve()));
   }).finally(() => inflight.delete(flight));
   inflight.set(flight, done);
-  w.postMessage({ id, outfit: outfit ?? null, loadout, body: needBody, hat: needHat, crown: needCrown });
+  w.postMessage({ id, outfit: outfit ?? null, loadout, body: needBody, hat: needHat, crown: needCrown, glow });
   return done;
 }
 
@@ -157,7 +195,13 @@ export function prebuildViewmodels(pairs: readonly [KnifeDef, GloveStyleId][]): 
   const id = ++seq;
   for (const [k] of need) knifeOf.set(k.id, k);
   const done = new Promise<void>((resolve) => {
-    const timer = window.setTimeout(resolve, PREBUILD_TIMEOUT_MS);
+    const timer = window.setTimeout(() => {
+      waiting.delete(id);
+      partsOf.delete(id);
+      hatOf.delete(id);
+      crownOf.delete(id);
+      resolve();
+    }, PREBUILD_TIMEOUT_MS);
     waiting.set(id, () => (clearTimeout(timer), resolve()));
   }).finally(() => inflight.delete(`vm:${flight}`));
   inflight.set(`vm:${flight}`, done);
@@ -166,16 +210,109 @@ export function prebuildViewmodels(pairs: readonly [KnifeDef, GloveStyleId][]): 
 }
 
 /**
- * Compiles the programs of a model that isn't in the scene yet (warmPrograms: compileAsync for each output the look
- * draws `scene` to, fog / lights from `scene`), so its first frame doesn't wait on the driver. Resolves after
+ * Prepares a hidden model for every output the look draws `scene` to, with its fog / lights. No-KHR drivers also
+ * draw its vertex layouts separately before attachment; KHR drivers keep parallel shader preparation. Resolves after
  * `timeoutMs` at the latest.
  */
-export function compileModel(renderer: THREE.WebGLRenderer, root: THREE.Object3D, camera: THREE.Camera, scene: THREE.Scene, timeoutMs = 4000): Promise<void> {
+export function compileModel(renderer: THREE.WebGLRenderer, root: THREE.Object3D, camera: THREE.Camera, scene: THREE.Scene, timeoutMs = 5000): Promise<void> {
   let timer = 0;
   return Promise.race([
-    warmPrograms(renderer, root, camera, scene),
+    warmModelPrograms(renderer, root, camera, scene),
     new Promise<void>((resolve) => (timer = window.setTimeout(resolve, timeoutMs))),
   ])
     .catch(() => {})
     .finally(() => clearTimeout(timer));
+}
+
+/** Unbounded loading-screen preparation; the joining model's caller supplies its own fallback deadline. */
+export function warmModelPrograms(renderer: THREE.WebGLRenderer, root: THREE.Object3D, camera: THREE.Camera, scene: THREE.Scene): Promise<void> {
+  return warmPrograms(renderer, root, camera, scene, false)
+    .then(() => retainModelPrograms(renderer, root, camera, scene))
+    .then(() => drawHiddenPrograms(renderer, root, camera, scene));
+}
+
+/** The gun, its camo and grip data share the remote bunny worker and five-second fallback. */
+export function prebuildGun(gunId: string | null, camo?: string | null): Promise<void> {
+  if (!gunId) return Promise.resolve();
+  const key = dressedGunKey(gunId, camo);
+  if (hasDressedGun(key)) return Promise.resolve();
+  const flight = `gun:${key}`;
+  const running = inflight.get(flight);
+  if (running) return running;
+  const w = ensureWorker();
+  if (!w) return Promise.resolve();
+  const id = ++seq;
+  const done = new Promise<void>(resolve => {
+    const timer = window.setTimeout(() => {
+      waiting.delete(id);
+      partsOf.delete(id);
+      hatOf.delete(id);
+      crownOf.delete(id);
+      resolve();
+    }, PREBUILD_TIMEOUT_MS);
+    waiting.set(id, () => { clearTimeout(timer); resolve(); });
+  }).finally(() => inflight.delete(flight));
+  inflight.set(flight, done);
+  w.postMessage({ id, gunId, camo });
+  return done;
+}
+
+/** Upload one material texture per task while the remote player is still hidden, including bone and tag textures. */
+export async function stageModelTextures(renderer: THREE.WebGLRenderer, root: THREE.Object3D): Promise<void> {
+  const textures = new Set<THREE.Texture>();
+  root.traverse(object => {
+    const mesh = object as THREE.SkinnedMesh;
+    if (mesh.skeleton) {
+      if (!mesh.skeleton.boneTexture) mesh.skeleton.computeBoneTexture();
+      if (mesh.skeleton.boneTexture) textures.add(mesh.skeleton.boneTexture);
+    }
+    const material = (object as THREE.Mesh).material;
+    for (const m of Array.isArray(material) ? material : material ? [material] : []) {
+      for (const value of Object.values(m)) if (value instanceof THREE.Texture) textures.add(value);
+      if (m instanceof THREE.ShaderMaterial) for (const u of Object.values(m.uniforms)) {
+        if (u.value instanceof THREE.Texture) textures.add(u.value);
+      }
+    }
+  });
+  for (const texture of textures) {
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+    renderer.initTexture(texture);
+  }
+}
+
+// A leave used to dispose the last reference to shared glow / tag programs, so the next join compiled them again.
+// Keep a bounded set of program-owning material clones per renderer. No model or GPU geometry buffers are kept.
+const residentPrograms = new WeakMap<THREE.WebGLRenderer, Map<string, THREE.Material>>();
+const MAX_RESIDENT_PROGRAMS = 32;
+async function retainModelPrograms(renderer: THREE.WebGLRenderer, root: THREE.Object3D, camera: THREE.Camera, scene: THREE.Scene): Promise<void> {
+  let resident = residentPrograms.get(renderer);
+  if (!resident) residentPrograms.set(renderer, (resident = new Map()));
+  const copies = new THREE.Group();
+  root.traverse(object => {
+    const mesh = object as THREE.Mesh;
+    if (!mesh.material) return;
+    for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+      // Use three's actual keys, which include fog, output, skinning, hilt, glove and finish defines.
+      const properties = renderer.properties.get(material) as { programs?: Map<string, unknown> };
+      const programs = properties.programs;
+      if (!programs?.size) continue;
+      const key = [...programs.keys()].sort().join("\n");
+      const hit = resident!.get(key);
+      if (hit) {
+        resident!.delete(key);
+        resident!.set(key, hit);
+        continue;
+      }
+      const copy = mesh.clone(false);
+      copy.material = material.clone();
+      resident!.set(key, copy.material);
+      copies.add(copy);
+      while (resident!.size > MAX_RESIDENT_PROGRAMS) {
+        const oldest = resident!.keys().next().value!;
+        resident!.get(oldest)!.dispose();
+        resident!.delete(oldest);
+      }
+    }
+  });
+  if (copies.children.length) await warmPrograms(renderer, copies, camera, scene, false);
 }

@@ -1,3 +1,4 @@
+import { dressedGunGeometry } from "../../viewmodel/guns/meshes";
 import { PlayerGlowShell } from "../glow";
 import type { PlayerGlow } from "../glow-config";
 // BunnyModel: the bunnyhop.lol bunny (mesh.ts) on the CS:S player skeleton (rig.ts). Implements the PlayerModel
@@ -47,9 +48,7 @@ import { gunById } from "../../viewmodel/guns/index";
 
 /** The ponytail's length over the built one (loadout.hairLength, a percent; absent = 1). */
 const ponyLength = (l: CosmeticLoadout | null | undefined): number => (l?.hairLength ?? HAIR_LENGTH.default) / 100;
-import { bunnyGunGeometry, bunnyHold, bunnySilencerGeometry } from "../../viewmodel/guns/meshes";
-import { camoTpGeometry } from "../../viewmodel/guns/camo";
-import { camoStyle } from "../../camo";
+import { bunnyHold } from "../../viewmodel/guns/meshes";
 import { GunHold } from "./gun-hold";
 import { BunnyGunFx } from "./gun-fx";
 import { hypot2, hypot3 } from "../../hypot";
@@ -598,10 +597,10 @@ export class BunnyModel implements PlayerModelImpl {
     if (!keepHold) (this.hold ??= new GunHold(this.r)).setGun(def ? bunnyHold(def) : null, this.hasLast && !this.snapNext);
     if (!def) return;
     this.gunSkel ??= new DirectSkeleton(2);
-    this.gun = this.handMesh(camoTpGeometry(bunnyGunGeometry(def), this.loadout?.camo, camoStyle(this.loadout?.camo)), this.gunSkel);
+    const dressed = dressedGunGeometry(def, this.loadout?.camo);
+    this.gun = this.handMesh(dressed.gun, this.gunSkel);
     this.yawG.add(this.gun);
-    const silGeo = bunnySilencerGeometry(def);
-    const sil = silGeo && camoTpGeometry(silGeo, this.loadout?.camo, camoStyle(this.loadout?.camo));
+    const sil = dressed.silencer;
     if (sil) {
       this.silencer = this.handMesh(sil, this.gunSkel);
       this.silencer.visible = this.silencerOn;

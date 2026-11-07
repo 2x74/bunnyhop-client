@@ -17,6 +17,8 @@ import { gunMaterial } from "../viewmodel/guns/material";
 import { gunModelGeometry } from "../viewmodel/guns/meshes";
 import type { GunDef } from "../viewmodel/guns/types";
 import { GunViewmodel } from "../viewmodel/guns/viewmodel";
+import { warmIfNew } from "../graphics/warm-programs";
+import { prefs } from "./settings";
 
 /** The guns the stage steps through: one per model (the M4A1 borrows the Furrow's). */
 export const STAGE_GUNS: readonly GunDef[] = GUNS.filter((g) => g.id !== "m4a1");
@@ -72,8 +74,31 @@ export class CamoStage {
     this.sideMesh.position.copy(c).multiplyScalar(-1);
   }
 
+  /** What the programs drawn depend on (warm). */
+  private look = "";
+  private warmKey = "";
+  private warming = false;
+
+  /**
+   * Whether the view can draw now: its programs (a new camo's or gun's, the gloves') are compiled first, outside a frame
+   * (graphics/warm-programs.ts), and until they're ready the stage stays clear, as the knife's hero does on first open.
+   * Linked in the frame they first drew in, each new camo froze the stage (0.1-0.4 s on Metal, ~1.5 s on SwiftShader).
+   */
+  ready(r: THREE.WebGLRenderer, side: boolean): boolean {
+    const key = `${side ? 1 : 0}|${this.camo}|${this.gunIdx}|${this.look}|${prefs.get().graphics.potato}`;
+    if (key !== this.warmKey) {
+      this.warmKey = key;
+      const scene = side ? this.side : this.vm.scene;
+      const wait = warmIfNew(r, scene, side ? this.sideCam : this.vm.camera, scene);
+      this.warming = !!wait;
+      void wait?.catch(() => {}).finally(() => this.warmKey === key && (this.warming = false));
+    }
+    return !this.warming;
+  }
+
   /** Gloves, colourway accents and the camo shown. */
   setLoadout(l: CosmeticLoadout, outfit?: string | null): void {
+    this.look = `${l.glove}|${l.outfit ?? ""}|${outfit ?? ""}`;
     this.vm.setLoadout(l);
     if (outfit !== undefined) this.vm.setOutfit(outfit);
     const camo = camoStyle(l.camo) ? l.camo! : null;
@@ -108,7 +133,7 @@ export class CamoStage {
     world.updateProjectionMatrix();
     this.vm.camera.setViewOffset(W0, H0, cx - cw / 2, cy - ch / 2, cw, ch);
     r.clear();
-    this.vm.render(r, world);
+    if (this.ready(r, false)) this.vm.render(r, world);
   }
 
   /** Side: the gun alone turning slowly, framed to its length. */
@@ -130,7 +155,7 @@ export class CamoStage {
     cam.lookAt(0, 0, 0);
     cam.updateProjectionMatrix();
     r.clear();
-    r.render(this.side, cam);
+    if (this.ready(r, true)) r.render(this.side, cam);
   }
 
   dispose(): void {

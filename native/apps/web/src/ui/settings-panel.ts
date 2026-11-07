@@ -882,6 +882,11 @@ function keysSection(ctx: Ctx): SettingsContent {
             desc: "Jumping with W held lets go of forward until you land or press W again. Not in Legit Scroll, W-Only, Sideways or Half-Sideways.",
             keywords: "release w jump forward let go auto unpress -forward prestrafe hold w air strafe script wjump",
           }),
+          toggle("Landfix", () => P().landfix, (v) => up((p) => (p.landfix = v)), {
+            hint: "!landfix",
+            desc: "Jumps start 1.5 units up, as on landfix servers. Off: stock CS:S jumps. Works mid-run.",
+            keywords: "landfix jump lift stock source sourcejump cl_landfix !landfix",
+          }),
           // The slider moves in 5s; the box takes exact values as CS:S cl_yawspeed and the desktop client do (118.889).
           // Three decimals: the replay stores it as a float32 (turn-binds.ts turnSpeedOf).
           range("Turn speed", () => P().yawSpeed, (v) => up((p) => (p.yawSpeed = Math.round(v * 1000) / 1000)), {
@@ -1260,7 +1265,7 @@ const BUILTIN: Section[] = [
   { id: "mouse", label: "Mouse & view", blurb: "", order: 10, render: mouseSection, reset: resetKeys("sensitivity", "mYaw", "mPitch", "verticalSensitivityEnabled", "verticalSensitivity", "dpi", "dpiConfirmed", "dpiHidden", "invertY", "rawInput", "spikeFilter", "timedInput", "inputStats", "fov") },
   { id: "crosshair", label: "Crosshair", blurb: "", order: 20, render: crosshairSection, reset: resetKeys("crosshair") },
   { id: "hud", label: "HUD", blurb: "", order: 30, render: hudSection, reset: resetKeys("hud", "showZones", "triggers", "landing") },
-  { id: "keys", label: "Keys", blurb: "Click a slot, then press a key. Backspace clears.", order: 40, render: keysSection, reset: resetKeys("binds", "holdRestart", "autoRestart", "practice", "nullBinds", "wRelease", "yawSpeed", "angleSpeedKey") },
+  { id: "keys", label: "Keys", blurb: "Click a slot, then press a key. Backspace clears.", order: 40, render: keysSection, reset: resetKeys("binds", "holdRestart", "autoRestart", "practice", "landfix", "nullBinds", "wRelease", "yawSpeed", "angleSpeedKey") },
   { id: "ghost", label: "Ghosts & players", blurb: "", order: 50, render: ghostSection, reset: resetKeys("showGhost", "ghost", "tags", "showPlayerGlow", "showPlayers", "firstPersonGlow") },
   { id: "graphics", label: "Graphics", blurb: "", order: 60, render: graphicsSection, reset: () => void chooseGraphicsPreset("source").then(() => { resetKeys("graphics")(); }) },
   { id: "audio", label: "Audio", blurb: "", order: 70, render: audioSection, reset: resetKeys("volume") },
