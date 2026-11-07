@@ -317,7 +317,6 @@ inline constexpr NameColor dim = {.72f, .69f, .64f, 1};
 inline constexpr NameColor white = {1, 1, 1, 1};
 inline constexpr NameColor quiet = {1, 1, 1, .7f};
 inline constexpr NameColor amber = {1, .71f, .24f, 1};
-inline constexpr NameColor gold = {1, .83f, .37f, 1};
 inline constexpr NameColor gain = {.3f, 1, .53f, 1};
 // The HUD font's baseline and cap height, per unit of text size (hud.hpp atlas metrics, JetBrains Mono).
 inline constexpr float baseline = 1.3f * 42 / 52;
@@ -474,7 +473,7 @@ void draw_room_race(
         const double since = now - (race.go_at - seconds * 1000.);
         posed_text(hud, x, numeral_middle, numeral.view(), numeral_size, white, stamp_in(since, calm));
     } else if (race.go_until > 0 && now < race.go_until) {
-        posed_text(hud, x, numeral_middle, "GO", numeral_size, gold, go_out(now - (race.go_until - go_ms), calm));
+        posed_text(hud, x, numeral_middle, "GO", numeral_size, amber, go_out(now - (race.go_until - go_ms), calm));
     }
     // Your place, just above the crosshair (or under your run's end card), for 2.4 s; the standings take over.
     if (race.place && race.finish_until > 0) {

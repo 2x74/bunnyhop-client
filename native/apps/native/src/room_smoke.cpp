@@ -3,7 +3,8 @@
 // a local server; nothing here opens a socket or submits anything.
 // A shot can also draw the spectator bar ("spectating": "eye", "chase" or "free", with "spectateMenu") and the run
 // HUD with freecam's line ("freecam"). Recorded race and room-race events draw as the client draws them; a shot can add
-// the run's end card ("endcard": run seconds, "endcardAt": when it came up, in recording ms) and "reducedMotion".
+// the run's end card ("endcard": run seconds, "endcardAt": when it came up, in recording ms), "reducedMotion", the run
+// HUD ("runHud") and the !copystart menu ("copyStartMenu").
 #include "client_smoke.hpp"
 #include "options.hpp"
 #include "game_session.hpp"
@@ -12,6 +13,7 @@
 #include "room_state.hpp"
 #include "room_modes.hpp"
 #include "hud_result.hpp"
+#include "copy_start_picker.hpp"
 #include "native_chat.hpp"
 #include "menu_backdrop.hpp"
 #include "free_cameras.hpp"
@@ -45,7 +47,7 @@ struct RoomShot {
     bool spectate_menu = false, freecam = false;
     std::optional<double> endcard;
     double endcard_at = 0;
-    bool reduced_motion = false, run_hud = false;
+    bool reduced_motion = false, run_hud = false, copy_start_menu = false;
 };
 
 std::vector<RecordedMessage> read_recording(const std::filesystem::path &path) {
@@ -83,6 +85,7 @@ std::vector<RoomShot> read_shots(const std::filesystem::path &path) {
         shot.endcard_at = item.value("endcardAt", 0.) / 1000;
         shot.reduced_motion = item.value("reducedMotion", false);
         shot.run_hud = item.value("runHud", false);
+        shot.copy_start_menu = item.value("copyStartMenu", false);
         shots.push_back(std::move(shot));
     }
     return shots;
@@ -247,6 +250,11 @@ void draw_room_frame(RoomSmokeFrame &frame, const RoomShot &shot, double at, BhS
                 {}
         );
     if (!shot.spectating.empty()) draw_spectating(frame.hud, frame.width, frame.height, shot, frame.replay.room, at);
+    if (shot.copy_start_menu) {
+        CopyStartPicker picker;
+        picker.show(frame.replay.room.display());
+        picker.draw(frame.hud, frame.width, frame.height, 100, std::nullopt);
+    }
     auto &modes = frame.replay.modes;
     modes.room_race_tick(epoch_ms);
     const HudGeometry geometry(frame.width, frame.height, 100);
