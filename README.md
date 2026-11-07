@@ -42,6 +42,7 @@ Download the file for your system from the [latest release](https://github.com/8
 | Linux | `-linux-x86_64.AppImage`, or the `-linux-amd64.deb` |
 
 The builds aren't signed with a paid certificate, so Windows and macOS ask once before the first launch of each version.
+Any Linux distro that uses `glibc` is supported.
 
 <details>
 <summary><b>Windows</b></summary>
