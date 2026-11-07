@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.9.0 — Native
+
+Matches website v0.0.39. Update from Settings → Updates: press Update, then Restart. Your settings, replays and maps
+are kept. Includes the fixes from v0.8.2 for Mac players updating from v0.8.1.
+
+- Start a room race with `!race all`, join with `!join` and leave with `!leave`. Race from a shared countdown,
+  see your place when you finish and the standings when everyone is done. One-on-one races get the same look.
+- Turn Landfix on or off in Settings or with `!landfix` or `cl_landfix`. You can bind it with `bind k "say !landfix"`.
+- Copy another run's starting point from the leaderboard's ⋯ menu or with `!copystart`.
+- Jump stats keep their count and gains through map teleports and checkpoints.
+- Recent world records are back on the home screen. Click a run to watch it or the player to open their profile.
+- Watch and Race stay on leaderboard rows; Copy start, Copy link and Report are in the ⋯ menu.
+- Binds stay put through finishes, map changes, menu reloads, restarts and account sync. Removed binds and aliases
+  stay removed.
+- Players joining a server and opening the Loadout no longer make the game hitch.
+- The route guide shows PB and WR routes again and draws the first takeoff.
+- bhop_crash_egypt's crates have their wood texture and splinter when they break. TNT counts down, nitro explodes
+  green and the moving tombs are drawn.
+
 ## v0.8.2 — Native
 
 The macOS build follows.

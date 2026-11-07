@@ -78,6 +78,13 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: bun install --frozen-lockfile
       - run: bunx playwright install --with-deps chromium
+      - name: Download immutable offline qualification inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p target
+          gh api repos/2x74/bunnyhop-client/releases/assets/719828724 -H 'Accept: application/octet-stream' > target/qualification-inputs.tar.gz
+      - run: bun apps/native/tools/landfix-release.ts --stage
       - run: bun run wasm
       - run: bun run check
       - run: bun apps/native/src/export-viewmodels.ts
@@ -89,6 +96,7 @@ jobs:
             native/target/native-assets
             native/target/native-menu/menu.html
             native/target/native-menu/menu-manifest.json
+            native/target/qualification-inputs.tar.gz
           if-no-files-found: error
   windows:
     outputs:
@@ -128,10 +136,12 @@ jobs:
         with:
           name: native-resources-${{ github.run_id }}-${{ github.run_attempt }}
           path: native/target
+      - run: bun apps/native/tools/landfix-release.ts --stage
       - shell: pwsh
         env:
           PACKAGE_VERSION: ${{ needs.version.outputs.version }}
         run: ./apps/native/packaging/windows/build.ps1 -Version $env:PACKAGE_VERSION
+      - run: bun apps/native/tools/landfix-release.ts --proof
       - shell: pwsh
         run: |
           $package = Get-ChildItem target/native-packages -Directory | Select-Object -First 1
@@ -190,12 +200,14 @@ jobs:
         with:
           name: native-resources-${{ github.run_id }}-${{ github.run_attempt }}
           path: native/target
+      - run: bun apps/native/tools/landfix-release.ts --stage
       - run: test "$(uname -m)" = arm64
       - run: bun apps/native/build.ts --prebuilt-resources
       - name: Required native movement vs pinned WASM (v17 and v16 contrast)
         run: bun apps/native/tools/parity-gate.ts && bun test apps/native/tools/parity-gate.test.ts
       - run: ctest --test-dir apps/native/build --output-on-failure --no-tests=error
       - run: cargo test -p bunnyhop-native-bridge --locked && cargo test -p bunnyhop-core --features native-wasm-math --test physics_versions --test native_entities --test native_render --locked && bun test apps/native/packaging
+      - run: bun apps/native/tools/landfix-release.ts --proof
       - env:
           PACKAGE_VERSION: ${{ needs.version.outputs.version }}
         run: bun apps/native/package.ts --skip-build --version "$PACKAGE_VERSION"
@@ -250,6 +262,7 @@ jobs:
         with:
           name: native-resources-${{ github.run_id }}-${{ github.run_attempt }}
           path: native/target
+      - run: bun apps/native/tools/landfix-release.ts --stage
       - env:
           CMAKE_PREFIX_PATH: ${{ github.workspace }}/native/target/native-deps/sdl/install
           LD_LIBRARY_PATH: ${{ github.workspace }}/native/target/native-deps/sdl/install/lib
@@ -261,6 +274,10 @@ jobs:
           cargo test -p bunnyhop-native-bridge --locked
           cargo test -p bunnyhop-core --features native-wasm-math --test physics_versions --test native_entities --test native_render --locked
           bun test apps/native/packaging
+      - name: Landfix identity, recording and Segmented proofs
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/native/target/native-deps/sdl/install/lib
+        run: bun apps/native/tools/landfix-release.ts --proof
       - env:
           PACKAGE_VERSION: ${{ needs.version.outputs.version }}
           LD_LIBRARY_PATH: ${{ github.workspace }}/native/target/native-deps/sdl/install/lib
