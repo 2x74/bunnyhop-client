@@ -9,6 +9,7 @@
 #include <array>
 #include <charconv>
 #include <cmath>
+#include <span>
 #include <optional>
 #include <string_view>
 
@@ -331,6 +332,7 @@ inline constexpr float ghost_tag_alpha = .85f;
 
 namespace name_tag_look {
 constexpr NameColor pill = {.043f, .051f, .071f, .62f};
+constexpr NameColor name_ink = {.94f, .91f, .86f, 1};
 constexpr NameColor detail_ink = {.639f, .671f, .729f, 1};
 constexpr float name_size = 13;
 constexpr float detail_size = 12;
@@ -341,6 +343,14 @@ constexpr float badge_width = 18;
 constexpr float standing_height_units = 76;
 constexpr float crouched_height_units = 58;
 }  // namespace name_tag_look
+
+// A small speaker (voice chat): the box and the cone, then one wave.
+template <class Hud>
+void draw_speaker(Hud &hud, float x, float y, float size, NameColor ink) {
+    hud.overlay_rect(x, y + size * .3f, size * .3f, size * .4f, ink);
+    hud.overlay_rect(x + size * .3f, y + size * .1f, size * .25f, size * .8f, ink);
+    hud.overlay_rect(x + size * .75f, y + size * .2f, size * .12f, size * .6f, ink);
+}
 
 inline NameAppearance faded_appearance(NameAppearance look, float opacity) {
     look.color[3] *= opacity;
@@ -362,7 +372,8 @@ void draw_player_tag(
         const NameAppearance &look,
         NameColor dot,
         float opacity,
-        double seconds
+        double seconds,
+        bool talking = false
 ) {
     using namespace name_tag_look;
     const float name_width =
@@ -372,7 +383,11 @@ void draw_player_tag(
     const float left = x - width / 2;
     hud.overlay_rect(left, y - 4, width, pill_height, {pill[0], pill[1], pill[2], pill[3] * opacity});
     dot[3] *= opacity;
-    hud.overlay_rect(left + 8, y + 4, dot_size, dot_size, dot);
+    // Talking in voice chat: a speaker in the dot's place (the website's name tags do the same).
+    if (talking)
+        draw_speaker(hud, left + 7, y + 2, dot_size + 3, {name_ink[0], name_ink[1], name_ink[2], opacity});
+    else
+        hud.overlay_rect(left + 8, y + 4, dot_size, dot_size, dot);
     const float name_x = left + 8 + dot_size + 6;
     hud.overlay_name(name_x, y, name, name_size, faded_appearance(look, opacity), seconds);
     if (!detail.empty())
@@ -400,7 +415,8 @@ void draw_name_tags(
         bool through_walls,
         Trace trace,
         double seconds,
-        std::optional<GraphicsView> output = std::nullopt
+        std::optional<GraphicsView> output = std::nullopt,
+        std::span<const bool> talking = {}
 ) {
     using namespace name_tag_look;
     const HudGeometry geometry(width, height, percent);
@@ -443,7 +459,8 @@ void draw_name_tags(
                 room.appearance(slot),
                 slot_color(slot),
                 opacity,
-                seconds
+                seconds,
+                slot < talking.size() && talking[slot]
         );
     }
     hud.overlay_end(width, height);

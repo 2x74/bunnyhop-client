@@ -3,6 +3,7 @@
 #include "room_modes.hpp"
 #include "discord_rpc.hpp"
 #include "room_pose.hpp"
+#include "voice_chat.hpp"
 #include <chrono>
 #include <functional>
 #include <optional>
@@ -60,6 +61,14 @@ public:
     // Once a frame, after its ticks: hands the batches that came due to the room.
     void send_poses(MenuWebView *menu, bool menu_ready, const std::string &map_id);
 
+    // Voice chat. `devices` false (hidden and scripted runs) never opens a microphone or speakers.
+    void enable_voice(bool devices);
+    voice::VoiceChat &voice() { return *voice_; }
+    // A voiceDown (for this room only) or voicePeople message from the menu.
+    void voice_message(const nlohmann::json &message);
+    // Once a frame: the HUD's talker list, then the packets that came due go to the menu's socket.
+    void send_voice(MenuWebView *menu, bool menu_ready, double now_ms, float master_volume, bool keys_free);
+
 private:
     RoomPoseBatcher poses_;
     RoomPoseOutbox pose_outbox_;
@@ -72,6 +81,7 @@ private:
     const bool *menu_ready_ = nullptr;
     std::function<void(bool)> show_menu_;
     bool practice_sent_ = false;
+    std::unique_ptr<voice::VoiceChat> voice_;
 
     void join(const std::string &id);
     nlohmann::json presence_activity(

@@ -7,6 +7,7 @@
 #include "weapon_menu.hpp"
 #include "preferences.hpp"
 #include "spectate.hpp"
+#include "voice_chat.hpp"
 
 namespace native {
 
@@ -71,6 +72,8 @@ struct HudFrame {
     const CopyStartPicker *copy_start = nullptr;
     // The menu's prefers-reduced-motion: race numerals and results fade instead of moving.
     bool reduced_motion = false;
+    // Who's talking in voice chat, and your line when the key did nothing.
+    const voice::VoiceChat *voice_chat = nullptr;
 
     void draw() const;
 

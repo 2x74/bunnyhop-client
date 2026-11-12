@@ -145,4 +145,23 @@ void RoomBridge::send_poses(MenuWebView *menu, bool menu_ready, const std::strin
     pose_outbox_.clear();
 }
 
+void RoomBridge::enable_voice(bool devices) {
+    auto capture = devices ? voice::default_microphone : [] { return std::unique_ptr<voice::CaptureSource>(); };
+    voice_ = std::make_unique<voice::VoiceChat>(std::make_unique<voice::Engine>(capture, devices));
+}
+
+void RoomBridge::voice_message(const nlohmann::json &message) {
+    if (message.value("type", std::string()) == "voicePeople") return voice_->people(message.value("people", nlohmann::json()));
+    const auto data = message.find("data");
+    if (data == message.end() || !data->is_string() || message.value("id", std::string()) != room.id) return;
+    if (message.value("generation", uint64_t(0)) != room.generation) return;
+    voice_->receive(data->get_ref<const std::string &>());
+}
+
+void RoomBridge::send_voice(MenuWebView *menu, bool menu_ready, double now_ms, float master_volume, bool keys_free) {
+    voice_->frame(now_ms, master_volume, keys_free);
+    for (const auto &packet : voice_->outgoing(now_ms))
+        if (menu && menu_ready) menu->evaluate_js("window.bunnyhopNativeMenu?.onVoiceUp?.(\"" + packet + "\")");
+}
+
 }  // namespace native

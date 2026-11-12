@@ -83,6 +83,8 @@ public:
     // Talking now (the speaker mark on a name tag or scoreboard row).
     bool talking(unsigned slot) const { return slot < slot_count && talking_[slot]; }
 
+    std::span<const bool> talking_slots() const { return talking_; }
+
     std::span<const HudRow> rows() const { return std::span(rows_).first(row_count_); }
 
     // The plain line under the talker list while it shows, else empty.
