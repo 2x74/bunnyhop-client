@@ -532,7 +532,10 @@ void hud_parity_smoke(Gl &gl, NativeHud &hud, int width, int height, Save save) 
     clear();
     RoomState room;
     room.vote = {
-            {"options", {{{"map", "bhop_boxes_snowy"}}, {{"map", "bhop_japan"}}, {{"extend", true}, {"minutes", 10}}}},
+            {"options",
+             {{{"map", "bhop_boxes_snowy"}, {"tier", 2}},
+              {{"map", "bhop_japan"}, {"tier", 4}},
+              {{"extend", true}, {"minutes", 10}}}},
             {"counts", Json::array({5u, 3u, 1u})},
             {"endsAt", 14000}
     };

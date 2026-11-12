@@ -312,7 +312,28 @@ void test_null_fields_never_break_the_display() {
     refresh(*room, 6);
 }
 
+// The map vote shows each map's tier, as the website does (protocol.ts VoteOption {map, tier}); Extend and maps
+// without a tier show none.
+void test_vote_shows_tiers() {
+    const auto room = std::make_unique<native::RoomState>();
+    auto welcome = easy_welcome();
+    welcome["vote"]["options"] = J::array(
+            {{{"map", "bhop_blue"}, {"tier", 3}},
+             {{"map", "bhop_a"}, {"tier", nullptr}},
+             {{"extend", true}, {"minutes", 10}}}
+    );
+    welcome["vote"]["counts"] = J::array({2u, 0u, 1u});
+    room->event(envelope(welcome));
+    room->refresh_display(1);
+    const auto &vote = room->vote_display;
+    assert(vote.count == 3);
+    assert(vote.options[0].view() == "bhop_blue" && vote.tiers[0] == 3 && vote.counts[0] == 2);
+    assert(vote.options[1].view() == "bhop_a" && vote.tiers[1] == 0);
+    assert(vote.options[2].view() == "Extend 10 minutes" && vote.tiers[2] == 0 && vote.counts[2] == 1);
+}
+
 int main() {
+    test_vote_shows_tiers();
     test_unknown_slot_keeps_map_changes();
     test_null_fields_never_break_the_display();
     test_null_loadout_fields_use_defaults();
