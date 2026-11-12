@@ -129,6 +129,9 @@ inline Json default_settings() {
             {"uiVolume", .6},
             {"ambienceVolume", .7},
             {"mapVolume", .5},
+            // Voice chat in rooms: on, at 80%, push to talk on X (the voiceRecord bind).
+            {"voiceEnabled", true},
+            {"voiceVolume", .8},
             {"muteSfx", false},
             {"muteUi", false},
             {"muteMusic", false},
@@ -288,6 +291,8 @@ inline Json default_settings() {
               {"practice", Json::array()},
               {"cpSave", {"KeyC"}},
               {"cpTeleport", {"KeyX"}},
+              // Shares X with the teleport: in a room with voice the key talks, elsewhere it teleports.
+              {"voiceRecord", {"KeyX"}},
               {"cpPrev", Json::array()},
               {"cpNext", Json::array()},
               {"mainMenu", Json::array()},
@@ -656,7 +661,8 @@ inline Json patch_settings(const Json &current, const Json &patch, bool switch_l
             if (key == "crosshairThickness" && (n < .5 || n > 10))
                 throw std::runtime_error("Crosshair thickness must be .5–10");
             if ((key == "volume" || key == "sfxVolume" || key == "musicVolume" || key == "uiVolume"
-                 || key == "ambienceVolume" || key == "mapVolume" || key == "crosshairAlpha" || key == "ghostOpacity")
+                 || key == "ambienceVolume" || key == "mapVolume" || key == "voiceVolume" || key == "crosshairAlpha"
+                 || key == "ghostOpacity")
                 && (n < 0 || n > 1))
                 throw std::runtime_error("Volume must be 0–1");
             if (key == "yawSpeed" && (n < 60 || n > 720)) throw std::runtime_error("Yaw speed must be 60–720");
@@ -757,7 +763,8 @@ inline void backup_settings(const std::filesystem::path &file) {
 }
 
 // Actions added after a player saved their binds get their default keys, minus any key the saved binds already use
-// (the website's migrateBinds), so a key the player gave to something else keeps it.
+// (the website's migrateBinds), so a key the player gave to something else keeps it. Push to talk shares its key by
+// design (a voice room gives X to voice), so it keeps X.
 inline void fill_new_binds(const Json &saved, Json &out) {
     const auto binds = saved.find("binds");
     if (binds == saved.end() || !binds->is_object()) return;
@@ -767,7 +774,7 @@ inline void fill_new_binds(const Json &saved, Json &out) {
             for (const auto &code : codes)
                 if (code.is_string()) used.insert(code.get<std::string>());
     for (auto &[action, codes] : out["binds"].items()) {
-        if (binds->contains(action)) continue;
+        if (binds->contains(action) || action == "voiceRecord") continue;
         Json free = Json::array();
         for (const auto &code : codes)
             if (!used.contains(code.get<std::string>())) free.push_back(code);
