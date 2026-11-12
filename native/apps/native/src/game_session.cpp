@@ -31,10 +31,13 @@ std::vector<BhZone> timer_zones(const nlohmann::json &detail) {
             zone.kind = 2;
         else if (kind == "checkpoint")
             zone.kind = 3;
+        else if (kind == "anti-skip")
+            zone.kind = 4;
         else
             continue;
         zone.track = z.value("track", 0u);
-        zone.index = z.value("index", 0u);
+        // Only splits are numbered (web zones.ts normalizeZone); an anti-skip index would change the zone hash.
+        zone.index = zone.kind == 2 || zone.kind == 3 ? z.value("index", 0u) : 0u;
         for (int i = 0; i < 3; ++i) {
             zone.mins[i] = z.at("mins").at(i).get<float>();
             zone.maxs[i] = z.at("maxs").at(i).get<float>();

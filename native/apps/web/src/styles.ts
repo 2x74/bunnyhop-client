@@ -37,6 +37,14 @@
 //     bits are rebuilt from its values (IN_FORWARD iff forwardmove > 0), so a forged command can't slip a value past.
 //     A pass-through command (S, A or D held) is free like any Normal-style command (input-analysis flags values the
 //     keyboard can't produce).
+//   - v28+ (AUTOSTRAFE_LEAD_FROM): the direction comes from the yaw change from this command to the NEXT one (the
+//     replay's next yaw; the live session passes it as `nextYaw`), not from the previous one. The live session moves
+//     with the view one tick old (RunSession.command: the command's yaw is the previous tick's mouse yaw, and this
+//     tick's mouse yaw becomes the next command's), so the key switches on the tick the mouse reverses while the view
+//     the sim moves with reverses a tick later: a -1 key offset, which is what an accurate hand does on Normal (the
+//     velocity heading turns one tick after the key; research/AUTOSTRAFE-OFFSET.md). Offset 0 costs about one tick of
+//     gain per strafe. The last command of a replay has no next yaw: it counts as a still mouse (the live session only
+//     differs there when the mouse moved, and then the key is non-zero, so the command passes through either way).
 // The verifier enforces the rule exactly (a command that differs from the computed one is a style violation); what it
 // cannot know, as for every style, is whether the view yaws came from a hand on a mouse.
 //
@@ -52,14 +60,24 @@
 // bits are cleared, so a recorded command always matches its keys.
 
 import { DEFAULT_SETTINGS, PHYSICS_V1, type Settings } from "./core";
+import { TUTORIAL_MAP } from "./tutorial/data";
 
 /** First physics version whose Auto-strafe lets S stop the assist in the air (StyleFilter). */
 export const AUTOSTRAFE_S_STOPS_FROM = 5;
 /** First physics version whose Auto-strafe lets A/D take over and W move forward in the air (StyleFilter). */
 export const AUTOSTRAFE_KEYS_FROM = 8;
+/** First physics version whose Auto-strafe reads the key from the next command's yaw (a -1 key offset; StyleFilter). */
+export const AUTOSTRAFE_LEAD_FROM = 28;
 import type { TickCmd } from "./timer";
 import { AUTO_HOLD_TICKS, AUTO_MOVE, strafeDir, yawDelta } from "./autostrafe";
 import { TURN_HOLD_BITS, turnBindsAllowed } from "./turn-binds";
+
+/** StyleFilter.leadView: one tick of view, held back for the next command (v28+ Auto-strafe). */
+interface LeadView {
+  yaw: number;
+  turn: number;
+  look: unknown;
+}
 
 // Source IN_* button bits (same values as input.ts; duplicated to keep this module DOM-free).
 const IN_JUMP = 1 << 1;
@@ -145,13 +163,32 @@ export function stylePrespeedCap(id: string): number | null { return id === "scr
 export const INFINITE_START_REENTRY_CAP = 3510;
 export function styleStartReentryCap(id: string): number | null { return BY_ID.get(id)?.airJump ? INFINITE_START_REENTRY_CAP : null; }
 
-export const DEFAULT_STYLE: StyleId = "autohop";
-/** Bonus tracks are always run (and ranked) in Normal style, whatever style is selected for the main track. */
-export const BONUS_STYLE: StyleId = "autohop";
+/**
+ * Why an Infinite run looks like noclip (three cheat reports in Nov 2026 were Infinite runs): shown where people watch
+ * or report one (the replay viewer, the report form).
+ */
+export const INFINITE_NOTE = "Infinite allows a noclip start: the run can begin from a flight through the start zone, and every jump press in the air rises again. That's the style, not a cheat.";
 
-/** The style a run on `track` uses when `selected` is the player's chosen (main-track) style. */
-export function styleForTrack(selected: StyleId, track: number): StyleId {
-  return track > 0 ? BONUS_STYLE : selected;
+export const DEFAULT_STYLE: StyleId = "autohop";
+/**
+ * The tutorial's final course (its bonus 1) is always Normal: its coach, board and completion flag read Normal. Every
+ * other bonus track runs in the selected style, like the main track (v0.0.40; until then every bonus was Normal only).
+ */
+export const TUTORIAL_BONUS_STYLE: StyleId = "autohop";
+
+/** True when `track` of `map` runs in one fixed style whatever is selected (the tutorial's final course). */
+export function trackStyleLocked(track: number, map: string | undefined): boolean {
+  return track > 0 && map === TUTORIAL_MAP;
+}
+
+/** The style a run on `track` of `map` uses when `selected` is the player's chosen style. */
+export function styleForTrack(selected: StyleId, track: number, map?: string): StyleId {
+  return trackStyleLocked(track, map) ? TUTORIAL_BONUS_STYLE : selected;
+}
+
+/** Why a finished run on `track` of `map` can't be in `style` (submit and verifier), or null. */
+export function trackStyleProblem(map: string, track: number, style: string): string | null {
+  return trackStyleLocked(track, map) && style !== TUTORIAL_BONUS_STYLE ? `the tutorial's final course is ${styleLabel(TUTORIAL_BONUS_STYLE)} style only (got ${style})` : null;
 }
 
 const BY_ID = new Map<string, StyleDef>(STYLE_DEFS.map((s) => [s.id, s]));
@@ -354,6 +391,11 @@ export class StyleFilter {
   bwBlocked = false;
   /** A/D-Only: the run's side key (SideLock), 0 until the first air A or D of the run. */
   sideLock: SideLock = 0;
+  /**
+   * v28+ Auto-strafe, live play only: the view this tick's mouse produced (yaw, turn-bind bits, counted-yaw sample), which
+   * becomes the next command's (lagView; null: none yet).
+   */
+  leadView: LeadView | null = null;
 
   /**
    * Auto-strafe from physics v5 (v0.0.10): holding S in the air pauses the computed strafe, so S slows you down and A/D
@@ -365,10 +407,16 @@ export class StyleFilter {
    * and W moves you forward alongside the computed strafe (Golden_Tick, 2026-10-08: stuck after a jump-up crouch).
    */
   private readonly keys: boolean;
+  /**
+   * Auto-strafe from physics v28 (header): the direction comes from this command's yaw to the next command's, so the
+   * live session must feed the sim the view one tick late (RunSession.command reads this).
+   */
+  readonly lead: boolean;
 
   constructor(public style: StyleDef | null, physics: number = PHYSICS_V1) {
     this.sStops = physics >= AUTOSTRAFE_S_STOPS_FROM;
     this.keys = physics >= AUTOSTRAFE_KEYS_FROM;
+    this.lead = !!style?.auto && physics >= AUTOSTRAFE_LEAD_FROM;
   }
 
   reset(): void {
@@ -380,16 +428,31 @@ export class StyleFilter {
     this.bwGround = BW_GROUND_GRACE + 1;
     this.bwBlocked = false;
     this.sideLock = 0;
+    this.leadView = null;
+  }
+
+  /**
+   * v28+ Auto-strafe, live play (RunSession.command): the command moves with the previous tick's view, and this tick's
+   * becomes the next command's. The view is the yaw plus what records how it was made: the turn-bind bits and the
+   * counted-yaw sample (replay.ts v8), so each recorded yaw keeps the mouse counts and turn bits that explain it. Pitch,
+   * keys and other buttons stay live. `nextYaw` is this tick's mouse yaw, for apply().
+   */
+  lagView<L>(cmd: TickCmd, look: L): { cmd: TickCmd; look: L; nextYaw: number } {
+    const live: LeadView = { yaw: cmd.yaw, turn: cmd.buttons & TURN_HOLD_BITS, look };
+    const v = this.leadView ?? live;
+    this.leadView = live;
+    return { cmd: { ...cmd, yaw: v.yaw, buttons: ((cmd.buttons & ~TURN_HOLD_BITS) | v.turn) >>> 0 }, look: v.look as L, nextYaw: cmd.yaw };
   }
 
   /**
    * `state` is the player state BEFORE the tick. `running`: the run is under way before the tick (RunTimer.started);
    * only A/D-Only reads it (its key lock clears while it is false), so a caller that omits it never locks.
+   * `nextYaw`: the next command's yaw (NaN: none); only v28+ Auto-strafe reads it (`lead`).
    */
-  apply(cmd: TickCmd, state: StyleContext, running = false): TickCmd {
+  apply(cmd: TickCmd, state: StyleContext, running = false, nextYaw = NaN): TickCmd {
     if (state.onLadder) this.fromLadder = true;
     else if (state.grounded) this.fromLadder = false;
-    if (this.style?.auto) return this.assist(cmd, state);
+    if (this.style?.auto) return this.assist(cmd, state, nextYaw);
     if (this.style?.backwards) return this.backwards(cmd, state);
     // A v22 edge landing without a jump is an air tick: the core takes the landing back before it moves.
     const grounded = state.grounded && !(state.edgeLanding && !(cmd.buttons & IN_JUMP));
@@ -435,8 +498,8 @@ export class StyleFilter {
   }
 
   /** Auto-strafe: the computed strafe (header comment). */
-  private assist(cmd: TickCmd, state: StyleContext): TickCmd {
-    const d = yawDelta(this.prevYaw, cmd.yaw);
+  private assist(cmd: TickCmd, state: StyleContext, nextYaw: number): TickCmd {
+    const d = this.lead ? yawDelta(cmd.yaw, nextYaw) : yawDelta(this.prevYaw, cmd.yaw);
     this.prevYaw = cmd.yaw;
     const dir = strafeDir(d);
     if (dir) (this.autoDir = dir), (this.still = 0);

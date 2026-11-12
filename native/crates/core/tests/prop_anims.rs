@@ -5,10 +5,9 @@
 
 use bunnyhop_core::game::{PHYSICS_LATEST, PROP_ANIM_HIDDEN, PROP_ANIM_REMOVED};
 use bunnyhop_core::{Cmd, Game, Settings};
-use std::path::PathBuf;
 
 fn load(name: &str) -> Option<Game> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("../../maps/{name}.bsp"));
+    let path = bunnyhop_core::test_maps::bsp(name);
     let Ok(bytes) = std::fs::read(&path) else {
         eprintln!("skipping: {} not found", path.display());
         return None;
@@ -108,7 +107,7 @@ fn frozen_fallback_is_unchanged_with_and_without_opting_in() {
     use bunnyhop_core::props::{self, PROP_VERTEX_FLOATS};
     use bunnyhop_core::vfs::{Source, Vfs};
     for map in ["bhop_ceaseless", "bhop_crash_egypt"] {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("../../maps/{map}.bsp"));
+        let path = bunnyhop_core::test_maps::bsp(map);
         let Ok(bytes) = std::fs::read(&path) else { continue };
         let bsp = bunnyhop_core::parse_bsp(&bytes).unwrap();
         let Some(g) = load(map) else { continue };
@@ -205,7 +204,7 @@ fn tomb_rendering_uses_the_existing_solid_train_without_adding_prop_collision() 
 #[test]
 fn packed_crate_has_fourteen_distinct_debris_bodies_and_tnt_skins() {
     use bunnyhop_core::{studio::{self, Load}, vfs::{Vfs, Source}};
-    let raw = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"),"/../../maps/bhop_crash_egypt.bsp")).unwrap();
+    let raw = std::fs::read(bunnyhop_core::test_maps::bsp("bhop_crash_egypt")).unwrap();
     let bsp = bunnyhop_core::parse_bsp(&raw).unwrap();
     let mut vfs = Vfs::default(); vfs.mount(Source::from_zip("pak", bunnyhop_core::content::pakfile(&bsp)));
     let Load::Ready(model) = studio::load(&vfs,"models/dofke/crash bandicoot/props/crates/crate_generic.mdl") else { panic!("packed model") };

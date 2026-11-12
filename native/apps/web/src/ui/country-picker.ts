@@ -14,8 +14,8 @@ export function countryPicker(current: string | null | undefined, saved: (code: 
   const pride = Object.entries(PRIDE_FLAGS);
   const dialog = h("dialog.acct-dialog.country-dialog", { "aria-labelledby": "country-title" });
   const close = () => { if (!busy) dialog.close(); };
-  const search = h<"input">("input.nf-input.country-search#profile-country-search", { type: "search", placeholder: "Search countries, regions and pride flags…", "aria-label": "Search flags", autocomplete: "off" });
-  const grid = h("div.country-grid", { role: "group", "aria-label": "Pride, country and region flags" });
+  const search = h<"input">("input.nf-input.country-search#profile-country-search", { type: "search", placeholder: "Search countries and regions…", "aria-label": "Search flags", autocomplete: "off" });
+  const grid = h("div.country-grid", { role: "group", "aria-label": "Country, region and pride flags" });
   const preview = h("div.country-selected", { "aria-live": "polite" });
   const status = h("p.dim.country-status", { role: "status" });
   const suggestion = h("div.country-suggestion");
@@ -44,9 +44,9 @@ export function countryPicker(current: string | null | undefined, saved: (code: 
     const prideMatches = pride.filter(([, name]) => normalize(`${name} pride lgbt lgbtq queer`).includes(query));
     const matches = countries.filter(([code, name]) => normalize(`${name} ${code} ${code.startsWith("GB") ? "UK United Kingdom Britain" : ""}`).includes(query));
     grid.replaceChildren(
-      ...(prideMatches.length ? [h("p.country-group.dim", null, "Pride flags"), ...prideMatches.map(option)] : []),
       ...(matches.length && prideMatches.length ? [h("p.country-group.dim", null, "Countries and regions")] : []),
       ...matches.map(option),
+      ...(prideMatches.length ? [h("p.country-group.dim", null, "Pride flags"), ...prideMatches.map(option)] : []),
     );
     if (!matches.length && !prideMatches.length) grid.append(h("p.country-no-results.dim", null, "No flags found. Try another name or country code."));
     grid.scrollTop = 0;

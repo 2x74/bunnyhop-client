@@ -4,8 +4,8 @@
 
 import "./marks.css";
 import "./name-fonts.css";
-import { nameFontOf } from "../supporter-looks";
-import { nameFit } from "./name-fit";
+import { nameFontOf, nameStyleShown } from "../supporter-looks";
+import { faceClasses, faceKey, nameFit } from "./name-fit";
 import {
   equippedNameBadges, GIFTER_TIERS, GIFTER_SVG, isGifterColor, SPECIAL_BADGES,
   BOOSTER_LABEL,
@@ -27,6 +27,7 @@ import {
   type StaffBadge,
 } from "../creators";
 import { h } from "./dom";
+import { LIVE_PLATFORM_NAME, type LiveStream } from "../live";
 
 const svg = (inner: string) => `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">${inner}</svg>`;
 
@@ -67,11 +68,14 @@ export function nameAttrs(m: (NameLook & { name?: unknown }) | null | undefined,
   // The name font (v0.0.37, name-fonts.css): a class of its own, so it goes with any colour and effect, fitted to the
   // name (ui/name-fit.ts) so it is never wider than the default font. Before the face loads: the default font, marked
   // to be upgraded when it arrives. `name`: the text drawn (default: m.name).
+  // v0.0.40: bold / italic where the font has the cut (supporter-looks.ts nameStyleShown), fitted the same way.
   const font = nameFontOf(m?.nameFont);
+  const style = nameStyleShown(font, m?.nameStyle);
+  const face = font || style ? faceKey(font, style) : null;
   const text = name ?? (typeof m?.name === "string" ? m.name : null);
-  const k = font && text !== null ? nameFit(font, text) : null;
-  const fontCls = font && k !== null ? `nm-font nm-font-${font}` : undefined;
-  const wait = font && text !== null && k === null ? { "data-nm-font": font } : {};
+  const k = face && text !== null ? nameFit(face, text) : null;
+  const fontCls = face && k !== null ? faceClasses(face).join(" ") : undefined;
+  const wait = face && text !== null && k === null ? { "data-nm-font": face } : {};
   const fit = k !== null ? `--nm-k:${k}` : "";
   if (!c && !fx) {
     const style = [fallback ? `color:${fallback}` : "", fit].filter(Boolean).join(";");
@@ -115,6 +119,24 @@ export function nameMarks(m: PlayerMarks | null | undefined, o: { label?: boolea
     const color = colors?.[0] ?? tier.color;
     return h(`span.nm-gifter.${id}${m.gifterAnimated !== false && (colors?.length ?? 2) > 1 ? ".animated" : ""}`, { role: "img", "aria-label": tier.name, title: tier.name, style: `color:${color};--gift-a:${color};--gift-b:${colors?.[1] ?? "#7fcfff"};--gift-c:${colors?.[2] ?? color}`, html: svg(GIFTER_SVG) });
   })) : null;
+}
+
+/**
+ * LIVE after a name (src/live.ts): the player is streaming right now. A link to the stream in a new tab; its tooltip
+ * names the platform and the title. null when not live.
+ */
+export function liveMark(s: LiveStream | null | undefined): HTMLElement | null {
+  if (!s) return null;
+  const where = `Live on ${LIVE_PLATFORM_NAME[s.platform]}`;
+  return h(`a.nm-live.${s.platform}`, {
+    href: s.url,
+    target: "_blank",
+    rel: "noopener noreferrer nofollow",
+    title: s.title ? `${where}: ${s.title}` : where,
+    "aria-label": where,
+    // Inside rows that are buttons or open a profile: the stream, not the row.
+    onclick: (e: Event) => e.stopPropagation(),
+  }, "LIVE");
 }
 
 /** Monochrome glyphs for the link chips (YouTube / Twitch use their mark colours). */

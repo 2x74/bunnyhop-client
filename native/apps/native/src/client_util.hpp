@@ -54,10 +54,12 @@ inline bool external_url_allowed(const std::string &url) {
     const auto host = authority.substr(0, authority.find(':'));
     if (host == "checkout.stripe.com") {
         if (authority != "checkout.stripe.com" && authority != "checkout.stripe.com:443") return false;
+        // Stripe documents the session URL as opaque (it has moved paths before), so any path past the root on
+        // Stripe's own checkout host goes; the host and port above are the boundary.
         const auto path = authority_end == std::string::npos
                                   ? std::string()
                                   : url.substr(authority_end, url.find_first_of("?#", authority_end) - authority_end);
-        return path.starts_with("/c/pay/") || path.starts_with("/pay/");
+        return path.size() > 1;
     }
     // Exact hosts used by the Credits page; no wildcard subdomains or alternate ports.
     static constexpr std::string_view credits[] = {

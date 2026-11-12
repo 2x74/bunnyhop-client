@@ -5,10 +5,9 @@
 
 use bunnyhop_core::game::{MAP_SOUND_ACTIVE, PHYSICS_LATEST};
 use bunnyhop_core::{Cmd, Game, Settings};
-use std::path::PathBuf;
 
 fn load(name: &str) -> Option<Game> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("../../maps/{name}.bsp"));
+    let path = bunnyhop_core::test_maps::bsp(name);
     let Ok(bytes) = std::fs::read(&path) else {
         eprintln!("skipping: {} not found", path.display());
         return None;
@@ -25,6 +24,7 @@ fn total_starts(g: &Game) -> u32 {
 }
 
 /// bhop_waterfall: logic_timers fire PlaySound on start-silent, non-looping ambient_generics.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn timers_reach_ambient_generics() {
     let Some(mut g) = load("bhop_waterfall") else { return };
@@ -40,6 +40,7 @@ fn timers_reach_ambient_generics() {
 }
 
 /// Restart and snapshot both bring the state back.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn reset_and_snapshots_restore_the_state() {
     let Some(mut g) = load("bhop_waterfall") else { return };
@@ -64,6 +65,7 @@ fn reset_and_snapshots_restore_the_state() {
 }
 
 /// Reading the states every tick changes nothing: the same commands land on the same position and velocity.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn reading_changes_nothing() {
     let Some(mut a) = load("bhop_waterfall") else { return };

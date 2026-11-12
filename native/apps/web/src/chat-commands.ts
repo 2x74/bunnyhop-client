@@ -605,7 +605,7 @@ const BUILT_IN: ChatCommand[] = [
   { name: "currentmap", where: "room", server: true, bare: true },
   { name: "thetime", where: "room", server: true, bare: true, hidden: true },
   { name: "motd", where: "room", server: true, bare: true, hidden: true },
-  ...["kick", "ban", "unban", "mute", "unmute", "map", "mapvote"].map((name): ChatCommand => ({ name, where: "room", server: true, hidden: true })),
+  ...["kick", "ban", "unban", "mute", "unmute", "vmute", "vunmute", "map", "mapvote"].map((name): ChatCommand => ({ name, where: "room", server: true, hidden: true })),
   // Rooms only, handled on the client.
   {
     name: "spec",

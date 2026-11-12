@@ -3,7 +3,7 @@
 
 import type { LessonId } from "./data";
 
-/** The final course is the map's bonus 1: its own timed run and board (bonus runs are Normal style). */
+/** The final course is the map's bonus 1: its own timed run and board (always Normal style: styles.ts TUTORIAL_BONUS_STYLE). */
 export const FINAL_TRACK = 1;
 
 /** Lessons 1-3 are practice: an attempt that plays one is never submitted or saved as a PB. The final course isn't. */

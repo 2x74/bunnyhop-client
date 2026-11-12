@@ -19,7 +19,15 @@ import {
 } from "../../web/src/ui/settings";
 import { toast } from "../../web/src/notify";
 import { paintPrefs } from "../../web/src/paint/prefs";
-import { NATIVE_BIND_ACTIONS, nativeKeyCode, send, settingsPatch, state, type SettingsPatch } from "./bridge";
+import {
+  NATIVE_BIND_ACTIONS,
+  nativeKeyCode,
+  send,
+  settingsPatch,
+  SHARED_KEY_ACTION,
+  state,
+  type SettingsPatch,
+} from "./bridge";
 import { defaultPosition, type HudElementId, type HudLayout as NativeHudLayout } from "./hud-layout";
 import { mergeHostLooks } from "./map-looks";
 import { REQUESTED_KEYS, readPath, requestedPatch, writePath } from "./settings-keys";
@@ -274,7 +282,8 @@ const SHARED_ACTIONS = NATIVE_BIND_ACTIONS.filter((action) => action in DEFAULT_
 
 /**
  * Key binds. The web's actions take its binds; a key one of them takes leaves the native-only actions (chat, the
- * scoreboard...), as it leaves any other web action. Keys the native client can't read aren't sent.
+ * scoreboard...), as it leaves any other web action; push to talk keeps a shared key. Keys the native client can't
+ * read aren't sent.
  */
 const binds: Mapping = {
   keys: ["binds"],
@@ -286,7 +295,7 @@ const binds: Mapping = {
       for (const code of out[action]) taken.add(code);
     }
     for (const action of NATIVE_ONLY_ACTIONS) {
-      out[action] = (host.binds[action] ?? []).filter((code) => !taken.has(code));
+      out[action] = (host.binds[action] ?? []).filter((code) => action === SHARED_KEY_ACTION || !taken.has(code));
     }
     return { binds: out };
   },

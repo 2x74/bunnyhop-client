@@ -45,7 +45,7 @@
    two words, and VERSION stays below 0.1.0 while STAGE is alpha.
    ============================================================ */
 
-export const VERSION = "0.0.39";
+export const VERSION = "0.0.40";
 
 /** Release stage, printed after the number ("v0.0.4 alpha"). */
 export const STAGE = "alpha";
@@ -67,8 +67,8 @@ export interface ChangelogEntry {
 
 /** Notes for the next release, unpublished until promoted into CHANGELOG. */
 export const UPCOMING: ChangelogEntry = {
-  version: "0.0.40",
-  date: "2026-11-06",
+  version: "0.0.41",
+  date: "2026-11-12",
   kind: "minor",
   title: "Next update",
   notes: [],
@@ -76,6 +76,31 @@ export const UPCOMING: ChangelogEntry = {
 
 /** Newest first. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "0.0.40",
+    date: "2026-11-12",
+    kind: "minor",
+    title: "Voice chat, Compare, rank history and a faster Auto-strafe",
+    notes: [
+      "Voice chat in servers and private lobbies: hold X to talk and everyone in the room hears you. Guests can listen. The game asks for your microphone the first time you press the key and only uses it while you hold it. Mute someone, change their volume or report them from the speaker button by their name on the Tab scoreboard, and set your microphone and volume under Settings → Audio → Voice chat.",
+      "Auto-strafe presses A and D one tick earlier, the way a good hand strafes, so it gains speed like Normal. Auto-strafe times will get faster. Your existing runs don't change.",
+      "Your points and rank update as soon as your run is verified, on your profile, the ranks board and Top points. Before, they could take up to an hour on the biggest maps.",
+      "Rank history: your profile has a graph of your overall rank over time and your best rank ever.",
+      "Compare: on another player's profile, Compare sets your times against theirs on every map you've both finished, closest first, and lists the maps only one of you has finished. Watch plays both runs side by side.",
+      "Bonus tracks in every style: pick W-Only, Sideways, Scroll or any other style and play the bonus in it. Every bonus has its own leaderboard per style, and !race and room races can be on a bonus in any style.",
+      "Points: longer maps are worth more. From T3 up, a map that takes more jumps than is usual for its tier pays more and a very short one a little less. bhop_11mb_of_hell_rtv is now T4 and bhop_gofuckyourself T3. Bonus tracks no longer give points; their leaderboards and records stay.",
+      "Achievements, unlocks and notices have a new look and no longer cover the menu. An unlock names the item and why you got it. The rarity names (Garden, Market, Prize, Heirloom, Golden) are gone.",
+      "Profiles: a bigger card with your ranks under it. Rest on a player's name to see what they were called before.",
+      "Names: you can change your name once a week. Your old name is kept for you for 14 days, and you can go straight back to it within a day. A guest's name can be taken by someone else after 30 days away (7 if the guest never finished a run); accounts with a password or a linked sign-in keep theirs.",
+      "Supporters: six new avatar decorations, five new card effects and three new card borders, a hover effect for your mini profile, more name colours, an Outline effect, a new font and bold and italic for names. While you talk, your row in the voice list takes your card's background and effects.",
+      "The strafe trainer works in every style. New in the jump stats: slow ticks (ticks spent below a share of perfect gain, off by default), and strafe offsets show how many times in a row, like -1 (2). SSJ lines are always written to the console, even with chat off.",
+      "Profile runs can be filtered by style. New achievements for A/D-Only and Backwards clears, each with a hilt. The Surf music track is gone.",
+      "Streamers get a LIVE mark next to their name in servers and show under Live now on the main menu. Link your Discord, add your Twitch, YouTube or TikTok to your profile and apply for the Streamer role in #roles on our Discord, then type /live when you go live.",
+      "New players start on friendlier maps, bhop_lol_meadow among them, and see what the goal is before their first run.",
+      "The Loadout opens and switches items faster.",
+      "The desktop client gets voice chat and the new Auto-strafe timing in its next update. Until then its Auto-strafe runs keep the old timing and it can't talk or hear voice.",
+    ],
+  },
   {
     version: "0.0.39",
     date: "2026-11-06",

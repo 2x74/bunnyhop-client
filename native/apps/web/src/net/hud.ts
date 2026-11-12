@@ -2,6 +2,8 @@
 // menu (map votes, spectate list, nominations), a centre banner (map change countdown) and the spectator bar.
 // All text is set with textContent: chat from other players never becomes markup.
 
+import { voiceButton } from "../voice/menu";
+import { speakerMark } from "../voice/hud";
 import { releaseHeldCursor } from "../free-cursor";
 import "./net.css";
 import { clear, h } from "../ui/dom";
@@ -13,7 +15,8 @@ import type { RankTag } from "./protocol";
 import type { NameLook, PlayerMarks } from "../creators";
 import { countryFlag } from "../ui/country-flag";
 import { bindLabel } from "../ui/settings";
-import { nameAttrs, nameMarks } from "../ui/marks";
+import { liveMark, nameAttrs, nameMarks } from "../ui/marks";
+import { liveOf } from "../live";
 import { hoverCardFor } from "../ui/hover-card";
 import { hopKeyframes, hopOffKeyframes } from "../notify/spring";
 
@@ -195,6 +198,9 @@ export class ChatBox {
       // same marks as the boards and profiles, so staff read the same everywhere.
       const marks = nameMarks(o);
       if (marks) line.append(" ", marks);
+      // Streaming right now (src/live.ts): LIVE, a link to the stream.
+      const live = o.id ? liveMark(liveOf(o.id)) : null;
+      if (live) line.append(live);
       line.append(": ");
     } else if (o.kind === "server") line.append(h("span.chat-sys", null, "» "));
     else if (o.kind === "admin") line.append(h("span.chat-sys", null, "ADMIN » "));
@@ -405,7 +411,9 @@ export class Scoreboard {
           countryFlag(r.country),
           r.id ? hoverCardFor(h("span.sb-pname", nameAttrs(r), r.name), { ...r, id: r.id, avatarUrl: null }) : h("span.sb-pname", nameAttrs(r), r.name),
           nameMarks(r),
+          r.id ? liveMark(liveOf(r.id)) : null,
           r.host ? h("span.sb-host", { title: "Lobby host" }, "host") : null,
+          voiceButton(r),
         ),
         h("td.sb-style", null, styleLabel(r.style)),
         h(`td.sb-time.${r.statusKind}`, null, r.status),
@@ -485,8 +493,8 @@ export class SpecBar {
   }
 
   /** `hint`: one quiet line under it (the camera, and the way out). */
-  set(o: { name: string; color: string; waiting?: boolean; hint?: string; look?: NameLook } | null): void {
-    const key = o ? `${o.name}|${o.color}|${o.waiting ? 1 : 0}|${o.hint ?? ""}|${o.look ? JSON.stringify(o.look) : ""}` : "";
+  set(o: { name: string; color: string; waiting?: boolean; hint?: string; look?: NameLook; talking?: boolean } | null): void {
+    const key = o ? `${o.name}|${o.color}|${o.waiting ? 1 : 0}|${o.hint ?? ""}|${o.look ? JSON.stringify(o.look) : ""}|${o.talking ? 1 : 0}` : "";
     if (key === this.shown) return;
     this.shown = key;
     if (!o) {
@@ -494,6 +502,6 @@ export class SpecBar {
       return;
     }
     this.el.hidden = false;
-    clear(this.el, "Watching ", h("b", nameAttrs(o.look, o.color, o.name), o.name), o.waiting ? h("span.dim", null, ", waiting for them") : null, o.hint ? h("div.spec-hint", null, o.hint) : null);
+    clear(this.el, "Watching ", h("b", nameAttrs(o.look, o.color, o.name), o.name), o.talking ? speakerMark() : null, o.waiting ? h("span.dim", null, ", waiting for them") : null, o.hint ? h("div.spec-hint", null, o.hint) : null);
   }
 }

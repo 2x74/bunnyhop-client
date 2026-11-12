@@ -12,7 +12,7 @@ use bunnyhop_core::{Cmd, Game, Settings};
 use std::path::PathBuf;
 
 fn load(name: &str, version: u32) -> Option<Game> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("../../maps/{name}.bsp"));
+    let path = bunnyhop_core::test_maps::bsp(name);
     if !path.exists() {
         eprintln!("skipping: {} not present", path.display());
         return None;
@@ -72,7 +72,7 @@ fn named(map: &Prefab, version: u32) -> Option<Game> {
 }
 
 fn bytes(map: &str) -> Option<Vec<u8>> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("../../maps/{map}.bsp"));
+    let path = bunnyhop_core::test_maps::bsp(map);
     std::fs::read(path).ok()
 }
 
@@ -92,6 +92,7 @@ fn lump_range(raw: &[u8], index: usize) -> std::ops::Range<usize> {
     ofs..ofs + len
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn builds_are_the_reviewed_ones() {
     for m in [HELLOPRO2, TRIEDSAME] {
@@ -111,6 +112,7 @@ fn builds_are_the_reviewed_ones() {
 
 /// A rebuild that keeps every non-output key (same entity CRC) but changes an output, the collision or a packed physics
 /// material is not the reviewed build: no v25 mechanics, standing on a block does nothing.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn modified_builds_get_no_v25_mechanics() {
     let Some(raw) = bytes(HELLOPRO2.map) else { return };
@@ -196,6 +198,7 @@ fn repack_vmt(raw: &[u8], from: &[u8], to: &[u8]) -> Vec<u8> {
 
 /// The digest covers what the core reads from materials: the movement surface each `$surfaceprop` resolves to
 /// (`physics::SURFACE_PROPS`). grass -> metal is `default` either way, so it is still the reviewed build.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn material_edits_without_a_physics_change_keep_the_build() {
     let Some(raw) = bytes(HELLOPRO2.map) else { return };
@@ -215,6 +218,7 @@ fn stripped_physics_bsps_match_too() {
     }
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn standing_on_a_block_sends_the_player_back_from_v25() {
     for m in [HELLOPRO2, TRIEDSAME] {
@@ -230,6 +234,7 @@ fn standing_on_a_block_sends_the_player_back_from_v25() {
     }
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn v24_and_v19_never_run_the_makers() {
     for version in [PHYSICS_V19, PHYSICS_V24] {
@@ -242,6 +247,7 @@ fn v24_and_v19_never_run_the_makers() {
     }
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn landing_on_the_same_spot_again_fails_within_4_s_only() {
     for m in [HELLOPRO2, TRIEDSAME] {

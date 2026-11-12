@@ -11,7 +11,6 @@ use bunnyhop_core::game::{
     PHYSICS_V15, PHYSICS_V16, map_nonlinear_objectives_for, map_nonlinear_objectives_table, map_player_io_for,
 };
 use bunnyhop_core::{Cmd, Game, Settings};
-use std::path::PathBuf;
 
 const EVENT_TELEPORTED: u32 = 1;
 const IN_JUMP: u32 = 1 << 1;
@@ -29,7 +28,7 @@ const ROUTE_FROM_START: [[f32; 2]; 7] =
     [[5300.0, 1232.0], [5072.0, 1232.0], [5072.0, 1408.0], [4820.0, 1408.0], [4820.0, 1232.0], [4572.0, 1232.0], [4572.0, 1488.0]];
 
 fn load(version: u32) -> Option<Game> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps").join(format!("{MAP}.bsp"));
+    let path = bunnyhop_core::test_maps::bsp(&MAP);
     let Ok(bytes) = std::fs::read(&path) else {
         eprintln!("skipping {MAP}: {} not found", path.display());
         return None;
@@ -89,6 +88,7 @@ fn walk(game: &mut Game, route: &[[f32; 2]], ticks: u32) -> (Option<u32>, u32) {
     (None, gated)
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn cooks_table_and_scripted_triggers() {
     assert_eq!(map_nonlinear_objectives_table(), [MAP]);
@@ -98,7 +98,7 @@ fn cooks_table_and_scripted_triggers() {
     assert_eq!(game.objective_triggers(), INGREDIENTS.map(|(i, _)| i));
     // The PLAYER_IO maps and an ordinary map are not in the table.
     for map in ["bhop_synthetic_fix", "bhop_wonderland", "bhop_lego3", "bhop_eazy", "bhop_montana_fix"] {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps").join(format!("{map}.bsp"));
+        let path = bunnyhop_core::test_maps::bsp(map);
         let Ok(bytes) = std::fs::read(&path) else { continue };
         let game = Game::load(&bunnyhop_core::parse_bsp(&bytes).unwrap()).unwrap();
         assert_eq!(map_nonlinear_objectives_for(&game.entities), None, "{map}");
@@ -106,6 +106,7 @@ fn cooks_table_and_scripted_triggers() {
     }
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn cooks_scripted_triggers_have_overlay_roles() {
     for version in [PHYSICS_V15, PHYSICS_V16, bunnyhop_core::game::PHYSICS_LATEST] {
@@ -129,6 +130,7 @@ fn cooks_scripted_triggers_have_overlay_roles() {
     }
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn cooks_walk_from_start_without_ingredients_is_blocked_from_v16() {
     // The bypass found on 2026-10-24 (a 33.5 s bot walk; this walker takes about 15 s, 13.1 s on the timer): v15 walks
@@ -151,6 +153,7 @@ fn cooks_walk_from_start_without_ingredients_is_blocked_from_v16() {
     assert_eq!(walk(&mut old, &ROUTE_FROM_START, 3000).1, 0);
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn cooks_doors_open_with_all_four_ingredients() {
     let route = &ROUTE_FROM_START[2..];
@@ -178,6 +181,7 @@ fn cooks_doors_open_with_all_four_ingredients() {
     }
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn cooks_south_teleport_gate_puts_a_fast_player_back() {
     // South doorway: rebound gate *10 (y 1104..1164) then teleport gate *3 (y 1164..1180), whose entity origin
@@ -208,6 +212,7 @@ fn cooks_south_teleport_gate_puts_a_fast_player_back() {
     }
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn cooks_rebound_gate_bounces_a_walker_back() {
     // East doorway, walking west into the rebound gate *12 (x 4918..4978): the player's centre is east of the gate's
@@ -231,6 +236,7 @@ fn cooks_rebound_gate_bounces_a_walker_back() {
     assert!(old.state.position[0] < 4900.0, "v15 walks through ({:?})", old.state.position);
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn cooks_ingredients_reset_on_restart_respawn_and_the_start_room() {
     let Some(mut game) = load(PHYSICS_V16) else { return };
@@ -262,6 +268,7 @@ fn cooks_ingredients_reset_on_restart_respawn_and_the_start_room() {
     assert!(old.objectives_collected().is_empty());
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn cooks_is_deterministic() {
     // Two identical runs (walk with all four ingredients, then back into a gate without them) digest identically.

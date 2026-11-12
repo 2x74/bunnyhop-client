@@ -8,6 +8,7 @@ import { copyLobbyInvite } from "../../web/src/net/lobby";
 import { state } from "./bridge";
 import { formatTime } from "../../web/src/timer";
 import { roomStyleLabel } from "./room-styles";
+import { voiceControls } from "./voice-people";
 import type { NativeRoomService } from "./room-service";
 import { openReport, reportButton } from "./report";
 
@@ -164,6 +165,7 @@ export function roomPanel(
                   "Race",
                 ),
             player.slot === view.you ? null : reportButton({ id: player.id, name: player.name }),
+            voiceControls(view, player, service.voice),
           ),
         ),
         h(

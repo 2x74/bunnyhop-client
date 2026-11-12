@@ -151,7 +151,7 @@ const DEMO: HudFrame = {
 const GHOST_COLOR = "#66b3ff";
 /** The layout editor's sample for the movement elements. */
 const LJ_DEMO: LjReport = { kind: "LJ", distance: 254.32, displacement: 222.32, pre: 278.1, max: 342.2, strafes: 6, sync: 91.4, airtime: 0.72, crouched: true };
-const MOVEMENT_DEMO: MovementReading = { offset: { ticks: -1, gap: false, overlap: false }, fjt: 1, lj: LJ_DEMO };
+const MOVEMENT_DEMO: MovementReading = { offset: { ticks: -1, gap: false, overlap: false, streak: 2 }, slow: 3, fjt: 1, lj: LJ_DEMO };
 /** The spectator list in the layout editor. */
 const SPEC_DEMO = ["hopper", "strafegod"];
 const text = () => document.createTextNode("");
@@ -263,7 +263,7 @@ export class Hud {
   private gspeedShown = NaN;
   private startPre: number | null = null;
   private startPreEl = h("div.mv-pre");
-  private movement: MovementReading = { offset: null, fjt: null, lj: null };
+  private movement: MovementReading = { offset: null, slow: null, fjt: null, lj: null };
   private offsetEl = h("div.mv-line");
   private fjtEl = h("div.mv-line");
   private ljView = new LjView();
@@ -514,10 +514,11 @@ export class Hud {
 
   private drawMovement(): void {
     const r = this.editing ? MOVEMENT_DEMO : this.movement;
-    const offset = r.offset ? JSON.stringify(r.offset) : "";
+    const slow = this.editing || this.p.hud.movement.slowTicks ? r.slow : null;
+    const offset = r.offset || slow !== null ? JSON.stringify([r.offset, slow]) : "";
     if (offset !== this.movementShown.offset) {
       this.movementShown.offset = offset;
-      this.offsetEl.replaceChildren(...(r.offset ? offsetNodes(r.offset) : []));
+      this.offsetEl.replaceChildren(...offsetNodes(r.offset, slow));
     }
     const fjt = r.fjt === null ? "" : String(r.fjt);
     if (fjt !== this.movementShown.fjt) {
@@ -674,15 +675,16 @@ export class Hud {
    * One simulated tick: `cmd` is exactly what core.step received, `state` the post-tick state.
    * Drives the keys overlay, speed graph (jump marks) and sync bar; the jump stats element is fed by session.ts (setJumpStats).
    */
-  tick(cmd: TickCmd, state: PlayerState, events: number, trainer?: { settings: Settings; style: string; noclip?: boolean }): void {
+  tick(cmd: TickCmd, state: PlayerState, events: number, trainer?: { settings: Settings; noclip?: boolean; turnYaw?: number }): void {
     if (this.editing) return;
     const v = state.velocity;
     const speed = Math.sqrt(v[0] * v[0] + v[1] * v[1]);
     if (trainer && this.p.hud.layout.strafeTrainer.on) this.trainer.feed(cmd, {
       airSpeedGain: state.airSpeedGain, airBestGain: state.airBestGain,
-      speed, grounded: state.grounded, onLadder: state.onLadder, tick: state.tick,
+      speed, velYaw: Math.atan2(v[1], v[0]) * 180 / Math.PI, grounded: state.grounded, onLadder: state.onLadder, tick: state.tick,
       dt: trainer.settings.tickInterval, maxSpeed: trainer.settings.maxSpeed, airAccelerate: trainer.settings.airAccelerate,
-      style: trainer.style, interrupted: !!trainer.noclip || !!(events & (EVENT_TELEPORTED | EVENT_RESPAWNED)), jumped: (events & EVENT_JUMPED) !== 0,
+      interrupted: !!trainer.noclip || !!(events & (EVENT_TELEPORTED | EVENT_RESPAWNED)), jumped: (events & EVENT_JUMPED) !== 0,
+      ...(trainer.turnYaw !== undefined ? { turnYaw: trainer.turnYaw } : {}),
     });
     else this.trainer.reset();
     const jump = this.trainer.takeLanding();

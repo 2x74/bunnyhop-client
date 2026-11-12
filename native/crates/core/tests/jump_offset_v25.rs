@@ -12,7 +12,6 @@ use bunnyhop_core::{Cmd, Game, Settings};
 use common::{Scene, Sim, floor, ramp_up};
 use playsrc_collision::Hull;
 use playsrc_movement::{self as movement, Command, Error, Event, Mode, Player, State, StepInput, Trace, Tracer, CONTENTS_LADDER, CONTENTS_WATER};
-use std::path::PathBuf;
 
 /// Where a trace from above stops on a floor at z = 0 (DIST_EPSILON).
 const REST: f32 = 0.031_25;
@@ -49,7 +48,7 @@ fn jump_peak(scene: &Scene, version: u32, position: [f32; 3], crouched: bool) ->
 
 #[test]
 fn v25_is_the_latest_and_only_v25_lifts() {
-    assert_eq!(PHYSICS_LATEST, 27);
+    assert_eq!(PHYSICS_LATEST, 28);
     let scene = Scene::new(vec![floor()]);
     for version in 1..=PHYSICS_LATEST {
         let (lift, _) = jump_peak(&scene, version, [0.0, 0.0, 0.7], false);
@@ -328,7 +327,7 @@ fn jump_offset_changes_height_only() {
 // ---- Real maps (skipped when absent) ----
 
 fn load(name: &str, version: u32) -> Option<Game> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("../../maps/{name}.bsp"));
+    let path = bunnyhop_core::test_maps::bsp(name);
     if !path.exists() {
         eprintln!("skipping: {} not present", path.display());
         return None;
@@ -374,6 +373,7 @@ fn tranquility_clears(game: &mut Game, start_x: f32, drop: f32, duck: u32) -> Op
 
 /// The tranquility ledge is +64.0, a 100-tick crouch jump's apex. On v24 the takeoff window (start x, 4 u steps at 616 u/s)
 /// depends on the landing phase, from a few units to the widest; on v25 it is the same for every phase.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn tranquility_ledge_window_is_constant_on_v25() {
     let Some(mut v24) = load("bhop_tranquility", PHYSICS_V24) else { return };
@@ -402,6 +402,7 @@ fn tranquility_ledge_window_is_constant_on_v25() {
 /// teleport. The landing tick is untouched by v25 (the lift belongs to the jump after it), so a teleport that fires on
 /// or before the first jump fires on the same tick at the same place on v25. Teleports after the jump may differ: that
 /// jump starts higher (a ceiling teleport is reached sooner), which is the point of v25.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn thin_teleports_fire_on_the_same_landing_tick() {
     let (mut sites, mut fired, mut later) = (0, 0, 0);
@@ -452,6 +453,7 @@ fn thin_teleports_fire_on_the_same_landing_tick() {
 /// Bhop blocks (func_door / func_button movers under the block fix, and stock sinking blocks): three autohops off the
 /// first blocks of a few maps. No movement errors, the jump starts 1.5 over the block top, and v25 only differs from v24
 /// from the first jump on.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn bhop_blocks_hop_from_floor_plus_offset() {
     let mut checked = 0;

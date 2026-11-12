@@ -119,7 +119,20 @@ fn main() {
                 100,
             ),
         );
-        for cmd in spec["commands"].as_array().unwrap() {
+        // Optional: the recording's v29 options (turn rates, timed input), as the client sets them at a run's start.
+        if let Some(o) = spec["recordOptions"].as_object() {
+            let options = BhRecordOptionsV29 {
+                yaw_speed: o["yawSpeed"].as_f64().unwrap() as f32,
+                angle_speed_key: o["angleSpeedKey"].as_f64().unwrap() as f32,
+                timed_input: u32::from(o["timedInput"].as_bool().unwrap_or(false)),
+                ..BhRecordOptionsV29::default()
+            };
+            ok(c, bh_record_options_v29(c, &options));
+        }
+        // Optional: live view samples, one per command (null: none). The commands are then the live input before the
+        // style filter, as the client steps them (bh_step_look_v2).
+        let looks = spec["looks"].as_array();
+        for (i, cmd) in spec["commands"].as_array().unwrap().iter().enumerate() {
             let cmd = BhCmd {
                 forward: f(cmd, "forward"),
                 side: f(cmd, "side"),
@@ -128,7 +141,24 @@ fn main() {
                 buttons: u(cmd, "buttons"),
             };
             let mut state = BhState::default();
-            ok(c, bh_step(c, &cmd, &mut state));
+            match looks.map(|looks| &looks[i]).filter(|l| l.is_object()) {
+                Some(l) => {
+                    // Exact f64 bit patterns as decimal strings: serde_json's float parsing can be an ulp off.
+                    let exact = |key: &str| f64::from_bits(l["bits"][key].as_str().unwrap().parse::<u64>().unwrap());
+                    let look = BhLookSampleV2 {
+                        base: exact("base"),
+                        k: exact("k"),
+                        count: exact("count"),
+                        epoch: u(l, "epoch"),
+                        kind: u(l, "kind"),
+                        frames: u(l, "frames"),
+                        events: u(l, "events"),
+                        reports: u(l, "reports"),
+                    };
+                    ok(c, bh_step_look_v2(c, &cmd, &look, &mut state));
+                }
+                None => ok(c, bh_step(c, &cmd, &mut state)),
+            }
         }
         ok(c, bh_record_end(c));
         let mut folded = 0;

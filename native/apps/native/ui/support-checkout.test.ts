@@ -14,8 +14,19 @@ test("checkout permits only server Stripe checkout sessions and never substitute
   expect(trustedCheckoutUrl("https://checkout.stripe.com/c/pay/cs_test_example#session")).toBe(
     "https://checkout.stripe.com/c/pay/cs_test_example#session",
   );
+  // Stripe's session URL is opaque: any path on its checkout host is what the server hands back.
+  for (const url of [
+    "https://checkout.stripe.com/g/pay/cs_live_a1B2c3#fidkdWxOYHwnPyd1blpxYHZxWjA0",
+    "https://checkout.stripe.com/pay/cs_live_a1B2c3",
+    "https://checkout.stripe.com:443/c/pay/cs_test_example",
+  ])
+    expect(trustedCheckoutUrl(url)).toBe(new URL(url).href);
+  expect(() => trustedCheckoutUrl("https://pay.example/c/pay/x")).toThrow("(https://pay.example)");
   for (const url of [
     "https://evil.example/c/pay/x",
+    "https://checkout.stripe.com",
+    "https://billing.stripe.com/p/session/x",
+    "https://buy.stripe.com/x",
     "https://checkout.stripe.com.evil.example/c/pay/x",
     "http://checkout.stripe.com/c/pay/x",
     "https://user@checkout.stripe.com/c/pay/x",

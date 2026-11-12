@@ -9,7 +9,7 @@ use std::path::PathBuf;
 const ENTITY_HIT: u64 = 1 << 40;
 
 fn load(name: &str, version: u32) -> Option<Game> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps").join(format!("{name}.bsp"));
+    let path = bunnyhop_core::test_maps::bsp(name);
     let Ok(bytes) = std::fs::read(&path) else {
         eprintln!("skipping {name}: {} not found", path.display());
         return None;
@@ -43,6 +43,7 @@ fn speed_after_tick(game: &mut Game, speed: f32) -> f32 {
     best
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn sandtrap_maps_run_at_ten_thousand_from_v14() {
     let mut tested = 0;
@@ -79,6 +80,7 @@ fn web_table_matches_the_core() {
 }
 
 /// Newly reviewed builds change only at v19, including when settings are switched back for replay playback.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn new_limits_preserve_every_historical_version() {
     for (map, limit) in [("bhop_gigaheish_fix", 10000.0), ("bhop_accelerate", 10000.0), ("bhop_quack", 10000.0), ("bhop_rainbowroad_fix", 10000.0), ("kz_bhop_global", 20000.0)] {
@@ -105,6 +107,7 @@ fn web_minimum_versions_match_the_core() {
     web.sort(); core.sort(); assert_eq!(web,core);
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn other_maps_keep_3500() {
     for map in ["bhop_areaportal_v1", "bhop_eject", "bhop_arcane_v1"] {
@@ -121,6 +124,7 @@ fn train(game: &Game, name: &str) -> usize {
 
 /// bhop_areaportal_v1's green platform (`gamstvonorm`: speed 0, startspeed 1000) is started only by
 /// `logic_auto OnMapSpawn -> StartForward`. v13 delivered the input before the train's Find think, so it never moved.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn areaportal_green_platform_moves_from_v14() {
     for version in [PHYSICS_V13, PHYSICS_V14] {
@@ -146,6 +150,7 @@ fn areaportal_green_platform_moves_from_v14() {
 /// paths): a player who lands with the platform's 1000 u/s stays on it standing or hopping (a jump keeps the platform's
 /// velocity, CGameMovement::SetGroundEntity), and one who drops onto it at rest slides off the back (landing subtracts
 /// the platform's velocity), as in CS:S.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn areaportal_platforms_carry_riders_moving_with_them() {
     for name in ["rede3da", "gamstvonorm"] {
@@ -190,6 +195,7 @@ fn areaportal_platforms_carry_riders_moving_with_them() {
 /// Every map whose trains a spawn output starts (`PHYSICS_FIX_TRAIN_SPAWN`; an audit of the 26 maps with trains, v13 vs
 /// v14, research/MAX-VELOCITY.md): each of these moves on the real engine (tools/parity jobs tr_<map>) and from v14,
 /// and stood still before.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn trains_started_at_spawn_move_like_the_engine() {
     let cases: &[(&str, &[&str])] = &[

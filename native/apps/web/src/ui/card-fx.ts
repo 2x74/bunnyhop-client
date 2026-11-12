@@ -29,7 +29,10 @@ export function cardLayers(peak: PeakTier | null, fx: CardFx | null | undefined)
   const plan = cardLayerPlan(peak, border, effect);
   const color = nameColorHex(fx?.nameColor) ?? SUPPORTER_FX;
   const aura = plan.frame === "peak" ? base.aura : plan.frame ? h(`div.pc-sborder.pc-sborder-${plan.frame}`, { "aria-hidden": "true" }) : null;
+  // Vine and Neon also put a layer behind the content (the leaves in the cut corners; the tube's glow on its edge).
+  const borderInner = plan.frame === "vine" || plan.frame === "neon" ? [h(`div.pc-sfx.pc-sfx-${plan.frame}`, { "aria-hidden": "true" })] : [];
   const inner = [
+    ...borderInner,
     ...(plan.effect === "motes" ? base.inner.filter((el) => el.classList.contains("pc-motes")) : plan.effect ? [h(`div.pc-sfx.pc-sfx-${plan.effect}`, { "aria-hidden": "true" })] : []),
     ...base.inner.filter((el) => el.classList.contains("pc-glint")),
   ];
@@ -46,4 +49,4 @@ export function cardLayers(peak: PeakTier | null, fx: CardFx | null | undefined)
  * exists). One registration per card; the observer lets go of it when the card is replaced (avatar-deco.ts).
  */
 export const watchCardFx = (card: HTMLElement): (() => void) =>
-  card.querySelector(".pc-sborder, .pc-sfx, .pc-aura, .pc-motes, .pc-glint, .av-spin, .av-spin-back, .av-sway, .av-twinkle, .av-twinkle-late") ? fxVisibility(card) : () => {};
+  card.querySelector(".pc-sborder, .pc-sfx, .pc-aura, .pc-motes, .pc-glint, .av-anim") ? fxVisibility(card) : () => {};

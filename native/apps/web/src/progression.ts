@@ -419,6 +419,8 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { id: "style_wonly", name: "W Only", desc: "Finish a map in W-Only", group: "style", icon: "w", ring: 1, progress: (s) => at(s.styleMaps.wonly ?? 0, 1) },
   { id: "style_sideways", name: "Sideways", desc: "Finish a map in Sideways", group: "style", icon: "sw", ring: 1, progress: (s) => at(s.styleMaps.sideways ?? 0, 1) },
   { id: "style_hsw", name: "Half and Half", desc: "Finish a map in Half-Sideways", group: "style", icon: "hsw", ring: 1, progress: (s) => at(s.styleMaps.hsw ?? 0, 1) },
+  { id: "style_adonly", name: "One Side", desc: "Finish a map in A/D-Only", group: "style", icon: "ad", ring: 1, progress: (s) => at(s.styleMaps.adonly ?? 0, 1) },
+  { id: "style_backwards", name: "Rear View", desc: "Finish a map in Backwards", group: "style", icon: "bw", ring: 1, progress: (s) => at(s.styleMaps.backwards ?? 0, 1) },
   {
     id: "style_all",
     name: "Stylist",
@@ -474,6 +476,8 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { id: "sideways_10", name: "Crab Walk", desc: "Finish 10 different maps in Sideways", goal: "Clear 10 maps in Sideways", group: "style", icon: "sw", ring: 2, progress: (s) => at(s.styleMaps.sideways ?? 0, 10) },
   { id: "wonly_10", name: "One Key", desc: "Finish 10 different maps in W-Only", goal: "Clear 10 maps in W-Only", group: "style", icon: "w", ring: 2, progress: (s) => at(s.styleMaps.wonly ?? 0, 10) },
   { id: "hsw_10", name: "Halfway", desc: "Finish 10 different maps in Half-Sideways", goal: "Clear 10 maps in Half-Sideways", group: "style", icon: "hsw", ring: 2, progress: (s) => at(s.styleMaps.hsw ?? 0, 10) },
+  { id: "adonly_10", name: "Lopsided", desc: "Finish 10 different maps in A/D-Only", goal: "Clear 10 maps in A/D-Only", group: "style", icon: "ad", ring: 2, progress: (s) => at(s.styleMaps.adonly ?? 0, 10) },
+  { id: "backwards_10", name: "Moonwalker", desc: "Finish 10 different maps in Backwards", goal: "Clear 10 maps in Backwards", group: "style", icon: "bw", ring: 2, progress: (s) => at(s.styleMaps.backwards ?? 0, 10) },
   // Batch 1, part 2: !race, the October window and three hidden ones (research/PROGRESSION-BATCH1.md). The gauntlet
   // achievements are GAUNTLET_ACHIEVEMENTS below (gauntlets-weekly); batch 1's gauntlet items unlock with those.
   { id: "race_1", name: "Head to Head", desc: "Win a !race", goal: "Win a !race", group: "social", icon: "race", ring: 0, progress: (s) => at(s.raceWins ?? 0, 1) },
@@ -1273,12 +1277,16 @@ COSMETICS.push(
   { id: "hilt-twine", slot: "hilt", name: "Garden Twine", unlock: ach("style_wonly"), color: "#c8ad7a", rarity: 2 },
   { id: "hilt-olive-rubber", slot: "hilt", name: "Olive Rubber", unlock: ach("style_sideways"), color: "#4f5a34", rarity: 2 },
   { id: "hilt-tan-leather", slot: "hilt", name: "Tan Leather", unlock: ach("style_hsw"), color: "#b27a45", rarity: 2 },
+  { id: "hilt-slate-cord", slot: "hilt", name: "Slate Cord", unlock: ach("style_adonly"), color: "#5b6470", rarity: 2 },
+  { id: "hilt-driftwood", slot: "hilt", name: "Driftwood", unlock: ach("style_backwards"), color: "#9a8a74", rarity: 2 },
   // Ten clears in a style: the step up.
   { id: "hilt-walnut", slot: "hilt", name: "Walnut", unlock: ach("scroll_10"), color: "#6b4428", rarity: 3 },
   { id: "hilt-antler", slot: "hilt", name: "Antler", unlock: ach("legitscroll_10"), color: "#cdbb9a", rarity: 3 },
   { id: "hilt-orange-cord", slot: "hilt", name: "Orange Cord", unlock: ach("wonly_10"), color: "#ff7a1a", rarity: 3 },
   { id: "hilt-bamboo", slot: "hilt", name: "Bamboo", unlock: ach("sideways_10"), color: "#c7c27a", rarity: 3 },
   { id: "hilt-black-leather", slot: "hilt", name: "Black Leather", unlock: ach("hsw_10"), color: "#1f1c1c", rarity: 3 },
+  { id: "hilt-oxblood", slot: "hilt", name: "Oxblood Leather", unlock: ach("adonly_10"), color: "#6e1f1c", rarity: 3 },
+  { id: "hilt-ebony", slot: "hilt", name: "Ebony", unlock: ach("backwards_10"), color: "#2b211c", rarity: 3 },
   // Maps, boards and sweeps.
   { id: "hilt-clover", slot: "hilt", name: "Clover", unlock: ach("time_bhop_lol_meadow_16"), color: "#2f8f4a", rarity: 3 },
   { id: "hilt-navy-cord", slot: "hilt", name: "Navy Cord", unlock: ach("top10_1"), color: "#22305e", rarity: 3 },

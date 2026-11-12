@@ -26,7 +26,7 @@ import {
   type PlayerMarks,
   type StaffBadge,
 } from "../creators";
-import { nameFontFamily, nameFontOf, type NameFontId } from "../supporter-looks";
+import { nameFontFamily, nameFontOf, nameStyleShown, type NameFontId, type NameStyle } from "../supporter-looks";
 import "../ui/name-fonts.css";
 import { fitScale } from "../ui/name-fit";
 
@@ -34,26 +34,45 @@ const W = 512;
 const H = 112;
 const FONT = '600 30px Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif';
 const MONO = '600 28px ui-monospace, "SF Mono", Menlo, Consolas, monospace';
+const LIVE_FONT = '800 18px Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif';
+const LIVE_RED = "#e8433f";
 
 /**
  * A supporter's name font on the tag (supporter-looks.ts, ui/name-fonts.css): the canvas only draws a face that has
  * loaded, so the first ask starts the load and the tag draws in Inter until it lands; the tag's key carries "ready", so
  * the next set() after that redraws it once in the font. Same size-adjust as the page, so the pill fits the same.
  */
-const fontReady = new Set<NameFontId>();
-const fontAsked = new Set<NameFontId>();
-function tagFont(id: NameFontId | null): string | null {
-  if (!id) return null;
-  const css = `600 30px "${nameFontFamily(id)}", Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif`;
-  if (fontReady.has(id)) return css;
-  if (!fontAsked.has(id) && typeof document !== "undefined" && document.fonts) {
-    fontAsked.add(id);
-    document.fonts.load(`600 30px "${nameFontFamily(id)}"`, "Aa").then(
-      (faces) => void (faces.length && fontReady.add(id)),
+const fontReady = new Set<string>();
+const fontAsked = new Set<string>();
+/** v0.0.40: bold / italic too (only a cut the font has: nameStyleShown); the default font's own cuts need no load. */
+function tagFont(id: NameFontId | null, style: NameStyle | null = null): string | null {
+  if (!id && !style) return null;
+  const cut = `${style?.includes("i") ? "italic " : ""}${style?.includes("b") ? 950 : 600}`;
+  if (!id) return `${cut} 30px Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif`;
+  const css = `${cut} 30px "${nameFontFamily(id)}", Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif`;
+  const key = `${id}|${cut}`;
+  if (fontReady.has(key)) return css;
+  if (!fontAsked.has(key) && typeof document !== "undefined" && document.fonts) {
+    fontAsked.add(key);
+    document.fonts.load(`${cut} 30px "${nameFontFamily(id)}"`, "Aa").then(
+      (faces) => void (faces.length && fontReady.add(key)),
       () => {},
     );
   }
   return null;
+}
+
+/** voice: the speaker that takes the colour dot's place while the player talks (ui/icons.ts audio, 26 px). */
+function drawSpeaker(g: CanvasRenderingContext2D, cx: number, cy: number): void {
+  g.save();
+  g.translate(cx - 14, cy - 13);
+  g.scale(1.3, 1.3);
+  g.fillStyle = "#ffffff";
+  g.fill(new Path2D("M3 7.5H6L10 4V16L6 12.5H3Z"));
+  g.strokeStyle = "#ffffff";
+  g.lineWidth = 1.8;
+  g.stroke(new Path2D("M13 7.5A3.5 3.5 0 0 1 13 12.5M15.3 5A7 7 0 0 1 15.3 15"));
+  g.restore();
 }
 
 export class NameTag {
@@ -82,16 +101,16 @@ export class NameTag {
    * staff shield / Verified check / creator icon / Server Booster gem / Supporter badge (other players only), drawn
    * right after the name; a supporter's name look for the name. The tags are canvas textures redrawn only when they
    * change, so the look is drawn still: the colour; glow as a soft glow; gradient as the gradient; shine as the plain
-   * colour (it needs motion).
+   * colour (it needs motion). live: streaming right now (src/live.ts): a small red LIVE after the marks.
    */
-  set(name: string, time: string, delta: string | null, ahead: boolean, marks?: PlayerMarks | null): void {
+  set(name: string, time: string, delta: string | null, ahead: boolean, marks?: PlayerMarks | null, live = false, talking = false): void {
     const equipped = marks ? equippedNameBadges(marks) : [];
     const motion = marks?.gifterAnimated !== false && !this.reducedMotion.matches;
     const clock = motion && equipped.some(id => id === "gifter-prism" || id === "gifter-gold" || SPECIAL_BADGES[id]?.gold) ? Math.floor(performance.now() / 66) : 0;
     // Special badges draw from their SVG as an image: redraw once each has loaded.
     const loading = equipped.filter((id) => SPECIAL_BADGES[id] && !specialImage(id)).join(",");
-    const nameFont = tagFont(nameFontOf(marks?.nameFont));
-    const key = `${nameFont ?? ""}|${clock}|${loading}|${equipped.join(",")}|${marks?.gifterColors?.join(",") ?? ""}|${marks?.gifterAnimated ?? ""}|${name}|${time}|${delta}|${ahead}|${marks?.staff ?? ""}${marks?.verified ? 1 : 0}${marks?.creator ?? ""}${marks?.booster ? 1 : 0}${marks?.supporter ? 1 : 0}|${marks?.nameColor ?? ""}|${marks?.nameEffect ?? ""}|${marks?.nameColor2 ?? ""}`;
+    const nameFont = tagFont(nameFontOf(marks?.nameFont), nameStyleShown(nameFontOf(marks?.nameFont), marks?.nameStyle));
+    const key = `${nameFont ?? ""}|${clock}|${loading}|${equipped.join(",")}|${marks?.gifterColors?.join(",") ?? ""}|${marks?.gifterAnimated ?? ""}|${name}|${time}|${delta}|${ahead}|${marks?.staff ?? ""}${marks?.verified ? 1 : 0}${marks?.creator ?? ""}${marks?.booster ? 1 : 0}${marks?.supporter ? 1 : 0}|${marks?.nameColor ?? ""}|${marks?.nameEffect ?? ""}|${marks?.nameColor2 ?? ""}|${marks?.nameStyle ?? ""}|${live ? 1 : 0}|${talking ? 1 : 0}`;
     if (key === this.key) return;
     this.key = key;
     const g = this.g;
@@ -108,7 +127,9 @@ export class NameTag {
     }
     g.font = faceFont ?? FONT;
     const nameW = Math.min(g.measureText(name).width, W - 120);
-    const marksW = equipped.length * (MARK + 6);
+    g.font = LIVE_FONT;
+    const liveW = live ? g.measureText("LIVE").width + 14 + 6 : 0;
+    const marksW = equipped.length * (MARK + 6) + liveW;
     g.font = MONO;
     const timeW = g.measureText(time).width;
     const pillW = Math.min(W - 4, 30 + nameW + marksW + 18 + timeW + 22);
@@ -116,10 +137,13 @@ export class NameTag {
     g.fillStyle = "rgba(11, 13, 18, 0.62)";
     roundRect(g, x0, 2, pillW, 50, 25);
     g.fill();
-    g.fillStyle = this.color;
-    g.beginPath();
-    g.arc(x0 + 24, 27, 8, 0, Math.PI * 2);
-    g.fill();
+    if (talking) drawSpeaker(g, x0 + 24, 27);
+    else {
+      g.fillStyle = this.color;
+      g.beginPath();
+      g.arc(x0 + 24, 27, 8, 0, Math.PI * 2);
+      g.fill();
+    }
     g.textBaseline = "middle";
     g.font = faceFont ?? FONT;
     const fx = nameEffectOf(marks?.nameEffect);
@@ -136,6 +160,12 @@ export class NameTag {
     } else if (fx === "glow") {
       g.shadowColor = base;
       g.shadowBlur = 14;
+    } else if (fx === "outline") {
+      // v0.0.40: the rim in the second colour (or a paler shade of the first), under the fill.
+      g.strokeStyle = nameColorHex(marks?.nameColor2) ?? mixHex(base, "#ffffff", 0.55);
+      g.lineWidth = 3;
+      g.lineJoin = "round";
+      g.strokeText(name, x0 + 40, 28, W - 120);
     }
     g.fillText(name, x0 + 40, 28, W - 120);
     g.shadowBlur = 0;
@@ -200,6 +230,15 @@ export class NameTag {
         }
       }
       mx += MARK + 6;
+    }
+    if (live) {
+      // As the page's .nm-live (ui/marks.css): white on the live red, small, after the marks.
+      g.font = LIVE_FONT;
+      roundRect(g, mx, 27 - 12, liveW - 6, 24, 5);
+      g.fillStyle = LIVE_RED;
+      g.fill();
+      g.fillStyle = "#ffffff";
+      g.fillText("LIVE", mx + 7, 28);
     }
     g.font = MONO;
     g.fillStyle = "#a3abba";

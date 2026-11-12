@@ -438,6 +438,9 @@ public:
 
     bool map_audible() const { return enabled_ && volume > 0; }
 
+    // The master volume as heard now (0 while muted in the background): voice chat plays under it too.
+    float output_volume() const { return enabled_ ? volume : 0; }
+
     void set_map(BhContext *core) {
         map_core = core;
         impact_surfaces.build(core);

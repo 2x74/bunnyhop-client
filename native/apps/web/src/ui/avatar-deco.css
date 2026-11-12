@@ -6,6 +6,8 @@
 .av-deco > :first-child { grid-area: 1 / 1; }
 .av-deco-l { position: absolute; inset: -25%; pointer-events: none; display: block; }
 .av-deco-l svg { display: block; width: 100%; height: 100%; overflow: visible; }
+/* A placed layer's motion (supporter-looks.ts DecoLayer.place): the inner span moves inside the outer's fixed transform. */
+.av-deco-a { position: absolute; inset: 0; display: block; }
 .av-spin { animation: av-spin 14s linear infinite; }
 .av-spin-back { animation: av-spin 14s linear infinite reverse; }
 .av-sway { animation: av-sway 3.6s ease-in-out infinite; transform-origin: 50% 60%; }
@@ -14,6 +16,27 @@
 @keyframes av-spin { to { transform: rotate(1turn); } }
 @keyframes av-sway { 0%, 100% { transform: rotate(-4deg); } 50% { transform: rotate(4deg); } }
 @keyframes av-twinkle { 0%, 100% { opacity: 1; } 50% { opacity: 0.15; } }
-.fx-off .av-deco-l, .av-deco.fx-off .av-deco-l { animation-play-state: paused; }
-@media (prefers-reduced-motion: reduce) { .av-deco-l { animation: none !important; } }
-body.potato .av-deco-l { animation: none !important; }
+/* Speedometer: the needle (drawn near the top of the scale) starts at the bottom of it, climbs, trembles, drops back. */
+.av-gauge { animation: av-gauge 6s infinite; }
+@keyframes av-gauge {
+  0% { transform: rotate(-232deg); animation-timing-function: cubic-bezier(0.3, 0, 0.2, 1); }
+  28% { transform: rotate(0deg); animation-timing-function: ease-in-out; }
+  34% { transform: rotate(-2.5deg); } 40% { transform: rotate(1.2deg); } 46% { transform: rotate(-1.8deg); } 52% { transform: rotate(0.8deg); }
+  58% { transform: rotate(-2deg); } 64% { transform: rotate(0.6deg); } 70% { transform: rotate(-1deg); animation-timing-function: cubic-bezier(0.5, 0, 0.8, 0.4); }
+  90%, 100% { transform: rotate(-232deg); }
+}
+/* A rare short flash (Frost). Drawn lit, so the still keeps it. */
+.av-glint { animation: av-glint 5.2s ease-in-out infinite; }
+@keyframes av-glint { 0%, 78%, 100% { opacity: 0; transform: scale(0.4); } 86% { opacity: 1; transform: none; } }
+/* A petal comes loose, drifts off by --dx --dy turning, and fades; the next one follows. */
+.av-drift { animation: av-drift 6.8s linear infinite; }
+@keyframes av-drift {
+  0% { opacity: 0; transform: none; }
+  8% { opacity: 1; transform: none; }
+  20% { opacity: 1; transform: rotate(-10deg); }
+  60% { opacity: 0.9; transform: translate(calc(var(--dx) * 0.45), calc(var(--dy) * 0.5)) rotate(140deg); }
+  85%, 100% { opacity: 0; transform: translate(var(--dx), var(--dy)) rotate(260deg); }
+}
+.fx-off .av-anim, .av-deco.fx-off .av-anim { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) { .av-anim { animation: none !important; } }
+body.potato .av-anim { animation: none !important; }

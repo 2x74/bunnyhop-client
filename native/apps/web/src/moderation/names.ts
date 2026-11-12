@@ -21,7 +21,7 @@ export const NAME_MAX = 20;
 
 export type NameProblem = "too_short" | "too_long" | "charset" | "edges" | "separators" | "blocked" | "reserved";
 /** Every refusal the API can give for a name (problems plus uniqueness and rate limits). */
-export type NameError = NameProblem | "taken" | "rename_limit" | "bad_name";
+export type NameError = NameProblem | "taken" | "held" | "rename_limit" | "bad_name";
 
 export const NAME_MESSAGES: Record<NameError, string> = {
   too_short: `At least ${NAME_MIN} characters.`,
@@ -32,6 +32,7 @@ export const NAME_MESSAGES: Record<NameError, string> = {
   blocked: "That name isn't allowed. Try another.",
   reserved: "That name is reserved. Try another.",
   taken: "That name is taken.",
+  held: "That name's owner changed it recently. It's kept for them for up to 14 days.",
   rename_limit: "You can change your name 3 times a day.",
   bad_name: "That name isn't allowed. Try another.",
 };

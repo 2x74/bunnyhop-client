@@ -618,7 +618,27 @@ void test_landfix_does_not_change_infinite_flight_or_air_jumps() {
 
 }  // namespace
 
+void test_anti_skip_zones_match_recorded_header() {
+    // bhop_gofuckyourself pins anti-skip zones (kind 4, never numbered). Practice from a replay must match them.
+    const std::array<BhZone, 3> zones{
+            BhZone{0, 0, 0, {192, -9616, -415}, {960, -9200, -288}},
+            BhZone{1, 0, 0, {192, 9232, -415}, {960, 9648, -288}},
+            BhZone{4, 0, 0, {128, -9199, -448}, {256, 9231, 512}}
+    };
+    Json info = {{"zones", Json::array()}};
+    for (const auto &z : zones) {
+        Json zone = {{"kind", z.kind == 4 ? "anti-skip" : z.kind == 1 ? "end" : "start"}};
+        zone["mins"] = {z.mins[0], z.mins[1], z.mins[2]};
+        zone["maxs"] = {z.maxs[0], z.maxs[1], z.maxs[2]};
+        info["zones"].push_back(zone);
+    }
+    assert(native::replay_zones_match(info, zones));
+    info["zones"].erase(2);
+    assert(!native::replay_zones_match(info, zones));
+}
+
 int main() {
+    test_anti_skip_zones_match_recorded_header();
     test_landfix_does_not_change_infinite_flight_or_air_jumps();
     test_restart_placement_and_recorded_names();
     test_invalid_start_point_preserves_default_spawn();

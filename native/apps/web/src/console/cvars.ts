@@ -105,6 +105,8 @@ const hudDetail: Cvar[] = [
   sw("cl_fjt_chat", "First jump tick in the chat.", (p) => p.hud.movement.fjtChat, (p, v) => (p.hud.movement.fjtChat = v)),
   sw("cl_ljstats", "Longjump stats.", (p) => p.hud.movement.lj, (p, v) => (p.hud.movement.lj = v)),
   sw("cl_ljstats_chat", "Longjump stats in the chat.", (p) => p.hud.movement.ljChat, (p, v) => (p.hud.movement.ljChat = v)),
+  sw("cl_slowticks", "Slow ticks per strafe, with the strafe offsets.", (p) => p.hud.movement.slowTicks, (p, v) => (p.hud.movement.slowTicks = v)),
+  num("cl_slowticks_below", "A tick is slow under this % of the best gain, 10 to 99.", [10, 99], (p) => p.hud.movement.slowBelow, (p, v) => (p.hud.movement.slowBelow = v), { int: true }),
 ];
 /** Announcer, scroll-hop cues and per-bus mutes (Settings → Audio). */
 const audioDetail: Cvar[] = [
@@ -263,6 +265,9 @@ export const CVARS: readonly Cvar[] = [
   num("snd_uivolume", "Menu sounds volume, 0 to 1.", pct, (p) => p.audio.ui, (p, v) => (p.audio.ui = v)),
   num("snd_ambiencevolume", "Ambience volume, 0 to 1.", pct, (p) => p.audio.ambience, (p, v) => (p.audio.ambience = v)),
   num("snd_mapvolume", "The map's own sounds, 0 to 1.", pct, (p) => p.audio.map, (p, v) => (p.audio.map = v)),
+  // Voice chat (voice/): Source's names. +voicerecord (bound to X) is the push to talk command.
+  sw("voice_enable", "Voice chat in rooms: hear others and talk with push to talk.", (p) => p.voice.enabled, (p, v) => (p.voice.enabled = v)),
+  num("voice_scale", "Everyone's voice volume, 0 to 1.", pct, (p) => p.voice.volume, (p, v) => (p.voice.volume = v)),
   sw("snd_mute", "Mute everything.", (p) => p.audio.muted, (p, v) => (p.audio.muted = v)),
   sw("snd_mute_losefocus", "Silence while the tab is in the background.", (p) => p.audio.muteInBackground, (p, v) => (p.audio.muteInBackground = v)),
   pick("snd_musicmode", "Music: always, menus or off.", ["always", "menus", "off"] as const, (p) => p.audio.musicMode, (p, v) => (p.audio.musicMode = v)),
@@ -284,6 +289,8 @@ export const CVARS: readonly Cvar[] = [
  */
 export const NOT_CONSOLE: Readonly<Record<string, string>> = {
   binds: "keys: bind / unbind",
+  "voice.key": "keys: bind <key> +voicerecord",
+  "voice.device": "a microphone the browser names: Settings → Audio → Voice chat",
   cmdBinds: "keys: bind",
   aliases: "alias",
   mapLooks: "per map: !bright, !fb, the pause menu",
@@ -422,8 +429,6 @@ export const UNSUPPORTED_CVARS: Record<string, string> = {
   cl_bobup: "use viewmodel_bob",
   cl_autowepswitch: "no weapon pickups",
   hud_fastswitch: "weapon slots always switch at once",
-  voice_enable: "no voice chat",
-  voice_scale: "no voice chat",
   snd_mixahead: "not a browser setting",
   windows_speaker_config: "not a browser setting",
   name: "change your name on your profile",

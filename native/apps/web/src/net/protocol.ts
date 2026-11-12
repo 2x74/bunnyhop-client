@@ -53,7 +53,7 @@ import type { StyleId } from "../styles";
 import type { CosmeticLoadout } from "../loadout";
 import type { StaffRole } from "../progression";
 import type { CreatorKind, NameColorId, NameEffect, StaffBadge } from "../creators";
-import type { NameFontId } from "../supporter-looks";
+import type { AvatarDecoId, CardBorderId, CardEffectId, NameFontId, NameStyle } from "../supporter-looks";
 
 export const PROTOCOL_VERSION = 1;
 
@@ -505,6 +505,8 @@ export interface RosterPlayer {
   nameColor2?: NameColorId | null;
   /** v0.0.37: a supporter's name font (supporter-looks.ts NAME_FONTS id). Absent = the default font; older clients ignore it. */
   nameFont?: NameFontId | null;
+  /** v0.0.40: bold / italic (supporter-looks.ts NameStyle). Absent = plain; older clients ignore it. */
+  nameStyle?: NameStyle | null;
   nameBadges?: string[]; giftsSent?: number; gifterColors?: string[]; gifterAnimated?: boolean;
   /** Staff-granted special badges (creators.ts SPECIAL_BADGES, 0.0.21). Absent from older servers. */
   special?: string[];
@@ -516,6 +518,20 @@ export interface RosterPlayer {
    * client says so with { t: "practice" }; patched live. Absent from older servers; older clients ignore it.
    */
   practice?: boolean;
+  /** Voice: muted from talking in this room by staff or the lobby's host (patched live). Absent: not muted. */
+  voiceMuted?: boolean;
+  /** A supporter's avatar decoration (supporter-looks.ts AVATAR_DECOS), read at join. Absent: none. */
+  avatarDeco?: AvatarDecoId | null;
+  /** The player card's looks (the voice talker list draws a talker in them), read at join. Absent: the default card. */
+  card?: RosterCard | null;
+}
+
+/** A player card's looks: frame and background (progression.ts cosmetics), a supporter's border and effect. */
+export interface RosterCard {
+  frame?: string;
+  background?: string;
+  border?: CardBorderId;
+  effect?: CardEffectId;
 }
 
 export interface RoomInfo {
@@ -531,6 +547,8 @@ export interface RoomInfo {
    */
   private?: boolean;
   host?: number | null;
+  /** Voice chat (net/voice-wire.ts) relays here: 1 = push to talk, alltalk. Absent: an older room, send no voice. */
+  voice?: number;
 }
 
 export interface MapInfo {
@@ -681,7 +699,7 @@ export type ServerMsg =
    * marks; `nameColor` / `nameEffect` / `nameColor2` / `nameFont`: a supporter's name look. Set by the room (never by the client);
    * absent from older servers.
    */
-  | { t: "chat"; kind: ChatKind; text: string; slot?: number; name?: string; rank?: RankTag | null; role?: StaffRole | null; staff?: StaffBadge | null; verified?: boolean; creator?: CreatorKind | null; special?: string[]; booster?: boolean; supporter?: boolean; nameColor?: NameColorId | null; nameEffect?: NameEffect | null; nameColor2?: NameColorId | null; nameFont?: NameFontId | null; nameBadges?: string[]; giftsSent?: number; gifterColors?: string[]; gifterAnimated?: boolean; at: number }
+  | { t: "chat"; kind: ChatKind; text: string; slot?: number; name?: string; rank?: RankTag | null; role?: StaffRole | null; staff?: StaffBadge | null; verified?: boolean; creator?: CreatorKind | null; special?: string[]; booster?: boolean; supporter?: boolean; nameColor?: NameColorId | null; nameEffect?: NameEffect | null; nameColor2?: NameColorId | null; nameFont?: NameFontId | null; nameStyle?: NameStyle | null; nameBadges?: string[]; giftsSent?: number; gifterColors?: string[]; gifterAnimated?: boolean; at: number }
   | { t: "gift"; batchId: string; count: number; names: string[]; sender: { id: string; name: string }; recipients: { id: string; name: string }[] }
   | { t: "vote"; vote: VoteView; myVote?: number | null }
   | { t: "voteEnd"; id: number; winner: VoteOption | null }
@@ -725,7 +743,18 @@ export type ClientMsg =
    * others. Cosmetic: the room never trusts it for records (only verified replays are announced). Sent on change (at
    * most about twice a second) and after every welcome. Older servers drop it.
    */
-  | { t: "practice"; on: boolean };
+  | { t: "practice"; on: boolean }
+  /**
+   * Voice chat (net/voice-wire.ts): this socket wants voice frames (`listen`; voice on in its settings). Sent after
+   * every welcome of a room that says `voice` and on change. Without it the room sends this socket no voice at all,
+   * so older clients and native builds without voice never get the frames. Older servers drop it.
+   */
+  | { t: "voice"; listen: boolean }
+  /**
+   * Voice: staff or a private lobby's host mutes (`on`) or unmutes a player's voice for this room. `minutes` absent:
+   * the room's default. The room checks who may; everyone gets the roster's `voiceMuted` patch.
+   */
+  | { t: "voiceMute"; slot: number; on: boolean; minutes?: number };
 
 /** Validates a client control frame. Returns null for anything malformed (the room drops it). */
 export function parseClientMsg(text: string): ClientMsg | null {
@@ -737,6 +766,7 @@ export function parseClientMsg(text: string): ClientMsg | null {
     return null;
   }
   if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const uint = (v: unknown, max = 0xffff_ffff): v is number => Number.isSafeInteger(v) && (v as number) >= 0 && (v as number) <= max;
   const o = v as Record<string, unknown>;
   switch (o.t) {
     case "chat":
@@ -752,6 +782,12 @@ export function parseClientMsg(text: string): ClientMsg | null {
       return typeof o.knife === "string" && typeof o.finish === "string" && o.knife.length <= 48 && o.finish.length <= 48 ? { t: "knife", knife: o.knife, finish: o.finish } : null;
     case "practice":
       return typeof o.on === "boolean" ? { t: "practice", on: o.on } : null;
+    case "voice":
+      return typeof o.listen === "boolean" ? { t: "voice", listen: o.listen } : null;
+    case "voiceMute":
+      return uint(o.slot, 255) && typeof o.on === "boolean" && (o.minutes === undefined || uint(o.minutes, 7 * 24 * 60) && o.minutes > 0)
+        ? { t: "voiceMute", slot: o.slot, on: o.on, ...(o.minutes !== undefined ? { minutes: o.minutes as number } : {}) }
+        : null;
     case "spec":
       if (o.target === null) return { t: "spec", target: null };
       return Number.isInteger(o.target) && (o.target as number) >= 0 && (o.target as number) < 256 ? { t: "spec", target: o.target as number } : null;

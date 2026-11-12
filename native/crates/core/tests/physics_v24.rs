@@ -13,10 +13,9 @@
 
 use bunnyhop_core::game::{map_cs_deleted_props_v24, map_end_touch_outputs_v24, map_event_clock_v24_for, map_parented_doors_v24_for, map_parented_props_v24_for, EVENT_TELEPORTED, PHYSICS_V23, PHYSICS_V24};
 use bunnyhop_core::{Cmd, Game, Settings};
-use std::path::PathBuf;
 
 fn load(name: &str, version: u32) -> Option<Game> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("../../maps/{name}.bsp"));
+    let path = bunnyhop_core::test_maps::bsp(name);
     if !path.exists() {
         eprintln!("skipping: {} not present", path.display());
         return None;
@@ -46,6 +45,7 @@ const IN_DUCK: u32 = 4;
 /// `OnStartTouch !activator,AddOutput,Basevelocity boostAmountX boostAmountY 1550` fires on EndTouch from v24
 /// (`map_fixes::END_TOUCH_OUTPUTS_V24`). Expected values are srcds on a copy of the BSP with the key renamed OnEndTouch
 /// (tools/parity, /tmp/bh-0036/funhouse-report.md; the core is bit-exact with it on every case).
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn weed_funhouse_boosters_fire_on_end_touch_from_v24() {
     let pad = [4448.0, -1892.0, 66.0];
@@ -89,9 +89,10 @@ fn weed_funhouse_boosters_fire_on_end_touch_from_v24() {
 }
 
 /// Only the two boosters on this build; the map's other outputs and every other map are unchanged.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn weed_funhouse_end_touch_table_pins_the_two_boosters() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps/bhop_weed_funhouse.bsp");
+    let path = bunnyhop_core::test_maps::bsp("bhop_weed_funhouse");
     if !path.exists() {
         eprintln!("skipping: {} not present", path.display());
         return;
@@ -105,7 +106,7 @@ fn weed_funhouse_end_touch_table_pins_the_two_boosters() {
         assert!(list.outputs[i].iter().all(|o| &*o.event == "onstarttouch"), "the build's boosters still say OnStartTouch");
     }
     for other in ["bhop_eazy", "bhop_4tele", "bhop_finalmap_strange_fixed2"] {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("../../maps/{other}.bsp"));
+        let path = bunnyhop_core::test_maps::bsp(other);
         let Ok(bytes) = std::fs::read(&path) else { continue };
         let bsp = bunnyhop_core::parse_bsp(&bytes).unwrap();
         assert!(map_end_touch_outputs_v24(&bunnyhop_core::physics::entity_list_with_outputs(&bsp, true).entities).is_empty(), "{other}");
@@ -183,6 +184,7 @@ fn hell_barrel_rest(version: u32) -> Option<f32> {
     Some(game.state.position[2])
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn hell_barrels_are_gone_from_v24() {
     let (Some(v23), Some(v24)) = (hell_barrel_rest(PHYSICS_V23), hell_barrel_rest(PHYSICS_V24)) else { return };
@@ -191,6 +193,7 @@ fn hell_barrels_are_gone_from_v24() {
     assert!((v24 - 361.0).abs() < 2.0, "v24 falls to the floor, z {v24}");
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn every_deleted_prop_row_matches_its_build() {
     for (map, n) in [("bhop_hell", 7), ("bhop_ecodus", 3), ("bhop_mirrorsedge_chpt1", 1), ("bhop_mist_4", 2), ("bhop_sina_fix", 1),
@@ -225,6 +228,7 @@ fn dtt_drop(version: u32) -> Option<(Option<u32>, f32, bool)> {
     Some((None, game.state.position[2], teleported))
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn dtt_trainning2_crates_carry_the_player_from_v24() {
     let Some(game) = load("bhop_dtt_trainning2", PHYSICS_V24) else { return };
@@ -236,6 +240,7 @@ fn dtt_trainning2_crates_carry_the_player_from_v24() {
     assert!(game.render_props().iter().filter(|p| p.4 != 0).count() >= 36, "the crates are drawn, moving");
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn four_tele_is_on_the_event_clock_from_v24() {
     let Some(game) = load("bhop_4tele", PHYSICS_V24) else { return };

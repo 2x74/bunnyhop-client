@@ -86,6 +86,8 @@ export const REQUESTED_KEYS: readonly RequestedKey[] = [
   hud("hud.movement.fjtChat", boolean),
   hud("hud.movement.lj", boolean),
   hud("hud.movement.ljChat", boolean),
+  hud("hud.movement.slowTicks", boolean),
+  hud("hud.movement.slowBelow", number(10, 99, true)),
   hud("triggers.style", choice("filled", "outline", "bottom")),
   hud("triggers.thickness", number(TRIGGER_THICKNESS[0], TRIGGER_THICKNESS[1])),
   hud("triggers.opacity", number(TRIGGER_OPACITY[0], TRIGGER_OPACITY[1])),

@@ -488,10 +488,11 @@ export const playerView: View = async (root, _params, [id]) => {
 // --- Names
 
 export const namesView: View = async (root) => {
-  const [flagged, terms, reserved] = await Promise.all([
+  const [flagged, terms, reserved, holds] = await Promise.all([
     api<{ players: { id: string; name: string; problem: string }[] }>("/admin/names?flagged=1"),
     api<{ terms: { term: string; whole: number; created_by: string | null; created_at: number }[] }>("/admin/names?terms=1"),
     api<{ names: { name: string; name_key: string; reason: string | null; created_by: string | null; created_at: number }[] }>("/admin/names?reserved=1"),
+    api<{ holds: { name: string; user_id: string; holder: string | null; expires_at: number; created_at: number }[] }>("/admin/names?holds=1"),
   ]);
   const term = h("input", { type: "text", placeholder: "3+ letters", required: true });
   const whole = h("input", { type: "checkbox" });
@@ -582,6 +583,28 @@ export const namesView: View = async (root) => {
           ["Name", "Why", "Added", ""],
           reserved.names.map((r) => h("tr", null, h("td", null, r.name), h("td", null, r.reason ?? ""), timeCell(r.created_at), h("td", { class: "acts" }, may("names.unban") && h("button", { class: "small ghost", onclick: async (e: Event) => { const row = rowOf(e); if (await ask({ title: `Allow "${r.name}" again?`, confirm: "Allow" })) await leaveRow(row, act("/admin/names", { action: "unban-name", name: r.name }, "Allowed again")); } }, glyph("close"), "Remove")))),
           "No reserved names.",
+        ),
+      ),
+      // Old names kept for players who renamed (apps/api src/names.ts holds): nobody else can take them until they free up.
+      h(
+        "section",
+        { class: "card" },
+        h("h2", null, "Held names", h("small", null, String(holds.holds.length))),
+        h("p", { class: "faint" }, "A player's previous name stays theirs for 14 days after they rename."),
+        table(
+          ["Name", "Kept for", "Since", "Frees", ""],
+          holds.holds.map((r) =>
+            h(
+              "tr",
+              null,
+              h("td", null, r.name),
+              h("td", null, playerLink(r.user_id, r.holder ?? r.user_id)),
+              timeCell(r.created_at),
+              timeCell(r.expires_at),
+              h("td", { class: "acts" }, may("names.unban") && h("button", { class: "small ghost", onclick: async (e: Event) => { const row = rowOf(e); if (await ask({ title: `Free "${r.name}" now?`, text: "Anyone can take it after this.", confirm: "Free name" })) await leaveRow(row, act("/admin/names", { action: "release-hold", name: r.name }, "Name freed")); } }, glyph("close"), "Free now")),
+            ),
+          ),
+          "No held names.",
         ),
       ),
     ),

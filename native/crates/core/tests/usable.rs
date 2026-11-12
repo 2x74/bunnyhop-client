@@ -5,10 +5,9 @@ use bunnyhop_core::{
     Cmd, Game, Settings,
     game::{IN_ATTACK, IN_JUMP, IN_USE, PHYSICS_LATEST},
 };
-use std::path::PathBuf;
 
 fn load(name: &str) -> Option<Game> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps").join(format!("{name}.bsp"));
+    let path = bunnyhop_core::test_maps::bsp(name);
     if !path.exists() {
         eprintln!("skipping {name}: {} not found", path.display());
         return None;
@@ -39,6 +38,7 @@ fn ivy_door_run(ticks: usize, use_tick: usize, walk_from: usize) -> Option<(Vec<
     Some((yaws, game))
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn ivy_door_opens_on_use_like_the_engine() {
     let Some((yaws, _)) = ivy_door_run(1400, 5, 126) else { return };
@@ -52,6 +52,7 @@ fn ivy_door_opens_on_use_like_the_engine() {
     assert_eq!(yaws[1230], 270.0);
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn ivy_door_needs_a_fresh_press_and_blocks_when_closed() {
     let Some(mut game) = load("bhop_ivy_final") else { return };
@@ -76,6 +77,7 @@ fn ivy_door_needs_a_fresh_press_and_blocks_when_closed() {
     assert!(game.state.position[1] < -4340.0, "walked through the open doorway (y {})", game.state.position[1]);
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn ivy_use_is_deterministic() {
     let run = || {
@@ -110,6 +112,7 @@ fn yonkoma_rock_run() -> Option<(Vec<f32>, Game)> {
     Some((z, game))
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn yonkoma_rock_falls_and_is_deterministic() {
     let Some((z, a)) = yonkoma_rock_run() else { return };
@@ -121,6 +124,7 @@ fn yonkoma_rock_falls_and_is_deterministic() {
 }
 
 /// kz_bhop_yonkoma's crane lever (func_rot_button, +use activates, roll 45 deg at 32 deg/s, stays pressed).
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn yonkoma_lever_rotates_on_use() {
     let Some(mut game) = load("kz_bhop_yonkoma") else { return };
@@ -141,6 +145,7 @@ fn yonkoma_lever_rotates_on_use() {
 /// pit) lifts the player to the ceiling and trigger_push *275 (filter rand1, 200 west, z -568..-496) carries them
 /// through the exit hole onto stage 1 (floor -568 past x -3584). +use only, like CS:S: +attack does nothing, and the
 /// button must be within PLAYER_USE_RADIUS (80u from the eye), so it can't be pressed from across the room.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn badges2_start_boost_button() {
     let Some(mut game) = load("bhop_badges2") else { return };

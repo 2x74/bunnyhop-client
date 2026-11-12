@@ -30,14 +30,19 @@ let uid = 0;
 /** Server error -> message (never echoing the name). */
 export function nameErrorMessage(e: unknown): string {
   if (e instanceof ApiError) {
-    if (e.code === "rename_limit" || e.code === "taken") return e.message;
+    if (e.code === "rename_limit" || e.code === "taken" || e.code === "held") return e.message;
     if (e.code in NAME_MESSAGES) return NAME_MESSAGES[e.code as NameError];
     return e.message || "That didn't work. Try again.";
   }
   return "Couldn't reach the server. Try again.";
 }
 
-export function nameField(o: { dispatch?:RequestDispatch; initial?: string; label?: string; autofocus?: boolean; onSaved?: (u: User | null, name: string) => void; onInput?: () => void } = {}): NameField {
+/**
+ * `keepOnLimit`: when the network's guest limit refuses the save (a school or café that already made its new players
+ * today), keep the name on this device and carry on, as offline does. The intro uses it: without it its first question
+ * can't be answered there (695 refused saves 10-28 to 11-10). Runs are kept on the device and the end-of-run card says why.
+ */
+export function nameField(o: { dispatch?:RequestDispatch; initial?: string; label?: string; autofocus?: boolean; keepOnLimit?: boolean; onSaved?: (u: User | null, name: string) => void; onInput?: () => void } = {}): NameField {
   const id = `name-field-${++uid}`;
   const input = h("input.nf-input", {
     id,
@@ -97,8 +102,9 @@ export function nameField(o: { dispatch?:RequestDispatch; initial?: string; labe
       const r = await api.checkName(name);
       if (my !== seq) return;
       if (!r.ok) serverNote = { text: r.message ?? NAME_MESSAGES.bad_name, kind: "err" };
-      else if (r.available) serverNote = { text: name === o.initial ? "" : "Available", kind: "ok" };
-      else if (r.adjusts && r.suggestion) serverNote = { text: `Taken. You'd be ${r.suggestion}.`, kind: "warn" };
+      else if (r.available) serverNote = { text: name === o.initial ? "" : r.heldForYou ? "Your old name. You can take it back." : "Available", kind: "ok" };
+      else if (r.adjusts && r.suggestion) serverNote = { text: `${r.error === "held" ? "Kept for its owner" : "Taken"}. You'd be ${r.suggestion}.`, kind: "warn" };
+      else if (r.error === "held") serverNote = { text: r.suggestion ? `${NAME_MESSAGES.held} Try ${r.suggestion}?` : NAME_MESSAGES.held, kind: "err" };
       else serverNote = { text: r.suggestion ? `Taken. Try ${r.suggestion}?` : NAME_MESSAGES.taken, kind: "err" };
       paint(true);
     } catch {
@@ -153,11 +159,19 @@ export function nameField(o: { dispatch?:RequestDispatch; initial?: string; labe
         const u = await api.setDisplayName(name,o.dispatch);
         localStorage.setItem(NAME_LOCAL_KEY, u.name);
         input.value = u.name;
-        set(u.nameAdjusted ? `That one was taken. You're ${u.name}.` : "Saved.", u.nameAdjusted ? "warn" : "ok");
+        const kept = u.oldNameHeld ? ` ${u.oldNameHeld.name} stays yours until ${new Date(u.oldNameHeld.until).toLocaleDateString()} if you want it back.` : "";
+        set(u.nameAdjusted ? `That one was taken. You're ${u.name}.${kept}` : `Saved.${kept}`, u.nameAdjusted ? "warn" : "ok");
         o.onSaved?.(u, u.name);
         return u.name;
       } catch (e) {
+        if (o.keepOnLimit && e instanceof ApiError && e.code === "guest_limit") {
+          localStorage.setItem(NAME_LOCAL_KEY, name);
+          set(e.message, "warn");
+          o.onSaved?.(null, name);
+          return name;
+        }
         if (e instanceof ApiError && e.code === "taken" && typeof e.body.suggestion === "string") set(`Taken. Try ${e.body.suggestion}?`, "err");
+        else if (e instanceof ApiError && e.code === "held" && typeof e.body.suggestion === "string") set(`${NAME_MESSAGES.held} Try ${e.body.suggestion}?`, "err");
         else set(nameErrorMessage(e), "err");
         sfx("ui_error", 0.6);
         input.focus();

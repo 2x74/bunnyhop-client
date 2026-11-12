@@ -2,10 +2,9 @@
 //! Test maps are gitignored; each test skips (with a note) when its map is absent.
 
 use bunnyhop_core::{Cmd, Game, game::EVENT_TELEPORTED, physics};
-use std::path::PathBuf;
 
 fn map_bytes(name: &str) -> Option<Vec<u8>> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps").join(format!("{name}.bsp"));
+    let path = bunnyhop_core::test_maps::bsp(name);
     match std::fs::read(&path) {
         Ok(b) => Some(b),
         Err(_) => {
@@ -20,6 +19,7 @@ const DISPLACEMENT_MAPS: [&str; 5] = ["bhop_arcane_v1", "bhop_sahara", "bhop_dep
 
 /// Dropping the player onto the middle of every floor-like displacement lands on it instead of
 /// falling through (displacement collision is attached to the world).
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn players_land_on_displacements() {
     let mut total = (0, 0);
@@ -75,6 +75,7 @@ fn players_land_on_displacements() {
 
 /// The same drop with displacement collision missing would fall through: check the trace really
 /// comes from the displacement (hit identity tagged as a world surface, not a brush).
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn displacement_hits_are_world_surfaces() {
     let Some(bytes) = map_bytes("bhop_arcane_v1") else { return };
@@ -100,6 +101,7 @@ fn displacement_hits_are_world_surfaces() {
 /// whole map (`displacements: InvalidRange`). They load, report the triangles, and box sweeps
 /// through the collapsed vertices only ever return unit hit normals (a zero normal is a malformed
 /// trace for the movement code).
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn maps_with_zero_area_displacement_triangles_load() {
     const SUFFIX: &str = " zero-area triangles collide as segments (no face plane)";
@@ -168,6 +170,7 @@ fn maps_with_zero_area_displacement_triangles_load() {
 /// ice surface (hit identity bits 48..64 = surface-table index), and standing on one gives the
 /// player surface friction min(0.1 * 1.25, 1) = 0.125. (On arcane the ice floors are fail floors
 /// inside teleport triggers, so the slide itself is tested on a synthetic scene in slopes.rs.)
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn ice_surface_property_resolves_from_the_packed_vmt() {
     let Some(bytes) = map_bytes("bhop_arcane_v1") else { return };
@@ -202,6 +205,7 @@ fn ice_surface_property_resolves_from_the_packed_vmt() {
 }
 
 /// With the surface-property rule off, every surface uses the default player friction.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn surface_properties_rule_off_uses_default_friction() {
     let Some(bytes) = map_bytes("bhop_strafingonlegos") else { return };
@@ -224,6 +228,7 @@ fn surface_properties_rule_off_uses_default_friction() {
 
 /// bhop_depot packs the .phy collision models of its static props: players stand on them (the
 /// hit is a world surface without a brush index, i.e. the prop's convex hull, not a brush).
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn players_stand_on_packed_static_props() {
     let Some(bytes) = map_bytes("bhop_depot") else { return };

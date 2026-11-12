@@ -1,20 +1,23 @@
 // The Support page's look (ui/support.ts): the name colour and effect plus the v0.0.37 supporter looks (name font,
-// avatar decoration, card border and card effect). DOM-free, so the rules are testable:
+// avatar decoration, card border, card effect and, v0.0.40, the hover effect). DOM-free, so the rules are testable:
 // - everyone can try every look on the page's cards (a preview, nothing saved);
 // - a supporter's picks are their real look: seeded from GET /me/supporter and saved with POST /me/supporter, sending
 //   only what changed since the last answer, one request at a time (lookSaver; the server refuses anyone else: 403
 //   not_supporter).
 
 import type { NameColorId, NameEffect } from "./creators";
-import type { AvatarDecoId, CardBorderId, CardEffectId, NameFontId } from "./supporter-looks";
+import type { AvatarDecoId, CardBorderId, CardEffectId, HoverFxId, NameFontId, NameStyle } from "./supporter-looks";
 
 export interface LookPicks {
   color: NameColorId | null;
   effect: NameEffect | null;
   font: NameFontId | null;
+  /** v0.0.40: bold / italic. */
+  style: NameStyle | null;
   deco: AvatarDecoId | null;
   border: CardBorderId | null;
   cardEffect: CardEffectId | null;
+  hoverFx: HoverFxId | null;
 }
 
 /** The POST /me/supporter field each pick saves to. */
@@ -22,19 +25,21 @@ export const LOOK_FIELDS = {
   color: "nameColor",
   effect: "nameEffect",
   font: "nameFont",
+  style: "nameStyle",
   deco: "avatarDeco",
   border: "cardBorder",
   cardEffect: "cardEffect",
+  hoverFx: "hoverFx",
 } as const satisfies Record<keyof LookPicks, string>;
 
 export type LookPatch = { -readonly [K in keyof LookPicks as (typeof LOOK_FIELDS)[K]]?: LookPicks[K] };
 
 /** What the page shows before you pick anything (and what a non-supporter starts from): a few looks on, to show them. */
-export const PREVIEW_LOOK: LookPicks = { color: "aqua", effect: "sparkle", font: null, deco: "ears", border: "comet", cardEffect: null };
+export const PREVIEW_LOOK: LookPicks = { color: "aqua", effect: "sparkle", font: null, style: null, deco: "ears", border: "comet", cardEffect: null, hoverFx: null };
 
 /** A supporter's saved picks (fields an older API leaves out are off). */
-export function savedPicks(s: { nameColor: NameColorId | null; nameEffect: NameEffect | null; nameFont?: NameFontId | null; avatarDeco?: AvatarDecoId | null; cardBorder?: CardBorderId | null; cardEffect?: CardEffectId | null }): LookPicks {
-  return { color: s.nameColor, effect: s.nameEffect, font: s.nameFont ?? null, deco: s.avatarDeco ?? null, border: s.cardBorder ?? null, cardEffect: s.cardEffect ?? null };
+export function savedPicks(s: { nameColor: NameColorId | null; nameEffect: NameEffect | null; nameFont?: NameFontId | null; nameStyle?: NameStyle | null; avatarDeco?: AvatarDecoId | null; cardBorder?: CardBorderId | null; cardEffect?: CardEffectId | null; hoverFx?: HoverFxId | null }): LookPicks {
+  return { color: s.nameColor, effect: s.nameEffect, font: s.nameFont ?? null, style: s.nameStyle ?? null, deco: s.avatarDeco ?? null, border: s.cardBorder ?? null, cardEffect: s.cardEffect ?? null, hoverFx: s.hoverFx ?? null };
 }
 
 /** The fields that differ from what's saved, as POST /me/supporter takes them; null when nothing changed. */

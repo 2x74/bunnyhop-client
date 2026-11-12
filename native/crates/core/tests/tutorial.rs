@@ -8,12 +8,11 @@ use bunnyhop_core::{
     game::{EVENT_TELEPORTED, IN_JUMP},
     mesh,
 };
-use std::path::PathBuf;
 
 const MAP: &str = "bhop_lol_tutorial";
 
 fn bytes() -> Option<Vec<u8>> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps").join(format!("{MAP}.bsp"));
+    let path = bunnyhop_core::test_maps::bsp(&MAP);
     std::fs::read(&path).map_err(|_| eprintln!("skipping: {} not found (bun tools/tutorial/build.ts)", path.display())).ok()
 }
 

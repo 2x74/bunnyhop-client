@@ -24,7 +24,6 @@ use bunnyhop_core::physics::ConvexBrush;
 use bunnyhop_core::{Cmd, Game, Settings};
 use playsrc_collision::Hull;
 use playsrc_movement::{self as movement, Command, Error, Player, State, StepInput, Trace, Tracer};
-use std::path::PathBuf;
 
 mod common;
 
@@ -38,7 +37,7 @@ fn v(version: u32) -> Settings {
 #[test]
 fn versions_and_fix_bits() {
     assert_eq!(Settings::css_bhop().physics_version, PHYSICS_V1, "native default stays v1");
-    assert_eq!(PHYSICS_LATEST, 27);
+    assert_eq!(PHYSICS_LATEST, 28);
     assert_eq!(physics_fixes(PHYSICS_V1), Some(0));
     assert_eq!(physics_fixes(PHYSICS_V2), Some(PHYSICS_FIX_PLAYERCLIP | PHYSICS_FIX_UNDUCK_JUMP));
     assert_eq!(
@@ -106,7 +105,8 @@ fn versions_and_fix_bits() {
     assert_eq!(physics_fixes(PHYSICS_V25), physics_fixes(PHYSICS_V24));
     assert_eq!(physics_fixes(26), physics_fixes(PHYSICS_V25));
     assert_eq!(physics_fixes(27), physics_fixes(26));
-    assert_eq!(physics_fixes(28), None);
+    assert_eq!(physics_fixes(28), physics_fixes(27));
+    assert_eq!(physics_fixes(29), None);
     // v7 used all 16 bits of the old diagnostic mask (base 0x1_0000); v8's fix is bit 16, so the base moved to bit 24
     // with 24 fix bits; v15's fix is bit 24, so it moved again to bit 25 with 25 fix bits, v16's is bit 25, so it moved
     // to bit 26, and v17's four are bits 26..29, so it is now bit 30 with 30 fix bits. Versions keep their fix sets bit
@@ -158,7 +158,7 @@ fn versions_and_fix_bits() {
 // ---- 1. playerclips ------------------------------------------------------------------------------------------------
 
 fn load(name: &str) -> Option<Game> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps").join(format!("{name}.bsp"));
+    let path = bunnyhop_core::test_maps::bsp(name);
     let Ok(bytes) = std::fs::read(&path) else {
         eprintln!("skipping {name}: {} not found", path.display());
         return None;
@@ -210,6 +210,7 @@ fn run_into(game: &mut Game, start: [f32; 3]) -> f32 {
     max_x
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn playerclips_block_the_player_in_v2_only() {
     let Some(mut game) = load("bhop_fps_max") else { return };
@@ -329,6 +330,7 @@ fn duck_released_on_landing_keeps_speed_in_v2_only() {
 
 /// `Game::set_settings` picks the version up and `reset` keeps it (the playerclip test above runs both versions
 /// through `Game::step`).
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn game_follows_the_selected_version() {
     let Some(mut game) = load("bhop_fps_max") else { return };
@@ -345,9 +347,10 @@ fn game_follows_the_selected_version() {
 /// (the clipped, tiny upward velocity) then "hit" the block's bottom face at fraction 0 and v1/v2 zeroed the velocity:
 /// the next hop leaves at ~30 u/s (the player report). The real CS:S engine (tools/parity rw_land1) keeps moving and
 /// lands at exactly the v3 position and velocity below.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn redwood_block_landing_keeps_speed() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps/bhop_redwood.bsp");
+    let path = bunnyhop_core::test_maps::bsp("bhop_redwood");
     let Ok(bytes) = std::fs::read(&path) else {
         eprintln!("skipping: {} not found", path.display());
         return;
@@ -378,7 +381,7 @@ fn redwood_block_landing_keeps_speed() {
 // ---- 4. the knife (v4) ---------------------------------------------------------------------------------------------
 
 fn map_game(name: &str) -> Option<Game> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps").join(format!("{name}.bsp"));
+    let path = bunnyhop_core::test_maps::bsp(name);
     if !path.exists() {
         eprintln!("skipping {name}: {} not found", path.display());
         return None;
@@ -417,6 +420,7 @@ fn hive_keypad(version: u32, buttons: u32) -> Option<(f32, f32)> {
     Some((drop, game.state.position[1]))
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn hive_knife_opens_the_first_door_from_v4() {
     // v4: the swing and the stab both reach the keypad; the door sinks into the floor (144 u) and the player walks
@@ -436,6 +440,7 @@ fn hive_knife_opens_the_first_door_from_v4() {
     assert_eq!(drop, 0.0, "+use doesn't press a damage-only button (CS:S: not FCAP_IMPULSE_USE)");
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn knife_swings_at_the_knife_rate() {
     // Holding +attack at the keypad from tick 10: the first swing at once, then every 0.5 s (a hit). Each hit fires OnDamaged
@@ -534,6 +539,7 @@ fn crash_egypt_tide_moves_from_v4() {
 }
 
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn portal_start_open_door_is_clear_from_v12_and_old_versions_stay_closed() {
     let Some(mut game) = map_game("bhop_ln_portal") else { return };
@@ -564,9 +570,10 @@ fn portal_start_open_door_is_clear_from_v12_and_old_versions_stay_closed() {
     assert_ne!(game.entity_transform(door).unwrap().0, closed_origin, "Open returns to position2");
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn start_open_door_children_follow_parent_at_spawn_and_reset() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps/bhop_ln_portal.bsp");
+    let path = bunnyhop_core::test_maps::bsp("bhop_ln_portal");
     let Ok(bytes) = std::fs::read(&path) else { eprintln!("skipping {}: map absent",path.display()); return };
     let bsp = bunnyhop_core::parse_bsp(&bytes).unwrap();
     let mut list = bunnyhop_core::physics::entity_list_with_outputs(&bsp,true);
@@ -660,6 +667,7 @@ fn slope_sweep(game: &mut Game, version: u32, pos: [f32; 3], vel: [f32; 3], phas
 /// phase (most under 300: her 173 / 137), v17 always lands and launches up the slope. Also Maharero's bhop_lego2 run
 /// onto the 30 degree slope brick at (-2900, -3945, 1030) (479 -> 307 in the run): v16 keeps or loses ~170, v17 keeps;
 /// and a bevelled beam on bhop_letour.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn reported_slope_jumps_keep_speed_from_v17() {
     if let Some(mut game) = map_game("bhop_null_fix") {
@@ -772,6 +780,7 @@ fn edge_bug_still_jumps_from_v17() {
 /// y 80..144, z 160..161) on a block top at z 160. Dropped onto it from 40 heights, jump held: the landing tick ends
 /// 0..2 units above the block, so in v16 the pad (the hull doesn't reach it) teleports only some first landings; v17
 /// touches triggers in the landing gap, every first landing teleports.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn landing_touches_thin_triggers_from_v17() {
     let Some(mut game) = map_game("bhop_null_fix") else { return };
@@ -805,6 +814,7 @@ fn landing_touches_thin_triggers_from_v17() {
 /// doesn't change which landings touch the pad: when the landing and the pad's teleport happen on the same tick, v16
 /// teleports the player with the landing's vz = 0; v17 restores the velocity the move started with (plus half a tick of
 /// gravity), as if the teleport had come first, and flags the map teleport (`EVENT_MAP_TELEPORT`) for the next tick.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn telehop_keeps_the_landing_velocity_from_v17() {
     let Some(mut game) = map_game("bhop_null_fix") else { return };

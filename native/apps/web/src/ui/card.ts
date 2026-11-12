@@ -23,7 +23,7 @@ import { cardLayers, watchCardFx } from "./card-fx";
 import type { CardBorderId, CardEffectId } from "../supporter-looks";
 
 /** Everything Edit card previews of a supporter's look over the saved one. */
-export type SupporterLook = NameLook & { avatarDeco?: import("../supporter-looks").AvatarDecoId | null; cardBorder?: CardBorderId | null; cardEffect?: CardEffectId | null };
+export type SupporterLook = NameLook & { avatarDeco?: import("../supporter-looks").AvatarDecoId | null; cardBorder?: CardBorderId | null; cardEffect?: CardEffectId | null; hoverFx?: import("../supporter-looks").HoverFxId | null };
 
 
 const CROWN_SVG = `<svg viewBox="0 0 20 14" aria-hidden="true"><path d="M2 12h16l1.4-9-5 3.6L10 1 5.6 6.6.6 3z" fill="currentColor"/><circle cx="10" cy="9" r="1.4" fill="rgba(0,0,0,0.35)"/></svg>`;
@@ -138,7 +138,7 @@ export function playerCard(p: Profile, o: CardOverrides = {}): HTMLElement {
   // The staff badge (older APIs: from the role).
   const staff = p.player.staff !== undefined ? p.player.staff : staffBadgeOf(p.role);
   /** A supporter's name look (Edit card → Name previews over what's saved). */
-  const look = nameAttrs({ nameColor: p.player.nameColor, nameEffect: p.player.nameEffect, nameColor2: p.player.nameColor2, nameFont: p.player.nameFont, ...o.nameLook }, undefined, p.player.name);
+  const look = nameAttrs({ nameColor: p.player.nameColor, nameEffect: p.player.nameEffect, nameColor2: p.player.nameColor2, nameFont: p.player.nameFont, nameStyle: p.player.nameStyle, ...o.nameLook }, undefined, p.player.name);
 
   // data-part: the parts the owner's card editor picks by clicking them (ui/profile.ts).
   const card = h(
@@ -175,7 +175,8 @@ export function playerCard(p: Profile, o: CardOverrides = {}): HTMLElement {
           // and the supporter badge are card parts in edit mode (their switches live under Badges), and so is a supporter's name.
           h(
             "div.pc-nameline",
-            null,
+            // Earlier names (the API's previousNames), shown on hover or focus of the name line (profile.css).
+            p.player.previousNames?.length ? { "data-prev": `Previously known as ${p.player.previousNames.join(", ")}`, tabindex: "0" } : null,
             countryFlag(p.player.country),
             h(
               "div.pc-name",

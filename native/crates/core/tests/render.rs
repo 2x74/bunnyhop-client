@@ -5,12 +5,13 @@ use bunnyhop_core::{content, mesh, vfs};
 use std::path::PathBuf;
 
 fn map_bytes(name: &str) -> Option<Vec<u8>> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps").join(format!("{name}.bsp"));
+    let path = bunnyhop_core::test_maps::bsp(name);
     std::fs::read(&path).map_err(|_| eprintln!("skipping {name}: {} not found", path.display())).ok()
 }
 
 /// Maps compiled without light entities (all-black lighting lump) are fullbright: no face gets a lightmap block,
 /// so the atlas is just the reserved white block.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn unlit_maps_are_fullbright() {
     for name in ["bhop_stairs", "bhop_mp_stairs", "bhop_redwood", "bhop_2_easy", "bhop_noob", "bhop_red"] {
@@ -28,6 +29,7 @@ fn unlit_maps_are_fullbright() {
 }
 
 /// Every upward-facing water surface sits on top of a water volume (used for underwater fog).
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn water_surfaces_lie_on_water_volumes() {
     for name in ["bhop_mp_stairs", "bhop_arcane_v1"] {
@@ -60,6 +62,7 @@ fn water_surfaces_lie_on_water_volumes() {
 /// which the client draws depth-only so they hide what's behind them. bhop_monster_jam: from the spawn eye looking
 /// up over the start room's walls (yaw 75, pitch -24), the first surface is a sky face; the black starry stage
 /// (cs_italy/black) behind it must not show.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn sky_faces_are_exported_and_occlude() {
     let Some(bytes) = map_bytes("bhop_monster_jam") else { return };
@@ -111,6 +114,7 @@ fn sky_faces_are_exported_and_occlude() {
 /// outside that area and every skybox triangle inside it (checked by the leaf in front of each triangle), the
 /// sky_camera keyvalues come through, static skybox props are found by their leaf lists, static brush entities are
 /// merged into the world's skybox groups while toggled ones keep their own, and maps without a sky_camera have none.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn sky3d_membership() {
     use bunnyhop_core::{entities, props, skybox};
@@ -209,6 +213,7 @@ fn sky3d_survey() {
 }
 
 /// The descending water in Sonni's fourth section is a wedge, not its enclosing box.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn sloped_water_keeps_brush_planes() {
     let Some(bytes) = map_bytes("bhop_sonni_v2") else { return };
@@ -222,6 +227,7 @@ fn sloped_water_keeps_brush_planes() {
     assert!(inside([2000.0, -3700.0, -600.0]), "point below surface remains underwater");
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn highly_compressible_wrath_lumps_load_with_bounded_game_limits() {
     let Some(bytes) = map_bytes("bhop_wrath") else { return };
@@ -231,6 +237,7 @@ fn highly_compressible_wrath_lumps_load_with_bounded_game_limits() {
 }
 
 /// GothQueen's unreal_space report: toolsblack is a visible opaque wall, not a nodraw tool.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn black_tool_walls_are_rendered() {
     assert!(!mesh::hidden_tool_material("tools/toolsblack"));

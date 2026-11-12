@@ -7,12 +7,11 @@
 
 use bunnyhop_core::game::{PHYSICS_V15, PHYSICS_V16, map_player_io_for, map_player_io_table};
 use bunnyhop_core::{Cmd, Game, Settings};
-use std::path::PathBuf;
 
 const EVENT_TELEPORTED: u32 = 1;
 
 fn load(name: &str, version: u32) -> Option<Game> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps").join(format!("{name}.bsp"));
+    let path = bunnyhop_core::test_maps::bsp(name);
     let Ok(bytes) = std::fs::read(&path) else {
         eprintln!("skipping {name}: {} not found", path.display());
         return None;
@@ -63,6 +62,7 @@ fn door_sends_back(game: &mut Game) -> bool {
     false
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn synthetic_potion_door_opens_from_v16() {
     let Some(mut old) = load("bhop_synthetic_fix", PHYSICS_V15) else { return };
@@ -82,6 +82,7 @@ fn synthetic_potion_door_opens_from_v16() {
     assert_eq!(new.player_name, "potpass", "v16: any order");
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn synthetic_door_still_needs_three_potions() {
     let Some(mut game) = load("bhop_synthetic_fix", PHYSICS_V16) else { return };
@@ -101,6 +102,7 @@ fn synthetic_door_still_needs_three_potions() {
     assert_eq!(game.player_name, "pot3", "the reset trigger spent the earlier potions");
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn synthetic_saved_state_keeps_the_potions() {
     // Practice checkpoints (save_state / restore_state) carry the outputs the player holds.
@@ -122,6 +124,7 @@ fn synthetic_saved_state_keeps_the_potions() {
     assert_eq!(game.player_name, "pot3");
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn wonderland_key_room_opens_from_v16() {
     // The cp3 key room: keys *241..*243 (any order), then checking_trigger *247 counts the keys held; at 3 the player is
@@ -146,6 +149,7 @@ fn wonderland_key_room_opens_from_v16() {
     }
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn lego3_coins_open_from_v16() {
     // Three coins (*3..*5), then checking_trigger *171: at 3 the player is renamed ng0_pass, which the denied teleport
@@ -170,6 +174,7 @@ fn lego3_coins_open_from_v16() {
     }
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn other_maps_are_not_in_the_table() {
     assert_eq!(map_player_io_table(), ["bhop_synthetic_fix", "bhop_wonderland", "bhop_lego3"]);

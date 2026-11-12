@@ -10,7 +10,7 @@ struct Options {
     std::string map, content_root, screenshot, online_map, menu_html = BUNNYHOP_MENU_HTML, menu_smoke;
     uint64_t frames = 0;
     double sensitivity = 2;
-    bool hidden = false, help = false, no_menu = false, windowed = false, sensitivity_set = false,
+    bool hidden = false, help = false, no_menu = false, windowed = false, sensitivity_set = false, style_set = false,
          menu_home_smoke = false;
     // Comparator: the pre-0.5.2 per-frame proration and latest-polled keys instead of timestamped input.
     bool legacy_input = false;
@@ -20,6 +20,8 @@ struct Options {
     bool tutorial_demo = false;
     // Render checks: a fixed eye (Source x, y, z) and pitch, yaw, with no HUD or viewmodel.
     std::optional<std::array<float, 5>> camera;
+    // Voice chat's frame cost with this many synthetic talkers (voice_load.hpp); 0 measures the same loop without.
+    std::optional<unsigned> voice_load;
 };
 
 Options options(int argc, char **argv);

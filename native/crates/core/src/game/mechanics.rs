@@ -357,13 +357,7 @@ impl Game {
 mod tests {
     use super::*;
     fn load(map: &str, version: u32) -> Option<Game> {
-        let path =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../../maps/{map}.bsp"));
-        if !path.exists() {
-            eprintln!("skip {map}: BSP absent");
-            return None;
-        }
-        let mut game = crate::content::load_game(&path).unwrap();
+        let mut game = crate::content::load_game(&crate::test_maps::map(map)?).unwrap();
         game.set_settings(Settings {
             physics_version: version,
             ..Settings::css_bhop()
@@ -371,6 +365,7 @@ mod tests {
         game.reset();
         Some(game)
     }
+    #[cfg_attr(ci, ignore = "map library")]
     #[test]
     fn reviewed_builds_match_in_full_and_verifier_loaders() {
         for m in map_fixes::MECHANICS_V19 {
@@ -412,6 +407,7 @@ mod tests {
             assert_eq!(map_fixes::parented_doors_v21(&entities).map(|m| m.map), Some(m.map));
         }
     }
+    #[cfg_attr(ci, ignore = "map library")]
     #[test]
     fn v20_inherits_v19_mechanics_and_keeps_instances_when_switching_versions() {
         if let Some(mut game) = load("bhop_ceaseless", PHYSICS_V18) {
@@ -442,6 +438,7 @@ mod tests {
             assert!(game.mechanics_on(), "{map} keeps its reviewed mechanics in v20");
         }
     }
+    #[cfg_attr(ci, ignore = "map library")]
     #[test]
     fn v21_inherits_v19_mechanics() {
         for map in ["bhop_profane", "bhop_playboy_csgo", "bhop_api_kowka", "kz_bhop_liminal", "bhop_treason"] {
@@ -579,6 +576,7 @@ mod tests {
             assert_eq!(game.state.velocity[1], 0.0);
         }
     }
+    #[cfg_attr(ci, ignore = "map library")]
     #[test]
     fn maker_instances_coexist_transform_filter_expire_and_restore() {
         for map in ["bhop_cutekittenz2", "bhop_vandora", "bhop_ponpon_fix"] {

@@ -15,10 +15,9 @@
 .st-reading { position: relative; text-align: center; line-height: 1.3; }
 .st-reading b { font-size: .9em; font-weight: 550; font-variant-numeric: tabular-nums; }
 .st-cue { position: absolute; left: calc(50% + 2.7em); top: .12em; font-size: .7em; color: color-mix(in srgb, currentColor 58%, transparent); white-space: nowrap; }
-.st-cue:empty, .st-trainer:not(.st-hints):not([data-cue="unsupported"]) .st-cue { display: none; }
-.st-trainer[data-cue="unsupported"] .st-cue { position: static; margin-left: .65em; }
+.st-cue:empty, .st-trainer:not(.st-hints) .st-cue { display: none; }
 .st-nopace .st-reading b { visibility: hidden; }
-.st-nopace:not(.st-hints):not([data-cue="unsupported"]) .st-reading { display: none; }
+.st-nopace:not(.st-hints) .st-reading { display: none; }
 
 /* Detailed and minimal: the rail itself is the zones, red at the ends, amber, green around 100%. */
 .st-trainer:not([data-style="classic"]) .st-band { display: none; }

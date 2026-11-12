@@ -82,7 +82,7 @@ fn slice(name: &str, map: &str) -> Job {
 }
 
 fn load(map: &str) -> Option<Game> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("../../maps/{map}.bsp"));
+    let path = bunnyhop_core::test_maps::bsp(map);
     if !path.exists() {
         assert!(std::env::var_os("BH_REQUIRE_MAPS").is_none(), "BH_REQUIRE_MAPS: {} not present", path.display());
         eprintln!("skipping: {} not present", path.display());
@@ -202,6 +202,7 @@ fn v25_turns_the_ramp_fix_on_and_older_versions_keep_the_engine_rules() {
 
 /// bhop_kotodama k189: CS:S slides down the shaft without stopping. v24's stationary test missed the ramp brush the
 /// player had ended inside, so every later move started all-solid: frozen in mid-air for 100+ ticks. v25 slides on.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn kotodama_k189_no_mid_air_freeze() {
     let job = job("koto_k189.job");
@@ -228,6 +229,7 @@ fn kotodama_k189_no_mid_air_freeze() {
 
 /// bhop_kotodama k27: CS:S itself stops here for one tick (speed 1366 to about 30) and moves on slowly; v24 stopped
 /// and then froze for 96 ticks. v25 doesn't stop at all (Momentum's behaviour, the owner's choice for v25).
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn kotodama_k27_slides_through_the_css_stop() {
     let job = job("koto_k27.job");
@@ -252,6 +254,7 @@ fn kotodama_k27_slides_through_the_css_stop() {
 
 /// bhop_aux_a9's kicker ramp on the WR path (start state 33452_26): CS:S never stops. v24 matched CS:S bit for bit
 /// until its sweep missed the ramp brush (grazing contact), then stopped dead. v25 tracks CS:S through it.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn aux_a9_kicker_no_grazing_stop() {
     let job = job("aux_33452_26.job");
@@ -277,6 +280,7 @@ fn aux_a9_kicker_no_grazing_stop() {
 /// bhop_badges_mini's quarter-pipe (Throwtop's video): flying into the curve and up it, the hull reaches the seam of two
 /// segments; CS:S (srcds, tick 59) and v24 report the upper segment's axial bevel plane and lose all horizontal speed.
 /// v25 reports the segment's face and slides up the curve.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn badges_mini_curve_seam_keeps_the_slide() {
     let job = job("badges_315.job");
@@ -302,6 +306,7 @@ fn badges_mini_curve_seam_keeps_the_slide() {
 
 /// The collision rule itself, at the seam where v24 lost the slide: tick 58's sweep (its second bump, after sliding
 /// along brush 2047) stops on brush 2046. Engine rules report its axial bevel (1, 0, 0); `face_over_bevel` reports the curved face the hull rests on.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn badges_mini_seam_reports_the_face_not_the_bevel() {
     let job = job("badges_315.job");
@@ -325,6 +330,7 @@ fn badges_mini_seam_reports_the_face_not_the_bevel() {
 /// Falling along a wall of bhop_kotodama (a slice of the public CS:S WR, perturbed): the wall's plane comes back at
 /// fraction 0 on every bump (float rounding, the player moves parallel to it), and the move ends with velocity zeroed.
 /// v25 steps 1/32 off the wall and keeps falling with the same velocity.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn kotodama_wall_repeated_plane_keeps_falling() {
     let job = slice("koto_wall_2936_3.slice", "bhop_kotodama");
@@ -542,6 +548,7 @@ fn bfur_peak(game: &mut Game, version: u32, side: f32, buttons: u32, ticks: u32)
 /// and strafe with autohop on (ordinary bhop) and climbs the same curve higher and farther (about +110); a single jump
 /// on the first tick reaches about +62 on either version. With no input both versions stay put. This is a bounded
 /// local peak-height comparison, not proof of route equivalence for every input.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn bfur_curve_toe_climb_from_rest_is_intended_and_opens_nothing() {
     let Some(mut game) = load("bhop_bfur") else { return };

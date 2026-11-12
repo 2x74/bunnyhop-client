@@ -4,8 +4,8 @@ import { prefs } from "../ui/settings";
 import { registerChatCommand } from "../chat-commands";
 import { postLocalLine } from "../net/hud";
 import { announce } from "../audio";
-import { actions, button, group, toggle } from "../ui/controls";
-import { FirstJumpTracker, LjTracker, OffsetTracker, fjtText, ljColor, ljColumns, ljText, type LjReport, type OffsetReport } from "./stats";
+import { actions, button, group, range, toggle } from "../ui/controls";
+import { FirstJumpTracker, LjTracker, OffsetTracker, SlowTickTracker, fjtText, ljColor, ljColumns, ljText, type LjReport, type OffsetReport } from "./stats";
 import { h } from "../ui/dom";
 import { forgetJump, openLastJump, rememberJump, type JumpResult } from "./share";
 
@@ -16,19 +16,21 @@ function ljChatNodes(r: LjReport): (string | Node)[] {
   return [`${r.kind} `, dist, ...ljColumns(r).map(([n, l]) => ` | ${n} ${l}`)];
 }
 
-export interface MovementReading { offset: OffsetReport | null; fjt: number | null; lj: LjReport | null }
+/** `slow`: the slow ticks of the last strafe (null: off, or none yet). */
+export interface MovementReading { offset: OffsetReport | null; slow: number | null; fjt: number | null; lj: LjReport | null }
 export class LiveMovementStats {
   private offsets = new OffsetTracker();
+  private slow = new SlowTickTracker();
   private first = new FirstJumpTracker();
   private jumps = new LjTracker();
   private pre: PlayerState | null = null;
   private enabled = false;
-  private shown: MovementReading = { offset: null, fjt: null, lj: null };
-  private reading: MovementReading = { offset: null, fjt: null, lj: null };
+  private shown: MovementReading = { offset: null, slow: null, fjt: null, lj: null };
+  private reading: MovementReading = { offset: null, slow: null, fjt: null, lj: null };
   constructor(private show: (v: MovementReading) => void) {}
   reset(state: PlayerState | null): void {
-    this.offsets.reset(); this.first.reset(); this.jumps.reset(); this.pre = state;
-    this.reading = { offset: null, fjt: null, lj: null }; this.show(this.reading);
+    this.offsets.forget(); this.slow.reset(); this.first.reset(); this.jumps.reset(); this.pre = state;
+    this.reading = { offset: null, slow: null, fjt: null, lj: null }; this.show(this.reading);
     this.shown = { ...this.reading };
   }
   feed(cmd: TickCmd, state: PlayerState, events: number, timer: RunTimer, context: Omit<JumpResult, "report" | "at">, noclip = false): void {
@@ -40,6 +42,11 @@ export class LiveMovementStats {
     if (!offsetsOn) { this.offsets.reset(); this.reading.offset = null; }
     if (broken || state.grounded) this.reading.offset = null;
     if (offset) this.reading.offset = offset;
+    const slowOn = offsetsOn && p.hud.movement.slowTicks;
+    const slow = slowOn ? this.slow.feed(cmd, state, events, p.hud.movement.slowBelow) : null;
+    if (!slowOn) this.slow.reset();
+    if (!slowOn || broken || state.grounded) this.reading.slow = null;
+    if (slow !== null) this.reading.slow = slow;
     const fjt = this.first.feed({ jumped: !!(events & EVENT_JUMPED), jumps: timer.jumps, ticks: timer.ticks(), running: timer.status === "running", inStart: timer.inStart, broken });
     if (broken || timer.jumps === 0) this.reading.fjt = null;
     if (fjt !== undefined) {
@@ -62,7 +69,7 @@ export class LiveMovementStats {
     if (broken) this.reading.lj = null;
     // Reports are immutable once published. Compare their identity without walking the retained flight path each tick.
     const r = this.reading, s = this.shown;
-    if (r.lj !== s.lj || r.fjt !== s.fjt || r.offset?.ticks !== s.offset?.ticks || r.offset?.overlap !== s.offset?.overlap || r.offset?.gap !== s.offset?.gap) {
+    if (r.lj !== s.lj || r.fjt !== s.fjt || r.slow !== s.slow || r.offset?.streak !== s.offset?.streak || r.offset?.ticks !== s.offset?.ticks || r.offset?.overlap !== s.offset?.overlap || r.offset?.gap !== s.offset?.gap) {
       this.shown = { ...r }; this.show(r);
     }
   }
@@ -72,7 +79,9 @@ export function movementRows(): HTMLElement[] {
   const p = () => prefs.get();
   return [
     group("Strafe timing",
-      toggle("Strafe offsets", () => p().hud.layout.strafeOffsets.on, v => prefs.update(p => p.hud.layout.strafeOffsets.on = v), { desc: "A/D timing against mouse reversals, in ticks. Negative = key early, positive = key late; aim for -1 or 0. Normal, HSW and scroll styles. Edit layout moves it.", keywords: "offset offsets strafe early late key timing" }),
+      toggle("Strafe offsets", () => p().hud.layout.strafeOffsets.on, v => prefs.update(p => p.hud.layout.strafeOffsets.on = v), { desc: "A/D timing against mouse reversals, in ticks. Negative = key early, positive = key late; aim for -1 or 0. The number in brackets counts the same offset in a row before it: −1 (0), −1 (1), −1 (2). Normal, HSW and scroll styles. Edit layout moves it.", keywords: "offset offsets strafe early late key timing streak row" }),
+      toggle("Slow ticks", () => p().hud.movement.slowTicks, v => prefs.update(p => { p.hud.movement.slowTicks = v; if (v) p.hud.layout.strafeOffsets.on = true; }), { desc: "After each strafe, the air ticks it spent gaining less than the share of the best gain set below (dead time, as on SourceJump servers). Shown with the strafe offsets. Every style.", keywords: "slow ticks dead time jss gain strafe sourcejump sj" }),
+      range("Slow below", () => p().hud.movement.slowBelow, v => prefs.update(p => p.hud.movement.slowBelow = Math.round(v)), { min: 10, max: 99, step: 1, unit: "%", desc: "A tick is slow when it gains less than this share of the most it could have gained.", keywords: "slow ticks threshold jss gain percent" }),
       toggle("First jump tick HUD", () => p().hud.layout.firstJump.on, v => prefs.update(p => p.hud.layout.firstJump.on = v), { desc: "First takeoff relative to the timer's start. A takeoff inside the start zone is 0. Edit layout moves it.", keywords: "fjt first jump tick start timing" }),
       toggle("First jump tick chat", () => p().hud.movement.fjtChat, v => prefs.update(p => p.hud.movement.fjtChat = v), { keywords: "fjt first jump tick chat" }),
     ),

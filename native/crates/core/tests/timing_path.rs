@@ -99,7 +99,7 @@ fn selected_step_has_discrete_phases_and_rejected_alternative_never_leaks() {
 #[test]
 #[ignore = "external corpus: requires maps/bhop_eazy.bsp; run explicitly with --ignored"]
 fn reset_and_snapshot_restore_invalidate_observation() {
-    let bytes=std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"),"/../../maps/bhop_eazy.bsp")).unwrap();
+    let bytes=std::fs::read(bunnyhop_core::test_maps::bsp("bhop_eazy")).unwrap();
     let bsp=bunnyhop_core::parse_bsp(&bytes).unwrap();let mut g=bunnyhop_core::Game::load(&bsp).unwrap();
     g.observe_timing=true;g.step(Default::default()).unwrap();assert!(g.timing_path.is_some());
     let snapshot=g.save_state();g.reset();assert!(g.timing_path.is_none());assert!(g.observe_timing);
@@ -109,7 +109,7 @@ fn reset_and_snapshot_restore_invalidate_observation() {
 #[test]
 #[ignore = "external corpus: requires maps/bhop_eazy.bsp; run explicitly with --ignored"]
 fn real_game_world_death_does_not_record_respawn_chord() {
-    let bytes=std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"),"/../../maps/bhop_eazy.bsp")).unwrap();
+    let bytes=std::fs::read(bunnyhop_core::test_maps::bsp("bhop_eazy")).unwrap();
     let bsp=bunnyhop_core::parse_bsp(&bytes).unwrap();let mut g=bunnyhop_core::Game::load(&bsp).unwrap();
     g.observe_timing=true;
     g.state.position=[100000.,0.,0.];

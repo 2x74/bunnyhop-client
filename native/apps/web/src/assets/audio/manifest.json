@@ -1039,16 +1039,6 @@
       "credit": "Original, generated with ElevenLabs Music for bunnyhop.lol"
     },
     {
-      "id": "game-surf",
-      "title": "Surf",
-      "role": "game",
-      "duration": 121.18,
-      "bpm": 172,
-      "loopStart": 0,
-      "loopEnd": 0,
-      "credit": "Original, generated with ElevenLabs Music for bunnyhop.lol"
-    },
-    {
       "id": "menu-spectate",
       "title": "Spectate (menu)",
       "role": "menu",

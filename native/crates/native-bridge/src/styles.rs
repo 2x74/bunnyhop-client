@@ -1,5 +1,6 @@
 //! Exact command/style transform from apps/web/src/styles.ts and autostrafe.ts.
 use super::{BhCmd, BhSettings, BhState};
+use crate::look::BhLookSampleV2;
 pub const IDS: [&str; 12] = [
     "autohop",
     "legit",
@@ -20,6 +21,30 @@ const BACK: u32 = 1 << 4;
 const LEFT: u32 = 1 << 9;
 const RIGHT: u32 = 1 << 10;
 const MOVE: u32 = FORWARD | BACK | LEFT | RIGHT;
+/// IN_TURN_FAST | IN_LEFT | IN_RIGHT: the turn-bind bits that explain a yaw (turn-binds.ts TURN_HOLD_BITS).
+pub const TURN_HOLD_BITS: u32 = (1 << 6) | (1 << 7) | (1 << 8);
+/// styles.ts AUTOSTRAFE_LEAD_FROM: from this physics version Auto-strafe keys from this command's yaw to the next one's.
+pub const AUTOSTRAFE_LEAD_FROM: u32 = 28;
+/// styles.ts LeadView: one tick of view held back for the next command (v28+ Auto-strafe).
+#[derive(Clone, Copy, Debug)]
+pub struct LeadView {
+    yaw: f32,
+    turn: u32,
+    look: Option<BhLookSampleV2>,
+}
+/// autostrafe.ts yawDelta: the change a -> b in degrees, wrapped to [-180, 180]; 0 when either isn't finite.
+fn yaw_delta(a: f64, b: f64) -> f64 {
+    if !a.is_finite() || !b.is_finite() {
+        return 0.0;
+    }
+    let mut d = (b - a) % 360.0;
+    if d > 180.0 {
+        d -= 360.0;
+    } else if d < -180.0 {
+        d += 360.0;
+    }
+    d
+}
 pub fn settings(id: &str) -> Result<BhSettings, String> {
     if !IDS.contains(&id) {
         return Err(format!("unknown style {id}"));
@@ -154,6 +179,9 @@ pub struct Filter {
     bw_ground: u32,
     /// A/D-Only: the run's side key, -1 (A), 0 (none yet) or +1 (D).
     side_lock: i32,
+    /// v28+ Auto-strafe (styles.ts StyleFilter.lead): the key comes from the next yaw and the sim's view runs a tick late.
+    lead: bool,
+    lead_view: Option<LeadView>,
 }
 impl Filter {
     pub fn new(id: &str, physics: u32) -> Self {
@@ -168,14 +196,45 @@ impl Filter {
             // A spawn is not a landing.
             bw_ground: BW_GROUND_GRACE + 1,
             side_lock: 0,
+            lead: id == "autostrafe" && physics >= AUTOSTRAFE_LEAD_FROM,
+            lead_view: None,
         }
+    }
+    pub fn lead(&self) -> bool {
+        self.lead
+    }
+    /// Auto-strafe's last direction and still ticks (the shared vectors' `dir` / `still`).
+    #[cfg(test)]
+    pub(crate) fn auto_state(&self) -> (i32, u32) {
+        (self.auto_dir, self.still)
+    }
+    /// Forget the held-back view (a practice restore): the next command moves with the live view.
+    pub fn clear_lead_view(&mut self) {
+        self.lead_view = None;
+    }
+    /// styles.ts StyleFilter.lagView (v28+ Auto-strafe live input): the command moves with the previous command's yaw,
+    /// turn-bind bits and look sample, and this one's are held for the next command. Pitch, keys and every other button
+    /// stay live. Returns the command, the look sample to record with it, and the next yaw for apply().
+    pub fn lag_view(&mut self, mut c: BhCmd, look: Option<BhLookSampleV2>) -> (BhCmd, Option<BhLookSampleV2>, f64) {
+        let live = LeadView {
+            yaw: c.yaw,
+            turn: c.buttons & TURN_HOLD_BITS,
+            look,
+        };
+        let v = self.lead_view.unwrap_or(live);
+        self.lead_view = Some(live);
+        let next_yaw = f64::from(c.yaw);
+        c.yaw = v.yaw;
+        c.buttons = (c.buttons & !TURN_HOLD_BITS) | v.turn;
+        (c, v.look, next_yaw)
     }
     pub fn reset(&mut self, physics: u32) {
         *self = Self::new(&self.id, physics);
     }
     /// `edge_landing`: physics v22's landing that the next command can still take back (`State::edge_landing`).
     /// `running`: the run is under way before the tick (timer.ts RunTimer.started); only A/D-Only reads it.
-    pub fn apply(&mut self, mut c: BhCmd, s: BhState, edge_landing: bool, running: bool) -> BhCmd {
+    /// `next_yaw`: the next command's yaw (NaN: none); only v28+ Auto-strafe reads it.
+    pub fn apply(&mut self, mut c: BhCmd, s: BhState, edge_landing: bool, running: bool, next_yaw: f64) -> BhCmd {
         if s.on_ladder != 0 {
             self.from_ladder = true;
         } else if s.grounded != 0 {
@@ -183,16 +242,11 @@ impl Filter {
         }
         if self.id == "autostrafe" {
             let yaw = f64::from(c.yaw);
-            let mut d = if self.prev_yaw.is_finite() && yaw.is_finite() {
-                (yaw - self.prev_yaw) % 360.0
+            let d = if self.lead {
+                yaw_delta(yaw, next_yaw)
             } else {
-                0.0
+                yaw_delta(self.prev_yaw, yaw)
             };
-            if d > 180.0 {
-                d -= 360.0;
-            } else if d < -180.0 {
-                d += 360.0;
-            }
             self.prev_yaw = yaw;
             let dir = if d > 0.0 {
                 -1
@@ -412,7 +466,7 @@ mod tests {
                 };
                 let edge_landing = row["state"]["edgeLanding"].as_bool().unwrap();
                 let running = row["running"].as_bool().unwrap_or(false);
-                let got = filter.apply(command(&row["cmd"]), state, edge_landing, running);
+                let got = filter.apply(command(&row["cmd"]), state, edge_landing, running, f64::NAN);
                 let mut expected = command(&row["expected"]);
                 // The pinned web filter predates v29 IN_TURN_FAST. All other fields remain its exact oracle.
                 if style == "scroll" {

@@ -9,6 +9,9 @@ pub mod skybox;
 pub mod studio;
 pub mod physics;
 pub mod vfs;
+#[cfg(not(target_arch = "wasm32"))]
+#[doc(hidden)]
+pub mod test_maps;
 #[cfg(any(target_arch = "wasm32", feature = "native-web"))]
 mod wasm;
 

@@ -19,6 +19,7 @@ const NATIVE_LIBRARIES: readonly { name: string; url: string; licence: string }[
     licence: "MIT-0 or public domain",
   },
   { name: "stb_vorbis", url: "https://github.com/nothings/stb", licence: "MIT or public domain" },
+  { name: "libopus (voice chat)", url: "https://opus-codec.org/", licence: "BSD 3-clause" },
   { name: "Unicode Character Database", url: "https://www.unicode.org/", licence: "Unicode License v3" },
   {
     name: "Microsoft Edge WebView2 (Windows)",

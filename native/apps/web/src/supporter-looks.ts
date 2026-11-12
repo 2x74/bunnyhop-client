@@ -16,12 +16,14 @@
 // - Card border and card effect: layers on the player card (CARD_BORDERS: a light round the frame; CARD_EFFECTS: a
 //   moving layer behind the card's content). They share the peak treatment's layers (ui/card.ts cardLayers): see
 //   cardLayerPlan for how a supporter's pick and a T7+ clearer's peak layers stack.
+// - Hover effect (v0.0.40, users.hover_fx, migrations/0104): how their mini profile comes in when someone rests on
+//   their name (HOVER_FX, ui/hover-fx.ts). Behaviour, not a picture: the OG cards have nothing to draw for it.
 //
 // Every look shows only while the player is a supporter: the pick is gated on write (403 for anyone else) and on every
 // read (apps/api/src/supporter-cols.ts), so a revoked supporter keeps the stored pick, unshown, and gets it back if
 // they support again. Defaults are off (null).
 
-export type NameFontId = "grotesk" | "round" | "pixel" | "mono" | "serif" | "wide" | "marker" | "block" | "script";
+export type NameFontId = "grotesk" | "round" | "pixel" | "mono" | "serif" | "wide" | "marker" | "block" | "script" | "condensed";
 
 export interface NameFont {
   id: NameFontId;
@@ -49,6 +51,8 @@ export const NAME_FONTS: readonly NameFont[] = [
   { id: "marker", name: "Marker", typeface: "Permanent Marker", licence: "Apache-2.0", url: "https://fonts.google.com/specimen/Permanent+Marker", size: 0.98 },
   { id: "block", name: "Block", typeface: "Russo One", licence: "OFL-1.1", url: "https://fonts.google.com/specimen/Russo+One", size: 0.98 },
   { id: "script", name: "Script", typeface: "Pacifico", licence: "OFL-1.1", url: "https://github.com/googlefonts/Pacifico", size: 0.96 },
+  // v0.0.40: the narrow one (a jersey / scoreboard face): long names keep their size where the others shrink to fit.
+  { id: "condensed", name: "Condensed", typeface: "Barlow Condensed", licence: "OFL-1.1", url: "https://github.com/jpt/barlow", size: 1 },
 ];
 export const isNameFont = (v: unknown): v is NameFontId => typeof v === "string" && NAME_FONTS.some((f) => f.id === v);
 export const nameFontOf = (v: unknown): NameFontId | null => (isNameFont(v) ? v : null);
@@ -56,20 +60,87 @@ export const nameFontOf = (v: unknown): NameFontId | null => (isNameFont(v) ? v 
 export const nameFontFamily = (id: NameFontId) => `bh-name-${id}`;
 export const nameFontDef = (id: NameFontId): NameFont => NAME_FONTS.find((f) => f.id === id)!;
 
+// v0.0.40: bold and italic (users.name_style, migrations/0105). Only real cuts, never a browser-faked bold or slant:
+// a toggle shows only with a font that has that cut (NAME_STYLE_CUTS), and the faces are declared with
+// font-synthesis: none. The default font is the player's system font on the page (real bold and italic everywhere we
+// ship) and Inter on the OG cards (inter-b / -i / -bi, tools/name-fonts/build.py). Bold is a step heavier than names are
+// drawn already (900 against 600 to 850), so it is only offered where that step shows: Condensed (600 to 800) and the
+// default font. (Orbitron's 900 looked the same as the 700 Wide is pinned at, at board size: left out.) A pick stays stored as made; a font without the cut shows the name without it.
+export type NameStyle = "b" | "i" | "bi";
+export const isNameStyle = (v: unknown): v is NameStyle => v === "b" || v === "i" || v === "bi";
+/** Which cuts each font has (null: the default font). Each bold or italic face is its own file: "<id>-b", "-i", "-bi". */
+export const NAME_STYLE_CUTS: Record<NameFontId | "default", { bold: boolean; italic: boolean }> = {
+  default: { bold: true, italic: true },
+  condensed: { bold: true, italic: true },
+  wide: { bold: false, italic: false },
+  serif: { bold: false, italic: true },
+  mono: { bold: false, italic: true },
+  grotesk: { bold: false, italic: false },
+  round: { bold: false, italic: false },
+  pixel: { bold: false, italic: false },
+  marker: { bold: false, italic: false },
+  block: { bold: false, italic: false },
+  script: { bold: false, italic: false },
+};
+/** The style a name shows in `font`: the picked one, less any cut the font lacks (null: plain). */
+export function nameStyleShown(font: NameFontId | null | undefined, style: unknown): NameStyle | null {
+  if (!isNameStyle(style)) return null;
+  const cuts = NAME_STYLE_CUTS[font ?? "default"] ?? NAME_STYLE_CUTS.default;
+  const b = style.includes("b") && cuts.bold, i = style.includes("i") && cuts.italic;
+  return b && i ? "bi" : b ? "b" : i ? "i" : null;
+}
+/** The stored value for a pair of toggles (null when both are off). */
+export const nameStyleOf = (bold: boolean, italic: boolean): NameStyle | null => (bold && italic ? "bi" : bold ? "b" : italic ? "i" : null);
+
 // ---------------------------------------------------------------------------------------------
 // Avatar decorations
 
-export type AvatarDecoId = "ears" | "orbit" | "strafe" | "geode" | "stardust";
+export type AvatarDecoId = "ears" | "orbit" | "strafe" | "geode" | "stardust" | "carrot" | "clover" | "halo" | "gauge" | "frost" | "petals";
 
 /**
  * One SVG layer of a decoration, in a 120 x 120 box whose middle 80 x 80 is the avatar (centre 60,60, radius 40).
  * `anim`: how the layer moves (avatar-deco.css): spin / spin-back (a full turn), sway (a small rock back and forth),
- * twinkle (fades in and out). Every move is the whole layer's transform or opacity, so it stays on the compositor.
+ * twinkle (fades in and out), gauge (a needle's climb, tremble and fall), glint (a rare short flash), drift (comes loose
+ * and drifts off by `drift`, turning, fading out). Every move is the whole layer's transform or opacity, so it stays on
+ * the compositor. The SVG as drawn is the layer at rest: the still (lists, reduced motion, Potato, OG cards).
  * `currentColor` is the player's name colour (or the decoration's own accent without one).
  */
 export interface DecoLayer {
   svg: string;
-  anim?: "spin" | "spin-back" | "sway" | "twinkle" | "twinkle-late";
+  anim?: "spin" | "spin-back" | "sway" | "twinkle" | "twinkle-late" | "gauge" | "glint" | "drift";
+  /** The point the layer turns or sways about, in box units (default: the centre; sway: 60, 72). */
+  origin?: readonly [number, number];
+  /** Seconds per cycle and start offset (negative: already partway), over the animation's own. */
+  dur?: number;
+  delay?: number;
+  /** drift: how far it goes, in box units. */
+  drift?: readonly [number, number];
+  /**
+   * A fixed placement of the whole layer round the box centre (moved by x, y; turned; scaled), under its animation: a
+   * spin inside a squashed placement travels round an ellipse (Halo's glint).
+   */
+  place?: { x?: number; y?: number; rotate?: number; sx?: number; sy?: number };
+}
+
+const pct = (u: number) => `${Math.round((u / 1.2) * 1000) / 1000}%`;
+/** A layer's placement as CSS (the outer span) and as an SVG transform (the stills), the same transform both ways. */
+export function decoPlace(l: DecoLayer): { css: string; svg: string } | null {
+  const p = l.place;
+  if (!p) return null;
+  const [x, y, r, sx, sy] = [p.x ?? 0, p.y ?? 0, p.rotate ?? 0, p.sx ?? 1, p.sy ?? 1];
+  return {
+    css: `transform:translate(${pct(x)},${pct(y)}) rotate(${r}deg) scale(${sx},${sy})`,
+    svg: `translate(${60 + x} ${60 + y}) rotate(${r}) scale(${sx} ${sy}) translate(-60 -60)`,
+  };
+}
+/** A moving layer's own timing, pivot and drift as inline CSS (empty when it uses avatar-deco.css's defaults). */
+export function decoMotion(l: DecoLayer): string {
+  const out: string[] = [];
+  if (l.origin) out.push(`transform-origin:${pct(l.origin[0])} ${pct(l.origin[1])}`);
+  if (l.dur) out.push(`animation-duration:${l.dur}s`);
+  if (l.delay) out.push(`animation-delay:${l.delay}s`);
+  if (l.drift) out.push(`--dx:${pct(l.drift[0])}`, `--dy:${pct(l.drift[1])}`);
+  return out.join(";");
 }
 
 export interface AvatarDeco {
@@ -98,6 +169,40 @@ const shard = (deg: number, len: number) => {
   const [bx, by] = at(deg, 39);
   return `<path transform="rotate(${deg} ${bx} ${by})" d="M${bx - 3.4} ${by}L${bx - 2.2} ${by - len * 0.7}L${bx} ${by - len}L${bx + 2.2} ${by - len * 0.7}L${bx + 3.4} ${by}z" fill="url(#dg)" stroke="#0d1424" stroke-width="0.8" stroke-linejoin="round"/><path transform="rotate(${deg} ${bx} ${by})" d="M${bx} ${by - len}L${bx + 0.6} ${by - 1}" stroke="#ffffff" stroke-opacity="0.55" stroke-width="0.7"/>`;
 };
+
+/** A pointed leaf from x0, y0 to x1, y1, `w` wide at its middle. */
+const leaf = (x0: number, y0: number, x1: number, y1: number, w: number, fill: string, extra = "") => {
+  const mx = (x0 + x1) / 2, my = (y0 + y1) / 2, len = Math.hypot(x1 - x0, y1 - y0);
+  const nx = (-(y1 - y0) / len) * w, ny = ((x1 - x0) / len) * w;
+  const f = (v: number) => Math.round(v * 100) / 100;
+  return `<path d="M${f(x0)} ${f(y0)}Q${f(mx + nx)} ${f(my + ny)} ${f(x1)} ${f(y1)}Q${f(mx - nx)} ${f(my - ny)} ${f(x0)} ${f(y0)}z" fill="${fill}"${extra}/>`;
+};
+/** A heart-shaped clover leaflet pointing up from 0,0, about 8 long. */
+const LEAFLET = "M0 0C-1.4-1.6-4.4-3-4.2-5.8C-4-8-1.2-8.6 0-6.2C1.2-8.6 4-8 4.2-5.8C4.4-3 1.4-1.6 0 0z";
+/** A clover at x, y: `n` leaflets (3, or 4 for the lucky one), `s` its scale. */
+const clover = (x: number, y: number, n: number, s: number, fill: string, turn = 0) =>
+  `<g transform="translate(${x} ${y}) rotate(${turn}) scale(${s})" stroke="#0d1424" stroke-width="${Math.round((0.9 / s) * 100) / 100}" stroke-linejoin="round">` +
+  Array.from({ length: n }, (_, i) => `<path transform="rotate(${(360 / n) * i})" d="${LEAFLET}" fill="${fill}"/>`).join("") +
+  `</g>`;
+/** A five-petal blossom at x, y, `s` its scale, the middle in the name colour. */
+const PETAL = "M0 0C-3.2-2.2-3.6-6.4-1.6-8.4L0-7.2L1.6-8.4C3.6-6.4 3.2-2.2 0 0z";
+const blossom = (x: number, y: number, s: number, turn: number) =>
+  `<g transform="translate(${x} ${y}) rotate(${turn}) scale(${s})" stroke="#0d1424" stroke-width="${Math.round((0.8 / s) * 100) / 100}" stroke-linejoin="round">` +
+  [0, 72, 144, 216, 288].map((a) => `<path transform="rotate(${a})" d="${PETAL}" fill="#ffd9e6"/>`).join("") +
+  `<circle r="2.3" fill="currentColor"/></g>`;
+/** A loose petal at x, y, turned `turn`. */
+const looseP = (x: number, y: number, turn: number) => `<path transform="translate(${x} ${y}) rotate(${turn}) scale(0.8)" d="${PETAL}" fill="#ffe6ee" stroke="#0d1424" stroke-width="1"/>`;
+/** An ice shard hanging out from the avatar's rim at `deg`, lit on its left face. */
+const ice = (deg: number, len: number) => {
+  const [bx, by] = at(deg, 40);
+  const t = `rotate(${deg + 180} ${bx} ${by})`;
+  return `<g transform="${t}" stroke="#0d1424" stroke-width="0.8" stroke-linejoin="round"><path d="M${bx - 2.2} ${by}L${bx} ${by + len}L${bx + 2.2} ${by}z" fill="#bfe6fb"/><path d="M${bx - 2.2} ${by}L${bx} ${by + len}L${bx} ${by}z" fill="#f2fbff" stroke="none"/></g>`;
+};
+/** A six-armed frost crystal at x, y. */
+const crystal = (x: number, y: number, s: number) =>
+  `<g transform="translate(${x} ${y})" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">` +
+  [0, 60, 120].map((a) => `<path transform="rotate(${a})" d="M0 ${-s}V${s}M-${s * 0.35} ${-s * 0.75}L0 ${-s * 0.45}L${s * 0.35} ${-s * 0.75}M-${s * 0.35} ${s * 0.75}L0 ${s * 0.45}L${s * 0.35} ${s * 0.75}"/>`).join("") +
+  `</g>`;
 
 export const AVATAR_DECOS: readonly AvatarDeco[] = [
   {
@@ -165,6 +270,98 @@ export const AVATAR_DECOS: readonly AvatarDeco[] = [
       { anim: "twinkle-late", svg: [[15, 52, 3.4], [115, 46, 4.4], [205, 50, 3.6], [300, 51, 4.8]].map(([d, r, s]) => star(...at(d, r), s, "#ffffff")).join("") },
     ],
   },
+  {
+    // Carrot greens sprouting over the top of the ring, as if the avatar were the carrot; they sway a little.
+    id: "carrot",
+    name: "Carrot Top",
+    accent: "#6ff0f0",
+    layers: [
+      { svg: ring(41.5, 2.4, 0.9) },
+      {
+        anim: "sway",
+        origin: [60, 21],
+        svg:
+          `<g stroke="#0d1424" stroke-width="1.3" stroke-linejoin="round">` +
+          leaf(56, 22, 38, 12, 3.6, "#4f9e3a") + leaf(64, 22, 82, 12, 3.6, "#4f9e3a") +
+          leaf(58, 22, 45, 3, 4.6, "#7fd35f") + leaf(62, 22, 75, 3, 4.6, "#7fd35f") + leaf(60, 23, 60, 0, 5, "#97e06f") +
+          `</g><path d="M53 22.5Q60 18 67 22.5" fill="none" stroke="#ff9d42" stroke-width="3.4" stroke-linecap="round"/>`,
+      },
+    ],
+  },
+  {
+    // Small clovers round the ring; the lucky four-leafed one, in the name colour, turns slowly.
+    id: "clover",
+    name: "Clover",
+    accent: "#6ff0f0",
+    layers: [
+      { svg: ring(41.5, 1.4, 0.6) + [[105, 0.62, 20], [165, 0.7, -15], [228, 0.6, 40], [292, 0.68, 10]].map(([d, sc, t]) => clover(...at(d, 45), 3, sc, "#6cc76a", t)).join("") },
+      { anim: "spin", dur: 16, origin: at(38, 46), svg: clover(...at(38, 46), 4, 0.95, "currentColor") },
+    ],
+  },
+  {
+    // A thin tilted halo above the avatar; a glint travels slowly round it.
+    id: "halo",
+    name: "Halo",
+    accent: "#6ff0f0",
+    layers: [
+      { svg: `<ellipse cx="60" cy="13" rx="31" ry="7.6" transform="rotate(-7 60 13)" fill="none" stroke="#0d1424" stroke-width="5.2" stroke-opacity="0.55"/><ellipse cx="60" cy="13" rx="31" ry="7.6" transform="rotate(-7 60 13)" fill="none" stroke="currentColor" stroke-width="3"/><ellipse cx="60" cy="13" rx="31" ry="7.6" transform="rotate(-7 60 13)" fill="none" stroke="#ffffff" stroke-width="0.9" stroke-opacity="0.7"/>` },
+      { anim: "spin", dur: 5, place: { y: -47, rotate: -7, sx: 31 / 60, sy: 7.6 / 60 }, svg: `<ellipse cx="60" cy="0" rx="18" ry="24" fill="#ffffff" fill-opacity="0.35"/><ellipse cx="60" cy="0" rx="9" ry="14" fill="#ffffff"/>` },
+    ],
+  },
+  {
+    // A speed gauge round the ring: ticks from bottom left to bottom right, the last few in the name colour; the needle
+    // climbs, trembles near the top of the scale and drops back.
+    id: "gauge",
+    name: "Speedometer",
+    accent: "#6ff0f0",
+    layers: [
+      {
+        svg:
+          `<path d="${arc(-130, 130, 49)}" fill="none" stroke="#ffffff" stroke-opacity="0.25" stroke-width="1"/>` +
+          Array.from({ length: 27 }, (_, i) => {
+            const d = -130 + i * 10, major = i % 3 === 0;
+            const [x0, y0] = at(d, major ? 42.5 : 43.5), [x1, y1] = at(d, major ? 49 : 47);
+            return `<path d="M${x0} ${y0}L${x1} ${y1}" stroke="${d >= 90 ? "currentColor" : "#f4f1ea"}" stroke-width="${major ? 2.2 : 1.3}" stroke-linecap="round"${d >= 90 ? "" : ` stroke-opacity="0.8"`}/>`;
+          }).join(""),
+      },
+      {
+        anim: "gauge",
+        svg: (() => {
+          // A needle across the scale: from just inside the ring to past the ticks, with a white tip.
+          const [tx, ty] = at(112, 56), [lx, ly] = at(106, 33), [rx, ry] = at(118, 33), [wx, wy] = at(112, 49);
+          return `<path d="M${lx} ${ly}L${tx} ${ty}L${rx} ${ry}z" fill="currentColor" stroke="#0d1424" stroke-width="1.4" stroke-linejoin="round"/><path d="M${wx} ${wy}L${tx} ${ty}" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round"/>`;
+        })(),
+      },
+    ],
+  },
+  {
+    // Ice on the lower rim: shards hanging off it and two frost crystals; now and then a glint on the ice.
+    id: "frost",
+    name: "Frost",
+    accent: "#6ff0f0",
+    layers: [
+      {
+        svg:
+          `<path d="${arc(95, 265, 41.5)}" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-opacity="0.85"/>` +
+          [[134, 6], [150, 10], [166, 15], [176, 8], [192, 12], [212, 7], [226, 5]].map(([d, l]) => ice(d, l)).join("") +
+          crystal(...at(104, 47), 4.2) + crystal(...at(256, 47.5), 3.6),
+      },
+      { anim: "glint", origin: at(166, 54), svg: star(...at(166, 54), 4.6, "#ffffff") },
+      { anim: "glint", origin: at(212, 47.5), delay: -2.6, svg: star(...at(212, 47.5), 3.4, "#ffffff") },
+    ],
+  },
+  {
+    // Blossom round the ring; now and then a petal comes loose and drifts off, turning.
+    id: "petals",
+    name: "Petals",
+    accent: "#6ff0f0",
+    layers: [
+      { svg: ring(41.5, 1.4, 0.55) + blossom(...at(-38, 45), 1, 10) + blossom(...at(95, 46), 0.85, -20) + blossom(...at(205, 45), 0.95, 30) },
+      { anim: "drift", origin: at(-22, 47), drift: [20, 30], svg: looseP(...at(-22, 47), 60) },
+      { anim: "drift", origin: at(110, 49), drift: [14, 26], delay: -2.4, svg: looseP(...at(110, 49), -30) },
+      { anim: "drift", origin: at(222, 48), drift: [-16, 28], delay: -4.6, svg: looseP(...at(222, 48), 120) },
+    ],
+  },
 ];
 export const isAvatarDeco = (v: unknown): v is AvatarDecoId => typeof v === "string" && AVATAR_DECOS.some((d) => d.id === v);
 export const avatarDecoOf = (v: unknown): AvatarDecoId | null => (isAvatarDeco(v) ? v : null);
@@ -182,14 +379,18 @@ export function decoStillSvg(id: AvatarDecoId, color: string | null, o: { x?: nu
   const c = color ?? d.accent;
   const s = o.size ?? 120;
   return `<svg x="${o.x ?? 0}" y="${o.y ?? 0}" width="${s}" height="${s}" viewBox="0 0 120 120" color="${c}">${DECO_DEFS.replace(/id="dg"/, `id="dg-${id}"`)}${d.layers
-    .map((l) => l.svg.replaceAll("url(#dg)", `url(#dg-${id})`).replaceAll("currentColor", c))
+    .map((l) => {
+      const svg = l.svg.replaceAll("url(#dg)", `url(#dg-${id})`).replaceAll("currentColor", c);
+      const place = decoPlace(l);
+      return place ? `<g transform="${place.svg}">${svg}</g>` : svg;
+    })
     .join("")}</svg>`;
 }
 
 // ---------------------------------------------------------------------------------------------
 // Card borders and card effects
 
-export type CardBorderId = "comet" | "twin" | "prism" | "pulse";
+export type CardBorderId = "comet" | "twin" | "prism" | "pulse" | "stride" | "vine" | "neon";
 export const CARD_BORDERS: readonly { id: CardBorderId; name: string }[] = [
   // One bright light with a long tail running round the frame, in the name colour.
   { id: "comet", name: "Comet" },
@@ -199,11 +400,17 @@ export const CARD_BORDERS: readonly { id: CardBorderId; name: string }[] = [
   { id: "prism", name: "Prism" },
   // The frame band breathing in the name colour.
   { id: "pulse", name: "Pulse" },
+  // Dashes in the name colour walking round the frame.
+  { id: "stride", name: "Stride" },
+  // A vine along the frame, leaves at the two cut corners swaying a little.
+  { id: "vine", name: "Vine" },
+  // The frame as a lit tube in the name colour, with a rare flicker.
+  { id: "neon", name: "Neon" },
 ];
 export const isCardBorder = (v: unknown): v is CardBorderId => typeof v === "string" && CARD_BORDERS.some((b) => b.id === v);
 export const cardBorderOf = (v: unknown): CardBorderId | null => (isCardBorder(v) ? v : null);
 
-export type CardEffectId = "hops" | "embers" | "stars" | "aurora";
+export type CardEffectId = "hops" | "embers" | "stars" | "aurora" | "rain" | "snow" | "petals" | "speed" | "foil";
 export const CARD_EFFECTS: readonly { id: CardEffectId; name: string }[] = [
   // Dotted hop arcs drifting across the card, like a run's jumps.
   { id: "hops", name: "Hops" },
@@ -213,6 +420,16 @@ export const CARD_EFFECTS: readonly { id: CardEffectId; name: string }[] = [
   { id: "stars", name: "Stars" },
   // Soft bands of colour drifting across the back of the card.
   { id: "aurora", name: "Aurora" },
+  // Thin slanting streaks, small splashes along the bottom edge.
+  { id: "rain", name: "Rain" },
+  // Slow snow, flakes of a few sizes.
+  { id: "snow", name: "Snow" },
+  // Blossom petals drifting across (pairs with the Petals decoration).
+  { id: "petals", name: "Petals" },
+  // Horizontal streaks passing behind the content.
+  { id: "speed", name: "Speed Lines" },
+  // A coloured sheen that follows the card's tilt and the pointer; still when nothing is over the card.
+  { id: "foil", name: "Foil" },
 ];
 export const isCardEffect = (v: unknown): v is CardEffectId => typeof v === "string" && CARD_EFFECTS.some((e) => e.id === v);
 export const cardEffectOf = (v: unknown): CardEffectId | null => (isCardEffect(v) ? v : null);
@@ -237,3 +454,28 @@ export function cardLayerPlan(peak: number | null, border: CardBorderId | null, 
     effect: effect ?? (peak && peak >= 9 ? "motes" : null),
   };
 }
+
+// ---------------------------------------------------------------------------------------------
+// Hover effect: how a supporter's mini profile (ui/hover-card.ts) comes in for everyone who rests on their name
+// (ui/hover-fx.ts). The card's wait, size and manners stay the same; an effect adds at most HOVER_FX_EXTRA_MS to the
+// entrance and nothing to the exit.
+
+export type HoverFxId = "hop" | "flip" | "unfold" | "glint" | "tilt";
+export const HOVER_FX: readonly { id: HoverFxId; name: string }[] = [
+  // Drops in on the site's hop arc and lands with a squash (notify/spring.ts hopKeyframes).
+  { id: "hop", name: "Hop" },
+  // Turns in like a card.
+  { id: "flip", name: "Flip" },
+  // Opens out from the name while the frame draws itself.
+  { id: "unfold", name: "Unfold" },
+  // The usual entrance, then one sheen across the card.
+  { id: "glint", name: "Glint" },
+  // Leans toward the pointer with a soft light while you stay on the name.
+  { id: "tilt", name: "Tilt" },
+];
+export const isHoverFx = (v: unknown): v is HoverFxId => typeof v === "string" && HOVER_FX.some((e) => e.id === v);
+export const hoverFxOf = (v: unknown): HoverFxId | null => (isHoverFx(v) ? v : null);
+/** The most an effect may add to the plain entrance (hover-card.css hc-in, 140 ms). */
+export const HOVER_FX_EXTRA_MS = 250;
+/** How long each entrance runs, ms (Glint: the plain 140 ms, then its sheen); Tilt has none. Tests hold them to the budget. */
+export const HOVER_FX_MS: Record<Exclude<HoverFxId, "tilt">, number> = { hop: 340, flip: 360, unfold: 380, glint: 390 };

@@ -1,6 +1,7 @@
 // Home (title) screen: the menu column over the live map background (attract.ts), and on the right six maps to try
 // (the one behind the menu first, then what to play next) as quick links with their pictures, with the recent world
-// records under them (ui/home-records.ts; four maps then, unless the window is tall). The tutorial is on the menu for a new player's first two
+// records under them (ui/home-records.ts; four maps then, unless the window is tall), and above those, while someone is
+// streaming, Live now (ui/home-live.ts). The tutorial is on the menu for a new player's first two
 // days (tutorialOnHome); after that it's at the top of the map list (tutorial/learn.ts), and the quiet links under the
 // menu keep a way to it for players who hid it there.
 
@@ -22,6 +23,7 @@ import { backgroundPick, featuredArtReady, markFeaturedArtReady } from "./featur
 import { fetchMapIndex, onlineMaps, prewarmMapRows, tierOf, type MapEntry } from "./maps";
 import { mapArt, observeThumbs, prefetchThumbs } from "./thumbs";
 import { recentRecords } from "./home-records";
+import { liveNow } from "./home-live";
 import { landRows } from "./land";
 import { selectedStyle } from "./style-picker";
 import { onlineSummary } from "./servers";
@@ -295,8 +297,9 @@ export function homeScreen(a: HomeActions): HTMLElement {
   arrowNav(menu, "button");
   menu.classList.add("hop-host");
   hopIndicator(menu, ".home-item", { inset: 4, rest: () => menu.querySelector<HTMLElement>(".home-item.primary") });
-  // The maps to try, then the recent world records under them (ui/home-records.ts): online only.
-  const right = h("aside.home-right", null, mapsToTry(a, (n) => (plateMap = n)), recentRecords({ profile: (id) => a.profile(id) }));
+  // The maps to try, then who is streaming right now (ui/home-live.ts, only while someone is) and the recent world
+  // records (ui/home-records.ts) under them: online only.
+  const right = h("aside.home-right", null, mapsToTry(a, (n) => (plateMap = n)), liveNow({ profile: (id) => a.profile(id) }), recentRecords({ profile: (id) => a.profile(id) }));
   // Right arrow from the menu goes to the maps to try (the grid takes its own arrows, and Left back).
   menu.addEventListener("keydown", (e) => {
     if (e.key !== "ArrowRight" || !(document.activeElement as HTMLElement)?.closest(".home-menu")) return;

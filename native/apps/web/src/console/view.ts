@@ -102,6 +102,11 @@ export function runBoundCommand(command: string): void {
   (view ??= new ConsoleView()).runBound(command);
 }
 
+/** A line in the console's scrollback, open or not (jump stats write every report here). */
+export function printConsole(text: string, kind: LineKind = "out"): void {
+  (view ??= new ConsoleView()).print(text, kind);
+}
+
 /** Installs the console key. Call once at startup. */
 export function initConsole(): void {
   addEventListener(

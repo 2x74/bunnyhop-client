@@ -2,10 +2,9 @@
 //! skips when its map is absent. bhop_spooktober: GameBanana 78512.
 
 use bunnyhop_core::{Cmd, Game};
-use std::path::PathBuf;
 
 fn load(name: &str) -> Option<Game> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps").join(format!("{name}.bsp"));
+    let path = bunnyhop_core::test_maps::bsp(name);
     if !path.exists() {
         eprintln!("skipping {name}: {} not found", path.display());
         return None;
@@ -22,10 +21,11 @@ fn land(game: &mut Game, x: f32, y: f32, z: f32) -> f32 {
     game.state.position[2]
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn spooktober_scaled_static_props_collide_at_their_scale() {
     let Some(mut game) = load("bhop_spooktober") else { return };
-    let bsp = bunnyhop_core::parse_bsp(&std::fs::read(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps/bhop_spooktober.bsp")).unwrap()).unwrap();
+    let bsp = bunnyhop_core::parse_bsp(&std::fs::read(bunnyhop_core::test_maps::bsp("bhop_spooktober")).unwrap()).unwrap();
     let props = playsrc_bsp::parse_static_props(&bsp, Default::default()).unwrap().unwrap();
     assert_eq!(props.version, 11);
     let scales: Vec<f32> = props.occurrences.iter().map(|o| o.uniform_scale.value()).collect();

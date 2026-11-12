@@ -14,7 +14,7 @@ import { cleanLoadout, type CosmeticLoadout } from "./loadout";
 // network / device bans and ban-evasion checks, apps/api src/network.ts). Reads carry the device id in its cookie.
 
 import type { NameColorId, NameEffect, PlayerMarks, ProfileLink, ProfileLinks } from "./creators";
-import type { AvatarDecoId, CardBorderId, CardEffectId, NameFontId } from "./supporter-looks";
+import type { AvatarDecoId, CardBorderId, CardEffectId, HoverFxId, NameFontId, NameStyle } from "./supporter-looks";
 import { deviceHeaders } from "./device";
 import { GUEST_REFUSED_MS, resolveMe } from "./me-rules";
 import { WAVEDASH } from "./platform/env";
@@ -68,9 +68,13 @@ export interface SupporterSettings {
   nameColor2: NameColorId | null;
   /** v0.0.37 (supporter-looks.ts): name font, avatar decoration, card border and card effect; null = off. Absent from older APIs. */
   nameFont?: NameFontId | null;
+  /** v0.0.40: bold / italic (supporter-looks.ts NameStyle); null = plain. Absent from older APIs. */
+  nameStyle?: NameStyle | null;
   avatarDeco?: AvatarDecoId | null;
   cardBorder?: CardBorderId | null;
   cardEffect?: CardEffectId | null;
+  /** v0.0.40: how their mini profile comes in (supporter-looks.ts HOVER_FX); null = the plain fade. Absent from older APIs. */
+  hoverFx?: HoverFxId | null;
   showBadge: boolean;
   /** On Top supporters and the About page's thank-you list (shown by default). */
   showOnBoard: boolean;
@@ -89,6 +93,8 @@ export interface TopSupporter {
   nameColor2: NameColorId | null;
   /** v0.0.37; absent from older APIs. */
   nameFont?: NameFontId | null;
+  /** v0.0.40; absent from older APIs. */
+  nameStyle?: NameStyle | null;
   /** The supporter badge shows (not hidden by the player). */
   badge: boolean;
 }
@@ -131,6 +137,8 @@ export interface User {
   bunnyAvatarStale?: boolean;
   /** setDisplayName(): a guest asked for a taken name and got a numbered variant. */
   nameAdjusted?: boolean;
+  /** setDisplayName(): the name left behind, kept for this player until then (ISO; apps/api src/names.ts holds). */
+  oldNameHeld?: { name: string; until: string };
 }
 
 /** GET /names/check (rules: moderation/names.ts; policy: apps/api/src/names.ts). */
@@ -145,6 +153,8 @@ export interface NameCheck {
   suggestion?: string | null;
   /** Saving would use `suggestion` automatically (guests). */
   adjusts?: boolean;
+  /** Available because it is this player's own held old name. */
+  heldForYou?: boolean;
 }
 
 export interface SignInMethod {
@@ -165,7 +175,8 @@ export interface AccountView {
   user: User;
   methods: SignInMethod[];
   canUnlink: Record<string, boolean>;
-  name: { isDefault: boolean; changesLeft: number; limit: number; resetAt: string | null };
+  /** held: the player's previous name, kept for them until then (ISO). */
+  name: { isDefault: boolean; changesLeft: number; limit: number; resetAt: string | null; held: { name: string; until: string } | null };
   /**
    * resetUntil: until when this browser may set a new password without the old one (ISO), else null. alias: staff renamed
    * this player and their old name still signs in, until they rename themself.
@@ -472,6 +483,8 @@ export interface PlayerCardView {
   /** v0.0.37: a supporter's card border and effect (supporter-looks.ts); null / absent otherwise. */
   cardBorder?: CardBorderId | null;
   cardEffect?: CardEffectId | null;
+  /** v0.0.40: a supporter's hover effect (supporter-looks.ts HOVER_FX); null / absent otherwise. */
+  hoverFx?: HoverFxId | null;
 }
 
 /** A verified run on a profile (featured, recent PBs, replay list). */
@@ -520,6 +533,30 @@ export interface PointsPage {
   more?: boolean;
 }
 
+/** One board in a compare: each side's PB there (time in ms, place, run), null for a player who hasn't finished it. */
+export interface CompareBoard {
+  map: string;
+  tier: number;
+  style: string;
+  track: number;
+  players: number;
+  a: { ms: number; rank: number; runId: string } | null;
+  b: { ms: number; rank: number; runId: string } | null;
+}
+/** GET /players/:id/compare/:other. */
+export interface PlayerCompare {
+  a: { id: string; name: string };
+  b: { id: string; name: string };
+  boards: CompareBoard[];
+}
+
+/** A player's overall place per day (GET /players/:id/rank-history, oldest first) and the best place held. */
+export interface RankHistory {
+  player: string;
+  days: { day: string; rank: number; points: number }[];
+  peak: { rank: number; day: string } | null;
+}
+
 export type CosmeticChoice = Record<"background" | "frame" | "title" | "ghost" | "trail" | "outfit" | "knife" | "finish" | "glove" | "hilt" | "hat" | "body" | "camo", string | null> & {
   /** A wig's hair colour ("#rrggbb"), kept for players who own one; absent = the default. */
   hairColor?: string | null;
@@ -549,7 +586,8 @@ export type ApiStaffRole = "owner" | "admin" | "moderator";
 
 export interface Profile {
   nameBadgeSettings?: NameBadgeSettings | null;
-  player: ApiPlayer & { provider: string; since: string; cardBorder?: CardBorderId | null; cardEffect?: CardEffectId | null; mouse?: import("./mouse-settings").MouseSettings & { updatedAt?: number } | null };
+  /** player.previousNames: names the player chose and later left, newest first (at most 5); the card shows them on hover. */
+  player: ApiPlayer & { provider: string; since: string; previousNames?: string[]; cardBorder?: CardBorderId | null; cardEffect?: CardEffectId | null; hoverFx?: HoverFxId | null; mouse?: import("./mouse-settings").MouseSettings & { updatedAt?: number } | null };
   /**
    * Your own profile while you boost the Discord server: the "Show booster badge" switch (Edit card → Badges). null /
    * absent otherwise (older APIs too).
@@ -676,6 +714,25 @@ export interface RecentWr {
   /** ISO date the run was set. */
   date: string;
   player: ApiPlayer;
+}
+
+/** Where a live stream is (apps/api src/live.ts): the platforms /live posts for. */
+export type LivePlatform = "twitch" | "youtube" | "tiktok";
+
+/**
+ * GET /live: a player streaming right now (a Streamer on the Discord server, linked to their bunnyhop.lol account).
+ * The url is the platform's own (twitch.tv, youtube.com, tiktok.com), built by the server from the profile's handle.
+ */
+export interface LiveStream {
+  player: ApiPlayer;
+  platform: LivePlatform;
+  url: string;
+  /** The stream's title (Twitch's, or what the streamer typed with /live), null: none. */
+  title: string | null;
+  /** The category Twitch reports ("Counter-Strike: Source"), null: unknown. */
+  game: string | null;
+  /** When it started (ms). */
+  startedAt: number;
 }
 
 /** GET /maps/:name — summary plus the current build and its pinned (ranked) zone set. */
@@ -1059,8 +1116,8 @@ export const api = {
   },
   /**
    * Sets the display name (rules: moderation/names.ts). Throws ApiError 400 <problem> (too_short, charset, blocked,
-   * reserved, ...), 409 "taken" (body.suggestion; registered players), 429 "rename_limit". Guests asking for a taken
-   * name get a numbered variant: the result has nameAdjusted.
+   * reserved, ...), 409 "taken" / "held" (body.suggestion; registered players), 429 "rename_limit". Guests asking for a
+   * taken name get a numbered variant: the result has nameAdjusted. oldNameHeld: the name left behind is kept for them.
    */
   async setMouseSettings(mouse: import("./mouse-settings").MouseSettings, dispatch?: RequestDispatch): Promise<import("./mouse-settings").MouseSettings> {
     return json("/me/mouse", post(mouse), dispatch);
@@ -1125,7 +1182,7 @@ export const api = {
     return json("/me/name-badges", post(settings), dispatch);
   },
   /** A supporter's name look, badge switch, About listing (403 not_supporter for everyone else). */
-  async saveSupporter(s: Partial<Pick<SupporterSettings, "nameColor" | "nameEffect" | "nameColor2" | "nameFont" | "avatarDeco" | "cardBorder" | "cardEffect" | "showBadge" | "showOnBoard" | "playerGlow">>, dispatch?: RequestDispatch): Promise<SupporterSettings> {
+  async saveSupporter(s: Partial<Pick<SupporterSettings, "nameColor" | "nameEffect" | "nameColor2" | "nameFont" | "nameStyle" | "avatarDeco" | "cardBorder" | "cardEffect" | "hoverFx" | "showBadge" | "showOnBoard" | "playerGlow">>, dispatch?: RequestDispatch): Promise<SupporterSettings> {
     return json("/me/supporter", post(s), dispatch);
   },
   /**
@@ -1243,6 +1300,10 @@ export const api = {
   async recentWrs(limit = 8): Promise<{ at: number; records: RecentWr[] }> {
     return json<{ at: number; records: RecentWr[] }>(`/records/wrs?limit=${limit}`);
   },
+  /** Players streaming right now (the home screen's Live now, the LIVE marks in rooms: src/live.ts). */
+  async live(): Promise<{ at: number; streams: LiveStream[] }> {
+    return json<{ at: number; streams: LiveStream[] }>("/live");
+  },
   /** Newest personal bests across all ranked boards (rank 1 = new world record). */
   async recentRecords(style = "autohop", limit = 6): Promise<RecentRecord[]> {
     return json<RecentRecord[]>(`/records/recent?style=${encodeURIComponent(style)}&limit=${limit}`);
@@ -1351,9 +1412,10 @@ export const api = {
     return json<Profile>(`/players/${encodeURIComponent(id)}`, { cache: "no-cache" });
   },
   /** Verified runs, newest first (pbOnly: current PBs only). */
-  async playerRuns(id: string, opts: { offset?: number; limit?: number; pbOnly?: boolean } = {}): Promise<{ total: number; runs: RunCard[] }> {
+  async playerRuns(id: string, opts: { offset?: number; limit?: number; pbOnly?: boolean; style?: string | null } = {}): Promise<{ total: number; runs: RunCard[] }> {
     const q = new URLSearchParams({ offset: String(opts.offset ?? 0), limit: String(opts.limit ?? 20) });
     if (opts.pbOnly) q.set("pb", "1");
+    if (opts.style) q.set("style", opts.style);
     return json(`/players/${encodeURIComponent(id)}/runs?${q}`);
   },
   /** Overall ("all") or per-style rank leaderboard. */
@@ -1459,6 +1521,7 @@ export const api = {
     u.searchParams.set("style", style);
     // The wire styles this build decodes (protocol.ts LEGACY_META_STYLES): without it the room sends the legacy form.
     u.searchParams.set("roomrace", "1");
+    u.searchParams.set("bonusstyles", "1");
     u.searchParams.set("wire", String(WIRE_STYLES.length));
     return u.toString();
   },
@@ -1481,6 +1544,13 @@ export const api = {
   async playerPoints(id: string, scope = "all", page: { offset?: number; limit?: number } = {}): Promise<PointsPage> {
     const q = `${page.offset ? `&offset=${page.offset}` : ""}${page.limit ? `&limit=${page.limit}` : ""}`;
     return json(`/players/${encodeURIComponent(id)}/points?scope=${encodeURIComponent(scope)}${q}`);
+  },
+  /** Two players' records by board (the profile's Compare): `id` is side a, `other` side b. */
+  async playerCompare(id: string, other: string): Promise<PlayerCompare> {
+    return json(`/players/${encodeURIComponent(id)}/compare/${encodeURIComponent(other)}`);
+  },
+  async playerRankHistory(id: string): Promise<RankHistory> {
+    return json(`/players/${encodeURIComponent(id)}/rank-history`);
   },
   /** A board row's stats card (cached at the edge; 404 for runs that aren't on a public board). */
   async runStats(runId: string, signal?: AbortSignal): Promise<RunStats> {

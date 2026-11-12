@@ -3,10 +3,12 @@ import { EVENT_JUMPED, EVENT_LANDED, EVENT_TELEPORTED, type PlayerState } from "
 import { EVENT_RESPAWNED, type TickCmd } from "../timer";
 import { yawDelta } from "../autostrafe";
 import { palette } from "../palette";
+import { barGain } from "../hud/strafe-trainer";
 
 const BROKEN = EVENT_TELEPORTED | EVENT_RESPAWNED;
 const MANUAL = new Set(["autohop", "legit", "scroll", "hsw"]);
-export interface OffsetReport { ticks: number; overlap: boolean; gap: boolean }
+/** `streak`: how many offsets in a row had these ticks before this one, as CS:S shows it (−1 (0), −1 (1), ...). */
+export interface OffsetReport { ticks: number; overlap: boolean; gap: boolean; streak?: number }
 /** "−1", "0", "+2": a real minus sign so the HUD's tabular figures line up. */
 export const signedTicks = (n: number): string => (n < 0 ? `\u2212${-n}` : n > 0 ? `+${n}` : "0");
 export const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
@@ -15,9 +17,11 @@ export const plural = (n: number, one: string, many = `${one}s`): string => `${n
 export function offsetNote(r: OffsetReport): string {
   return [r.ticks < 0 ? "key early" : r.ticks > 0 ? "key late" : "same tick", r.overlap ? "overlap" : r.gap ? "gap" : ""].filter(Boolean).join(", ");
 }
-/** "Offset −1 (key early, gap)". */
+/** "−1 (2)": the offset and its streak. */
+export const offsetTicks = (r: OffsetReport): string => `${signedTicks(r.ticks)}${r.streak === undefined ? "" : ` (${r.streak})`}`;
+/** "Offset −1 (2) key early, gap". */
 export function offsetText(r: OffsetReport): string {
-  return `Offset ${signedTicks(r.ticks)} (${offsetNote(r)})`;
+  return `Offset ${offsetTicks(r)} ${offsetNote(r)}`;
 }
 /** "FJT 1 tick"; with the tick length, the chat's "FJT 1 tick (10 ms)". */
 export function fjtText(ticks: number, tickInterval?: number): string {
@@ -36,9 +40,18 @@ export class OffsetTracker {
   private turnAt: { tick: number; dir: number } | null = null;
   private overlap = false;
   private gap = false;
+  /** The last offset and its streak: they carry on over landings and resets, until forget(). */
+  private last: number | null = null;
+  private streak = 0;
   reset(): void {
     this.tick = -1; this.yaw = NaN; this.side = this.turn = 0;
     this.keyAt = this.turnAt = null; this.overlap = this.gap = false;
+  }
+  /** A restart: the streak starts over too. */
+  forget(): void {
+    this.reset();
+    this.last = null;
+    this.streak = 0;
   }
   feed(cmd: TickCmd, state: PlayerState, events: number, style: string): OffsetReport | null {
     const previousYaw = this.yaw, continuous = state.tick === this.tick + 1;
@@ -56,9 +69,53 @@ export class OffsetTracker {
     if (this.keyAt && state.tick - this.keyAt.tick >= 20) this.keyAt = null;
     if (this.turnAt && state.tick - this.turnAt.tick >= 20) this.turnAt = null;
     if (!this.keyAt || !this.turnAt || this.keyAt.dir !== this.turnAt.dir) return null;
-    const r = { ticks: this.keyAt.tick - this.turnAt.tick, overlap: this.overlap, gap: this.gap };
+    const ticks = this.keyAt.tick - this.turnAt.tick;
+    this.streak = ticks === this.last ? this.streak + 1 : 0;
+    this.last = ticks;
+    const r = { ticks, overlap: this.overlap, gap: this.gap, streak: this.streak };
     this.keyAt = this.turnAt = null; this.overlap = this.gap = false;
     return r;
+  }
+}
+
+/**
+ * Slow ticks (SourceJump 2.0's dead time): the air ticks of one strafe whose speed gain stayed under `below` % of the
+ * most that tick could have gained (the core's AirAccelerate observation, the trainer Bar's gain), a tick without keys
+ * included. A strafe runs from one turn reversal to the next (a still mouse keeps the direction), so it works in every
+ * style. feed() returns the finished strafe's count at a reversal.
+ */
+export class SlowTickTracker {
+  private tick = -1;
+  private yaw = NaN;
+  private turn = 0;
+  private ticks = 0;
+  private slow = 0;
+  private ground = 0;
+  reset(): void {
+    this.tick = -1; this.yaw = NaN; this.turn = this.ticks = this.slow = this.ground = 0;
+  }
+  feed(cmd: TickCmd, state: PlayerState, events: number, below: number): number | null {
+    const previousYaw = this.yaw, continuous = state.tick === this.tick + 1;
+    this.tick = state.tick; this.yaw = cmd.yaw;
+    this.ground = state.grounded ? this.ground + 1 : 0;
+    if (!continuous || (events & BROKEN) || state.onLadder || this.ground > 10 || !Number.isFinite(cmd.yaw)) {
+      this.turn = this.ticks = this.slow = 0;
+      return null;
+    }
+    // A hop's ground tick doesn't end the strafe; it isn't judged either.
+    if (state.grounded) return null;
+    const turn = Math.sign(yawDelta(previousYaw, cmd.yaw));
+    let out: number | null = null;
+    if (turn && this.turn && turn !== this.turn) {
+      if (this.ticks >= 2) out = this.slow;
+      this.ticks = this.slow = 0;
+    }
+    if (turn) this.turn = turn;
+    if (!this.turn) return null;
+    this.ticks++;
+    const gain = barGain(state.airSpeedGain, state.airBestGain);
+    if (gain !== null && gain * 100 < below) this.slow++;
+    return out;
   }
 }
 

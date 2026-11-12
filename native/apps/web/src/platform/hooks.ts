@@ -16,10 +16,10 @@ export function initPlatform(): void {
   const resync = () => void me().then((u) => syncSettings(u));
   resync();
   window.addEventListener(ACCOUNT_EVENT, resync);
+  showDesktopNotice();
   if (!WAVEDASH) return;
 
   wavedashReady();
-  showDesktopNotice();
   onMyProfile((p) => {
     if (!p.mine) return;
     void syncWavedashCareer({

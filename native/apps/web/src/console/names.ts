@@ -224,7 +224,6 @@ export const UNSUPPORTED_COMMANDS: Record<string, string> = {
   "+movedown": "no swimming down key here (duck swims down)",
   "+walk": "no walk key in bhop",
   "+showscores": "the scoreboard is Tab in servers",
-  "+voicerecord": "no voice chat",
   "+klook": "no keyboard look",
   "+lookup": "no keyboard look",
   "+lookdown": "no keyboard look",

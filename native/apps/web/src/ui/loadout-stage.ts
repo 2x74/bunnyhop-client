@@ -36,8 +36,9 @@ import { FINISH_CODE, specOf } from "../viewmodel/finishes/shader";
 import { ensureViewmodelLayout } from "../viewmodel/finishes/layout";
 import { viewmodelGeometry } from "../viewmodel/mesh";
 import { vmRig } from "../viewmodel/rig";
-import { getLoadout, getOutfit, onOutfit } from "../player/cosmetics";
+import { getLoadout, getOutfit, getPlayerGlow, onOutfit } from "../player/cosmetics";
 import { GLOVE_STYLE_IDS, gloveStyle, hiltSkin, type CosmeticLoadout, type GloveStyleId } from "../loadout";
+import type { PlayerGlow } from "../player/glow-config";
 import { prefs } from "./settings";
 import { BunnyScene, type BunnyLook } from "./bunny-preview";
 import { HERO, type PreviewSpec } from "../notify/item-preview";
@@ -52,6 +53,8 @@ import { menuIdleAllowed, onMenuMapStart } from "./menu-work";
 import { loadThumb, saveThumb } from "./thumb-store";
 import { playerLookTier } from "../player/look-tier";
 import { CamoStage } from "./camo-stage";
+import { softwareContext } from "../gfx-auto";
+import { sharedRenderer } from "../shared-gl";
 
 /** First person and close-up (hands), your bunny, your ghost; a gun in first person or from the side (Gun camo). */
 export type StageView = "fp" | "close" | "bunny" | "ghost" | "gun" | "gunside";
@@ -76,6 +79,8 @@ const vmKnife = (k: KnifeDef): KnifeDef | null => (k.id === "carrot" ? null : k)
 const FINISH_CODES = [...new Set(Object.values(FINISH_CODE))];
 /** A knife thumbnail's program variant: its finish code and whether a hilt skin is on (KnifeShowcase.material). */
 const knifeProgram = (l: CosmeticLoadout): string => `${FINISH_CODE[specOf(l).kind] ?? 0}|${hiltSkin(l.hilt) ? 1 : 0}`;
+/** The shortest frame the stage draws (~62 fps, as the menu background: attract.ts). */
+const FRAME_MIN_MS = 1000 / 62;
 /** Seconds of the idle sequence the hero loops (see drawFirstPerson). */
 const IDLE_LOOP = 4.6;
 
@@ -199,6 +204,8 @@ export class LoadoutStage {
   private offOutfit: () => void;
   private parkTimer = 0;
   private warmed = false;
+  /** The hands' glow shells were asked for (display). */
+  private glowShells = false;
   /** The latest display() whose bunny was waiting for the worker (an older one finishing late is dropped). */
   private bunnyWant = 0;
   private offHost: (() => void) | null = null;
@@ -249,10 +256,23 @@ export class LoadoutStage {
   }
 
   constructor(host: HTMLElement, initial: CosmeticLoadout) {
+    // (The game's context says so already: no context of our own made for nothing, ~1.5 s on SwiftShader.)
+    const game = sharedRenderer();
+    if (game && softwareContext(game.getContext())) throw new Error("software WebGL");
     this.canvas = document.createElement("canvas");
     this.canvas.className = "lo-canvas";
     this.canvas.setAttribute("aria-hidden", "true");
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: true, powerPreference: "high-performance" });
+    // Software GL (SwiftShader, llvmpipe: a blocklisted GPU, hardware acceleration off): no stage, the tiles keep their
+    // swatches. There every stage frame and every new shader held up the whole page for seconds.
+    if (softwareContext(this.renderer.getContext())) {
+      this.renderer.dispose();
+      this.renderer.forceContextLoss();
+      throw new Error("software WebGL");
+    }
+    // No shader info logs: each program's first use then asks the GPU process once instead of four times, and every one
+    // of those waits for what it has queued (the same shaders are checked in game).
+    this.renderer.debug.checkShaderErrors = false;
     this.renderer.setClearColor(0x000000, 0);
     this.shown = initial;
     this.vm = new Viewmodel();
@@ -351,6 +371,12 @@ export class LoadoutStage {
     if (look) this.look = { ...look };
     // The first-person views show the glow being edited too (ui/player-glow-controls.ts), as the bunny does.
     this.vm.glowOverride = this.look?.playerGlow;
+    // A glow on the hands needs each knife's glow shell (its smoothed normals: ~50 ms a knife at 4x CPU, in the frame a
+    // hovered knife first showed): built in the prebuild worker, once a glow is shown.
+    if (!this.glowShells && handsGlow(this.vm.glowOverride === undefined ? getPlayerGlow() : this.vm.glowOverride)) {
+      this.glowShells = true;
+      void prebuildViewmodels(vmPairs(l), true);
+    }
     const k = knifeOf(l.knife);
     // A different knife up close settles first: the spin from the last one eases out quickly, the tilt comes back level.
     if (k !== this.shownKnife && this.shownKnife !== undefined && !this.dragging) this.settle = 0.45;
@@ -895,8 +921,12 @@ export class LoadoutStage {
     const h = Math.max(1, this.host.clientHeight);
     // Device pixels: up to 1.5x (it's antialiased and redrawn every frame: past that an integrated GPU pays a lot for
     // little), and no more than ~2.5 megapixels on very large screens.
-    const pr = Math.min(Math.max(1, devicePixelRatio), 1.5, Math.sqrt(2_500_000 / (w * h)));
-    this.renderer.setPixelRatio(Math.max(1, pr));
+    const pr = Math.max(1, Math.min(Math.max(1, devicePixelRatio), 1.5, Math.sqrt(2_500_000 / (w * h))));
+    // Same size: nothing to do. Setting a WebGL canvas's size, even to the one it has, reallocates its drawing buffer,
+    // which waits for the GPU process (0.6 s on open at 4x CPU, behind the shaders compiling): the ResizeObserver's
+    // first call always comes with the size attach() already set.
+    if (w === this.w && h === this.h && pr === this.renderer.getPixelRatio()) return;
+    this.renderer.setPixelRatio(pr);
     this.renderer.setSize(w, h, false);
     this.w = w;
     this.h = h;
@@ -964,6 +994,20 @@ export class LoadoutStage {
       this.vm.seek("idle", 0.4);
       this.vm.timeScale = 1;
     }
+    // The first time in this context: its programs compile in parallel first (the 70 kB hands shader linked inside a
+    // frame froze the page for 0.1-0.3 s on open, longer on Windows), the hero shows when they're ready. Before any
+    // measuring too: measuring renders the probe, which linked the same program inside the first frame (0.5 s at 4x CPU).
+    if (this.vmReady !== true) {
+      if (this.vmReady === false) {
+        this.vmReady = null;
+        void compileModel(this.renderer, this.vm.scene, this.vm.camera, this.vm.scene, 3000).finally(() => {
+          this.vmReady = true;
+          this.kick();
+        });
+      }
+      this.renderer.clear();
+      return;
+    }
     // (Measuring a new knife renders one scissored pixel: before the clear.)
     const target = this.targetRect();
     this.renderer.clear();
@@ -977,18 +1021,6 @@ export class LoadoutStage {
     this.world.position.set(0, 0, 0);
     this.world.rotation.set(0, 0, 0);
     this.crop(this.vm, this.rect, this.w, this.h);
-    // The first time in this context: its programs compile in parallel first (the 70 kB hands shader linked inside a
-    // frame froze the page for 0.1-0.3 s on open, longer on Windows), the hero shows when they're ready.
-    if (this.vmReady !== true) {
-      if (this.vmReady === false) {
-        this.vmReady = null;
-        void compileModel(this.renderer, this.vm.scene, this.vm.camera, this.vm.scene, 3000).finally(() => {
-          this.vmReady = true;
-          this.kick();
-        });
-      }
-      return;
-    }
     this.vm.render(this.renderer, this.world);
   }
   /** The hero viewmodel's programs: not compiled in this context yet (false), compiling (null), ready (true). */
@@ -1030,14 +1062,20 @@ export class LoadoutStage {
 
   private kick(): void {
     if (this.raf || !this.visible || this.disposed) return;
-    this.last = performance.now();
+    // (A frame's worth back: the first frame isn't held back by the frame cap below.)
+    this.last = performance.now() - 2 * FRAME_MIN_MS;
     const step = (now: number) => {
       this.raf = 0;
       if (!this.canvas.isConnected) return this.park();
       if (!this.visible || document.hidden) return;
+      this.raf = requestAnimationFrame(step);
+      // At most ~60 fps, or Settings → Graphics → FPS limit in menus, as the menu background (attract.ts). With the
+      // browser's frame limit off (the desktop client's uncapped mode) rAF fires as fast as it can, and the stage drew
+      // every one of those frames.
+      const menuFps = prefs.get().graphics.menuFps;
+      if (now - this.last < Math.max(FRAME_MIN_MS, menuFps > 0 ? 1000 / menuFps : 0) - 1) return;
       this.frame(Math.min(0.1, (now - this.last) / 1000));
       this.last = now;
-      this.raf = requestAnimationFrame(step);
     };
     this.raf = requestAnimationFrame(step);
   }
@@ -1221,8 +1259,7 @@ export function prewarmLoadout(l: CosmeticLoadout = getLoadout(), done?: () => v
     const glove = gloveStyle(l.glove).style;
     // The first-person geometries below are built in the prebuild worker first (~10 ms each here, several times that
     // on a slow PC, about 30 of them): the steps then only sample them. Any not back yet are built here as before.
-    const vmPairs: [KnifeDef, GloveStyleId][] = [[carrot, "knit"], [mine ?? carrot, glove], ...GLOVE_STYLE_IDS.map((style): [KnifeDef, GloveStyleId] => [mine ?? carrot, style]), ...KNIVES.map((k): [KnifeDef, GloveStyleId] => [k, glove])];
-    const built = prebuildViewmodels(vmPairs);
+    const built = prebuildViewmodels(vmPairs(l), handsGlow(getPlayerGlow()));
     const steps: (() => void)[] = [
       () => sampleOf(viewmodelGeometry(mine, glove)),
       ...GLOVE_STYLE_IDS.map((style) => () => sampleOf(viewmodelGeometry(mine, style))),
@@ -1241,6 +1278,16 @@ export function prewarmLoadout(l: CosmeticLoadout = getLoadout(), done?: () => v
   if (done) void warming.then(done);
   return warming;
 }
+
+/** The hands + knife pairs the Loadout shows: yours, your knife in every glove style, every knife in your gloves. */
+function vmPairs(l: CosmeticLoadout): [KnifeDef, GloveStyleId][] {
+  const mine = vmKnife(knifeOf(l.knife)) ?? carrot;
+  const glove = gloveStyle(l.glove).style;
+  return [[carrot, "knit"], [mine, glove], ...GLOVE_STYLE_IDS.map((style): [KnifeDef, GloveStyleId] => [mine, style]), ...KNIVES.map((k): [KnifeDef, GloveStyleId] => [k, glove])];
+}
+
+/** Whether the hands show this glow (Viewmodel: only with "In first person" on): their glow shells are then needed. */
+const handsGlow = (g: PlayerGlow | null | undefined): boolean => !!g?.enabled && prefs.get().firstPersonGlow;
 
 /** An item model's bunny / hat geometry, built in the prebuild worker (no-op for other kinds or when cached). */
 function prebuildItem(spec: PreviewSpec): Promise<void> {

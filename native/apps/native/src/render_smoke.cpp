@@ -343,6 +343,8 @@ int main(int argc, char **argv) {
                     zone.kind = 2;
                 else if (kind == "checkpoint")
                     zone.kind = 3;
+                else if (kind == "anti-skip")
+                    zone.kind = 4;
                 else
                     continue;
                 zone.track = z.value("track", 0u);

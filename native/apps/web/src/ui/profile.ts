@@ -15,7 +15,7 @@ import { SIGN_IN_HELP } from "./account-copy";
 // Profile screen (/?u=<id>, /u/<id>, any player name on a board, the account chip). One screen, no page scroll:
 //   - tabs in the screen's header (menu.ts passes a slot for them), so they stay put whatever the tab shows.
 //   - hero (left): the tilting player card (ui/card.ts) is the page: rank, level and records are on it, so no tiles
-//     repeat them. Under it one row of actions (owner: Edit card; visitor: Race best run, Follow) + Share, and for
+//     repeat them. Under it one row of actions (owner: Edit card; visitor: Follow) + Share, and for
 //     guests one "Sign in" link.
 //     Edit card turns the hero into the card's editor (ui/card-editor.ts): the card stays, its parts (background,
 //     frame, title, badges, links) are picked right under it, or by clicking them on the card. Esc / Done leaves.
@@ -42,7 +42,7 @@ import { countryPicker } from "./country-picker";
 import { api, ApiError, ApiUnavailable, lastKnownMe, type PlayerGauntlets, type PointsPage, type Profile, type RunCard } from "../api";
 import { COSMETICS, supporterItem, type CosmeticChoice } from "../progression";
 import { fmtPoints, rankGroupById } from "../ranking";
-import { styleLabel } from "../styles";
+import { STYLE_DEFS, styleLabel } from "../styles";
 import { formatTime } from "../timer";
 import { trackName } from "../zones";
 import { focusEquipped, localModel, loadoutView, profileModel } from "./loadout-view";
@@ -51,6 +51,8 @@ import { isCardPart, isLoadoutCategory, profileTarget, type CardPart, type Profi
 import { communityConfig } from "./community";
 import { playerCard, viewsLabel, type SupporterLook } from "./card";
 import { topPoints } from "./profile-points";
+import { profileCompare } from "./profile-compare";
+import { profileRankHistory } from "./profile-rank-history";
 import { h } from "./dom";
 import { tierBadge } from "./maps";
 import { navigate, profileUrl } from "./nav";
@@ -95,7 +97,7 @@ function ago(iso: string): string {
 
 export function placeLabel(r: { rank: number | null; players?: number | null }): HTMLElement {
   // A world record is told by the gold time itself (.pf-run.is-wr), not a chip.
-  if (r.rank === 1) return h("span.place.wr-word", { title: "World record" });
+  if (r.rank === 1) return h("span.place.wr-word", { title: "World record" }, "WR");
   if (!r.rank) return h("span.place.dim", null, "—");
   return h(`span.place${r.rank <= 10 ? ".top10" : ""}`, null, `#${r.rank}`, r.players ? h("small.dim", null, `/${r.players}`) : null);
 }
@@ -104,6 +106,7 @@ const TABS: [ProfileTab, string][] = [
   ["overview", "Overview"],
   ["loadout", "Loadout"],
   ["runs", "Runs"],
+  ["compare", "Compare"],
 ];
 
 // ---------------------------------------------------------------------------------------------
@@ -112,7 +115,7 @@ const TABS: [ProfileTab, string][] = [
 function skeleton(tabs: HTMLElement, tab: ProfileTab, mine: boolean): HTMLElement {
   const sk = (cls: string) => h(`div.sk.${cls}`);
   // The tabs the loaded screen will have (Loadout on your own profile only), so the row doesn't shift when it lands.
-  const shown = TABS.filter(([t]) => t !== "loadout" || mine || tab === "loadout");
+  const shown = TABS.filter(([t]) => (t === "loadout" ? mine || tab === "loadout" : t === "compare" ? !mine : true));
   tabs.replaceChildren(h("div.pf-tabs.is-loading", { "aria-hidden": "true" }, ...shown.map(([t, l]) => h(`span.pf-tab.sk-text${t === (tab ?? "overview") ? ".on" : ""}`, null, l))));
   // Opened on the Loadout: its own boxes (stage | grid), so the page doesn't jump from the card layout.
   if (tab === "loadout") return h("div.pf-layout.is-loading", { "aria-hidden": "true", "data-tab": "loadout" }, h("div.pf-main", null, h("div.pf-panel", null, h("div.lo-boot", null, h("div"), h("div")))));
@@ -245,14 +248,16 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
       },
     },
   );
-  const best = [...p.featured, ...p.recentPBs].filter((x) => x.pb).sort((x, y) => (y.points ?? 0) - (x.points ?? 0))[0] ?? p.featured[0] ?? null;
   const editBtn = p.mine ? h("button.btn.primary.pf-cta", { type: "button", "data-act": "edit", onclick: () => setEditing(true) }) : null;
   const social = profileSocial(p);
+  // Compare (you against them): someone else's profile, when they have runs and the viewer is somebody.
+  const me = p.mine ? null : lastKnownMe();
+  const canCompare = !!me && me.id !== p.player.id && api.available() && (p.featured.length > 0 || p.recentPBs.length > 0);
   const actions = h("div.pf-actions");
   // One row by relationship (ui/profile.css .pf-actions): one amber action that leans, the rest quiet, the extras in ⋯.
   //   yours:    Edit card · Loadout · Share · ⋯ (Profile flag, Mouse settings)
   //   theirs:   Follow / Follow back (the amber one) or Following ▾ / Friends ▾ (Message, Join, Invite, Unfollow) ·
-  //             Race best run (amber once you follow) · Share · ⋯ (Gift Supporter, Block, Report)
+  //             Compare (its tab) · Share · ⋯ (Gift Supporter, Block, Report). Racing a run is on each run's row, not here (owner 11-12).
   const drawActions = () => {
     const focused = actions.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.act : null;
     const more = (items: () => MenuItem[]) =>
@@ -275,18 +280,9 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
         ]),
       );
     } else {
-      const rel = social.rel();
-      const raceBtn = best
-        ? h(
-            `button.btn.pf-cta${rel ? ".primary" : ".pf-quiet"}`,
-            { type: "button", "data-act": "race", onclick: () => a.race(best, p.player.name), title: `Race ${p.player.name}'s ghost on ${best.map}` },
-            "Race best run",
-            h("span.pf-cta-time", null, formatTime(best.time)),
-          )
-        : null;
       actions.replaceChildren(
         ...(api.available() ? [social.followControl()] : []),
-        raceBtn ?? "",
+        canCompare ? h("button.btn.pf-quiet", { type: "button", "data-act": "compare", onclick: () => select("compare"), title: `Your times against ${p.player.name}'s` }, "Compare") : "",
         copy,
         more(() => [
           { label: "Gift Supporter", run: () => openGiftDialog({ recipientId: p.player.id, recipientName: p.player.name }) },
@@ -329,7 +325,25 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
     fresh && p.mine ? h("p.pf-fresh", null, "Finish a map to get a rank.") : null,
     mouseProfileStats(p.mine ? mouseFromPrefs(prefs.get()) : p.player.mouse),
     linksSlot,
+    // Where the player stands goes with the card (the right column is their runs).
+    fresh ? null : h("div.pf-hero-secs", null, ranksSection(), profileRankHistory(p)),
   );
+
+  function ranksSection(): HTMLElement | null {
+    // Most points first: where the player is strongest leads (rank breaks a tie).
+    const ranked = p.styles.filter((s) => s.rank).sort((x, y) => y.points - x.points || (x.rank ?? 0) - (y.rank ?? 0));
+    if (!ranked.length) return null;
+    return h(
+      "section.pf-sec.pf-ranks",
+      null,
+      h("h3", null, "Ranks", h("button.link-btn", { type: "button", onclick: () => a.ranks("all") }, "Rank board ›")),
+      h(
+        "div.pf-rank-rows",
+        null,
+        ...ranked.map((s) => h("button.pf-rank-row", { type: "button", onclick: () => a.ranks(s.scope), title: `${styleLabel(s.scope)} rank board` }, h("span", null, styleLabel(s.scope)), h("span.pf-rank-pts", null, `${fmtPoints(s.points)} pts`), h("b.pf-rank-pos", null, `#${s.rank}`))),
+      ),
+    );
+  }
 
   // --- the card editor (owner): the hero's numbers and actions make room for it; the card stays put
   const cardIds = COSMETICS.filter((c) => isCardPart(c.slot)).map((c) => c.id);
@@ -356,9 +370,11 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
           p.player.nameEffect = s.nameEffect;
           p.player.nameColor2 = s.nameColor2;
           p.player.nameFont = s.nameFont ?? null;
+          p.player.nameStyle = s.nameStyle ?? null;
           p.player.avatarDeco = s.avatarDeco ?? null;
           p.player.cardBorder = s.cardBorder ?? null;
           p.player.cardEffect = s.cardEffect ?? null;
+          p.player.hoverFx = s.hoverFx ?? null;
           namePreview = undefined;
           drawCard();
         },
@@ -426,7 +442,8 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
   addEventListener("keydown", onEsc, true);
 
   // --- tabs
-  const tabs = TABS.filter(([t]) => t !== "loadout" || p.mine);
+  // Loadout on your own profile; Compare (you against them) on anyone else's.
+  const tabs = TABS.filter(([t]) => (t === "loadout" ? p.mine : t === "compare" ? canCompare : true));
   let tab: ProfileTab = tabs.some(([t]) => t === target.tab) ? target.tab : "overview";
   const tabBar = h("div.pf-tabs", { role: "tablist", "aria-label": "Profile sections" });
   const panel = h("div.pf-panel", { role: "tabpanel", id: "pf-panel", tabindex: "-1" });
@@ -486,7 +503,7 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
         // Pin (yours), Copy start, Copy link, Report (ui/row-menu.ts).
         o.mini
           ? null
-          : rowMenu({ runId: run.runId, map: run.map, time: run.time, player: { id: p.player.id, name: p.player.name } }, {
+          : rowMenu({ runId: run.runId, map: run.map, time: run.time, player: { id: p.player.id, name: p.player.name }, style: run.style }, {
               mine: p.mine,
               extra: () => (p.mine ? [{ label: featuredIds.includes(run.runId) ? "Unpin from featured" : "Pin to featured", run: () => togglePin(run) }] : []),
             }),
@@ -522,20 +539,6 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
         p.mine ? null : h("p.pf-empty", null, `${p.player.name} hasn't finished a map yet.`),
       );
     }
-    // Most points first: where the player is strongest leads (rank breaks a tie).
-    const ranked = p.styles.filter((s) => s.rank).sort((x, y) => y.points - x.points || (x.rank ?? 0) - (y.rank ?? 0));
-    const ranks = ranked.length
-      ? h(
-          "section.pf-sec.pf-ranks",
-          null,
-          h("h3", null, "Ranks", h("button.link-btn", { type: "button", onclick: () => a.ranks("all") }, "Rank board ›")),
-          h(
-            "div.pf-rank-rows",
-            null,
-            ...ranked.map((s) => h("button.pf-rank-row", { type: "button", onclick: () => a.ranks(s.scope), title: `${styleLabel(s.scope)} rank board` }, h("span", null, styleLabel(s.scope)), h("span.pf-rank-pts", null, `${fmtPoints(s.points)} pts`), h("b.pf-rank-pos", null, `#${s.rank}`))),
-          ),
-        )
-      : null;
     const next =
       p.mine && p.suggestions.length
         ? h(
@@ -559,26 +562,38 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
       : null;
     const { points, gauntlets, stats } = early;
     Object.assign(early, { points: undefined, gauntlets: undefined, stats: undefined });
-    return h("div.pf-ov", null, next, h("div.pf-ov-row", null, recent, ranks), topPoints(p, points), profileMapper(p), profileGauntlets(p.player.id, gauntlets), playerStatsSection(p.player.id, { compact: true, early: stats }));
+    return h("div.pf-ov", null, next, recent, topPoints(p, points), profileMapper(p), profileGauntlets(p.player.id, gauntlets), playerStatsSection(p.player.id, { compact: true, early: stats }));
   }
 
   // --- runs (virtualised)
   let runs: { el: HTMLElement; refresh: () => void } | null = null;
   let runsPbOnly = true;
+  /** One style's runs (null: every style). */
+  let runsStyle: string | null = null;
   function runsTab(): HTMLElement {
     const seg = h("div.pf-seg", { role: "group", "aria-label": "Which runs" });
+    // The styles the player has records in, in the menu's order (Top points' switch lists the same ones).
+    const styles = STYLE_DEFS.filter((d) => p.styles.some((s) => s.scope === d.id && s.records > 0)).map((d) => d.id);
+    const styleSeg = styles.length > 1 ? h("div.pf-seg", { role: "group", "aria-label": "Style" }) : null;
     const listHost = h("div.pf-runs-list");
-    const drawSeg = () =>
+    const drawSeg = () => {
+      // The counts are every style's; with one style picked they'd be wrong, so they go.
+      const n = (v: number) => (runsStyle ? null : h("small", null, ` ${v}`));
       seg.replaceChildren(
-        h(`button${runsPbOnly ? ".on" : ""}`, { type: "button", "aria-pressed": String(runsPbOnly), onclick: () => switchTo(true) }, "Personal bests", h("small", null, ` ${p.stats.pbs}`)),
-        h(`button${!runsPbOnly ? ".on" : ""}`, { type: "button", "aria-pressed": String(!runsPbOnly), onclick: () => switchTo(false) }, "All replays", h("small", null, ` ${p.stats.runs}`)),
+        h(`button${runsPbOnly ? ".on" : ""}`, { type: "button", "aria-pressed": String(runsPbOnly), onclick: () => switchTo(true, runsStyle) }, "Personal bests", n(p.stats.pbs)),
+        h(`button${!runsPbOnly ? ".on" : ""}`, { type: "button", "aria-pressed": String(!runsPbOnly), onclick: () => switchTo(false, runsStyle) }, "All replays", n(p.stats.runs)),
       );
-    let list = virtualRuns(p.player.id, runsPbOnly, runRow, runsPbOnly ? early.runs : undefined);
+      styleSeg?.replaceChildren(
+        ...[null, ...styles].map((s) => h(`button${s === runsStyle ? ".on" : ""}`, { type: "button", "aria-pressed": String(s === runsStyle), onclick: () => switchTo(runsPbOnly, s) }, s ? styleLabel(s) : "All styles")),
+      );
+    };
+    let list = virtualRuns(p.player.id, runsPbOnly, runRow, runsPbOnly && !runsStyle ? early.runs : undefined, runsStyle);
     early.runs = undefined;
-    const switchTo = (pb: boolean) => {
-      if (pb === runsPbOnly) return;
+    const switchTo = (pb: boolean, style: string | null) => {
+      if (pb === runsPbOnly && style === runsStyle) return;
       runsPbOnly = pb;
-      list = virtualRuns(p.player.id, pb, runRow);
+      runsStyle = style;
+      list = virtualRuns(p.player.id, pb, runRow, undefined, style);
       listHost.replaceChildren(list.el);
       drawSeg();
       if (runs) runs.refresh = list.refresh;
@@ -588,7 +603,7 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
     const el = h(
       "section.pf-runs",
       null,
-      h("div.pf-runs-bar", null, seg, h("span.pf-runs-note", null, p.mine ? "Pin up to 5 runs to feature them on your card." : `Race any run as a ghost.`)),
+      h("div.pf-runs-bar", null, seg, styleSeg, h("span.pf-runs-note", null, p.mine ? "Pin up to 5 runs to feature them on your card." : `Race any run as a ghost.`)),
       listHost,
     );
     runs = { el, refresh: list.refresh };
@@ -612,7 +627,7 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
       return view;
     }
     let el = built.get(t);
-    if (!el) built.set(t, (el = t === "overview" ? overview() : runsTab()));
+    if (!el) built.set(t, (el = t === "overview" ? overview() : t === "compare" ? profileCompare(me!, p.player, a.play) : runsTab()));
     return el;
   }
   function select(t: ProfileTab): void {
@@ -694,7 +709,7 @@ const runHead = () =>
   h("div.pf-run.pf-run-head", { "aria-hidden": "true" }, h("span", null, "Map"), h("span.pf-run-time", null, "Time"), h("span.pf-run-place", null, "Place"), h("span.pf-run-pts", null, "Points"), h("span.pf-run-when", null, "When"), h("span"));
 
 /** `first`: page 0, already asked (earlyReads). */
-function virtualRuns(id: string, pbOnly: boolean, row: (r: RunCard) => HTMLElement, first?: Promise<{ total: number; runs: RunCard[] }>): { el: HTMLElement; refresh: () => void } {
+function virtualRuns(id: string, pbOnly: boolean, row: (r: RunCard) => HTMLElement, first?: Promise<{ total: number; runs: RunCard[] }>, style: string | null = null): { el: HTMLElement; refresh: () => void } {
   const pages = new Map<number, RunCard[] | null>();
   const cache = new Map<number, HTMLElement>();
   let total = -1;
@@ -707,7 +722,7 @@ function virtualRuns(id: string, pbOnly: boolean, row: (r: RunCard) => HTMLEleme
   function load(pg: number): void {
     if (pages.has(pg)) return;
     pages.set(pg, null);
-    const read = pg === 0 && first ? first : api.playerRuns(id, { offset: pg * PAGE, limit: PAGE, pbOnly });
+    const read = pg === 0 && first ? first : api.playerRuns(id, { offset: pg * PAGE, limit: PAGE, pbOnly, style });
     first = undefined;
     read.then(
       (res) => {
@@ -727,7 +742,7 @@ function virtualRuns(id: string, pbOnly: boolean, row: (r: RunCard) => HTMLEleme
   function paint(): void {
     queued = false;
     if (total === 0 || (failed && total < 0)) {
-      scroller.replaceChildren(h("p.pf-empty", null, failed ? "Couldn't load runs." : pbOnly ? "No personal bests yet." : "No verified runs yet."));
+      scroller.replaceChildren(h("p.pf-empty", null, failed ? "Couldn't load runs." : style ? `No ${pbOnly ? "personal bests" : "verified runs"} in ${styleLabel(style)} yet.` : pbOnly ? "No personal bests yet." : "No verified runs yet."));
       return;
     }
     const H = rowH();

@@ -42,7 +42,7 @@ import {
 import { badgeToken } from "./badges";
 import { fmtHours } from "./card";
 import { h } from "./dom";
-import { isLoadoutSlot, listedCosmetic, loadoutSwatch, rarityOf } from "./loadout-ui";
+import { isLoadoutSlot, listedCosmetic, loadoutSwatch } from "./loadout-ui";
 import { isLoadoutCategory } from "./cosmetic-slots";
 import { me } from "./account-state";
 import { navigate } from "./nav";
@@ -439,7 +439,7 @@ export interface Celebration {
   tokens?: AchievementDef[];
   /**
    * The item unlocked: a live 3D model of it (notify/item3d.ts; its swatch for a knife / finish / gloves if that can't
-   * show), in its rarity colour, instead of tokens.
+   * show), instead of tokens.
    */
   item?: CosmeticDef;
   action?: { label: string; run: () => void };
@@ -461,7 +461,7 @@ export interface Celebration {
   priority?: number;
   /** Same key: merges into the card on screen / waiting instead of queueing another. */
   key?: string;
-  /** Accent (default: the item's rarity colour, else amber). */
+  /** Accent (default amber). */
   color?: string;
 }
 
@@ -483,7 +483,6 @@ export function rarityLadder(r: Rarity | undefined): Pick<Celebration, "stage" |
 }
 
 export function celebrate(c: Celebration): void {
-  const rar = c.item ? rarityOf(c.item) : null;
   const emblem = c.item ? (isLoadoutSlot(c.item.slot) ? loadoutSwatch(c.item, c.item.slot) : undefined) : c.tokens?.length ? badgeToken(c.tokens[0], { size: "md" }) : undefined;
   // The reward as a little 3D model (the item, or the first badge as a medal); the flat icon above stays as its fallback.
   const model = c.item ? liveEmblem({ cosmetic: c.item }, runGoing()) : c.tokens?.length ? liveEmblem({ achievement: c.tokens[0] }, runGoing()) : null;
@@ -495,7 +494,7 @@ export function celebrate(c: Celebration): void {
     emblem,
     model: model ?? undefined,
     level: c.level,
-    color: c.color ?? rar?.color,
+    color: c.color,
     shine: c.shine ?? !!c.item,
     ring: c.ring ?? !c.item,
     mood: c.mood,
@@ -510,15 +509,15 @@ export function celebrate(c: Celebration): void {
   });
 }
 
-// No knife: every knife is free (progression.ts) but the Supporter set's, so none is ever unlocked by a run.
-const LOADOUT_KICKER: Record<string, string> = { finish: "New finish", glove: "New gloves" };
+// What the card calls the item: the thing unlocked, never a rarity (owner 11-12: the unlock is what matters).
+const LOADOUT_KICKER: Record<string, string> = { knife: "New knife", finish: "New finish", hilt: "New hilt", glove: "New gloves", camo: "New gun camo" };
 
 
 /**
  * The cards for a run's rewards (HUD, rooms); false when there's nothing to celebrate. In game the end card's reward
  * reel (hud.ts) shows the level, the achievement tokens and the items, so only what takes the stage is queued here
  * (Heirloom / Golden items, the secret: they wait for the run to end), plus achievements a room grants (moments).
- * Outside a game every reward is a moment, most special first. Only the item, its rarity and why: no pattern or wear.
+ * Outside a game every reward is a moment, most special first. Only the item and why: no rarity, pattern or wear.
  */
 export function celebrateRun(r: RunRewards, customise?: (slot: string) => void): boolean {
   if (!r.achievements.length && !r.cosmetics.length && !r.levelUp) return false;
@@ -542,13 +541,13 @@ export function celebrateRun(r: RunRewards, customise?: (slot: string) => void):
     const ladder = rarityLadder(top.rarity);
     // Below the stage: one card for the rarest.
     if (!ladder.stage && i > 0) continue;
-    const rarity = rarityOf(top)?.name;
+    const kind = LOADOUT_KICKER[top.slot] ?? "New unlock";
     const reason = why(top);
     celebrate({
       ...ladder,
-      kicker: ladder.stage ? undefined : rarity ?? LOADOUT_KICKER[top.slot] ?? "New unlock",
-      title: ladder.stage ? rarity ?? top.name : top.name,
-      detail: ladder.stage ? top.name : undefined,
+      kicker: ladder.stage ? undefined : kind,
+      title: top.name,
+      detail: ladder.stage ? kind : reason,
       hint: reason ? `For ${reason}` : undefined,
       item: top,
       action: customise ? { label: "Equip", run: () => customise(top.slot) } : undefined,
@@ -572,10 +571,13 @@ export function celebrateRun(r: RunRewards, customise?: (slot: string) => void):
   if (achievements.length) {
     const owner = achievements.some((a) => a.id === PLAY_WITH_OWNER);
     const [first] = achievements;
+    const many = achievements.length > 1;
+    // Several from one run: every name is on the card (the count as the title), then what they unlocked.
+    const fresh = fromAch.length ? `New: ${cosmeticList(fromAch)}` : undefined;
     celebrate({
-      kicker: "Achievement",
-      title: achievements.length > 1 ? `${first.name} and ${achievements.length - 1} more` : first.name,
-      detail: fromAch.length ? `New: ${cosmeticList(fromAch)}` : achievements.length === 1 ? first.desc : undefined,
+      kicker: many ? undefined : "Achievement",
+      title: many ? `${achievements.length} achievements` : first.name,
+      detail: many ? [achievements.map((a) => a.name).join(", "), fresh].filter(Boolean).join(". ") : fresh ?? first.desc,
       tokens: achievements,
       // Meeting the owner on a server: the bunny waves.
       mood: owner ? "waving" : undefined,

@@ -1,5 +1,48 @@
 # Changelog
 
+## v0.9.1 — Native
+
+Voice chat and the new Auto-strafe timing from website v0.0.40, plus fixes for v0.9.0. Update from Settings →
+Updates: press Update, then Restart. Your settings, replays and maps are kept.
+
+This update is for Windows and Linux. The macOS build follows: GitHub had no Mac build machines free today, and we
+don't ship a Mac package that wasn't built and checked there. Mac players stay on v0.9.0 until then.
+
+- Voice chat in servers and private lobbies: hold X to talk and everyone in the room hears you. Guests can listen.
+  The game asks for your microphone the first time you press the key and only uses it while you hold it. In a voice
+  room X talks; everywhere else it still teleports you to your checkpoint.
+- Mute anyone or change their volume on the room screen. Turn voice off, change its volume or pick another talk key in
+  Settings → Voice chat, or use `voice_enable`, `voice_scale` and `bind <key> +voicerecord` in the console.
+- A talking player's name tag shows a speaker, and who's talking is listed at the bottom left.
+- Auto-strafe presses A and D one tick earlier, as on the website, so it gains speed like Normal. Auto-strafe times
+  will get faster. Your existing runs don't change. Sync is measured against the turn each key answers, so a cleanly
+  synced Auto-strafe run reads 100%.
+- The menu matches the website: Compare on other players' profiles (Watch plays your run with theirs as the compare
+  ghost), rank history, the bigger profile card, earlier names, a name change once a week, and the new supporter
+  items. Names in the new Condensed font show in the game too.
+- Supporting from the Support page works again. It stopped with "The payment service returned an untrusted
+  checkout link." Thanks to dr_unlisted for the report.
+- Switching quickly between the knife and a gun no longer crashes the game. Thanks to dr_unlisted for the report.
+- Map votes no longer fill chat with `type_error.306` errors, and the map changes when the vote ends. Thanks to
+  dr_unlisted for the report.
+- The map vote shows each map's tier.
+- The game remembers your style between launches.
+- Closing a replay of another map that you opened in a server takes you back to the server's map. (Watching a
+  replay stopped removing you from the server in v0.8.0.) Thanks to hena for the report.
+- Runs on bhop_gofuckyourself use all of the map's zones, so the anti-skip walls stop a run in the game as they
+  do on the website.
+
+Not in the desktop client yet, coming in a later update:
+
+- Bonus tracks in other styles. Bonuses still play in Normal here.
+- The strafe trainer in every style, the new slow ticks in the jump stats, and the repeat count on strafe offsets
+  (like -1 (2)).
+- The new look for notices in the game.
+- The new supporter looks in the game: the five new name colours (white in the game for now), the Outline effect,
+  bold and italic, and your card behind your row in the voice list. They show in the menu.
+- The LIVE mark next to streamers' names in servers.
+- Choosing your microphone and the microphone test in Settings.
+
 ## v0.9.0 — Native
 
 Matches website v0.0.39. Update from Settings → Updates: press Update, then Restart. Your settings, replays and maps

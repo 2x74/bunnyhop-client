@@ -173,6 +173,7 @@ fn a_jump_on_the_next_tick_is_exactly_v21() {
 
 /// bhop_at_night's spawn drop ends exactly on the floor: the next tick's trace clears and ends stuck. It is a landing in the middle of a
 /// floor, and has to stay one: taking it back lets the move stop dead.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn a_fall_ending_exactly_on_the_floor_stays_a_landing() {
     let Some(mut game) = map_game("bhop_at_night") else { return };
@@ -378,7 +379,7 @@ fn a_changed_landing_stands() {
 }
 
 fn map_game(name: &str) -> Option<Game> {
-    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps").join(format!("{name}.bsp"));
+    let path = bunnyhop_core::test_maps::bsp(name);
     if !path.exists() {
         eprintln!("skipping: {name} not present");
         return None;
@@ -503,6 +504,7 @@ fn a_saved_landing_tick_restores() {
 
 /// Thin triggers (RNGFix's trigger jump): the landing tick is a v21 landing, so a thin teleport under the feet still fires on it. Every
 /// 2-unit-or-thinner teleport on these maps, a drop over each side: a teleport on v21 is the same teleport on the same tick on v22.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn thin_teleports_still_fire_on_an_edge_landing() {
     let (mut sites, mut fired, mut edge_landings) = (0, 0, 0);

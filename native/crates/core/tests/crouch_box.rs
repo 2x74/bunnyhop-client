@@ -29,7 +29,7 @@ fn run(physics: u32, duck_from: u32, gap: f32) -> Option<u32> {
 
 #[test]
 fn pony_box_v25_lands_in_32_ticks_older_versions_in_37() {
-    assert_eq!(PHYSICS_LATEST, 27);
+    assert_eq!(PHYSICS_LATEST, 28);
     for physics in 1..=PHYSICS_LATEST {
         let want = if physics >= PHYSICS_V25 { 32 } else { 37 };
         for duck in [1u32, 5, 15] {

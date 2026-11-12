@@ -6,6 +6,7 @@
 import { StrafeTrainer } from "../hud/strafe-trainer";
 import { StrafeTrainerView } from "../hud/strafe-trainer-view";
 import { replayStyle } from "../replay";
+import { AUTOSTRAFE_LEAD_FROM } from "../styles";
 import { formatDelta, TimeFace } from "../hud/time-face";
 import { SpeedGraph } from "../hud/graph";
 import { KeysOverlay } from "../hud/keys";
@@ -216,13 +217,17 @@ export class ViewerHud {
       this.fed = Math.max(0, i - 250);
       this.keys.reset(d.buttons[this.fed], d.view[this.fed * 2]);
     }
+    // v28+ Auto-strafe: the key came from the turn to the next command's yaw (the trainer's turnYaw; hud/strafe-trainer.ts).
+    const hdr = d.replay.header, lead = replayStyle(hdr) === "autostrafe" && hdr.settings.physics >= AUTOSTRAFE_LEAD_FROM;
+    const n = d.view.length / 2 - 1;
     for (let k = this.fed + 1; k <= i; k++) {
       if (prefs.get().hud.layout.strafeTrainer.on) this.trainer.feed({ forward: d.forward[k], side: d.side[k], yaw: d.view[k * 2], pitch: d.view[k * 2 + 1], buttons: d.buttons[k] }, {
         airSpeedGain: d.airSpeedGain[k], airBestGain: d.airBestGain[k],
         // d.speed is f32, but live computes the length in JS double. Use the cached velocity in both paths.
-        barSpeed: Math.sqrt(d.vel[k * 3] ** 2 + d.vel[k * 3 + 1] ** 2), speed: d.speed[k], grounded: !!(d.flags[k] & F_GROUNDED), onLadder: !!(d.flags[k] & F_LADDER), tick: k,
+        barSpeed: Math.sqrt(d.vel[k * 3] ** 2 + d.vel[k * 3 + 1] ** 2), speed: d.speed[k], velYaw: Math.atan2(d.vel[k * 3 + 1], d.vel[k * 3]) * 180 / Math.PI, grounded: !!(d.flags[k] & F_GROUNDED), onLadder: !!(d.flags[k] & F_LADDER), tick: k,
         dt: d.interval, maxSpeed: d.replay.header.settings.maxSpeed, airAccelerate: d.replay.header.settings.airAccelerate,
-        style: replayStyle(d.replay.header), interrupted: !!(d.flags[k] & (F_TELEPORTED | F_RESTARTED)), jumped: (d.flags[k] & F_JUMPED) !== 0,
+        interrupted: !!(d.flags[k] & (F_TELEPORTED | F_RESTARTED)), jumped: (d.flags[k] & F_JUMPED) !== 0,
+        ...(lead ? { turnYaw: k < n ? d.view[(k + 1) * 2] : NaN } : {}),
       });
       this.keys.feed(d.buttons[k], d.view[k * 2]);
       this.graph.push(d.speed[k]);

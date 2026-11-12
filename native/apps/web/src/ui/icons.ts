@@ -39,6 +39,10 @@ const DRAW = {
   measure: [p("M2.5 7H17.5V13H2.5Z"), p("M5.5 7V9.5M8.5 7V10.5M11.5 7V9.5M14.5 7V10.5")],
   /** A speaker with two waves. */
   audio: [p("M3 7.5H6L10 4V16L6 12.5H3Z"), p("M13 7.5A3.5 3.5 0 0 1 13 12.5M15.3 5A7 7 0 0 1 15.3 15")],
+  /** The speaker crossed out: a player you muted (voice/). */
+  audioOff: [p("M3 7.5H6L10 4V16L6 12.5H3Z"), p("M13 7.5L18 12.5M18 7.5L13 12.5")],
+  /** A microphone: talking (voice/). */
+  mic: [p("M8 2.5H12V11H8Z"), p("M5 9V10A5 5 0 0 0 15 10V9"), p("M10 15V17.5M7 17.5H13")],
   /** A person: head over shoulders. */
   account: [c(10, 6.6, 3.1), p("M3.9 17.2C4.9 14.2 7.3 12.5 10 12.5S15.1 14.2 16.1 17.2")],
   /** Two sliders: any other settings section. */

@@ -13,7 +13,7 @@ no secrets.
    the shared resources.
 2. Each platform job builds the client and runs the movement parity gate (`apps/native/tools/parity-gate.ts`):
    generated maps, identical commands through the native core and the pinned WASM, every state compared bit for
-   bit at physics 16, 17, 18, 23, 24, 25, 26 and 27 as applicable to each fixture. A mutation check confirms the gate
+   bit at physics 16, 17, 18, 23, 24, 25, 26, 27 and 28 as applicable to each fixture. A mutation check confirms the gate
    catches a version mix-up. The release landfix identity proof adds every physics version 1–27 and mid-run toggles
    (see `native/apps/native/tools/README.md`).
 3. Each platform also runs CTest, the bridge and physics tests, the packaging tests and `release-check.ts`. Linux
@@ -61,9 +61,9 @@ bun test apps/native/tools/parity-gate.test.ts
 The parity output folder (`native/target/native-parity` by default) must be empty before a run; `--output DIR`
 keeps separate attempts.
 
-The v0.9.0 jobs also stage the hash-pinned `qualification-inputs.tar.gz` release asset with
+From v0.9.1 the jobs stage the hash-pinned `qualification-inputs.tar.gz` asset of the v0.9.1 release with
 `landfix-release.ts --stage`. It holds the retained v26 verifier, three portable BHR fixtures, Eazy BSP and
-only the Git objects needed to archive the pristine v27 proof source. Each platform runs `--proof`: legacy/current
+only the Git objects needed to archive the pristine website source (v0.0.40 at 642474e3, physics 28) that verifies the Segmented proof. Each platform runs `--proof`: legacy/current
 identity, real-map Rust landfix tests, native recording/verification for ON/OFF/toggle, and Segmented checkpoint
 reuse with forged-input controls. Separate `native-landfix-PLATFORM-RUN-ATTEMPT` artifacts retain these proofs and traces; the standard parity
 artifact keeps its exact file contract.

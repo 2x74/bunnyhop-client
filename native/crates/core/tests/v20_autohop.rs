@@ -6,7 +6,7 @@ use bunnyhop_core::{
 use playsrc_movement::{CrouchState, Mode};
 
 fn dom(version: u32, autohop: bool) -> Option<Game> {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../maps/bhop_dom.bsp");
+    let path = bunnyhop_core::test_maps::bsp("bhop_dom");
     if !path.is_file() {
         eprintln!("skipping optional bhop_dom fixture");
         return None;
@@ -189,7 +189,7 @@ fn ladders_deep_water_and_released_jump_keep_v19_policy() {
 
 #[test]
 fn map_trigger_teleport_to_floor_reports_the_next_commands_pre_jump_ground() {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../maps/bhop_lol_tutorial.bsp");
+    let path = bunnyhop_core::test_maps::bsp("bhop_lol_tutorial");
     if !path.is_file() {
         eprintln!("skipping optional tutorial BSP fixture");
         return;

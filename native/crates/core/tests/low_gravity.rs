@@ -3,7 +3,7 @@ use bunnyhop_core::{Cmd, Game, Settings};
 
 #[test]
 fn half_gravity_composes_with_map_scale_and_resets() {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../maps/bhop_eazy.bsp");
+    let path = bunnyhop_core::test_maps::bsp("bhop_eazy");
     let bytes = std::fs::read(path).expect("bhop_eazy fixture");
     let bsp = bunnyhop_core::parse_bsp(&bytes).unwrap();
     let mut game = Game::load(&bsp).unwrap();

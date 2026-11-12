@@ -13,6 +13,13 @@
 .nm-creator.labelled { padding: 0.12em 0.45em 0.12em 0.3em; border-radius: 0.4em; background: rgba(255, 255, 255, 0.07); }
 .nm-creator .nm-label { font-size: 0.8em; font-weight: 750; color: var(--dim); }
 
+/* LIVE (src/live.ts, marks.ts liveMark): a player streaming right now, linking to the stream. The one red label in the
+   game, like the platforms' own; static, so reduced motion has nothing to stop. */
+.nm-live { display: inline-flex; align-items: center; flex: none; margin-left: 0.35em; padding: 0.16em 0.32em 0.12em; border-radius: 0.28em; background: var(--live-red, #e8433f); color: #fff; font-family: var(--font-ui, inherit); font-size: 0.62em; font-weight: 800; font-style: normal; line-height: 1; letter-spacing: 0; text-decoration: none; text-shadow: none; -webkit-text-fill-color: #fff; vertical-align: 0.14em; }
+a.nm-live:hover, a.nm-live:focus-visible { background: #ff5753; text-decoration: none; outline: none; }
+:is(.nm-marks, .hc-nameline, .home-rec-time) > .nm-live, .nm-marks + .nm-live { margin-left: 0; }
+.nm-marks + .nm-live { margin-left: 0.32em; }
+
 /* Profile links: quiet chips under the profile actions. */
 .lk-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; }
 .lk-chip { display: inline-flex; align-items: center; gap: 0.4rem; max-width: 100%; padding: 0.28rem 0.6rem 0.28rem 0.45rem; border: 1px solid var(--line); border-radius: 999px; background: var(--raise); color: var(--text); font-size: var(--fs-sm); font-weight: 600; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: background var(--t-fast), border-color var(--t-fast); }
@@ -57,6 +64,9 @@
 }
 /* Potato: the endless shine repaints every frame on software GL; the plain colour instead. */
 body.potato .nm-fx.nm-fx-sparkle { animation: none; }
+/* v0.0.40, still (nothing to stop under reduced motion or Potato): outline, a rim in the second colour round the
+   letters, drawn under the fill (paint-order), so the letters keep their full shape and weight. */
+.nm-fx.nm-fx-outline { -webkit-text-stroke: 0.09em var(--nm-c2); paint-order: stroke fill; text-shadow: none; }
 
 .nm-gifter { display:inline-flex; width:.95em; height:.95em; flex-shrink:0; background:transparent; filter:none; box-shadow:none; }
 .nm-gifter svg { width:100%; height:100%; overflow:visible; }

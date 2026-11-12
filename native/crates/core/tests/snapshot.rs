@@ -4,12 +4,11 @@
 //! Maps are gitignored; each test skips (with a note) when its map is absent.
 
 use bunnyhop_core::{Cmd, Game, game::IN_JUMP};
-use std::path::PathBuf;
 
 const MAPS: [&str; 4] = ["bhop_eazy", "bhop_eazy_v2", "bhop_arcane_v1", "bhop_badges_mini"];
 
 fn load(name: &str) -> Option<Game> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps").join(format!("{name}.bsp"));
+    let path = bunnyhop_core::test_maps::bsp(name);
     let Ok(bytes) = std::fs::read(&path) else {
         eprintln!("skipping {name}: {} not found", path.display());
         return None;
@@ -47,6 +46,7 @@ fn run(game: &mut Game, from: u32, to: u32) -> Vec<Vec<u8>> {
         .collect()
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn restore_then_step_matches_continuous_run() {
     const SNAP_AT: u32 = 700;
@@ -83,6 +83,7 @@ fn restore_then_step_matches_continuous_run() {
     }
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn camera_trace_hits_floor_and_clears_in_open_air() {
     for name in MAPS {

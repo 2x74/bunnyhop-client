@@ -28,7 +28,7 @@ import { bunnyGeometry } from "./mesh";
 import { bunnyParts } from "./prebuild-parts";
 import type { PlainGeometry } from "./prebuild";
 
-type InMsg = { id: number; outfit: string | null; loadout: CosmeticLoadout; body: boolean; hat: boolean; crown: boolean; glow: boolean } | { id: number; gunId: string; camo?: string | null } | { id: number; vm: [string, GloveStyleId][]; clouds: string[] };
+type InMsg = { id: number; outfit: string | null; loadout: CosmeticLoadout; body: boolean; hat: boolean; crown: boolean; glow: boolean } | { id: number; gunId: string; camo?: string | null } | { id: number; vm: [string, GloveStyleId][]; clouds: string[]; glow?: boolean };
 const ctx = self as unknown as { onmessage: ((e: MessageEvent<InMsg>) => void) | null; postMessage(m: unknown, transfer: Transferable[]): void };
 
 function plain(g: THREE.BufferGeometry, transfer: Transferable[], glow = false): PlainGeometry {
@@ -73,7 +73,7 @@ ctx.onmessage = (e) => {
         const knife = knifeById(id) ?? carrot;
         const g = viewmodelGeometry(knife, glove);
         ensureViewmodelLayout(g); // the Loadout's sampleOf / the Viewmodel do this on the main thread; done here it's a no-op there
-        return { knife: knife.id, glove, geometry: plain(g, transfer), tris: knife.tris ?? null };
+        return { knife: knife.id, glove, geometry: plain(g, transfer, m.glow), tris: knife.tris ?? null };
       });
       const clouds = m.clouds.map((id) => {
         const c = knifeCloud(knifeById(id) ?? carrot);

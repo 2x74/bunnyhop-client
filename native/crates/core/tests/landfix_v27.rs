@@ -5,7 +5,7 @@ use bunnyhop_core::{Cmd, Game, Settings};
 const IDLE: Cmd = Cmd { forward: 0.0, side: 0.0, yaw: 0.0, pitch: 0.0, buttons: 0 };
 
 fn load(physics: u32) -> Option<Game> {
-    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps/bhop_eazy.bsp");
+    let path = bunnyhop_core::test_maps::bsp("bhop_eazy");
     if !path.exists() { eprintln!("bhop_eazy unavailable; skipping landfix integration fixture"); return None; }
     let mut g = bunnyhop_core::content::load_game(&path).unwrap();
     g.set_settings(Settings { physics_version: physics, ..Settings::css_bhop() });

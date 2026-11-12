@@ -665,7 +665,7 @@ pub unsafe extern "C" fn bh_replay_step(ctx: *mut BhContext, out: *mut BhSnapsho
                     return Err(error.clone());
                 }
                 let cmd = *p.data.commands.get(p.index).ok_or("replay finished")?;
-                m.advance_canonical(cmd, None, false)?;
+                m.advance_canonical(cmd, None, false, next_yaw(&p.data.commands, p.index))?;
                 p.index += 1;
                 if let Err(error) = m.check_replay(&p.data) {
                     p.error = Some(error.clone());
@@ -699,7 +699,7 @@ pub unsafe extern "C" fn bh_replay_seek(
                 p.index = 0;
                 p.error = None;
                 for i in 0..tick as usize {
-                    m.advance_canonical(p.data.commands[i], None, false)?;
+                    m.advance_canonical(p.data.commands[i], None, false, next_yaw(&p.data.commands, i))?;
                     p.index = i + 1;
                     if let Err(error) = m.check_replay(&p.data) {
                         p.error = Some(error.clone());
@@ -771,9 +771,9 @@ pub unsafe extern "C" fn bh_ghost_load_cancellable(
                 });
                 let mut frames = Vec::with_capacity(d.commands.len() + 1);
                 frames.push(m.ghost_frame(first));
-                for &cmd in &d.commands {
+                for (i, &cmd) in d.commands.iter().enumerate() {
                     check_cancel(cancel, data)?;
-                    m.advance_canonical(cmd, None, false)?;
+                    m.advance_canonical(cmd, None, false, next_yaw(&d.commands, i))?;
                     m.check_replay(&d)?;
                     frames.push(m.ghost_frame(cmd));
                 }
@@ -1000,4 +1000,9 @@ pub unsafe extern "C" fn bh_replay_header(
         })
     };
     result
+}
+
+/// The yaw of the command after `i` (NaN after the last): what a lead style's sync measures against (sim.ts replayStep).
+fn next_yaw(commands: &[BhCmd], i: usize) -> f64 {
+    commands.get(i + 1).map_or(f64::NAN, |c| f64::from(c.yaw))
 }

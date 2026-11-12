@@ -272,27 +272,7 @@ export const COUNTRIES: Readonly<Record<string, string>> = {
  */
 export const PRIDE_FLAGS: Readonly<Record<string, string>> = {
   "PRIDE-RAINBOW": "Rainbow",
-  "PRIDE-PROGRESS": "Progress Pride",
-  "PRIDE-INTERSEX-PROGRESS": "Intersex-inclusive Progress Pride",
   "PRIDE-TRANS": "Transgender",
-  "PRIDE-BI": "Bisexual",
-  "PRIDE-PAN": "Pansexual",
-  "PRIDE-LESBIAN": "Lesbian",
-  "PRIDE-GAY": "Gay men",
-  "PRIDE-NONBINARY": "Nonbinary",
-  "PRIDE-ACE": "Asexual",
-  "PRIDE-ARO": "Aromantic",
-  "PRIDE-AROACE": "Aroace",
-  "PRIDE-DEMI": "Demisexual",
-  "PRIDE-GENDERFLUID": "Genderfluid",
-  "PRIDE-GENDERQUEER": "Genderqueer",
-  "PRIDE-AGENDER": "Agender",
-  "PRIDE-BIGENDER": "Bigender",
-  "PRIDE-DEMIBOY": "Demiboy",
-  "PRIDE-DEMIGIRL": "Demigirl",
-  "PRIDE-INTERSEX": "Intersex",
-  "PRIDE-POLY": "Polysexual",
-  "PRIDE-OMNI": "Omnisexual",
 };
 
 export const isPrideFlag = (code: string): boolean => Object.hasOwn(PRIDE_FLAGS, code);

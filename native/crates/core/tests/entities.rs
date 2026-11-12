@@ -3,10 +3,9 @@
 //! Test maps are gitignored; each test skips (with a note) when its map is absent.
 
 use bunnyhop_core::{Cmd, Game, game::EVENT_TELEPORTED};
-use std::path::PathBuf;
 
 fn load(name: &str) -> Option<Game> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps").join(format!("{name}.bsp"));
+    let path = bunnyhop_core::test_maps::bsp(name);
     let Ok(bytes) = std::fs::read(&path) else {
         eprintln!("skipping {name}: {} not found", path.display());
         return None;
@@ -21,6 +20,7 @@ fn of_class(game: &Game, class: &str) -> Vec<usize> {
 
 /// metal_v2 and redwood use point_teleport entities as trigger_teleport destinations: they resolve,
 /// and touching the trigger lands on the point_teleport's origin with its angles.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn point_teleport_destinations() {
     for map in ["bhop_metal_v2", "bhop_redwood"] {
@@ -45,6 +45,7 @@ fn point_teleport_destinations() {
 
 /// point_teleport's Teleport input (CPointTeleport::InputTeleport) needs a target; without one it
 /// does nothing.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn point_teleport_without_target_does_nothing() {
     let Some(mut game) = load("bhop_metal_v2") else { return };
@@ -83,6 +84,7 @@ fn trigger_gravity_sets_player_gravity() {
 
 /// trigger_playermovement: ytt_space's (spawnflags 129) disable auto movement (no step-up) while
 /// touching, and the override ends when the player leaves.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn trigger_playermovement_disables_auto_movement() {
     let Some(mut game) = load("bhop_ytt_space") else { return };
@@ -108,10 +110,11 @@ fn trigger_playermovement_disables_auto_movement() {
 }
 
 /// prop_dynamic with a packed collision model is solid, and DisableCollision turns it off.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn prop_dynamic_collision_toggles() {
     for map in ["bhop_ambience", "bhop_monster_jam"] {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps").join(format!("{map}.bsp"));
+        let path = bunnyhop_core::test_maps::bsp(map);
         let Ok(bytes) = std::fs::read(&path) else { continue };
         let bsp = bunnyhop_core::parse_bsp(&bytes).unwrap();
         let mut game = Game::load(&bsp).unwrap();
@@ -171,7 +174,7 @@ fn set_position_restarts_in_the_start_zone() {
 
 /// Axis-aligned bounds of every world brush whose contents match `mask`.
 fn brush_boxes(map: &str, mask: u32) -> Option<(Game, Vec<([f32; 3], [f32; 3])>)> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps").join(format!("{map}.bsp"));
+    let path = bunnyhop_core::test_maps::bsp(map);
     let bytes = std::fs::read(&path).ok()?;
     let bsp = bunnyhop_core::parse_bsp(&bytes).unwrap();
     let world = bunnyhop_core::physics::build(&bsp).unwrap().world;
@@ -202,6 +205,7 @@ fn brush_boxes(map: &str, mask: u32) -> Option<(Game, Vec<([f32; 3], [f32; 3])>)
 /// func_ladder brushes (CONTENTS_LADDER): walking into one attaches (MOVETYPE_LADDER) and holding
 /// forward climbs at the SDK's 200 u/s (MAX_CLIMB_SPEED, looking level: the up component of
 /// forward is 0, so climbing comes from the into-the-ladder conversion).
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn ladders_attach_and_climb() {
     let mut climbed = 0;
@@ -236,6 +240,7 @@ fn ladders_attach_and_climb() {
 
 /// Water brushes: a player inside sinks slowly (water friction, no gravity when swimming) and
 /// holding jump swims up (CheckJumpButton in water: vz = 100, then WaterMove).
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn water_swims() {
     let mut swam = 0;
@@ -274,6 +279,7 @@ fn water_swims() {
 /// kz_bhop_essence's long-jump counter has min 5 and max 0 (a mapper's typo for max 5). Leaving the floor trigger in
 /// front of the long jump adds 1 to it; that used to panic (f32::clamp with min > max) and freeze the game. It must
 /// clamp like Source's macro instead and keep simulating.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn math_counter_with_min_above_max_does_not_panic() {
     let Some(mut game) = load("kz_bhop_essence") else { return };
@@ -292,6 +298,7 @@ fn math_counter_with_min_above_max_does_not_panic() {
 }
 
 /// Synthetic uses a solid brush with $surfaceprop ladder rather than CONTENTS_LADDER.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn synthetic_material_ladder_is_versioned() {
     use bunnyhop_core::{Settings, game::{PHYSICS_V17, PHYSICS_V18}};

@@ -7,10 +7,9 @@
 
 use bunnyhop_core::game::{EVENT_TELEPORTED, PHYSICS_V4, PHYSICS_V5};
 use bunnyhop_core::{Cmd, Game, Settings};
-use std::path::PathBuf;
 
 fn map(name: &str, version: u32) -> Option<Game> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps").join(format!("{name}.bsp"));
+    let path = bunnyhop_core::test_maps::bsp(name);
     if !path.exists() {
         eprintln!("skipping {name}: {} not found", path.display());
         return None;
@@ -27,6 +26,7 @@ fn idle(game: &mut Game, ticks: u32) {
     }
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn a_picked_up_gun_survives_the_spawners_kill() {
     // bhop_badges_mini's first segment-18 spawner: its trigger kills `glock` and ForceSpawns a new one, which the player
@@ -55,6 +55,7 @@ fn hive_drop(version: u32, wait: u32) -> Option<Option<u32>> {
     Some(None)
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn hive_fake_floor_breaks_under_the_player() {
     let Some(v4) = hive_drop(PHYSICS_V4, 500) else { return };

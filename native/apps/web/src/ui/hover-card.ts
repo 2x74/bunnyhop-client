@@ -12,6 +12,10 @@
 // cached a minute at the edge, and here per player for the page's life). One card at a time, a manual popover in the
 // top layer like the run stats card (ui/run-stats.ts), which steps aside while this one is up. It never takes the
 // pointer; a click on the name still opens the profile.
+//
+// A supporter's hover effect (v0.0.40, supporter-looks.ts HOVER_FX, ui/hover-fx.ts) changes how their card comes in
+// (Hop, Flip, Unfold, Glint) or lets it lean toward the pointer (Tilt). Same wait, same size, same manners; at most
+// HOVER_FX_EXTRA_MS more on the way in, nothing on the way out.
 
 import { api, lastKnownMe, type PlayerCardView } from "../api";
 import { accountGeneration } from "./account-state";
@@ -23,8 +27,13 @@ import { formatTime } from "../timer";
 import { avatarEl } from "./card";
 import { cardLayers, watchCardFx } from "./card-fx";
 import { decorated } from "./avatar-deco";
+import { enterHoverFx, followPointer, tiltLight } from "./hover-fx";
+import { hoverFxOf } from "../supporter-looks";
+import { nameColorHex } from "../creators";
+import { SUPPORTER_FX } from "./card-fx";
 import { h } from "./dom";
-import { nameAttrs, nameMarks } from "./marks";
+import { liveMark, nameAttrs, nameMarks } from "./marks";
+import { liveOf } from "../live";
 import { hideRunStats } from "./run-stats";
 import "./hover-card.css";
 
@@ -106,9 +115,12 @@ export function hoverCardBody(p: Who, v: PlayerCardView): HTMLElement {
   const peak = cardLayers(peakOf(p.special), { cardBorder: v.cardBorder, cardEffect: v.cardEffect, nameColor: p.nameColor });
   const title = cosmetic(v.cosmetics.title)?.name ?? v.rank.group.name;
   const r = v.rank;
+  // A supporter's hover effect (ui/hover-fx.ts) draws in their colour too.
+  const fx = hoverFxOf(v.hoverFx);
+  const sx = fx && !peak.style.includes("--sx") ? `--sx:${nameColorHex(p.nameColor) ?? SUPPORTER_FX}` : "";
   const card = h(
     `div.hc.pc-frame-${frame}.pc-bg-${bg}${peak.cls}`,
-    { style: `--rank:${r.group.color}${peak.style ? `;${peak.style}` : ""}` },
+    { style: [`--rank:${r.group.color}`, peak.style, sx].filter(Boolean).join(";"), "data-hfx": fx ?? undefined },
     peak.aura,
     h(
       "div.hc-inner",
@@ -121,7 +133,7 @@ export function hoverCardBody(p: Who, v: PlayerCardView): HTMLElement {
         h(
           "div.hc-who",
           null,
-          h("div.hc-nameline", null, h("b.hc-name", nameAttrs(p), p.name), nameMarks(p)),
+          h("div.hc-nameline", null, h("b.hc-name", nameAttrs(p), p.name), nameMarks(p), liveMark(liveOf(p.id))),
           h("div.hc-line", null, h("span.hc-title", null, title), h("span.hc-level", null, "Level ", h("b", null, String(v.level.level)))),
         ),
       ),
@@ -149,6 +161,7 @@ export function hoverCardBody(p: Who, v: PlayerCardView): HTMLElement {
             ),
           )
         : h("p.hc-empty", null, "No ranked runs yet"),
+      fx === "tilt" ? tiltLight() : null,
     ),
   );
   // Its moving layers (peak, supporter) pause off screen; let go when the card is replaced (ui/avatar-deco.ts).
@@ -159,10 +172,16 @@ export function hoverCardBody(p: Who, v: PlayerCardView): HTMLElement {
 let current: { el: Element; seq: number } | null = null;
 let seq = 0;
 let timer: ReturnType<typeof setTimeout> | null = null;
+/** Tilt / Foil following the pointer while the card is up (ui/hover-fx.ts followPointer); stopped when it hides. */
+let stopFollow: (() => void) | null = null;
+/** The pointer's last spot over a name, where Tilt starts from. */
+let lastPointer: { x: number; y: number } | null = null;
 
 export function hideHoverCard(): void {
   if (timer !== null) clearTimeout(timer);
   timer = null;
+  stopFollow?.();
+  stopFollow = null;
   current?.el.removeAttribute("aria-describedby");
   current = null;
   if (card && !card.hidden) {
@@ -191,11 +210,19 @@ function show(el: Element): void {
     hideRunStats();
     const pop = cardEl();
     pop.classList.toggle("hc-compact", !!optsOf.get(el)?.compact);
-    pop.replaceChildren(hoverCardBody(p, v));
+    const body = hoverCardBody(p, v);
+    pop.replaceChildren(body);
     pop.hidden = false;
     if (canPopover && !pop.matches(":popover-open")) pop.showPopover();
     el.setAttribute("aria-describedby", pop.id);
-    place(pop, el.getBoundingClientRect(), !!optsOf.get(el)?.above);
+    const anchor = el.getBoundingClientRect();
+    place(pop, anchor, !!optsOf.get(el)?.above);
+    // A supporter's hover effect: the entrance, then (Tilt, Foil) the pointer watch until the card hides.
+    const fx = hoverFxOf(v.hoverFx);
+    stopFollow?.();
+    stopFollow = null;
+    enterHoverFx(body, fx, parseFloat(pop.style.top) < anchor.top ? "12px 100%" : "12px 0");
+    if (fx === "tilt" || v.cardEffect === "foil") stopFollow = followPointer(body, { lean: fx === "tilt" ? pop : null, from: lastPointer });
   });
 }
 
@@ -220,7 +247,10 @@ function bind(): void {
   document.addEventListener("pointerover", (e) => {
     if (e.pointerType === "touch") return;
     const el = targetOf(e.target);
-    if (el) schedule(el);
+    if (el) {
+      lastPointer = { x: e.clientX, y: e.clientY };
+      schedule(el);
+    }
   });
   document.addEventListener("pointerout", (e) => {
     const el = targetOf(e.target);
@@ -228,7 +258,10 @@ function bind(): void {
   });
   document.addEventListener("focusin", (e) => {
     const el = targetOf(e.target);
-    if (el && (e.target as Element).matches(":focus-visible")) schedule(el);
+    if (el && (e.target as Element).matches(":focus-visible")) {
+      lastPointer = null;
+      schedule(el);
+    }
   });
   document.addEventListener("focusout", (e) => {
     if (current && targetOf(e.target) === current.el) hideHoverCard();

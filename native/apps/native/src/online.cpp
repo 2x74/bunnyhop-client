@@ -1,5 +1,6 @@
 #include "atomic_replace.hpp"
 #include "data_location.hpp"
+#include "json_fields.hpp"
 #include "online.hpp"
 #include "bunnyhop_native.h"
 #include <curl/curl.h>
@@ -301,9 +302,11 @@ struct MapTransfer {
     nlohmann::json content_files(const Bytes &bytes, const std::string &sha) const {
         const auto manifest = nlohmann::json::parse(bytes);
         if (manifest.at("mapSha256") != sha) throw std::runtime_error("Content manifest belongs to another map");
-        auto files = manifest.value("files", nlohmann::json::object());
-        const auto physics =
-                manifest.value("physics", nlohmann::json::object()).value("files", nlohmann::json::object());
+        // Optional groups may be null in a manifest; only a present group of the wrong shape is refused below.
+        auto files = json_value(manifest, "files", nlohmann::json::object());
+        const auto physics = json_value(
+                json_value(manifest, "physics", nlohmann::json::object()), "files", nlohmann::json::object()
+        );
         constexpr size_t content_file_limit = 40'000;
         if (!files.is_object() || !physics.is_object() || files.size() + physics.size() > content_file_limit)
             throw std::runtime_error("Invalid map content manifest");
@@ -407,8 +410,9 @@ void download_classic_sounds(
     std::ifstream f(path);
     nlohmann::json manifest;
     f >> manifest;
-    const auto group = manifest.value("optional", nlohmann::json::object()).value("sounds", nlohmann::json::object());
-    const auto files = group.value("files", nlohmann::json::object());
+    const auto group =
+            json_value(json_value(manifest, "optional", nlohmann::json::object()), "sounds", nlohmann::json::object());
+    const auto files = json_value(group, "files", nlohmann::json::object());
     if (!files.is_object() || files.size() > 128) throw std::runtime_error("Invalid optional sound manifest");
     size_t total = 0;
     for (const auto &[name, info] : files.items()) {

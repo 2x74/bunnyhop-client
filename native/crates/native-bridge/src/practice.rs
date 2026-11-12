@@ -270,6 +270,8 @@ pub unsafe extern "C" fn bh_practice_noclip_exit(
             invalidate_recording(m, "practice_noclip")?;
             m.playback = None;
             result = m.game.practice_noclip_exit(position, velocity, yaw, pitch);
+            // Noclip ticks skip the style filter: the first command after them moves with the live view.
+            m.filter.clear_lead_view();
             m.transforms_dirty = true;
             output(out, BhSnapshot::from(&m.game))
         })
@@ -368,6 +370,8 @@ unsafe fn restore(
             let s = m.checkpoints[handle as usize - 1].as_ref().unwrap();
             m.game.restore_state(&s.game);
             m.filter = s.filter.clone();
+            // As after a restart (session.ts practiceRestored): the next command moves with the live view.
+            m.filter.clear_lead_view();
             m.timer = s.timer.clone();
             m.last_command = s.command;
             m.transforms_dirty = true;

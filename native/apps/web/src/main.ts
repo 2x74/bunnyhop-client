@@ -1,6 +1,7 @@
 // The Wavedash build's fetch / socket / image / page-load patches, before any other module runs (platform/boot.ts).
 import { appLocation } from "./platform/navigation";
 import "./platform/boot";
+import { voice } from "./voice/client";
 import { myProfile } from "./ui/account-state";
 import { advanceKnifePool, getOutfit, onHeldLoadout, poolPicks } from "./player/cosmetics";
 import { PlayerShadowProxy } from "./graphics/player-shadow";
@@ -37,7 +38,7 @@ import { fetchMapIndex, goToMainMenu, initMenu, openMap, revealGame, showError, 
 import { gameView, keyLabel, prefs, verticalFov } from "./ui/settings";
 import { applyPalette } from "./palette";
 import { setUiHidden, uiHidden } from "./ui/hide-ui";
-import { isStyleId, styleLabel, styleSettings, type StyleId } from "./styles";
+import { isStyleId, styleDef, styleLabel, styleSettings, type StyleId } from "./styles";
 import { turnBindsAllowed } from "./turn-binds";
 import { nullBindsAllowed } from "./null-binds";
 import { wReleaseAllowed, type WReleaseContext } from "./w-release";
@@ -48,6 +49,9 @@ import { GAUNTLET_STYLE } from "./gauntlet/state";
 import { selectedStyle, setSelectedStyle } from "./ui/style-picker";
 import { afterPaint, fmtBytes } from "./ui/dom";
 import { countJump, hasFinishedAMap, recordMapPlayed } from "./ui/stats";
+import { startFirstPlay } from "./first-play";
+import { STUCK_LINE, StuckHint } from "./ui/stuck-hint";
+import { tutorialProgress } from "./tutorial/flag";
 import { api, ApiError } from "./api";
 import { goToLobby, lobbyIdFromParam } from "./net/lobby";
 import { decodeReplay, INSPECT_HOLD, INSPECT_RELEASE, YAW_SET_PUSHER, YAW_SET_SPAWN, YAW_SET_TELEPORT } from "./replay";
@@ -454,6 +458,11 @@ if (!replayMap) advanceKnifePool("map");
 setSocialPlaying(mapName, style); // friends see the map (and the room, once joined: social/state.ts)
 document.title = `${mapName} · bunnyhop.lol`;
 const loading = showLoading(mapName);
+// A new player's first map visits, summed up for where non-finishers stop (first-play.ts; not replays).
+const loadStart = performance.now();
+const firstPlay = viewerStart || replayMap ? null : startFirstPlay({ map: mapName, tutorial: mapName === TUTORIAL_MAP, room: !!params.get("server"), tick: DEFAULT_SETTINGS.tickInterval, lessons: mapName === TUTORIAL_MAP ? () => Object.keys(tutorialProgress().lessons).length : undefined }, hasFinishedAMap());
+// Never finished a map: after a while stuck here, one line points to the tutorial and other maps (ui/stuck-hint.ts).
+const stuckHint = !hasFinishedAMap() && mapName !== TUTORIAL_MAP && !params.get("server") && !viewerStart && !replayMap ? new StuckHint() : null;
 await loading.stage("Downloading map", 0);
 
 let core: Core;
@@ -513,6 +522,10 @@ try {
   // A map that isn't there gets the way back to the maps (Retry can't help); a download that broke off gets Retry.
   const why = (e as { download?: string })?.download;
   const cause = String((e as Error)?.message ?? e);
+  if (firstPlay) {
+    firstPlay.outcome = why === "missing" ? "missing" : why === "network" ? "network" : "build";
+    firstPlay.send();
+  }
   if (why === "missing") showError("That map didn't load", "It isn't on the server.", [], { cause, back: "maps" });
   else if (why === "network") showError("That map didn't load", "The download stopped. Check your connection and try again.", loadErrorActions(false), { cause });
   else showError("That map didn't load", "Something went wrong while building it.", loadErrorActions(!!bsp), { cause });
@@ -543,6 +556,15 @@ function applyTeleportAngles(s: PlayerState, kind = YAW_SET_SPAWN) {
 applyTeleportAngles(curr);
 // Dev hook for automated visual checks (pointer lock can't engage in automation).
 if (import.meta.env.DEV) Object.assign(window, { bunnyhop: { input, core, camera, scene, renderer, graphicsPipeline, world: w } });
+// Dev hook: voice chat's surfaces without a room (voice/mock.ts).
+if (import.meta.env.DEV)
+  Object.assign(window, {
+    __voicemock: {
+      show: (s: unknown) => import("./voice/mock").then((m) => m.mockVoice(s as never)),
+      board: (on: boolean) => import("./voice/mock").then((m) => m.mockBoard(on)),
+      tags: (specs: unknown) => import("./voice/mock").then((m) => m.mockTags(specs as never)),
+    },
+  });
 
 /** R / B / M / style switches: reset onto `track` (default: current) at its start-zone restart point. */
 function restart(track?: number, at?: RestartPoint | null, canonical = false) {
@@ -551,6 +573,8 @@ function restart(track?: number, at?: RestartPoint | null, canonical = false) {
   liveCapture.stop(); // a core/world reset ends this independently reproducible segment
   if (liveCapture.status.stopping) liveCapture.fail("Restart during command application requires a new capture");
   const view = run!.resetCore(track, at ?? null, canonical);
+  firstPlay?.restarted();
+  if (input.locked) stuckHint?.restarted(); // (not the reset while the map loads)
   // Knife pool swap "restart": the next knife comes up with the new attempt.
   advanceKnifePool("restart");
   playerAudio.reset();
@@ -751,8 +775,14 @@ function drawn(now: number): void {
 }
 if (!viewerStart && !params.get("server") && !matchMedia("(prefers-reduced-motion: reduce)").matches && !prefs.get().graphics.potato && !document.body.classList.contains("potato"))
   arrival.start(core, [curr.position[0], curr.position[1], curr.position[2] + curr.viewOffsetZ], input.yaw);
+if (firstPlay) {
+  firstPlay.loadMs = performance.now() - loadStart;
+  firstPlay.setZones(session.zones?.zones ?? []);
+}
 await showReady({ menu: !firstLook });
-if (firstLook) showStartPrompt();
+// Before their first finish, what the map wants. Holding jump from a standstill hops before the ground speeds you up,
+// and W alone can't go past 30 u/s in the air: the first thing a newcomer does, so the line says to run first.
+if (firstLook) showStartPrompt(mapName === TUTORIAL_MAP ? undefined : styleDef(session.runStyle)?.autohop ? "Get to the end zone. Run first, then hold jump to keep hopping." : "Get to the end zone.");
 
 // Replay viewer: its own physics-only sim instance; the live run below is paused, never stepped or restored by it.
 viewer = new ReplayViewer({
@@ -1023,7 +1053,8 @@ const leaveHold = new LeaveHold({
 });
 // A numbered menu on screen (a room vote, !cp, the guns menu) owns the digit keys, as in CS:S: no bind fires with them,
 // and they don't move, turn or attack. The menus read the keys from their own listeners.
-input.ownsKey = (code) => isDigitCode(code) && numberMenuOpen();
+// voice: in a room that relays voice, the push to talk key (X) talks instead of its solo bind (voice/client.ts).
+input.ownsKey = (code) => (isDigitCode(code) && numberMenuOpen()) || voice.ownsKey(code);
 input.onAction = (a, code) => {
   if (replayViewer.active) return;
   // The chat bind (Settings -> Keys): the room's chat, or solo play's command chat. None on the tutorial map.
@@ -1168,7 +1199,7 @@ prefs.watch((p) => {
 let landVz = 0;
 /** The style's bind policy for the next command: turn binds and null binds. */
 function bindPolicy(): { turnBinds: boolean; nullBinds: boolean } {
-  // command() switches to the start zone's track style; use that policy even on its first tick (bonuses are Normal).
+  // command() switches to the start zone's track style; use that policy even on its first tick (the tutorial's final course is Normal).
   const inputStyle = session.timer.inStart ? session.styleFor(session.timer.track) : session.runStyle;
   // (Practice attempts are never submitted: turn binds and null binds work in every style there.)
   const free = session.practicing;
@@ -1217,6 +1248,8 @@ function applyTick(sample: UserCmd, diagnostic?: SampledInput, generatedGive = 0
   const events = core.step(cmd.forwardmove, cmd.sidemove, cmd.yaw, cmd.pitch, cmd.buttons);
   prev = curr;
   curr = session.afterStep(cmd, events);
+  firstPlay?.tick(events, curr.position, curr.velocity, input.locked, session.timer.status, () => session.timer.time(), prev.position);
+  if (stuckHint?.tick(events, input.locked, session.timer.status === "finished", session.settings.tickInterval)) session.hud.toast(STUCK_LINE, 8000);
   if (diagnostic && pre) liveCapture.applied({ sample:diagnostic, applied:cmd, generatedGive,
     chatSuppressed:filtered !== sample, pre, post:curr, events,
     startTick:session.timer.status === "idle" ? 0 : session.timer.startTick,
@@ -1247,7 +1280,8 @@ function applyTick(sample: UserCmd, diagnostic?: SampledInput, generatedGive = 0
     // Commit the platform turn relative to the simulated view, not pending camera preview motion.
     // With the sampler or timed input the camera runs ahead of the commands: turn the view the sim used.
     const committed = inputExperiment || input.timed;
-    input.rebasePhysicsView((committed ? cmd.yaw : input.yaw) + curr.angleChange[1],
+    // v28+ Auto-strafe moves with last tick's yaw (session.viewLags): turn the live mouse view, not the command's.
+    input.rebasePhysicsView((committed && !session.viewLags ? cmd.yaw : committed ? filtered.yaw : input.yaw) + curr.angleChange[1],
       Math.max(-89,Math.min(89,(committed ? cmd.pitch : input.pitch)+curr.angleChange[0])),YAW_SET_PUSHER);
   }
   if (diagnostic && session.timer.status === "finished") liveCapture.stop();

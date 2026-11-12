@@ -17,13 +17,13 @@ export function sameSettings(a: Settings, b: Settings): boolean {
 
 /**
  * Why the replay can't be practised from on this map and style, or null if it can. It continues in the live game, so it
- * has to be the style you have selected (bonus tracks are Normal) and play back with the physics and timer rules the game
+ * has to be the style you have selected (styles.ts styleForTrack) and play back with the physics and timer rules the game
  * runs now; runs from older versions keep their original movement and are only for watching.
  */
 export function replayStartProblem(h: ReplayHeader, o: { map: string; selectedStyle: StyleId }): string | null {
   if (h.map !== o.map) return "That replay is for another map.";
   const style = replayStyle(h);
-  if (style !== styleForTrack(o.selectedStyle, h.track)) return `That replay is ${styleLabel(style)}. Switch to it first.`;
+  if (style !== styleForTrack(o.selectedStyle, h.track, o.map)) return `That replay is ${styleLabel(style)}. Switch to it first.`;
   if (replayTimerRules(h) !== TIMER_RULES || !sameSettings(h.settings, styleSettings(style as StyleId))) return "That replay is from an older version of the game, so it can only be watched.";
   return null;
 }

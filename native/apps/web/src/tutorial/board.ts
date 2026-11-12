@@ -4,7 +4,7 @@
 // your row.
 
 import { api, type LeaderboardEntry } from "../api";
-import { BONUS_STYLE } from "../styles";
+import { TUTORIAL_BONUS_STYLE } from "../styles";
 import { formatTime } from "../timer";
 import { h } from "../ui/dom";
 import { nameAttrs, nameMarks } from "../ui/marks";
@@ -22,13 +22,13 @@ interface BoardData {
 }
 
 async function load(best: number | null, signal: AbortSignal): Promise<BoardData> {
-  const lb = await api.leaderboard(TUTORIAL_MAP, BONUS_STYLE, { offset: 0, limit: TOP, track: FINAL_TRACK }, { signal });
+  const lb = await api.leaderboard(TUTORIAL_MAP, TUTORIAL_BONUS_STYLE, { offset: 0, limit: TOP, track: FINAL_TRACK }, { signal });
   const top = lb.entries;
   const mine = lb.me ?? (best !== null ? { time: best } : null);
   let next = nextToBeat(top, mine);
   // Your row is below the top 10: the run just above it is at board position rank - 2 (RANK counts strictly faster).
   if (!next && lb.me && lb.me.rank > top.length + 1) {
-    const above = await api.leaderboard(TUTORIAL_MAP, BONUS_STYLE, { offset: lb.me.rank - 2, limit: 1, track: FINAL_TRACK }, { signal });
+    const above = await api.leaderboard(TUTORIAL_MAP, TUTORIAL_BONUS_STYLE, { offset: lb.me.rank - 2, limit: 1, track: FINAL_TRACK }, { signal });
     next = nextToBeat(above.entries, lb.me);
   }
   return { top, total: lb.total, me: lb.me, next };

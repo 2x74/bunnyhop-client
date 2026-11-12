@@ -33,6 +33,8 @@ const adapters: Record<string, string> = {
   "net/hud": "chat-hud",
   "ui/loadout-stage": "loadout-stage",
   "notify/item3d": "item-emblem",
+  "voice/client": "voice-web",
+  "voice/settings": "voice-web-settings",
 };
 async function walk(path: string): Promise<string[]> {
   const out: string[] = [];

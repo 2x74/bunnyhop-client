@@ -97,14 +97,13 @@ const COAST_CANCEL: Region = Region { points: [[-9877.0, -10640.0], [-9973.0, -1
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn load(name: &str, version: u32) -> Game {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../../maps/{name}.bsp"));
-        let mut g = crate::content::load_game(&path).unwrap();
-        g.set_settings(Settings { physics_version: version, ..Settings::css_bhop() }); g.reset(); g
+    fn load(name: &str, version: u32) -> Option<Game> {
+        let mut g = crate::content::load_game(&crate::test_maps::map(name)?).unwrap();
+        g.set_settings(Settings { physics_version: version, ..Settings::css_bhop() }); g.reset(); Some(g)
     }
     #[test]
     fn selector_identity_renames_wildcards_negation_multi_and_targets() {
-        let mut g = load("ahop_coast", PHYSICS_V26);
+        let Some(mut g) = load("ahop_coast", PHYSICS_V26) else { return };
         let f = g.ents.iter().position(|e| e.name == "filter_triggers").unwrap();
         for name in ["", "renamed", "!player"] {
             assert!(g.filter_entity_passes(f, name, "renamed_class", true, 0));
@@ -135,7 +134,7 @@ mod tests {
     }
     #[test]
     fn coast_reset_subset_is_versioned_stops_turns_and_restores() {
-        let mut g = load("ahop_coast", PHYSICS_V26);
+        let Some(mut g) = load("ahop_coast", PHYSICS_V26) else { return };
         let ids: Vec<_> = g.ents.iter().enumerate().filter(|(_,e)| e.class == "trigger_momentum_teleport").map(|(i,_)| i).collect();
         assert_eq!(ids.len(), 19);
         for &i in &ids {
@@ -160,7 +159,7 @@ mod tests {
     }
     #[test]
     fn coast_checkpoints_reject_skips_reordering_lobby_and_allow_saved_segments() {
-        let mut g = load("ahop_coast", PHYSICS_V26);
+        let Some(mut g) = load("ahop_coast", PHYSICS_V26) else { return };
         visit(&mut g, 2); assert!(g.extra.objectives.is_empty());
         visit(&mut g, 0); visit(&mut g, 2); assert_eq!(g.extra.objectives, [0]);
         visit(&mut g, 1); let segment = g.save_state();
@@ -180,7 +179,7 @@ mod touch_tests {
     use super::*;
     #[test]
     fn coast_fall_reset_touch_is_start_only_and_obeys_enable_filter() {
-        let path=std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../maps/ahop_coast.bsp");
+        let Some(path)=crate::test_maps::map("ahop_coast") else { return };
         let mut g=crate::content::load_game(&path).unwrap();g.set_settings(Settings{physics_version:26,..Settings::css_bhop()});g.reset();
         let ids:Vec<_>=g.ents.iter().enumerate().filter(|(_,e)|e.class=="trigger_momentum_teleport").map(|(i,_)|i).collect();
         let mut falls=0;

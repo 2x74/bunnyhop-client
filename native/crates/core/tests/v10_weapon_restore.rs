@@ -10,7 +10,6 @@ use bunnyhop_core::game::{
     WEAPON_EVENT_SWITCHED, WEAPON_RESTORE_TICKS,
 };
 use bunnyhop_core::{Cmd, Game, Settings};
-use std::path::PathBuf;
 
 const GLOCK: u32 = 2;
 const USP: u32 = 3;
@@ -26,7 +25,7 @@ fn restore(id: u32, mode: bool) -> u32 {
 }
 
 fn load(version: u32) -> Option<Game> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps/bhop_eazy.bsp");
+    let path = bunnyhop_core::test_maps::bsp("bhop_eazy");
     let Ok(bytes) = std::fs::read(&path) else {
         eprintln!("skipping: {} not found", path.display());
         return None;

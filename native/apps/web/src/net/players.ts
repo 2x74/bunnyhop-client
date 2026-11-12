@@ -10,6 +10,7 @@
 // join (player/bunny/prebuild.ts), and their model compiles its shaders (compileAsync) before it's added to the scene.
 // Until then they're simply not drawn yet (a few frames).
 
+import { voice } from "../voice/client";
 import * as THREE from "three";
 import { emitWeaponEvent } from "../viewmodel/events";
 import { WEAPON_IDS } from "../core";
@@ -31,6 +32,7 @@ import { styleDef } from "../styles";
 import { blankState, RemoteTrack, type InterpState } from "./interp";
 import { SpatialMover } from "../audio";
 import { prefs } from "../ui/settings";
+import { liveOf } from "../live";
 import { styleAt, TIMER_FINISHED, TIMER_RUNNING, TIMER_START, type NetMeta, type NetSample, type RosterPlayer } from "./protocol";
 
 /** Distinct accents per slot (readable on bright and dark maps). */
@@ -377,7 +379,8 @@ export class RemotePlayers {
         // A practice attempt (roster `practice`, 0.0.36): its time isn't a run, so the tag says practice instead.
         const time = p.info.practice ? `${styleTag}practice` : !rt ? "" : rt.status === TIMER_RUNNING || rt.status === TIMER_FINISHED ? styleTag + formatTime(rt.seconds) : rt.status === TIMER_START ? `${styleTag}start` : styleTag.replace(/ · $/, "");
         // Staff shield / Verified / Creator / Booster marks: from the room's roster, never from the client.
-        tag.set(p.info.name, time, null, false, p.info);
+        // LIVE: streaming right now (src/live.ts); the list is the client's, refreshed once a minute.
+        tag.set(p.info.name, time, null, false, p.info, !!liveOf(p.info.id), voice.isTalking(p.slot));
       }
       tag.place(tmp, camPos, fade);
     }

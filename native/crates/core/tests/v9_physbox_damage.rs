@@ -16,10 +16,9 @@
 
 use bunnyhop_core::game::{IN_ATTACK, IN_JUMP, PHYSICS_FIX_PHYSBOX_DAMAGE, PHYSICS_V8, PHYSICS_V9, physics_fixes};
 use bunnyhop_core::{Cmd, Game, Settings};
-use std::path::PathBuf;
 
 fn load(version: u32) -> Option<Game> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps/bhop_tesquo_v2.bsp");
+    let path = bunnyhop_core::test_maps::bsp("bhop_tesquo_v2");
     if !path.exists() {
         eprintln!("skipping: {} not found", path.display());
         return None;
@@ -91,6 +90,7 @@ fn v9_is_v8_plus_physbox_damage() {
 }
 
 /// The first booster: func_physbox *53 (2736 1224, top z 4056), solid, `gravity -0.8` for 0.5 s.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn physbox_booster() {
     let at = [2736.0, 1224.0, 4060.0];
@@ -115,6 +115,7 @@ fn physbox_booster() {
 }
 
 /// A func_physbox_multiplayer booster: *56 (2680 456, z 4552..4568 on a world floor at 4552), `gravity -0.9`.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn physbox_multiplayer_booster() {
     let at = [2680.0, 456.0, 4556.0];
@@ -134,6 +135,7 @@ fn physbox_multiplayer_booster() {
 }
 
 /// The damage filter: a player who isn't `canshoot` (off the platform, where the feedback's player stood) gets nothing.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn only_the_player_on_the_platform_is_boosted() {
     let Some(mut g) = with_glock(PHYSICS_V9) else { return };

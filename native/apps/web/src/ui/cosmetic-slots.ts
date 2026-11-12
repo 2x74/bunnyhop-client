@@ -56,10 +56,10 @@ export const CARD_PARTS: readonly { part: CardPart; label: string }[] = [
 ];
 export const isCardPart = (s: unknown): s is CardPart => CARD_PARTS.some((c) => c.part === s);
 
-export type ProfileTab = "overview" | "loadout" | "runs";
+export type ProfileTab = "overview" | "loadout" | "runs" | "compare";
 
 /**
- * Where a request to open the profile lands. Tabs are the three above; "card" (a new card item) and v0.0.8's
+ * Where a request to open the profile lands. Tabs are the ones above (Compare on someone else's profile only); "card" (a new card item) and v0.0.8's
  * "customise" (old links, unlock buttons, a remembered tab) open the Overview with the card in edit mode on that part,
  * or the Loadout for an item that moved there (colourway, ghost, trail, hat). 0.0.13's removed Collection tab (old links,
  * a remembered tab) opens the Loadout.
@@ -69,7 +69,7 @@ export function profileTarget(tab: string | null | undefined, slot: string | nul
   if (isLoadoutCategory(s) && (tab === "loadout" || tab === "customise" || tab === "card" || !tab)) return { tab: "loadout", slot: s, edit: null };
   if (tab === "customise" || tab === "card" || (isCardPart(s) && (!tab || tab === "overview"))) return { tab: "overview", slot: null, edit: isCardPart(s) ? s : "background" };
   if (tab === "collection") return { tab: "loadout", slot: isLoadoutCategory(s) ? s : null, edit: null };
-  if (tab === "overview" || tab === "loadout" || tab === "runs") return { tab, slot: null, edit: null };
+  if (tab === "overview" || tab === "loadout" || tab === "runs" || tab === "compare") return { tab, slot: null, edit: null };
   return { tab: "overview", slot: null, edit: null };
 }
 

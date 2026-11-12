@@ -99,7 +99,9 @@ test("the Tab board is the room screen's rows; a running time ticking alone isn'
 
 test("pride flags reach the host as their own codes; unknown codes are no flag", () => {
   expect(hostFlag("PRIDE-TRANS")).toBe("PRIDE-TRANS");
-  expect(hostFlag("PRIDE-PROGRESS")).toBe("PRIDE-PROGRESS");
+  expect(hostFlag("PRIDE-RAINBOW")).toBe("PRIDE-RAINBOW");
+  // Retired on the website (countries.ts PRIDE_FLAGS keeps Rainbow and Transgender).
+  expect(hostFlag("PRIDE-PROGRESS")).toBeNull();
   expect(hostFlag("US")).toBe("us");
   for (const code of ["PRIDE-XX", "pride-trans", "PRIDE-", "USA", "", null, 7]) expect(hostFlag(code)).toBeNull();
 });

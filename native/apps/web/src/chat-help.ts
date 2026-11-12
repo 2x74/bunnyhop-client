@@ -150,7 +150,7 @@ const TOPICS: readonly Topic[] = [
   },
   {
     names: ["bonus", "bonuses", "b"],
-    lines: (c) => [`${k(c, "!b", "restartBonus")} goes to the next bonus and after the last one back to the main track, ${k(c, "!m", "restartMain")} straight to the main track. Bonuses have their own leaderboards and are always Normal style.`],
+    lines: (c) => [`${k(c, "!b", "restartBonus")} goes to the next bonus and after the last one back to the main track, ${k(c, "!m", "restartMain")} straight to the main track. Bonuses have their own leaderboards in every style.`],
   },
   {
     names: ["bhop", "bunnyhop", "how", "strafe", "strafing", "speed", "jump", "tips"],

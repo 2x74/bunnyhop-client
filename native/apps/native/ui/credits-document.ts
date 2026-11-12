@@ -110,6 +110,7 @@ export const CREDITS_PAGE = `<!doctype html>
         <li><a href="https://github.com/theleagueof/orbitron">Orbitron</a> — the Orbitron Project Authors; a supporter name font; <a href="/name-fonts/Orbitron-OFL.txt">notice</a>.</li>
         <li><a href="https://fonts.google.com/specimen/Russo+One">Russo One</a> — Jovanny Lemonad; a supporter name font; <a href="/name-fonts/RussoOne-OFL.txt">notice</a>.</li>
         <li><a href="https://github.com/googlefonts/Pacifico">Pacifico</a> — the Pacifico Project Authors; a supporter name font; <a href="/name-fonts/Pacifico-OFL.txt">notice</a>.</li>
+        <li><a href="https://github.com/jpt/barlow">Barlow Condensed</a> — the Barlow Project Authors; a supporter name font; <a href="/name-fonts/BarlowCondensed-OFL.txt">notice</a>.</li>
       </ul>
       <p>The supporter name fonts above are pinned to one weight, cut down to the letters names use and renamed (bh-name-…), as the licence asks of modified versions. One more is licensed under the <a href="https://www.apache.org/licenses/LICENSE-2.0">Apache License 2.0</a>:</p>
       <ul>

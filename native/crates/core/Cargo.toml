@@ -10,6 +10,10 @@ native-wasm-math = ["playsrc-collision/native-wasm-math", "playsrc-movement/nati
 # Measurement exports for research/EDGEBUG-V22.md. Never in a shipped build.
 edge-diag = []
 
+[lints.rust]
+# CI builds tests with --cfg ci: tests whose maps CI doesn't fetch are ignored there (src/test_maps.rs).
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(ci)"] }
+
 [lib]
 crate-type = ["cdylib", "rlib"]
 

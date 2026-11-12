@@ -1,10 +1,9 @@
 //! Physics v23: bhop_crutle5_css's first level ends in a trigger_teleport with no target; touching it runs a logic_case
 //! PickRandom that gives it one (research/MAPS-FINISH-V34.md). Skips when the BSP isn't local (maps/ is gitignored).
 use bunnyhop_core::{Cmd, Settings, content::load_game, game::{EVENT_TELEPORTED, PHYSICS_V22, PHYSICS_V23}};
-use std::path::Path;
 
 fn run(physics: u32) -> Option<Vec<[f32; 3]>> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../maps/bhop_crutle5_css.bsp");
+    let path = bunnyhop_core::test_maps::bsp("bhop_crutle5_css");
     let mut game = load_game(&path).ok()?;
     game.set_settings(Settings { physics_version: physics, ..Settings::css_bhop() });
     game.reset();
@@ -21,6 +20,7 @@ fn run(physics: u32) -> Option<Vec<[f32; 3]>> {
     Some(arrivals)
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn the_trigger_gets_a_target_on_v23_only() {
     let Some(old) = run(PHYSICS_V22) else { return eprintln!("bhop_crutle5_css.bsp not local: skipped") };

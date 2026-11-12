@@ -28,6 +28,7 @@ import "./support.css";
 import { api, lastKnownMe, type MySupport, type Profile, type TopSupporter } from "../api";
 import { NAME_COLORS, peakOf, type NameColorId } from "../creators";
 import { lookSaver, PREVIEW_LOOK, savedPicks, type LookPicks } from "../support-look";
+import { nameStyleShown } from "../supporter-looks";
 import { COSMETICS, cosmetic, DEFAULT_COSMETICS, supporterItem, SUPPORTER_MIN_USD, SUPPORTER_SETS, type SupporterSetId } from "../progression";
 import { UNRANKED } from "../ranking";
 import { uiSound } from "../audio/ui";
@@ -42,7 +43,7 @@ import { nameAttrs, supporterMark } from "./marks";
 import { navigate } from "./nav";
 import { profileWriteGuard } from "./profile-write";
 import { supportGifting } from "./support-gifting";
-import { borderChoices, cardEffectChoices, cardFxSwatch, COLOUR_CHOICES, DECO_CHOICES, decoSwatch, EFFECT_CHOICES, FONT_CHOICES, nameSample } from "./supporter-pickers";
+import { borderChoices, cardEffectChoices, cardFxSwatch, COLOUR_CHOICES, DECO_CHOICES, decoSwatch, EFFECT_CHOICES, FONT_CHOICES, HOVER_FX_CHOICES, hoverFxSwatch, nameSample, styleChoices } from "./supporter-pickers";
 
 /**
  * Back from Stripe's payment page (/?support=thanks, src/stripe.ts success_url): read at load, before menu.ts tidies the
@@ -488,7 +489,7 @@ function topList(top: TopSupporter[] | "failed" | null): HTMLElement {
     "ol.sp-top",
     null,
     ...top.map((t, i) => {
-      const a = nameAttrs({ nameColor: t.nameColor, nameEffect: t.nameEffect, nameColor2: t.nameColor2, nameFont: t.nameFont }, undefined, t.name);
+      const a = nameAttrs({ nameColor: t.nameColor, nameEffect: t.nameEffect, nameColor2: t.nameColor2, nameFont: t.nameFont, nameStyle: t.nameStyle }, undefined, t.name);
       return h(
         "li.sp-top-row",
         null,
@@ -529,7 +530,7 @@ function lookState(): Look {
 
 /** The look as the card reads it: a gradient's second colour is the next colour along (never the same one). */
 function lookAttrs(l: LookPicks & Partial<Pick<Look, "own">>): SupporterLook {
-  const more = { nameFont: l.font, avatarDeco: l.deco, cardBorder: l.border, cardEffect: l.cardEffect };
+  const more = { nameFont: l.font, nameStyle: l.style, avatarDeco: l.deco, cardBorder: l.border, cardEffect: l.cardEffect, hoverFx: l.hoverFx };
   if (l.own) return { nameColor: l.color, nameEffect: l.effect, nameColor2: l.own.color2, ...more };
   const i = NAME_COLORS.findIndex((c) => c.id === l.color);
   const color2 = NAME_COLORS[(i + 2) % NAME_COLORS.length].id;
@@ -671,7 +672,7 @@ function cardDeck(l: Look, who: () => { provider: string } | null, pick: (id: Su
 
 // ---------------------------------------------------------------------------------------------
 // Your look, beside the stage above the player glow: two views under one heading, so the column keeps its height.
-//   Your name: colour, effect and font.   Your card: avatar decoration, card border and card effect.
+//   Your name: colour, effect and font.   Your card: avatar decoration, card border, card effect and hover effect.
 // The choices and swatches are Edit card's (ui/supporter-pickers.ts); every pick shows on the cards at once.
 
 function lookPickers(l: Look, status: HTMLElement, deck: Pick<Deck, "player">): HTMLElement {
@@ -728,7 +729,15 @@ function lookPickers(l: Look, status: HTMLElement, deck: Pick<Deck, "player">): 
           );
         }),
       );
-      body.replaceChildren(colours, effects, row("Name font", null, FONT_CHOICES, l.font, (id) => nameSample({ ...attrs, nameFont: id }), (id) => l.set({ font: id })));
+      // v0.0.40: bold / italic in the cuts the picked font has (none: no row); a pick the font lacks shows as Plain.
+      const styles = styleChoices(l.font);
+      const shown = nameStyleShown(l.font, l.style);
+      body.replaceChildren(
+        colours,
+        effects,
+        row("Name font", null, FONT_CHOICES, l.font, (id) => nameSample({ ...attrs, nameFont: id }), (id) => l.set({ font: id })),
+        ...(styles.length ? [row("Bold and italic", null, styles, shown, (id) => nameSample({ ...attrs, nameStyle: id }), (id) => l.set({ style: id }))] : []),
+      );
     } else {
       const player = deck.player();
       const peak = peakOf(player.special);
@@ -736,6 +745,7 @@ function lookPickers(l: Look, status: HTMLElement, deck: Pick<Deck, "player">): 
         row("Avatar decoration", "Avatar", DECO_CHOICES, l.deco, (id) => decoSwatch(player, id, l.color), (id) => l.set({ deco: id })),
         row("Card border", "Border", borderChoices(peak), l.border, (id) => cardFxSwatch(peak, id, null, l.color), (id) => l.set({ border: id })),
         row("Card effect", "Effect", cardEffectChoices(peak), l.cardEffect, (id) => cardFxSwatch(peak, null, id, l.color), (id) => l.set({ cardEffect: id })),
+        row("Hover effect", "Hover", HOVER_FX_CHOICES, l.hoverFx, (id) => hoverFxSwatch(id, l.color), (id) => l.set({ hoverFx: id })),
       );
     }
     if (at >= 0) body.querySelectorAll("button")[at]?.focus({ preventScroll: true });
@@ -754,7 +764,7 @@ function lookPickers(l: Look, status: HTMLElement, deck: Pick<Deck, "player">): 
 
 /** The rest, in a sentence. */
 function perks(): HTMLElement {
-  return h("p.sp-perks", null, "You also get name fonts, avatar decorations, card borders and effects, a heart by your name, a reserved spot on full servers and a place in Top supporters.");
+  return h("p.sp-perks", null, "You also get name fonts, avatar decorations, card borders and effects, an effect on your mini profile, a heart by your name, a reserved spot on full servers and a place in Top supporters.");
 }
 
 export const openSupport = () => navigate({ screen: "support" });

@@ -17,11 +17,11 @@ inline bool replay_zones_match(const nlohmann::json &info, std::span<const BhZon
     if (!saved.is_array() || saved.size() != zones.size() || zones.empty()) {
         return false;
     }
-    constexpr const char *kinds[] = {"start", "end", "stage", "checkpoint"};
+    constexpr const char *kinds[] = {"start", "end", "stage", "checkpoint", "anti-skip"};
     for (size_t i = 0; i < zones.size(); ++i) {
         const auto &zone = zones[i];
         const auto &recorded = saved.at(i);
-        if (zone.kind > 3 || recorded.at("kind") != kinds[zone.kind] || recorded.value("track", 0u) != zone.track
+        if (zone.kind > 4 || recorded.at("kind") != kinds[zone.kind] || recorded.value("track", 0u) != zone.track
             || recorded.value("index", 0u) != zone.index) {
             return false;
         }

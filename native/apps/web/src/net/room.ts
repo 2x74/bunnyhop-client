@@ -2,6 +2,7 @@
 // state batches and control messages. No DOM and no three.js; net/mp.ts wires it to the game.
 
 import { api } from "../api";
+import { MSG_VOICE_DOWN } from "./voice-wire";
 import {
   CLOSE,
   decodeSnapshot,
@@ -100,6 +101,8 @@ export class RoomConnection {
         const buf = e.data as ArrayBuffer;
         this.stats.recv++;
         this.stats.recvBytes += buf.byteLength;
+        // voice: VOICE_DOWN frames (net/voice-wire.ts) go to the voice client, never the snapshot decoders.
+        if (buf.byteLength && new Uint8Array(buf, 0, 1)[0] === MSG_VOICE_DOWN) return void this.onVoice?.(buf);
         const s = decodeSnapshot(buf);
         if (s) this.h.snapshot(s, now);
       }
@@ -142,6 +145,18 @@ export class RoomConnection {
     this.ws!.send(text);
     this.stats.sent++;
     this.stats.sentBytes += text.length;
+  }
+
+  /** voice: VOICE_DOWN frames from the room (voice/client.ts sets it). */
+  onVoice: ((buf: ArrayBuffer) => void) | null = null;
+
+  /** voice: one binary frame as is (VOICE_UP); false when the socket isn't open. */
+  sendBinary(bytes: Uint8Array<ArrayBuffer>): boolean {
+    if (!this.open_) return false;
+    this.ws!.send(bytes);
+    this.stats.sent++;
+    this.stats.sentBytes += bytes.byteLength;
+    return true;
   }
 
   /** Queues one 20 Hz sample; flushSamples() sends the batch (every SEND_TICKS). */

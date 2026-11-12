@@ -23,6 +23,7 @@ import { installGlowSettings } from "./glow-settings";
 import { flushSettings, onHostSettings } from "./prefs-bridge";
 import { decorateNativeRows } from "./settings-decorations";
 import { registerUpdatesSection } from "./update-panel";
+import { registerVoiceSection } from "./voice-section";
 import { registerDisplaySection } from "./window-panel";
 
 /** Where the website keeps the section the screen last showed (settings-panel.ts LAST_SECTION). */
@@ -37,6 +38,7 @@ function install(): void {
   installed = true;
   installGlowSettings();
   registerAudioSettings();
+  registerVoiceSection();
   registerDisplaySection();
   registerDiscordSection();
   registerDataFolderSection();

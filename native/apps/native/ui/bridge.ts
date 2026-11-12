@@ -15,6 +15,7 @@ import { ANGLE_SPEED_KEY_RANGE, YAW_SPEED_RANGE } from "./turn-speed";
 import { DEFAULT_PREFS } from "../../web/src/ui/settings";
 import { PAINT_COLORS, PAINT_SIZES, type PaintPrefs, type PaintSize } from "../../web/src/paint/prefs";
 import { requestedPatch } from "./settings-keys";
+import { isStripeCheckoutUrl } from "./support-checkout";
 export const LIVE_ORIGIN = "https://bunnyhop.lol";
 export interface VideoExportOptions {
   width: number;
@@ -166,6 +167,9 @@ export type MenuMessage =
   | { type: "tutorial"; action: "stop" }
   | { type: "roomEvent"; generation: number; id: string; event: Record<string, unknown> }
   | { type: "roomSnapshot"; generation: number; id: string; snapshot: unknown }
+  /** Voice chat (voice-relay.ts): a VOICE_DOWN frame, base64, and your per-player mutes and volumes. */
+  | { type: "voiceDown"; generation: number; id: string; data: string }
+  | { type: "voicePeople"; people: Record<string, { m?: 1; v?: number; t: number }> }
   | { type: "announce"; event: AnnouncerEvent; id?: string; remote?: boolean; preview?: AnnouncerLine }
   | { type: "audioCue"; id: string; gain: number; rate: number }
   | { type: "sensitivity"; value: number }
@@ -278,8 +282,11 @@ export const NATIVE_BIND_ACTIONS = [
   "clearPaint",
   "measurePoint",
   "clearMeasure",
+  "voiceRecord",
 ] as const;
 type NativeBindAction = (typeof NATIVE_BIND_ACTIONS)[number];
+/** Push to talk shares its key (X with the checkpoint teleport): in a room with voice the key talks. */
+export const SHARED_KEY_ACTION = "voiceRecord";
 /** The web game's defaults, plus native-only actions and defaults (settings.hpp keeps the same list). */
 export const DEFAULT_BINDS: Record<NativeBindAction, readonly string[]> = {
   ...WEB_DEFAULT_BINDS,
@@ -294,6 +301,8 @@ export const DEFAULT_BINDS: Record<NativeBindAction, readonly string[]> = {
   spectatorMode: ["KeyN"],
   // A toggle most players never use shouldn't take a key off anyone: !freecam always works.
   freecam: [],
+  // Push to talk in rooms with voice; elsewhere X keeps the checkpoint teleport.
+  voiceRecord: ["KeyX"],
 };
 /** A settings change: native keys, and website keys the host has added (settings-keys.ts). */
 export type SettingsPatch = Partial<NativeSettings> & Record<string, unknown>;
@@ -406,6 +415,9 @@ export interface NativeSettings {
   uiVolume: number;
   ambienceVolume: number;
   mapVolume: number;
+  /** Voice chat in rooms (voice-relay.ts): on, and its own volume. */
+  voiceEnabled: boolean;
+  voiceVolume: number;
   footsteps: boolean;
   weaponSounds: boolean;
   wind: boolean;
@@ -673,6 +685,8 @@ declare global {
       onLeaveMap?: () => void;
       joinRoom?: (id: string) => void;
       onRoomPose?: (value: unknown) => void;
+      /** A VOICE_UP packet from the game, base64 (voice-relay.ts). */
+      onVoiceUp?: (value: unknown) => void;
       onRoomCommand?: (value: unknown) => void;
       /** This attempt is practice (true) or a real run again (room_bridge.cpp publish_practice). */
       onRoomPractice?: (value: unknown) => void;
@@ -742,11 +756,10 @@ export function openExternal(raw: string): boolean {
     url.password
   )
     return false;
-  const checkout =
-    url.hostname === "checkout.stripe.com" &&
-    (!url.port || url.port === "443") &&
-    /^\/(?:c\/)?pay\//.test(url.pathname);
-  if (!checkout && !EXTERNAL_HOSTS.some((host) => url.hostname === host || url.hostname.endsWith("." + host)))
+  if (
+    !isStripeCheckoutUrl(url) &&
+    !EXTERNAL_HOSTS.some((host) => url.hostname === host || url.hostname.endsWith("." + host))
+  )
     return false;
   send({ type: "openExternal", url: url.href });
   return true;
@@ -823,6 +836,8 @@ function defaultSettings(): NativeSettings {
     uiVolume: web.audio.ui,
     ambienceVolume: web.audio.ambience,
     mapVolume: web.audio.map,
+    voiceEnabled: true,
+    voiceVolume: 0.8,
     muteSfx: false,
     muteMusic: false,
     muteUi: false,
@@ -1047,6 +1062,7 @@ export function settingsPatch(value: unknown): Partial<NativeSettings> {
     ["viewmodelSway", 0, 2],
     ["ambienceVolume", 0, 1],
     ["mapVolume", 0, 1],
+    ["voiceVolume", 0, 1],
     ["sfxVolume", 0, 1],
     ["musicVolume", 0, 1],
     ["uiVolume", 0, 1],
@@ -1158,6 +1174,7 @@ export function settingsPatch(value: unknown): Partial<NativeSettings> {
     "discordJoinLobbies",
     "privacyMode",
     "timedInput",
+    "voiceEnabled",
   ])
     if (typeof input[key] === "boolean") out[key] = input[key];
   if (input.inputBackend === "auto" || input.inputBackend === "sdl" || input.inputBackend === "raw") {

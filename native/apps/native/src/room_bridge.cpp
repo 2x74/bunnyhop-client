@@ -3,6 +3,7 @@
 #include "menu_webview.hpp"
 #include "tutorial_runner.hpp"
 #include "room_styles.hpp"
+#include "json_fields.hpp"
 
 namespace native {
 namespace {
@@ -143,6 +144,35 @@ void RoomBridge::send_poses(MenuWebView *menu, bool menu_ready, const std::strin
             menu->evaluate_js(pose_script_.write(batch.generation, room.id, map_id, batch));
     }
     pose_outbox_.clear();
+}
+
+void RoomBridge::enable_voice(bool devices, bool test_tone) {
+    constexpr float test_tone_hz = 550, test_tone_amplitude = .2f;
+    std::function<std::unique_ptr<voice::CaptureSource>()> capture = voice::default_microphone;
+    if (test_tone)
+        capture = [] {
+            return voice::tone_source(test_tone_hz, test_tone_amplitude);
+        };
+    if (!devices && !test_tone)
+        capture = [] {
+            return std::unique_ptr<voice::CaptureSource>();
+        };
+    voice_ = std::make_unique<voice::VoiceChat>(std::make_unique<voice::Engine>(capture, devices));
+}
+
+void RoomBridge::voice_message(const nlohmann::json &message) {
+    if (json_value(message, "type", std::string()) == "voicePeople")
+        return voice_->people(json_value(message, "people", nlohmann::json()));
+    const auto data = message.find("data");
+    if (data == message.end() || !data->is_string() || json_value(message, "id", std::string()) != room.id) return;
+    if (json_value(message, "generation", uint64_t(0)) != room.generation) return;
+    voice_->receive(data->get_ref<const std::string &>());
+}
+
+void RoomBridge::send_voice(MenuWebView *menu, bool menu_ready, double now_ms, float master_volume, bool keys_free) {
+    voice_->frame(now_ms, master_volume, keys_free);
+    for (const auto &packet : voice_->outgoing(now_ms))
+        if (menu && menu_ready) menu->evaluate_js("window.bunnyhopNativeMenu?.onVoiceUp?.(\"" + packet + "\")");
 }
 
 }  // namespace native

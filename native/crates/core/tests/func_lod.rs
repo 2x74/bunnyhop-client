@@ -6,10 +6,9 @@
 
 use bunnyhop_core::game::{EVENT_TELEPORTED, PHYSICS_V4, PHYSICS_V5};
 use bunnyhop_core::{Cmd, Game, Settings};
-use std::path::PathBuf;
 
 fn map(name: &str, version: u32) -> Option<Game> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps").join(format!("{name}.bsp"));
+    let path = bunnyhop_core::test_maps::bsp(name);
     if !path.exists() {
         eprintln!("skipping {name}: {} not found", path.display());
         return None;
@@ -35,6 +34,7 @@ fn on_tile(version: u32, buttons: u32, ticks: u32) -> Option<(Option<u32>, f32)>
     Some((teleported, game.state.position[2]))
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn flocci_tiles_hold_the_player_from_v5() {
     let Some((tp, z)) = on_tile(PHYSICS_V5, 0, 60) else { return };
@@ -46,6 +46,7 @@ fn flocci_tiles_hold_the_player_from_v5() {
     assert!(tp.is_some_and(|t| t < 40), "v4 falls through into the fail teleport (tick {tp:?})");
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn non_solid_func_lod_stay_non_solid() {
     let Some(game) = map("bhop_omniscient", PHYSICS_V5) else { return };

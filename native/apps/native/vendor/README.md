@@ -11,6 +11,11 @@ NVAPI's headers, unchanged. To update, re-download from the upstream URL and ref
 | `stb/` | https://github.com/nothings/stb | Decoding custom Ogg Vorbis; sky panoramas (.hdr, PNG, JPEG) |
 | `nvapi/` | https://github.com/NVIDIA/nvapi | NVIDIA Reflex on Windows (an excerpt: `nvapi_reflex.h`) |
 | `amd/` | https://github.com/GPUOpen-LibrariesAndSDKs/AntiLag2-SDK | AMD Anti-Lag 2 on Windows (`ffx_antilag2_dx11.h`) |
+| `opus/` | https://opus-codec.org/ (release 1.6.1 tarball) | Voice chat (BSD 3-clause, `COPYING`) |
+
+`opus/` is the 1.6.1 release's float C sources only: `src`, `celt`, `silk`, `silk/float`, `include` and the `*_sources.mk`
+lists `cmake/Opus.cmake` reads. The DNN models, SIMD paths, fixed-point code, tests and build scripts are left out; the
+files kept are unmodified. It is compiled as C into its own static library, not header-only.
 
 `dr_libs` and `stb` exist only for the custom audio packs: a player's own files
 in `sound/` and `bgm/` can be in any of those formats, so the client has to

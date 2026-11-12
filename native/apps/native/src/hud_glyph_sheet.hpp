@@ -18,33 +18,13 @@
 
 namespace native {
 
-inline constexpr std::array<std::string_view, 26> sheet_glyph_ids = {
+inline constexpr std::array<std::string_view, 6> sheet_glyph_ids = {
         "peak-7",
         "peak-8",
         "peak-9",
         "peak-10",
         "PRIDE-RAINBOW",
-        "PRIDE-PROGRESS",
-        "PRIDE-INTERSEX-PROGRESS",
         "PRIDE-TRANS",
-        "PRIDE-BI",
-        "PRIDE-PAN",
-        "PRIDE-LESBIAN",
-        "PRIDE-GAY",
-        "PRIDE-NONBINARY",
-        "PRIDE-ACE",
-        "PRIDE-ARO",
-        "PRIDE-AROACE",
-        "PRIDE-DEMI",
-        "PRIDE-GENDERFLUID",
-        "PRIDE-GENDERQUEER",
-        "PRIDE-AGENDER",
-        "PRIDE-BIGENDER",
-        "PRIDE-DEMIBOY",
-        "PRIDE-DEMIGIRL",
-        "PRIDE-INTERSEX",
-        "PRIDE-POLY",
-        "PRIDE-OMNI",
 };
 
 // After the fifteen marks and the 26 × 26 regional-indicator flags (hud_theme.hpp).

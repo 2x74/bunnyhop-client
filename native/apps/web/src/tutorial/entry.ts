@@ -5,7 +5,7 @@
 // only loads on its map, the leaderboard dialog when it's opened.
 
 import { requestRace } from "../player/race";
-import { BONUS_STYLE } from "../styles";
+import { TUTORIAL_BONUS_STYLE } from "../styles";
 import { LESSON_IDS, TUTORIAL_MAP } from "./data";
 import { firstSeen, NEW_PLAYER_MS, tutorialEnabled, tutorialHidden, tutorialProgress, tutorialUrl } from "./flag";
 import { FINAL_TRACK } from "./flow";
@@ -34,7 +34,7 @@ export function tutorialOnHome(onboarded: boolean, now = Date.now()): boolean {
 /** The final course's leaderboard in a dialog (map list). Race opens the tutorial with that run as the ghost. */
 export function openTutorialBoard(pick?: (map: string) => void): void {
   void import("../ui/leaderboard").then((m) =>
-    m.openLeaderboardDialog(TUTORIAL_MAP, BONUS_STYLE, {
+    m.openLeaderboardDialog(TUTORIAL_MAP, TUTORIAL_BONUS_STYLE, {
       ...TUTORIAL_BOARD,
       subtitle: "Learn to bhop",
       onRace: (e, track) => {

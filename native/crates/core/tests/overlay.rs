@@ -8,10 +8,9 @@ use bunnyhop_core::game::{
     PHYSICS_LATEST, PHYSICS_V1,
 };
 use bunnyhop_core::{Cmd, Game, Settings};
-use std::path::PathBuf;
 
 fn load_version(name: &str, version: u32) -> Option<(Game, Vec<bool>)> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("../../maps/{name}.bsp"));
+    let path = bunnyhop_core::test_maps::bsp(name);
     let Ok(bytes) = std::fs::read(&path) else {
         eprintln!("skipping: {} not found", path.display());
         return None;
@@ -57,6 +56,7 @@ fn eazy_teleports_and_invisible_walls() {
     assert!(v.iter().all(|b| b.planes.len() >= 4));
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn boosters_gravity_and_other_triggers() {
     let Some((game, drawn)) = load("bhop_tesquo_v2") else { return };
@@ -73,6 +73,7 @@ fn boosters_gravity_and_other_triggers() {
 }
 
 /// Playerclips block from physics v2 (MASK_PLAYERSOLID); before that they're not drawn as clips.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn clips_follow_the_physics_version() {
     let Some((game, drawn)) = load("bhop_arcane_v1") else { return };
@@ -83,6 +84,7 @@ fn clips_follow_the_physics_version() {
 
 /// CS:GO (v21) brush sides keep a `thin` byte after `bevel`: read as one i16, every side would look like a bevel and
 /// every brush like an invisible wall.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn csgo_map() {
     let Some((game, drawn)) = load("bhop_easystrafe_1_csgo") else { return };
@@ -113,6 +115,7 @@ fn overlays_never_change_the_run() {
 }
 
 /// v19 scripts use map outputs, or add runtime outputs for Liminal / Treason's bhop blocks. Both already draw.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn v19_script_connections_are_in_the_overlay() {
     for map in ["bhop_ceaseless", "bhop_retrowave", "bhop_k2", "bhop_k3", "bhop_api_kowka", "kz_bhop_liminal", "bhop_treason"] {

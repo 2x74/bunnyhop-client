@@ -1,8 +1,6 @@
 use bunnyhop_core::{Cmd, Game, Settings};
 fn load(name: &str, version: u32) -> Option<Game> {
-    let p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../maps")
-        .join(format!("{name}.bsp"));
+    let p = bunnyhop_core::test_maps::bsp(name);
     let Ok(bytes) = std::fs::read(&p) else {
         eprintln!("skipping {name}: {} not found", p.display());
         return None;
@@ -17,6 +15,7 @@ fn load(name: &str, version: u32) -> Option<Game> {
     g.reset();
     Some(g)
 }
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn profane_uses_csgo_crouch_lift_only_in_v19() {
     let Some(mut game) = load("bhop_profane", 19) else {
@@ -87,6 +86,7 @@ fn playboy_wrapped_destination_pitch_is_signed_only_in_v19() {
     }
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn altered_entity_builds_do_not_match() {
     for name in ["bhop_profane", "bhop_playboy_csgo"] {
@@ -99,6 +99,7 @@ fn altered_entity_builds_do_not_match() {
     }
 }
 /// Original BSP's 66-unit step (floor 0 -> 66), ordinary commands and no state/velocity injection.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn profane_actual_sixty_six_unit_ledge_is_clearable() {
     for version in [18, 19] {

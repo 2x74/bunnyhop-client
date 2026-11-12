@@ -6,10 +6,9 @@
 
 use bunnyhop_core::game::{map_entity_fingerprint, map_event_clock_v23_for, map_event_clock_v23_table, EVENT_TELEPORTED, IN_JUMP, PHYSICS_V22, PHYSICS_V23};
 use bunnyhop_core::{Cmd, Game, Settings};
-use std::path::PathBuf;
 
 fn load(name: &str, version: u32) -> Option<Game> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("../../maps/{name}.bsp"));
+    let path = bunnyhop_core::test_maps::bsp(name);
     if !path.exists() {
         eprintln!("skipping: {} not present", path.display());
         return None;
@@ -44,6 +43,7 @@ fn slam_after_touch(version: u32, wait: u32) -> Option<u32> {
     panic!("no slam on v{version}");
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn kz_anti_hop_is_five_ticks_shorter_on_v23() {
     let Some(first) = slam_after_touch(PHYSICS_V22, 0) else { return };
@@ -62,6 +62,7 @@ fn kz_anti_hop_is_five_ticks_shorter_on_v23() {
     assert!(new[21] >= 15, "{new:?}");
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn every_event_clock_entry_matches_its_build() {
     for (map, fingerprint) in map_event_clock_v23_table() {
@@ -90,6 +91,7 @@ fn block_497_destination(version: u32) -> Option<[f32; 3]> {
     panic!("block *497 didn't teleport on v{version}");
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn benchmark_block_497_goes_to_this_stage_on_v23() {
     let Some(old) = block_497_destination(PHYSICS_V22) else { return };
@@ -110,6 +112,7 @@ fn trampislow_peak(version: u32) -> Option<f32> {
     Some(peak)
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn trampislow_booster_reaches_its_recorded_speed_on_v23() {
     let Some(old) = trampislow_peak(PHYSICS_V22) else { return };

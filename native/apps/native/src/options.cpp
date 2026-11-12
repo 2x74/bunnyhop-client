@@ -35,9 +35,10 @@ Options options(int argc, char **argv) {
             out.tutorial_lesson = value();
         else if (arg == "--tutorial-demo")
             out.tutorial_demo = true;
-        else if (arg == "--style")
+        else if (arg == "--style") {
             out.style = value();
-        else if (arg == "--replay")
+            out.style_set = true;
+        } else if (arg == "--replay")
             out.replay = value();
         else if (arg == "--map")
             out.map = value();
@@ -90,6 +91,11 @@ Options options(int argc, char **argv) {
             if (s.empty() || s[0] == '-') throw std::runtime_error("--frames must be positive");
             out.frames = std::stoull(s, &n);
             if (n != s.size() || out.frames == 0) throw std::runtime_error("--frames must be positive");
+        } else if (arg == "--voice-load") {
+            const auto s = value();
+            if (s.size() != 1 || s[0] < '0' || s[0] > '6')
+                throw std::runtime_error("--voice-load takes 0 to 6 talkers");
+            out.voice_load = unsigned(s[0] - '0');
         } else if (arg == "--hidden")
             out.hidden = true;
         else if (arg == "--help" || arg == "-h")

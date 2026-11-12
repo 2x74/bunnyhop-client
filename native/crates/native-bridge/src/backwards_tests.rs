@@ -67,7 +67,7 @@ fn check_filter_rows(rows: &[Value]) {
             ],
             ..BhState::default()
         };
-        let got = filter.apply(command(&row["cmd"]), state, false, false);
+        let got = filter.apply(command(&row["cmd"]), state, false, false, f64::NAN);
         assert_eq!(
             command_bits(got),
             command_bits(command(&row["out"])),

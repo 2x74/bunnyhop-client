@@ -132,7 +132,11 @@ export function minutesWord(m: number | null | undefined): string {
 // ---------------------------------------------------------------------------------------------
 // API
 
-export class NotAdmin extends Error {}
+export class NotAdmin extends Error {
+  constructor() {
+    super("not found");
+  }
+}
 
 export function token(): string | null {
   return sessionStorage.getItem(TOKEN_KEY);
@@ -142,12 +146,37 @@ export function setToken(t: string | null): void {
   else sessionStorage.removeItem(TOKEN_KEY);
 }
 
+/** How long one request may take before the panel gives up on it (a stalled D1 can hold a request for minutes). */
+export const REQUEST_TIMEOUT_MS = 30_000;
+/** A failed GET is tried again after these waits: D1's stalls last a second or two and a page shouldn't die of one. */
+export const GET_RETRY_MS = [700, 2000];
+const RETRY_STATUS = new Set([500, 502, 503, 504]);
+
 export async function api<T>(path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = {};
   const t = token();
   if (t) headers.authorization = `Bearer ${t}`;
   if (body !== undefined) headers["content-type"] = "application/json";
-  const res = await fetch(API + path, { method: body === undefined ? "GET" : "POST", credentials: "include", headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  const get = body === undefined;
+  let res: Response;
+  for (let attempt = 0; ; attempt++) {
+    const retry = get && attempt < GET_RETRY_MS.length;
+    try {
+      res = await fetch(API + path, { method: get ? "GET" : "POST", credentials: "include", headers, body: get ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+    } catch (e) {
+      // Offline, a dropped connection, or the timeout. A POST is never sent twice (it may have been applied).
+      if (retry) {
+        await sleep(GET_RETRY_MS[attempt]);
+        continue;
+      }
+      throw new Error((e as Error).name === "TimeoutError" ? "The server took too long to answer. Try again." : `Couldn't reach the server: ${(e as Error).message}`);
+    }
+    if (retry && RETRY_STATUS.has(res.status)) {
+      await sleep(GET_RETRY_MS[attempt]);
+      continue;
+    }
+    break;
+  }
   if (res.status === 404 && path.startsWith("/admin/")) {
     const e = await res.json().catch(() => ({}) as Record<string, string>);
     // requireStaff answers a bare 404 not_found; other 404s carry a message (no such player, unknown server).
@@ -157,6 +186,22 @@ export async function api<T>(path: string, body?: unknown): Promise<T> {
   const data = (await res.json().catch(() => null)) as (T & { error?: string; message?: string }) | null;
   if (!res.ok) throw new Error(data?.message ?? data?.error ?? `HTTP ${res.status}`);
   return data as T;
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * After a request answered "not staff" (a bare 404): whether the session really is gone. /admin/me decides; a route
+ * an older Worker doesn't have answers the same 404, and so did the staff check while D1 stalled (before v0.0.40).
+ * true: signed out; false: still signed in (the request failed for another reason).
+ */
+export async function signedOut(): Promise<boolean> {
+  try {
+    await api<Me>("/admin/me");
+    return false;
+  } catch (e) {
+    return e instanceof NotAdmin;
+  }
 }
 
 /** An admin-only image (Bearer token or cookie) as an object URL. */

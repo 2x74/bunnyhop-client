@@ -192,7 +192,7 @@ pub const PHYSICS_V16: u32 = 16;
 /// slope or a ledge no longer depends on where inside a tick the player meets it.
 pub const PHYSICS_V17: u32 = 17;
 /// The version new recordings use.
-pub const PHYSICS_LATEST: u32 = PHYSICS_V27;
+pub const PHYSICS_LATEST: u32 = PHYSICS_V28;
 /// v18: ladder surface properties, preserving historical replay behavior.
 pub const PHYSICS_V18: u32 = 18;
 /// v19: scoped map mechanics (template instances and explicit velocity scripts). No new movement fix bits.
@@ -237,6 +237,9 @@ pub const PHYSICS_V25: u32 = 25;
 pub const PHYSICS_V26: u32 = 26;
 /// v27: per-command landfix opt-out. Unset preserves v26's jump lift exactly.
 pub const PHYSICS_V27: u32 = 27;
+/// v28: the web style filter's Auto-strafe rule only (its key from the next command's yaw, apps/web/src/styles.ts). The
+/// core plays v28 exactly as v27. No new fix bits.
+pub const PHYSICS_V28: u32 = 28;
 /// Command bit 25: stock ground jump, without the 1.5-unit landfix lift (physics 27+ only).
 /// The state is carried on every command, so replay seeking and mid-run toggles need no side channel.
 pub const IN_NO_LANDFIX: u32 = 1 << 25;
@@ -547,7 +550,7 @@ pub fn physics_fixes(version: u32) -> Option<u32> {
         PHYSICS_V15 => Some(PHYSICS_FIX_V15),
         PHYSICS_V16 => Some(PHYSICS_FIX_V16),
         PHYSICS_V17 => Some(PHYSICS_FIX_V17),
-        PHYSICS_V18 | PHYSICS_V19 | PHYSICS_V20 | PHYSICS_V21 | PHYSICS_V22 | PHYSICS_V23 | PHYSICS_V24 | PHYSICS_V25 | PHYSICS_V26 | PHYSICS_V27 => Some(PHYSICS_FIX_ALL),
+        PHYSICS_V18 | PHYSICS_V19 | PHYSICS_V20 | PHYSICS_V21 | PHYSICS_V22 | PHYSICS_V23 | PHYSICS_V24 | PHYSICS_V25 | PHYSICS_V26 | PHYSICS_V27 | PHYSICS_V28 => Some(PHYSICS_FIX_ALL),
         v if v & !PHYSICS_DIAG_FIXES == PHYSICS_DIAG && v & PHYSICS_DIAG_FIXES & !PHYSICS_FIX_ALL == 0 => Some(v & PHYSICS_DIAG_FIXES),
         _ => None,
     }

@@ -52,7 +52,7 @@ impl BhZone {
         if self.track != 0 {
             v["track"] = self.track.into();
         }
-        if self.kind >= 2 {
+        if self.kind == 2 || self.kind == 3 {
             v["index"] = self.index.into();
         }
         v
@@ -130,6 +130,9 @@ pub struct Timer {
     perf_ground_ticks: u32,
     last_side: i32,
     prev_yaw: f64,
+    /// timer.ts leadYaw: the yaw the next command turns to, set per tick by whoever steps the run for styles whose key
+    /// answers that turn (physics 28 Auto-strafe); NaN otherwise. Sync is then measured against that turn.
+    pub lead_yaw: f64,
     prev_position: Option<[f32; 3]>,
     start_crossing: Crossing,
     end_crossing: Crossing,
@@ -154,6 +157,7 @@ impl Timer {
             perf_ground_ticks: 0,
             last_side: 0,
             prev_yaw: f64::NAN,
+            lead_yaw: f64::NAN,
             prev_position: None,
             start_crossing: Crossing::boundary(0),
             end_crossing: Crossing::boundary(FRACTION_UNITS),
@@ -563,9 +567,10 @@ impl Timer {
                     self.last_side = axis;
                 }
             }
-            if s.grounded == 0 && !self.prev_yaw.is_nan() {
+            let lead = !self.lead_yaw.is_nan();
+            if s.grounded == 0 && (lead || !self.prev_yaw.is_nan()) {
                 let yaw = f64::from(cmd.yaw);
-                let mut d = yaw - self.prev_yaw;
+                let mut d = if lead { self.lead_yaw - yaw } else { yaw - self.prev_yaw };
                 if d > 180.0 {
                     d -= 360.0;
                 } else if d < -180.0 {

@@ -13,7 +13,7 @@
 
 import { glyph } from "./glyphs";
 import { installPress, hopArc } from "./ui";
-import { $, api, avatar, cachedMe, clearKeys, h, may, me, NotAdmin, ROLE_WORD, setMe, setRouter, setToken, staffShield, token, append, type Me, type View } from "./core";
+import { $, api, avatar, cachedMe, clearKeys, h, may, me, NotAdmin, ROLE_WORD, setMe, setRouter, setToken, signedOut, staffShield, toast, token, append, type Me, type View } from "./core";
 import { GOTO_KEYS, installPalette } from "./palette";
 import type { Permission } from "../moderation/staff";
 import { closeDrawer, installDrawer, openDrawer } from "./drawer";
@@ -288,7 +288,13 @@ function skeleton(view: string, detail: boolean): HTMLElement {
 // ---------------------------------------------------------------------------------------------
 // Auth
 
-function showAuthPage(error?: string): void {
+/** A request answered "not staff": the sign-in page only once /admin/me agrees (core.ts signedOut). */
+async function lostAuth(): Promise<void> {
+  if (await signedOut()) showAuthPage();
+  else toast("That didn't load. You're still signed in: try it again.", true);
+}
+
+function showAuthPage(error?: string, retry?: () => void): void {
   // A view still loading from before (the optimistic first route) must not paint over this.
   routeSeq++;
   cleanup?.();
@@ -308,6 +314,7 @@ function showAuthPage(error?: string): void {
       h("h1", null, "Staff only"),
       h("p", null, "Sign in on ", h("a", { href: "/" }, "bunnyhop.lol"), " with a staff account and reload, or paste the admin token."),
       error ? h("p", { class: "err" }, error) : null,
+      retry ? h("button", { type: "button", class: "primary", onclick: retry }, "Try again") : null,
       h(
         "form",
         {
@@ -383,9 +390,16 @@ async function start(): Promise<void> {
   try {
     fresh = await api<Me>("/admin/me");
   } catch (e) {
-    const hadToken = !!token();
-    if (hadToken) setToken(null);
-    return showAuthPage(e instanceof NotAdmin ? (hadToken ? "That token wasn't accepted." : undefined) : `Couldn't reach the API: ${(e as Error).message}`);
+    if (e instanceof NotAdmin) {
+      const hadToken = !!token();
+      if (hadToken) setToken(null);
+      return showAuthPage(hadToken ? "That token wasn't accepted." : undefined);
+    }
+    // The API failed (a D1 stall, offline): that says nothing about who this is. Keep the session and the token; with
+    // the last answer in this tab the panel stays up and its views show their own errors.
+    if (!cached) return showAuthPage(`Couldn't reach the API: ${(e as Error).message}`, () => void start());
+    toast(`Couldn't reach the API: ${(e as Error).message}`, true);
+    fresh = cached;
   }
   const same = cached && cached.id === fresh.id && cached.role === fresh.role && (cached.perms ?? []).join() === (fresh.perms ?? []).join();
   setMe(fresh);
@@ -485,7 +499,8 @@ async function route(): Promise<void> {
     setTimeout(() => root.classList.remove("enter"), 420);
   } catch (e) {
     if (my !== routeSeq) return;
-    if (e instanceof NotAdmin) return showAuthPage();
+    if (e instanceof NotAdmin && (await signedOut())) return my === routeSeq ? showAuthPage() : undefined;
+    if (my !== routeSeq) return;
     const label = detail ? "this page" : (SECTIONS.flatMap((s) => s.tabs).find((t) => t.id === tabOf(view))?.label ?? "this");
     root.replaceChildren(
       ...[
@@ -505,5 +520,5 @@ async function route(): Promise<void> {
   }
 }
 
-setRouter(() => void route(), () => showAuthPage());
+setRouter(() => void route(), () => void lostAuth());
 void start();
