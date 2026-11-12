@@ -2,6 +2,7 @@
 // queue, talking (spurts, release tail, the 59 s stop, the room's budgets), listening (concealment, gains) and the
 // game side's rules (the key only belongs to voice in a voice room, guests and room mutes).
 #include "room_state.hpp"
+#include "settings.hpp"
 #include "voice_chat.hpp"
 #include "voice_codec.hpp"
 #include "voice_engine.hpp"

@@ -22,8 +22,7 @@ std::string json_string(const nlohmann::json &object, const char *key) {
 bool room_relays_voice(const RoomState &room) {
     if (room.id.empty() || room.status != "open" || !room.room_info.is_object()) return false;
     const auto voice = room.room_info.find("voice");
-    return voice != room.room_info.end() && voice->is_number_unsigned()
-           && voice->get<unsigned>() == voice_room_flag;
+    return voice != room.room_info.end() && voice->is_number_integer() && voice->get<int64_t>() == voice_room_flag;
 }
 
 }  // namespace

@@ -78,7 +78,6 @@ private:
 
     std::function<std::unique_ptr<CaptureSource>()> make_capture_;
     std::unique_ptr<CaptureSource> capture_;
-    bool capture_failed_ = false;
     Receiver receiver_;
     Sender sender_;
     bool devices_;

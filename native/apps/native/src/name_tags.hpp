@@ -332,7 +332,7 @@ inline constexpr float ghost_tag_alpha = .85f;
 
 namespace name_tag_look {
 constexpr NameColor pill = {.043f, .051f, .071f, .62f};
-constexpr NameColor name_ink = {.94f, .91f, .86f, 1};
+constexpr NameColor speaker_ink = {.94f, .91f, .86f, 1};
 constexpr NameColor detail_ink = {.639f, .671f, .729f, 1};
 constexpr float name_size = 13;
 constexpr float detail_size = 12;
@@ -385,7 +385,7 @@ void draw_player_tag(
     dot[3] *= opacity;
     // Talking in voice chat: a speaker in the dot's place (the website's name tags do the same).
     if (talking)
-        draw_speaker(hud, left + 7, y + 2, dot_size + 3, {name_ink[0], name_ink[1], name_ink[2], opacity});
+        draw_speaker(hud, left + 7, y + 2, dot_size + 3, {speaker_ink[0], speaker_ink[1], speaker_ink[2], opacity});
     else
         hud.overlay_rect(left + 8, y + 4, dot_size, dot_size, dot);
     const float name_x = left + 8 + dot_size + 6;
