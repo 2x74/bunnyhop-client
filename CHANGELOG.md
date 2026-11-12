@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.9.1 — Native
+
+Fixes for v0.9.0. Update from Settings → Updates: press Update, then Restart. Your settings, replays and maps are kept.
+
+- Supporting from the Support page works again. It stopped with "The payment service returned an untrusted
+  checkout link." Thanks to dr_unlisted for the report.
+- Switching quickly between the knife and a gun no longer crashes the game. Thanks to dr_unlisted for the report.
+- Map votes no longer fill chat with `type_error.306` errors, and the map changes when the vote ends. Thanks to
+  dr_unlisted for the report.
+- The map vote shows each map's tier.
+- The game remembers your style between launches.
+- Closing a replay you watched from a server takes you back to the server's map. Watching replays no longer
+  removes you from the server since v0.8.0. Thanks to hena for the report.
+- Runs on bhop_gofuckyourself use all of the map's zones, so the anti-skip walls stop a run in the game as they
+  do on the website.
+
 ## v0.9.0 — Native
 
 Matches website v0.0.39. Update from Settings → Updates: press Update, then Restart. Your settings, replays and maps
