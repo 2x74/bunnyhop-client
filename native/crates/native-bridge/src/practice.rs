@@ -270,6 +270,8 @@ pub unsafe extern "C" fn bh_practice_noclip_exit(
             invalidate_recording(m, "practice_noclip")?;
             m.playback = None;
             result = m.game.practice_noclip_exit(position, velocity, yaw, pitch);
+            // Noclip ticks skip the style filter: the first command after them moves with the live view.
+            m.filter.clear_lead_view();
             m.transforms_dirty = true;
             output(out, BhSnapshot::from(&m.game))
         })
