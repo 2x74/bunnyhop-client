@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <deque>
+#include <limits>
 #include <optional>
 #include <unordered_map>
 #include <vector>
@@ -115,7 +116,7 @@ class RoomState {
                     p.contains("playerGlow") ? native_render::parse_glow(p["playerGlow"]) : std::nullopt;
         if (p.contains("outfit"))
             peer.actor.outfit =
-                    p.value("outfit", nlohmann::json()).is_string() ? p.at("outfit").get<std::string>() : "";
+                    json_value(p, "outfit", nlohmann::json()).is_string() ? p.at("outfit").get<std::string>() : "";
         if (p.contains("loadout")) {
             if (p["loadout"].is_object()) {
                 const auto &l = p["loadout"];
@@ -166,9 +167,9 @@ class RoomState {
         WireMeta wire;
         wire.known = meta.is_object();
         if (!wire.known) return wire;
-        wire.style = meta.value("style", 0u);
-        wire.timer = meta.value("timer", 0u);
-        wire.timer_ticks = meta.value("timerTicks", 0.);
+        wire.style = json_value(meta, "style", 0u);
+        wire.timer = json_value(meta, "timer", 0u);
+        wire.timer_ticks = json_value(meta, "timerTicks", 0.);
         return wire;
     }
 
@@ -249,7 +250,7 @@ public:
             vote_display.choice = -1;
             return;
         }
-        vote_display.ends_at = vote.value("endsAt", 0.) - clock_offset_ms;
+        vote_display.ends_at = json_value(vote, "endsAt", 0.) - clock_offset_ms;
         const auto counts = vote.find("counts");
         for (const auto &option : vote["options"]) {
             if (vote_display.count == vote_display.options.size()) break;
@@ -257,7 +258,7 @@ public:
             if (option.contains("map"))
                 vote_display.options[index].assign(json_text(option, "map"));
             else
-                vote_display.options[index].format("Extend %u minutes", option.value("minutes", 0u));
+                vote_display.options[index].format("Extend %u minutes", json_value(option, "minutes", 0u));
             if (counts != vote.end() && counts->is_array() && index < counts->size()
                 && (*counts)[index].is_number_unsigned())
                 vote_display.counts[index] = (*counts)[index].get<unsigned>();
@@ -292,11 +293,11 @@ public:
                 auto &row = display_.rows[i];
                 const auto peer = peers.find(row.slot);
                 if (peer != peers.end() && peer->second.meta.is_object())
-                    row.track = peer->second.meta.value("track", 0u);
+                    row.track = json_value(peer->second.meta, "track", 0u);
             }
             refresh_vote();
             changing_map.assign(change.is_object() ? json_text(change, "map") : "");
-            changing_at = change.is_object() ? change.value("at", 0.) - clock_offset_ms : 0;
+            changing_at = change.is_object() ? json_value(change, "at", 0.) - clock_offset_ms : 0;
             return;
         }
         const auto previous_head = display_.head;
@@ -304,15 +305,17 @@ public:
         display_.head = previous_head;
         refresh_vote();
         changing_map.assign(change.is_object() ? json_text(change, "map") : "");
-        changing_at = change.is_object() ? change.value("at", 0.) - clock_offset_ms : 0;
+        changing_at = change.is_object() ? json_value(change, "at", 0.) - clock_offset_ms : 0;
         display_.head.room = room_info.is_object() ? json_text(room_info, "name") : id;
         display_.head.map = map;
-        if (room_info.is_object()) display_.head.max = room_info.value("maxPlayers", 0u);
+        if (room_info.is_object()) display_.head.max = json_value(room_info, "maxPlayers", 0u);
         for (const auto &[slot, peer] : peers) {
+            // Snapshots and metas can name a slot whose join hasn't arrived (or was refused): no row until it does.
+            if (!peer.info.is_object()) continue;
             display_.add(peer.info, peer.meta, self, peer.meta_at > 0 ? peer.meta_at : now);
             auto &row = display_.rows[display_.count - 1];
             if (room_info.is_object() && json_flag(room_info, "private"))
-                row.host = room_info.value("host", 256u) == slot;
+                row.host = json_value(room_info, "host", 256u) == slot;
             if (peer.spectator) {
                 row.status = "SPEC";
                 const auto spec = peer.info.find("spec");
@@ -378,7 +381,7 @@ public:
             display_.head.tier = 0;
             if (e.contains("map") && e["map"].is_object()) {
                 const auto &map = e["map"];
-                display_.head.ends_at_ms = map.value("endsAt", 0.) - clock_offset_ms;
+                display_.head.ends_at_ms = json_value(map, "endsAt", 0.) - clock_offset_ms;
                 if (map.contains("tier") && map["tier"].is_number_integer())
                     display_.head.tier = map["tier"].get<int>();
             }
@@ -390,7 +393,7 @@ public:
         if (e.contains("nativeClockOffsetMs") && e["nativeClockOffsetMs"].is_number())
             clock_offset_ms = e["nativeClockOffsetMs"].get<double>();
         if (type == "nativeStatus") {
-            status = e.value("status", std::string());
+            status = json_value(e, "status", std::string());
             if (status == "closed") {
                 peers.clear();
                 spectator_target.reset();
@@ -400,7 +403,7 @@ public:
             return "";
         }
         if (type == "kicked") {
-            notice = e.value("reason", std::string("Removed from room"));
+            notice = json_value(e, "reason", std::string("Removed from room"));
             peers.clear();
             spectator_target.reset();
             status = "closed";
@@ -417,10 +420,10 @@ public:
             nominations = e.at("list");
         if (type == "welcome") {
             status = "open";
-            room_info = e.value("room", nlohmann::json::object());
-            vote = e.value("vote", nlohmann::json(nullptr));
-            change = e.value("change", nlohmann::json(nullptr));
-            nominations = e.value("nominations", nlohmann::json::array());
+            room_info = json_value(e, "room", nlohmann::json::object());
+            vote = json_value(e, "vote", nlohmann::json(nullptr));
+            change = json_value(e, "change", nlohmann::json(nullptr));
+            nominations = json_value(e, "nominations", nlohmann::json::array());
             peers.clear();
             spectator_target.reset();
             self = e.at("you").get<unsigned>();
@@ -461,7 +464,7 @@ public:
             }
             return change_map(next_map);
         } else if (type == "chat")
-            notice = e.value("name", std::string("Server")) + ": " + e.value("text", std::string());
+            notice = json_value(e, "name", std::string("Server")) + ": " + json_value(e, "text", std::string());
         return "";
     }
 
@@ -470,7 +473,8 @@ public:
         const auto &blocks = message.at("snapshot").at("blocks");
         if (!blocks.is_array() || blocks.size() > 64) throw std::runtime_error("Invalid room snapshot");
         for (const auto &block : blocks) {
-            const unsigned slot = block.at("slot").get<unsigned>();
+            // A malformed block or sample is skipped: one bad peer never stops the others (or reaches chat).
+            const unsigned slot = json_value(block, "slot", 256u);
             if (slot == self || slot >= 256) continue;
             auto &p = peers[slot];
             if (block.contains("meta") && block["meta"].is_object()) {
@@ -480,30 +484,32 @@ public:
             }
             p.actor.id = std::to_string(slot);
             p.actor.opacity = 1;
-            const auto &samples = block.at("samples");
-            if (!samples.is_array() || samples.size() > 8) continue;
+            const auto samples = block.find("samples");
+            if (samples == block.end() || !samples->is_array() || samples->size() > 8) continue;
             const uint32_t newest_before = p.samples.empty() ? 0 : p.samples.back().frame.tick;
             bool appended = false;
-            for (const auto &raw : samples) {
+            for (const auto &raw : *samples) {
+                constexpr float missing = std::numeric_limits<float>::quiet_NaN();
                 BhGhostFrame f{};
-                f.tick = raw.at("tick").get<uint32_t>();
-                bool valid = true;
+                const auto tick = json_value(raw, "tick", int64_t(-1));
+                bool valid = tick >= 0 && tick <= int64_t(UINT32_MAX);
+                f.tick = uint32_t(std::max<int64_t>(tick, 0));
                 for (int i = 0; i < 3; i++) {
                     const char *pos[] = {"x", "y", "z"}, *vel[] = {"vx", "vy", "vz"};
-                    f.position[i] = raw.at(pos[i]).get<float>();
-                    f.velocity[i] = raw.at(vel[i]).get<float>();
+                    f.position[i] = json_value(raw, pos[i], missing);
+                    f.velocity[i] = json_value(raw, vel[i], missing);
                     valid &= std::isfinite(f.position[i]) && std::abs(f.position[i]) <= 16896
                              && std::isfinite(f.velocity[i]) && std::abs(f.velocity[i]) <= 32768;
                 }
-                f.yaw = raw.at("yaw").get<float>();
-                f.pitch = raw.at("pitch").get<float>();
+                f.yaw = json_value(raw, "yaw", missing);
+                f.pitch = json_value(raw, "pitch", missing);
                 valid &= std::isfinite(f.yaw) && std::isfinite(f.pitch);
                 if (!valid) continue;
-                const unsigned flags = raw.at("flags").get<unsigned>();
+                const unsigned flags = json_value(raw, "flags", 0u);
                 f.flags = (flags & 2 ? 1 : 0) | (flags & 1 ? 2 : 0);
                 f.view_offset_z = f.flags & 1 ? 46 : 64;
                 const auto previous_weapon = p.samples.empty() ? p.actor.frame.weapon : p.samples.back().frame.weapon;
-                f.weapon = block.value("weapon", previous_weapon ? previous_weapon : 1u);
+                f.weapon = json_value(block, "weapon", previous_weapon ? previous_weapon : 1u);
                 if (f.weapon > 31) f.weapon = 1;
                 if (!p.samples.empty() && f.tick <= p.samples.back().frame.tick) continue;
                 if (flags & 8) {
@@ -514,7 +520,7 @@ public:
                     p.playback_at = -1;
                 }
                 appended = true;
-                p.samples.push_back({f, bool(flags & 8), flags, block.value("silenced", false)});
+                p.samples.push_back({f, bool(flags & 8), flags, json_value(block, "silenced", false)});
                 while (p.samples.size() > 96)
                     p.samples.pop_front();
             }
@@ -677,8 +683,8 @@ public:
         const auto it = peers.find(slot);
         if (it == peers.end() || !it->second.meta.is_object()) return std::nullopt;
         const auto &p = it->second;
-        const unsigned state = p.meta.value("timer", 0u);
-        const double seconds = p.meta.value("timerTicks", 0.) * .01
+        const unsigned state = json_value(p.meta, "timer", 0u);
+        const double seconds = json_value(p.meta, "timerTicks", 0.) * .01
                                + (state == 2 && p.meta_at > 0 ? std::max(0., now - p.meta_at) : 0.);
         return std::pair<unsigned, double>{state, seconds};
     }
@@ -691,8 +697,8 @@ public:
             row["name"] = p.actor.name;
             row["meta"] = p.meta;
             if (p.meta.is_object()) {
-                row["track"] = p.meta.value("track", 0);
-                row["ping"] = p.meta.value("ping", 0);
+                row["track"] = json_value(p.meta, "track", 0);
+                row["ping"] = json_value(p.meta, "ping", 0);
             }
             const auto time = timer(slot, now);
             if (time) {
@@ -707,8 +713,8 @@ public:
     std::string change_notice(double epoch_ms) const {
         if (!change.is_object() || !change.contains("at") || !change["at"].is_number()) return {};
         const auto left = std::max(0., std::ceil((change["at"].get<double>() - clock_offset_ms - epoch_ms) / 1000));
-        return "Changing to " + change.value("map", std::string()) + " in " + std::to_string(int(std::min(left, 999.)))
-               + "s";
+        return "Changing to " + json_value(change, "map", std::string()) + " in "
+               + std::to_string(int(std::min(left, 999.))) + "s";
     }
 
     std::optional<native_render::Actor> spectated(double now) {

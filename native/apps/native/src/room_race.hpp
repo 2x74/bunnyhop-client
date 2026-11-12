@@ -221,7 +221,7 @@ class RoomRaceModes {
                 display_.verdict.assign("You won");
             else
                 display_.verdict.format("%s of %zu", display_.place_label.bytes.data(), display_.racers);
-        } else if (race_->value("outcome", std::string()) == "cancelled")
+        } else if (json_value(*race_, "outcome", std::string()) == "cancelled")
             display_.verdict.assign("Race cancelled");
         else if (!display_.finished)
             display_.verdict.assign("Nobody finished");

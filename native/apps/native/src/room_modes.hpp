@@ -435,7 +435,7 @@ class RoomModes {
             const auto &finish = side["finish"];
             if (finish.contains("real") && number(finish["real"])) {
                 std::string text = time(finish["real"].get<double>());
-                const auto status = finish.value("status", std::string());
+                const auto status = json_value(finish, "status", std::string());
                 if (status == "verifying")
                     text += " (checking)";
                 else if (status == "rejected")
@@ -545,8 +545,8 @@ class RoomModes {
         if (them.contains("slot") && them["slot"].is_number_unsigned() && them["slot"].get<uint64_t>() < 256)
             display_.opponent_slot = them["slot"].get<unsigned>();
         if (display_.state == State::over) {
-            const auto winner = race_->value("winner", J(nullptr));
-            const auto outcome = race_->value("outcome", std::string());
+            const auto winner = json_value(*race_, "winner", J(nullptr));
+            const auto outcome = json_value(*race_, "outcome", std::string());
             const auto name = them.at("name").get<std::string>();
             const auto real = [&](const J &side) {
                 return finished(side) ? side["finish"]["real"].get<double>() : INFINITY;
@@ -625,7 +625,7 @@ public:
         }
         room_ = id;
         const auto &e = envelope["event"];
-        const auto type = e.value("t", std::string());
+        const auto type = json_value(e, "t", std::string());
         if (e.contains("nativeClockOffsetMs") && number(e["nativeClockOffsetMs"]))
             clock_offset_ = e["nativeClockOffsetMs"].get<double>();
         if (type == "nativeLeave") {
@@ -635,7 +635,7 @@ public:
             closed_ = true;
             return {};
         }
-        if (type == "nativeStatus" && e.value("status", std::string()) == "closed") {
+        if (type == "nativeStatus" && json_value(e, "status", std::string()) == "closed") {
             reset_race();
             room_race_.clear();
             return {};
@@ -646,9 +646,9 @@ public:
             return {};
         }
         if (type == "welcome") {
-            auto action = apply(e.value("race", J(nullptr)), map, spectating, now_epoch_ms);
+            auto action = apply(json_value(e, "race", J(nullptr)), map, spectating, now_epoch_ms);
             auto room_action = room_race_.apply(
-                    e.value("roomRace", J(nullptr)), map, spectating, now_epoch_ms, clock_offset_, true
+                    json_value(e, "roomRace", J(nullptr)), map, spectating, now_epoch_ms, clock_offset_, true
             );
             if (room_action.restart || room_action.room_race_finish || room_action.room_race_over) return room_action;
             return action;
@@ -692,8 +692,8 @@ public:
         }
         if (state == "over") {
             if (now_epoch_ms > result_until_) return {};
-            const auto winner = race_->value("winner", J(nullptr));
-            const auto outcome = race_->value("outcome", std::string());
+            const auto winner = json_value(*race_, "winner", J(nullptr));
+            const auto outcome = json_value(*race_, "outcome", std::string());
             const auto verdict = winner == race_->at("you") ? "You won"
                                  : winner.is_string()       ? opponent_name + " won"
                                  : outcome == "draw"        ? "Draw"

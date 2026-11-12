@@ -109,14 +109,16 @@ public:
         if (count == rows.size()) return;
         auto &row = rows[count++];
         row = {};
-        row.slot = player.value("slot", 256u);
+        row.slot = json_value(player, "slot", 256u);
         row.you = row.slot == self;
         row.name = json_text(player, "name");
         row.style = json_text(player, "style");
         row.look = name_appearance(player);
         if (player.contains("look") || player.contains("marks"))
             row.look = host_name_appearance(
-                    player.value("look", nlohmann::json()), player.value("marks", nlohmann::json()), row.look
+                    json_value(player, "look", nlohmann::json()),
+                    json_value(player, "marks", nlohmann::json()),
+                    row.look
             );
         row.country = flag_code(json_text(player, "country", flag_code_max_bytes));
         row.host = json_flag(player, "host");
@@ -132,9 +134,9 @@ public:
             if (meta.contains("style") && meta["style"].is_number_unsigned()) {
                 if (const auto *style = wire_style_at(meta["style"].get<unsigned>())) row.style = style->id;
             }
-            row.track = meta.value("track", 0u);
-            row.timer = meta.value("timer", 0u);
-            row.seconds = meta.value("timerTicks", 0.) * .01;
+            row.track = json_value(meta, "track", 0u);
+            row.timer = json_value(meta, "timer", 0u);
+            row.seconds = json_value(meta, "timerTicks", 0.) * .01;
             if (row.timer == 3 && meta.contains("timeMs") && meta["timeMs"].is_number_integer())
                 row.seconds = meta["timeMs"].get<double>() / 1000;
             const auto ping = meta.find("ping");
@@ -181,8 +183,8 @@ public:
         next.head.map = json_text(value, "map");
         next.head.time_left = json_text(value, "timeLeft");
         next.head.next_map = json_text(value, "nextMap");
-        next.head.tier = value.value("tier", nlohmann::json()).is_number_integer() ? value["tier"].get<int>() : 0;
-        next.head.max = value.value("max", 0u);
+        next.head.tier = json_value(value, "tier", nlohmann::json()).is_number_integer() ? value["tier"].get<int>() : 0;
+        next.head.max = json_value(value, "max", 0u);
         next.head.spectating = json_flag(value, "spectating");
         next.head.chat_key = json_text(value, "chatKey", 32);
         for (const auto &row : message["rows"]) {

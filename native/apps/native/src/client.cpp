@@ -1086,11 +1086,23 @@ int run(const native::Options &opt) {
         map_preparation.cancel();
         map_download.start(id, cache, lock_cache);
     };
+    // The scoreboard and vote are display only: a bad field there is logged and never stops a room event (a throw here
+    // used to repeat in chat on every snapshot and drop the map change that came with it).
+    std::string room_display_error;
+    auto refresh_room_display = [&](double now) {
+        try {
+            room.refresh_display(now);
+            room.refresh_spectators(hud.extras);
+            room_display_error.clear();
+        } catch (const std::exception &e) {
+            if (room_display_error != e.what()) std::cerr << "Room display: " << e.what() << '\n';
+            room_display_error = e.what();
+        }
+    };
     auto apply_room_event = [&](const nlohmann::json &message) {
         const auto lifecycle = room.generation;
         const auto next = room.event(message);
-        room.refresh_display(std::chrono::duration<double>(Clock::now().time_since_epoch()).count());
-        room.refresh_spectators(hud.extras);
+        refresh_room_display(std::chrono::duration<double>(Clock::now().time_since_epoch()).count());
         if (!room.id.empty()) {
             // Joining a room ends solo practice. Practice started in the room carries on through its events.
             const bool joined = room.generation != lifecycle;
@@ -3050,7 +3062,7 @@ int run(const native::Options &opt) {
                     } else if (type == "roomSnapshot") {
                         const double now = std::chrono::duration<double>(Clock::now().time_since_epoch()).count();
                         room.snapshot(message, now);
-                        room.refresh_display(now);
+                        refresh_room_display(now);
                     } else if (type == "openAuth")
                         menu->open_auth(message.at("url").get<std::string>());
                     else if (type == "update") {
