@@ -17,7 +17,7 @@
   ],
   "patches": {
     "native-core.patch": "1f738b9114dde72e7277e858a44a706daabec7c887a7124c384f56e27b8187a7",
-    "native-web.patch": "1d4eae42998f78f9483c1579b07e7934e03eca49ddba56c5e747df24d012e1f7"
+    "native-web.patch": "eb60c40ecd06f3b76189bc439eebe2edfebcc15eb1bd933a0c18b50a07c880e5"
   },
   "sourceTreeSha256": "365e7bb5003c8300c331803c37b400fd9e9d432e2f4892b8b9f108a28861cd98",
   "sources": {
@@ -1897,7 +1897,7 @@
     "apps/web/src/net/protocol.ts": "51de60f3ac378def2c99b7a4b02c4f1890cdcdc8a4c3df3cb6f044b4eb72b427",
     "apps/web/src/net/race.ts": "4f665829073994a61f9c635b40ccc007fd00e556749ee817b218095f4ebf728a",
     "apps/web/src/net/room-race.ts": "b5a148ec4a4bb3233a190f59635b9e6260f5a2b4f45d272e8d97ff6da905926f",
-    "apps/web/src/net/room.ts": "57db1d9f5e4c09504036db76148c220bff8c66f86c2c2c4284945314621fb74c",
+    "apps/web/src/net/room.ts": "28199303e3190790a5f2b78691b646c4f4a453d9d3888cd66372d32f95b756c0",
     "apps/web/src/net/scoreboard.ts": "04ad45eb5b377ee0f8101274460cf9cbe85f4022f29eb0b7d079a77380aca1b8",
     "apps/web/src/net/spectators.ts": "4ce1109507ad22aa6d8c9d5ead319476c7ca4c366aa4c85100e2dda289248477",
     "apps/web/src/notices.ts": "7c19351ec9ddb6c7ca51bf7f43e244dff7331c54772c4c0e1202165656ddf499",

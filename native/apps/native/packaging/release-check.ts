@@ -48,6 +48,7 @@ if (import.meta.main) {
       "licenses/SDL3.txt",
       "licenses/dr_libs.txt",
       "licenses/stb.txt",
+      "licenses/opus.txt",
       "licenses/nvapi.txt",
       "licenses/amd.txt",
       "licenses/LDNOOBW-CC-BY-4.0.txt",

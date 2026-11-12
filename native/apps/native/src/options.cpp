@@ -91,6 +91,11 @@ Options options(int argc, char **argv) {
             if (s.empty() || s[0] == '-') throw std::runtime_error("--frames must be positive");
             out.frames = std::stoull(s, &n);
             if (n != s.size() || out.frames == 0) throw std::runtime_error("--frames must be positive");
+        } else if (arg == "--voice-load") {
+            const auto s = value();
+            if (s.size() != 1 || s[0] < '0' || s[0] > '6')
+                throw std::runtime_error("--voice-load takes 0 to 6 talkers");
+            out.voice_load = unsigned(s[0] - '0');
         } else if (arg == "--hidden")
             out.hidden = true;
         else if (arg == "--help" || arg == "-h")

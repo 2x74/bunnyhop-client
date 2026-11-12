@@ -7,7 +7,7 @@ import { icon } from "../../web/src/ui/icons";
 import { keyLabel, prefs } from "../../web/src/ui/settings";
 import { registerSettingsSection } from "../../web/src/ui/settings-registry";
 import { uiSound } from "./audio";
-import { DEFAULT_BINDS, nativeKeyCode, state } from "./bridge";
+import { DEFAULT_BINDS, nativeKeyCode, SHARED_KEY_ACTION as SHARED_BIND, state } from "./bridge";
 import { followHost, nativeChoice, nativeToggle, type Ui } from "./native-rows";
 import { WEBSITE_CHAT_BIND } from "./settings-gates";
 import { sendNativeSettings } from "./prefs-bridge";
@@ -142,11 +142,13 @@ export const NATIVE_BINDS: readonly [keyof typeof DEFAULT_BINDS, string][] = [
 
 let stopCapture: (() => void) | null = null;
 
-/** Gives `code` to `action`: it leaves every other action, the website's and the native ones. */
+/** Gives `code` to `action`: it leaves every other action, the website's and the native ones (push to talk aside). */
 function assign(action: string, slot: number, code: string | null): void {
   const binds: Record<string, string[]> = {};
   const list = [...(state.settings.binds[action] ?? [])];
-  if (code) {
+  if (code && action === SHARED_BIND) {
+    list[slot] = code;
+  } else if (code) {
     list[slot] = code;
     prefs.update((p) => {
       for (const other of Object.keys(p.binds) as (keyof typeof p.binds)[]) {
@@ -154,6 +156,7 @@ function assign(action: string, slot: number, code: string | null): void {
       }
     });
     for (const [other] of NATIVE_BINDS) {
+      if (other === SHARED_BIND) continue;
       const codes = state.settings.binds[other] ?? [];
       if (other !== action && codes.includes(code)) binds[other] = codes.filter((item) => item !== code);
     }
@@ -210,7 +213,7 @@ function capture(button: HTMLButtonElement, action: string, slot: number, done: 
 }
 
 /** A bind row in the website's look (two keycap slots and a reset) for an action only the native client has. */
-function bindRow(ui: Ui, action: keyof typeof DEFAULT_BINDS, label: string): HTMLElement {
+export function bindRow(ui: Ui, action: keyof typeof DEFAULT_BINDS, label: string): HTMLElement {
   const slots = [0, 1].map((slot) => {
     return h("button.bind", { type: "button", "data-action": action, "data-slot": String(slot) }) as HTMLButtonElement;
   });

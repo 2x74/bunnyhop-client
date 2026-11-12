@@ -75,6 +75,7 @@
 #include "app_identity.hpp"
 #include "room_state.hpp"
 #include "room_bridge.hpp"
+#include "voice_load.hpp"
 #include "room_modes.hpp"
 #include "tutorial_runner.hpp"
 #include "discord_rpc.hpp"
@@ -234,7 +235,7 @@ int run(const native::Options &opt) {
             )
     );
     native::MapAudio map_audio;
-    native::Audio audio(assets, cache, !opt.hidden && !opt.frames);
+    native::Audio audio(assets, cache, !opt.hidden && (!opt.frames || opt.voice_load));
     audio.set_map_mixer(&map_audio.mixer);
     std::unique_ptr<native::MenuWebView> menu;
     std::string menu_failure;
@@ -361,6 +362,9 @@ int run(const native::Options &opt) {
     const auto room_bridge_owner = std::make_unique<native::RoomBridge>();
     auto &room_bridge = *room_bridge_owner;
     auto &room = room_bridge.room;
+    room_bridge.enable_voice(!opt.hidden && (!opt.frames || opt.voice_load), opt.voice_load.has_value());
+    const auto voice_load =
+            opt.voice_load ? std::make_unique<native::VoiceLoad>(room_bridge, *opt.voice_load) : nullptr;
     auto &room_modes = room_bridge.room_modes;
     auto &observed_spectator = room_bridge.observed_spectator;
     auto epoch_ms = []() {
@@ -453,6 +457,7 @@ int run(const native::Options &opt) {
                 preferences.at("viewmodelLandSettle").get<bool>(), preferences.at("viewmodelSpeedFov").get<bool>()
         );
         discord_settings = native::discord::settings_from(preferences);
+        room_bridge.voice().settings(preferences);
         menu_state.settings_changed();
         graphics_menu_pacer.settings(preferences);
         flashlight = preferences.value("graphicsFlashlight", false);
@@ -1116,6 +1121,7 @@ int run(const native::Options &opt) {
         const auto lifecycle = room.generation;
         const auto next = room.event(message);
         refresh_room_display(std::chrono::duration<double>(Clock::now().time_since_epoch()).count());
+        room_bridge.voice().room(room);
         if (!room.id.empty()) {
             // Joining a room ends solo practice. Practice started in the room carries on through its events.
             const bool joined = room.generation != lifecycle;
@@ -1652,6 +1658,8 @@ int run(const native::Options &opt) {
             [&](const std::string &code, bool down, bool repeat = false, bool wheel = false, uint64_t stamp = 0) {
                 if (code.empty()) return;
                 if (input_timeline.released_until_keyup(code, down, repeat)) return;
+                // In a room with voice the push to talk key talks, even where it shares a key (X: teleport).
+                if (room_bridge.voice().key(code, down, repeat)) return;
                 std::string command_bind;
                 if (down && !repeat) {
                     const auto binds = preferences.find("cmdBinds");
@@ -3081,6 +3089,8 @@ int run(const native::Options &opt) {
                         }
                     } else if (type == "roomEvent") {
                         apply_room_event(message);
+                    } else if (type == "voiceDown" || type == "voicePeople") {
+                        room_bridge.voice_message(message);
                     } else if (type == "roomSnapshot") {
                         const double now = std::chrono::duration<double>(Clock::now().time_since_epoch()).count();
                         room.snapshot(message, now);
@@ -3800,6 +3810,16 @@ int run(const native::Options &opt) {
             }
         }
         room_bridge.send_poses(menu.get(), menu_ready, map_id);
+        if (voice_load)
+            voice_load->frame(epoch_ms(), audio.output_volume());
+        else
+            room_bridge.send_voice(
+                    menu.get(),
+                    menu_ready,
+                    epoch_ms(),
+                    audio.output_volume(),
+                    captured && focused && !chat.active && !(menu && menu->visible())
+            );
         hud.publish_movement_chat(chat, epoch_ms() / 1000.);
         frame_diagnostics.mark(native::FrameDiagnostics::kSimulation, SDL_GetTicksNS());
         frame_diagnostics.input(input_timeline.queue());
@@ -4191,7 +4211,8 @@ int run(const native::Options &opt) {
                         hud.preferences().tags_through_walls,
                         native::NameTagTrace{core.get(), eye},
                         steady_seconds,
-                        renderer->output_view(width, height)
+                        renderer->output_view(width, height),
+                        room_bridge.voice().talking_slots()
                 );
                 const auto *primary_actor = native::find_primary_ghost(actors);
                 if (primary_actor && prefs.ghost_tag)
@@ -4296,7 +4317,8 @@ int run(const native::Options &opt) {
                     &look_menu,
                     menu_cursor.pointer(),
                     &numbered_menus.copy_start,
-                    menu_reduced_motion
+                    menu_reduced_motion,
+                    &room_bridge.voice()
             }
                     .draw();
         }

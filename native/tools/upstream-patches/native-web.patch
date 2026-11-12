@@ -714,6 +714,38 @@ index 0000000..d8c4428
 +  const bytes = coreBytes(x, ptr, length * 4);
 +  return new Uint32Array(bytes.buffer, bytes.byteOffset, length);
 +}
+diff --git a/apps/web/src/net/room.ts b/apps/web/src/net/room.ts
+index c898286..f617713 100644
+--- a/apps/web/src/net/room.ts
++++ b/apps/web/src/net/room.ts
+@@ -100,6 +100,8 @@ export class RoomConnection {
+         const buf = e.data as ArrayBuffer;
+         this.stats.recv++;
+         this.stats.recvBytes += buf.byteLength;
++        // voice: VOICE_DOWN frames (0x11, net/voice-wire.ts) go to the voice client, never the snapshot decoders.
++        if (buf.byteLength && new Uint8Array(buf, 0, 1)[0] === 0x11) return void this.onVoice?.(buf);
+         const s = decodeSnapshot(buf);
+         if (s) this.h.snapshot(s, now);
+       }
+@@ -144,6 +146,18 @@ export class RoomConnection {
+     this.stats.sentBytes += text.length;
+   }
+ 
++  /** voice: VOICE_DOWN frames from the room. */
++  onVoice: ((buf: ArrayBuffer) => void) | null = null;
++
++  /** voice: one binary frame as is (VOICE_UP); false when the socket isn't open. */
++  sendBinary(bytes: Uint8Array<ArrayBuffer>): boolean {
++    if (!this.open_) return false;
++    this.ws!.send(bytes);
++    this.stats.sent++;
++    this.stats.sentBytes += bytes.byteLength;
++    return true;
++  }
++
+   /** Queues one 20 Hz sample; flushSamples() sends the batch (every SEND_TICKS). */
+   pushSample(s: NetSample): void {
+     this.pending.push(s);
 diff --git a/apps/web/src/net/scoreboard.ts b/apps/web/src/net/scoreboard.ts
 new file mode 100644
 index 0000000..782ca90

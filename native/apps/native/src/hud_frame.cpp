@@ -7,6 +7,7 @@
 #include "room_state.hpp"
 #include "room_modes.hpp"
 #include "leave_hold.hpp"
+#include "voice_hud.hpp"
 #include <chrono>
 #include <cstdio>
 
@@ -163,6 +164,8 @@ void HudFrame::draw_chat() const {
                 &chat,
                 chat.viewport(epoch_ms() / milliseconds_per_second)
         );
+    if (voice_chat && prefs.hud)
+        voice_hud::draw(hud, width, height, prefs.hud_scale, voice_chat->rows(), voice_chat->line(epoch_ms()));
 }
 
 void HudFrame::draw_panels() const {

@@ -52,6 +52,7 @@ import { installTutorialProgress } from "./tutorial-entry";
 import { watchGauntletSplit } from "./gauntlet-watch";
 import { NativeRoomService } from "./room-service";
 import { RoomConnection } from "../../web/src/net/room";
+import { installVoicePeople } from "./voice-people";
 import { leaveRoomBefore } from "./room-message-policy";
 import { setRoomPresence, setRaceTag, currentRoom, currentRace } from "../../web/src/net/presence";
 import { serverBrowser } from "../../web/src/ui/servers";
@@ -815,6 +816,7 @@ const roomService = new NativeRoomService({
   chatKey: chatKeyLabel,
   heldKnife: getHeldLoadout,
   connect: (id, handlers) => new RoomConnection(id, () => state.style, handlers),
+  voiceEnabled: () => state.settings.voiceEnabled,
   ensureAccount: async () => {
     try {
       const user = await api.me();
@@ -1052,6 +1054,7 @@ window.bunnyhopNativeMenu = {
     roomService.command(value);
   },
   onRoomPractice: (value) => roomService.practice(value === true),
+  onVoiceUp: (value) => void roomService.voice.up(value),
   // A friend pressed Join on your Discord activity. The host has already checked the secret.
   settle,
   onLeaveMap: teardownMap,
@@ -1330,3 +1333,6 @@ send({
 });
 
 window.addEventListener("bunnyhop:host-state", () => chatService.copyStart.update());
+// Voice on or off in settings: the room hears whether this socket listens.
+window.addEventListener("bunnyhop:host-state", () => roomService.voice.sync());
+installVoicePeople(send);

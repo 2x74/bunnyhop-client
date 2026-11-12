@@ -26,6 +26,7 @@ import { validRoomRace } from "./room-race";
 import { roomStyleId } from "./room-styles";
 import type { RoomHandlers, RoomStatus } from "../../web/src/net/room";
 import type { MenuMessage } from "./bridge";
+import { VoiceRelay } from "./voice-relay";
 /**
  * (0.0.36) The attempt turned into practice or back: the room patches your roster's `practice`, and the others see a
  * practice tag instead of a time. Older rooms drop it.
@@ -37,6 +38,9 @@ export interface RoomTransport {
   pushSample(sample: NetSample): void;
   flushSamples(meta: Omit<NetMeta, "ping">, weapon?: number | null, silenced?: boolean): void;
   close(code?: number): void;
+  /** Voice chat (voice-relay.ts): VOICE_DOWN frames in, VOICE_UP packets out. */
+  onVoice?: ((buf: ArrayBuffer) => void) | null;
+  sendBinary?(bytes: Uint8Array<ArrayBuffer>): boolean;
   toLocal?(serverTime: number): number;
   serverNow?(): number;
 }
@@ -49,6 +53,8 @@ interface Dependencies {
   chatKey?: () => string | null;
   /** The knife and finish held now: the knife pool's pick (player/cosmetics.ts getHeldLoadout). */
   heldKnife?: () => { knife: string; finish: string };
+  /** Voice chat is on in settings (voiceEnabled). */
+  voiceEnabled?: () => boolean;
 }
 /** At most one practice message this often, so restarts on a practice spawn send the latest state (net/mp.ts). */
 const PRACTICE_SEND_MS = 600;
@@ -331,8 +337,14 @@ export class NativeRoomService {
       this.audioRaceSecond = second;
     }
   }
+  /** Voice chat on this room's socket. */
+  readonly voice: VoiceRelay;
   constructor(private dependencies: Dependencies) {
     this.now = dependencies.now ?? (() => performance.now());
+    this.voice = new VoiceRelay({
+      send: (message) => dependencies.send(message),
+      enabled: () => dependencies.voiceEnabled?.() ?? true,
+    });
   }
   clockNow(): number {
     return this.now();
@@ -391,6 +403,7 @@ export class NativeRoomService {
         this.changed();
       },
     });
+    this.voice.attach(this.transport, id, generation);
   }
   private scheduleChange(change: { map: string; at: number } | null): void {
     if (this.changeTimer) clearTimeout(this.changeTimer);
@@ -431,6 +444,7 @@ export class NativeRoomService {
   leave(): void {
     const id = this.view.id,
       generation = this.view.generation;
+    this.voice.detach();
     this.connectionEpoch++;
     this.transport?.close();
     this.transport = null;
@@ -661,6 +675,7 @@ export class NativeRoomService {
       this.view.metaAt = Object.fromEntries(Object.keys(this.view.metas).map((slot) => [slot, this.now()]));
       this.view.change = message.change;
       this.scheduleChange(message.change);
+      this.voice.welcome(message.room);
       this.sendHeldKnife();
       // A new connection: the room knows nothing of practice yet (the next batch says so if it is).
       this.practiceSent = false;

@@ -206,6 +206,13 @@ public:
         return found == peers.end() ? std::string_view() : std::string_view(found->second.actor.name);
     }
 
+    // Each player's roster entry as the room sent it, with their name (voice chat reads id, provider, voiceMuted).
+    template <class Visit>
+    void each_player(Visit visit) const {
+        for (const auto &[slot, peer] : peers)
+            if (peer.info.is_object()) visit(slot, peer.info, std::string_view(peer.actor.name));
+    }
+
     VoteDisplay vote_display;
     HudLabel<128> changing_map;
     double changing_at = 0;

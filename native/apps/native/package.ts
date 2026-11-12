@@ -21,6 +21,10 @@ import { APP_NAME, APP_ID, MAC_APP, ICON_HASHES, packageBranding, verifyPackageB
 import { verifyMusicAssets } from "./src/export-music";
 const root = resolve(import.meta.dir, "../..");
 const sha = (b: Uint8Array | string) => createHash("sha256").update(b).digest("hex");
+/** What macOS shows when it asks for the microphone (voice chat's push to talk). */
+const MICROPHONE_USE = "Voice chat in rooms: the microphone is used only while you hold the push to talk key.";
+/** The hardened runtime's microphone entitlement (com.apple.security.device.audio-input). */
+const MAC_ENTITLEMENTS = join(root, "apps/native/packaging/macos-entitlements.plist");
 export function run(args: string[], cwd = root): string {
   const r = Bun.spawnSync(args, { cwd, stdout: "pipe", stderr: "pipe", env: process.env });
   if (r.exitCode) throw new Error(`${args[0]} failed (${r.exitCode}): ${Buffer.from(r.stderr).toString()}`);
@@ -167,6 +171,7 @@ function notices(resources: string, extra: string[]) {
   copy(join(root, "apps/native/vendor/unicode/LICENSE.txt"), join(to, "Unicode.txt"));
   for (const name of ["dr_libs", "stb", "nvapi", "amd"])
     copy(join(root, "apps/native/vendor", name, "LICENSE"), join(to, `${name}.txt`));
+  copy(join(root, "apps/native/vendor/opus/COPYING"), join(to, "opus.txt"));
   for (const name of ["JetBrainsMono-OFL.txt", "LeagueGothic-OFL.txt"])
     copy(join(root, "tools/hermes/fonts", name), join(to, name));
   for (const name of [
@@ -405,7 +410,7 @@ if (import.meta.main) {
     if (platform === "darwin") {
       const libs = bundleMacLibraries(sourceBinary, executable, join(packageRoot, "Contents/Frameworks"));
       minimumSupportedOS = macMinimumSupportedOS(executable, join(packageRoot, "Contents/Frameworks"));
-      const plist = `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>CFBundleName</key><string>${xml(APP_NAME)}</string><key>CFBundleDisplayName</key><string>${xml(APP_NAME)}</string><key>CFBundleIdentifier</key><string>${APP_ID}</string><key>CFBundleIconFile</key><string>icon.icns</string><key>CFBundleExecutable</key><string>bunnyhop-native</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleShortVersionString</key><string>${xml(version.split("-")[0])}</string><key>CFBundleVersion</key><string>${xml(version.split("-")[0])}</string><key>LSMinimumSystemVersion</key><string>${minimumSupportedOS}</string><key>NSHighResolutionCapable</key><true/><key>NSPrincipalClass</key><string>NSApplication</string></dict></plist>`;
+      const plist = `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>CFBundleName</key><string>${xml(APP_NAME)}</string><key>CFBundleDisplayName</key><string>${xml(APP_NAME)}</string><key>CFBundleIdentifier</key><string>${APP_ID}</string><key>CFBundleIconFile</key><string>icon.icns</string><key>CFBundleExecutable</key><string>bunnyhop-native</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleShortVersionString</key><string>${xml(version.split("-")[0])}</string><key>CFBundleVersion</key><string>${xml(version.split("-")[0])}</string><key>LSMinimumSystemVersion</key><string>${minimumSupportedOS}</string><key>NSHighResolutionCapable</key><true/><key>NSPrincipalClass</key><string>NSApplication</string><key>NSMicrophoneUsageDescription</key><string>${xml(MICROPHONE_USE)}</string></dict></plist>`;
       writeFileSync(join(packageRoot, "Contents/Info.plist"), plist);
       run(["plutil", "-lint", join(packageRoot, "Contents/Info.plist")]);
       const identity = values.identity!,
@@ -416,6 +421,7 @@ if (import.meta.main) {
             "--sign",
             identity,
             ...(identity === "-" ? [] : ["--options", "runtime", "--timestamp"]),
+            ...(file === executable ? ["--entitlements", MAC_ENTITLEMENTS] : []),
             file,
           ]);
       if (values["require-platform-signing"] && (identity === "-" || !values["notary-profile"]))
@@ -492,6 +498,8 @@ if (import.meta.main) {
         "--sign",
         identity,
         ...(identity === "-" ? [] : ["--options", "runtime", "--timestamp"]),
+        "--entitlements",
+        MAC_ENTITLEMENTS,
         packageRoot,
       ]);
       run(["codesign", "--verify", "--deep", "--strict", packageRoot]);
