@@ -1,4 +1,5 @@
 #include "client_util.hpp"
+#include "saved_style.hpp"
 #include "room_state.hpp"
 #include "movement_audio.hpp"
 #include "audio.hpp"
@@ -46,7 +47,20 @@ J snapshot(uint64_t generation, std::string id, J samples) {
             {"snapshot", {{"blocks", J::array({{{"slot", 2}, {"samples", samples}, {"weapon", 1}}})}}}};
 }
 
+// The style picked last starts the next launch (web: localStorage bunnyhop:style); unknown or damaged values don't.
+void saved_style_round_trips() {
+    assert(native::read_saved_style(native::saved_style_json("sideways")) == "sideways");
+    for (const auto &bad :
+         {nlohmann::json{{"style", "moonwalk"}},
+          nlohmann::json{{"style", nullptr}},
+          nlohmann::json{{"style", 3}},
+          nlohmann::json::array(),
+          nlohmann::json()})
+        assert(!native::read_saved_style(bad));
+}
+
 int main() {
+    saved_style_round_trips();
     native::MovementAudio movement;
     BhState state{};
 

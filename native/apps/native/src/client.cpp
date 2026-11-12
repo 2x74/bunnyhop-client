@@ -65,6 +65,7 @@
 #include "audio.hpp"
 #include "map_audio.hpp"
 #include "client_util.hpp"
+#include "saved_style.hpp"
 #include "run_vault.hpp"
 #include "replay_library.hpp"
 #include "menu_state.hpp"
@@ -341,6 +342,18 @@ int run(const native::Options &opt) {
     };
     std::string selected_style = opt.style, active_style = opt.style, outfit, packed_loadout,
                 ghost_cosmetic = "ghost-default", trail_cosmetic = "trail-none";
+    // The style the player last picked starts the next launch too (saved_style.hpp); --style wins for that launch.
+    const auto style_path = cache / "style.json";
+    if (persist_window && !opt.style_set) try {
+            if (std::filesystem::exists(style_path) && std::filesystem::file_size(style_path) <= 4096)
+                if (const auto saved = native::read_saved_style(nlohmann::json::parse(native::read_text(style_path))))
+                    selected_style = active_style = *saved;
+        } catch (const std::exception &e) {
+            std::cerr << "Saved style: " << e.what() << '\n';
+        }
+    auto remember_style = [&] {
+        if (persist_window) json_writer.write(style_path, native::saved_style_json(selected_style));
+    };
     std::optional<native_render::Glow> player_glow;
     // The equipped loadout holding the knife pool's pick: what the viewmodel, your bunny and the replay trailer show.
     native::HeldKnife held_knife;
@@ -1613,6 +1626,7 @@ int run(const native::Options &opt) {
                     }
                 } else if (action == "cycleStyle") {
                     selected_style = std::string(native::next_menu_style(selected_style));
+                    remember_style();
                     reset();
                 } else if (action == "slot1" || action == "slot2" || action == "slot3")
                     input.pulse = (input.pulse & ~(3u << 14)) | (uint32_t(action.back() - '0') << 14);
@@ -2765,6 +2779,7 @@ int run(const native::Options &opt) {
                             throw std::runtime_error("Gauntlets are Normal style on the main track.");
                         tutorial_runner.stopped = false;
                         selected_style = style;
+                        if (gauntlet_id.empty()) remember_style();
                         active_track = message.value("track", 0u);
                         if (active_track > 64) throw std::runtime_error("Invalid track");
                         pending_replay.clear();
@@ -2779,6 +2794,7 @@ int run(const native::Options &opt) {
                         const auto id = message.at("id").get<std::string>();
                         if (!native::styles.contains(id)) throw std::runtime_error("Unknown style");
                         selected_style = id;
+                        remember_style();
                         active_track = 0;
                         reset();
                     } else if (type == "settings") {

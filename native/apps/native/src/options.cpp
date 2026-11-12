@@ -35,9 +35,10 @@ Options options(int argc, char **argv) {
             out.tutorial_lesson = value();
         else if (arg == "--tutorial-demo")
             out.tutorial_demo = true;
-        else if (arg == "--style")
+        else if (arg == "--style") {
             out.style = value();
-        else if (arg == "--replay")
+            out.style_set = true;
+        } else if (arg == "--replay")
             out.replay = value();
         else if (arg == "--map")
             out.map = value();
