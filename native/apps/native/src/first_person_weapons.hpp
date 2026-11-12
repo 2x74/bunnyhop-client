@@ -184,8 +184,9 @@ struct ViewmodelLayer {
 };
 
 struct FirstPersonOutput {
-    // Drawn in order: a weapon lowering out of view, then the one in hand.
-    std::array<ViewmodelLayer, 2> layers{};
+    // Drawn in order: the weapons lowering out of view, then the one in hand. A fast knife, gun, knife, gun switch
+    // has the knife and the first gun both still lowering while the second draws, as on the website.
+    std::array<ViewmodelLayer, 3> layers{};
     size_t count = 0;
 };
 

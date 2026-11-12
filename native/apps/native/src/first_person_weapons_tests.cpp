@@ -176,6 +176,24 @@ void test_knife_lowers_while_the_gun_draws() {
     assert(h.step().count == 1);
 }
 
+// Spamming knife and gun: the knife and the first gun are both still lowering while the second gun draws, three
+// layers at once (a fixed array of two overflowed here and crashed the client).
+void test_fast_switches_lower_both_weapons() {
+    Harness h;
+    h.run(1);
+    h.weapon = usp_id;
+    h.step();
+    h.weapon = native_vm::knife_weapon_id;
+    h.step();
+    h.weapon = usp_id;
+    const auto &out = h.step();
+    assert(out.count == 3);
+    assert(!out.layers[0].gun && out.layers[0].entry == &h.library.knife);
+    assert(out.layers[1].gun && out.layers[2].gun && clip_id(out.layers[2]) == gun_draw);
+    h.run(.5);
+    assert(h.step().count == 1);
+}
+
 // Gun to knife: the gun plays its holster from where it was, then is gone.
 void test_gun_holsters_from_where_it_was() {
     Harness h;
@@ -445,6 +463,7 @@ int main() {
     test_gun_motion_is_read_from_the_metadata();
     test_knife_lowers_while_the_gun_draws();
     test_gun_holsters_from_where_it_was();
+    test_fast_switches_lower_both_weapons();
     test_resets_and_hidden_frames_never_lower();
     test_quiet_inspect_is_yours_only();
     test_attack_blends_the_inspect_out();
