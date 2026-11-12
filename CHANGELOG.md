@@ -5,6 +5,9 @@
 Voice chat and the new Auto-strafe timing from website v0.0.40, plus fixes for v0.9.0. Update from Settings →
 Updates: press Update, then Restart. Your settings, replays and maps are kept.
 
+This update is for Windows and Linux. The macOS build follows: GitHub had no Mac build machines free today, and we
+don't ship a Mac package that wasn't built and checked there. Mac players stay on v0.9.0 until then.
+
 - Voice chat in servers and private lobbies: hold X to talk and everyone in the room hears you. Guests can listen.
   The game asks for your microphone the first time you press the key and only uses it while you hold it. In a voice
   room X talks; everywhere else it still teleports you to your checkpoint.
