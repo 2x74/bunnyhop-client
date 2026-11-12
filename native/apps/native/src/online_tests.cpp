@@ -51,7 +51,10 @@ int main() {
     const auto detail = encode({{"sha256", sha}, {"name", "bhop_test"}});
     const auto manifest =
             encode({{"mapSha256", sha},
-                    {"files", {{"materials/test.vmt", {{"sha256", fileSha}, {"size", content.size()}}}}}});
+                    {"files", {{"materials/test.vmt", {{"sha256", fileSha}, {"size", content.size()}}}}},
+                    // Optional groups may come as null (a value() on them used to throw type_error.306).
+                    {"physics", nullptr},
+                    {"optional", nullptr}});
     int requests = 0;
     bool offline = false, notFound = false;
     native::LoadProgress latest;
@@ -159,5 +162,16 @@ int main() {
         rejected = true;
     }
     check(rejected, "unsafe optional sound accepted");
+    for (const auto &empty :
+         {nlohmann::json{{"optional", nullptr}}, nlohmann::json{{"optional", {{"sounds", nullptr}}}}}) {
+        const auto bytes = encode(empty);
+        {
+            std::ofstream f(first.content_root.parent_path() / "manifest.json", std::ios::binary);
+            f.write(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+        }
+        requests = 0;
+        native::download_classic_sounds(first.content_root, cache, fetch);
+        check(requests == 0, "a null optional group should fetch nothing");
+    }
     return 0;
 }

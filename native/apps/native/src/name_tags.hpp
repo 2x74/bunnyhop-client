@@ -4,6 +4,7 @@
 #include "hud_text.hpp"
 #include "hud_geometry.hpp"
 #include "name_fonts.hpp"
+#include "json_fields.hpp"
 #include <nlohmann/json.hpp>
 #include <algorithm>
 #include <array>
@@ -11,8 +12,6 @@
 #include <cmath>
 #include <optional>
 #include <string_view>
-#include <string>
-#include <type_traits>
 
 namespace native {
 using NameColor = std::array<float, 4>;
@@ -78,28 +77,6 @@ inline std::string json_text(const nlohmann::json &value, const char *key, size_
 inline bool json_flag(const nlohmann::json &value, const char *key) {
     const auto found = value.find(key);
     return found != value.end() && *found == true;
-}
-
-// A field of a room or menu message, or `fallback` when the message isn't an object or the field is missing, null or of
-// another type. nlohmann's value() throws on any of those, and a throw there used to spam chat and drop map changes.
-template <class T>
-T json_value(const nlohmann::json &object, const char *key, T fallback) {
-    const auto found = object.find(key);
-    if (found == object.end() || found->is_null()) return fallback;
-    if constexpr (std::is_same_v<T, nlohmann::json>)
-        return *found;
-    else if constexpr (std::is_same_v<T, bool>)
-        return found->is_boolean() ? found->get<bool>() : fallback;
-    else if constexpr (std::is_same_v<T, std::string>)
-        return found->is_string() ? found->get<std::string>() : fallback;
-    else {
-        static_assert(std::is_arithmetic_v<T>);
-        if (!found->is_number()) return fallback;
-        if constexpr (std::is_unsigned_v<T>)
-            if (found->is_number_integer() && !found->is_number_unsigned() && found->get<int64_t>() < 0)
-                return fallback;
-        return found->get<T>();
-    }
 }
 
 inline NameAppearance name_appearance(const nlohmann::json &value) {
