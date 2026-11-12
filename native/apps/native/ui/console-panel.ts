@@ -6,7 +6,8 @@ import { h } from "../../web/src/ui/dom";
 import { icon } from "../../web/src/ui/icons";
 import { isTextField } from "../../web/src/input";
 import { state, send } from "./bridge";
-import { installPrefsBridge } from "./prefs-bridge";
+import { installPrefsBridge, sendNativeSettings } from "./prefs-bridge";
+import { nativeVoiceHost, runVoiceLine, takeVoiceLines, voiceConfigLines } from "./voice-console";
 import "./native-console.css";
 
 export interface NativeConsoleHooks {
@@ -21,6 +22,7 @@ export interface NativeConsoleHooks {
 let view: NativeConsole | null = null;
 let hooks: NativeConsoleHooks | null = null;
 const CFG_PREFIX = "bunnyhop:cfg:";
+const voiceHost = nativeVoiceHost(sendNativeSettings);
 const configs: ConfigStore = {
   list: () => {
     const names: string[] = [];
@@ -36,12 +38,14 @@ const configs: ConfigStore = {
   },
   get: (name) => {
     try {
-      return localStorage.getItem(CFG_PREFIX + name);
+      const text = localStorage.getItem(CFG_PREFIX + name);
+      return text === null ? null : takeVoiceLines(voiceHost, text);
     } catch {
       return null;
     }
   },
-  set: (name, text) => {
+  set: (name, written) => {
+    const text = [written, ...voiceConfigLines(voiceHost)].join("\n");
     if (text.length > 32_000) return "That config is too big to save.";
     try {
       if (!configs.list().includes(name) && configs.list().length >= 20)
@@ -130,7 +134,7 @@ class NativeConsole {
       if (!/[\r\n]/.test(text.trim())) return;
       event.preventDefault();
       this.print(`Pasted ${text.trim().split(/\r?\n/).length} lines.`, "dim");
-      this.runner.paste(text);
+      this.runner.paste(takeVoiceLines(voiceHost, text));
     });
     this.dialog.addEventListener("close", () => {
       if (this.openedInGame) send({ type: "resume" });
@@ -178,7 +182,9 @@ class NativeConsole {
     } catch {
       /* private storage */
     }
-    this.runner.run(line);
+    const voiceAnswer = runVoiceLine(voiceHost, line);
+    if (voiceAnswer === null) this.runner.run(line);
+    else this.print(voiceAnswer);
   }
   private recall(direction: -1 | 1): void {
     if (!this.history.length) return;
