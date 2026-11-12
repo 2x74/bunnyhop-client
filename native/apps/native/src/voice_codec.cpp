@@ -40,7 +40,8 @@ Decoder::Decoder() {
 
 bool Decoder::decode(std::span<const uint8_t> packet, std::span<float, frame_samples> pcm) {
     const auto *data = packet.empty() ? nullptr : packet.data();
-    const int samples = opus_decode_float(decoder_.get(), data, opus_int32(packet.size()), pcm.data(), frame_samples, 0);
+    const int samples =
+            opus_decode_float(decoder_.get(), data, opus_int32(packet.size()), pcm.data(), frame_samples, 0);
     if (samples == frame_samples) return true;
     std::fill(pcm.begin(), pcm.end(), 0.f);
     return false;

@@ -87,9 +87,8 @@ inline std::optional<DownPacket> parse_voice_down(std::span<const uint8_t> bytes
 }
 
 // Builds a VOICE_UP. Returns nothing for a packet the room would refuse as malformed (never send those).
-inline std::optional<std::vector<uint8_t>> encode_voice_up(
-        uint8_t flags, uint16_t seq, std::span<const std::span<const uint8_t>> frames
-) {
+inline std::optional<std::vector<uint8_t>>
+encode_voice_up(uint8_t flags, uint16_t seq, std::span<const std::span<const uint8_t>> frames) {
     if (frames.size() > max_frames || (frames.empty() && !(flags & flag_end))) return std::nullopt;
     if (flags & ~(flag_start | flag_end)) return std::nullopt;
     std::vector<uint8_t> out;

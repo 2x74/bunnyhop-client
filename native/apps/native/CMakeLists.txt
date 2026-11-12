@@ -289,6 +289,10 @@ if(BUNNYHOP_BUILD_CLIENT)
         add_test(NAME native_voice COMMAND bunnyhop-native-voice-tests
             "${CMAKE_CURRENT_SOURCE_DIR}/src/voice_wire_vectors.json")
         set_tests_properties(native_voice PROPERTIES TIMEOUT 60)
+        # The local interoperability proof's stand-in for the client (tools/voice-local.ts).
+        add_executable(bunnyhop-native-voice-harness EXCLUDE_FROM_ALL src/voice_harness.cpp ${BUNNYHOP_VOICE_SOURCES})
+        target_include_directories(bunnyhop-native-voice-harness PRIVATE include vendor src)
+        target_link_libraries(bunnyhop-native-voice-harness PRIVATE ${BUNNYHOP_VOICE_LIBRARIES} SDL3::SDL3 Threads::Threads)
     endif()
     if(APPLE)
         enable_language(OBJCXX)

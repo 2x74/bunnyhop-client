@@ -74,6 +74,7 @@
 #include "app_identity.hpp"
 #include "room_state.hpp"
 #include "room_bridge.hpp"
+#include "voice_load.hpp"
 #include "room_modes.hpp"
 #include "tutorial_runner.hpp"
 #include "discord_rpc.hpp"
@@ -233,7 +234,7 @@ int run(const native::Options &opt) {
             )
     );
     native::MapAudio map_audio;
-    native::Audio audio(assets, cache, !opt.hidden && !opt.frames);
+    native::Audio audio(assets, cache, !opt.hidden && (!opt.frames || opt.voice_load));
     audio.set_map_mixer(&map_audio.mixer);
     std::unique_ptr<native::MenuWebView> menu;
     std::string menu_failure;
@@ -348,7 +349,9 @@ int run(const native::Options &opt) {
     const auto room_bridge_owner = std::make_unique<native::RoomBridge>();
     auto &room_bridge = *room_bridge_owner;
     auto &room = room_bridge.room;
-    room_bridge.enable_voice(!opt.hidden && !opt.frames);
+    room_bridge.enable_voice(!opt.hidden && (!opt.frames || opt.voice_load), opt.voice_load.has_value());
+    const auto voice_load =
+            opt.voice_load ? std::make_unique<native::VoiceLoad>(room_bridge, *opt.voice_load) : nullptr;
     auto &room_modes = room_bridge.room_modes;
     auto &observed_spectator = room_bridge.observed_spectator;
     auto epoch_ms = []() {
@@ -3773,13 +3776,16 @@ int run(const native::Options &opt) {
             }
         }
         room_bridge.send_poses(menu.get(), menu_ready, map_id);
-        room_bridge.send_voice(
-                menu.get(),
-                menu_ready,
-                epoch_ms(),
-                audio.output_volume(),
-                captured && focused && !chat.active && !(menu && menu->visible())
-        );
+        if (voice_load)
+            voice_load->frame(epoch_ms(), audio.output_volume());
+        else
+            room_bridge.send_voice(
+                    menu.get(),
+                    menu_ready,
+                    epoch_ms(),
+                    audio.output_volume(),
+                    captured && focused && !chat.active && !(menu && menu->visible())
+            );
         hud.publish_movement_chat(chat, epoch_ms() / 1000.);
         frame_diagnostics.mark(native::FrameDiagnostics::kSimulation, SDL_GetTicksNS());
         frame_diagnostics.input(input_timeline.queue());

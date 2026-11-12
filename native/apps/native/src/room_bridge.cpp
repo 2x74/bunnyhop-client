@@ -145,13 +145,23 @@ void RoomBridge::send_poses(MenuWebView *menu, bool menu_ready, const std::strin
     pose_outbox_.clear();
 }
 
-void RoomBridge::enable_voice(bool devices) {
-    auto capture = devices ? voice::default_microphone : [] { return std::unique_ptr<voice::CaptureSource>(); };
+void RoomBridge::enable_voice(bool devices, bool test_tone) {
+    constexpr float test_tone_hz = 550, test_tone_amplitude = .2f;
+    std::function<std::unique_ptr<voice::CaptureSource>()> capture = voice::default_microphone;
+    if (test_tone)
+        capture = [] {
+            return voice::tone_source(test_tone_hz, test_tone_amplitude);
+        };
+    if (!devices && !test_tone)
+        capture = [] {
+            return std::unique_ptr<voice::CaptureSource>();
+        };
     voice_ = std::make_unique<voice::VoiceChat>(std::make_unique<voice::Engine>(capture, devices));
 }
 
 void RoomBridge::voice_message(const nlohmann::json &message) {
-    if (message.value("type", std::string()) == "voicePeople") return voice_->people(message.value("people", nlohmann::json()));
+    if (message.value("type", std::string()) == "voicePeople")
+        return voice_->people(message.value("people", nlohmann::json()));
     const auto data = message.find("data");
     if (data == message.end() || !data->is_string() || message.value("id", std::string()) != room.id) return;
     if (message.value("generation", uint64_t(0)) != room.generation) return;

@@ -86,8 +86,9 @@ void test_wire_matches_the_website(const Json &vectors) {
         const auto down = voice::parse_voice_down(down_bytes);
         assert(down && down->slot == c.at("down").at("slot") && down->packet.seq == c.at("seq"));
         for (size_t i = 0; i < frames.size(); ++i)
-            assert(std::equal(frames[i].begin(), frames[i].end(), down->packet.frames[i].begin(),
-                              down->packet.frames[i].end()));
+            assert(std::equal(
+                    frames[i].begin(), frames[i].end(), down->packet.frames[i].begin(), down->packet.frames[i].end()
+            ));
     }
     for (const auto &bytes : vectors.at("malformedUp"))
         assert(!voice::parse_voice_up(from_hex(bytes.get<std::string>())));
@@ -402,9 +403,9 @@ void test_talking_sends_packets_and_marks_you() {
     const auto tail = chat.outgoing(700);
     assert(!tail.empty());
     const auto last = native::base64_decode(tail.back());
-    assert(last && voice::parse_voice_up(std::span(reinterpret_cast<const uint8_t *>(last->data()), last->size()))
-                                   ->flags
-                           & voice::flag_end);
+    assert(last
+           && voice::parse_voice_up(std::span(reinterpret_cast<const uint8_t *>(last->data()), last->size()))->flags
+                      & voice::flag_end);
 }
 
 void test_your_mutes_and_volumes() {

@@ -62,8 +62,10 @@ public:
     void send_poses(MenuWebView *menu, bool menu_ready, const std::string &map_id);
 
     // Voice chat. `devices` false (hidden and scripted runs) never opens a microphone or speakers.
-    void enable_voice(bool devices);
+    void enable_voice(bool devices, bool test_tone = false);
+
     voice::VoiceChat &voice() { return *voice_; }
+
     // A voiceDown (for this room only) or voicePeople message from the menu.
     void voice_message(const nlohmann::json &message);
     // Once a frame: the HUD's talker list, then the packets that came due go to the menu's socket.

@@ -54,18 +54,25 @@ public:
     void forget(unsigned slot);
     void clear_talkers();
     void set_listening(bool on);
+
     void set_gain(unsigned slot, float gain) { receiver_.set_gain(slot, gain); }
+
     void set_bus_gain(float gain) { bus_gain_.store(gain, std::memory_order_relaxed); }
+
     std::vector<Bytes> take_outgoing();
     std::vector<EngineEvent> take_events();
+
     void snapshot(std::array<TalkerView, slot_count> &views) const { receiver_.snapshot(views); }
+
     TalkerView self_view() const;
+
     bool transmitting() const { return transmitting_.load(std::memory_order_relaxed); }
 
     // Mixes `out` by hand when there is no playback stream.
     void mix(std::span<float> out);
 
     Receiver &receiver() { return receiver_; }
+
     std::atomic<unsigned> sent_packets{0}, sent_frames{0};
 
 private:

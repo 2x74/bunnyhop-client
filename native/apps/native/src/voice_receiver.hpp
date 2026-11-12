@@ -78,8 +78,7 @@ public:
     // Ends spurts that went quiet without an END (worker thread).
     void end_silent(double now_seconds) {
         for (auto &talker : talkers_)
-            if (talker && talker->open && now_seconds - talker->last_packet > talker_silent_seconds)
-                end_spurt(*talker);
+            if (talker && talker->open && now_seconds - talker->last_packet > talker_silent_seconds) end_spurt(*talker);
     }
 
     // Adds every talker into `out` (audio callback).
