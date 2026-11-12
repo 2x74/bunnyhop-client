@@ -23,18 +23,19 @@ Updates: press Update, then Restart. Your settings, replays and maps are kept.
   dr_unlisted for the report.
 - The map vote shows each map's tier.
 - The game remembers your style between launches.
-- Closing a replay you watched from a server takes you back to the server's map. Watching replays no longer
-  removes you from the server since v0.8.0. Thanks to hena for the report.
+- Closing a replay of another map that you opened in a server takes you back to the server's map. (Watching a
+  replay stopped removing you from the server in v0.8.0.) Thanks to hena for the report.
 - Runs on bhop_gofuckyourself use all of the map's zones, so the anti-skip walls stop a run in the game as they
   do on the website.
 
 Not in the desktop client yet, coming in a later update:
 
 - Bonus tracks in other styles. Bonuses still play in Normal here.
-- The strafe trainer in every style, and the new slow ticks in the jump stats.
+- The strafe trainer in every style, the new slow ticks in the jump stats, and the repeat count on strafe offsets
+  (like -1 (2)).
 - The new look for notices in the game.
-- The new supporter looks in the game: name effects, Outline, bold and italic, and your card behind your row in the
-  voice list. They show in the menu.
+- The new supporter looks in the game: the five new name colours (white in the game for now), the Outline effect,
+  bold and italic, and your card behind your row in the voice list. They show in the menu.
 - The LIVE mark next to streamers' names in servers.
 - Choosing your microphone and the microphone test in Settings.
 

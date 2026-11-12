@@ -99,11 +99,11 @@ void test_wire_matches_the_website(const Json &vectors) {
 }
 
 void test_never_builds_what_the_room_refuses() {
-    const std::vector<uint8_t> big(voice::max_opus_frame_bytes + 1, 1), small(10, 1);
+    const std::vector<uint8_t> big(voice::max_opus_frame_bytes + 1, 1), tiny(10, 1);
     assert(!voice::encode_voice_up(0, 1, std::vector<std::span<const uint8_t>>{}));
     assert(!voice::encode_voice_up(0, 1, std::vector<std::span<const uint8_t>>{big}));
-    assert(!voice::encode_voice_up(0, 1, std::vector<std::span<const uint8_t>>{small, small, small, small}));
-    assert(!voice::encode_voice_up(4, 1, std::vector<std::span<const uint8_t>>{small}));
+    assert(!voice::encode_voice_up(0, 1, std::vector<std::span<const uint8_t>>{tiny, tiny, tiny, tiny}));
+    assert(!voice::encode_voice_up(4, 1, std::vector<std::span<const uint8_t>>{tiny}));
     assert(voice::encode_voice_up(voice::flag_end, 1, std::vector<std::span<const uint8_t>>{}));
 }
 
