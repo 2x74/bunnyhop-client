@@ -28,10 +28,10 @@ import { nameAttrs } from "./marks";
 import { autoBadges, earnedLine, lockInfo, profileHolder, profileRanks, progressText, newDot, ownedCosmetics, shortGoal, ownedIds, type LockInfo } from "./unlocks";
 import { pastGoal } from "./unlock-text";
 import { NUMBER_ONE, rankColorOf, rankGroupById } from "../ranking";
-import { type AvatarDecoId, type CardBorderId, type CardEffectId, type NameFontId } from "../supporter-looks";
+import { nameStyleShown, type AvatarDecoId, type CardBorderId, type CardEffectId, type HoverFxId, type NameFontId, type NameStyle } from "../supporter-looks";
 import { peakOf } from "../creators";
 import { type SupporterLook } from "./card";
-import { borderChoices, cardEffectChoices, cardFxSwatch, COLOUR_CHOICES, DECO_CHOICES, EFFECT_CHOICES, FONT_CHOICES, nameSample, decoSwatch } from "./supporter-pickers";
+import { borderChoices, cardEffectChoices, cardFxSwatch, COLOUR_CHOICES, DECO_CHOICES, EFFECT_CHOICES, FONT_CHOICES, HOVER_FX_CHOICES, hoverFxSwatch, nameSample, decoSwatch, styleChoices } from "./supporter-pickers";
 import { navigate } from "./nav";
 
 export const MAX_BADGES = 3;
@@ -358,8 +358,8 @@ export function cardEditor(p: Profile, lo: Loadout, news: NewTracker, o: CardEdi
     const s = p.supporterSettings ?? null;
     const lock: LockInfo | null = s ? null : { hint: "For supporters", goal: "Supporter item", fraction: null };
     const cur: SupporterLook = s
-      ? { nameColor: s.nameColor, nameEffect: s.nameEffect, nameColor2: s.nameColor2, nameFont: s.nameFont ?? null, avatarDeco: s.avatarDeco ?? null, cardBorder: s.cardBorder ?? null, cardEffect: s.cardEffect ?? null }
-      : { nameColor: null, nameEffect: null, nameColor2: null, nameFont: null, avatarDeco: null, cardBorder: null, cardEffect: null };
+      ? { nameColor: s.nameColor, nameEffect: s.nameEffect, nameColor2: s.nameColor2, nameFont: s.nameFont ?? null, nameStyle: s.nameStyle ?? null, avatarDeco: s.avatarDeco ?? null, cardBorder: s.cardBorder ?? null, cardEffect: s.cardEffect ?? null, hoverFx: s.hoverFx ?? null }
+      : { nameColor: null, nameEffect: null, nameColor2: null, nameFont: null, nameStyle: null, avatarDeco: null, cardBorder: null, cardEffect: null, hoverFx: null };
     const grid = (list: HTMLElement[], cls = "ce-grid-name") => {
       const g = h(`div.ce-grid.${cls}`, null, ...list);
       g.addEventListener("pointerleave", () => o.onNamePreview?.(undefined));
@@ -391,6 +391,10 @@ export function cardEditor(p: Profile, lo: Loadout, news: NewTracker, o: CardEdi
         ...second,
         label("Font"),
         grid(FONT_CHOICES.map((f) => item(nameSample({ ...cur, nameFont: f.id }), f.name, "nameFont", f.id, (cur.nameFont ?? null) === f.id))),
+        // v0.0.40: bold / italic, in the cuts the font has (none: no row). A pick the font lacks shows as Plain.
+        ...(styleChoices(cur.nameFont).length
+          ? [label("Bold and italic"), grid(styleChoices(cur.nameFont).map((st) => item(nameSample({ ...cur, nameStyle: st.id }), st.name, "nameStyle", st.id, nameStyleShown(cur.nameFont, cur.nameStyle) === st.id)))]
+          : []),
       ];
     }
     if (which === "avatar")
@@ -403,6 +407,9 @@ export function cardEditor(p: Profile, lo: Loadout, news: NewTracker, o: CardEdi
       grid(borderChoices(peak).map((b) => item(cardFxSwatch(peak, b.id, null, cur.nameColor), b.name, "cardBorder", b.id, (cur.cardBorder ?? null) === b.id))),
       label("Effect"),
       grid(cardEffectChoices(peak).map((e) => item(cardFxSwatch(peak, null, e.id, cur.nameColor), e.name, "cardEffect", e.id, (cur.cardEffect ?? null) === e.id))),
+      // How your mini profile comes in when someone rests on your name: each small card plays it under the pointer.
+      label("Hover effect"),
+      grid(HOVER_FX_CHOICES.map((e) => item(hoverFxSwatch(e.id, cur.nameColor), e.name, "hoverFx", e.id, (cur.hoverFx ?? null) === e.id))),
     ];
   }
 
@@ -536,9 +543,11 @@ type SupporterPatch = {
   nameEffect?: NameEffect | null;
   nameColor2?: NameColorId | null;
   nameFont?: NameFontId | null;
+  nameStyle?: NameStyle | null;
   avatarDeco?: AvatarDecoId | null;
   cardBorder?: CardBorderId | null;
   cardEffect?: CardEffectId | null;
+  hoverFx?: HoverFxId | null;
   showBadge?: boolean;
   showOnBoard?: boolean;
 };

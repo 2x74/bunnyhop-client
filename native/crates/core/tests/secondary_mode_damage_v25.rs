@@ -10,7 +10,6 @@
 
 use bunnyhop_core::game::{IN_ATTACK, IN_ATTACK2, IN_GIVE_SHIFT, PHYSICS_V24, PHYSICS_V25, USP_SILENCER_TIME};
 use bunnyhop_core::{Cmd, Game, Settings};
-use std::path::PathBuf;
 
 const GLOCK: u32 = 2;
 const USP: u32 = 3;
@@ -18,7 +17,7 @@ const M4A1: u32 = 18;
 const PLATFORM: &str = "*3";
 
 fn map_bytes() -> Option<Vec<u8>> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps/bhop_eazy.bsp");
+    let path = bunnyhop_core::test_maps::bsp("bhop_eazy");
     let bytes = std::fs::read(&path).ok();
     if bytes.is_none() {
         eprintln!("skipping: {} not found", path.display());

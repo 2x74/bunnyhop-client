@@ -7,7 +7,7 @@
 //   while the decoration is off screen (fxVisibility).
 
 import "./avatar-deco.css";
-import { avatarDecoDef, avatarDecoOf, DECO_DEFS } from "../supporter-looks";
+import { avatarDecoDef, avatarDecoOf, DECO_DEFS, decoMotion, decoPlace } from "../supporter-looks";
 import { nameColorHex, type PlayerMarks } from "../creators";
 import { h } from "./dom";
 
@@ -22,12 +22,16 @@ export function decorated(avatar: HTMLElement, p: Pick<PlayerMarks, "avatarDeco"
   // Each instance its own gradient id: a document can hold many, and one inside a hidden subtree mustn't break the rest.
   const gid = `dg${++uid}`;
   const defs = DECO_DEFS.replace('id="dg"', `id="${gid}"`);
-  const layers = d.layers.map((l) =>
-    h(`span.av-deco-l${l.anim && o.animate ? `.av-${l.anim}` : ""}`, {
-      "aria-hidden": "true",
-      html: `<svg viewBox="0 0 120 120" focusable="false">${defs}${l.svg.replaceAll("url(#dg)", `url(#${gid})`)}</svg>`,
-    }),
-  );
+  const layers = d.layers.map((l) => {
+    const html = `<svg viewBox="0 0 120 120" focusable="false">${defs}${l.svg.replaceAll("url(#dg)", `url(#${gid})`)}</svg>`;
+    const moving = !!l.anim && !!o.animate;
+    // .av-anim: every moving span (the card's off-screen watch finds them by it). A placed layer (supporter-looks.ts
+    // DecoLayer.place) is two spans: the fixed placement outside, the motion inside it.
+    const motion = moving ? { class: `av-anim av-${l.anim}`, style: decoMotion(l) || undefined } : {};
+    const place = decoPlace(l);
+    if (!place) return h("span.av-deco-l", { "aria-hidden": "true", html, ...motion });
+    return h("span.av-deco-l", { "aria-hidden": "true", style: place.css }, h("span.av-deco-a", { html, ...motion }));
+  });
   const wrap = h(`span.av-deco.av-deco-${id}`, { style: `color:${color}` }, avatar, ...layers);
   // watch: false inside a card, whose own registration (ui/card-fx.ts watchCardFx) pauses it with the card.
   if (o.animate && o.watch !== false) fxVisibility(wrap);

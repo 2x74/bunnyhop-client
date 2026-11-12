@@ -12,8 +12,25 @@
 //     for every looser one (the ratio grows with the spacing when the face is the wider one).
 // Until the face has loaded, a name is drawn in the default font (no class, no zoom): nothing is wider while it loads.
 // When it arrives, one pass upgrades the names waiting for it ([data-nm-font]).
+//
+// v0.0.40, bold and italic (supporter-looks.ts NAME_STYLE_CUTS): a face is a font and a cut ("condensed-bi"), measured
+// in that cut (bold at 950, italic slanted) against the same default; the default font in bold or italic is fitted the
+// same way (the system's own cuts, always loaded), so a bold name is never wider than the plain one either.
 
-import { nameFontFamily, type NameFontId } from "../supporter-looks";
+import { nameFontFamily, type NameFontId, type NameStyle } from "../supporter-looks";
+
+/** A font in a cut: "serif", "serif-i", "default-b" (the default font bold). What [data-nm-font] carries. */
+export type FaceKey = string;
+export const faceKey = (font: NameFontId | null, style: NameStyle | null): FaceKey => `${font ?? "default"}${style ? `-${style}` : ""}`;
+const parseKey = (key: FaceKey): { font: NameFontId | null; style: NameStyle | null } => {
+  const [font, style] = key.split("-") as [string, NameStyle | undefined];
+  return { font: font === "default" ? null : (font as NameFontId), style: style ?? null };
+};
+/** The CSS font of a face at `px` (the weight it is measured at: 900, or 950 bold). */
+const faceFont = (key: FaceKey, px: number): string => {
+  const { font, style } = parseKey(key);
+  return `${style?.includes("i") ? "italic " : ""}${style?.includes("b") ? 950 : 900} ${px}px ${font ? `"${nameFontFamily(font)}", ` : ""}${FONT_UI}`;
+};
 
 /** The most negative letter-spacing on any name element (ui/profile.css .pc-name), in em. */
 export const TIGHTEST_EM = -0.03;
@@ -33,8 +50,8 @@ export function fitScale(wDefault: number, wFace: number, n: number, ls: number)
   return k >= 1 ? 1 : Math.floor(k * 1000) / 1000;
 }
 
-const ready = new Set<NameFontId>();
-const asked = new Set<NameFontId>();
+const ready = new Set<FaceKey>(["default", "default-b", "default-i", "default-bi"]);
+const asked = new Set<FaceKey>();
 const cache = new Map<string, number>();
 let ctx: CanvasRenderingContext2D | null = null;
 
@@ -45,8 +62,11 @@ function measure(font: string, text: string): number {
   return ctx.measureText(text).width;
 }
 
-/** The fit of `name` in face `id`, or null while the face hasn't loaded (draw the default font meanwhile). */
-export function nameFit(id: NameFontId, name: string): number | null {
+/**
+ * The fit of `name` in face `id` (a font, or a FaceKey for a font in a cut), or null while the face hasn't loaded (draw
+ * the default font meanwhile).
+ */
+export function nameFit(id: NameFontId | FaceKey, name: string): number | null {
   if (typeof document === "undefined") return null;
   if (!ready.has(id)) {
     load(id);
@@ -55,8 +75,12 @@ export function nameFit(id: NameFontId, name: string): number | null {
   const key = `${id}|${name}`;
   let k = cache.get(key);
   if (k === undefined) {
-    const wDefault = Math.min(measure(`400 ${PX}px ${FONT_UI}`, name), measure(`400 ${PX}px ${FONT_TEXT}`, name));
-    const wFace = measure(`900 ${PX}px "${nameFontFamily(id)}", ${FONT_UI}`, name);
+    const { font, style } = parseKey(id);
+    // A face against the default at 400 (faces are one weight, drawn the same at any weight). The default font in a cut
+    // against itself at 600, the lightest weight a name column draws (the boards): its weight changes with the surface.
+    const base = font ? 400 : 600;
+    const wDefault = Math.min(measure(`${base} ${PX}px ${FONT_UI}`, name), measure(`${base} ${PX}px ${FONT_TEXT}`, name));
+    const wFace = font ? measure(faceFont(id, PX), name) : measure(`${style?.includes("i") ? "italic " : ""}${style?.includes("b") ? 950 : base} ${PX}px ${FONT_UI}`, name);
     k = fitScale(wDefault, wFace, [...name].length, TIGHTEST_EM * PX);
     if (cache.size > 4000) cache.clear();
     cache.set(key, k);
@@ -64,10 +88,10 @@ export function nameFit(id: NameFontId, name: string): number | null {
   return k;
 }
 
-function load(id: NameFontId): void {
+function load(id: FaceKey): void {
   if (asked.has(id) || !document.fonts) return;
   asked.add(id);
-  document.fonts.load(`400 16px "${nameFontFamily(id)}"`, "Aa").then(
+  document.fonts.load(faceFont(id, 16).replace(`, ${FONT_UI}`, ""), "Aa").then(
     (faces) => {
       if (!faces.length) return;
       ready.add(id);
@@ -78,7 +102,7 @@ function load(id: NameFontId): void {
 }
 
 /** Names drawn while `id` was loading: give them the face now, fitted. */
-function upgrade(id: NameFontId): void {
+function upgrade(id: FaceKey): void {
   for (const el of document.querySelectorAll<HTMLElement>(`[data-nm-font="${id}"]`)) {
     const k = nameFit(id, el.textContent ?? "");
     if (k === null) continue;
@@ -86,12 +110,18 @@ function upgrade(id: NameFontId): void {
   }
 }
 
-/** The face's class and the fit on an element (also what nameAttrs returns for one created after the face loaded). */
-export function applyFit(el: HTMLElement, id: NameFontId, k: number): void {
-  el.classList.add("nm-font", `nm-font-${id}`);
+/** The classes of a face (font and cut) on a name element. */
+export function faceClasses(id: FaceKey): string[] {
+  const { font, style } = parseKey(id);
+  return [...(font ? ["nm-font", `nm-font-${font}`] : ["nm-font"]), ...(style?.includes("b") ? ["nm-b"] : []), ...(style?.includes("i") ? ["nm-i"] : [])];
+}
+
+/** The face's classes and the fit on an element (also what nameAttrs returns for one created after the face loaded). */
+export function applyFit(el: HTMLElement, id: FaceKey, k: number): void {
+  el.classList.add(...faceClasses(id));
   el.style.setProperty("--nm-k", String(k));
   el.removeAttribute("data-nm-font");
 }
 
 /** For tests: mark a face loaded without a document. */
-export const _markReady = (id: NameFontId) => ready.add(id);
+export const _markReady = (id: FaceKey) => ready.add(id);

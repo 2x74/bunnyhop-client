@@ -22,6 +22,7 @@ import { hopIndicator } from "../ui/hop";
 import { caseProps, loadThread, timeline, type ThreadData } from "./thread";
 import { pinnedLine } from "./notes";
 import { markSeen } from "./seen";
+import { compareSection, type CompareData } from "./compare";
 
 /** The daily sweep's rules (apps/api src/ac-player-rules.ts), for the Stop re-flags dialog. */
 const SWEEP_RULES = ["key-shape-repeat", "key-follows-mouse-repeat", "counted-yaw-missing", "missing-beats-repeat", "pooled-review", "gain-jump", "legit-jumps"];
@@ -164,9 +165,22 @@ const players = new Map<string, Promise<PlayerDetail>>();
 const details = new Map<string, Promise<RunDetail>>();
 const wrTimes = new Map<string, Promise<number | null>>();
 const threads = new Map<string, Promise<ThreadData>>();
-const thread = (uid: string, fresh = false) => (!fresh && threads.has(uid) ? threads.get(uid)! : (threads.set(uid, loadThread("ac", uid)), threads.get(uid)!));
-const lite = (id: string) => (players.has(id) ? players.get(id)! : (players.set(id, api<PlayerDetail>(`/admin/players/${encodeURIComponent(id)}?lite=1`)), players.get(id)!));
-const detail = (id: string) => (details.has(id) ? details.get(id)! : (details.set(id, api<RunDetail>(`/admin/integrity/run/${encodeURIComponent(id)}`)), details.get(id)!));
+/** `map`'s promise for `key`, made by `load` once; a failed one is forgotten, so selecting the case again retries it. */
+function once<T>(map: Map<string, Promise<T>>, key: string, load: () => Promise<T>): Promise<T> {
+  const hit = map.get(key);
+  if (hit) return hit;
+  const p = load();
+  map.set(key, p);
+  p.catch(() => map.get(key) === p && map.delete(key));
+  return p;
+}
+const thread = (uid: string, fresh = false) => (fresh && threads.delete(uid), once(threads, uid, () => loadThread("ac", uid)));
+const lite = (id: string) => once(players, id, () => api<PlayerDetail>(`/admin/players/${encodeURIComponent(id)}?lite=1`));
+const detail = (id: string) => once(details, id, () => api<RunDetail>(`/admin/integrity/run/${encodeURIComponent(id)}`));
+const compares = new Map<string, Promise<CompareData>>();
+const compare = (id: string) => once(compares, id, () => api<CompareData>(`/admin/integrity/compare/${encodeURIComponent(id)}`));
+/** Players per page of the case list (the queue view, apps/api src/admin-integrity.ts). */
+const PAGE = 50;
 const wrTime = (map: string, style: string) => {
   const k = `${map}|${style}`;
   if (!wrTimes.has(k))
@@ -260,17 +274,38 @@ export const casesView: View = async (root, params) => {
   q.set("review", runParam || (caseParam && review === "open") ? "all" : review);
   if (tier) q.set("tier", tier);
   if (userParam ?? (runParam || caseParam ? caseParam : null)) q.set("user", (userParam ?? caseParam)!);
-  // The queue always lists every open case; a deep-linked player's case comes first, with their history.
+  // The queue lists open cases a page at a time (the light queue view: a few runs per player, scored signals only); a
+  // deep-linked player's case comes first, with their history. Each case's full signals and every run of theirs load
+  // when it is opened (full below).
+  type ListData = { runs: FlagRun[]; players: FlagPlayer[]; total?: number; autoClosedWeek?: number; shadowedOpen?: number };
+  const listUrl = (offset: number) => `/admin/integrity?view=queue&review=${encodeURIComponent(review)}${tier ? `&tier=${tier}` : ""}${userParam ? `&user=${encodeURIComponent(userParam)}` : ""}&limit=${PAGE}&offset=${offset}`;
   const [data, focusData] = await Promise.all([
-    api<{ runs: FlagRun[]; players: FlagPlayer[]; autoClosedWeek?: number; shadowedOpen?: number }>(`/admin/integrity?review=${encodeURIComponent(review)}${tier ? `&tier=${tier}` : ""}${userParam ? `&user=${encodeURIComponent(userParam)}` : ""}`),
+    api<ListData>(listUrl(0)),
     caseParam && !userParam ? api<{ runs: FlagRun[]; players: FlagPlayer[] }>(`/admin/integrity?${q}`) : Promise.resolve(null),
   ]);
   let cases = data.players.slice();
   let runs = data.runs.slice();
-  if (focusData) {
-    for (const p of focusData.players) if (!cases.some((c) => c.user_id === p.user_id)) cases.unshift(p);
-    for (const r of focusData.runs) if (!runs.some((x) => x.run_id === r.run_id)) runs.push(r);
-  }
+  let total = data.total ?? cases.length;
+  let loaded = data.players.length;
+  /** A player's full list answer folded in: their signals (the queue view has the scored ones only) and every run. */
+  const merge = (f: { runs: FlagRun[]; players: FlagPlayer[] }) => {
+    for (const p of f.players) {
+      const i = cases.findIndex((c) => c.user_id === p.user_id);
+      if (i < 0) cases.unshift(p);
+      else Object.assign(cases[i], p);
+    }
+    for (const r of f.runs) if (!runs.some((x) => x.run_id === r.run_id)) runs.push(r);
+  };
+  if (focusData) merge(focusData);
+  // A case's full answer (GET /admin/integrity?user=: every run in this view, the review-only signals), once each.
+  const fulls = new Map<string, Promise<void>>();
+  const full = (uid: string) =>
+    once(fulls, uid, () => {
+      const p = new URLSearchParams({ review: uid === caseParam ? q.get("review")! : review, user: uid, limit: "200" });
+      if (tier) p.set("tier", tier);
+      return api<{ runs: FlagRun[]; players: FlagPlayer[] }>(`/admin/integrity?${p}`).then(merge);
+    });
+  if (focusData && caseParam) fulls.set(caseParam, Promise.resolve());
   const runsOf = (uid: string) => runs.filter((r) => r.user_id === uid).sort((a, b) => b.score - a.score);
   const openRuns = (uid: string) => runsOf(uid).filter((r) => r.review === null);
   const headline = (p: FlagPlayer) => {
@@ -293,8 +328,21 @@ export const casesView: View = async (root, params) => {
       h("span", { class: "q-age", title: `Open since ${when(since)}` }, age(since)),
     );
   };
+  const loadMore = async (btn: HTMLButtonElement) => {
+    btn.disabled = true;
+    const next = await api<ListData>(listUrl(loaded)).catch((e: Error) => (toast(e.message, true), null));
+    btn.disabled = false;
+    if (!next) return;
+    loaded += next.players.length;
+    total = next.total ?? total;
+    for (const p of next.players) if (!cases.some((c) => c.user_id === p.user_id)) cases.push(p);
+    for (const r of next.runs) if (!runs.some((x) => x.run_id === r.run_id)) runs.push(r);
+    paintList();
+    if (current) select(current, currentRun, false);
+  };
   const paintList = () => {
     fill(list, ...(cases.length ? cases.map(listRow) : [h("div", { class: "calm-state small" }, hopArc({ size: 72, cls: "still" }), h("p", null, review === "open" ? "No open cases." : "Nothing matches."))]));
+    if (loaded < total) list.append(h("button", { type: "button", class: "small ghost case-more", onclick: (e: Event) => void loadMore(e.currentTarget as HTMLButtonElement) }, `Show more (${total - loaded} more players)`));
     if (cases.length) hopIndicator(list, ".case-row", { axis: "y", selected: ".on", inset: 8 });
   };
 
@@ -317,6 +365,12 @@ export const casesView: View = async (root, params) => {
     const rs = runsOf(uid);
     currentRun = runId && rs.some((r) => r.run_id === runId) ? runId : (openRuns(uid)[0] ?? rs[0])?.run_id ?? null;
     void paintCase(p, slide);
+    // The rest of the case (every run, the review-only signals) comes in behind it.
+    if (!fulls.has(uid))
+      void full(uid).then(
+        () => current === uid && select(uid, currentRun, false),
+        (e: Error) => current === uid && toast(`Couldn't load the whole case: ${e.message}`, true),
+      );
     if (phone()) pane.scrollIntoView({ block: "start", behavior: reduced() ? "auto" : "smooth" });
   };
 
@@ -328,6 +382,9 @@ export const casesView: View = async (root, params) => {
     const metaSlot = h("div", { class: "case-meta" });
     const activity = h("section", { class: "case-sec case-activity" }, h("h3", null, "Activity"), h("div", { class: "sk-block sm" }));
     const ctxSlot = h("div", { class: "case-ctx" }, h("div", { class: "sk-block sm" }));
+    const cmpSlot = h("div", { class: "case-compare" }, run ? h("div", { class: "sk-block sm" }) : null);
+    // Rule holds after a staff lift (the ac-rules lane's API, v0.0.40): its list goes here, under the evidence.
+    const holdsSlot = h("div", { class: "case-holds", "data-user": p.user_id });
     const rank = h("span", { class: "case-rank" });
     const verdict = p.blatant ? h("span", { class: "verdict bad" }, "Blatant") : h("span", { class: "verdict warn" }, "Suspicious");
     const body = h(
@@ -371,7 +428,9 @@ export const casesView: View = async (root, params) => {
         : null,
       run ? h("div", { class: "case-map" }, mapLine(run.map, { track: run.track }), h("span", { class: "faint" }, styleWord(run.style)), run.session ? h("span", { class: "faint", title: attemptText(run.session) ?? "" }, `attempt ${run.session.attempt}`) : null, h("span", { class: "faint", title: when(run.created_at) }, ago(run.created_at)), clientTag(run.client), h("span", null, run.status === "verified" ? (run.tier === "blatant" ? badge("verified, shadowed by the rule", "warn") : badge("verified", "")) : badge(run.status, "bad")), run.review ? badge(run.reviewed_by === AUTO_REVIEWER ? `closed: ${reviewWord(run)}` : `${run.review}${run.note ? `: ${run.note}` : ""}`, "") : null) : null,
       h("section", { class: "case-sec" }, h("h3", null, "Evidence"), evidenceBlock([run?.evidence ?? [], p.signals])),
+      holdsSlot,
       runSlot,
+      cmpSlot,
       ctxSlot,
       activity,
     );
@@ -403,6 +462,11 @@ export const casesView: View = async (root, params) => {
           );
         },
         (e: Error) => my === seq && fill(runSlot, h("p", { class: "err" }, `Couldn't load the run: ${e.message}`)),
+      );
+      // This run against the board's fastest and the player's own runs, and who the player is (compare.ts).
+      void Promise.all([compare(run.run_id), lite(p.user_id).catch(() => null)]).then(
+        ([x, d]) => my === seq && fill(cmpSlot, compareSection(x, d, p.linked)),
+        (e: Error) => my === seq && fill(cmpSlot, h("p", { class: "err" }, `Couldn't load the comparison: ${e.message}`)),
       );
     } else runSlot.replaceChildren();
     // The case: stage, assignee, labels, the pinned note, and its timeline. Looking at it marks it seen (seen.ts).
@@ -459,10 +523,13 @@ export const casesView: View = async (root, params) => {
     paintList();
     select(p.user_id);
   };
+  /** Before acting on a case: every open run of the player is here (the list holds a few). false: it didn't load. */
+  const everyRun = (uid: string) => full(uid).then(() => true, (e: Error) => (toast(`Couldn't load the case's runs: ${e.message}`, true), false));
   const markReviewed = async (ids: string[], noteText: string | null, resolution = "cleared") => (ids.length ? !!(await api("/admin/integrity", { action: "clear", ids, note: noteText, resolution }).then(() => true, (e) => (toast(String((e as Error).message), true), false))) : true);
 
   const actions = {
     clear: async (p: FlagPlayer) => {
+      if (!(await everyRun(p.user_id))) return;
       const ids = openRuns(p.user_id).map((r) => r.run_id);
       if (!ids.length) return toast("Nothing open in this case.");
       const text = note.value.trim() || null;
@@ -495,6 +562,7 @@ export const casesView: View = async (root, params) => {
       if (p.shadow_at) return void ((p.shadow_at = null), select(p.user_id, currentRun, false));
       p.shadow_at = Date.now();
       p.shadow_source = "admin";
+      await everyRun(p.user_id);
       const ids = openRuns(p.user_id).map((r) => r.run_id);
       await markReviewed(ids, "shadowbanned", "shadowed");
       for (const x of runs) if (ids.includes(x.run_id)) x.review = "cleared";

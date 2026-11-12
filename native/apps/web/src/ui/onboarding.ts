@@ -232,7 +232,7 @@ export function openOnboarding(user?: User | null): void {
   // ---------------------------------------------------------------- name
   function nameStep(): HTMLElement {
     const start = user && !isDefaultName(user.name) ? user.name : suggestName();
-    const nf = nameField({ initial: start, autofocus: true, onSaved: (u) => accountChanged(u ?? undefined), onInput: () => (showName(nf.input.value), stage?.typed()) });
+    const nf = nameField({ initial: start, autofocus: true, keepOnLimit: true, onSaved: (u) => accountChanged(u ?? undefined), onInput: () => (showName(nf.input.value), stage?.typed()) });
     nf.input.setAttribute("aria-label", "Display name");
     // The bunny tilts its head while the name has a problem (the field marks it aria-invalid).
     const invalid = new MutationObserver(() => stage?.puzzled(nf.input.getAttribute("aria-invalid") === "true"));

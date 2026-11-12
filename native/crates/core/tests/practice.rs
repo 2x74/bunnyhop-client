@@ -3,10 +3,9 @@
 //! Maps are gitignored; each test skips (with a note) when its map is absent.
 
 use bunnyhop_core::{Cmd, Game};
-use std::path::PathBuf;
 
 fn load(name: &str) -> Option<Game> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps").join(format!("{name}.bsp"));
+    let path = bunnyhop_core::test_maps::bsp(name);
     let Ok(bytes) = std::fs::read(&path) else {
         eprintln!("skipping {name}: {} not found", path.display());
         return None;

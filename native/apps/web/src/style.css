@@ -870,7 +870,7 @@ a.home-link, a.home-link:hover { text-decoration: none; }
 .home-right > .home-records[hidden] { display: none; }
 .home-recs-head { margin: 0 0 0.55rem; padding: 0 0.15rem; font-family: var(--font-ui); font-size: var(--fs-md); font-weight: 700; color: var(--cream); text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8); }
 .home-recs { display: flex; flex-direction: column; gap: 0.45rem; margin: 0; padding: 0; list-style: none; }
-.home-rec { display: grid; grid-template-columns: minmax(0, 15rem) minmax(0, 1fr); align-items: center; column-gap: 1.1rem; min-width: 0; }
+.home-rec { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); align-items: center; column-gap: 1.1rem; min-width: 0; }
 .home-rec-run { display: flex; align-items: center; gap: 0.7rem; min-width: 0; padding: 0; border: 0; background: none; color: var(--cream); text-align: left; cursor: pointer; }
 .home-rec-art { flex: none; width: 4.4rem; aspect-ratio: 16 / 9; border-radius: var(--r-1); background-color: var(--ink-2); box-shadow: 0 0.4rem 1rem -0.6rem rgba(0, 0, 0, 0.7); transition: box-shadow var(--t-step) var(--ease-glide); }
 .home-rec-art::after { display: none; }
@@ -904,6 +904,35 @@ a.home-rec-who:hover, a.home-rec-who:focus-visible { text-decoration: none; }
 @media (min-width: 58.01rem) and (max-height: 860px) { .home-rec:nth-child(n + 5) { display: none; } }
 @media (min-width: 58.01rem) and (max-height: 760px) { .home-rec:nth-child(n + 4) { display: none; } }
 @media (max-width: 58rem) { .home-records { width: 100%; max-width: 34rem; } }
+
+/* Live now, above the records while someone is streaming (ui/home-live.ts): the records' rows, with the platform's
+   mark where a record has its map picture. The stream opens in a new tab; the player opens their profile. While it
+   shows, the records give up rows so the column keeps its height. */
+.home-live { display: var(--home-live, block); min-width: 0; }
+.home-right > .home-live[hidden] { display: none; }
+.home-live-stream { color: var(--cream); text-decoration: none; }
+a.home-live-stream:hover, a.home-live-stream:focus-visible { text-decoration: none; outline: none; }
+.home-live-art { display: grid; place-items: center; color: #fff; background: var(--ink-2); }
+.home-live-art .lk-icon { width: 1.35rem; height: 1.35rem; color: #fff; }
+.home-live-stream:hover .home-live-art, .home-live-stream:focus-visible .home-live-art { box-shadow: 0 0 0 2px var(--amber); }
+.home-live-stream:hover .home-rec-map b, .home-live-stream:focus-visible .home-rec-map b { color: #fff; }
+.home-live .home-rec-time { align-items: center; }
+.home-live .home-rec-time .nm-live { font-size: 0.6rem; vertical-align: 0; }
+/* With Live now, the maps to try are four on every height (tall windows show six otherwise). */
+@media (min-width: 58.01rem) { .home-right:has(> #home-live:not([hidden])) .home-grid > :nth-child(n + 5) { display: none; } }
+/* The records' row budget (above) less one row for the heading and one per stream: */
+@media (min-width: 58.01rem) and (max-height: 1260px) {
+  .home-right:has(> #home-live:not([hidden])) #home-records .home-rec:nth-child(n + 5) { display: none; }
+  .home-right:has(> #home-live:not([hidden]) .home-live-row:nth-child(2)) #home-records .home-rec:nth-child(n + 4) { display: none; }
+  .home-right:has(> #home-live:not([hidden]) .home-live-row:nth-child(3)) #home-records .home-rec:nth-child(n + 3) { display: none; }
+}
+@media (min-width: 58.01rem) and (max-height: 860px) {
+  .home-live-row:nth-child(n + 3) { display: none; }
+  .home-right:has(> #home-live:not([hidden])) #home-records .home-rec:nth-child(n + 3) { display: none; }
+  .home-right:has(> #home-live:not([hidden]) .home-live-row:nth-child(2)) #home-records .home-rec:nth-child(n + 2) { display: none; }
+}
+@media (min-width: 58.01rem) and (max-height: 760px) { .home-right:has(> #home-live:not([hidden])) #home-records .home-rec:nth-child(n + 2) { display: none; } }
+@media (max-width: 58rem) { .home-live { width: 100%; max-width: 34rem; } }
 @keyframes mb-pulse { 50% { opacity: 0.55; } }
 
 /* Leaving for a map (menu.ts startLeave): the screen you were on takes off under the loading screen's plate (the home
@@ -1070,12 +1099,14 @@ a:hover { color: var(--accent-hi); }
   background: radial-gradient(60% 50% at 50% 50%, rgba(5, 6, 9, 0.35), rgba(5, 6, 9, 0.15)); outline: none;
 }
 #resume-veil[hidden] { display: none; }
+/* "Click to resume": the same plain line as "Click to start", above the crosshair, with how to get the menu under it.
+   No box and no keycap. */
 #resume-veil .rv-card {
-  display: grid; gap: 0.35rem; justify-items: center; padding: 0.9rem 1.5rem; border-radius: var(--radius, 0.6rem);
-  background: rgba(10, 12, 16, 0.88); border: 1px solid var(--line-2); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  display: grid; gap: 0.2rem; justify-items: center; margin: 0 0 7rem;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9), 0 0 0.5em rgba(0, 0, 0, 0.55), 0 0 1.2em rgba(0, 0, 0, 0.35);
 }
-#resume-veil .rv-card b { font-size: var(--fs-xl); letter-spacing: -0.01em; }
-#resume-veil .rv-card small { color: var(--dim); font-size: var(--fs-sm); }
+#resume-veil .rv-card b { font-size: 1.35rem; font-weight: 700; letter-spacing: -0.01em; color: #fff; }
+#resume-veil .rv-card small { color: rgba(255, 255, 255, 0.78); font-size: var(--fs-sm); font-weight: 600; }
 /* A new player's first look at a map (showStartPrompt): the world, clear, and one line just above the crosshair. */
 #resume-veil.start { background: none; }
 #resume-veil .rv-line {
@@ -1083,6 +1114,8 @@ a:hover { color: var(--accent-hi); }
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9), 0 0 0.5em rgba(0, 0, 0, 0.55), 0 0 1.2em rgba(0, 0, 0, 0.35);
   animation: rv-line-in 0.5s var(--ease) both;
 }
+#resume-veil .rv-line:has(small) { text-align: center; }
+#resume-veil .rv-line small { display: block; margin-top: 0.3rem; font-size: var(--fs-sm); font-weight: 600; }
 @keyframes rv-line-in { from { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { #resume-veil .rv-line { animation: none; } }
 /* One line at a time: the tutorial's prompt waits until play starts. */

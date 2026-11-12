@@ -11,7 +11,7 @@ import { requestRace } from "../player/race";
 import { rowMenu } from "./row-menu";
 import { openReplayViewer } from "../viewer/request";
 import { navigate } from "./nav";
-import { BONUS_STYLE, STYLE_DEFS, styleForTrack, styleLabel, type StyleId } from "../styles";
+import { STYLE_DEFS, styleForTrack, styleLabel, trackStyleLocked, type StyleId } from "../styles";
 import { trackName } from "../zones";
 import { fullDate, gapTime, pagedBoard, playerCell, relDate, type BoardPage, type BoardSource } from "./board-pager";
 import { dismissOutside } from "./dismiss";
@@ -31,7 +31,7 @@ export interface BoardOptions {
   trackNames?: Record<number, string>;
   /** The dialog's subtitle (openLeaderboardDialog; default: the map name). */
   subtitle?: string;
-  /** The main-track style switch was used (the map list keeps one selected style for its board and the run). */
+  /** The style switch was used (the map list keeps one selected style for its board and the run). */
   onStyle?: (id: StyleId) => void;
 }
 
@@ -47,8 +47,9 @@ const toPage = (lb: Leaderboard, offset: number): BoardPage<LeaderboardEntry> =>
 });
 
 /**
- * Leaderboard with Main | Bonus N track switches and, on the main track, style switches (every style by its plain
- * name). Bonus boards are Normal only. `style` is the initially selected main-track style.
+ * Leaderboard with Main | Bonus N track switches and style switches (every style by its plain name), one board per
+ * track × style. The tutorial's final course is Normal only (styles.ts styleForTrack). `style` is the initially selected
+ * style.
  */
 export function leaderboardPanel(map: string, style: string, opts: BoardOptions = {}): HTMLElement {
   const tracks = (opts.tracks ?? [0]).length ? (opts.tracks ?? [0]) : [0];
@@ -56,7 +57,7 @@ export function leaderboardPanel(map: string, style: string, opts: BoardOptions 
   let mainStyle = style;
   // Everyone, or only the players you follow (and you): apps/api boards.ts ?scope=following.
   let following = false;
-  const boardStyle = () => styleForTrack(mainStyle as StyleId, track);
+  const boardStyle = () => styleForTrack(mainStyle as StyleId, track, map);
   const nameOf = (t: number) => opts.trackNames?.[t] ?? trackName(t);
   const label = () => `${track || opts.trackNames?.[track] ? nameOf(track) + " · " : ""}${styleLabel(boardStyle())}`;
   const race =
@@ -112,7 +113,7 @@ export function leaderboardPanel(map: string, style: string, opts: BoardOptions 
           withReplayViews(h("button.link-btn", { type: "button", title: `Watch ${e.player.name}'s run in the replay viewer`, "aria-label": `Watch ${e.player.name}'s run`, onclick: () => openReplayViewer({ runId: e.runId, name }) }, "Watch"), e.runId),
           h("button.link-btn", { type: "button", title: `Race ${e.player.name}'s run as a ghost`, "aria-label": `Race ${e.player.name}'s run as a ghost`, onclick: () => race(e, t) }, "Race"),
           // Copy start, Copy link, Report, Open in admin (ui/row-menu.ts).
-          rowMenu({ runId: e.runId, map, time: e.time, player: e.player }, { mine: c.mine }),
+          rowMenu({ runId: e.runId, map, time: e.time, player: e.player, style: boardStyle() }, { mine: c.mine }),
         ),
       );
     },
@@ -153,14 +154,13 @@ export function leaderboardPanel(map: string, style: string, opts: BoardOptions 
 
   function renderControls(): void {
     const parts: HTMLElement[] = [];
-    if (tracks.length > 1) parts.push(seg("Track", tracks.map((t) => [nameOf(t), t ? `${nameOf(t)} (Normal style only)` : "Main track", String(t), t === track, () => ((track = t), refresh())])));
+    if (tracks.length > 1) parts.push(seg("Track", tracks.map((t) => [nameOf(t), t ? nameOf(t) : "Main track", String(t), t === track, () => ((track = t), refresh())])));
     if (api.available()) parts.push(seg("Players", [["All", "Everyone", "all", !following, () => ((following = false), refresh())], ["Following", "Players you follow, and you", "following", following, () => ((following = true), refresh())]]));
-    if (track === 0) {
+    if (!trackStyleLocked(track, map)) {
       const styles = seg("Style", STYLE_DEFS.map((d) => [d.name, d.rule, d.id, d.id === mainStyle, () => ((mainStyle = d.id), opts.onStyle?.(d.id), refresh())]), ".rb-styles");
       styles.style.setProperty("--rb-half", String(Math.ceil(STYLE_DEFS.length / 2))); // boards.css: two even rows
       parts.push(styles);
     }
-    else if (!opts.trackNames?.[track]) parts.push(h("span.rb-only", null, `${styleLabel(BONUS_STYLE)} only on bonus tracks`));
     // Keep keyboard focus on the switch that was just used (the buttons are rebuilt).
     const key = (document.activeElement as HTMLElement | null)?.closest(".rb-controls") ? (document.activeElement as HTMLElement).dataset.key : undefined;
     board.controls.replaceChildren(...parts);

@@ -1,5 +1,6 @@
 import { appLocation } from "../platform/navigation";
-import { desktopNoticePending } from "../platform/touch";
+import { desktopNoticePending, touchOnly } from "../platform/touch";
+import { WAVEDASH } from "../platform/env";
 import { setPBAccount, syncPBs } from "../pb";
 import { playerGlowRevision, setPlayerGlow } from "../player/cosmetics";
 // The current player, cached for the page, plus a change signal so every account chip / panel repaints after a
@@ -27,9 +28,12 @@ export const getReplayIntro = () => replayIntro;
 /** Cheap pre-check before loading ui/onboarding.ts: false once this browser finished or skipped the intro. */
 export const ONBOARDED_KEY = "bunnyhop:onboarded";
 export function onboardingMaybeNeeded(): boolean {
-  // The Wavedash build's keyboard-and-mouse notice on a phone comes first (platform/touch.ts).
+  // The keyboard-and-mouse notice on a phone comes first (platform/touch.ts).
   if (desktopNoticePending()) return false;
-  return !localStorage.getItem(ONBOARDED_KEY) || appLocation().searchParams.get("intro") === "1";
+  const forced = appLocation().searchParams.get("intro") === "1";
+  // On the site a phone never gets the intro by itself: it ends in a map a phone can't play.
+  if (!WAVEDASH && touchOnly() && !forced) return false;
+  return !localStorage.getItem(ONBOARDED_KEY) || forced;
 }
 
 export function accountAvatar(user: { id?: string | null; name: string; avatarUrl: string | null }, size = 24): HTMLElement {

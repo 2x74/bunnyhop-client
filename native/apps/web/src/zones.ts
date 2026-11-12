@@ -172,6 +172,17 @@ export function zonesEqual(a: readonly Zone[], b: readonly Zone[]): boolean {
   );
 }
 
+/**
+ * Whether a replay's zones match the official ones. Native clients up to v0.9.0 drop anti-skip zones when they load a
+ * map, so their headers carry the official set minus its anti-skip zones. Timing never trusts header zones (the
+ * verifier re-simulates against the official set, anti-skip included), so that one gap is accepted.
+ */
+export function zonesMatchOfficial(official: readonly Zone[], timed: readonly Zone[]): boolean {
+  if (zonesEqual(official, timed)) return true;
+  const kept = official.filter((z) => z.kind !== "anti-skip");
+  return kept.length < official.length && zonesEqual(kept, timed);
+}
+
 // ---------------------------------------------------------------------------
 // BSP model bounds (read straight from the BSP header so no wasm changes are needed)
 

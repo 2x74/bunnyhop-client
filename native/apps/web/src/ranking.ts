@@ -23,7 +23,16 @@
 // - Past the top 10, N and place round down to steps (STEPS, 10 per decade, N capped at 10,000). A new finisher then
 //   changes points only for the few players who cross a step, instead of rewriting every row and every total on the board
 //   (research/RANKING-REVAMP.md: ~4× the D1 writes otherwise).
-// - Bonus tracks give a quarter (they're short, and bonus boards are Normal only).
+// - Bonus tracks give no points (BONUS_MAX_TIER 0, owner 11-12: "set bonus points to 0 and see if anyone complains";
+//   their boards and WRs stay). The mechanism, should it come back: a quarter, scored at most at BONUS_MAX_TIER, because a
+//   bonus has no tier of its own and is usually a
+//   short track (8-20 s WRs at every map tier), so a T6-T8 map's bonus paid like a hard map for a few seconds' run
+//   (bhop_minecraft_spiral's 0.8 s bonus 2 paid 158 points, more than a T3 map's WR). The same rule in every style.
+// - Length (v0.0.40): a main-track record is multiplied by its map's length factor (maps.length_factor, set offline from
+//   the SourceJump WR's jump count: lengthFactorFor below). Length counts more the harder the tier, because a long hard
+//   map compounds (one slip anywhere costs the run): T1-T2 are never changed, a T7 twice as long as a typical T7 pays
+//   ~11% more. Troll stamina maps opt out of the bonus by hand (owner 11-07: bhop_ragequit). Styles whose tier is capped
+//   (Infinite) keep 1.
 // - Overall points = the 0.985-weighted sum of weighted points over every record; style rankings = the same weighted
 //   sum of raw points over that style's records. The weighting (from shavit-rankings) means the 46th-best record counts
 //   half, so rank comes from a strong set of records rather than from finishing the most maps or re-running the same
@@ -36,6 +45,12 @@ import { clampTier, type Tier } from "./tiers";
 
 export const TIER_BASE: Record<Tier, number> = { 1: 10, 2: 30, 3: 60, 4: 100, 5: 150, 6: 210, 7: 280, 8: 360, 9: 450, 10: 550 };
 export const BONUS_TRACK_FACTOR = 0.25;
+/**
+ * The highest tier a bonus track is scored at (v0.0.40, owner's choice; research in the v0.0.40 ranks report): bonus
+ * boards pay like a T1-T2 map at most, whatever the map's tier. 0 = bonuses give no points at all (their boards and WRs
+ * stay, unranked). src/points.ts tierSql mirrors this.
+ */
+export const BONUS_MAX_TIER: number = 0;
 
 export const CLEAR_WEIGHT = 3;
 export const CLEAR_FLOOR = 0.4;
@@ -122,6 +137,8 @@ export interface RecordInput {
   rank: number;
   /** Players on the board. */
   players: number;
+  /** The map's length factor (maps.length_factor); main track only, absent = 1. */
+  lengthFactor?: number;
 }
 
 /**
@@ -131,28 +148,62 @@ export interface RecordInput {
  */
 export const STYLE_MAX_TIER: Readonly<Record<string, Tier>> = { infinite: 3 };
 
-/** The tier a record is scored at: the map's (clamped to 1..10), capped for the styles in STYLE_MAX_TIER. */
-export function scoredTier(tier: number | null, style: string): Tier | null {
+/**
+ * The tier a record is scored at: the map's (clamped to 1..10), capped for the styles in STYLE_MAX_TIER and for bonus
+ * tracks at BONUS_MAX_TIER; null = no points (no tier, or bonuses unranked).
+ */
+export function scoredTier(tier: number | null, style: string, track = 0): Tier | null {
   const t = clampTier(tier);
-  const cap = Object.hasOwn(STYLE_MAX_TIER, style) ? STYLE_MAX_TIER[style] : null;
-  return t && cap && t > cap ? cap : t;
+  if (!t) return null;
+  const caps = [Object.hasOwn(STYLE_MAX_TIER, style) ? STYLE_MAX_TIER[style] : 10, track > 0 ? BONUS_MAX_TIER : 10];
+  const cap = Math.min(...caps);
+  return cap < 1 ? null : (Math.min(t, cap) as Tier);
+}
+
+/**
+ * Typical jumps in a SourceJump WR per tier (the median over maps with 5+ SourceJump runs, fetched 2026-11-07,
+ * tools/ranking/sourcejump.json), made non-decreasing: past T4 tier measures difficulty more than length.
+ */
+export const LENGTH_REF_JUMPS: Record<Tier, number> = { 1: 25, 2: 39, 3: 72, 4: 197, 5: 270, 6: 351, 7: 386, 8: 386, 9: 386, 10: 386 };
+/** Tier steps per doubling of length over the tier's typical WR: none at T1-T2, then 0.05 a tier up to 0.25 (T7+). */
+export const lengthStep = (t: Tier): number => Math.min(0.25, 0.05 * Math.max(0, t - 2));
+/** A map can gain up to two steps (4× the typical length) and lose one (half of it or shorter). */
+export const LENGTH_UP_STEPS = 2;
+export const LENGTH_DOWN_STEPS = 1;
+
+/**
+ * A map's length factor from its tier and the jumps in its SourceJump WR (null: unknown → 1): the points of tier
+ * t + adj over tier t, adj = lengthStep(t) × log2(jumps / typical), clamped. `bonus: false` (troll stamina maps) keeps
+ * the cut for short maps but no gain. Rounded to 4 decimals: the value is stored in maps.length_factor.
+ */
+export function lengthFactorFor(tier: number | null, jumps: number | null, bonus = true): number {
+  const t = clampTier(tier);
+  if (!t || !jumps || jumps <= 0) return 1;
+  const step = lengthStep(t);
+  if (!step) return 1;
+  let adj = step * Math.log2(jumps / LENGTH_REF_JUMPS[t]);
+  adj = Math.max(-step * LENGTH_DOWN_STEPS, Math.min(step * LENGTH_UP_STEPS, adj));
+  if (!bonus) adj = Math.min(0, adj);
+  const base = (x: number) => 5 * x * (x + 1); // TIER_BASE's curve between whole tiers
+  return Math.round((base(t + adj) / base(t)) * 1e4) / 1e4;
 }
 
 /** Raw (style-blind) points of one record; 0 on unrated maps and for unknown styles. src/points.ts RAW_SQL mirrors this, operation for operation. */
 export function recordPointsRaw(r: RecordInput): number {
-  const t = scoredTier(r.tier, r.style);
+  const t = scoredTier(r.tier, r.style, r.track);
   if (!t || r.ticks <= 0 || !isRankedStyle(r.style)) return 0;
   const track = r.track > 0 ? BONUS_TRACK_FACTOR : 1;
+  const len = r.track === 0 && t === clampTier(r.tier) ? (r.lengthFactor ?? 1) : 1;
   const clear = CLEAR_WEIGHT * TIER_BASE[t];
   const n = pointsStep(r.players);
   if (r.rank === 1) {
-    if (r.players <= 1) return clear * track;
+    if (r.players <= 1) return clear * track * len;
     const second = pointsStep(2);
-    return (clear + TIER_PLACEMENT[t] * Math.max(0, n.power / second.power - 1) * (1 + second.inverse)) * (1 + n.wrRamp) * track;
+    return (clear + TIER_PLACEMENT[t] * Math.max(0, n.power / second.power - 1) * (1 + second.inverse)) * (1 + n.wrRamp) * track * len;
   }
   const q = r.wrTicks / r.ticks;
   const place = pointsStep(r.rank);
-  return (clear * (CLEAR_FLOOR + CLEAR_TIME * (q * q)) + TIER_PLACEMENT[t] * Math.max(0, n.power / place.power - 1) * (1 + place.inverse)) * track;
+  return (clear * (CLEAR_FLOOR + CLEAR_TIME * (q * q)) + TIER_PLACEMENT[t] * Math.max(0, n.power / place.power - 1) * (1 + place.inverse)) * track * len;
 }
 
 /** Points the record adds to the overall rank (before the per-player RECORD_WEIGHTING). */

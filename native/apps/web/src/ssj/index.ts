@@ -5,12 +5,14 @@
 //   session.ts   ssj.feed(cmd, state, events, { inStart, time }) after every tick, ssj.reset(state) on restarts
 //   chat         one local system line per reported jump (net/hud.ts postLocalLine: the line a command's ctx.reply
 //                writes), solo and rooms, when "Chat" is on
+//   console      every reported jump, chat on or off (console/view.ts printConsole)
 //   !ssj         chat-commands.ts registry: opens the panel (pauses the game like the HUD editor, resumes on close)
 
 import { EVENT_JUMPED, EVENT_TELEPORTED, type PlayerState } from "../core";
 import { registerChatCommand } from "../chat-commands";
 import { takeFreeCursor } from "../free-cursor";
 import { postLocalLine } from "../net/hud";
+import { printConsole } from "../console/view";
 import { resumePlay } from "../play-lock";
 import type { TickCmd } from "../timer";
 import { check, color, group, range, segmented, toggle } from "../ui/controls";
@@ -75,13 +77,15 @@ export class LiveSsj {
 }
 
 /**
- * The chat line for a report, if Chat is on and the jump passes the gain filter: "Jump 6 · 1013 u/s (+87) · Gain 87.5% ·
- * Sync 92% · 5 strafes".
+ * A report in the console, always (so earlier jumps can be read back with the chat off), and in the chat if Chat is on
+ * and the jump passes the gain filter: "Jump 6 · 1013 u/s (+87) · Gain 87.5% · Sync 92% · 5 strafes".
  */
 export function ssjChat(r: SsjReport): void {
   const p = P();
+  const text = ssjText(r, p.fields);
+  printConsole(text);
   if (!p.chat || !ssjPassesGain(r.gain, p.minGain)) return;
-  postLocalLine(ssjText(r, p.fields), ssjNodes(ssjItems(r, p.fields), false));
+  postLocalLine(text, ssjNodes(ssjItems(r, p.fields), false));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -109,7 +113,7 @@ export function ssjRows(): HTMLElement[] {
   return [
     toggle("Chat", () => P().chat, (v) => up((p) => (p.hud.ssj.chat = v)), {
       hint: "!ssj",
-      desc: "A line in chat for each jump picked below.",
+      desc: "A line in chat for each jump picked below. The console gets every one either way, to read back later.",
       keywords: "ssj jump stats speed sixth jump gain sync strafes efficiency chat",
     }),
     toggle("HUD", () => prefs.get().hud.layout.jumpStats.on, (v) => up((p) => (p.hud.layout.jumpStats.on = v)), {

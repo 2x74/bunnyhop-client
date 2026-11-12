@@ -110,7 +110,7 @@ fn press_edge_gate_stops_the_flight() {
 fn game_step_gates_air_jumps_on_a_press_edge() {
     use bunnyhop_core::game::{IN_JUMP, PHYSICS_V23};
     use bunnyhop_core::{Cmd, Game};
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../maps/bhop_eazy.bsp");
+    let path = bunnyhop_core::test_maps::bsp("bhop_eazy");
     let bytes = std::fs::read(path).expect("bhop_eazy fixture");
     let bsp = bunnyhop_core::parse_bsp(&bytes).unwrap();
     let mut game = Game::load(&bsp).unwrap();

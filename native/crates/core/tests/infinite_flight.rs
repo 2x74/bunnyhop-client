@@ -4,10 +4,9 @@
 
 use bunnyhop_core::game::{EVENT_FLIGHT, EVENT_FLIGHT_LANDED, FLIGHT_EXIT_CAP, FLIGHT_TOP_SPEED, IN_FLIGHT, PHYSICS_V23, PHYSICS_V24};
 use bunnyhop_core::{Cmd, Game, Settings};
-use std::path::PathBuf;
 
 fn load(name: &str, air_jump: bool, physics: u32) -> Option<Game> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps").join(format!("{name}.bsp"));
+    let path = bunnyhop_core::test_maps::bsp(name);
     let Ok(bytes) = std::fs::read(&path) else {
         eprintln!("skipping {name}: {} not found", path.display());
         return None;
@@ -115,6 +114,7 @@ fn flight_tops_out_at_3500_and_the_landing_caps_at_3510() {
     assert!(after <= FLIGHT_EXIT_CAP + 1.0, "landing kept {after} (flew at {before:?})");
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn landing_inside_solid_keeps_flying_until_free() {
     for map in ["bhop_eazy", "bhop_badges", "bhop_arcane_v1", "bhop_mist_4", "bhop_monster_jam"] {

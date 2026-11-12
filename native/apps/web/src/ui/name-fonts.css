@@ -17,6 +17,14 @@
 @font-face { font-family: "bh-name-script"; src: url("../assets/name-fonts/script.woff2") format("woff2"); font-weight: 100 900; font-display: swap; size-adjust: 96%; ascent-override: 100.9%; descent-override: 25.1%; line-gap-override: 0%; }
 /* Doubled class: wins over the name elements' own font rules (board buttons, chat names). --nm-k is the name's own fit
    (ui/name-fit.ts): zoom shrinks the layout box with the text, so the name is never wider than in the default font. */
+/* v0.0.40: Condensed, and the bold (weight 950: the plain faces stop at 949, so nothing drawn at 900 picks it up) and
+   italic cuts (supporter-looks.ts NAME_STYLE_CUTS), each under its family with a weight or style. */
+@font-face { font-family: "bh-name-condensed"; src: url("../assets/name-fonts/condensed.woff2") format("woff2"); font-weight: 100 949; font-display: swap; size-adjust: 100%; ascent-override: 96.9%; descent-override: 24.1%; line-gap-override: 0%; }
+@font-face { font-family: "bh-name-condensed"; src: url("../assets/name-fonts/condensed-b.woff2") format("woff2"); font-weight: 950 1000; font-display: swap; size-adjust: 100%; ascent-override: 96.9%; descent-override: 24.1%; line-gap-override: 0%; }
+@font-face { font-family: "bh-name-condensed"; src: url("../assets/name-fonts/condensed-i.woff2") format("woff2"); font-weight: 100 949; font-style: italic; font-display: swap; size-adjust: 100%; ascent-override: 96.9%; descent-override: 24.1%; line-gap-override: 0%; }
+@font-face { font-family: "bh-name-condensed"; src: url("../assets/name-fonts/condensed-bi.woff2") format("woff2"); font-weight: 950 1000; font-style: italic; font-display: swap; size-adjust: 100%; ascent-override: 96.9%; descent-override: 24.1%; line-gap-override: 0%; }
+@font-face { font-family: "bh-name-serif"; src: url("../assets/name-fonts/serif-i.woff2") format("woff2"); font-weight: 100 949; font-style: italic; font-display: swap; size-adjust: 100%; ascent-override: 96.9%; descent-override: 24.1%; line-gap-override: 0%; }
+@font-face { font-family: "bh-name-mono"; src: url("../assets/name-fonts/mono-i.woff2") format("woff2"); font-weight: 100 949; font-style: italic; font-display: swap; size-adjust: 96%; ascent-override: 100.9%; descent-override: 25.1%; line-gap-override: 0%; }
 .nm-font { zoom: var(--nm-k, 1); }
 .nm-font.nm-font-grotesk { font-family: "bh-name-grotesk", var(--font-ui); font-synthesis: none; }
 .nm-font.nm-font-round { font-family: "bh-name-round", var(--font-ui); font-synthesis: none; }
@@ -27,3 +35,8 @@
 .nm-font.nm-font-marker { font-family: "bh-name-marker", var(--font-ui); font-synthesis: none; }
 .nm-font.nm-font-block { font-family: "bh-name-block", var(--font-ui); font-synthesis: none; }
 .nm-font.nm-font-script { font-family: "bh-name-script", var(--font-ui); font-synthesis: none; }
+.nm-font.nm-font-condensed { font-family: "bh-name-condensed", var(--font-ui); font-synthesis: none; }
+/* Bold and italic (marks.ts nameAttrs adds them only where the font has the cut, NAME_STYLE_CUTS). Never synthesised:
+   the default font is the system's own, which has both. */
+.nm-b.nm-b { font-weight: 950; font-synthesis: none; }
+.nm-i.nm-i { font-style: italic; font-synthesis: none; }

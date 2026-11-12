@@ -6,8 +6,7 @@ use bunnyhop_core::{
 };
 use playsrc_movement::CrouchState;
 fn game(version: u32, autohop: bool, crouched: bool, latched: bool) -> Option<Game> {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../maps/bhop_monument_valley.bsp");
+    let path = bunnyhop_core::test_maps::bsp("bhop_monument_valley");
     if !path.is_file() {
         eprintln!("skipping optional Monument fixture: {}", path.display());
         return None;
@@ -48,6 +47,7 @@ fn release(g: &mut Game) -> u32 {
     .unwrap();
     g.events
 }
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn v11_scroll_unduck_recategorizes_and_jumps_on_current_command() {
     let (Some(mut old), Some(mut new)) = (
@@ -60,6 +60,7 @@ fn v11_scroll_unduck_recategorizes_and_jumps_on_current_command() {
     assert_ne!(release(&mut new) & EVENT_JUMPED, 0);
     assert!((new.state.position[2] - 1572.750488).abs() < 0.001);
 }
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn v11_keeps_historical_autohop_airborne_strip() {
     for v in [PHYSICS_V10, PHYSICS_V11] {
@@ -69,6 +70,7 @@ fn v11_keeps_historical_autohop_airborne_strip() {
         assert_eq!(release(&mut g) & EVENT_JUMPED, 0);
     }
 }
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn scroll_held_jump_is_not_rearmed_by_unduck() {
     let Some(mut g) = game(PHYSICS_V11, false, true, true) else {
@@ -76,6 +78,7 @@ fn scroll_held_jump_is_not_rearmed_by_unduck() {
     };
     assert_eq!(release(&mut g) & EVENT_JUMPED, 0);
 }
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn teleport_ground_categorization_keeps_autohop_policy() {
     for v in [PHYSICS_V10, PHYSICS_V11] {

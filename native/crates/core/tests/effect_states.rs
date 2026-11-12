@@ -1,9 +1,10 @@
 //! Rendering-only map entities still receive Source I/O and replay snapshot restoration.
 use bunnyhop_core::{Game, entities::Entity};
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn smoke_inputs_kill_and_snapshot_restore() {
-    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps/bhop_arcane_v2.bsp");
+    let path = bunnyhop_core::test_maps::bsp("bhop_arcane_v2");
     if !path.exists() { eprintln!("Arcane map unavailable; skipping asset integration test"); return; }
     let bytes = std::fs::read(&path).unwrap();
     let bsp = bunnyhop_core::parse_bsp(&bytes).unwrap();
@@ -23,9 +24,10 @@ fn smoke_inputs_kill_and_snapshot_restore() {
     game.fire_input("test_smoke", "Disable", ""); assert!(!enabled(&game));
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn local_lights_toggle_kill_and_restore_with_no_movement_effect() {
-    let path=std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps/bhop_arcane_v2.bsp");
+    let path=bunnyhop_core::test_maps::bsp("bhop_arcane_v2");
     if !path.exists() { return; }
     let bsp=bunnyhop_core::parse_bsp(&std::fs::read(path).unwrap()).unwrap();
     let mut list=bunnyhop_core::physics::entity_list_with_outputs(&bsp,true);

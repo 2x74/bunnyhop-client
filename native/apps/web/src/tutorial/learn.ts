@@ -2,7 +2,7 @@
 // far you got, the final course's board, Start, and "Hide" (flag.ts tutorialHidden). Hidden, the row goes; the
 // home screen's "Tutorial" link and the map list's search still find it.
 
-import { BONUS_STYLE } from "../styles";
+import { TUTORIAL_BONUS_STYLE } from "../styles";
 import { h } from "../ui/dom";
 import { mapBoard } from "../ui/map-board";
 import { LESSON_IDS, TUTORIAL_MAP } from "./data";
@@ -49,7 +49,7 @@ export function tutorialPanel(o: TutorialPanelOptions): HTMLElement {
       "div.mbd-main",
       null,
       h("header.mbd-title", null, h("h3", null, "Learn to bhop"), h("p.mbd-meta", null, line)),
-      mapBoard({ map: TUTORIAL_MAP, style: BONUS_STYLE, track: FINAL_TRACK, ranked: null, title: "Final course", onFull: () => openTutorialBoard(o.pick) }),
+      mapBoard({ map: TUTORIAL_MAP, style: TUTORIAL_BONUS_STYLE, track: FINAL_TRACK, ranked: null, title: "Final course", onFull: () => openTutorialBoard(o.pick) }),
       h(
         "div.mbd-actions",
         null,

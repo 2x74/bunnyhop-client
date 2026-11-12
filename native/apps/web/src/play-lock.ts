@@ -264,11 +264,12 @@ function syncZoomGuard(): void {
  * A new player's first look at a map (main.ts): the world with one line, "Click to start", instead of the pause menu.
  * It's the veil in its quiet form: a click anywhere starts (pointer lock), Esc opens the pause menu.
  */
-export function showStartPrompt(): void {
-  showVeil("start");
+/** `goal`: one quieter line under it (a new player's first maps: what to do there). */
+export function showStartPrompt(goal?: string): void {
+  showVeil("start", goal);
 }
 
-function showVeil(kind: "resume" | "start" = "resume"): void {
+function showVeil(kind: "resume" | "start" = "resume", goal?: string): void {
   if (locked()) return;
   if (!S.veil) {
     const v = h("div#resume-veil", { role: "button", tabindex: "-1" });
@@ -285,7 +286,7 @@ function showVeil(kind: "resume" | "start" = "resume"): void {
   if (S.veil.getAttribute("aria-label") !== label) {
     S.veil.setAttribute("aria-label", label);
     S.veil.classList.toggle("start", kind === "start");
-    S.veil.replaceChildren(kind === "start" ? h("p.rv-line", null, label) : h("div.rv-card", null, h("b", null, label), h("small", null, h("kbd", null, "Esc"), " menu")));
+    S.veil.replaceChildren(kind === "start" ? h("p.rv-line", null, label, goal ? h("small", null, goal) : null) : h("div.rv-card", null, h("b", null, label), h("small", null, "Esc for the menu")));
   }
   setPauseMenuVisible(false);
   S.veil.hidden = false;

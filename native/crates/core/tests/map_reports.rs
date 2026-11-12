@@ -6,10 +6,9 @@ use bunnyhop_core::{
     Cmd, Game, Settings,
     game::{EVENT_TELEPORTED, IN_JUMP, PHYSICS_V1, PHYSICS_V2},
 };
-use std::path::PathBuf;
 
 fn load(name: &str, physics_version: u32) -> Option<Game> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps").join(format!("{name}.bsp"));
+    let path = bunnyhop_core::test_maps::bsp(name);
     let Ok(bytes) = std::fs::read(&path) else {
         eprintln!("skipping {name}: {} not found", path.display());
         return None;
@@ -37,6 +36,7 @@ fn run(game: &mut Game, ticks: u32, buttons: u32) -> (f32, bool) {
 /// so the pad only switched gravity off: apex 402.6 and the map was unfinishable. The real engine (CS:S, 100 tick)
 /// reaches 570.92 from a standing jump on the pad (tools/parity, bit-exact with the core now). Not version-gated: no
 /// production replay used a negative gravity.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn saimaa_jump_pad_negative_gravity() {
     for version in [PHYSICS_V1, PHYSICS_V2] {
@@ -80,6 +80,7 @@ fn saimaa_jump_pad_negative_gravity() {
 /// back (s_13) before the activator_boost name (0.01 s AddOutput, +5 ticks player clock) let the 2800 u/s
 /// trigger_push act: the map was unfinishable. v2 (MASK_PLAYERSOLID) lands on the pad and is launched, bit-exact with
 /// the real engine (tools/parity bhfix_xmas2 / xmas3: engine apex -526.1).
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn christmas_jump_pad_is_playerclip() {
     for (version, launches) in [(PHYSICS_V1, false), (PHYSICS_V2, true)] {
@@ -100,6 +101,7 @@ fn christmas_jump_pad_is_playerclip() {
 /// bhop_awful3 ("teleport missing, impossible to finish"): the maze floor (z -3008, under teleport `bilbo`) and the
 /// landing under `baggins` (z -4224) are playerclip brushes. In v1 the player fell through the maze floor to z -4032,
 /// where no trigger_teleport reaches (stuck for good), and through the `baggins` floor into an earlier stage's pit.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn awful3_playerclip_floors() {
     for (version, solid) in [(PHYSICS_V1, false), (PHYSICS_V2, true)] {
@@ -124,10 +126,11 @@ fn awful3_playerclip_floors() {
 /// core resolves the teleport as CS:S does (bit-exact destination, velocity kept); the bug was the client drawing no
 /// env_smokestack, so the level looked empty. This pins the map facts the client's smokestacks.ts relies on: the pit
 /// leads to sky1, and every sky-level plate has no render faces and an InitialState-1 smokestack on it.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn absolutebhop_sky_level_platforms_are_smoke_marked() {
     let name = "bhop_absolutebhop_v4";
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps").join(format!("{name}.bsp"));
+    let path = bunnyhop_core::test_maps::bsp(name);
     let Ok(bytes) = std::fs::read(&path) else {
         eprintln!("skipping {name}: {} not found", path.display());
         return;

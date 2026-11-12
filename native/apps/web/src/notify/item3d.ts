@@ -12,10 +12,12 @@
 // No hitch: a model is built in an idle slot (never while a run is going: the card waits then anyway) and its shaders
 // compile in the background (KHR_parallel_shader_compile, compileAsync) before the first frame; built models are
 // cached by look (item-preview.ts keys), so the same reward again is instant. If the game has no renderer on this page,
-// its context is lost, or the model isn't ready soon after the card shows, the card keeps its flat icon.
+// its context is lost or draws in software, or the model isn't ready soon after the card shows, the card keeps its flat
+// icon.
 
 import * as THREE from "three";
 import { sharedRenderer } from "../shared-gl";
+import { softwareContext } from "../gfx-auto";
 import { getLoadout, getOutfit } from "../player/cosmetics";
 import { HERO, previewOf, turntable, type PreviewItem, type PreviewSpec } from "./item-preview";
 import { simulateSpring, SPRINGS } from "./spring";
@@ -419,7 +421,8 @@ class Preview implements LiveEmblem {
  */
 export function liveEmblem(item: PreviewItem, runGoing = false): LiveEmblem | null {
   const r = sharedRenderer();
-  if (!r) return null;
+  // (On software GL a model's shaders alone take seconds of the game's GPU thread: the flat icon.)
+  if (!r || softwareContext(r.getContext())) return null;
   const l = getLoadout();
   const spec = previewOf(item, { knife: l.knife, finish: l.finish, hilt: l.hilt, outfit: getOutfit() });
   if (!spec) return null;

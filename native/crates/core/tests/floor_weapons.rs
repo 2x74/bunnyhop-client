@@ -7,10 +7,9 @@ use bunnyhop_core::game::{
     FLOOR_DROPPED, FLOOR_PICKED_UP, FLOOR_PRESENT, FLOOR_SPAWNED, FloorItem, IN_DROP, PHYSICS_V5,
 };
 use bunnyhop_core::{Cmd, Game, Settings};
-use std::path::PathBuf;
 
 fn mini() -> Option<Game> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps/bhop_badges_mini.bsp");
+    let path = bunnyhop_core::test_maps::bsp("bhop_badges_mini");
     if !path.exists() {
         eprintln!("skipping: {} not found", path.display());
         return None;
@@ -33,6 +32,7 @@ fn idle(game: &mut Game, ticks: u32, buttons: u32) {
     }
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn floor_report_follows_pickups_and_drops() {
     let Some(mut game) = mini() else { return };
@@ -67,6 +67,7 @@ fn floor_report_follows_pickups_and_drops() {
     assert_eq!(it.flags, FLOOR_PRESENT | FLOOR_DROPPED, "dropped: {it:?}");
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn floor_report_does_not_change_the_simulation() {
     let (Some(mut a), Some(mut b)) = (mini(), mini()) else { return };
@@ -84,6 +85,7 @@ fn floor_report_does_not_change_the_simulation() {
     }
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn floor_report_sees_template_respawns() {
     // The first segment-18 spawner (research/maps/badges.md): its trigger kills `glock` and ForceSpawns the template next

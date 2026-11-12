@@ -1,7 +1,7 @@
 // The movement HUD elements (layout ids longJump, strafeOffsets, firstJump, startPre): plain text over the game in the
 // HUD face, numbers bold and tabular, labels dimmer. No boxes. hud.ts owns the elements and feeds these.
 import { h } from "../ui/dom";
-import { ljColor, ljColumns, offsetNote, plural, signedTicks, type LjReport, type OffsetReport } from "./stats";
+import { ljColor, ljColumns, offsetNote, offsetTicks, plural, type LjReport, type OffsetReport } from "./stats";
 import "./movement.css";
 
 /** How long a jump stays up before it fades (a newer one replaces it at once). */
@@ -46,9 +46,11 @@ export class LjView {
   }
 }
 
-/** "Offset −1 (key early, gap)": the number bold. */
-export function offsetNodes(r: OffsetReport): (string | Node)[] {
-  return ["Offset ", h("b", null, signedTicks(r.ticks)), h("span.mv-note", null, ` (${offsetNote(r)})`)];
+/** "Offset −1 (2) key early, gap · 3 slow": the numbers bold; either part may be missing. */
+export function offsetNodes(r: OffsetReport | null, slow: number | null = null): (string | Node)[] {
+  const out: (string | Node)[] = r ? ["Offset ", h("b", null, offsetTicks(r)), h("span.mv-note", null, ` ${offsetNote(r)}`)] : [];
+  if (slow !== null) out.push(...(r ? [h("span.mv-note", null, " · ")] : []), h("b", null, String(slow)), h("span.mv-note", null, " slow"));
+  return out;
 }
 
 /** "FJT 1 tick". */

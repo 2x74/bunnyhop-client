@@ -34,7 +34,7 @@ import { hasNoclip, noclipExit, noclipMove, noclipSpeed, noclipTick, type Noclip
 import { isPracticeTool, PRACTICE_KEY_HINT, practiceCommandPlan, practiceKeyGate, practiceUnavailable, type PracticeChatCommand, type PracticeContext, type PracticeTool } from "./rules";
 
 interface CheckpointData {
-  /** Style the attempt ran in (bonus tracks are Normal) and the selected style when it was saved. */
+  /** Style the attempt ran in (styles.ts styleForTrack) and the selected style when it was saved. */
   style: StyleId;
   selected: StyleId;
   timer: TimerSnapshot;
@@ -403,7 +403,7 @@ export class Practice {
     }
     const state = this.h.core.state();
     const timer = run.result().timer;
-    const style = styleForTrack(s.selectedStyle, timer.track);
+    const style = styleForTrack(s.selectedStyle, timer.track, this.h.map);
     this.endNoclip();
     s.practiceRestored(style, saveTimer(timer));
     const n = run.ticksDone;

@@ -1,6 +1,8 @@
 /* Notifications (notify/index.ts): whispers, notices (toasts), moments, the celebration stage, banners, inline cues.
-   Tokens from style.css. Whispers have no box at all; notices and moments are one solid slab (no outline, no stripe);
-   the celebration takes the screen. Sentence case. Motion is all WAAPI in index.ts. */
+   Tokens from style.css. Whispers have no box at all. Notices and moments are plates: the menu's own shape (the PLAY
+   plate, the loading plate), ink with the left edge leaning, drawn by ::before so what stands on a plate isn't clipped
+   by it. A moment's plate carries a lip in its colour; the reward stands on its left end with nothing behind it.
+   The celebration takes the screen. Sentence case. Motion is all WAAPI in index.ts. */
 
 #nt-whispers, #nt-toasts, #nt-cels, #nt-banners { position: fixed; z-index: var(--z-toast); pointer-events: none; font-family: var(--font-ui); color: var(--text); }
 #nt-confetti { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: calc(var(--z-toast) - 1); }
@@ -10,8 +12,8 @@
 #nt-whispers { inset: 0; }
 .nt-whisper {
   position: absolute; left: 50%; bottom: calc(1.9rem + env(safe-area-inset-bottom, 0px)); translate: -50% 0;
-  white-space: nowrap; font-size: 0.95rem; font-weight: 700; color: rgba(255, 255, 255, 0.85);
-  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.9), 0 0 0.7em rgba(0, 0, 0, 0.45);
+  white-space: nowrap; font-size: 0.95rem; font-weight: 700; color: rgba(255, 255, 255, 0.94);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.9), 0 0 3px rgba(0, 0, 0, 0.75), 0 0 0.8em rgba(0, 0, 0, 0.6);
 }
 .nt-whisper.at { position: fixed; bottom: auto; translate: -50% -100%; font-size: 0.85rem; }
 .nt-whisper.at.below { translate: -50% 0; }
@@ -26,27 +28,30 @@ body.in-game:not(.menu-open) .nt-whisper:not(.at) { bottom: auto; top: max(30vh,
   transition: transform 0.32s var(--ease);
 }
 /* A moment in the same corner: the notices sit on top of it. */
-/* Home: the footer's buttons sit bottom left, the maps grid bottom right; notices go bottom right, above the dock. */
-body[data-screen="home"]:not(.in-game) #nt-toasts { left: auto; right: 1.4rem; bottom: 4.4rem; translate: none; align-items: flex-end; }
+/* Home: the maps, records and the dock fill the right, the footer the bottom left. Notices and moments stand in the
+   menu's own column, above the footer, their leaning edge in line with PLAY's. */
+body[data-screen="home"]:not(.in-game) :is(#nt-toasts, #nt-cels:not(:has(> .nt-stage))) { left: 4.5vw; bottom: calc(4.5vh + 7.4rem); translate: none; }
+body[data-screen="home"]:not(.in-game) #nt-toasts { align-items: flex-start; max-width: min(34rem, 60vw); }
 html.nt-has-cel #nt-toasts { transform: translateY(calc(-1 * var(--nt-cel-h, 0px) - 0.6rem)); }
 body.in-game:not(.menu-open) #nt-toasts { top: 22vh; bottom: auto; flex-direction: column; transform: none; }
 body.in-game:not(.menu-open):has(#hud-endcard:not([hidden])) #nt-toasts { top: 4.2vh; transform: none; }
 
 .nt-toast {
   position: relative; pointer-events: auto; display: flex; align-items: center; gap: 0.6rem; box-sizing: border-box; max-width: 100%;
-  min-height: 2.5rem; padding: 0.5rem 0.95rem; border-radius: var(--r-3);
-  background: var(--ink-1); box-shadow: 0 0.9rem 2rem -0.9rem rgba(0, 0, 0, 0.75);
+  z-index: 0; min-height: 2.5rem; padding: 0.5rem 1rem 0.5rem calc(0.95rem + var(--nt-lean)); --nt-lean: 0.5rem; --nt-face: var(--ink-1);
   font-size: 0.9rem; font-weight: 560; line-height: 1.3; touch-action: pan-y;
 }
-.nt-toast:has(> .nt-glyph, > .nt-lead) { padding-left: 0.6rem; }
+.nt-toast::before { content: ""; position: absolute; inset: 0; z-index: -1; background: var(--nt-face); clip-path: polygon(var(--nt-lean) 0, 100% 0, 100% 100%, 0 100%); }
+.nt-toast::after { content: ""; position: absolute; z-index: -2; left: 6%; right: 3%; bottom: -0.35rem; height: 0.9rem; background: rgba(0, 0, 0, 0.6); filter: blur(10px); pointer-events: none; }
+.nt-toast.tone-bad::before { box-shadow: inset 0 -2px 0 var(--loss); }
+.nt-toast:has(> .nt-glyph, > .nt-lead) { padding-left: calc(0.7rem + var(--nt-lean)); }
 .nt-toast.nt-leaving { position: fixed; z-index: var(--z-toast); margin: 0; max-width: none; pointer-events: none; }
 /* The lead: a glyph carrying the tone (↻ an update, a red ! an error) or the friend's avatar. */
-.nt-glyph { flex: none; display: grid; place-items: center; width: 1.45rem; height: 1.45rem; border-radius: 50%; background: var(--ink-3); color: var(--text); font-style: normal; font-size: 0.95rem; font-weight: 800; line-height: 1; }
-.nt-glyph.bad { background: var(--loss); color: var(--ink-0); }
+.nt-glyph { flex: none; display: grid; place-items: center; width: 1.1rem; color: var(--accent); font-style: normal; font-size: 1.15rem; font-weight: 800; line-height: 1; }
+.nt-glyph.bad { color: var(--loss); font-size: 1.05rem; font-weight: 900; }
 .nt-lead { flex: none; display: grid; place-items: center; }
 .nt-lead > .fd-av, .nt-lead > img { width: 1.6rem; height: 1.6rem; border-radius: 50%; }
 .nt-lead > .mascot { --m-size: 1.9rem; margin: -0.35rem 0 -0.2rem; }
-.nt-toast.tone-bad .nt-text { color: color-mix(in srgb, var(--loss) 38%, var(--cream)); }
 .nt-text { min-width: 0; overflow-wrap: anywhere; }
 .nt-count { font-variant-numeric: tabular-nums; font-weight: 800; color: var(--accent); }
 .nt-count:empty { display: none; }
@@ -54,28 +59,35 @@ body.in-game:not(.menu-open):has(#hud-endcard:not([hidden])) #nt-toasts { top: 4
 .nt-act:hover { background: var(--accent-soft); }
 .nt-act:focus-visible { outline: none; box-shadow: var(--ring); }
 /* In game: a touch smaller and lighter, it shares the screen with the run. */
-body.in-game:not(.menu-open) .nt-toast { font-size: 0.86rem; background: rgba(20, 20, 24, 0.88); min-height: 2.2rem; padding-block: 0.4rem; }
+body.in-game:not(.menu-open) .nt-toast { --nt-face: rgba(20, 20, 24, 0.9); font-size: 0.86rem; min-height: 2.2rem; padding-block: 0.4rem; }
+body.in-game:not(.menu-open) .nt-toast::after { display: none; }
 
-/* ---- moments: one slab, bottom centre; the reward breaks out of its top edge, the bunny peeks over it. No time bar,
-   no ×: a click or a swipe dismisses it. */
+/* ---- moments: one plate, bottom centre; the reward stands on its left end and breaks out of its top edge, the bunny
+   peeks over it. A lip in the moment's colour (a rarity's, else amber) and a wash of it under the reward. No time
+   bar, no ×: a click or a swipe dismisses it. */
 #nt-cels { left: 50%; bottom: calc(1.6rem + env(safe-area-inset-bottom, 0px)); translate: -50% 0; }
 .nt-cel { --c: var(--accent); position: relative; pointer-events: auto; padding-top: 2rem; touch-action: pan-y; cursor: pointer; }
 .nt-cel-slab {
-  position: relative; z-index: 1; display: flex; align-items: center; gap: 1rem; box-sizing: border-box;
-  min-width: 19rem; max-width: min(31rem, calc(100vw - 1.5rem)); padding: 0.75rem 0.85rem 0.85rem 0.95rem; border-radius: var(--r-3);
-  background: var(--ink-1); box-shadow: 0 1.5rem 3rem -1.2rem rgba(0, 0, 0, 0.85);
+  position: relative; z-index: 1; display: flex; align-items: center; gap: 0.85rem; box-sizing: border-box;
+  --nt-lean: 0.85rem; min-width: 19rem; max-width: min(31rem, calc(100vw - 1.5rem)); padding: 0.7rem 1rem 0.9rem calc(0.7rem + var(--nt-lean));
 }
+.nt-cel-slab::before {
+  content: ""; position: absolute; inset: 0; z-index: -1; clip-path: polygon(var(--nt-lean) 0, 100% 0, 100% 100%, 0 100%);
+  background: linear-gradient(100deg, color-mix(in srgb, var(--c) 17%, var(--ink-1)), var(--ink-1) 46%); box-shadow: inset 0 -3px 0 var(--c);
+}
+.nt-cel-slab::after { content: ""; position: absolute; z-index: -2; left: 5%; right: 3%; bottom: -0.5rem; height: 1.3rem; background: rgba(0, 0, 0, 0.7); filter: blur(14px); pointer-events: none; }
 .nt-cel-emblem-wrap { position: relative; flex: none; display: grid; place-items: center; width: 4.4rem; height: 4.4rem; margin-top: -2.6rem; }
-.nt-cel-emblem {
-  position: relative; display: grid; place-items: center; width: 100%; height: 100%; border-radius: 50%; overflow: hidden;
-  background: radial-gradient(circle at 50% 30%, color-mix(in srgb, var(--c) 34%, var(--ink-2)), var(--ink-0) 72%);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--c) 75%, transparent), 0 0.7rem 1.4rem -0.5rem color-mix(in srgb, var(--c) 60%, transparent);
-}
+/* No disc and no ring behind the reward: the thing itself stands there (round only so the shine sweeps a round token). */
+.nt-cel-emblem { position: relative; display: grid; place-items: center; width: 100%; height: 100%; border-radius: 50%; overflow: hidden; }
+/* A level-up: the number on a small plate of its own, leaning like the rest. */
+.nt-cel-emblem-wrap.is-level { width: 3.9rem; height: 3.5rem; margin-top: -1.7rem; }
+.nt-cel-emblem.is-level { border-radius: 0; background: var(--c); clip-path: polygon(0.5rem 0, 100% 0, 100% 100%, 0 100%); box-shadow: inset 0 -3px 0 color-mix(in srgb, var(--c) 68%, #000); }
+.nt-cel-emblem.is-level .nt-level-n { color: var(--amber-ink); padding-left: 0.3rem; }
 .nt-cel-emblem .tk { transform: scale(1.25); }
 .nt-cel-emblem .pf-sw { width: 78%; height: 78%; }
 /* A live 3D model of the reward (item3d.ts) stands on the disc and breaks out of it; the disc's own icon and shine hide
    while it loads and once it shows, and come back (fading in) only if it can't. */
-.nt-cel-emblem-wrap.has-model { margin-right: 0.4rem; }
+.nt-cel-emblem-wrap.has-model { margin-right: 0.1rem; }
 .nt-model { position: absolute; z-index: 1; left: 50%; top: 50%; width: 7.4rem; height: 7.4rem; translate: -50% -56%; pointer-events: none; }
 .nt-model canvas { display: block; width: 100%; height: 100%; }
 .nt-cel-emblem > * { transition: opacity 0.2s var(--ease); }
@@ -87,11 +99,13 @@ body.in-game:not(.menu-open) .nt-toast { font-size: 0.86rem; background: rgba(20
 .nt-spark { width: 46%; height: 46%; background: var(--c); clip-path: polygon(50% 0, 61% 39%, 100% 50%, 61% 61%, 50% 100%, 39% 61%, 0 50%, 39% 39%); }
 .nt-level-n { font-size: 1.9rem; font-weight: 850; letter-spacing: -0.03em; line-height: 1; font-variant-numeric: tabular-nums; color: #fff; }
 .nt-cel-text { display: flex; flex-direction: column; flex: 1; min-width: 0; line-height: 1.22; }
-.nt-cel-kicker { font-size: var(--fs-sm); font-weight: 700; color: var(--c); }
-.nt-cel-title { font-size: 1.2rem; font-weight: 800; letter-spacing: -0.012em; overflow-wrap: anywhere; }
+.nt-cel-kicker { font-size: 0.8rem; font-weight: 700; color: color-mix(in srgb, var(--c) 82%, #fff); }
+.nt-cel-title { font-size: 1.22rem; font-weight: 800; font-stretch: 104%; letter-spacing: -0.012em; overflow-wrap: anywhere; }
 .nt-cel-detail { margin-top: 0.1rem; font-size: 0.82rem; color: var(--dim); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.nt-cel .nt-act, .nt-stage .nt-act { align-self: center; margin: 0; padding: 0.45rem 0.95rem; border-radius: var(--r-2); background: var(--c); color: var(--amber-ink); font-weight: 750; box-shadow: inset 0 -3px 0 color-mix(in srgb, var(--c) 70%, #000); }
-.nt-cel .nt-act:hover, .nt-stage .nt-act:hover { background: color-mix(in srgb, var(--c) 80%, #fff); }
+/* The one action is the site's primary button (amber, leaning), whatever the moment's colour. */
+.nt-cel .nt-act, .nt-stage .nt-act { align-self: center; margin: 0; padding: 0.42rem 0.9rem 0.45rem calc(0.9rem + var(--lean) * 0.6); border-radius: 0; background: var(--amber); color: var(--amber-ink); font-weight: 750; clip-path: polygon(var(--lean) 0, 100% 0, 100% 100%, 0 100%); box-shadow: inset 0 -3px 0 var(--amber-deep); }
+.nt-cel .nt-act:hover, .nt-stage .nt-act:hover { background: var(--amber-hi); }
+.nt-cel .nt-act:focus-visible, .nt-stage .nt-act:focus-visible { box-shadow: inset 0 -3px 0 var(--amber-deep), inset 0 0 0 2px var(--amber-ink); }
 .mascot.nt-cel-mascot { --m-size: 4.6rem; position: absolute; z-index: 0; right: 2.4rem; top: -2.1rem; }
 /* In game the HUD's speed, timer and run stats sit right above the slab: the bunny stands beside it instead of peeking
    over it, so it never covers them (or the tutorial's lines). */
@@ -103,7 +117,7 @@ body.in-game:not(.menu-open) .nt-toast { font-size: 0.86rem; background: rgba(20
    fading out at both ends, the title on it, the reward standing on its top edge, the bunny beside it. */
 #nt-cels:has(> .nt-stage) { inset: 0; translate: none; }
 .nt-stage { --c: var(--accent); position: absolute; inset: 0; pointer-events: auto; cursor: pointer; }
-.nt-stage-dim { position: absolute; inset: 0; background: rgba(6, 7, 10, 0.5); }
+.nt-stage-dim { position: absolute; inset: 0; background: rgba(6, 7, 10, 0.68); }
 .nt-stage-band {
   position: absolute; left: 0; right: 0; top: 40%; height: 9.6rem; translate: 0 -50%;
   background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--c) 16%, rgba(10, 10, 13, 0.94)) 22%, color-mix(in srgb, var(--c) 16%, rgba(10, 10, 13, 0.94)) 78%, transparent);
@@ -128,7 +142,6 @@ body.in-game:not(.menu-open) .nt-toast { font-size: 0.86rem; background: rgba(20
 .nt-stage-sub { font-size: 1.15rem; font-weight: 650; color: color-mix(in srgb, var(--c) 35%, var(--cream)); }
 .nt-stage .nt-act { position: absolute; top: calc(100% + 1rem); left: 50%; translate: -50% 0; }
 /* The model stands on the band itself: its disc goes once it's live. */
-.nt-stage-reward:has(> .nt-model[data-state="live"]) .nt-cel-emblem { background: none; box-shadow: none; transition: background 0.2s, box-shadow 0.2s; }
 .mascot.nt-stage-mascot { --m-size: 5.4rem; position: absolute; right: max(1rem, calc(50% - 23rem)); bottom: 0.2rem; }
 @media (max-width: 40rem) {
   .nt-stage-band, .nt-stage-body { height: 8rem; }

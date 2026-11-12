@@ -2,7 +2,7 @@
 // is the racer's side of it, driven by net/mp.ts:
 //
 //   - picking: !race alone (or Esc → Server → Race a player) opens numbered menus: player, track (maps with bonuses),
-//     style (main track); a typed !race <player> [style] [main|bonus] is resolved here. Either way the room gets
+//     style; a typed !race <player> [style] [main|bonus] is resolved here. Either way the room gets
 //     "/race #slot style track".
 //   - a challenge to you: a menu (1 Accept / 2 Decline) until it expires.
 //   - countdown: you're switched to the race's style and put on the track's start; movement is held (the view still
@@ -67,7 +67,7 @@ export interface RaceHost {
 /** How long the result stays on the race line. */
 const RESULT_MS = 8000;
 
-const desc = (r: Pick<RaceView, "map" | "style" | "track">) => (r.track ? trackName(r.track) : styleLabel(r.style));
+const desc = (r: Pick<RaceView, "map" | "style" | "track">) => (r.track ? `${trackName(r.track)}, ${styleLabel(r.style)}` : styleLabel(r.style));
 
 const DNF_TEXT = { forfeit: "forfeited", left: "left", timeout: "time limit" } as const;
 /** Standings rows a room race's result shows (yours is added when it's further down). */
@@ -185,7 +185,7 @@ export class RaceUi {
     this.preparedFor = r.id;
     this.lastBeep = -1;
     if (this.o.spectating()) this.o.stopSpectating();
-    if (r.track === 0 && this.o.selectedStyle() !== r.style) await this.o.setStyle(r.style);
+    if (this.o.selectedStyle() !== r.style) await this.o.setStyle(r.style);
     if (this.race?.id !== r.id) return;
     this.o.restart(r.track);
     this.o.reply(`Race vs ${this.opponent(r).name}: ${r.map} · ${desc(r)}. !forfeit to give up.`);
@@ -277,17 +277,17 @@ export class RaceUi {
   /** Menu 2: the track (maps with a bonus). */
   private pickTrack(p: { slot: number; name: string }): void {
     const bonus = this.o.bonusTracks().slice(0, 8);
-    if (!bonus.length) return this.pickStyle(p);
+    if (!bonus.length) return this.pickStyle(p, 0);
     const tracks = [0, ...bonus];
     this.o.menu.show("race", {
       title: `Race ${p.name}: track`,
-      items: tracks.map((t) => ({ label: trackName(t), detail: t ? "Normal" : "" })),
-      onPick: (i) => (tracks[i] ? (this.o.menu.hide("race"), this.send(p.slot, "autohop", tracks[i])) : this.pickStyle(p)),
+      items: tracks.map((t) => ({ label: trackName(t), detail: "" })),
+      onPick: (i) => this.pickStyle(p, tracks[i]),
     });
   }
 
-  /** Menu 3: the style (main track), seven a page like the nominate menu: a numbered menu has keys 1-9 only. */
-  private pickStyle(p: { slot: number; name: string }, page = 0): void {
+  /** Menu 3: the style, seven a page like the nominate menu: a numbered menu has keys 1-9 only. */
+  private pickStyle(p: { slot: number; name: string }, track: number, page = 0): void {
     const cur = this.o.selectedStyle();
     // (Not Segmented: a race is decided by real time since GO, and checkpoint loads rewind the run's clock.)
     const styles = STYLE_DEFS.filter((d) => !d.segmented);
@@ -297,12 +297,12 @@ export class RaceUi {
     const items = slice.map((d) => ({ label: d.name, detail: d.id === cur ? "yours" : "", selected: d.id === cur }));
     if (pages > 1) items.push({ label: "More…", detail: `${page + 1}/${pages}`, selected: false });
     this.o.menu.show("race", {
-      title: `Race ${p.name}: style`,
+      title: `Race ${p.name}: ${track ? `${trackName(track)}, style` : "style"}`,
       items,
       onPick: (i) => {
-        if (i >= slice.length) return this.pickStyle(p, (page + 1) % pages);
+        if (i >= slice.length) return this.pickStyle(p, track, (page + 1) % pages);
         this.o.menu.hide("race");
-        this.send(p.slot, slice[i].id, 0);
+        this.send(p.slot, slice[i].id, track);
       },
     });
   }

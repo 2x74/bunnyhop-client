@@ -6,10 +6,10 @@ import { IN_NO_LANDFIX, PHYSICS_V27, isPhysicsVersion, type Core, type PlayerSta
 import { FLIGHT_PHYSICS_FROM, FLIGHT_RULES_FROM, firstFlightCommand, flightAllowed, replayPhysics, replayStyle, replayTimerRules, styleReplayProblem, type Replay } from "./replay";
 import { restartNamesAllowed, restartPointProblem } from "./restart";
 import { SimRun, type SimOptions, type SimResult } from "./sim";
-import { BONUS_STYLE, isSegmented, STYLE_DEFS, styleDef, stylePrespeedCap, styleSettings } from "./styles";
+import { isSegmented, STYLE_DEFS, styleDef, stylePrespeedCap, styleSettings, trackStyleProblem } from "./styles";
 import { isTimerRules } from "./timer";
 import type { RunTiming } from "./run-timing";
-import { HULL_HEIGHT, zonesEqual, type Zone } from "./zones";
+import { HULL_HEIGHT, zonesMatchOfficial, type Zone } from "./zones";
 import { disallowedCommand, RANKED_COMMAND_WEAPONS } from "./weapon-rules";
 
 /** Ranked styles (styles.ts) and their canonical physics settings. */
@@ -206,7 +206,7 @@ function beginVerify(core: Core, replay: Replay, zones: readonly Zone[], opts: V
     const gun = disallowedCommand(replay.buttons);
     if (gun) problems.push(`weapon command for ${gun.weapon} at tick ${gun.tick}: ranked runs only allow ${RANKED_COMMAND_WEAPONS.join(", ")}`);
   }
-  if (!zonesEqual(zones, h.zones)) problems.push(`zones differ from ${opts.zoneSource ?? "authoritative zones"}`);
+  if (!zonesMatchOfficial(zones, h.zones)) problems.push(`zones differ from ${opts.zoneSource ?? "authoritative zones"}`);
   if (h.spawn && !restartPointAllowed(h.spawn.position, zones)) {
     problems.push(`restart point (${h.spawn.position.map((v) => v.toFixed(1)).join(", ")}) is not in a start zone`);
   }
@@ -264,7 +264,8 @@ function concludeVerify(replay: Replay, problems: string[], sim: SimResult, simM
     problems.push(`claimed ticks ${h.startTick}..${h.endTick} != recomputed ${sim.startTick}..${sim.endTick}`);
   }
   if (finished && sim.track !== (h.track ?? 0)) problems.push(`claimed track ${h.track} != recomputed track ${sim.track}`);
-  if (finished && sim.track > 0 && style !== BONUS_STYLE) problems.push(`bonus runs are ${styleDef(BONUS_STYLE)!.name} style only (replay style ${style})`);
+  const trackStyle = finished ? trackStyleProblem(h.map, sim.track, style) : null;
+  if (trackStyle) problems.push(trackStyle);
   if (finished && sim.ticks !== sim.endTick) problems.push(`replay continues ${sim.ticks - sim.endTick} ticks past the finish`);
   // A flight ends a timed run (timer.ts flightTick), so a finished run never has one; checked here as well.
   const fl = sim.flight;

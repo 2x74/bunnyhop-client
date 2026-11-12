@@ -191,12 +191,11 @@ impl Game {
 mod tests {
     use super::*;
     fn load(map: &str) -> Option<Game> {
-        let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../../maps/{map}.bsp"));
-        if !p.exists() { eprintln!("skip {map}: external BSP absent"); return None; }
-        let mut g = crate::content::load_game(&p).unwrap();
+        let mut g = crate::content::load_game(&crate::test_maps::map(map)?).unwrap();
         g.set_settings(Settings { physics_version: PHYSICS_V19, ..Settings::css_bhop() }); g.reset(); Some(g)
     }
     fn drain(g: &mut Game) { for _ in 0..12 { g.tick += 1; g.service_events(); } }
+    #[cfg_attr(ci, ignore = "map library")]
     #[test]
     fn player_connections_drive_original_gate_and_keep_snapshot_state() {
         for map in ["bhop_crutle4_css", "bhop_crutle3_css", "bhop_enlightened2", "bhop_balaco", "kz_fastcombowombo"] {
@@ -215,6 +214,7 @@ mod tests {
             }
         }
     }
+    #[cfg_attr(ci, ignore = "map library")]
     #[test]
     fn relative_teleports_use_brush_center_and_zero_velocity_only_in_v19() {
         let Some(mut g) = load("bhop_collective") else { return; };
@@ -241,6 +241,7 @@ mod tests {
         g.state.velocity[2]=0.01;g.entity_input(i,"runscriptcode","PlayerStop()",Actor::Player);assert_eq!(g.state.velocity,[0.0;3]);
         for version in 1..=18 { g.set_settings(Settings {physics_version:version,..Settings::css_bhop()});g.state.velocity=[12.0;3];g.entity_input(i,"runscriptcode","PlayerBoost()",Actor::Player);assert_eq!(g.state.velocity,[12.0;3]); }
     }
+    #[cfg_attr(ci, ignore = "map library")]
     #[test]
     fn liminal_checkpoint_uses_caller_and_block_timeout_preserves_velocity() {
         let Some(mut g)=load("kz_bhop_liminal") else{return;}; let script=g.find_named("3wayteleport_entity").unwrap();
@@ -264,6 +265,7 @@ mod tests {
         g.state.velocity=[99.0;3];g.script19_input(Actor::Entity(trigger),"callscriptfunction","ThinkLoop",Actor::Player,Actor::Entity(trigger));assert_eq!(g.state.velocity,[99.0;3],"edge only");
         for version in 1..=18 {g.set_settings(Settings{physics_version:version,..Settings::css_bhop()});g.reset();assert!(!g.script19_input(Actor::Entity(script),"runscriptcode","SetCheckpoint()",Actor::Player,Actor::Entity(caller)));assert!(g.extra.scripts19.checkpoint.is_none());}
     }
+    #[cfg_attr(ci, ignore = "map library")]
     #[test]
     fn treason_immunity_single_repeatable_reset_and_antipre() {
         let Some(mut g)=load("bhop_treason") else{return;};let block=g.ents.iter().position(|e|e.name.starts_with("block_single_")).unwrap();

@@ -107,6 +107,8 @@ export interface ReportTarget {
   id?: string;
   name: string;
   run?: { id: string; map: string; time: number | null };
+  /** The run's style, or the style they're playing in the room: Infinite gets a note (styles.ts INFINITE_NOTE). */
+  style?: string;
 }
 
 export interface FeedbackOpen {

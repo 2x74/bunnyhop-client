@@ -99,6 +99,19 @@ export type PlaceReadout = "off" | "place" | "top";
 export type CrosshairStyle = "cross" | "cross-dot" | "dot" | "t" | "circle" | "none";
 export type ViewmodelHand = "right" | "left";
 
+/**
+ * Voice chat (voice/). `enabled`: hear the room and talk with `key` held (Source's +voicerecord; console voice_enable);
+ * `volume`: everyone's voice (voice_scale); `key`: the push to talk key's code (X by default: in rooms it talks, so the
+ * checkpoint teleport bound to the same key works in solo play only); `device`: the microphone's deviceId ("" = the
+ * system default).
+ */
+export interface VoicePrefs {
+  enabled: boolean;
+  volume: number;
+  key: string;
+  device: string;
+}
+
 /** Music: always (menu track in menus, the playlist in game), only in menus (home + pause), or off. */
 export type MusicMode = "always" | "menus" | "off";
 
@@ -221,7 +234,8 @@ export interface Prefs {
     ssj: SsjPrefs;
     /** JHUD (!jhud, ssj/jhud.ts): what it shows and its colours. The HUD element is layout.jhud. */
     jhud: JhudPrefs;
-    movement: { fjtChat: boolean; lj: boolean; ljChat: boolean };
+    /** slowTicks: the strafe offsets line also shows each strafe's slow ticks, below slowBelow % of the best gain. */
+    movement: { fjtChat: boolean; lj: boolean; ljChat: boolean; slowTicks: boolean; slowBelow: number };
     /** CS:S `cl_showpos` (hud/showpos.ts): 0 off, 1 eye position and view angles, 2 feet origin. */
     showPos: number;
     /** `net_graph` (console): the FPS counter also shows your ping in servers. */
@@ -230,6 +244,8 @@ export interface Prefs {
   /** Master volume (0..1). The per-bus levels and the rest of the sound options are in `audio`. */
   volume: number;
   audio: AudioPrefs;
+  /** Voice chat in rooms (voice/): push to talk, everyone in the room hears everyone. */
+  voice: VoicePrefs;
   /** Master switch for race ghosts (see `ghost` for sources and look). */
   showGhost: boolean;
   ghost: {
@@ -547,7 +563,7 @@ export const DEFAULT_PREFS: Prefs = {
   inputStats: false,
   fov: 90,
   crosshair: { style: "cross", color: "#4dff6a", size: 6, thickness: 2, gap: 4, outline: true, alpha: 1 },
-  hud: { speedColors: true, gainTicks: true, edgeGlow: false, place: "off", strafeTrainer: DEFAULT_TRAINER, scale: 1, layout: CLASSIC, keys: DEFAULT_KEYS, hidden: false, hiddenKeeps: "speedKeys", ssj: DEFAULT_SSJ, jhud: DEFAULT_JHUD, movement: { fjtChat: false, lj: false, ljChat: true }, showPos: 0, netGraph: false },
+  hud: { speedColors: true, gainTicks: true, edgeGlow: false, place: "off", strafeTrainer: DEFAULT_TRAINER, scale: 1, layout: CLASSIC, keys: DEFAULT_KEYS, hidden: false, hiddenKeeps: "speedKeys", ssj: DEFAULT_SSJ, jhud: DEFAULT_JHUD, movement: { fjtChat: false, lj: false, ljChat: true, slowTicks: false, slowBelow: 75 }, showPos: 0, netGraph: false },
   volume: 0.8,
   audio: {
     announcer: { enabled: false, finish: true, movement: true, local: true, server: true, volume: 0.8, pb: "perfect", wr: "godlike", speed: "godlike", highSpeed: "holyshit", streak: "perfect", lj: "perfect", speedThreshold: 1500, highSpeedThreshold: 2500, streakThreshold: 3, ljThreshold: 250 },
@@ -576,6 +592,7 @@ export const DEFAULT_PREFS: Prefs = {
   colorBlind: "off",
   triggers: DEFAULT_TRIGGER_PREFS,
   landing: DEFAULT_LANDING_PREFS,
+  voice: { enabled: true, volume: 0.8, key: "KeyX", device: "" },
   showPlayerGlow: true,
   showPlayers: true,
   firstPersonGlow: true,

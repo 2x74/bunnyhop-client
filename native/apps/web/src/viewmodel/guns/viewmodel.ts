@@ -36,6 +36,11 @@ class DirectSkeleton extends THREE.Skeleton {
 export interface GunViewmodelOptions {
   /** Look (gloves, colourway) of this loadout instead of the equipped one (dev lab). */
   loadout?: CosmeticLoadout;
+  /**
+   * Materials kept per look and camo instead of disposed on a change (the Loadout's Gun camo stage, ui/camo-stage.ts):
+   * a disposed material releases its program, and hovering back to a camo linked it again.
+   */
+  keepMaterials?: boolean;
 }
 
 export class GunViewmodel {
@@ -90,6 +95,8 @@ export class GunViewmodel {
     return a * (t < 0.03 ? t / 0.03 : Math.exp(-(t - 0.03) * 12));
   }
   private hidden: Set<number> | null = null;
+  /** Materials by look and camo (keepMaterials), or null. */
+  private kept: Map<string, THREE.ShaderMaterial> | null = null;
   /** The M3 ejects its shell when the pump comes back. */
   private lastPump = 0;
 
@@ -100,6 +107,7 @@ export class GunViewmodel {
     this.loadout = o.loadout ?? getLoadout();
     this.glove = gloveStyle(this.loadout.glove).style;
     this.cheap = prefs.get().graphics.potato;
+    if (o.keepMaterials) this.kept = new Map();
     this.mesh = new THREE.SkinnedMesh(new THREE.BufferGeometry(), gunMaterial(this.uniforms, NO_LOOK, { cheap: this.cheap, flash: true }));
     this.camo = null;
     this.mesh.bindMode = THREE.DetachedBindMode;
@@ -162,8 +170,19 @@ export class GunViewmodel {
     if (sameLook(look, this.look) && camo === this.camo && !force) return;
     this.look = look;
     this.camo = camo;
-    (this.mesh.material as THREE.Material).dispose();
-    this.mesh.material = gunMaterial(this.uniforms, look, { cheap: this.cheap, flash: true, camo: camoStyle(camo) });
+    const make = () => gunMaterial(this.uniforms, look, { cheap: this.cheap, flash: true, camo: camoStyle(camo) });
+    if (!this.kept) {
+      (this.mesh.material as THREE.Material).dispose();
+      this.mesh.material = make();
+      return;
+    }
+    const key = `${JSON.stringify(look)}|${camo}`;
+    let m = this.kept.get(key);
+    if (!m) this.kept.set(key, (m = make()));
+    // (The constructor's material isn't one of them.)
+    const old = this.mesh.material as THREE.ShaderMaterial;
+    if (![...this.kept.values()].includes(old)) old.dispose();
+    this.mesh.material = m;
   }
 
   /** The gun in hand (null hides the viewmodel). Builds / solves on first use per gun + glove (cached). */
@@ -403,7 +422,8 @@ export class GunViewmodel {
 
   dispose(): void {
     for (const u of this.unsub) u();
-    (this.mesh.material as THREE.Material).dispose();
+    if (this.kept) for (const m of this.kept.values()) m.dispose();
+    else (this.mesh.material as THREE.Material).dispose();
     this.skeleton.dispose();
     this.fxImpl?.dispose();
   }

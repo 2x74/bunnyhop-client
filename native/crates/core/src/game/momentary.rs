@@ -236,13 +236,7 @@ mod tests {
     use super::*;
 
     fn load(map: &str, physics_version: u32) -> Option<Game> {
-        let p =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../../maps/{map}.bsp"));
-        if !p.exists() {
-            eprintln!("skip {map}: local BSP absent");
-            return None;
-        }
-        let mut g = crate::content::load_game(&p).unwrap();
+        let mut g = crate::content::load_game(&crate::test_maps::map(map)?).unwrap();
         g.set_settings(Settings {
             physics_version,
             ..Settings::css_bhop()
@@ -251,6 +245,7 @@ mod tests {
         Some(g)
     }
 
+    #[cfg_attr(ci, ignore = "map library: needs a bhop_avantasia build that is not a published map version")]
     #[test]
     fn reviewed_wheels_only_exist_on_v19_and_restore_through_reset() {
         for map in ["bhop_rpg", "bhop_avantasia"] {

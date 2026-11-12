@@ -6,7 +6,7 @@
 
 import { appLocation } from "../platform/navigation";
 import { getPB } from "../pb";
-import { BONUS_STYLE } from "../styles";
+import { TUTORIAL_BONUS_STYLE } from "../styles";
 import { TUTORIAL_MAP, type LessonId } from "./data";
 import { FINAL_TRACK } from "./flow";
 
@@ -91,7 +91,7 @@ export function tutorialProgress(): TutorialProgress {
     return { lessons: {} };
   }
   // One-time repair (v0.0.7 lost finishes, research/TUTORIAL.md): a saved final-course PB proves a finish.
-  if (repairProgress(p, getPB(TUTORIAL_MAP, BONUS_STYLE, FINAL_TRACK))) save(p);
+  if (repairProgress(p, getPB(TUTORIAL_MAP, TUTORIAL_BONUS_STYLE, FINAL_TRACK))) save(p);
   return p;
 }
 

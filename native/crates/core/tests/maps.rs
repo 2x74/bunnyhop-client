@@ -5,12 +5,11 @@ use bunnyhop_core::{
     Cmd, Game,
     game::{BhopBlockMode, EVENT_RESPAWNED, EVENT_TELEPORTED, IN_JUMP, Rules},
 };
-use std::path::PathBuf;
 
 const MAPS: [&str; 5] = ["bhop_eazy", "bhop_eazy_v2", "bhop_arcane_v1", "bhop_badges_mini", "bhop_strafingonlegos"];
 
 fn map_bytes(name: &str) -> Option<Vec<u8>> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps").join(format!("{name}.bsp"));
+    let path = bunnyhop_core::test_maps::bsp(name);
     match std::fs::read(&path) {
         Ok(b) => Some(b),
         Err(_) => {
@@ -30,6 +29,7 @@ fn idle(game: &mut Game, buttons: u32) {
     game.step(Cmd { buttons, ..Default::default() }).expect("step");
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn spawn_settles_on_ground() {
     for name in MAPS {
@@ -50,6 +50,7 @@ fn spawn_settles_on_ground() {
 
 /// Every trigger_teleport resolves its destination, and touching it (with the activator name its
 /// filter wants) teleports the player.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn teleports_resolve_and_fire_on_each_map() {
     for name in MAPS {
@@ -122,6 +123,7 @@ fn teleports_keep_velocity_by_default() {
 
 /// bhop_badges_mini has playable floor at y = -16000: the out-of-world kill must not fire there
 /// (it used to at |coord| > 16000, respawning players mid-run).
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn far_edges_of_the_world_are_playable() {
     let Some(mut game) = load("bhop_badges_mini") else { return };
@@ -154,6 +156,7 @@ fn fine_grid(mins: [f32; 3], maxs: [f32; 3]) -> impl Iterator<Item = [f32; 2]> {
     (0..nx).flat_map(move |i| (0..ny).map(move |j| [mins[0] + i as f32 * sx, mins[1] + j as f32 * sy]))
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn simulation_is_bit_deterministic() {
     for name in ["bhop_eazy", "bhop_badges_mini"] {
@@ -253,6 +256,7 @@ fn bhop_block_vanilla_mode_sinks_under_the_player() {
 /// bhop_badges_mini gates its teleports with `!activator AddOutput targetname activator` (0.09 s)
 /// then `targetname default` (0.1 s) from a trigger_multiple on each block plus a
 /// filter_activator_name on the trigger_teleport: standing ~9 ticks teleports, hopping does not.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn filtered_activator_name_teleports() {
     for name in ["bhop_badges_mini", "bhop_arcane_v1"] {
@@ -317,6 +321,7 @@ fn filtered_activator_name_teleports() {
 /// Stage checkpoints that rename the player's classname (`!activator,AddOutput,classname N`) gate the fall
 /// teleports through filter_activator_class (bhop_egyptiantemple: before this worked, every fall that missed a
 /// bhop block left the player stuck at the bottom of the pit).
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn filtered_activator_class_teleports() {
     let name = "bhop_egyptiantemple";
@@ -370,6 +375,7 @@ fn bsp_v19_header_parses() {
 /// Replays record the settled restart point and re-simulation settles it again: settling a settled point must give
 /// it back bit for bit (bhop_ananas / bhop_badges_ausbhop zone centres used to move 1 ulp in z, desyncing every run
 /// started there).
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn restart_point_resettles_identically() {
     for (name, target) in [
@@ -396,6 +402,7 @@ fn restart_point_resettles_identically() {
 
 /// The trigger touch pass after the move happens where the move ended, before a trigger_teleport in that pass moves
 /// the player (bhop_badges: the "end" teleport covers 94% of the end zone; the run timer checks `touch_origin`).
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn touch_origin_is_before_the_teleport() {
     let name = "bhop_badges";
@@ -417,6 +424,7 @@ fn touch_origin_is_before_the_teleport() {
 /// bhoptimer's bhop_japan map fix (shavit_zones_resetclassname_main "beginner"): with the restart names the start
 /// zone's class-filtered teleport (*133 -> begin) leaves the player alone; without them it sends them away, and the
 /// names survive a respawn at the restart point but not a reset.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn restart_names_pass_class_filters() {
     let name = "bhop_japan";

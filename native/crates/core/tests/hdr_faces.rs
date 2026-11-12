@@ -4,7 +4,6 @@
 
 use bunnyhop_core::lightmap;
 use playsrc_bsp::{Face, LumpData, TextureInfo};
-use std::path::PathBuf;
 
 fn faces(bsp: &playsrc_bsp::Bsp, index: usize) -> &[Face] {
     match bsp.lump(index).map(|l| &l.records) {
@@ -13,10 +12,11 @@ fn faces(bsp: &playsrc_bsp::Bsp, index: usize) -> &[Face] {
     }
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn hdr_only_maps_use_the_hdr_face_lump() {
     for name in ["bhop_2_S4RO", "bhop_alt_jestas", "bhop_dust_temple", "bhop_mourning"] {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps").join(format!("{name}.bsp"));
+        let path = bunnyhop_core::test_maps::bsp(name);
         let Ok(bytes) = std::fs::read(&path) else {
             eprintln!("skipping {name}: {} not found", path.display());
             continue;

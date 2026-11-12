@@ -84,6 +84,8 @@ interface BoardData {
   staff: Person[];
   sub: string;
   doneNote: string;
+  /** A line under the bar (anticheat: unassigned Triage cases by age, the next page of players). */
+  extra?: () => Child;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -368,7 +370,7 @@ const BOARD_KEYS: [string, string][] = [
  * The page around a board: a count line, the Everyone / Mine / Unassigned switch, the keys, and the board. `load`
  * builds the cards (again on every live change in `parts`); `peek` is a card's thread for the pane.
  */
-async function boardPage(root: HTMLElement, o: BoardOpts & { load: () => Promise<BoardData>; parts: (keyof LiveParts)[]; helpText: string; storeKey: string; peek: (c: Card) => PeekTarget }): Promise<() => void> {
+async function boardPage(root: HTMLElement, o: BoardOpts & { load: () => Promise<BoardData>; parts: (keyof LiveParts)[]; helpText: string; storeKey: string; peek: (c: Card) => PeekTarget; bindRefresh?: (refresh: () => void) => void }): Promise<() => void> {
   let d = await o.load();
   let who = (sessionStorage.getItem(o.storeKey) as Who | null) ?? "all";
   let selected: string | null = null;
@@ -376,6 +378,8 @@ async function boardPage(root: HTMLElement, o: BoardOpts & { load: () => Promise
   let current: (HTMLElement & { cleanup?: () => void }) | null = null;
   const seg = h("div", { class: "seg", role: "radiogroup", "aria-label": "Whose cards" });
   const sub = h("span", { class: "sub" }, d.sub);
+  const extra = h("div", { class: "board-extra" });
+  const paintExtra = () => fill(extra, d.extra?.() ?? null);
   let openTimer = 0;
   const hooks: BoardHooks = {
     selected: () => selected,
@@ -443,6 +447,7 @@ async function boardPage(root: HTMLElement, o: BoardOpts & { load: () => Promise
       const changed = sigOf(next) !== sigOf(d);
       d = next;
       sub.textContent = d.sub;
+      paintExtra();
       if (changed) paint(true);
     } catch {
       /* the next beat tries again */
@@ -451,7 +456,9 @@ async function boardPage(root: HTMLElement, o: BoardOpts & { load: () => Promise
       if (pending) void refresh();
     }
   };
-  fill(root, h("div", { class: "view-bar" }, sub, h("div", { class: "tools" }, seg, help(o.helpText))), slot);
+  o.bindRefresh?.(() => void refresh(true));
+  fill(root, h("div", { class: "view-bar" }, sub, h("div", { class: "tools" }, seg, help(o.helpText))), extra, slot);
+  paintExtra();
   paint();
   const unlive = onLive((_s, changed) => o.parts.some((p) => changed.has(p)) && void refresh());
   return () => {
@@ -468,25 +475,37 @@ const scoreClass = (s: number) => (s >= 90 ? "hi" : s >= 70 ? "mid" : "");
 // ---------------------------------------------------------------------------------------------
 // Anticheat → Board
 
+/** Players per board load; Show more adds a page. */
+const AC_BOARD_PAGE = 100;
+
+/** Unassigned Triage cases, oldest first: the ones nobody has picked up. */
+export function unassignedTriage(cards: { id: string; stage: string; assignee: string | null; since: number }[]): { id: string; since: number }[] {
+  return cards.filter((c) => c.stage === "triage" && !c.assignee).sort((a, b) => a.since - b.since);
+}
+
 export const acBoardView: View = async (root) => {
-  let flags: { runs: FlagRun[]; players: FlagPlayer[] } = { runs: [], players: [] };
+  let flags: { runs: FlagRun[]; players: FlagPlayer[]; total?: number } = { runs: [], players: [] };
+  let limit = AC_BOARD_PAGE;
+  let refreshBoard: (() => void) | null = null;
   const runsOf = (uid: string) => flags.runs.filter((r) => r.user_id === uid).sort((a, b) => b.score - a.score);
   const headline = (p: FlagPlayer) => {
     const ev = [...runsOf(p.user_id).flatMap((r) => r.evidence), ...p.signals];
     return (ev.find((e) => e.blatant) ?? ev.find((e) => !e.review) ?? ev[0])?.text ?? `best run score ${p.max_score}`;
   };
   const load = async (): Promise<BoardData> => {
-    const [f, data] = await Promise.all([api<{ runs: FlagRun[]; players: FlagPlayer[] }>("/admin/integrity?review=open"), api<CasesData>("/admin/cases?kind=ac")]);
+    // The light queue view (apps/api src/admin-integrity.ts view=queue): a few best runs per player, scored signals only.
+    const [f, data] = await Promise.all([api<{ runs: FlagRun[]; players: FlagPlayer[]; total: number }>(`/admin/integrity?view=queue&review=open&limit=${limit}`), api<CasesData>("/admin/cases?kind=ac")]);
     flags = f;
     const open = new Map(data.cases.filter((c) => c.closed_at === null).map((c) => [c.subject, c]));
     const cards: Card[] = flags.players.map((p) => {
       const c = open.get(p.user_id);
       const rs = runsOf(p.user_id);
-      const since = Math.min(...rs.map((r) => r.created_at), p.last);
+      // The case's age: since it opened, else since its oldest open flag here.
+      const since = c?.opened_at ?? Math.min(...rs.map((r) => r.created_at), p.last);
       const pin = data.pins[p.user_id];
       const state = () => (p.shadow_at ? h("span", { class: "kc-state warn" }, "shadowed") : p.banned ? h("span", { class: "kc-state bad" }, "banned") : null);
       const what = headline(p);
-      const openFlags = rs.filter((r) => !r.review).length || p.open;
+      const openFlags = p.open;
       return {
         id: p.user_id,
         stage: c && c.stage !== "done" ? c.stage : "triage",
@@ -539,12 +558,33 @@ export const acBoardView: View = async (root) => {
     }
     const openCount = cards.filter((c) => c.stage !== "done").length;
     const doneCount = cards.length - openCount;
-    return { cards, staff: data.staff, sub: openCount ? `${plural(openCount, "open case")}, ${doneCount} closed this week` : "Nothing open.", doneNote: `last ${data.doneDays} days` };
+    const total = flags.total ?? flags.players.length;
+    const more = total - flags.players.length;
+    const names = new Map(flags.players.map((p) => [p.user_id, p.name]));
+    const extra = () => {
+      const waiting = unassignedTriage(cards);
+      return [
+        waiting.length
+          ? h(
+              "p",
+              { class: "board-waiting" },
+              `${plural(waiting.length, "unassigned case")} in Triage, oldest first: `,
+              waiting.slice(0, 8).flatMap((c, i) => [i ? ", " : "", h("a", { href: `#/suspicious?case=${encodeURIComponent(c.id)}`, title: `Open since ${when(c.since)}` }, names.get(c.id) ?? c.id), ` ${age(c.since)}`]),
+              waiting.length > 8 ? ` and ${waiting.length - 8} more` : "",
+            )
+          : null,
+        more > 0 ? h("p", { class: "board-more" }, `${plural(flags.players.length, "player")} of ${total} with open flags shown. `, h("button", { type: "button", class: "small ghost", onclick: () => ((limit += AC_BOARD_PAGE), refreshBoard?.()) }, "Show more")) : null,
+      ];
+    };
+    return { cards, staff: data.staff, sub: openCount ? `${plural(openCount, "open case")}, ${doneCount} closed this week` : "Nothing open.", doneNote: `last ${data.doneDays} days`, extra };
   };
   const move = async (card: Card, to: string): Promise<boolean> => {
     if (to === "done") {
       const p = flags.players.find((x) => x.user_id === card.id);
-      const ids = runsOf(card.id).filter((r) => !r.review).map((r) => r.run_id);
+      // The board holds a few runs per player: every open flag of theirs comes from the player's own list.
+      const mine = await api<{ runs: FlagRun[] }>(`/admin/integrity?view=queue&review=open&user=${encodeURIComponent(card.id)}`).catch((e: Error) => (toast(e.message, true), null));
+      if (!mine) return false;
+      const ids = mine.runs.filter((r) => !r.review).map((r) => r.run_id);
       if (!p || !ids.length) return toast("Nothing open on this player.", true), false;
       const v = await ask({ title: `Clear ${p.name}'s ${plural(ids.length, "open flag")}?`, text: "Their runs stay as they are and the case closes as cleared. To shadowban or ban, open the case.", fields: [{ name: "note", label: "Note (optional, kept on the flags)", kind: "text" }], confirm: "Clear" });
       if (!v) return false;
@@ -564,6 +604,7 @@ export const acBoardView: View = async (root) => {
     move,
     parts: ["flags", "cases"],
     storeKey: "bh_admin_acboard_who",
+    bindRefresh: (r) => (refreshBoard = r),
     peek: (c) => ({ kind: "ac", subject: c.id, href: c.href, head: c.peekHead }),
     helpText:
       "One card per player with an open flag. A click (or Enter) opens the case's timeline beside the board; o opens the case. Drag a card, or pick one with j / k and h / l and press 1 to 4 to move it; a takes it. Dropping on Done clears the open flags. Shadowban and ban are in the case, and close it too. Mentioning someone (@name) in a comment moves the card to Second opinion. The board refreshes itself; a dot marks new flags since you last looked.",

@@ -69,7 +69,7 @@ export class RoomRaceClient {
   private async prepare(r: RoomRaceView): Promise<void> {
     try {
       if (this.host.spectating()) this.host.stopSpectating();
-      if (r.track === 0 && this.host.selectedStyle() !== r.style) await this.host.setStyle(r.style);
+      if (this.host.selectedStyle() !== r.style) await this.host.setStyle(r.style);
       if (this.race?.id !== r.id || !this.participating || (this.race.state !== "countdown" && this.race.state !== "live")) return;
       this.prepared = r.id;
       if (this.needsGo) this.go(this.race);

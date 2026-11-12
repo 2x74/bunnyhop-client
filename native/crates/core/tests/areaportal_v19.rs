@@ -1,8 +1,7 @@
 use bunnyhop_core::{Cmd, Game, Settings};
 
 fn load() -> Option<Game> {
-    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../maps/bhop_areaportal_v1.bsp");
+    let path = bunnyhop_core::test_maps::bsp("bhop_areaportal_v1");
     let Ok(bytes) = std::fs::read(&path) else {
         eprintln!("skipping areaportal: {} missing", path.display());
         return None;
@@ -14,6 +13,7 @@ fn load() -> Option<Game> {
     )
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn red_train_preserves_riders_through_both_turns_only_at_v19() {
     let Some(mut game) = load() else { return };
@@ -95,6 +95,7 @@ fn red_train_preserves_riders_through_both_turns_only_at_v19() {
     }
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn other_areaportal_movers_keep_their_authored_motion() {
     let Some(mut before) = load() else { return };
@@ -137,10 +138,10 @@ fn other_areaportal_movers_keep_their_authored_motion() {
     );
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn entity_edit_matches_full_and_verifier_entities_but_rejects_an_altered_build() {
-    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../maps/bhop_areaportal_v1.bsp");
+    let path = bunnyhop_core::test_maps::bsp("bhop_areaportal_v1");
     let Ok(bytes) = std::fs::read(&path) else {
         return;
     };
@@ -180,6 +181,7 @@ fn entity_edit_matches_full_and_verifier_entities_but_rejects_an_altered_build()
     }
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn rider_can_jump_off_after_the_turn_with_train_speed() {
     let Some(mut game) = load() else { return };

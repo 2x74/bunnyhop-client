@@ -20,12 +20,15 @@ import { resolveGiftTarget } from "./gift-target";
 import * as THREE from "three";
 import { EVENT_JUMPED, EVENT_TELEPORTED, traceRay, type Core, type PlayerState } from "../core";
 import type { Input, UserCmd } from "../input";
+import { isTextField } from "../input";
+import { voice } from "../voice/client";
+import { can } from "../moderation/staff";
 import type { RunSession } from "../session";
 import { bindLabel, prefs, type Action } from "../ui/settings";
 import { formatTime } from "../timer";
 import { IN_WEAPON_COMMAND_MASK } from "../weapon-rules";
 import { ATTACK_STAB } from "../viewmodel/events";
-import { BONUS_STYLE, styleLabel, type StyleId } from "../styles";
+import { styleLabel, type StyleId } from "../styles";
 import { copyRunStart, playerRunOn } from "../copy-start-request";
 import { tierLabel } from "../tiers";
 import { trackName } from "../zones";
@@ -234,6 +237,19 @@ export class Multiplayer {
         for (const b of s.blocks) if (b.slot !== this.you) this.players.feed(b.slot, b.meta, b.samples, now, b.weapon, b.silenced);
       },
       status: (s, detail) => this.onStatus(s, detail),
+    });
+    // voice: push to talk in this room (voice/client.ts); the welcome says whether the room relays it.
+    voice.attach(this.conn, {
+      you: () => (this.status === "open" ? this.you : null),
+      person: (slot) => {
+        const i = this.players.players.get(slot)?.info;
+        return i
+          ? { slot, id: i.id, name: i.name, color: slotColor(slot), avatarUrl: null, guest: i.provider === "guest", roomMuted: !!i.voiceMuted, look: { supporter: i.supporter, nameColor: i.nameColor, nameEffect: i.nameEffect, nameColor2: i.nameColor2, nameFont: i.nameFont, avatarDeco: i.avatarDeco, card: i.card } }
+          : null;
+      },
+      canRoomMute: () => can(this.roleOf(this.you), "player.mute") || (!!this.room?.private && this.host === this.you),
+      playing: () => o.input.locked && !isTextField(document.activeElement) && !document.body.classList.contains("menu-open"),
+      hudParent: () => document.getElementById("hud") ?? document.body,
     });
     this.banner.set("Connecting…", o.serverId);
     // net_graph: your ping beside the FPS counter (hud.ts).
@@ -515,6 +531,7 @@ export class Multiplayer {
           this.o.session.hud.setSpectated(null);
         }
         if (m.map.name !== this.o.map) return this.goto(m.map.name);
+        voice.welcome(m.room);
         setRoomPresence({ id: m.room.id, name: m.room.name });
         this.race.onState(m.race ?? null);
         this.race.room.onState(m.roomRace ?? null);
@@ -543,6 +560,7 @@ export class Multiplayer {
       case "leave":
         if (!m.quiet) this.chat.add({ kind: "server", text: `${m.name} left${m.reason ? ` (${m.reason})` : ""}.` });
         this.players.remove(m.slot);
+        voice.left(m.slot);
         // The room drops spec targets on the one who left without a patch (rooms/room.ts leave): drop them here too.
         for (const p of this.players.players.values()) if (p.info.spec === m.slot) p.info = { ...p.info, spec: null };
         if (this.spectating === m.slot) this.cycleSpectate(1, true);
@@ -578,7 +596,7 @@ export class Multiplayer {
           // Staff / Verified / Creator / Booster / Supporter marks and the name colour stamped by the room on the line
           // (older servers: from the roster).
           ...(m.verified !== undefined || m.creator !== undefined
-            ? { verified: m.verified, creator: m.creator, special: m.special, booster: m.booster, supporter: m.supporter, nameColor: m.nameColor, nameEffect: m.nameEffect, nameColor2: m.nameColor2, nameFont: m.nameFont, nameBadges: m.nameBadges, giftsSent: m.giftsSent, gifterColors: m.gifterColors, gifterAnimated: m.gifterAnimated }
+            ? { verified: m.verified, creator: m.creator, special: m.special, booster: m.booster, supporter: m.supporter, nameColor: m.nameColor, nameEffect: m.nameEffect, nameColor2: m.nameColor2, nameFont: m.nameFont, nameStyle: m.nameStyle, nameBadges: m.nameBadges, giftsSent: m.giftsSent, gifterColors: m.gifterColors, gifterAnimated: m.gifterAnimated }
             : m.slot !== undefined
               ? this.marksOf(m.slot)
               : {}),
@@ -651,7 +669,7 @@ export class Multiplayer {
   private marksOf(slot: number): PlayerMarks {
     const info = this.players.players.get(slot)?.info;
     return info
-      ? { verified: info.verified, creator: info.creator, special: info.special, booster: info.booster, supporter: info.supporter, nameColor: info.nameColor, nameEffect: info.nameEffect, nameColor2: info.nameColor2, nameFont: info.nameFont, nameBadges: info.nameBadges, giftsSent: info.giftsSent, gifterColors: info.gifterColors, gifterAnimated: info.gifterAnimated, staff: info.staff !== undefined ? info.staff : staffBadgeOf(this.roleOf(slot)) }
+      ? { verified: info.verified, creator: info.creator, special: info.special, booster: info.booster, supporter: info.supporter, nameColor: info.nameColor, nameEffect: info.nameEffect, nameColor2: info.nameColor2, nameFont: info.nameFont, nameStyle: info.nameStyle, nameBadges: info.nameBadges, giftsSent: info.giftsSent, gifterColors: info.gifterColors, gifterAnimated: info.gifterAnimated, staff: info.staff !== undefined ? info.staff : staffBadgeOf(this.roleOf(slot)) }
       : {};
   }
 
@@ -680,6 +698,7 @@ export class Multiplayer {
     if (this.navigating) return;
     this.navigating = true;
     this.banner.set(`Loading ${map}…`, this.room?.name ?? "", "change");
+    voice.detach();
     this.conn.close(CLOSE.MAP_CHANGE);
     allowLeave(); // no "Leave site?" prompt for the room's own map change
     location.href = roomUrl(this.o.serverId, map, { spectate: this.specOnJoin });
@@ -687,6 +706,7 @@ export class Multiplayer {
 
   private leave(): void {
     this.navigating = true;
+    voice.detach();
     this.conn.close(CLOSE.LEAVE);
     setRoomPresence(null);
     const url = new URL(appHref());
@@ -762,12 +782,12 @@ export class Multiplayer {
       report: (arg) => {
         // Someone in this room by name (exact, else the only one it starts with); anyone else is looked up by the server.
         const q = arg.trim().toLowerCase();
-        const here = [...this.players.players.values()].filter((p) => p.slot !== this.you).map((p) => ({ id: p.info.id, name: p.info.name }));
+        const here = [...this.players.players.values()].filter((p) => p.slot !== this.you).map((p) => ({ id: p.info.id, name: p.info.name, style: styleAt(p.meta?.style ?? -1) ?? p.info.style }));
         const exact = here.filter((p) => p.name.toLowerCase() === q);
         const starts = here.filter((p) => p.name.toLowerCase().startsWith(q));
         const p = !q ? null : exact.length === 1 ? exact[0]! : !exact.length && starts.length === 1 ? starts[0]! : null;
         takeFreeCursor();
-        openFeedback({ category: "report", ...(p ? { report: { id: p.id, name: p.name } } : q ? { report: { name: arg.trim() } } : {}) });
+        openFeedback({ category: "report", ...(p ? { report: { id: p.id, name: p.name, style: p.style } } : q ? { report: { name: arg.trim() } } : {}) });
       },
     },
   };
@@ -942,7 +962,8 @@ export class Multiplayer {
     const track = sess.timer.track;
     const theirs = styleAt(p.meta?.style ?? -1) ?? p.info.style;
     const pbs = (Object.entries(p.info.pb) as [StyleId, number][]).sort((a, b) => a[1] - b[1]).map(([s]) => s);
-    const styles = track > 0 ? [BONUS_STYLE] : [theirs, sess.runStyle, ...pbs];
+    // (Their roster PBs are main-track times.)
+    const styles = track > 0 ? [theirs, sess.runStyle, "autohop" as StyleId] : [theirs, sess.runStyle, ...pbs];
     let entry;
     try {
       entry = await playerRunOn(this.o.map, track, p.info.id, styles);
@@ -1049,7 +1070,7 @@ export class Multiplayer {
     const out = `${this.stopKey()} stops watching.`;
     const back = this.o.input.isMovementCode("KeyF") ? "!freecam" : "F";
     const hint = this.specMode === "free" ? `Free look. ${back} goes back in-eye, ${out}` : `Space changes the camera, ${out}`;
-    this.specBar.set(p && st ? { name: p.info.name, color: slotColor(p.slot), hint, look: { nameColor: p.info.nameColor, nameEffect: p.info.nameEffect, nameColor2: p.info.nameColor2, nameFont: p.info.nameFont } } : { name: this.name(this.spectating), color: "#fff", waiting: true, hint });
+    this.specBar.set(p && st ? { name: p.info.name, color: slotColor(p.slot), hint, look: { nameColor: p.info.nameColor, nameEffect: p.info.nameEffect, nameColor2: p.info.nameColor2, nameFont: p.info.nameFont, nameStyle: p.info.nameStyle }, talking: voice.isTalking(p.slot) } : { name: this.name(this.spectating), color: "#fff", waiting: true, hint });
   }
 
   // -------------------------------------------------------------------------------------------

@@ -20,7 +20,7 @@ import { mountOnlinePanel, submitAndTrack } from "./online";
 import { download, getPB, loadPBReplay, pbMs, savePBReplay, setPB, rejectPB, setPBContext, syncPBs, pbAccount, rememberPBSplits, type PersonalBest } from "./pb";
 import { keyLabel, prefs } from "./ui/settings";
 import { RunMouseSettings, mouseFromPrefs } from "./mouse-settings";
-import { DEFAULT_TURN_SPEED, turnSpeedOf } from "./turn-binds";
+import { DEFAULT_TURN_SPEED, TURN_HOLD_BITS, turnSpeedOf } from "./turn-binds";
 import { decodeReplay, encodeReplay, ReplayRecorder, replayFileName, replayStyle, sha256Hex, type Replay } from "./replay";
 import { isSegmented, nextStyle, StyleFilter, strafeKeys, styleDef, styleForTrack, styleLabel, stylePrespeedCap, styleSettings, styleStartReentryCap, type StyleDef, type StyleId } from "./styles";
 import { onStyleChange, setSelectedStyle } from "./ui/style-picker";
@@ -98,9 +98,9 @@ function recordedOutfit(): { outfit?: string } {
 }
 
 export class RunSession {
-  /** Selected (main-track) style: picked in the menus / F3. Bonus runs are always Normal (styles.ts styleForTrack). */
+  /** Selected style: picked in the menus / F3. Every track runs in it except the tutorial's final course (styles.ts styleForTrack). */
   selectedStyle: StyleId;
-  /** Style of the current attempt: physics settings, key filter and replay header (styleForTrack(selected, track)). */
+  /** Style of the current attempt: physics settings, key filter and replay header (styleForTrack(selected, track, map)). */
   runStyle: StyleId;
   private runDef: StyleDef | null;
   /** Live run key filter (tracks the ladder exemption until landing); reset with every core.reset(). */
@@ -352,10 +352,13 @@ export class RunSession {
    */
   command(sample: UserCmd): UserCmd {
     let c: TickCmd;
+    let nextYaw = NaN;
+    let look = this.experimentalInput || !sample.look ? undefined : sample.look;
     {
-      // Standing in a start zone whose track runs in another style (a bonus while W-Only is selected, or back on the
-      // main track after a bonus): restart right here in that track's style. Not while flying through one (Infinite).
-      if (this.timer.inStart && !this.flying && styleForTrack(this.selectedStyle, this.timer.track) !== this.runStyle) {
+      // Standing in a start zone whose track runs in another style (the tutorial's final course while W-Only is
+      // selected, or back on the main track after it): restart right here in that track's style. Not while flying
+      // through one (Infinite).
+      if (this.timer.inStart && !this.flying && this.styleFor(this.timer.track) !== this.runStyle) {
         const active = this.o.input.samplerState !== null;
         const restarted = this.switchTrackStyle(active ? sample.yaw : this.o.input.yaw);
         if (active && restarted) return sample; // applyTick discards it; do not run beforeStep on the new world.
@@ -363,6 +366,13 @@ export class RunSession {
       if (this.script.length) {
         c = this.script.shift()!;
         this.scripted = true;
+        nextYaw = this.script[0]?.yaw ?? NaN;
+        // v28+ Auto-strafe: the live command after the script moves with the last scripted yaw (a still mouse here, as on
+        // replay), not with a view from before the script.
+        if (this.styleFilter.lead) {
+          if (!this.script.length) nextYaw = c.yaw;
+          this.styleFilter.leadView = { yaw: c.yaw, turn: c.buttons & TURN_HOLD_BITS, look: undefined };
+        }
       } else {
         // Freecam: whatever the caller built, the body gets no keys or buttons (freecam.ts R1; main.ts already sends
         // the neutral command, this keeps any other path from feeding keys).
@@ -372,20 +382,35 @@ export class RunSession {
         c = { ...c, buttons: (prefs.get().landfix ? c.buttons & ~IN_NO_LANDFIX : c.buttons | IN_NO_LANDFIX) >>> 0 };
         // Infinite flight: the bit rides in the recorded command (before the style filter, which keeps it).
         if (this.flightOn) c = { ...c, buttons: (c.buttons | IN_FLIGHT) >>> 0 };
+        // v28+ Auto-strafe (styles.ts): the sim moves with last tick's mouse yaw, and this tick's becomes the next
+        // command's, so the key computed from the two leads the view by a tick. The camera keeps the live mouse.
+        // The turn-bind bits and the counted-yaw sample that explain a yaw travel with it (StyleFilter.lagView).
+        if (this.styleFilter.lead) ({ cmd: c, look, nextYaw } = this.styleFilter.lagView(c, look));
       }
-      c = this.styleFilter.apply(c, this.o.core.state(), this.timer.started);
+      c = this.styleFilter.apply(c, this.o.core.state(), this.timer.started, nextYaw);
       beforeStep(this.o.core, this.timer, c);
     }
     // v8: the live view state rides along to the recorder (a scripted command has none: that replay is written as v7).
-    return { forwardmove: c.forward, sidemove: c.side, yaw: c.yaw, pitch: c.pitch, buttons: c.buttons, ...(this.experimentalInput || this.scripted || !sample.look ? {} : { look: sample.look }), ...(sample.nullBinds && !this.scripted ? { nullBinds: true } : {}), ...(sample.timed && !this.scripted ? { timed: true } : {}), ...(sample.wRelease && !this.scripted ? { wRelease: true } : {}) };
+    return { forwardmove: c.forward, sidemove: c.side, yaw: c.yaw, pitch: c.pitch, buttons: c.buttons, ...(this.scripted || !look ? {} : { look }), ...(sample.nullBinds && !this.scripted ? { nullBinds: true } : {}), ...(sample.timed && !this.scripted ? { timed: true } : {}), ...(sample.wRelease && !this.scripted ? { wRelease: true } : {}) };
   }
 
   // -------------------------------------------------------------------------------------------
   // Styles, tracks and restarts
 
-  /** Style a run on `track` uses: the selected style on the main track, Normal on bonus tracks. */
+  /** Style a run on `track` uses: the selected style (styles.ts styleForTrack). */
   styleFor(track: number): StyleId {
-    return styleForTrack(this.selectedStyle, track);
+    return styleForTrack(this.selectedStyle, track, this.o.map);
+  }
+
+  /** Track of the latest restart: the attempt's track until the timer picks one (it resets to 0 on a restart). */
+  private restartTrack = 0;
+
+  /**
+   * The track this attempt is on: the timer's once it has seen the player in a start or running, else the last
+   * restart's (a style switch right after B, before a tick, stays on that bonus).
+   */
+  currentTrack(): number {
+    return this.timer.status === "idle" && !this.timer.inStart ? this.restartTrack : this.timer.track;
   }
 
   /** Bonus tracks of the current zone set (1..N), empty on maps without a bonus. */
@@ -402,8 +427,13 @@ export class RunSession {
     this.timer.options = { ...this.timer.options, prespeedCap: stylePrespeedCap(style), blockPrehops: blocksPrehops(style, this.o.map, this.timer.rules), strafeKeys: strafeKeys(this.runDef), startReentryCap: styleStartReentryCap(style) };
   }
 
+  /** The sim's view runs a tick behind the mouse (v28+ Auto-strafe, StyleFilter.lead): the command's yaw is not the live one. */
+  get viewLags(): boolean {
+    return this.styleFilter.lead;
+  }
+
   /** HUD map line: "map · W-Only · 100 tick", or "map · Bonus 1 · Normal" on a bonus track. */
-  private updateInfo(track = this.timer.track): void {
+  private updateInfo(track = this.currentTrack()): void {
     const label = track > 0 ? `${trackName(track)} · ${styleLabel(this.runStyle)}` : styleLabel(this.runStyle);
     const key = `${label}`;
     if (key === this.infoKey) return;
@@ -417,7 +447,8 @@ export class RunSession {
    * restartTarget(track)), then onReset(). main.ts's restart() calls this and resyncs its interpolation state.
    * Returns the start point's view pitch when one was used (the core only takes the yaw).
    */
-  resetCore(track = this.timer.track, at: RestartPoint | null = null, canonical = false): { pitch: number } | null {
+  resetCore(track = this.currentTrack(), at: RestartPoint | null = null, canonical = false): { pitch: number } | null {
+    this.restartTrack = track;
     this.setRunStyle(this.styleFor(track));
     const core = this.o.core;
     // The player's start point for this track (start-point.ts), if it's still valid here; else the usual target.
@@ -570,7 +601,7 @@ export class RunSession {
     this.o.restart(nextTrack(this.timer.track, b));
   }
 
-  /** Changes the selected style (pause menu, map browser, F3) and restarts on the main track in it. */
+  /** Changes the selected style (pause menu, map browser, F3) and restarts the current track in it. */
   async setStyle(id: StyleId): Promise<void> {
     if (this.modeLock && id !== this.selectedStyle) {
       this.hud.toast(this.modeLock, 2500, "mode-lock");
@@ -579,7 +610,7 @@ export class RunSession {
     this.selectedStyle = id;
     setSelectedStyle(id);
     this.ghosts.setStyle(id);
-    this.o.restart(0);
+    this.o.restart(this.currentTrack());
     const d = styleDef(id)!;
     this.hud.toast(d.name, 2000); // (the rule lives in the style picker)
     await this.refreshMenu();
@@ -622,7 +653,9 @@ export class RunSession {
     this.ssj.feed(cmd, state, events, flying ? { inStart: false, time: null, noclip: true } : ssjAt);
     if (flying) this.movementStats.reset(state);
     else this.movementStats.feed(cmd, state, events, t, { map: this.o.map, style: this.runStyle, track: t.track, practice: this.unranked });
-    this.hud.tick(cmd, state, events, flying ? { settings: this.settings, style: this.runStyle, noclip: true } : { settings: this.settings, style: this.runStyle }); // HUD: keys overlay / speed graph / jump stats see exactly the simulated command
+    // v28+ Auto-strafe: the trainer judges the turn the key came from, to the live mouse (StyleFilter.leadView).
+    const turnYaw = this.styleFilter.lead ? this.styleFilter.leadView?.yaw ?? NaN : undefined;
+    this.hud.tick(cmd, state, events, flying ? { settings: this.settings, noclip: true } : { settings: this.settings, ...(turnYaw !== undefined ? { turnYaw } : {}) }); // HUD: keys overlay / speed graph / jump stats see exactly the simulated command
     if (!this.experimentalInput) {
       this.recorder.push(cmd.forward, cmd.side, cmd.yaw, cmd.pitch, cmd.buttons, u.look ?? null);
       if (u.nullBinds) this.recorder.nullBinds = true; // header.nullBinds: the anticheat expects instant key switches
@@ -1065,7 +1098,7 @@ export class RunSession {
     const cmd: TickCmd = { forward: u.forwardmove, side: u.sidemove, yaw: u.yaw, pitch: u.pitch, buttons: u.buttons };
     const state = this.o.core.state();
     if (this.timer.status === "running") this.timer.coast(state.tick);
-    this.hud.tick(cmd, state, events, { settings: this.settings, style: this.runStyle, noclip: true });
+    this.hud.tick(cmd, state, events, { settings: this.settings, noclip: true });
     this.ssj.feed(cmd, state, events, { inStart: false, time: null, noclip: true });
     this.movementStats.reset(state);
     this.pushFrame(state, cmd);
@@ -1296,7 +1329,7 @@ export class RunSession {
     await renderMenu({
       map: this.o.map,
       style: this.selectedStyle,
-      currentTrack: () => this.timer.track,
+      currentTrack: () => this.currentTrack(),
       bonuses: this.modeLock ? [] : this.bonusTracks(),
       onStyle: (id) => void this.setStyle(id),
       onTrack: (track) => (this.modeLock && track ? this.hud.toast(this.modeLock, 2500, "mode-lock") : this.o.restart(track)),

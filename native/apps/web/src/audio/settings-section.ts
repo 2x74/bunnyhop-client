@@ -7,6 +7,7 @@ import { h } from "../ui/dom";
 import { announce, announcerAvailable, classic, engine, music, nextTrack, sfx } from "./index";
 import { trackName } from "./now-playing";
 import type { SfxId } from "./catalog";
+import { voiceGroup } from "../voice/settings";
 
 type BusKey = "music" | "sfx" | "ui" | "ambience" | "map";
 
@@ -89,6 +90,7 @@ export function registerAudioSettings(): void {
                 keywords: "counter-strike source valve",
               }),
             ),
+            voiceGroup(ui),
           ],
         ],
         advanced: [

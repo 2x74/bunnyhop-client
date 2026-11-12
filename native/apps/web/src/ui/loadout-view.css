@@ -1,8 +1,7 @@
 /* Loadout (ui/loadout-view.ts, ui/loadout-stage.ts): the categories across the top, the stage on the left, the item
    grid on the right. Same language as Settings: no borders, a 3px accent bar for "this one", sentence-case labels.
-   Rarity is a thin line under each thumbnail and the tier's name, in its colour, and the stage is lit in the shown
-   item's rarity (--rar; data-rar 0-1 keeps common items quiet): a pool on the floor, a rim along its edge, and in the
-   bunny view a slow light circling behind it. All static gradients; the only motion is transforms. */
+   No rarity is shown anywhere (owner 11-12: the item is what matters): the --rar rules below stay only so a theme
+   can light the stage itself. All static gradients; the only motion is transforms. */
 
 /* ---- the profile's Loadout tab (ui/profile.ts; its layout in profile.css) */
 .lo-boot { flex: 1; margin-top: calc(2.7rem + var(--sp-4)); display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(18rem, 1fr); gap: var(--sp-6); min-height: 0; }

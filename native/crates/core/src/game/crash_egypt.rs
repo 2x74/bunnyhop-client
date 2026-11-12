@@ -2,12 +2,8 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
-    fn load(version: u32) -> Game {
-        let raw = std::fs::read(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../maps/bhop_crash_egypt.bsp"
-        ))
-        .expect("required Crash Egypt BSP");
+    fn load(version: u32) -> Option<Game> {
+        let raw = std::fs::read(crate::test_maps::map("bhop_crash_egypt")?).unwrap();
         let b = crate::parse_bsp(&raw).unwrap();
         let mut g = Game::load(&b).unwrap();
         g.set_settings(Settings {
@@ -15,7 +11,7 @@ mod tests {
             ..Settings::css_bhop()
         });
         g.reset();
-        g
+        Some(g)
     }
     fn ticks(g: &mut Game, n: usize) {
         for _ in 0..n {
@@ -30,7 +26,7 @@ mod tests {
     }
     #[test]
     fn health_zero_physbox_weapon_hit_runs_its_authored_kill_chain() {
-        let mut g = load(26);
+        let Some(mut g) = load(26) else { return };
         ticks(&mut g, 100);
         g.place_player([148.0, 1408.0, -288.0]);
         g.step(Cmd {
@@ -48,7 +44,7 @@ mod tests {
     }
     #[test]
     fn nitro_timers_use_authored_random_intervals_and_restore_deterministically() {
-        let mut g = load(26);
+        let Some(mut g) = load(26) else { return };
         ticks(&mut g, 1);
         let next: Vec<_> = g
             .timers
@@ -95,7 +91,7 @@ mod tests {
     }
     #[test]
     fn normal_fruit_disappears_counts_once_and_plays_at_pickup() {
-        let mut g = load(26);
+        let Some(mut g) = load(26) else { return };
         assert_eq!(counter(&g), 50.0);
         assert!(g.ents[935].outputs.is_empty());
         g.place_player([0.0, 1632.0, -286.0]);
@@ -117,7 +113,7 @@ mod tests {
     }
     #[test]
     fn crate_touch_removes_collision_and_visual_and_requests_an_ordinary_jump() {
-        let mut g = load(26);
+        let Some(mut g) = load(26) else { return };
         assert!(g.entity_visible(968));
         assert!(g.ents[967].solid);
         g.place_player([96.0, 1408.0, -255.0]);
@@ -133,7 +129,7 @@ mod tests {
     }
     #[test]
     fn spawned_fruit_is_collectible_and_its_siblings_keep_distinct_names() {
-        let mut g = load(26);
+        let Some(mut g) = load(26) else { return };
         g.place_player([0.0, 1408.0, -180.0]);
         g.fire_input(
             "fruit_?_spawn_maker",
@@ -159,7 +155,7 @@ mod tests {
     }
     #[test]
     fn damage_maker_uses_output_caller_instead_of_makers_storage_room() {
-        let mut g = load(26);
+        let Some(mut g) = load(26) else { return };
         let pose = g.ents[967].origin;
         g.accept_input(
             Actor::Entity(959),
@@ -175,7 +171,7 @@ mod tests {
     }
     #[test]
     fn instances_and_sound_channels_restore_reset_and_reuse() {
-        let mut g = load(26);
+        let Some(mut g) = load(26) else { return };
         g.place_player([0.0, 1632.0, -286.0]);
         ticks(&mut g, 12);
         let snap = g.save_state();
@@ -212,7 +208,7 @@ mod tests {
     }
     #[test]
     fn every_legacy_version_keeps_makers_and_jump_commands_inert() {
-        let mut g = load(26);
+        let Some(mut g) = load(26) else { return };
         for version in 1..=25 {
             g.set_settings(Settings {
                 physics_version: version,
@@ -227,7 +223,7 @@ mod tests {
     }
     #[test]
     fn jump_latch_is_saved_released_and_cleared_by_respawn() {
-        let mut g = load(26);
+        let Some(mut g) = load(26) else { return };
         g.fire_input("Force Jump", "command", "+jump");
         assert!(g.extra.map_jump);
         let s = g.save_state();

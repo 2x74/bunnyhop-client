@@ -31,7 +31,8 @@ export class CamoStage {
   private sideCam = new THREE.PerspectiveCamera(22, 1, 1, 2000);
   private turn = new THREE.Group();
   private sideMesh: THREE.Mesh;
-  private sideMat: THREE.ShaderMaterial | null = null;
+  /** The side view's material per camo, kept while the stage lives (a disposed one released its program: see keepMaterials). */
+  private sideMats = new Map<string | null, THREE.ShaderMaterial>();
   private camo: string | null | undefined = undefined;
   private gunIdx = lastGun;
   private t = 0;
@@ -40,7 +41,7 @@ export class CamoStage {
   spinV = 0;
 
   constructor(l: CosmeticLoadout) {
-    this.vm = new GunViewmodel({ loadout: l });
+    this.vm = new GunViewmodel({ loadout: l, keepMaterials: true });
     this.vm.setVisible(true);
     const holder = new THREE.Group();
     holder.rotation.x = -Math.PI / 2; // gun-local z up -> y up
@@ -104,9 +105,9 @@ export class CamoStage {
     const camo = camoStyle(l.camo) ? l.camo! : null;
     if (camo === this.camo) return;
     this.camo = camo;
-    this.sideMat?.dispose();
-    this.sideMat = gunMaterial(playerUniforms(), NO_LOOK, { camo: camoStyle(camo), noEnv: true });
-    this.sideMesh.material = this.sideMat;
+    let m = this.sideMats.get(camo);
+    if (!m) this.sideMats.set(camo, (m = gunMaterial(playerUniforms(), NO_LOOK, { camo: camoStyle(camo), noEnv: true })));
+    this.sideMesh.material = m;
   }
 
   inspect(): void {
@@ -160,6 +161,6 @@ export class CamoStage {
 
   dispose(): void {
     this.vm.dispose();
-    this.sideMat?.dispose();
+    for (const m of this.sideMats.values()) m.dispose();
   }
 }

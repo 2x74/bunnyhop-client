@@ -4,12 +4,11 @@
 //! Maps are gitignored; each test skips (with a note) when its map is absent.
 
 use bunnyhop_core::{Cmd, Game, game::IN_JUMP};
-use std::path::PathBuf;
 
 const MAP: &str = "bhop_overground_fix";
 
 fn bsp_bytes() -> Option<Vec<u8>> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps").join(format!("{MAP}.bsp"));
+    let path = bunnyhop_core::test_maps::bsp(&MAP);
     match std::fs::read(&path) {
         Ok(b) => Some(b),
         Err(_) => {
@@ -55,12 +54,14 @@ fn same(scene: &str, (mut a, mut b): (Game, Game), ticks: u32, script: impl Fn(&
     }
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn the_map_itself() {
     let Some(games) = games(str::to_string) else { return };
     same("as shipped", games, 1500, |_, _| {});
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn nearly_every_event_is_skipped() {
     let Some((mut game, mut exact)) = games(str::to_string) else { return };
@@ -73,6 +74,7 @@ fn nearly_every_event_is_skipped() {
     assert!(game.events_skipped > 95 * 4000, "skipped {} of {}", game.events_skipped, game.events_fired());
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn every_physics_version_and_a_restart() {
     for version in 1..=bunnyhop_core::game::PHYSICS_LATEST {
@@ -89,6 +91,7 @@ fn every_physics_version_and_a_restart() {
     }
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn the_cap_is_still_spent() {
     let Some((mut game, _)) = games(str::to_string) else { return };
@@ -102,6 +105,7 @@ fn the_cap_is_still_spent() {
     assert_eq!(game.events_fired() - before, 10 * 4096);
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn inputs_that_break_into_the_loop() {
     for (scene, target, input, param) in [
@@ -125,6 +129,7 @@ fn inputs_that_break_into_the_loop() {
     }
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn doors_that_are_not_quite_the_loop() {
     // A counted output runs out; two outputs fan out; another door shares the target name; a real door joins the loop.
@@ -146,6 +151,7 @@ fn doors_that_are_not_quite_the_loop() {
     }
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn saved_states_keep_the_order() {
     let Some((mut a, mut b)) = games(str::to_string) else { return };

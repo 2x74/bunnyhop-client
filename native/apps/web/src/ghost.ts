@@ -406,7 +406,7 @@ export interface GhostHost {
   /** Main core (only used for loadPB during startup, before the run's first reset). */
   core: Core;
   map: string;
-  /** Selected (main-track) style; bonus tracks always use Normal (styles.ts styleForTrack). See GhostManager.setStyle. */
+  /** Selected style (styles.ts styleForTrack: every track but the tutorial's final course). See GhostManager.setStyle. */
   style: StyleId;
   mapSha256: string;
   settings: Settings;
@@ -451,9 +451,9 @@ export class GhostManager {
 
   private key = (kind: GhostKind, style: string, track: number) => `${kind}:${style}:${track}`;
 
-  /** Style whose PB / WR ghosts are raced on `track` (the selected style; Normal on bonus tracks). */
+  /** Style whose PB / WR ghosts are raced on `track` (the selected style; styles.ts styleForTrack). */
   styleFor(track: number): StyleId {
-    return styleForTrack(this.h.style, track);
+    return styleForTrack(this.h.style, track, this.h.map);
   }
 
   get(kind: GhostKind, track: number): Ghost | null {

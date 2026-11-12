@@ -13,6 +13,25 @@ export function softwareRenderer(name: string): boolean {
   return /swiftshader|basic render|llvmpipe|softpipe|software|\bwarp\b|mesa offscreen/i.test(name);
 }
 
+const softwareContexts = new WeakMap<object, boolean>();
+/**
+ * Whether this WebGL context draws on a software rasterizer (the menus' 3D previews then keep their flat swatches and
+ * icons: on SwiftShader each preview frame and each new shader cost the whole page seconds, research/PERF-PREVIEWS-0.0.40.md).
+ */
+export function softwareContext(gl: WebGLRenderingContext | WebGL2RenderingContext): boolean {
+  let s = softwareContexts.get(gl);
+  if (s === undefined) {
+    try {
+      const ext = gl.getExtension("WEBGL_debug_renderer_info");
+      s = softwareRenderer(String(gl.getParameter(ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER)));
+    } catch {
+      s = false;
+    }
+    softwareContexts.set(gl, s);
+  }
+  return s;
+}
+
 /** The WebGL renderer string, from a throwaway context (lost again at once). "" without WebGL. */
 function probeRenderer(): string {
   try {

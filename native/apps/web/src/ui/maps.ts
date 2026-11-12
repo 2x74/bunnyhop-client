@@ -240,7 +240,7 @@ function mapRow(m: MapEntry, fallbackThumb: string | null = null): HTMLElement {
   const bonus = bonusCount(m);
   const by = m.author?.trim() && !/^(unknown|none)$/i.test(m.author.trim()) ? `by ${m.author.trim()}` : "Unknown author";
   const r = rowShell(m.name, mapArt(m.name, m.thumbnail ?? fallbackThumb, { className: "mb-thumb" }), m.name, bonus ? `${by}, ${bonus} bonus${bonus > 1 ? "es" : ""}` : by, true);
-  if (bonus) r.querySelector(".mb-name small")!.setAttribute("title", "Bonus tracks are timed and ranked separately, always in Normal style");
+  if (bonus) r.querySelector(".mb-name small")!.setAttribute("title", "Bonus tracks are timed and ranked separately, in every style");
   const tag = csgoTag(m);
   if (tag) r.querySelector(".mb-title b")!.after(tag);
   return r;
@@ -714,7 +714,7 @@ export function mapBrowser(o: { current: string | null; focus?: string | null; s
       csgoTag(m),
       m.zoneWarning ? h("span.mbd-zone-warn", { title: zoneWarningNote(m.zoneWarning) }, m.zoneWarning) : null,
       m.author?.trim() ? authorSpan(m.author) : h("span", null, "Unknown author"),
-      bonus ? h("span", { title: "Bonus tracks are timed and ranked separately, always in Normal style" }, `${bonus} bonus track${bonus > 1 ? "s" : ""}`) : null,
+      bonus ? h("span", { title: "Bonus tracks are timed and ranked separately, in every style" }, `${bonus} bonus track${bonus > 1 ? "s" : ""}`) : null,
       m.size && m.size > 48 << 20 ? h("span", { title: "Download size" }, fmtBytes(m.size)) : null,
       sum?.added ? h("span", null, `Added ${new Date(sum.added).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}`) : null,
       onMap.attempts ? h("span", null, attemptsText(onMap.attempts)) : null,

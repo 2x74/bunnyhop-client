@@ -4,8 +4,8 @@ import type { TrainerPrefs } from "../ui/settings";
 import "./strafe-trainer.css";
 
 const LABELS: Record<TrainerCue, string> = {
-  ready: "", keys: "A / D", direction: "match your turn",
-  slow: "turn more", good: "", fast: "ease turn", unsupported: "manual A/D only",
+  ready: "", keys: "strafe keys", direction: "match your turn",
+  slow: "turn more", good: "", fast: "ease turn",
 };
 /** One element for every style (data-style switches the look in CSS); the rail spans 0 to PACE_MAX %. */
 export class StrafeTrainerView {
@@ -13,7 +13,7 @@ export class StrafeTrainerView {
   private cue = h("span.st-cue", null, LABELS.ready);
   private marker = h("i.st-marker");
   private fill = h("i.st-fill");
-  readonly el = h("div.st-trainer", { "data-cue": "ready", "data-style": "classic", "aria-label": "Strafe trainer", title: "100% is the target mouse turn per simulation tick. Bar colour: red loses speed, white holds it, orange/green/blue gain more. Normal, EZ Scroll, Legit Scroll and Half-Sideways." },
+  readonly el = h("div.st-trainer", { "data-cue": "ready", "data-style": "classic", "aria-label": "Strafe trainer", title: "100% is the target mouse turn per simulation tick. Bar colour: red loses speed, white holds it, orange/green/blue gain more. Works in every style." },
     h("div.st-rail", { "aria-hidden": "true" }, h("span.st-band"), h("i.st-target"), this.marker, this.fill),
     h("div.st-reading", null, this.number, this.cue),
   );
@@ -50,7 +50,7 @@ export class StrafeTrainerView {
     const pace = r.pace === null ? null : Math.round(r.pace);
     const barPace = r.bar ?? r.pace;
     const cue = isBar
-      ? r.cue === "unsupported" ? "unsupported" : r.gain == null || barPace === null ? "ready"
+      ? r.gain == null || barPace === null ? "ready"
         : Math.abs(barPace - 100) <= 10 ? "good" : barPace < 100 ? "slow" : "fast"
       : r.cue;
     const paceChanged = all || pace !== this.lastPace;

@@ -1,0 +1,68 @@
+/* Voice chat (voice/hud.ts): the talker list in the bottom left, under the chat, and the speaker mark by talking names.
+   Same face and panel tone as the chat (net/net.css); sizes follow the HUD scale (--hs). */
+
+#voice-hud {
+  position: absolute; left: 1.2vw; bottom: var(--voice-bottom, 3vh); z-index: 6;
+  display: none; flex-direction: column; align-items: flex-start; gap: 0.3em;
+  font-size: calc(0.86rem * var(--hs, 1)); pointer-events: none;
+}
+#voice-hud.on { display: flex; }
+.vh-list { display: flex; flex-direction: column; align-items: flex-start; gap: 0.3em; }
+/* A row is a plate: ink with a leaning left edge (::before, so the avatar standing on that edge isn't clipped). */
+.vh-row {
+  --vh-lean: 0.5em; position: relative; z-index: 0; display: grid; grid-template-columns: auto auto auto auto; align-items: center; column-gap: 0.55em;
+  min-width: 13.5em; min-height: 2.1em; box-sizing: border-box; padding: 0.2em 0.6em 0.2em calc(0.3em + var(--vh-lean));
+  color: #fff; font-weight: 650; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+.vh-row::before { content: ""; position: absolute; inset: 0; z-index: -2; background: rgba(12, 12, 15, 0.8); clip-path: polygon(var(--vh-lean) 0, 100% 0, 100% 100%, 0 100%); }
+body.chat-cursor .vh-row { pointer-events: auto; cursor: pointer; }
+.vh-row:hover::before { background: rgba(12, 12, 15, 0.92); }
+.vh-av { width: 1.7em; height: 1.7em; border-radius: 50%; object-fit: cover; display: block; background: rgba(255, 255, 255, 0.08); }
+.vh-av.letter { display: grid; place-items: center; font-weight: 800; font-size: 1em; color: #0b0d12; }
+.vh-name { max-width: 11em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vh-mic { color: #fff; opacity: 0.9; width: 0.95em; height: 0.95em; }
+.vh-graph { width: 4.8em; height: 1.45em; display: block; grid-column: 4; justify-self: end; margin-left: 0.3em; }
+/* Yours: a lip in amber, the game's "this one is you". */
+.vh-row.self::before { box-shadow: inset 0 -2px 0 var(--amber); }
+.vh-row.muted { opacity: 0.55; }
+.vh-row.muted .vh-graph { visibility: hidden; }
+/* A supporter's row is their card in small (voice/hud.ts): the card's background under a scrim that keeps the name
+   readable, its frame as the lip, their card effect behind the content (ui/card-fx.css layers, clipped to the plate). */
+.vh-row.vh-card { min-height: 2.3em; }
+.vh-row.vh-card::before { background: linear-gradient(90deg, rgba(8, 9, 12, 0.5), rgba(8, 9, 12, 0.18) 55%, rgba(8, 9, 12, 0.42)), var(--bg-card, var(--ink-1)); }
+.vh-row.vh-card:hover::before { filter: brightness(1.12); }
+.vh-plate { position: absolute; inset: 0; z-index: -1; overflow: hidden; clip-path: polygon(var(--vh-lean) 0, 100% 0, 100% 100%, 0 100%); pointer-events: none; }
+.vh-plate::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--frame, var(--ink-4)); }
+.vh-plate > .pc-sfx { opacity: 0.8; }
+.vh-row.vh-card .av-deco { font-size: inherit; }
+.vh-line {
+  --vh-lean: 0.5em; position: relative; z-index: 0; padding: 0.3em 0.7em 0.3em calc(0.6em + var(--vh-lean));
+  color: #d6dceb; font-weight: 600; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+.vh-line::before { content: ""; position: absolute; inset: 0; z-index: -1; background: rgba(12, 12, 15, 0.8); clip-path: polygon(var(--vh-lean) 0, 100% 0, 100% 100%, 0 100%); }
+
+/* The speaker mark beside a talking player's name: name tags, the spectator line, the scoreboards. */
+.voice-mark { display: inline-flex; align-items: center; margin-left: 0.3em; color: #fff; vertical-align: -0.12em; }
+.voice-mark .icon { width: 0.95em; height: 0.95em; }
+
+/* Scoreboard: the voice button at the end of a player's name (local mute / volume / room mute). */
+.sb-voice {
+  display: inline-flex; align-items: center; justify-content: center; margin-left: 0.4em; padding: 0.1em 0.2em;
+  background: none; border: 0; border-radius: 0.2em; color: var(--dim, #9aa3b5); cursor: pointer; font: inherit; line-height: 1;
+  vertical-align: -0.1em;
+}
+.sb-voice:hover, .sb-voice:focus-visible { color: #fff; background: rgba(255, 255, 255, 0.08); outline: none; }
+.sb-voice.talking { color: #fff; }
+.sb-voice.muted { color: #ff8a7a; }
+.sb-voice.room-muted { color: #ff8a7a; opacity: 0.8; }
+.sb-voice .icon { width: 1em; height: 1em; }
+
+/* The voice menu's volume line (voice/menu.ts). */
+.vm-volume { display: grid; grid-template-columns: auto 1fr 2.8em; align-items: center; gap: 0.6em; min-width: 15em; padding: 0.35em 0.7em; }
+.vm-volume input[type="range"] { width: 100%; }
+.vm-volume output { text-align: right; font-variant-numeric: tabular-nums; color: var(--dim, #9aa3b5); }
+
+/* Settings: the microphone level meter (voice/settings.ts). */
+.voice-meter { position: relative; width: 12em; height: 0.5em; border-radius: 0.2em; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
+.voice-meter > i { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--gain, #6fe08a); transition: width 60ms linear; }
+.voice-meter.idle > i { background: rgba(255, 255, 255, 0.25); }

@@ -6,10 +6,9 @@
 
 use bunnyhop_core::game::{PHYSICS_V20, PHYSICS_V21};
 use bunnyhop_core::{Cmd, Game, Settings};
-use std::path::PathBuf;
 
 fn load(version: u32) -> Option<Game> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps/bhop_collective.bsp");
+    let path = bunnyhop_core::test_maps::bsp("bhop_collective");
     let Ok(bytes) = std::fs::read(&path) else {
         eprintln!("skipping bhop_collective: {} not found", path.display());
         return None;
@@ -39,6 +38,7 @@ fn fly(game: &mut Game, from: [f32; 3], velocity: [f32; 3], ticks: usize) -> [f3
     game.state.position
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn doors_spawn_at_the_engines_angles_only_from_v21() {
     let Some(mut game) = load(PHYSICS_V21) else { return };
@@ -58,6 +58,7 @@ fn doors_spawn_at_the_engines_angles_only_from_v21() {
     }
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn a_restart_keeps_them_open() {
     let Some(mut game) = load(PHYSICS_V21) else { return };
@@ -76,6 +77,7 @@ const THROUGH: [([f32; 3], [f32; 3]); 3] = [
     ([5700.0, -10910.0, -13130.0], [-300.0, 0.0, 50.0]),   // *130
 ];
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn v20_stops_at_the_doors_and_v21_goes_through() {
     let (Some(mut old), Some(mut new)) = (load(PHYSICS_V20), load(PHYSICS_V21)) else { return };
@@ -91,6 +93,7 @@ fn v20_stops_at_the_doors_and_v21_goes_through() {
 }
 
 /// The open panel is where the engine has it. *130 is open at 90 degrees, so the hull meets an axis-aligned face.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn the_open_panel_of_the_90_degree_door_stops_a_flight_where_srcds_does() {
     let Some(mut game) = load(PHYSICS_V21) else { return };

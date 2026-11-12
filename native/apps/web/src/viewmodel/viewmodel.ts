@@ -313,7 +313,7 @@ export class Viewmodel {
   async warmLoadouts(ls: readonly CosmeticLoadout[], renderer: THREE.WebGLRenderer, camera: THREE.Camera, scene: THREE.Scene): Promise<void> {
     const glove = gloveStyle(this.loadout.glove).style;
     const knives = ls.map((l) => knifeById(l.knife) ?? carrot);
-    await prebuildViewmodels(knives.map((k) => [k, glove] as [KnifeDef, GloveStyleId]));
+    await prebuildViewmodels(knives.map((k) => [k, glove] as [KnifeDef, GloveStyleId]), !!getPlayerGlow()?.enabled && prefs.get().firstPersonGlow);
     const want = new Map<string, MaterialLook>();
     for (const l of ls) {
       const look = applyLoadoutUniforms(this.uniforms, { ...l, glove: this.loadout.glove }, undefined, true);

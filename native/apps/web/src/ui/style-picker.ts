@@ -1,7 +1,7 @@
 // Selected run style (Normal / Legit Scroll / W-Only / Sideways / Half-Sideways, and the assisted Auto-strafe; see
 // styles.ts) and the map list's style control.
 // The style is not a setting: it decides the physics + key rules of a run and keys PBs, ghosts and leaderboards.
-// It is remembered across maps (localStorage) and applies to main-track runs; bonus runs are always Normal.
+// It is remembered across maps (localStorage) and applies to the main track and every bonus (styles.ts styleForTrack).
 
 import { DEFAULT_STYLE, isStyleId, STYLE_DEFS, styleDef, type StyleId } from "../styles";
 import { h } from "./dom";
@@ -9,7 +9,7 @@ import { h } from "./dom";
 const KEY = "bunnyhop:style";
 const listeners = new Set<(id: StyleId) => void>();
 
-/** The player's chosen (main-track) style. */
+/** The player's chosen style. */
 export function selectedStyle(): StyleId {
   try {
     const v = localStorage.getItem(KEY);

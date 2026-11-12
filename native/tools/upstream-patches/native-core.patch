@@ -1,8 +1,8 @@
 diff --git a/crates/core/Cargo.toml b/crates/core/Cargo.toml
-index f79264a..b5993fd 100644
+index 6e679c1..6a42f8b 100644
 --- a/crates/core/Cargo.toml
 +++ b/crates/core/Cargo.toml
-@@ -4,14 +4,17 @@ version = "0.1.0"
+@@ -4,10 +4,9 @@ version = "0.1.0"
  edition.workspace = true
  license.workspace = true
  
@@ -15,6 +15,10 @@ index f79264a..b5993fd 100644
  # Measurement exports for research/EDGEBUG-V22.md. Never in a shipped build.
  edge-diag = []
  
+@@ -15,7 +14,11 @@ edge-diag = []
+ # CI builds tests with --cfg ci: tests whose maps CI doesn't fetch are ignored there (src/test_maps.rs).
+ unexpected_cfgs = { level = "warn", check-cfg = ["cfg(ci)"] }
+ 
 +[lib]
 +crate-type = ["cdylib", "rlib"]
 +
@@ -24,10 +28,10 @@ index f79264a..b5993fd 100644
  playsrc-collision = { path = "../vendor/collision" }
  playsrc-movement = { path = "../vendor/movement" }
 diff --git a/crates/core/src/game.rs b/crates/core/src/game.rs
-index e46cbe6..8f7bbf8 100644
+index 32ea0e0..a50e478 100644
 --- a/crates/core/src/game.rs
 +++ b/crates/core/src/game.rs
-@@ -1351,8 +1351,8 @@ impl Tracer for Scene<'_> {
+@@ -1359,8 +1359,8 @@ impl Tracer for Scene<'_> {
  }
  
  fn angle_vectors_forward(angles: [f32; 3]) -> [f32; 3] {
@@ -38,7 +42,7 @@ index e46cbe6..8f7bbf8 100644
      [cp * cy, cp * sy, -sp]
  }
  
-@@ -2484,8 +2484,8 @@ impl Game {
+@@ -2495,8 +2495,8 @@ impl Game {
          let lo = [p[0] + hull.mins[0], p[1] + hull.mins[1], p[2] + hull.mins[2]];
          let hi = [p[0] + hull.maxs[0], p[1] + hull.maxs[1], p[2] + hull.maxs[2]];
          let center = [(lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5, (lo[2] + hi[2]) * 0.5];
@@ -273,19 +277,19 @@ index 3e5e27c..7cbc6eb 100644
      }
  
 diff --git a/crates/core/src/lib.rs b/crates/core/src/lib.rs
-index 1053aad..56b1702 100644
+index aff53ab..42b80c7 100644
 --- a/crates/core/src/lib.rs
 +++ b/crates/core/src/lib.rs
-@@ -9,7 +9,7 @@ pub mod skybox;
- pub mod studio;
- pub mod physics;
- pub mod vfs;
+@@ -12,7 +12,7 @@ pub mod vfs;
+ #[cfg(not(target_arch = "wasm32"))]
+ #[doc(hidden)]
+ pub mod test_maps;
 -#[cfg(target_arch = "wasm32")]
 +#[cfg(any(target_arch = "wasm32", feature = "native-web"))]
  mod wasm;
  
  pub use game::{Cmd, Game, Settings};
-@@ -28,3 +28,6 @@ pub fn parse_bsp(bytes: &[u8]) -> Result<playsrc_bsp::Bsp, String> {
+@@ -31,3 +31,6 @@ pub fn parse_bsp(bytes: &[u8]) -> Result<playsrc_bsp::Bsp, String> {
          max_light_samples: 32 * 1024 * 1024,
          ..Default::default() }).map_err(|e| format!("bsp: {e:?}"))
  }
@@ -402,10 +406,10 @@ index 702314f..718cf65 100644
      let left = [sr * sp * cy - cr * sy, sr * sp * sy + cr * cy, sr * cp];
      let up = [cr * sp * cy + sr * sy, cr * sp * sy - sr * cy, cr * cp];
 diff --git a/crates/core/src/props.rs b/crates/core/src/props.rs
-index 61b3e57..8f82b8a 100644
+index 2fc6932..c0105a5 100644
 --- a/crates/core/src/props.rs
 +++ b/crates/core/src/props.rs
-@@ -336,9 +336,9 @@ pub struct PropMesh {
+@@ -349,9 +349,9 @@ pub struct PropMesh {
  
  /// Source `AngleMatrix` (pitch about Y, yaw about Z, roll about X), as rows applied to column vectors.
  fn angle_matrix([pitch, yaw, roll]: [f32; 3]) -> [[f32; 3]; 3] {
@@ -419,7 +423,7 @@ index 61b3e57..8f82b8a 100644
          [cp * cy, sr * sp * cy - cr * sy, cr * sp * cy + sr * sy],
          [cp * sy, sr * sp * sy + cr * cy, cr * sp * sy - sr * cy],
 diff --git a/crates/core/src/wasm.rs b/crates/core/src/wasm.rs
-index c6221ec..5aa40fd 100644
+index 043aa2c..74ef7da 100644
 --- a/crates/core/src/wasm.rs
 +++ b/crates/core/src/wasm.rs
 @@ -31,7 +31,7 @@ fn with<R>(f: impl FnOnce(&mut Ctx) -> R) -> R {
@@ -930,7 +934,7 @@ index c6221ec..5aa40fd 100644
  pub extern "C" fn overlay_states() -> usize {
      with(|c| {
          c.scratch_u32.clear();
-@@ -998,15 +998,15 @@ pub extern "C" fn edge_observed() -> u32 {
+@@ -999,15 +999,15 @@ pub extern "C" fn edge_observed() -> u32 {
  }
  
  // Optional observational ABI v2. Does not change commands, snapshots or ranked timing.
@@ -949,7 +953,7 @@ index c6221ec..5aa40fd 100644
  pub extern "C" fn timing_path() -> usize {
      with(|c| {
          c.timing_f64.clear();
-@@ -1024,9 +1024,9 @@ pub extern "C" fn timing_path() -> usize {
+@@ -1025,9 +1025,9 @@ pub extern "C" fn timing_path() -> usize {
          c.timing_f64.len()
      })
  }
@@ -961,7 +965,7 @@ index c6221ec..5aa40fd 100644
  pub extern "C" fn timing_path_reason() -> usize {
      with(|c| {
          c.scratch_str = c.game.as_ref().and_then(|g| g.timing_path.as_ref())
-@@ -1034,3 +1034,7 @@ pub extern "C" fn timing_path_reason() -> usize {
+@@ -1035,3 +1035,7 @@ pub extern "C" fn timing_path_reason() -> usize {
          c.scratch_str.len()
      })
  }

@@ -27,7 +27,7 @@ import { previewOf } from "../notify/item-preview";
 import type { Loadout, NewTracker } from "./card-editor";
 import { arrowNav, h } from "./dom";
 import type { LoadoutStage, StageLook, StageView, ThumbJob } from "./loadout-stage";
-import { loadoutSwatch, rarityOf, shownCosmetic } from "./loadout-ui";
+import { loadoutSwatch, shownCosmetic } from "./loadout-ui";
 import { EMPTYABLE, isLoadoutCategory, LOADOUT_CATEGORIES, loadoutCategories, loadoutSections, noneLabel, stageKind, type LoadoutCategory } from "./cosmetic-slots";
 import { keyLabel, prefs } from "./settings";
 import { earnedLine, lockInfo, profileHolder, profileRanks, type LockInfo } from "./unlocks";
@@ -634,22 +634,19 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
 
   function makeTile(c: CosmeticDef | null, group?: string): TileRef {
     const lock = c && !m.owns(c) ? m.lock(c) : null;
-    const rar = veiled(c) ? null : rarityOf(c);
     const canvas = h("canvas", { width: 384, height: 240, "aria-hidden": "true" }) as HTMLCanvasElement;
     const thumb = h(`span.lo-thumb${veiled(c) ? ".lo-veiled" : ""}`, null, veiled(c) ? h("span.pf-sw.lo-sw-none", { "aria-hidden": "true" }) : swatch(c), canvas, h("span.lo-on", { html: CHECK_SVG, "aria-hidden": "true" }));
-    // In the Supporter and Staff sections the line under the name is the item's set (the heading already says how it's
-    // had; the rarity is the line under the thumbnail): "Geode", or the lock and the set for a locked one.
+    // The line under the name: how to get a locked item, or in the Supporter and Staff sections the item's set
+    // ("Geode"). An item you own says nothing more: no rarity anywhere (owner 11-12).
     const sub = lock
       ? h("span.lo-sub.lo-lock", { title: lock.hint }, h("span.lo-lock-i", { html: LOCK_SVG }), goalText(c, group ?? lock.goal, true))
       : group
         ? h("span.lo-sub", null, group)
-        : rar
-          ? h("span.lo-sub", null, rar.name)
-          : null;
+        : null;
     const id = c?.id ?? "";
     const el = h(
       "button.lo-tile",
-      { type: "button", "data-id": id, "data-sound": "none", style: rar ? `--rar:${rar.color}` : undefined, onclick: () => choose(t) },
+      { type: "button", "data-id": id, "data-sound": "none", onclick: () => choose(t) },
       thumb,
       h("span.lo-name", null, h("span", null, nameOf(c) ?? noneLabel(slot)), c && m.isNew(c.id) ? h("span.pf-new-dot", { role: "img", "aria-label": "new" }) : null),
       sub,
@@ -795,15 +792,7 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
     } else {
       capName.replaceChildren(h("span", null, nameOf(focus) ?? (EMPTYABLE.has(slot) ? noneLabel(slot) : "")), h("span.lo-cap-fin", null, KIND[slot]));
     }
-    const rar = veiled(focus) ? null : rarityOf(focus);
-    // The room takes the shown item's rarity colour (common items barely tint it).
-    const level = veiled(focus) ? 0 : focus?.rarity ?? 0;
-    if (rar) stageHost.style.setProperty("--rar", rar.color);
-    else stageHost.style.removeProperty("--rar");
-    stageHost.dataset.rar = String(level);
-    stage?.tint(rar?.color ?? null, level <= 1 ? 0.35 : 1);
     capMeta.replaceChildren(
-      rar ? h("span.lo-cap-rar", { style: `--rar:${rar.color}` }, h("i", { "aria-hidden": "true" }), rar.name) : "",
       hands && l0.hilt ? h("span.dim", null, `${cosmetic(l0.hilt)?.name ?? ""} hilt`) : "",
       hands ? h("span.dim", null, `${cosmetic(c.glove)?.name ?? "Knit"} gloves`) : "",
     );

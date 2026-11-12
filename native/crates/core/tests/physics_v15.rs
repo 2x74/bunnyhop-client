@@ -6,10 +6,9 @@
 
 use bunnyhop_core::game::{IN_JUMP, PHYSICS_V14, PHYSICS_V15, map_signed_door_travel_for};
 use bunnyhop_core::{Cmd, Game, Settings};
-use std::path::PathBuf;
 
 fn load(name: &str, version: u32) -> Option<Game> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps").join(format!("{name}.bsp"));
+    let path = bunnyhop_core::test_maps::bsp(name);
     let Ok(bytes) = std::fs::read(&path) else {
         eprintln!("skipping {name}: {} not found", path.display());
         return None;
@@ -41,6 +40,7 @@ fn up_block(game: &mut Game) -> (f32, f32) {
     (standing, top)
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn montana_up_block_launches_from_v15() {
     let Some(mut old) = load("bhop_montana_fix", PHYSICS_V14) else { return };
@@ -57,6 +57,7 @@ fn montana_up_block_launches_from_v15() {
     assert!(new_top > 560.0 && new_top < 600.0, "v15: the block launches the jump ({new_top})");
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn other_maps_are_not_in_the_table() {
     for map in ["bhop_eazy", "bhop_frost_bite_v1", "bhop_areaportal_v1", "bhop_2easy"] {

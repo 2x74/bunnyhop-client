@@ -47,7 +47,7 @@ import { setFinishEnvironmentClock } from "../viewmodel/finishes/environment";
 import { FloorGuns } from "../viewmodel/guns/world";
 import type { WorldView } from "../render";
 import { simulate } from "../sim";
-import { styleForTrack, styleLabel, type StyleId } from "../styles";
+import { INFINITE_NOTE, styleDef, styleForTrack, styleLabel, type StyleId } from "../styles";
 import { formatTime } from "../timer";
 import { afterPaint, h } from "../ui/dom";
 import { hideUiKey, isHideUiKey, setUiHidden } from "../ui/hide-ui";
@@ -498,7 +498,7 @@ export class ReplayViewer implements ExportSource {
     const pb = target.pb === true ? {} : target.pb;
     const map = (pb as { map?: string }).map ?? this.host.map;
     const track = (pb as { track?: number }).track ?? 0;
-    const style = styleForTrack(((pb as { style?: string }).style ?? this.host.style()) as StyleId, track);
+    const style = styleForTrack(((pb as { style?: string }).style ?? this.host.style()) as StyleId, track, map);
     const bytes = await loadPBReplay(map, style, track);
     if (!bytes) throw new Error(`No ${track ? trackName(track) + " " : ""}${styleLabel(style)} PB replay saved on ${map} yet.`);
     return { bytes, label: "Personal best" };
@@ -652,6 +652,7 @@ export class ReplayViewer implements ExportSource {
     if (h0.mapSha256 !== this.host.mapSha256) notes.push("Recorded on a different build of this map, so playback may desync.");
     if (d.desyncTick !== null) notes.push(`Desync at tick ${d.desyncTick}: this build doesn't reproduce the recording exactly.`);
     if (d.styleViolations) notes.push(`${d.styleViolations} commands break the ${styleLabel(replayStyle(h0))} rules (filtered as the verifier does).`);
+    if (styleDef(replayStyle(h0))?.airJump) notes.push(INFINITE_NOTE);
     this.notice = notes.join(" ");
     this.updateTitle();
     this.updateControls();
@@ -676,7 +677,7 @@ export class ReplayViewer implements ExportSource {
     this.playing = false;
     this.updateControls();
     const d = this.player?.data;
-    openFeedback({ category: "report", report: { name: this.playerName() || "this player", run: { id: this.runId, map: r.header.map, time: d ? finalRunTime(d) : null } } });
+    openFeedback({ category: "report", report: { name: this.playerName() || "this player", run: { id: this.runId, map: r.header.map, time: d ? finalRunTime(d) : null }, style: replayStyle(r.header) } });
   }
 
   /** Who ran it: the server's account name for a leaderboard run, else the name in the replay file. */

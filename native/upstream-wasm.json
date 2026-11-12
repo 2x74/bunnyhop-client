@@ -1,11 +1,11 @@
 {
   "schema": 1,
-  "status": "published",
-  "commit": "f0d5a96e53fba78c9780db868315505ada16281f",
+  "status": "unpublished",
+  "commit": "5dd8e85f0c02cccc0b95fd219ab6b835f42bc5f3",
   "toolchain": "1.99.1",
-  "url": "https://bunnyhop.lol/assets/bunnyhop_core-DRB0bjUC.wasm",
-  "sha256": "36aeeb392a5dfc2e4aa6f38bc4fd1354480318363ba77bcc4926ada23281e19b",
-  "bytes": 1606772,
-  "physics": 27,
+  "url": "",
+  "sha256": "2a36e806d22a4388f6ecb593e6b6046589b6476465f1f57f2e8bf62b05057a76",
+  "bytes": 1606795,
+  "physics": 28,
   "rules": 5
 }

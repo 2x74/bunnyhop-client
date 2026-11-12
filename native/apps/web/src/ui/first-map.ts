@@ -8,11 +8,16 @@
 //   bh_aztec       2.1k players, median 23 s (WR 9 s), sandstone and water under a sky; 1.6 MB
 //   bhop_easyhop   150 players, median 22 s (WR 13 s), bright orange and blue rooms; 2.3 MB
 //   bhop_2_easy    475 players, median 12 s (WR 8 s), one short stone lane over water; 1.2 MB
-//   bhop_alley     190 players, median 23 s (WR 13 s), brick alleys on grass under a blue sky; 2.0 MB
 // Not: bhop_eazy / bhop_1 / bhop_1n5an3 / bhop_2easy (newcomers' times are 3-4x the WR), bhop_3_easy and
 // bhop_at_night (dark), bhop_bfur (one strafe corridor).
+// Dropped 2026-11-12: bhop_alley. Of players who went from the intro straight to the day's first map (10-28 to 11-10),
+// 39.9% finished a run on alley days against 43.3-49.6% on the others, and its newcomers took the longest (median first
+// finish 61 s, 130 s after the intro). Measure a change by that rate per first-map day (analytics_cohorts by day).
 
-export const FIRST_MAPS = ["bhop_ambience", "bh_aztec", "bhop_easyhop", "bhop_2_easy", "bhop_alley"] as const;
+// Added 2026-11-12 (owner): bhop_lol_meadow, our own T1 map, in alley's place. No newcomer numbers for it as a first map
+// yet: read its days from the first-play record (apps/api/src/first-play.ts) once it has some.
+
+export const FIRST_MAPS = ["bhop_ambience", "bh_aztec", "bhop_easyhop", "bhop_2_easy", "bhop_lol_meadow"] as const;
 
 const DAY_MS = 86_400_000;
 

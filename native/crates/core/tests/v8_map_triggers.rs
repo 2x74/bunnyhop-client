@@ -25,7 +25,7 @@ fn maps_dir() -> PathBuf {
 }
 
 fn bsp_bytes(name: &str) -> Option<Vec<u8>> {
-    let path = maps_dir().join(format!("{name}.bsp"));
+    let path = bunnyhop_core::test_maps::bsp(name);
     let bytes = std::fs::read(&path).ok();
     if bytes.is_none() {
         eprintln!("skipping: {} not found", path.display());
@@ -97,7 +97,7 @@ fn only_bhop_2easy_matches() {
         eprintln!("skipping: no maps");
         return;
     }
-    let has_2easy = maps_dir().join("bhop_2easy.bsp").exists();
+    let has_2easy = bunnyhop_core::test_maps::present(&maps_dir().join("bhop_2easy.bsp"));
     assert_eq!(matched, if has_2easy { vec![("bhop_2easy".to_string(), "bhop_2easy")] } else { vec![] }, "{scanned} maps scanned");
 }
 

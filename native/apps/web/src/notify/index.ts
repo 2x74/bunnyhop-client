@@ -500,7 +500,7 @@ function flip(container: HTMLElement, mutate: () => void): void {
 const modelClass = (s: CelebrationSpec): string => (s.model ? (s.model.el.dataset.state === "off" ? ".has-model.nt-model-off" : ".has-model") : "");
 
 function emblemOf(s: CelebrationSpec): { emblem: HTMLElement; level: HTMLElement | null; shine: HTMLElement | null } {
-  const emblem = h("span.nt-cel-emblem", { "aria-hidden": "true" });
+  const emblem = h(`span.nt-cel-emblem${s.level ? ".is-level" : ""}`, { "aria-hidden": "true" });
   let level: HTMLElement | null = null;
   if (s.level) emblem.append((level = h("b.nt-level-n", null, String(s.level[0]))));
   else if (s.emblem) emblem.append(s.emblem);
@@ -547,7 +547,7 @@ function showMoment(n: Note<Data>, s: CelebrationSpec): void {
   const title = h("b.nt-cel-title", null, s.title);
   const detail = s.detail ? h("span.nt-cel-detail", null, s.detail) : null;
   const m = s.mood ? mascot(s.mood, { className: "nt-cel-mascot" }) : null;
-  const slab = h("div.nt-cel-slab", null, h(`span.nt-cel-emblem-wrap${modelClass(s)}`, null, ringEl, emblem, s.model?.el ?? null), h("div.nt-cel-text", null, kicker, title, detail), s.action ? actionButton(n, s.action) : null);
+  const slab = h("div.nt-cel-slab", null, h(`span.nt-cel-emblem-wrap${modelClass(s)}${s.level ? ".is-level" : ""}`, null, ringEl, emblem, s.model?.el ?? null), h("div.nt-cel-text", null, kicker, title, detail), s.action ? actionButton(n, s.action) : null);
   const el = h(`div.nt-cel${m ? ".has-mascot" : ""}`, { style: `--c:${color}`, title: s.hint ?? null }, m?.el ?? null, slab);
   holdable(el, n);
   swipeable(el, n);

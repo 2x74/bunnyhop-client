@@ -12,14 +12,13 @@
 
 use bunnyhop_core::game::{IN_USE, PHYSICS_V5, PHYSICS_V6, PHYSICS_V7};
 use bunnyhop_core::{Cmd, Game, Settings};
-use std::path::PathBuf;
 
 /// bw (func_breakable, model *581) and db (model *539).
 const BW_MODEL: u32 = 581;
 const DB_MODEL: u32 = 539;
 
 fn monster_jam(version: u32) -> Option<Game> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps/bhop_monster_jam.bsp");
+    let path = bunnyhop_core::test_maps::bsp("bhop_monster_jam");
     if !path.exists() {
         eprintln!("skipping: {} not found", path.display());
         return None;
@@ -65,6 +64,7 @@ fn press(version: u32, at: [f32; 3], button: [f32; 3], wall: u32, checks: &[u32]
     Some(out)
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn bw_breaks_a_second_after_its_button_and_comes_back() {
     let (at, button) = ([3625.0, -3554.0, 4992.0], [3568.0, -3568.0, 5028.0]);
@@ -77,6 +77,7 @@ fn bw_breaks_a_second_after_its_button_and_comes_back() {
     assert_eq!(v7, [true, false, true], "v7: gone 1 s after the press, respawned by tbw 14 s after it");
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn db_breaks_twenty_seconds_after_its_button() {
     let (at, button) = ([10652.0, -5160.0, 7768.0], [10656.0, -5208.0, 7780.0]);

@@ -16,13 +16,12 @@
 
 use bunnyhop_core::game::{PHYSICS_V5, PHYSICS_V6};
 use bunnyhop_core::{Cmd, Game, Settings};
-use std::path::PathBuf;
 
 const IN_ATTACK: u32 = 1;
 const IN_ATTACK2: u32 = 1 << 11;
 
 fn badges_with(version: u32, weapon: &str) -> Option<Game> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps/bhop_badges.bsp");
+    let path = bunnyhop_core::test_maps::bsp("bhop_badges");
     if !path.exists() {
         eprintln!("skipping: {} not found", path.display());
         return None;
@@ -111,6 +110,7 @@ fn span(pushed: &[usize]) -> Option<(usize, usize)> {
     Some((*pushed.first()?, *pushed.last()?))
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn v5_first_hit_renames_nobody_like_stock_css() {
     let Some((names, pushed)) = pad_run(PHYSICS_V5, &[10], 120) else { return };
@@ -118,6 +118,7 @@ fn v5_first_hit_renames_nobody_like_stock_css() {
     assert!(pushed.is_empty());
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn v5_second_hit_renames_and_its_window_is_not_extended() {
     let Some((names, pushed)) = pad_run(PHYSICS_V5, &[10, 30, 74], 180) else { return };
@@ -127,6 +128,7 @@ fn v5_second_hit_renames_and_its_window_is_not_extended() {
     assert_eq!(span(&pushed), Some((36, 85)));
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn v6_first_hit_renames_the_attacker() {
     let Some((names, pushed)) = pad_run(PHYSICS_V6, &[10], 120) else { return };
@@ -136,6 +138,7 @@ fn v6_first_hit_renames_the_attacker() {
     assert_eq!(span(&pushed), Some((16, 65)));
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn v6_boost_ends_with_the_earlier_hits_window() {
     let Some((names, pushed)) = pad_run(PHYSICS_V6, &[10, 54], 160) else { return };
@@ -145,6 +148,7 @@ fn v6_boost_ends_with_the_earlier_hits_window() {
     assert_eq!(span(&pushed), Some((16, 65)));
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn v6_glock_burst_every_half_second_chains_the_boost() {
     // srcds (hook on): Glock in burst mode, presses on 10..=24, 54..=73, 100..=119 (a recorded player's rhythm: 44-46
@@ -167,6 +171,7 @@ fn v6_glock_burst_every_half_second_chains_the_boost() {
     assert_eq!(pushed.len(), 150, "no gap");
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn v6_held_glock_fires_one_burst() {
     // srcds: burst mode, +attack held from 10 on: one burst (10, 16, 22), no more; upboost after 16, default after 66.

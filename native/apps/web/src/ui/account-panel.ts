@@ -134,9 +134,11 @@ async function render(d: HTMLDialogElement, body: HTMLElement, section: AccountS
       null,
       plate,
       nameMsg,
-      h("small.acct-who-status", null, status, left && !left.isDefault ? ` ${left.changesLeft > 0 ? `${left.changesLeft} of ${left.limit} name changes left today.` : "No name changes left today."}` : ""),
+      h("small.acct-who-status", null, status, left && !left.isDefault ? ` ${left.changesLeft > 0 ? "You can change your name once a week." : left.resetAt ? `You can change your name again on ${new Date(left.resetAt).toLocaleDateString()}.` : "You can change your name once a week."}` : ""),
       // The name is the login (apps/api src/password.ts), and the old one stops working as soon as it changes.
       view?.password.set && !left?.isDefault ? h("small.acct-who-status", null, "You sign in with this name. If you change it, sign in with the new one: the old one stops working.") : null,
+      // A self rename keeps the old name for this player for a while (apps/api src/names.ts holds).
+      left?.held ? h("small.acct-who-status", null, `Your old name ${left.held.name} is kept for you until ${new Date(left.held.until).toLocaleDateString()}. Change back to it any time before then.`) : null,
       // After a staff rename the old name still works, until this player picks a name themself (apps/api src/names.ts).
       view?.password.alias ? h("small.acct-who-status", null, "Staff changed your name. Your old name still signs you in until you pick a new name yourself.") : null,
       // The avatar editor is its own page (avatar.html); the Wavedash build opens it on the site.

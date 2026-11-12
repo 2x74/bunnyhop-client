@@ -6,7 +6,7 @@
 
 import { appLocation } from "../platform/navigation";
 import { api, ApiUnavailable, type RankBoard, type RankEntry } from "../api";
-import { BONUS_TRACK_FACTOR, CLEAR_FLOOR, CLEAR_TIME, CLEAR_WEIGHT, fmtPoints, isRankedStyle, PLACEMENT_WEIGHT, PLAYERS_POWER, RANK_GROUPS, RECORD_WEIGHTING, STYLE_WEIGHT, TIER_BASE, topPercent, WR_FULL_PLAYERS } from "../ranking";
+import { BONUS_MAX_TIER, BONUS_TRACK_FACTOR, CLEAR_FLOOR, CLEAR_TIME, CLEAR_WEIGHT, fmtPoints, isRankedStyle, PLACEMENT_WEIGHT, PLAYERS_POWER, RANK_GROUPS, RECORD_WEIGHTING, STYLE_WEIGHT, TIER_BASE, topPercent, WR_FULL_PLAYERS } from "../ranking";
 import { tierLabel } from "../tiers";
 import { STYLE_DEFS, styleLabel } from "../styles";
 import { h } from "./dom";
@@ -63,10 +63,10 @@ function howItWorks(): void {
         h("li", null, "Clear pays for finishing: ", h("b", null, `${CLEAR_WEIGHT} × base × (${CLEAR_FLOOR} + ${CLEAR_TIME} × (WR time ÷ your time)²)`), "."),
         h("li", null, "Placement pays for the players you beat: ", h("b", null, `${PLACEMENT_WEIGHT} × √(base ÷ 10) × ((players ÷ place)^${PLAYERS_POWER} − 1) × (1 + 1 ÷ place)`), "."),
         h("li", null, `A WR pays 2× second place from ${WR_FULL_PLAYERS} players up and less on smaller boards. Alone on a board you get the clear only.`),
-        h("li", null, `Base by tier: ${tiers}. Bonus tracks: ×${BONUS_TRACK_FACTOR}. Maps without a tier (T?) give no points.`),
+        h("li", null, `Base by tier: ${tiers}. ${BONUS_MAX_TIER >= 1 ? `Bonus tracks: ×${BONUS_TRACK_FACTOR}, scored as T${BONUS_MAX_TIER} at most.` : "Bonus tracks give no points."} Maps without a tier (T?) give no points.`),
         h("li", null, `Overall rank weights styles: ${styles}. Each style also has its own board.${separate ? ` ${separate} is ranked on its own board only and doesn't count towards Overall.` : ""}`),
         h("li", null, `Your total adds your records best first, each worth ${RECORD_WEIGHTING}× the one before, so a strong set of records beats grinding easy maps.`),
-        h("li", null, "Points update within about 10 minutes of a verified run, or an hour on the biggest maps, for everyone on that board. Past the top 10, players and places round to small steps, so your points move when you cross a step."),
+        h("li", null, "Your own points and rank update as soon as your run is verified. Everyone else on that board follows within about 10 minutes, or an hour on the biggest maps. Past the top 10, players and places round to small steps, so your points move when you cross a step."),
       ),
       h(
         "div.rk-how-groups",

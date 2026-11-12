@@ -25,7 +25,7 @@ import { hasCrownGeometry, seedCrownGeometry } from "./crown";
 import { hasHatGeometry, seedHatGeometry } from "./hats";
 import { hasBunnyGeometry, seedBunnyGeometry } from "./mesh";
 import { bunnyParts } from "./prebuild-parts";
-import { hasViewmodelGeometry, seedViewmodelGeometry } from "../../viewmodel/mesh";
+import { hasViewmodelGeometry, seedViewmodelGeometry, viewmodelGeometry } from "../../viewmodel/mesh";
 import { markViewmodelLayout } from "../../viewmodel/finishes/layout";
 import type { KnifeDef } from "../../viewmodel/knives/types";
 import { hasKnifeCloud, seedKnifeCloud } from "../../viewmodel/knives/hold";
@@ -73,6 +73,12 @@ function ensureWorker(): Worker | null {
         if (def) seedGunHold(def, r.hold);
       } else if ("vm" in r) {
         for (const v of r.vm) {
+          // Only the glow's normals were missing: they go onto the geometry already in use.
+          if (hasViewmodelGeometry(v.knife, v.glove)) {
+            const k = knifeOf.get(v.knife);
+            if (v.geometry.glowNormals && k) seedShellGeometry(viewmodelGeometry(k, v.glove), v.geometry.glowNormals);
+            continue;
+          }
           const g = geometry(v.geometry);
           markViewmodelLayout(g); // laid out in the worker (finishUV is part of the geometry)
           seedViewmodelGeometry(v.knife, v.glove, g);
@@ -179,14 +185,16 @@ export function prebuildLoadoutStart(outfit: string | null | undefined, loadout:
 
 /**
  * Builds the first-person viewmodel geometry (hands in a glove style + a knife: viewmodel/mesh.ts) of these pairs in
- * the worker, for the ones not built yet; viewmodelGeometry then finds them cached. Never rejects; without the worker
+ * the worker, for the ones not built yet; viewmodelGeometry then finds them cached. `glow`: also the glow shell's
+ * smoothed normals (player/glow-geometry.ts), which the hands need when your glow shows in first person (~50 ms a
+ * knife on the main thread at 4x CPU, in the frame a hovered knife first showed). Never rejects; without the worker
  * they're built on the main thread when first used, as before.
  */
-export function prebuildViewmodels(pairs: readonly [KnifeDef, GloveStyleId][]): Promise<void> {
-  const need = pairs.filter(([k, g]) => !hasViewmodelGeometry(k.id, g));
+export function prebuildViewmodels(pairs: readonly [KnifeDef, GloveStyleId][], glow = false): Promise<void> {
+  const need = pairs.filter(([k, g]) => !hasViewmodelGeometry(k.id, g) || (glow && !hasShellGeometry(viewmodelGeometry(k, g))));
   // And their knives' point clouds for the grip solver (knives/hold.ts knifeCloud: the knife's mesh again, deduped).
   const clouds = [...new Set(pairs.map(([k]) => k.id))].filter((id) => !hasKnifeCloud(id));
-  const flight = need.map(([k, g]) => `${k.id}|${g}`).join(",") + `;${clouds.join(",")}`;
+  const flight = need.map(([k, g]) => `${k.id}|${g}`).join(",") + `;${clouds.join(",")}${glow ? ";glow" : ""}`;
   if (!need.length && !clouds.length) return Promise.resolve();
   const running = inflight.get(`vm:${flight}`);
   if (running) return running;
@@ -205,7 +213,7 @@ export function prebuildViewmodels(pairs: readonly [KnifeDef, GloveStyleId][]): 
     waiting.set(id, () => (clearTimeout(timer), resolve()));
   }).finally(() => inflight.delete(`vm:${flight}`));
   inflight.set(`vm:${flight}`, done);
-  w.postMessage({ id, vm: need.map(([k, g]) => [k.id, g]), clouds });
+  w.postMessage({ id, vm: need.map(([k, g]) => [k.id, g]), clouds, glow });
   return done;
 }
 

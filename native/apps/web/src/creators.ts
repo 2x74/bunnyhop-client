@@ -29,7 +29,7 @@
 // Booster, Supporter, special badges.
 
 import type { StaffRole } from "./progression";
-import { avatarDecoOf, nameFontOf, type AvatarDecoId, type NameFontId } from "./supporter-looks";
+import { avatarDecoOf, isNameStyle, nameFontOf, type AvatarDecoId, type NameFontId, type NameStyle } from "./supporter-looks";
 
 export type CreatorKind = "youtube" | "twitch" | "tiktok" | "x";
 export const CREATOR_KINDS: readonly CreatorKind[] = ["youtube", "twitch", "tiktok", "x"];
@@ -58,6 +58,8 @@ export interface PlayerMarks {
   nameColor2?: NameColorId | null;
   /** A supporter's name font (supporter-looks.ts NAME_FONTS); null / absent = the default font. v0.0.37. */
   nameFont?: NameFontId | null;
+  /** Bold / italic (supporter-looks.ts NameStyle), shown where the font has the cut; null / absent = plain. v0.0.40. */
+  nameStyle?: NameStyle | null;
   /** A supporter's avatar decoration (supporter-looks.ts AVATAR_DECOS); null / absent = none. v0.0.37. */
   avatarDeco?: AvatarDecoId | null;
   /** Special badges the player holds (SPECIAL_BADGES ids, staff-granted). Absent from older APIs / servers. */
@@ -65,15 +67,17 @@ export interface PlayerMarks {
 }
 
 /** How a supporter's name looks: colour, effect, second colour (PlayerMarks' name fields). */
-export type NameLook = Pick<PlayerMarks, "nameColor" | "nameEffect" | "nameColor2" | "nameFont">;
+export type NameLook = Pick<PlayerMarks, "nameColor" | "nameEffect" | "nameColor2" | "nameFont" | "nameStyle">;
 
 // ---------------------------------------------------------------------------------------------
-// Supporter name colours. Six, picked to read on every surface a name shows on (board rows, chat over the game, the
-// room scoreboard, name tags, every card background: WCAG contrast 4.5 or more) and to stay clear of the colours that
-// mean something already: WR gold, the staff shields (mint, sky, gold), the Verified blue, the Booster pink and red
-// (apps/api/test/supporters.test.ts checks both). In hue order.
+// Supporter name colours. Eleven (six, and five more in v0.0.40), picked to read on every surface a name shows on (board
+// rows, chat over the game, the room scoreboard, name tags, every card background: WCAG contrast 4.5 or more; over a
+// white map the name tag's pill keeps each at least as readable as Periwinkle, the lowest of the first six) and to stay
+// clear of the colours that mean something already: WR gold, the staff shields (mint, sky, gold), the Verified blue, the
+// Booster pink and red, and (v0.0.40) the tier and rank colours (apps/api/test/supporters.test.ts checks all of it). The
+// first six in hue order, then the five added, in hue order.
 
-export type NameColorId = "rose" | "peach" | "sand" | "lime" | "aqua" | "periwinkle";
+export type NameColorId = "rose" | "peach" | "sand" | "lime" | "aqua" | "periwinkle" | "blossom" | "cream" | "pear" | "honeydew" | "lilac";
 export const NAME_COLORS: readonly { id: NameColorId; name: string; hex: string }[] = [
   { id: "rose", name: "Rose", hex: "#ffa8cb" },
   { id: "peach", name: "Peach", hex: "#ffab8f" },
@@ -81,6 +85,11 @@ export const NAME_COLORS: readonly { id: NameColorId; name: string; hex: string 
   { id: "lime", name: "Lime", hex: "#c4ee6a" },
   { id: "aqua", name: "Aqua", hex: "#6ff0f0" },
   { id: "periwinkle", name: "Periwinkle", hex: "#a8b8ff" },
+  { id: "blossom", name: "Blossom", hex: "#ffc5f5" },
+  { id: "cream", name: "Cream", hex: "#fee5b3" },
+  { id: "pear", name: "Pear", hex: "#b6c728" },
+  { id: "honeydew", name: "Honeydew", hex: "#bff9c6" },
+  { id: "lilac", name: "Lilac", hex: "#e5a9fd" },
 ];
 export const isNameColor = (v: unknown): v is NameColorId => typeof v === "string" && NAME_COLORS.some((c) => c.id === v);
 
@@ -88,18 +97,21 @@ export const isNameColor = (v: unknown): v is NameColorId => typeof v === "strin
  * Supporter name effects (ui/marks.css draws them; player/tag.ts does colour, glow and a still gradient on the 3D name
  * tags). glow: a soft halo in the colour. paint ("Gradient"): a gradient across the letters to the second colour.
  * sparkle ("Shine"): the plain colour with a bright shine sweeping across it every few seconds (CSS only, still under
- * prefers-reduced-motion). The ids are what's stored (users.name_effect). "shimmer" (a drifting gradient, dropped
+ * prefers-reduced-motion). v0.0.40: outline ("Outline"), still: a rim round the letters in the second colour. (A "Lift"
+ * drop shadow was tried and left out: a dark shadow on the dark boards doesn't show at board size.) The ids are what's
+ * stored (users.name_effect). "shimmer" (a drifting gradient, dropped
  * 2026-10-09: too close to Gradient) still in a row reads as "paint" (nameEffectOf); no migration rewrites it.
  */
-export type NameEffect = "glow" | "paint" | "sparkle";
+export type NameEffect = "glow" | "paint" | "sparkle" | "outline";
 export const NAME_EFFECTS: readonly { id: NameEffect; name: string }[] = [
   { id: "glow", name: "Glow" },
   { id: "paint", name: "Gradient" },
   { id: "sparkle", name: "Shine" },
+  { id: "outline", name: "Outline" },
 ];
 export const isNameEffect = (v: unknown): v is NameEffect => typeof v === "string" && NAME_EFFECTS.some((e) => e.id === v);
 /** Effects that use the second colour. */
-export const usesColor2 = (e: NameEffect | null | undefined) => e === "paint";
+export const usesColor2 = (e: NameEffect | null | undefined) => e === "paint" || e === "outline";
 /** A stored effect as shown now: a known one, the dropped "shimmer" as "paint", anything else none. */
 export const nameEffectOf = (v: unknown): NameEffect | null => (v === "shimmer" ? "paint" : isNameEffect(v) ? v : null);
 /** The CSS colour of a name colour id (null for none or anything unknown, so a stray value never reaches a style). */
@@ -140,6 +152,7 @@ export function marksOf(
     name_effect?: string | null;
     name_color2?: string | null;
     name_font?: string | null;
+    name_style?: string | null;
     avatar_deco?: string | null;
     special_badges?: string | null;
   },
@@ -164,6 +177,8 @@ export function marksOf(
     nameColor2: isNameColor(row.name_color2) ? row.name_color2 : null,
     // name_font / avatar_deco: SUPPORTER_COLS too (v0.0.37, supporter-looks.ts); absent from older rows / queries.
     ...(row.name_font !== undefined ? { nameFont: nameFontOf(row.name_font) } : {}),
+    // name_style: SUPPORTER_COLS too (v0.0.40); absent from older rows / queries.
+    ...(row.name_style !== undefined ? { nameStyle: isNameStyle(row.name_style) ? row.name_style : null } : {}),
     ...(row.avatar_deco !== undefined ? { avatarDeco: avatarDecoOf(row.avatar_deco) } : {}),
     ...(row.special_badges !== undefined ? { special: onePeak(oneWeeklyPerMedal(parseBadgeList(row.special_badges).filter(isSpecialBadge))) } : {}),
   };

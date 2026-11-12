@@ -161,6 +161,7 @@ export function listBinds(p: Prefs): string[] {
   const out: [string, string][] = [];
   for (const a of actions(p.binds)) for (const c of p.binds[a]) out.push([keyForCode(c), commandForAction(a)]);
   for (const [c, text] of Object.entries(p.cmdBinds ?? {})) out.push([keyForCode(c), text.replace(/"/g, "'")]);
+  if (p.voice?.key) out.push([keyForCode(p.voice.key), "+voicerecord"]);
   return out.sort((x, y) => x[0].localeCompare(y[0])).map(([k, c]) => `"${k}" = "${c}"`);
 }
 
@@ -433,6 +434,7 @@ export class ConsoleRunner {
       h.update((p) => (why = setCvar(p, cvar, args[0])));
       return why ? h.print(why, "err") : h.print(`${cvar.name} ${fmtCvar(cvar.get(h.get()))}`, "ok");
     }
+    if (name === "+voicerecord" || name === "-voicerecord") return h.print(`${name} is for keys: bind one, e.g. bind x +voicerecord (now ${keyForCode(h.get().voice.key) || "unbound"}).`, "dim");
     if (name.startsWith("+") || name.startsWith("-")) {
       const a = actionForCommand(name.replace(/^-/, "+"));
       return h.print(a ? `${name} is for keys: bind one, e.g. bind space ${commandForAction(a)}.` : `Unknown command "${name}".`, a ? "dim" : "err");
@@ -537,6 +539,11 @@ export class ConsoleRunner {
     if (args.length === 1) {
       const b = bindingOf(h.get(), code);
       return h.print(b !== null ? `"${keyForCode(code)}" = "${b}"` : `"${keyForCode(code)}" is not bound`);
+    }
+    // Voice chat's push to talk is its own key (Prefs.voice.key): in rooms it talks, so the key can keep a solo bind.
+    if (/^\+voicerecord$/i.test(args.slice(1).join(" ").trim().replace(/^"|"$/g, ""))) {
+      h.update((p) => (p.voice.key = code));
+      return this.out(`"${keyForCode(code)}" = "+voicerecord" (push to talk in rooms)`, "ok");
     }
     const r = bindPlan(code, args.slice(1).join(" "));
     if ("error" in r) return this.out(r.error, "err");
@@ -666,6 +673,8 @@ export function writeConfigText(p: Prefs, name: string, at = new Date()): string
   for (const a of Object.keys(p.binds) as Action[]) for (const c of p.binds[a]) binds.push([keyForCode(c), commandForAction(a)]);
   for (const [c, t] of Object.entries(p.cmdBinds ?? {})) binds.push([keyForCode(c), flat(t)]);
   for (const [k, c] of binds) out.push(c === null ? `// bind ${k}: has quoted ";" (not written)` : `bind ${q(k)} ${q(c)}`);
+  // Voice chat's push to talk key (its own pref: it can share a key with a solo bind).
+  if (p.voice?.key) out.push(`bind ${q(keyForCode(p.voice.key))} "+voicerecord"`);
   for (const c of WRITTEN_CVARS) if (!c.skipWrite?.(p)) out.push(`${c.name} ${q(fmtCvar(c.get(p)))}`);
   return out.join("\n") + "\n";
 }
@@ -744,6 +753,13 @@ export function importConfig(text: string, base: Prefs, o: ImportOptions = {}): 
       }
       if (args.length < 2) {
         line(cmd, "skipped", "shows a bind, sets nothing");
+        continue;
+      }
+      // Voice chat's push to talk: its own key pref (the key keeps any other bind it has).
+      if (/^\+voicerecord$/i.test(args.slice(1).join(" ").trim())) {
+        p.voice.key = code;
+        binds++;
+        line(cmd, "set", "push to talk");
         continue;
       }
       const plan = bindPlan(code, args.slice(1).join(" "));

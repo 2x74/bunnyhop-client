@@ -24,6 +24,8 @@ export interface RowRun {
   /** Seconds (the report form shows it). */
   time: number | null;
   player: { id: string; name: string };
+  /** The run's style (the report form explains Infinite's noclip start). */
+  style?: string;
 }
 
 /** Staff see "Open in admin"; asked once, read when a menu opens. */
@@ -52,7 +54,7 @@ export function rowMenuItems(run: RowRun, o: { mine?: boolean; extra?: MenuItem[
     ...(o.extra ?? []),
     canCopyStart(run.map) ? { label: "Copy start", run: () => requestCopyStart(run.map, run.runId, run.player.name) } : null,
     { label: "Copy link", run: () => copyLink(run.runId) },
-    api.available() && !o.mine ? { label: "Report", run: () => openFeedback({ category: "report", report: { id: run.player.id, name: run.player.name, run: { id: run.runId, map: run.map, time: run.time } } }) } : null,
+    api.available() && !o.mine ? { label: "Report", run: () => openFeedback({ category: "report", report: { id: run.player.id, name: run.player.name, run: { id: run.runId, map: run.map, time: run.time }, style: run.style } }) } : null,
     staff && !o.mine ? { label: "Open in admin", run: () => void window.open(`/admin#/player/${encodeURIComponent(run.player.id)}`, "_blank", "noopener") } : null,
   ];
 }

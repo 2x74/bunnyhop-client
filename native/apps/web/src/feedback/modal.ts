@@ -36,7 +36,7 @@ import { discordLink } from "../ui/community";
 import { gpuInfo } from "../gpu-info";
 import { icon } from "../ui/icons";
 import { mapArt } from "../ui/thumbs";
-import { styleLabel } from "../styles";
+import { INFINITE_NOTE, styleDef, styleLabel } from "../styles";
 import { tierLabel, tierName, TIERS } from "../tiers";
 import { mapTier } from "../ui/maps";
 import { formatTime } from "../timer";
@@ -359,6 +359,7 @@ export function showFeedback(o: FeedbackOpen = {}): void {
   let target: ReportTarget | null = o.report ?? null;
   let reason: (typeof REASONS)[number]["id"] | null = null;
   const whoLine = h("p.fb-ask.fb-who");
+  const styleNote = h("p.fb-ask.fb-style-note", { hidden: true }, INFINITE_NOTE);
   const whoInput = h("input.fb-input", { id: "fb-who", type: "text", maxlength: 32, autocomplete: "off", spellcheck: "false", placeholder: "Their name", "aria-label": "The player's name" }) as HTMLInputElement;
   whoInput.addEventListener("input", () => (err.textContent = ""));
   const reasonButtons = REASONS.map((r) =>
@@ -369,10 +370,11 @@ export function showFeedback(o: FeedbackOpen = {}): void {
     if (!target) whoLine.textContent = "Who are you reporting?";
     else whoLine.replaceChildren(h("b", null, target.name), target.run ? `, their run on ${target.run.map}${target.run.time !== null ? ` in ${formatTime(target.run.time)}` : ""}` : "");
     whoInput.hidden = !!target;
+    styleNote.hidden = !(target?.style && styleDef(target.style)?.airJump);
     reasonButtons.forEach((b, i) => b.setAttribute("aria-checked", String(REASONS[i]!.id === reason)));
     if (category === "report") text.placeholder = REASONS.find((r) => r.id === reason)?.placeholder ?? PLACEHOLDER.report;
   };
-  const reportPage = h("div.fb-tier-pick.fb-report", { hidden: true }, whoLine, whoInput, reasonRow);
+  const reportPage = h("div.fb-tier-pick.fb-report", { hidden: true }, whoLine, styleNote, whoInput, reasonRow);
 
   // What goes with it, in words, with one switch.
   let include = true;

@@ -9,7 +9,6 @@ use bunnyhop_core::game::{
     WEAPON_COMMAND_COOLDOWN, WEAPON_EVENT_GIVEN, WEAPON_EVENT_SILENCER, WEAPON_EVENT_SWITCHED,
 };
 use bunnyhop_core::{Cmd, Game, Settings};
-use std::path::PathBuf;
 
 const KNIFE: u32 = 1;
 const GLOCK: u32 = 2;
@@ -24,7 +23,7 @@ fn give(id: u32) -> u32 {
 }
 
 fn load(name: &str, version: u32) -> Option<Game> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps").join(format!("{name}.bsp"));
+    let path = bunnyhop_core::test_maps::bsp(name);
     let Ok(bytes) = std::fs::read(&path) else {
         eprintln!("skipping {name}: {} not found", path.display());
         return None;
@@ -221,10 +220,11 @@ fn state_bytes_of_runs_without_the_new_features_are_unchanged() {
     assert_ne!(a.snapshot_bytes(), b.snapshot_bytes());
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn badges_usp_command_shoots_the_first_pad() {
     // bhop_badges runs on bhop servers take the USP with !usp from level 2 on (research/maps/badges-real-replays.md).
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps/bhop_badges.bsp");
+    let path = bunnyhop_core::test_maps::bsp("bhop_badges");
     if !path.exists() {
         eprintln!("skipping: {} not found", path.display());
         return;

@@ -4,10 +4,9 @@
 
 use bunnyhop_core::game::{EVENT_TELEPORTED, LANDING_GROUND, LANDING_NONE, LANDING_TELEPORT};
 use bunnyhop_core::{Cmd, Game, Settings};
-use std::path::PathBuf;
 
 fn load(name: &str) -> Option<Game> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps").join(format!("{name}.bsp"));
+    let path = bunnyhop_core::test_maps::bsp(name);
     let Ok(bytes) = std::fs::read(&path) else {
         eprintln!("skipping {name}: {} not found", path.display());
         return None;
@@ -199,6 +198,7 @@ fn sweep(map: &str, seed: u64, samples: usize) -> Option<(usize, usize)> {
     Some((agree, compared))
 }
 
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn prediction_matches_the_simulation_on_real_maps() {
     // Flat blocks (bhop_eazy), ledges and teleport floors (bhop_bfur, bhop_kotodama), displacements and ramps

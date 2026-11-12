@@ -15,6 +15,8 @@ export const GLYPHS: Record<string, string> = {
   w: textGlyph("W", 11),
   sw: textGlyph("SW", 9),
   hsw: textGlyph("HSW", 7.5),
+  ad: textGlyph("AD", 9.5),
+  bw: textGlyph("BW", 9),
   styles: P("M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"),
   clock: P("M12 7v5l3 2M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z"),
   sync: P("M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3M18 3v4h-4M6 21v-4h4"),

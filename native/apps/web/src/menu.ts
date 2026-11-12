@@ -32,7 +32,7 @@ import { ProfileHistory } from "./ui/profile-history";
 import { profileScreen, type ProfileActions, type ProfileOpen, type ProfileTab } from "./ui/profile";
 import { leaveRanksUrl, ranksScreen } from "./ui/ranks";
 import { gauntletResult, gauntletScreen, gauntletsScreen, leaveGauntletUrl, type GauntletScreens } from "./ui/gauntlets";
-import { BONUS_STYLE, STYLE_DEFS, styleForTrack, styleLabel, type StyleId } from "./styles";
+import { STYLE_DEFS, styleForTrack, styleLabel, trackStyleLocked, type StyleId } from "./styles";
 import { chatCommands } from "./chat-commands";
 import { helpPanelGroups } from "./chat-help";
 import { trackName } from "./zones";
@@ -520,19 +520,19 @@ function styleTab(a: MenuActions, track: number): HTMLElement {
   const bonuses = a.bonuses ?? [];
   const cycle = bindHint("cycleStyle");
   let styles: HTMLElement | null = null;
-  if (a.onStyle && track) {
+  if (a.onStyle && trackStyleLocked(track, a.map)) {
     styles = h(
       "div.pp-group",
       null,
       h("div.pp-group-head", null, h("span.kicker", null, "Style")),
-      h("div.style-locked", null, `${trackName(track)} · ${styleLabel(BONUS_STYLE)}`, h("small.dim", null, " Bonus tracks are always Normal style. Pick Main to choose a style.")),
+      h("div.style-locked", null, `${trackName(track)} · ${styleLabel(styleForTrack(selected as StyleId, track, a.map))}`, h("small.dim", null, " The final course is always Normal style.")),
     );
   } else if (a.onStyle) {
     const list = h(
       "div.style-list",
       { role: "radiogroup", "aria-label": "Style" },
       ...STYLE_DEFS.map((d) => {
-        const pb = getPB(a.map, d.id, 0);
+        const pb = getPB(a.map, d.id, track);
         const on = d.id === selected;
         return h(
           `button.style-row${on ? ".on" : ""}`,
@@ -571,7 +571,7 @@ function styleTab(a: MenuActions, track: number): HTMLElement {
               `button.track-btn${t === track ? ".on" : ""}`,
               { type: "button", onclick: resumeAnd(() => a.onTrack!(t)), "aria-pressed": String(t === track) },
               h("b", null, t ? trackName(t) : "Main"),
-              h("small", null, t === track ? "playing · restart" : t ? `${styleLabel(BONUS_STYLE)} only` : styleLabel(selected)),
+              h("small", null, t === track ? "playing · restart" : styleLabel(styleForTrack(selected as StyleId, t, a.map))),
             ),
           ),
         ),
@@ -683,7 +683,7 @@ function pauseScreen(): HTMLElement {
   const map = a?.map ?? "…";
   const selected = a?.style ?? "autohop";
   const track = a?.currentTrack?.() ?? 0;
-  const runStyle = styleForTrack(selected as StyleId, track);
+  const runStyle = styleForTrack(selected as StyleId, track, a?.map);
   const pb = a ? getPB(a.map, runStyle, track) : null;
   const restartKey = prefs.get().binds.restart[0];
   const inRoom = !!roomPresence();
@@ -902,7 +902,7 @@ function controlsHelp(): HTMLElement {
         h("li", null, "In the air, don't hold W. Hold ", h("kbd", null, "A"), " while moving the mouse left, ", h("kbd", null, "D"), " while moving it right."),
         h("li", null, "Smooth, synced strafes gain speed; the speedometer turns green while you gain."),
         h("li", null, "Stand in the green start zone, then run or jump out to start the timer (a jump counts from takeoff); touch the red end zone to finish. Prespeed is capped at 290 u/s."),
-        h("li", null, "Cyan / magenta zones are bonus tracks, timed and ranked separately (always Normal style). Orange zones are stage splits."),
+        h("li", null, "Cyan / magenta zones are bonus tracks, timed and ranked separately in every style. Orange zones are stage splits."),
       ),
       h("h3", null, "Styles"),
       h(

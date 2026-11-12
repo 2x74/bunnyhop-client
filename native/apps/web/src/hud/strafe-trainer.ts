@@ -1,11 +1,13 @@
 // Display-only turn pace, inspired by https://github.com/2x74/strafetrainer.
 // Pace is yaw change relative to atan(air push / speed). Bar colour uses the core's clean AirAccelerate observation.
+// Every style: the command is the style-filtered one core.step received, so its wish direction (forward * view forward +
+// side * view right, as in the core) is the style's. The velocity turns towards the wish, and the view has to follow it.
 import type { TickCmd } from "../timer";
 import type { ChatCommand } from "../chat-commands";
 
-export type TrainerCue = "ready" | "keys" | "direction" | "slow" | "good" | "fast" | "unsupported";
+export type TrainerCue = "ready" | "keys" | "direction" | "slow" | "good" | "fast";
 /**
- * `side`: the strafe key held, -1 left, 1 right, 0 none (the follow-the-turn gauge mirrors on it).
+ * `side`: the way the strafe turns, -1 left, 1 right (A / D in Normal), 0 none (the follow-the-turn gauge mirrors on it).
  * `bar` / `barSide`: the Bar look's own average, where a tick with nothing to judge counts as 0, so the fill grows out of
  * its edge after a strafe switch and fades when the strafing stops. Absent when 0; previews and the layout editor leave
  * it out too, and the Bar look then shows `pace` and `side`.
@@ -18,13 +20,20 @@ export interface TrainerSample {
   /** Double-precision post-tick length for Bar parity; legacy replay pace keeps its f32 cache. */
   barSpeed?: number;
   speed: number;
+  /** Heading of the horizontal velocity (degrees, the core's yaw convention). Absent: the turn follows the side key. */
+  velYaw?: number;
+  /**
+   * Physics 28+ Auto-strafe (styles.ts StyleFilter.lead): the next command's yaw, the live mouse. Its key comes from the
+   * turn from this command's yaw to that one, so that is the turn judged (NaN: none yet, a still mouse). Absent: the turn
+   * from the previous command's yaw to this one's.
+   */
+  turnYaw?: number;
   grounded: boolean;
   onLadder: boolean;
   tick: number;
   dt: number;
   maxSpeed: number;
   airAccelerate: number;
-  style: string;
   interrupted?: boolean;
   /** This tick took off (core EVENT_JUMPED): perfect hops may never show a grounded tick between jumps. */
   jumped?: boolean;
@@ -73,6 +82,27 @@ export function barBand(gain: number | null | undefined): BarBand {
   if (gain < 0) return "high";
   if (gain > BAR_PERFECT_GAIN) return "perfect";
   return gain > BAR_GOOD_GAIN ? "good" : "ok";
+}
+
+/**
+ * The way the view has to turn to follow this strafe: 1 left (yaw rising), -1 right, 0 no wish. The core's wish is
+ * forward * (cos yaw, sin yaw) + side * (sin yaw, -cos yaw); the velocity rotates towards whichever side of it the wish
+ * lies on, which covers W/S strafes (W-Only, Sideways) and a view facing back (Backwards).
+ */
+export function strafeTurn(forward: number, side: number, yaw: number, velYaw?: number): number {
+  if (!forward && !side) return 0;
+  if (velYaw !== undefined && Number.isFinite(velYaw)) {
+    const wishYaw = yaw + Math.atan2(-side, forward) * 180 / Math.PI;
+    const off = ((wishYaw - velYaw + 540) % 360 + 360) % 360 - 180;
+    if (Math.abs(off) > 1e-3 && Math.abs(off) < 180 - 1e-3) return Math.sign(off);
+  }
+  return -Math.sign(side);
+}
+
+/** The view's turn judged on this tick (TrainerSample.turnYaw), wrapped to ±180. */
+function judgedTurn(yaw: number, previousYaw: number, turnYaw: number | undefined): number {
+  const d = turnYaw === undefined ? yaw - previousYaw : Number.isFinite(turnYaw) ? turnYaw - yaw : 0;
+  return ((d + 540) % 360 + 360) % 360 - 180;
 }
 
 export class StrafeTrainer {
@@ -158,9 +188,6 @@ export class StrafeTrainer {
       this.air = { sum: 0, n: 0 };
       return idle("ready");
     }
-    if (!["autohop", "legit", "scroll", "hsw"].includes(s.style)) {
-      return idle("unsupported");
-    }
     // A landing or the next takeoff closes the jump: its average pace (the per-jump sound), if strafed long enough.
     if (s.grounded || s.onLadder || s.jumped) {
       if (!s.onLadder && this.air.n >= 5) this.landed = this.lastJump = this.air.sum / this.air.n;
@@ -168,9 +195,9 @@ export class StrafeTrainer {
     }
     if (s.grounded || s.onLadder) return idle("ready");
     if (s.speed < 100) return idle("ready");
-    const side = Math.sign(cmd.side);
+    const side = -strafeTurn(cmd.forward, cmd.side, cmd.yaw, s.velYaw);
     if (!side) return idle("keys");
-    const delta = ((cmd.yaw - previousYaw + 540) % 360 + 360) % 360 - 180;
+    const delta = judgedTurn(cmd.yaw, previousYaw, s.turnYaw);
     if (Math.abs(delta) > 0.001 && Math.sign(delta) === side) return idle("direction");
     // CSS air wishspeed is capped at 30 u/s; also respect lower per-tick acceleration.
     const push = Math.min(30, s.maxSpeed, s.airAccelerate * s.maxSpeed * s.dt);
@@ -194,8 +221,7 @@ export class StrafeTrainer {
   private feedBar(cmd: TickCmd, s: TrainerSample, previousYaw: number, continuous: boolean): void {
     if (!Number.isFinite(s.speed) || !Number.isFinite(s.dt) || !Number.isFinite(s.maxSpeed)
       || !Number.isFinite(s.airAccelerate) || !Number.isFinite(cmd.yaw) || !Number.isFinite(cmd.side) || !Number.isFinite(cmd.forward)
-      || s.dt <= 0 || s.interrupted || !continuous || !Number.isFinite(previousYaw)
-      || (s.style !== "autohop" && s.style !== "legit" && s.style !== "scroll" && s.style !== "hsw")) {
+      || s.dt <= 0 || s.interrupted || !continuous || !Number.isFinite(previousYaw)) {
       this.clearBar();
       return;
     }
@@ -204,11 +230,12 @@ export class StrafeTrainer {
     const speed = s.barSpeed ?? s.speed;
     const active = !s.grounded && !s.onLadder && speed >= 100 && !!(cmd.side || cmd.forward);
     this.reading.gain = active ? barGain(s.airSpeedGain, s.airBestGain) : null;
-    const delta = ((cmd.yaw - previousYaw + 540) % 360 + 360) % 360 - 180;
-    const side = Math.sign(cmd.side) || -Math.sign(delta) || this.barSide || 1;
+    const delta = judgedTurn(cmd.yaw, previousYaw, s.turnYaw);
+    const turn = -strafeTurn(cmd.forward, cmd.side, cmd.yaw, s.velYaw);
+    const side = turn || -Math.sign(delta) || this.barSide || 1;
     const push = Math.min(30, s.maxSpeed, s.airAccelerate * s.maxSpeed * s.dt);
     let bar: number;
-    const against = !!cmd.side && Math.abs(delta) > 0.001 && Math.sign(delta) === Math.sign(cmd.side);
+    const against = !!turn && Math.abs(delta) > 0.001 && Math.sign(delta) === turn;
     if (active && !against && push > 0) {
       if (side !== this.barSide) this.clearBar();
       this.barSide = side;
@@ -226,7 +253,7 @@ export class StrafeTrainer {
 
 export function trainerCommand(get: () => boolean, set: (on: boolean) => void): ChatCommand {
   return { name: "strafetrainer", aliases: ["st"], args: "[on|off]", help: "strafe trainer", group: "more", where: "both",
-    about: "Toggle the turn-pace trainer. Aim for 100%. Settings → HUD has its look, presets and smoothing; Edit layout moves it. Works with Normal, EZ Scroll, Legit Scroll and Half-Sideways.",
+    about: "Toggle the turn-pace trainer. Aim for 100%. Settings → HUD has its look, presets and smoothing; Edit layout moves it. Works in every style.",
     run: (ctx, arg) => {
       const value = arg.toLowerCase();
       if (value && value !== "on" && value !== "off") return void ctx.reply("Usage: !strafetrainer [on|off]");

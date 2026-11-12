@@ -16,7 +16,7 @@ export function restartPositionIn(z: Zone, position: readonly number[]): [number
  * noclipTick / update), so a main start overlapping the bonus start doesn't make it a main attempt.
  *
  * When the timer is armed in (in a start of) or has started a bonus track that runs in another style than this
- * attempt (bonuses are Normal: styles.ts styleForTrack), the tick may have started a bonus run in Infinite, which the
+ * attempt (since v0.0.40 only the tutorial's final course: styles.ts styleForTrack), the tick may have started a bonus run in Infinite, which the
  * verifier rejects at the finish, and command()'s switch never sees the player standing in the start. The session
  * restarts that bonus at its normal start point instead (the B key's restart: restart.ts restartTarget), which is
  * grounded and settled. Not at the landing spot: a flight can end in midair inside a tall start, and a spawn there is

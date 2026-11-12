@@ -4,10 +4,9 @@
 //! Maps are gitignored; each test skips (with a note) when its map is absent.
 
 use bunnyhop_core::{Cmd, Game, game::EVENT_ANGLES_CHANGED};
-use std::path::PathBuf;
 
 fn load(name: &str) -> Option<Game> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps").join(format!("{name}.bsp"));
+    let path = bunnyhop_core::test_maps::bsp(name);
     let Ok(bytes) = std::fs::read(&path) else {
         eprintln!("skipping {name}: {} not found", path.display());
         return None;
@@ -31,6 +30,7 @@ const ENTITY_HIT: u64 = 1 << 40;
 /// Start-on, solid, yaw func_rotating platforms (bhop_eject, bhop_drop, bhop_fly_lovers, ...): they start
 /// 0.2 s after spawn (SUB_CallUseToggle) at full speed (no ACCDCC), and a player standing on one is carried
 /// around its axis and has its view turned by the same yaw (FIXANGLE_RELATIVE).
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn rotating_platform_carries_and_turns_the_player() {
     let mut tested = 0;
@@ -100,6 +100,7 @@ fn rotating_platform_carries_and_turns_the_player() {
 }
 
 /// Two loads stepping the same inputs stay bit-identical on maps with movers.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn kinematic_maps_are_deterministic() {
     for map in ["bhop_veritas", "bhop_danmark", "bhop_null", "bhop_crash_egypt", "bhop_slope_v2", "bhop_highfly"] {
@@ -125,6 +126,7 @@ fn of_class(game: &Game, class: &str) -> Vec<usize> {
 }
 
 /// bhop_danmark's six func_physbox are `notsolid 1` weapon displays (FSOLID_NOT_SOLID): players pass through.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn danmark_physboxes_are_not_solid() {
     let Some(game) = load("bhop_danmark") else { return };
@@ -136,6 +138,7 @@ fn danmark_physboxes_are_not_solid() {
 }
 
 /// prop_physics_multiplayer is COLLISION_GROUP_PUSHAWAY: never solid to players.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn multiplayer_physics_objects_are_not_solid() {
     let Some(game) = load("bhop_cobblestone") else { return };
@@ -147,9 +150,10 @@ fn multiplayer_physics_objects_are_not_solid() {
 }
 
 /// Stock collision models from the content cache make bhop_kz_ocean's motion-disabled prop_physics solid.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn prop_physics_collide_with_cached_models() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../maps/bhop_kz_ocean.bsp");
+    let path = bunnyhop_core::test_maps::bsp("bhop_kz_ocean");
     if !path.exists() {
         return;
     }
@@ -170,6 +174,7 @@ fn prop_physics_collide_with_cached_models() {
 
 /// bhop_highfly: the hinged phys_motor spins its func_physbox at the motor speed (200 deg/s after the 1 s
 /// spin-up) about the motor's vertical axis.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn phys_motor_spins_hinged_physbox() {
     let Some(mut game) = load("bhop_highfly") else { return };
@@ -186,6 +191,7 @@ fn phys_motor_spins_hinged_physbox() {
 }
 
 /// func_conveyor (bhop_slope_v2): standing on one gives the player its velocity as base velocity.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn conveyor_pushes_player() {
     let Some(mut game) = load("bhop_slope_v2") else { return };

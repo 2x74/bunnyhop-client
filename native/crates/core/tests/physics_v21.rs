@@ -7,7 +7,6 @@ use bunnyhop_core::game::{
     PHYSICS_V20, PHYSICS_V21,
 };
 use bunnyhop_core::{Cmd, Game, Settings};
-use std::path::PathBuf;
 
 const AXIS: [f32; 2] = [3955.0, -1622.0];
 const FLOOR: u32 = 148;
@@ -19,7 +18,7 @@ const FLOORS: [(&str, f32, f32, f32); 3] =
     [("floor 1", 1246.0, 368.0, -132.0), ("floor 2", 869.0, 368.0, -68.0), ("floor 3", 485.0, 369.0, 175.0)];
 
 fn load(name: &str, version: u32) -> Option<Game> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("../../maps/{name}.bsp"));
+    let path = bunnyhop_core::test_maps::bsp(name);
     if !path.exists() {
         eprintln!("skipping: {} not present", path.display());
         return None;
@@ -158,6 +157,7 @@ fn the_rolling_logs_roll_only_from_v21() {
 }
 
 /// `PARENTED_DOORS_V21` is bhop_wayz alone; the other maps with the setup (research/parented-doors-v21/scan.json) are unchanged.
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn no_other_map_with_a_parented_door_changes_on_v21() {
     assert_eq!(map_parented_doors_v21_table(), ["bhop_wayz"]);
@@ -177,6 +177,7 @@ fn no_other_map_with_a_parented_door_changes_on_v21() {
 /// bhop_areaportal_v1's green train: from its checkpoint, W + jump onto it at the 12 train phases that board it. Before
 /// v21 its 180-degree push turns the rider around at 7 of them; from v21 at none, with the same boardings and no longer
 /// rides (not a bigger ride window: the map's fall trigger still ends each one).
+#[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn the_green_train_stops_turning_riders_only_from_v21() {
     let Some(mut game) = load("bhop_areaportal_v1", PHYSICS_V20) else { return };
