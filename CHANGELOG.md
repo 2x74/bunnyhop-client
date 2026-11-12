@@ -2,8 +2,20 @@
 
 ## v0.9.1 — Native
 
-Fixes for v0.9.0. Update from Settings → Updates: press Update, then Restart. Your settings, replays and maps are kept.
+Voice chat and the new Auto-strafe timing from website v0.0.40, plus fixes for v0.9.0. Update from Settings →
+Updates: press Update, then Restart. Your settings, replays and maps are kept.
 
+- Voice chat in servers and private lobbies: hold X to talk and everyone in the room hears you. Guests can listen.
+  The game asks for your microphone the first time you press the key and only uses it while you hold it. In a voice
+  room X talks; everywhere else it still teleports you to your checkpoint.
+- Mute anyone or change their volume on the room screen. Turn voice off, change its volume or pick another talk key in
+  Settings → Voice chat, or use `voice_enable`, `voice_scale` and `bind <key> +voicerecord` in the console.
+- A talking player's name tag shows a speaker, and who's talking is listed at the bottom left.
+- Auto-strafe presses A and D one tick earlier, as on the website, so it gains speed like Normal. Auto-strafe times
+  will get faster. Your existing runs don't change.
+- The menu matches the website: Compare on other players' profiles (Watch plays your run with theirs as the compare
+  ghost), rank history, the bigger profile card, earlier names, a name change once a week, and the new supporter
+  items. Names in the new Condensed font show in the game too.
 - Supporting from the Support page works again. It stopped with "The payment service returned an untrusted
   checkout link." Thanks to dr_unlisted for the report.
 - Switching quickly between the knife and a gun no longer crashes the game. Thanks to dr_unlisted for the report.
@@ -15,6 +27,16 @@ Fixes for v0.9.0. Update from Settings → Updates: press Update, then Restart. 
   removes you from the server since v0.8.0. Thanks to hena for the report.
 - Runs on bhop_gofuckyourself use all of the map's zones, so the anti-skip walls stop a run in the game as they
   do on the website.
+
+Not in the desktop client yet, coming in a later update:
+
+- Bonus tracks in other styles. Bonuses still play in Normal here.
+- The strafe trainer in every style, and the new slow ticks in the jump stats.
+- The new look for notices in the game.
+- The new supporter looks in the game: name effects, Outline, bold and italic, and your card behind your row in the
+  voice list. They show in the menu.
+- The LIVE mark next to streamers' names in servers.
+- Choosing your microphone and the microphone test in Settings.
 
 ## v0.9.0 — Native
 
