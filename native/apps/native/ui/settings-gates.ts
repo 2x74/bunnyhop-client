@@ -118,6 +118,9 @@ const ROWS: Record<string, Gate> = {
   "hud/Strafe timing/Strafe offsets": needs("hud:strafeOffsets"),
   "hud/Strafe timing/First jump tick HUD": needs("hud:firstJump"),
   "hud/Strafe timing/First jump tick chat": needs("hudMovementFjtChat"),
+  // Slow ticks per strafe (web v0.0.40): the host's strafe offsets readout doesn't count them yet.
+  "hud/Strafe timing/Slow ticks": needs("hudMovementSlowTicks"),
+  "hud/Strafe timing/Slow below": needs("hudMovementSlowTicks"),
   "hud/Longjump stats/Enable longjump stats": needs("hudMovementLj", "hud:longJump"),
   "hud/Longjump stats/Longjump HUD": needs("hud:longJump"),
   "hud/Longjump stats/Longjump chat": needs("hudMovementLjChat"),

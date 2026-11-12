@@ -332,8 +332,9 @@ void test_layouts_and_options() {
 void test_pride_flags() {
     const unsigned trans = native::flag_glyph("PRIDE-TRANS");
     assert(trans && trans == native::sheet_glyph("PRIDE-TRANS") && trans != native::flag_glyph("PR"));
-    assert(native::flag_glyph("PRIDE-PROGRESS") != trans);
-    for (const auto code : {"PRIDE-XX", "PRIDE-", "pride-trans", "PRIDE-TRANS2", "peak-9"})
+    assert(native::flag_glyph("PRIDE-RAINBOW") && native::flag_glyph("PRIDE-RAINBOW") != trans);
+    // The website keeps Rainbow and Transgender only; a retired code draws no flag.
+    for (const auto code : {"PRIDE-XX", "PRIDE-", "pride-trans", "PRIDE-TRANS2", "peak-9", "PRIDE-PROGRESS"})
         assert(!native::flag_glyph(code));
     assert(native::flag_code("PRIDE-TRANS") == "PRIDE-TRANS" && native::flag_code("PRIDE-XX").empty());
     const auto board = std::make_unique<native::HudScoreboard>();
@@ -353,8 +354,8 @@ void test_pride_flags() {
     DrawProbe probe;
     native::draw_scoreboard(probe, 1280, 720, 100, *board, 0, 0);
     assert(probe.flags == 3);
-    const auto line = native::chat_decoration({{"nativeCountry", "PRIDE-NONBINARY"}});
-    assert(line.country == "PRIDE-NONBINARY");
+    const auto line = native::chat_decoration({{"nativeCountry", "PRIDE-RAINBOW"}});
+    assert(line.country == "PRIDE-RAINBOW");
     assert(native::chat_decoration({{"country", "PRIDE-TRANS"}}).country == "PRIDE-TRANS");
     assert(native::chat_decoration({{"nativeCountry", "PRIDE-XX"}}).country.empty());
 }
@@ -384,7 +385,7 @@ void test_glyph_sheet() {
             {{"cell", 32},
              {"glyphs",
               {{"peak-9", encoded},
-               {"PRIDE-OMNI", encoded},
+               {"PRIDE-TRANS", encoded},
                {"PRIDE-NEW", encoded},
                {"peak-8", native::base64("short")},
                {"PRIDE-ACE", 7}}}}
@@ -395,7 +396,7 @@ void test_glyph_sheet() {
         cells.insert(glyph.cell);
         assert(glyph.rgba.size() == native::sheet_glyph_bytes && glyph.rgba[5] == 0x7f);
     }
-    assert(cells == std::set<unsigned>({native::sheet_glyph("peak-9"), native::sheet_glyph("PRIDE-OMNI")}));
+    assert(cells == std::set<unsigned>({native::sheet_glyph("peak-9"), native::sheet_glyph("PRIDE-TRANS")}));
     assert(native::read_glyph_sheet({{"cell", 16}, {"glyphs", {{"peak-9", encoded}}}}).empty());
     assert(native::read_glyph_sheet("not a sheet").empty());
     assert(native::load_glyph_sheet("missing-hud-glyphs.json").empty());

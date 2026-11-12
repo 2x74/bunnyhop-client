@@ -335,6 +335,7 @@ constexpr std::array<std::string_view, name_font_ids.size() + 1> supporter_font_
         "Marker Mike",
         "BlockParty",
         "Script Kiddo",
+        "Condensed_Cat",
         "Сова"
 };
 

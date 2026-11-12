@@ -56,6 +56,7 @@ if (import.meta.main) {
       "licenses/Unicode.txt",
       "licenses/JetBrainsMono-OFL.txt",
       "licenses/LeagueGothic-OFL.txt",
+      "licenses/name-fonts/BarlowCondensed-OFL.txt",
       "licenses/name-fonts/Fredoka-OFL.txt",
       "licenses/name-fonts/JetBrainsMono-OFL.txt",
       "licenses/name-fonts/Orbitron-OFL.txt",

@@ -54,6 +54,9 @@ const adapters: Record<string, string> = {
   "sky-packs/settings": "sky-settings.ts",
   // Cinematic's sky comes from the host; the menu downloads nothing into the browser.
   "graphics/cinematic-assets": "cinematic-assets.ts",
+  // Voice runs in the game; the menu's voice controls are native (voice-web.ts).
+  "voice/client": "voice-web.ts",
+  "voice/settings": "voice-web-settings.ts",
 };
 // Checked after the adapters: input stays forbidden apart from its command bits.
 const forbiddenGameModules = ["main", "render", "session", "attract", "input"];

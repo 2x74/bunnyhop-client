@@ -6,10 +6,10 @@
 namespace native {
 // A supporter's name font (web supporter-looks.ts NAME_FONTS). The room, chat lines and the menu's name looks carry
 // the id; anything else, or no id, is the default font.
-enum class NameFont : uint8_t { none, grotesk, round, pixel, mono, serif, wide, marker, block, script };
+enum class NameFont : uint8_t { none, grotesk, round, pixel, mono, serif, wide, marker, block, script, condensed };
 
-inline constexpr std::array<std::string_view, 9> name_font_ids = {
-        "grotesk", "round", "pixel", "mono", "serif", "wide", "marker", "block", "script"
+inline constexpr std::array<std::string_view, 10> name_font_ids = {
+        "grotesk", "round", "pixel", "mono", "serif", "wide", "marker", "block", "script", "condensed"
 };
 
 constexpr NameFont name_font_of(std::string_view id) {
