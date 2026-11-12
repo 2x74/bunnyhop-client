@@ -161,11 +161,11 @@ void RoomBridge::enable_voice(bool devices, bool test_tone) {
 }
 
 void RoomBridge::voice_message(const nlohmann::json &message) {
-    if (native::json_value(message, "type", std::string()) == "voicePeople")
-        return voice_->people(native::json_value(message, "people", nlohmann::json()));
+    if (json_value(message, "type", std::string()) == "voicePeople")
+        return voice_->people(json_value(message, "people", nlohmann::json()));
     const auto data = message.find("data");
-    if (data == message.end() || !data->is_string() || native::json_value(message, "id", std::string()) != room.id) return;
-    if (native::json_value(message, "generation", uint64_t(0)) != room.generation) return;
+    if (data == message.end() || !data->is_string() || json_value(message, "id", std::string()) != room.id) return;
+    if (json_value(message, "generation", uint64_t(0)) != room.generation) return;
     voice_->receive(data->get_ref<const std::string &>());
 }
 
