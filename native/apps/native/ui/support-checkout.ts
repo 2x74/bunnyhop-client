@@ -1,4 +1,15 @@
-/** The menu document stays open; only the server's trusted Stripe checkout goes to the system browser. */
+/**
+ * The menu document stays open; only the server's Stripe checkout goes to the system browser.
+ * Stripe documents the session URL as opaque, so the host is the boundary: exact checkout.stripe.com over
+ * https on the default port, no credentials, and a path beyond the root.
+ */
+export const isStripeCheckoutUrl = (url: URL): boolean =>
+  url.protocol === "https:" &&
+  url.hostname === "checkout.stripe.com" &&
+  (!url.port || url.port === "443") &&
+  !url.username &&
+  !url.password &&
+  url.pathname.length > 1;
 export function trustedCheckoutUrl(raw: string): string {
   let url: URL;
   try {
@@ -6,15 +17,8 @@ export function trustedCheckoutUrl(raw: string): string {
   } catch {
     throw new Error("The payment service returned an invalid checkout link.");
   }
-  if (
-    url.protocol !== "https:" ||
-    url.hostname !== "checkout.stripe.com" ||
-    url.port ||
-    url.username ||
-    url.password ||
-    !/^\/(?:c\/)?pay\/[^/]+/.test(url.pathname)
-  )
-    throw new Error("The payment service returned an untrusted checkout link.");
+  if (!isStripeCheckoutUrl(url))
+    throw new Error(`The payment service returned an untrusted checkout link (${url.protocol}//${url.host}).`);
   return url.href;
 }
 export interface SupportCheckoutDeps {

@@ -311,8 +311,14 @@ int main() {
         }
         assert(native::external_url_allowed("https://checkout.stripe.com/c/pay/cs_test_example"));
         assert(native::external_url_allowed("https://checkout.stripe.com:443/pay/cs_test_example"));
+        // Stripe's session URL path is opaque; only the host and port decide.
+        assert(native::external_url_allowed("https://checkout.stripe.com/g/pay/cs_live_a1B2c3#fidkdWxOYHwn"));
+        assert(native::external_url_allowed("https://checkout.stripe.com/cs_live_a1B2c3"));
         for (const char *bad :
              {"https://checkout.stripe.com/",
+              "https://checkout.stripe.com",
+              "https://checkout.stripe.com?x=/c/pay/x",
+              "http://checkout.stripe.com/c/pay/x",
               "https://checkout.stripe.com:444/c/pay/x",
               "https://checkout.stripe.com.evil.test/c/pay/x",
               "https://other.checkout.stripe.com/c/pay/x",

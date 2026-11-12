@@ -15,6 +15,7 @@ import { ANGLE_SPEED_KEY_RANGE, YAW_SPEED_RANGE } from "./turn-speed";
 import { DEFAULT_PREFS } from "../../web/src/ui/settings";
 import { PAINT_COLORS, PAINT_SIZES, type PaintPrefs, type PaintSize } from "../../web/src/paint/prefs";
 import { requestedPatch } from "./settings-keys";
+import { isStripeCheckoutUrl } from "./support-checkout";
 export const LIVE_ORIGIN = "https://bunnyhop.lol";
 export interface VideoExportOptions {
   width: number;
@@ -742,11 +743,10 @@ export function openExternal(raw: string): boolean {
     url.password
   )
     return false;
-  const checkout =
-    url.hostname === "checkout.stripe.com" &&
-    (!url.port || url.port === "443") &&
-    /^\/(?:c\/)?pay\//.test(url.pathname);
-  if (!checkout && !EXTERNAL_HOSTS.some((host) => url.hostname === host || url.hostname.endsWith("." + host)))
+  if (
+    !isStripeCheckoutUrl(url) &&
+    !EXTERNAL_HOSTS.some((host) => url.hostname === host || url.hostname.endsWith("." + host))
+  )
     return false;
   send({ type: "openExternal", url: url.href });
   return true;
