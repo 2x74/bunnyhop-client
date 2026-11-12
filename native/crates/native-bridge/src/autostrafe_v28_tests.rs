@@ -177,3 +177,46 @@ fn only_autostrafe_at_28_and_later_leads() {
         }
     }
 }
+
+/// website test/autostrafe-lead.test.ts "Auto-strafe v28 sync (timer.ts leadYaw)": a velocity along +x with the view on
+/// it, turning left (yaw rising) wants A, turning right wants D. `lead` measures sync against the next command's yaw.
+fn sync_run(lead: bool) -> super::run::Timer {
+    const MOUSE: [f32; 17] = [0., -1., -2., -3., -4., -3., -2., -1., 0., 1., 2., 3., 2., 1., 0., -1., -2.];
+    let air = BhState::default();
+    let mut filter = Filter::new("autostrafe", 28);
+    let recorded: Vec<BhCmd> = MOUSE
+        .iter()
+        .map(|&yaw| {
+            let (cmd, _, next_yaw) = filter.lag_view(BhCmd { yaw, ..BhCmd::default() }, None);
+            filter.apply(cmd, air, false, true, next_yaw)
+        })
+        .collect();
+    let mut timer = super::run::Timer::new(Vec::new(), super::BhRunOptions::default(), 0.01);
+    timer.state.status = 1;
+    let state = BhState {
+        velocity: [400.0, 0.0, 0.0],
+        ..BhState::default()
+    };
+    for (i, &cmd) in recorded.iter().enumerate() {
+        timer.lead_yaw = match recorded.get(i + 1) {
+            Some(next) if lead => f64::from(next.yaw),
+            _ => f64::NAN,
+        };
+        timer.update(cmd, state);
+    }
+    timer
+}
+
+#[test]
+fn autostrafe_v28_run_is_fully_in_sync_against_the_turn_its_key_answers() {
+    let t = sync_run(true);
+    assert!(t.state.sync_total > 10, "{}", t.state.sync_total);
+    assert_eq!(t.state.sync_percent, 100.0);
+}
+
+#[test]
+fn autostrafe_v28_sync_measured_the_old_way_loses_a_tick_at_every_reversal() {
+    let t = sync_run(false);
+    assert!(t.state.sync_percent < 100.0, "{}", t.state.sync_percent);
+    assert!(t.state.sync_total - t.state.sync_good >= 2);
+}

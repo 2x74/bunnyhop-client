@@ -9,6 +9,7 @@
 #include "voice_playout.hpp"
 #include "voice_receiver.hpp"
 #include "voice_sender.hpp"
+#include "voice_hud.hpp"
 #include "voice_wire.hpp"
 #include <cassert>
 #include <chrono>
@@ -19,6 +20,9 @@
 
 using Json = nlohmann::json;
 namespace voice = native::voice;
+namespace voice_hud = native::voice_hud;
+using native::HudGeometry;
+using native::HudRect;
 
 namespace {
 
@@ -458,6 +462,25 @@ void test_player_leaving_stops_their_voice() {
     assert(frames_until(chat, now, [&] { return !chat.talking(4); }));
 }
 
+// The talker list starts at the bottom left and moves above the key row (and the chat) where it would cover them.
+void test_talker_list_clears_the_key_row_and_chat() {
+    const HudGeometry geometry(1920, 1080, 100);
+    const float list = 4 * voice_hud::row_height_px;
+    const float free_top = voice_hud::list_top(geometry, list, {});
+    assert(free_top == geometry.height - voice_hud::bottom_gap_px - list);
+    const float s = geometry.scale;
+    const HudRect keys{26 * s, (geometry.height - 65) * s, 380 * s, 27 * s};
+    const std::array<HudRect, 1> only_keys{keys};
+    const float over_keys = voice_hud::list_top(geometry, list, only_keys);
+    assert(over_keys + list <= geometry.height - 65);
+    const HudRect chat{20 * s, (geometry.height - 65 - 150) * s, 500 * s, 140 * s};
+    const std::array<HudRect, 2> keys_and_chat{keys, chat};
+    const float over_both = voice_hud::list_top(geometry, list, keys_and_chat);
+    assert(over_both + list <= geometry.height - 65 - 150);
+    const std::array<HudRect, 1> elsewhere{HudRect{900 * s, (geometry.height - 65) * s, 300 * s, 27 * s}};
+    assert(voice_hud::list_top(geometry, list, elsewhere) == free_top);
+}
+
 }  // namespace
 
 int main(int argc, char **argv) {
@@ -480,6 +503,7 @@ int main(int argc, char **argv) {
     test_talking_sends_packets_and_marks_you();
     test_your_mutes_and_volumes();
     test_player_leaving_stops_their_voice();
+    test_talker_list_clears_the_key_row_and_chat();
     std::cout << "voice tests passed\n";
     return 0;
 }

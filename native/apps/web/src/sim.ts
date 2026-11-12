@@ -94,7 +94,11 @@ export function replayCommand(replay: Replay, i: number): TickCmd {
  */
 export function replayStep(core: Core, timer: RunTimer, filter: StyleFilter, replay: Replay, i: number, pre: PlayerState, retimer?: RunTimer | null) {
   const raw = replayCommand(replay, i);
-  const cmd = filter.apply(raw, pre, timer.started, i + 1 < replay.yaw.length ? replay.yaw[i + 1] : NaN);
+  const next = i + 1 < replay.yaw.length ? replay.yaw[i + 1] : NaN;
+  const cmd = filter.apply(raw, pre, timer.started, next);
+  // Sync is measured against the turn the key answers (timer.ts leadYaw): the next view for v28 Auto-strafe.
+  timer.leadYaw = filter.lead ? next : NaN;
+  if (retimer) retimer.leadYaw = timer.leadYaw;
   // The retimer only watches (SimRun retime): its prespeed velocities are never applied, so the physics stay as played.
   retimer?.beforeStep(cmd, pre);
   beforeStep(core, timer, cmd);

@@ -88,7 +88,7 @@ jobs:
         run: |
           mkdir -p target
           curl --fail --silent --show-error --location --retry-all-errors --retry 6 --retry-delay 10 \
-            "${QUALIFICATION_URL:-https://github.com/2x74/bunnyhop-client/releases/download/v0.9.0/qualification-inputs.tar.gz}" \
+            "${QUALIFICATION_URL:-https://github.com/2x74/bunnyhop-client/releases/download/v0.9.1/qualification-inputs.tar.gz}" \
             -o target/qualification-inputs.tar.gz
       - run: bun apps/native/tools/landfix-release.ts --stage
       - run: bun run wasm

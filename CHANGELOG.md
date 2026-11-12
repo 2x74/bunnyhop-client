@@ -12,7 +12,8 @@ Updates: press Update, then Restart. Your settings, replays and maps are kept.
   Settings → Voice chat, or use `voice_enable`, `voice_scale` and `bind <key> +voicerecord` in the console.
 - A talking player's name tag shows a speaker, and who's talking is listed at the bottom left.
 - Auto-strafe presses A and D one tick earlier, as on the website, so it gains speed like Normal. Auto-strafe times
-  will get faster. Your existing runs don't change.
+  will get faster. Your existing runs don't change. Sync is measured against the turn each key answers, so a cleanly
+  synced Auto-strafe run reads 100%.
 - The menu matches the website: Compare on other players' profiles (Watch plays your run with theirs as the compare
   ghost), rank history, the bigger profile card, earlier names, a name change once a week, and the new supporter
   items. Names in the new Condensed font show in the game too.

@@ -279,7 +279,7 @@ html body[data-screen="profile"] #menu { overflow: hidden; }
 .panel-profile { height: calc(100vh - 7.5vh); display: flex; flex-direction: column; }
 .profile { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .pf-layout { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(19rem, min(44rem, 50%)) minmax(0, 1fr); gap: 2.6rem; }
-.pf-hero { display: flex; flex-direction: column; gap: 0.9rem; min-height: 0; overflow: auto; scrollbar-width: none; padding: 0.4rem 0.4rem 0.4rem 0; }
+.pf-hero { display: flex; flex-direction: column; gap: 0.9rem; min-height: 0; overflow: auto; scrollbar-width: thin; padding: 0.4rem 0.4rem 0.4rem 0; }
 .pf-main { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 
 /* The card is the page: it lands with a short rise and one sheen sweep (card.ts); actions on one line under it. */

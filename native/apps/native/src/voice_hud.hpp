@@ -1,8 +1,8 @@
 #pragma once
-// Voice chat on the HUD, drawn plainly: the talker list in the bottom left under the chat (yours on top while you
-// talk), each row a speaker, the name and a small meter of the voice's level and bands, and the line that says why
-// the key did nothing. The speaker mark also replaces the colour dot on a talking player's name tag. Only drawing
-// lives here; who talks and how loud comes from voice::VoiceChat.
+// Voice chat on the HUD, drawn plainly: the talker list in the bottom left (yours on top while you talk), lifted
+// above the key row or the chat where they would overlap it, each row a speaker, the name and a small meter of the
+// voice's level and bands, and the line that says why the key did nothing. The speaker mark also replaces the colour
+// dot on a talking player's name tag. Only drawing lives here; who talks and how loud comes from voice::VoiceChat.
 #include "hud_geometry.hpp"
 #include "name_tags.hpp"
 #include "voice_chat.hpp"
@@ -43,12 +43,40 @@ void meter(Hud &hud, float x, float y, float height, float level, const voice::B
     }
 }
 
+// Where the list's top goes: at the bottom left, moved up past each box (in pixels: the key row, the chat) that it
+// would overlap, so the website's bottom-left place never covers what the native HUD draws there.
+inline float list_top(const HudGeometry &geometry, float list_height, std::span<const HudRect> avoid) {
+    float bottom = geometry.height - bottom_gap_px;
+    for (bool moved = true; moved;) {
+        moved = false;
+        for (const auto &box : avoid) {
+            if (box.width <= 0 || box.height <= 0) continue;
+            const float x = box.x / geometry.scale, y = box.y / geometry.scale;
+            const float w = box.width / geometry.scale, h = box.height / geometry.scale;
+            const bool across = x < left_px + row_width_px && x + w > left_px;
+            if (across && y < bottom && y + h > bottom - list_height) {
+                bottom = y - bottom_gap_px / 2;
+                moved = true;
+            }
+        }
+    }
+    return bottom - list_height;
+}
+
 template <class Hud>
-void draw(Hud &hud, int width, int height, float percent, std::span<const voice::HudRow> rows, std::string_view line) {
+void draw(
+        Hud &hud,
+        int width,
+        int height,
+        float percent,
+        std::span<const voice::HudRow> rows,
+        std::string_view line,
+        std::span<const HudRect> avoid = {}
+) {
     if (rows.empty() && line.empty()) return;
     const HudGeometry geometry(width, height, percent);
     hud.overlay_begin(width, height, percent);
-    float y = geometry.height - bottom_gap_px - row_height_px * float(rows.size()) - (line.empty() ? 0 : row_height_px);
+    float y = list_top(geometry, row_height_px * float(rows.size()) + (line.empty() ? 0 : row_height_px), avoid);
     for (const auto &row : rows) {
         hud.overlay_rect(left_px, y, row_width_px, row_height_px - 2, row.self ? self_fill : row_fill);
         draw_speaker(hud, left_px + 6, y + 4, speaker_px, name_ink);

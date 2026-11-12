@@ -73,7 +73,7 @@ export async function createEncoder(): Promise<VoiceEncoder> {
 }
 
 export async function createDecoder(): Promise<VoiceDecoder> {
-  if (await webDecoderOk()) return webDecoder();
+  if (!webDecodeBehind && (await webDecoderOk())) return webDecoder();
   return wasmDecoder();
 }
 
@@ -113,25 +113,69 @@ function webEncoder(): VoiceEncoder {
   return e;
 }
 
+/**
+ * How long a frame may wait inside a WebCodecs decoder (the playout's deepest delay). Chrome's AudioDecoder steps
+ * through the page's main thread: on a page busy rendering (software GL, a slow machine) it decoded about 10 frames a
+ * second against the 50 a talker sends, the backlog grew without end and the frames still in it only came out on a
+ * flush. libopus-wasm decodes at once on that same thread, so a talker that falls this far behind switches to it.
+ */
+const DECODE_LAG_MS = 120;
+/** A WebCodecs decoder fell behind on this page: later talkers decode with libopus-wasm from the start. */
+let webDecodeBehind = false;
+
 function webDecoder(): VoiceDecoder {
   let ts = 0;
   const frameUs = VOICE_FRAME_MS * 1000;
+  // Frames handed to WebCodecs and not out yet (copies, by timestamp), to decode again if we switch.
+  const held: { ts: number; at: number; bytes: Uint8Array | null }[] = [];
+  let wasmDec: VoiceDecoder | null = null;
+  let switching = false;
+  let closed = false;
+  const toWasm = () => {
+    switching = true;
+    webDecodeBehind = true;
+    wasmDecoder().then(
+      (w) => {
+        if (closed) return w.close();
+        // Closing drops whatever WebCodecs still holds; the frames it didn't put out go through libopus instead.
+        if (dec.state !== "closed") dec.close();
+        w.onPcm = (pcm) => d.onPcm(pcm);
+        wasmDec = w;
+        for (const f of held.splice(0)) w.decode(f.bytes);
+      },
+      (err) => {
+        switching = false;
+        console.warn("[voice] decoder fallback:", err);
+      },
+    );
+  };
   const d: VoiceDecoder = {
     kind: "webcodecs",
     onPcm: () => {},
     decode(bytes) {
+      if (closed) return;
+      if (wasmDec) return wasmDec.decode(bytes);
       ts += frameUs;
+      if (switching) return void held.push({ ts, at: 0, bytes: bytes && bytes.slice() });
       // WebCodecs has no loss call: a lost frame is a gap the jitter buffer fills with silence.
       if (!bytes || dec.state !== "configured") return;
-      dec.decode(new g.EncodedAudioChunk!({ type: "key", timestamp: ts, data: bytes as Uint8Array<ArrayBuffer> }));
+      const now = performance.now();
+      held.push({ ts, at: now, bytes: bytes.slice() });
+      dec.decode(new g.EncodedAudioChunk!({ type: "key", timestamp: ts, duration: frameUs, data: bytes as Uint8Array<ArrayBuffer> }));
+      if (now - held[0].at > DECODE_LAG_MS) toWasm();
     },
     close: () => {
+      closed = true;
+      wasmDec?.close();
       if (dec.state !== "closed") dec.close();
     },
   };
   const dec = new g.AudioDecoder!({
     output: (ad) => {
       try {
+        // Timestamps can come back a microsecond off.
+        const upTo = ad.timestamp + frameUs / 2;
+        while (held.length && held[0].ts <= upTo) held.shift();
         const n = ad.numberOfFrames;
         const out = new Float32Array(n);
         try {

@@ -1643,17 +1643,21 @@ impl Map {
         if self.filter.lead() {
             finite(&[cmd.forward, cmd.side, cmd.yaw, cmd.pitch])?;
             let (cmd, look, next_yaw) = self.filter.lag_view(cmd, look);
-            return self.advance_filtered(cmd, look, Some(next_yaw));
+            return self.advance_filtered(cmd, look, Some(next_yaw), next_yaw);
         }
-        self.advance_filtered(cmd, look, Some(f64::NAN))
+        self.advance_filtered(cmd, look, Some(f64::NAN), f64::NAN)
     }
+    /// `next_yaw`: the following command's yaw (NaN: none), which run sync measures against for styles with the lead
+    /// (website sim.ts replayStep).
     fn advance_canonical(
         &mut self,
         cmd: BhCmd,
         look: Option<BhLookSampleV2>,
         filter: bool,
+        next_yaw: f64,
     ) -> Result<BhState, String> {
-        self.advance_filtered(cmd, look, filter.then_some(f64::NAN))
+        let lead_yaw = if self.filter.lead() { next_yaw } else { f64::NAN };
+        self.advance_filtered(cmd, look, filter.then_some(f64::NAN), lead_yaw)
     }
     /// `next_yaw`: None plays the command as is; Some runs it through the style filter with that next yaw (NaN: none).
     fn advance_filtered(
@@ -1661,6 +1665,7 @@ impl Map {
         cmd: BhCmd,
         look: Option<BhLookSampleV2>,
         next_yaw: Option<f64>,
+        lead_yaw: f64,
     ) -> Result<BhState, String> {
         finite(&[cmd.forward, cmd.side, cmd.yaw, cmd.pitch])?;
         if self.recorder.is_some()
@@ -1687,6 +1692,7 @@ impl Map {
         self.transforms_dirty = true;
         self.game.observe_timing = self.timer.is_some() || self.game.observe_timing;
         if let Some(t) = &mut self.timer {
+            t.lead_yaw = lead_yaw;
             if let Some(v) = t.before_step(cmd, BhState::from(&self.game)) {
                 clamped = true;
                 self.game.state.velocity = v;

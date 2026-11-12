@@ -164,8 +164,10 @@ void HudFrame::draw_chat() const {
                 &chat,
                 chat.viewport(epoch_ms() / milliseconds_per_second)
         );
-    if (voice_chat && prefs.hud)
-        voice_hud::draw(hud, width, height, prefs.hud_scale, voice_chat->rows(), voice_chat->line(epoch_ms()));
+    if (voice_chat && prefs.hud) {
+        const std::array<HudRect, 2> taken{hud.drawn_bounds("keys"), hud.drawn_bounds("chat")};
+        voice_hud::draw(hud, width, height, prefs.hud_scale, voice_chat->rows(), voice_chat->line(epoch_ms()), taken);
+    }
 }
 
 void HudFrame::draw_panels() const {

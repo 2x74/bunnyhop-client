@@ -388,6 +388,7 @@ export class RunSession {
         if (this.styleFilter.lead) ({ cmd: c, look, nextYaw } = this.styleFilter.lagView(c, look));
       }
       c = this.styleFilter.apply(c, this.o.core.state(), this.timer.started, nextYaw);
+      this.timer.leadYaw = this.styleFilter.lead ? nextYaw : NaN;
       beforeStep(this.o.core, this.timer, c);
     }
     // v8: the live view state rides along to the recorder (a scripted command has none: that replay is written as v7).

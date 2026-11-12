@@ -196,6 +196,13 @@ export class RunTimer {
   private lastSide = 0;
   private prevYaw = NaN;
   /**
+   * The yaw the next command turns to, set per tick by whoever steps the run (session.ts, sim.ts replayStep) for styles
+   * whose key answers that turn (physics 28 Auto-strafe, styles.ts AUTOSTRAFE_LEAD_FROM); NaN otherwise. Sync is then
+   * measured against the turn the key was pressed for, not the one a tick earlier: without it every reversal of a
+   * perfectly synced Auto-strafe run counted one tick as out of sync.
+   */
+  leadYaw = NaN;
+  /**
    * Sub-tick timing (run-timing.ts): where in the run's first tick the player left the start zone, and where in the
    * finishing tick they entered the end zone. Read with timing() / timeMs().
    */
@@ -554,8 +561,9 @@ export class RunTimer {
         if (axis !== 0 && axis !== this.lastSide) this.strafes++;
         if (axis !== 0) this.lastSide = axis;
       }
-      if (!s.grounded && this.prevYaw === this.prevYaw) {
-        let d = cmd.yaw - this.prevYaw;
+      const lead = this.leadYaw === this.leadYaw;
+      if (!s.grounded && (lead || this.prevYaw === this.prevYaw)) {
+        let d = lead ? this.leadYaw - cmd.yaw : cmd.yaw - this.prevYaw;
         if (d > 180) d -= 360;
         else if (d < -180) d += 360;
         if (d !== 0) {
