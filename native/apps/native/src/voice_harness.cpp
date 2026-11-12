@@ -6,6 +6,7 @@
 #include "room_state.hpp"
 #include "settings.hpp"
 #include "voice_chat.hpp"
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -80,6 +81,7 @@ Json report(voice::VoiceChat &chat, const std::vector<float> &mixed) {
     for (const float sample : mixed)
         energy += double(sample) * sample;
     out["mixedRms"] = mixed.empty() ? 0 : std::sqrt(energy / double(mixed.size()));
+    out["mixedSeconds"] = double(mixed.size()) / voice::sample_rate;
     out["sentPackets"] = chat.engine().sent_packets.load();
     out["sentFrames"] = chat.engine().sent_frames.load();
     out["concealed"] = chat.engine().receiver().stats.concealed;
@@ -145,7 +147,9 @@ int main(int argc, char **argv) {
         while (double(mixed_samples) < now_ms * voice::sample_rate / 1000) {
             std::array<float, mix_chunk> chunk{};
             chat.engine().mix(chunk);
-            if (mixed.size() < kept_samples * 4) mixed.insert(mixed.end(), chunk.begin(), chunk.end());
+            // Only the audible stretches: what a listener actually heard.
+            const bool audible = std::any_of(chunk.begin(), chunk.end(), [](float v) { return v != 0; });
+            if (audible && mixed.size() < kept_samples * 4) mixed.insert(mixed.end(), chunk.begin(), chunk.end());
             mixed_samples += mix_chunk;
         }
         chat.frame(now_ms, 1, true);

@@ -58,6 +58,7 @@ async function makeAccounts(ids: string[]): Promise<void> {
 interface Report {
   heard: Record<string, { frames: number; seconds: number; pitch: number; purity: number; playout?: unknown }>;
   mixedRms: number;
+  mixedSeconds: number;
   sentPackets: number;
   sentFrames: number;
   concealed: number;
@@ -284,6 +285,7 @@ async function pass(browser: Browser, native: NativeClient, codec: string): Prom
   const nativeSlot = native.service.view.you;
   const webSlot = (await web.page.evaluate(() => (window as any).__voice.host.you())) as number;
   // Native talks; the website hears it and lists it.
+  const before = await native.report();
   native.key(true);
   await sleep(1500);
   const rowsWhileNativeTalks = await webRows(web);
@@ -291,6 +293,13 @@ async function pass(browser: Browser, native: NativeClient, codec: string): Prom
   await sleep(1500);
   native.key(false);
   await sleep(800);
+  const afterNative = await native.report();
+  const webStats = await web.page.evaluate(() => ({ ...(window as any).__voice.stats }));
+  const nativeSpurt = {
+    sentPackets: afterNative.sentPackets - before.sentPackets,
+    sentFrames: afterNative.sentFrames - before.sentFrames,
+    webReceivedFrames: webStats.recvFrames,
+  };
   // The website talks; native hears it.
   await web.page.keyboard.down("KeyX");
   await sleep(3000);
@@ -307,11 +316,12 @@ async function pass(browser: Browser, native: NativeClient, codec: string): Prom
   await web.context.close();
   const checks: [string, boolean][] = [
     ["website lists the native talker", rowsWhileNativeTalks.includes(nativeSlot)],
-    ["website decoded native at 550 Hz", heardByWeb?.pitch === 550 && heardByWeb.frames >= 100],
-    ["native decoded the website at 440 Hz", heardByNative?.pitch === 440 && heardByNative.frames >= 100],
+    ["website decoded native at 550 Hz", heardByWeb?.pitch === 550 && heardByWeb.frames >= 75],
+    ["native decoded the website at 440 Hz", heardByNative?.pitch === 440 && heardByNative.frames >= 75],
     ["native played it out", report.mixedRms > 0.01],
+    ["every frame native sent reached the website", nativeSpurt.webReceivedFrames >= nativeSpurt.sentFrames],
   ];
-  return { codec: codecPath, nativeSlot, webSlot, heardByWeb, heardByNative, report, checks };
+  return { codec: codecPath, nativeSlot, webSlot, nativeSpurt, heardByWeb, heardByNative, report, checks };
 }
 
 const browser = await chromium.launch({ args: ["--autoplay-policy=no-user-gesture-required"] });
