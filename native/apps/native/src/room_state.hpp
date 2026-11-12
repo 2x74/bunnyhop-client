@@ -186,6 +186,12 @@ class RoomState {
     }
 
 public:
+    // Closing a replay of another map while still in this room: the room's map to load again (empty: stay on this map).
+    std::string map_after_replay(const std::string &map_id) const {
+        if (closed_ || id.empty() || status == "closed" || map.empty() || map == map_id) return "";
+        return map;
+    }
+
     NameAppearance appearance(unsigned slot) const {
         for (size_t i = 0; i < display_.count; ++i) {
             if (display_.rows[i].slot == slot) return display_.rows[i].look;

@@ -3044,8 +3044,14 @@ int run(const native::Options &opt) {
                             viewer.hud = message.value("value", !viewer.hud);
                         else if (action == "viewer")
                             viewer.viewer_ui(message);
-                        else if (action == "stop")
-                            reset();
+                        else if (action == "stop") {
+                            // A replay of another map watched from a room goes back to the room's map; the room stayed.
+                            const auto room_map = room.map_after_replay(map_id);
+                            if (room_map.empty())
+                                reset();
+                            else
+                                request_map(room_map);
+                        }
                     } else if (type == "sensitivity") {
                         preferences = native::patch_settings(preferences, {{"sensitivity", message.at("value")}});
                         menu_state.settings_changed();

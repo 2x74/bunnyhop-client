@@ -332,7 +332,19 @@ void test_vote_shows_tiers() {
     assert(vote.options[2].view() == "Extend 10 minutes" && vote.tiers[2] == 0 && vote.counts[2] == 1);
 }
 
+// Watching a replay of another map from a room keeps the room (v0.8.0); closing it goes back to the room's map.
+void test_closing_a_replay_returns_to_the_room_map() {
+    const auto room = std::make_unique<native::RoomState>();
+    assert(room->map_after_replay("bhop_eazy").empty());
+    room->event(envelope(easy_welcome()));
+    assert(room->map_after_replay("bhop_eazy").empty());
+    assert(room->map_after_replay("bhop_blue") == "bhop_eazy");
+    room->event(envelope({{"t", "kicked"}, {"reason", "r"}}));
+    assert(room->map_after_replay("bhop_blue").empty());
+}
+
 int main() {
+    test_closing_a_replay_returns_to_the_room_map();
     test_vote_shows_tiers();
     test_unknown_slot_keeps_map_changes();
     test_null_fields_never_break_the_display();
