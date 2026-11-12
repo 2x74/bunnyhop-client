@@ -8,7 +8,7 @@
 // The website talks at 440 Hz and the native side at 550 Hz; each side checks it heard the other's pitch. It runs
 // twice: with the browser's WebCodecs Opus and with the libopus-wasm fallback (?voicecodec=wasm).
 import { strict as assert } from "node:assert";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import { NativeRoomService, type RoomTransport } from "../ui/room-service";
@@ -38,31 +38,18 @@ async function until(ready: () => boolean | Promise<boolean>, label: string, tim
   }
 }
 
-/** Local D1 only: guests can't talk, so the talkers become accounts. */
+/** Local D1 only: guests can't talk, so the talkers become accounts. The release tree's stack keeps its own state. */
 async function makeAccounts(ids: string[]): Promise<void> {
+  const api = join(WEB_REPO, "apps/api");
+  const own = existsSync(join(api, ".wrangler/voice-dev/wrangler.jsonc"));
+  const state = own
+    ? [".wrangler/voice-state", ".wrangler/voice-dev/wrangler.jsonc"]
+    : [".wrangler/state", "wrangler.jsonc"];
   const list = ids.map((id) => `'${id.replace(/[^\w-]/g, "")}'`).join(",");
-  const process = Bun.spawn(
-    [
-      "bunx",
-      "wrangler",
-      "d1",
-      "execute",
-      "DB",
-      "--local",
-      "--persist-to",
-      ".wrangler/state",
-      "--config",
-      "wrangler.jsonc",
-      "--command",
-      `UPDATE users SET provider = 'discord' WHERE id IN (${list})`,
-    ],
-    {
-      cwd: join(WEB_REPO, "apps/api"),
-      env: { ...Bun.env, WRANGLER_SEND_METRICS: "false" },
-      stdout: "pipe",
-      stderr: "pipe",
-    },
-  );
+  const command = `UPDATE users SET provider = 'discord' WHERE id IN (${list})`;
+  const args = ["d1", "execute", "DB", "--local", "--persist-to", state[0], "--config", state[1], "--command", command];
+  const env = { ...Bun.env, WRANGLER_SEND_METRICS: "false" };
+  const process = Bun.spawn(["bunx", "wrangler", ...args], { cwd: api, env, stdout: "pipe", stderr: "pipe" });
   if ((await process.exited) !== 0) throw new Error(await new Response(process.stderr).text());
 }
 

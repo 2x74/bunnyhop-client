@@ -7,7 +7,7 @@ import { icon } from "../../web/src/ui/icons";
 import { keyLabel, prefs } from "../../web/src/ui/settings";
 import { registerSettingsSection } from "../../web/src/ui/settings-registry";
 import { uiSound } from "./audio";
-import { DEFAULT_BINDS, nativeKeyCode, state } from "./bridge";
+import { DEFAULT_BINDS, nativeKeyCode, SHARED_KEY_ACTION as SHARED_BIND, state } from "./bridge";
 import { followHost, nativeChoice, nativeToggle, type Ui } from "./native-rows";
 import { WEBSITE_CHAT_BIND } from "./settings-gates";
 import { sendNativeSettings } from "./prefs-bridge";
@@ -141,9 +141,6 @@ export const NATIVE_BINDS: readonly [keyof typeof DEFAULT_BINDS, string][] = [
 ];
 
 let stopCapture: (() => void) | null = null;
-
-/** Push to talk shares its key (X with the checkpoint teleport): a voice room gives the key to voice. */
-const SHARED_BIND = "voiceRecord";
 
 /** Gives `code` to `action`: it leaves every other action, the website's and the native ones (push to talk aside). */
 function assign(action: string, slot: number, code: string | null): void {

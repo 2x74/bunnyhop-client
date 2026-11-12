@@ -284,6 +284,8 @@ export const NATIVE_BIND_ACTIONS = [
   "voiceRecord",
 ] as const;
 type NativeBindAction = (typeof NATIVE_BIND_ACTIONS)[number];
+/** Push to talk shares its key (X with the checkpoint teleport): in a room with voice the key talks. */
+export const SHARED_KEY_ACTION = "voiceRecord";
 /** The web game's defaults, plus native-only actions and defaults (settings.hpp keeps the same list). */
 export const DEFAULT_BINDS: Record<NativeBindAction, readonly string[]> = {
   ...WEB_DEFAULT_BINDS,
