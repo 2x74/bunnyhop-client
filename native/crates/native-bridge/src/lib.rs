@@ -59,6 +59,8 @@ mod styles;
 mod backwards_tests;
 #[cfg(test)]
 mod adonly_tests;
+#[cfg(test)]
+mod autostrafe_v28_tests;
 pub use assets::{BhAttackReport, BhFloorWeapon, BhWeaponReport};
 pub use assets::{BhMaterialExtra, BhPropGroup, BhSkyInfo};
 pub use look::{BhLookSample, BhLookSampleV2};
@@ -1635,13 +1637,30 @@ impl Map {
         self.game.air_speed_gain = None;
     }
     fn advance(&mut self, cmd: BhCmd, look: Option<BhLookSampleV2>) -> Result<BhState, String> {
-        self.advance_canonical(self.with_flight(cmd), look, true)
+        let cmd = self.with_flight(cmd);
+        // v28+ Auto-strafe (session.ts RunSession.command): the sim moves with last tick's view (yaw, turn-bind bits and
+        // look sample), and this tick's mouse yaw is the next yaw the key comes from. The camera keeps the live mouse.
+        if self.filter.lead() {
+            finite(&[cmd.forward, cmd.side, cmd.yaw, cmd.pitch])?;
+            let (cmd, look, next_yaw) = self.filter.lag_view(cmd, look);
+            return self.advance_filtered(cmd, look, Some(next_yaw));
+        }
+        self.advance_filtered(cmd, look, Some(f64::NAN))
     }
     fn advance_canonical(
         &mut self,
         cmd: BhCmd,
         look: Option<BhLookSampleV2>,
         filter: bool,
+    ) -> Result<BhState, String> {
+        self.advance_filtered(cmd, look, filter.then_some(f64::NAN))
+    }
+    /// `next_yaw`: None plays the command as is; Some runs it through the style filter with that next yaw (NaN: none).
+    fn advance_filtered(
+        &mut self,
+        cmd: BhCmd,
+        look: Option<BhLookSampleV2>,
+        next_yaw: Option<f64>,
     ) -> Result<BhState, String> {
         finite(&[cmd.forward, cmd.side, cmd.yaw, cmd.pitch])?;
         if self.recorder.is_some()
@@ -1651,11 +1670,11 @@ impl Map {
         {
             return Err("recorded movement must be representable as i16".into());
         }
-        let cmd = if filter {
+        let cmd = if let Some(next_yaw) = next_yaw {
             let edge_landing = self.game.state.edge_landing.is_some();
             // timer.ts RunTimer.started before the tick: running, or a rules-2 first tick still in the zone.
             let running = self.timer.as_ref().is_some_and(|t| t.state.status == 1 || t.state.pending_start != 0);
-            self.filter.apply(cmd, BhState::from(&self.game), edge_landing, running)
+            self.filter.apply(cmd, BhState::from(&self.game), edge_landing, running, next_yaw)
         } else {
             cmd
         };

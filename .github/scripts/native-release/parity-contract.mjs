@@ -13,7 +13,7 @@ export const fixtureHashes = {
   telehop: '9284b7e5abef51bf69589276eb5bbf7e286f4365fbe3dc2b512a25ecf3e095d5',
   'material-ladder': '91e211b00d7a0fa3722bb7d9971bd9a866e039fe450f7d0142bb2fa9b1dee36b',
 };
-export const fixtureVersions = name => name === 'material-ladder' ? [17, 18, 24, 25, 26, 27] : [16, 17, 23, 24, 25, 26, 27];
+export const fixtureVersions = name => name === 'material-ladder' ? [17, 18, 24, 25, 26, 27, 28] : [16, 17, 23, 24, 25, 26, 27, 28];
 export const fixtureTrials = { incline: 60, edge: 80, 'thin-trigger': 40, telehop: 40, 'material-ladder': 16 };
 export const behaviorCounters = ['landed', 'speedKept', 'speedLost', 'jumped', 'edgeBugs', 'teleported', 'fallRestored', 'mapTeleport', 'attached', 'climbed'];
 export const parityFiles = [...Object.keys(fixtureHashes).flatMap(name => [
@@ -44,11 +44,11 @@ export function validateParityReport(report, platform, context) {
       requireThat(Number.isSafeInteger(observation[counter]) && observation[counter] >= 0 && observation[counter] <= f.trials, `${f.name} invalid behavior count`);
     if (f.name === 'material-ladder') {
       const { v17, v18 } = f.behavior;
-      requireThat(v17.attached === 0 && v17.climbed === 0 && v18.attached === f.trials && v18.climbed === f.trials && [f.behavior.v24, f.behavior.v25, f.behavior.v26, f.behavior.v27].every(b => b.attached === f.trials && b.climbed === f.trials), 'material ladder does not exercise v18 attachment/climbing with v17 historical contrast');
+      requireThat(v17.attached === 0 && v17.climbed === 0 && v18.attached === f.trials && v18.climbed === f.trials && [f.behavior.v24, f.behavior.v25, f.behavior.v26, f.behavior.v27, f.behavior.v28].every(b => b.attached === f.trials && b.climbed === f.trials), 'material ladder does not exercise v18 attachment/climbing with v17 historical contrast');
     } else {
       const a = f.behavior.v16;
       // v17 and every later pinned version must retain every RNGFix behavior.
-      for (const b of [f.behavior.v17, f.behavior.v23, f.behavior.v24, f.behavior.v25, f.behavior.v26, f.behavior.v27]) {
+      for (const b of [f.behavior.v17, f.behavior.v23, f.behavior.v24, f.behavior.v25, f.behavior.v26, f.behavior.v27, f.behavior.v28]) {
         if (f.name === 'incline') requireThat(b.landed === f.trials && b.speedKept === f.trials && a.speedLost > 0, 'incline does not exercise speed preservation');
         if (f.name === 'edge') requireThat(b.jumped > a.jumped && a.edgeBugs > 0 && b.edgeBugs === 0, 'edge does not exercise edge-bug prevention');
         if (f.name === 'thin-trigger') requireThat(b.teleported === f.trials && a.teleported > 0 && a.teleported < b.teleported, 'thin trigger does not exercise first-landing contact');

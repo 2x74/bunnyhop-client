@@ -368,6 +368,8 @@ unsafe fn restore(
             let s = m.checkpoints[handle as usize - 1].as_ref().unwrap();
             m.game.restore_state(&s.game);
             m.filter = s.filter.clone();
+            // As after a restart (session.ts practiceRestored): the next command moves with the live view.
+            m.filter.clear_lead_view();
             m.timer = s.timer.clone();
             m.last_command = s.command;
             m.transforms_dirty = true;

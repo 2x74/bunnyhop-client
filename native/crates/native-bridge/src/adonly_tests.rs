@@ -47,6 +47,7 @@ fn run_rows(name: &str, rows: &[Value]) {
             state,
             row["edgeLanding"].as_bool().unwrap(),
             row["running"].as_bool().unwrap(),
+            f64::NAN,
         );
         let note = row["note"].as_str().unwrap_or("");
         assert_eq!(

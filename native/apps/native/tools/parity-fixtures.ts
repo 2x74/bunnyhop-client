@@ -2,8 +2,8 @@
 // no production maps, replays, content cache, credentials or private code at runtime.
 import { writeBsp, SURF_NOLIGHT, type Box, type MapSource, type Vec3 } from "../../../tools/tutorial/bsp";
 export const FIXTURE_SUITE = "material-ladder-release-v8";
-const PHYSICS_VERSIONS = [16, 17, 23, 24, 25, 26, 27];
-const LADDER_VERSIONS = [17, 18, 24, 25, 26, 27];
+const PHYSICS_VERSIONS = [16, 17, 23, 24, 25, 26, 27, 28];
+const LADDER_VERSIONS = [17, 18, 24, 25, 26, 27, 28];
 export const box = (min: Vec3, max: Vec3): Box => ({ min, max, tex: "tools/toolsnodraw" });
 function room(): MapSource {
   return {
