@@ -120,19 +120,22 @@ private:
 // The room's budgets for one talker (apps/api rooms/voice.ts VOICE_LIMITS), kept on this side too: a packet the room
 // would refuse with a strike is never sent. Only a long stall that bunches packets up ever hits it.
 struct RelayBudget {
+    static constexpr double packet_burst = 8, packet_refill_ms = 30;
     static constexpr double frame_burst = 16, frame_refill_ms = 18;
     static constexpr double byte_burst = 4096, bytes_per_ms = 8;
 
-    double frames = frame_burst, bytes = byte_burst, at_ms = -1;
+    double packets = packet_burst, frames = frame_burst, bytes = byte_burst, at_ms = -1;
 
     bool spend(size_t frame_count, size_t byte_count, double now_ms) {
         if (at_ms >= 0) {
             const double elapsed = now_ms > at_ms ? now_ms - at_ms : 0;
+            packets = std::min(packet_burst, packets + elapsed / packet_refill_ms);
             frames = std::min(frame_burst, frames + elapsed / frame_refill_ms);
             bytes = std::min(byte_burst, bytes + elapsed * bytes_per_ms);
         }
         at_ms = now_ms;
-        if (frames < double(frame_count) || bytes < double(byte_count)) return false;
+        if (packets < 1 || frames < double(frame_count) || bytes < double(byte_count)) return false;
+        packets -= 1;
         frames -= double(frame_count);
         bytes -= double(byte_count);
         return true;

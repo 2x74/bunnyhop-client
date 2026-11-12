@@ -32,6 +32,8 @@ else()
     target_compile_options(bunnyhop_opus PRIVATE -w)
     target_compile_definitions(bunnyhop_opus PRIVATE HAVE_LRINTF)
     if(UNIX AND NOT APPLE)
+        # glibc declares alloca in <alloca.h>; strict C modes hide the <stdlib.h> one.
+        target_compile_definitions(bunnyhop_opus PRIVATE HAVE_ALLOCA_H)
         target_link_libraries(bunnyhop_opus PRIVATE m)
     endif()
 endif()

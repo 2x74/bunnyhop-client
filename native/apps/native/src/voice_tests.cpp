@@ -250,12 +250,18 @@ void test_relay_budget() {
     // Real time: a packet of two 60-byte frames every 40 ms always fits.
     for (int i = 0; i < 2000; ++i)
         assert(budget.spend(2, 130, i * 40.));
-    // A stall that bunches 20 packets up: the room's burst lets 8 through, the rest would earn strikes.
+    // A stall that bunches 20 packets up: the room's burst of 8 packets lets 8 through, the rest would earn strikes.
     voice::RelayBudget bunched;
     int passed = 0;
     for (int i = 0; i < 20; ++i)
         passed += bunched.spend(2, 130, 1000);
     assert(passed == 8);
+    // One frame per packet at 50 a second is over the room's packet rate (one per 30 ms) and must not all go.
+    voice::RelayBudget single;
+    int sent = 0;
+    for (int i = 0; i < 500; ++i)
+        sent += single.spend(1, 70, i * 20.);
+    assert(sent < 350);
 }
 
 void test_receiver_conceals_and_mixes() {

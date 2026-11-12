@@ -232,6 +232,7 @@ void Engine::apply(const Pending &pending) {
             wants_talk_ = false;
             std::vector<Bytes> out;
             sender_.stop_now(out);
+            if (capture_) pump_capture(out);
             std::lock_guard lock(mutex_);
             for (auto &bytes : out)
                 outbox_.push_back(std::move(bytes));
@@ -297,7 +298,7 @@ bool Engine::ensure_capture() {
 }
 
 void Engine::pump_capture(std::vector<Bytes> &out) {
-    if (!capture_ || !sender_.transmitting()) return;
+    if (!capture_) return;
     std::array<float, frame_samples> pcm{};
     while (sender_.transmitting() && capture_->read(pcm)) {
         const size_t before = out.size();
@@ -312,7 +313,9 @@ void Engine::pump_capture(std::vector<Bytes> &out) {
         if (stop == Sender::Stop::limit) emit(EngineEvent::limit);
     }
     if (!sender_.transmitting()) {
+        // The microphone is open only while you talk: closed after each spurt, opened again on the next press.
         capture_->run(false);
+        capture_.reset();
         transmitting_.store(false, std::memory_order_relaxed);
         self_level_.store(0, std::memory_order_relaxed);
     }
