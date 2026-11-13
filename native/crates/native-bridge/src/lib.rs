@@ -62,7 +62,7 @@ mod adonly_tests;
 #[cfg(test)]
 mod autostrafe_v28_tests;
 pub use assets::{BhAttackReport, BhFloorWeapon, BhWeaponReport};
-pub use assets::{BhMaterialExtra, BhPropGroup, BhSkyInfo};
+pub use assets::{BhMaterialExtra, BhPropGroup, BhSkyInfo, BhWorldFog};
 pub use look::{BhLookSample, BhLookSampleV2};
 pub use practice::{
     bh_practice_from_replay,
@@ -443,6 +443,14 @@ impl Map {
                 break p;
             }
         };
+        let mut props = props;
+        let prop_light = mesh
+            .lighting
+            .as_ref()
+            .map(|lighting| bunnyhop_core::prop_light::bake(&sp, &props, &fs, lighting))
+            .unwrap_or_default();
+        // Kept only for the bake.
+        props.sources = Vec::new();
         let mut material_index = |name: &String| -> u32 {
             if let Some(i) = names.iter().position(|n| n == name) {
                 i as u32
@@ -540,6 +548,7 @@ impl Map {
                 .map_err(|e| e.to_string())?,
             floor: Vec::new(),
             props,
+            prop_light,
             prop_groups,
             water: CString::new(
                 serde_json::json!({"volumes":mesh.water,"planes":mesh.water_planes}).to_string(),
@@ -1472,6 +1481,7 @@ buffer!(bh_material_extras, BhMaterialExtra, assets.extras);
 buffer!(bh_prop_vertices, f32, assets.props.vertices);
 buffer!(bh_prop_indices, u32, assets.props.indices);
 buffer!(bh_prop_groups, BhPropGroup, assets.prop_groups);
+buffer!(bh_prop_light, f32, assets.prop_light);
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bh_sky_info(ctx: *mut BhContext, out: *mut BhSkyInfo) -> c_int {
     unsafe {
@@ -1501,6 +1511,54 @@ pub unsafe extern "C" fn bh_sky_info(ctx: *mut BhContext, out: *mut BhSkyInfo) -
         })
     }
 }
+/// The map's world fog (core fog.rs: its master env_fog_controller). 0 when the map has none, it is off, or the map
+/// changes its fog while running.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bh_world_fog(ctx: *mut BhContext, out: *mut BhWorldFog) -> c_int {
+    unsafe {
+        call(ctx, |c| {
+            let f = c
+                .map()?
+                .mesh
+                .world_fog
+                .as_ref()
+                .filter(|f| f.enable && f.end > f.start && f.max_density > 0.0)
+                .ok_or("map has no world fog")?;
+            output(
+                out,
+                BhWorldFog {
+                    blend: u32::from(f.blend),
+                    color: f.color,
+                    color2: f.color2,
+                    dir: f.dir,
+                    start: f.start,
+                    end: f.end,
+                    max_density: f.max_density.min(1.0),
+                },
+            )
+        })
+    }
+}
+
+/// The map's light at a point (core lighting.rs): six linear RGB colours for +x, -x, +y, -y, +z, -z into `out`
+/// (18 floats). 0 where there is none: a map drawn fullbright, a point in solid or outside the map.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bh_light_cube(ctx: *const BhContext, x: f32, y: f32, z: f32, out: *mut f32) -> c_int {
+    unsafe {
+        read(ctx, 0, |c| {
+            let Some(m) = &c.map else { return 0 };
+            let Some(cube) = m.mesh.lighting.as_ref().and_then(|l| l.cube([x, y, z])) else { return 0 };
+            if out.is_null() {
+                return 0;
+            }
+            for (i, value) in cube.iter().flatten().enumerate() {
+                *out.add(i) = *value;
+            }
+            1
+        })
+    }
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bh_sky_name(ctx: *mut BhContext, count: *mut usize) -> *const c_char {
     let mut result = ptr::null();

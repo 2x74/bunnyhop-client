@@ -25,6 +25,8 @@
 #include "first_person_weapons.hpp"
 #include "map_props.hpp"
 #include "runtime_prop_copies.hpp"
+#include "map_light.hpp"
+#include "model_light.hpp"
 #include "texture_motion.hpp"
 #include <span>
 #include "nlohmann/json.hpp"
@@ -452,6 +454,11 @@ class Renderer {
     std::array<int32_t, 6> skyMaterials{-1, -1, -1, -1, -1, -1};
     BhSkyInfo skyInfo{};
     bool hasSky = false;
+    // The map's own fog and its light on props (map_light.hpp).
+    BhWorldFog worldFog{};
+    bool hasWorldFog = false;
+    GLuint propLightBuffer = 0;
+    native_render::PropCubes propCubes;
     NativeMapEffects mapEffects;
     std::unique_ptr<NativePresentation> presentation;
     std::unique_ptr<ActorWarmup> actorWarmup;
@@ -887,7 +894,7 @@ class Renderer {
         GLint model = -1, flatColor = -1, hasNormal = -1, hasSecondary = -1, hasDetail = -1, detailScale = -1;
         GLint detailBlend = -1, tint = -1, opacity = -1, cutoff = -1, unlit = -1, props = -1, kind = -1;
         GLint aboveWater = -1, captureReady = -1, waterFogEnd = -1, additive = -1;
-        GLint baseOffset = -1, skinned = -1, boneBase = -1;
+        GLint baseOffset = -1, skinned = -1, boneBase = -1, propCubeOn = -1, propCube = -1;
 
         void read(Gl &gl, GLuint program) {
             const std::pair<GLint *, const char *> uniforms[] = {
@@ -911,6 +918,8 @@ class Renderer {
                     {&baseOffset, "baseOffset"},
                     {&skinned, "skinned"},
                     {&boneBase, "boneBase"},
+                    {&propCubeOn, "propCubeOn"},
+                    {&propCube, "propCube"},
             };
             for (const auto &[location, name] : uniforms)
                 *location = gl.GetUniformLocation(program, name);
@@ -1070,6 +1079,8 @@ class Renderer {
 
     // Moving textures and animated map props (texture_motion.hpp, map_prop_meshes.hpp), on the world's visual time.
     static constexpr GLint map_prop_bone_unit = 12;
+    // The prop mesh's light per vertex (world_vertex propLight).
+    static constexpr GLuint prop_light_location = 7;
     native_render::TextureMotion textureMotion;
     std::unique_ptr<MapPropMeshes> mapPropMeshes;
     double worldTime = -1, worldSeconds = 0;
@@ -1286,32 +1297,8 @@ class Renderer {
                 std::cos(lastPitch * native::radians) * std::sin(lastYaw * native::radians),
                 -std::sin(lastPitch * native::radians)
         );
-        float fog[3] = {skyInfo.fog_color[0] / 255.f, skyInfo.fog_color[1] / 255.f, skyInfo.fog_color[2] / 255.f};
-        if (skyInfo.fog_blend) {
-            const float dx = std::cos(lastPitch * native::radians) * std::cos(lastYaw * native::radians),
-                        dy = std::cos(lastPitch * native::radians) * std::sin(lastYaw * native::radians),
-                        dz = -std::sin(lastPitch * native::radians);
-            const float len = std::hypot(std::hypot(skyInfo.fog_dir[0], skyInfo.fog_dir[1]), skyInfo.fog_dir[2]);
-            const float t = len > 0 ? std::clamp(
-                                              .5f
-                                                      + .5f
-                                                                * (dx * skyInfo.fog_dir[0] + dy * skyInfo.fog_dir[1]
-                                                                   + dz * skyInfo.fog_dir[2])
-                                                                / len,
-                                              0.f,
-                                              1.f
-                                      )
-                                    : 0;
-            for (int k = 0; k < 3; k++)
-                fog[k] = (skyInfo.fog_color[k] * t + skyInfo.fog_color2[k] * (1 - t)) / 255.f;
-        }
-        gl.Uniform3fv(loc(program, "skyFogColor"), 1, fog);
-        gl.Uniform3f(
-                loc(program, "skyFogRange"),
-                skyInfo.fog_start / std::max(skyInfo.scale, .001f),
-                skyInfo.fog_end / std::max(skyInfo.scale, .001f),
-                skyInfo.fog_max_density
-        );
+        set_fog_uniforms(sky);
+        gl.Uniform1i(loc(program, "propLighting"), propLightBuffer && prop_lighting_on());
         gl.ActiveTexture(GL_TEXTURE1);
         gl.BindTexture(GL_TEXTURE_2D, lightmap);
         ++sceneNumber;
@@ -1358,7 +1345,7 @@ class Renderer {
         if (profiling) frameProfile.survivors += draws.size();
         profile_elapsed(frameProfile.buildCull, phaseStart);
         pose_map_props(draws);
-        bool skinnedBound = false, linesBound = false;
+        bool skinnedBound = false, linesBound = false, cubeBound = false;
         const bool visibleWater =
                 hasWaterMaterials && std::any_of(draws.begin(), draws.end(), [&](const native_render::SceneDraw &d) {
                     return d.material < materials.size() && materials[d.material].kind == 2;
@@ -1395,6 +1382,7 @@ class Renderer {
                     boundMaterial = std::pair(d.material, d.prop);
                 }
                 bind_skinning(materialUniforms.skinned, materialUniforms.boneBase, d.skinned, skinnedBound);
+                bind_prop_cube(d, cubeBound);
                 if (wireframe(d.material) != linesBound) {
                     linesBound = !linesBound;
                     gl.PolygonMode(GL_FRONT_AND_BACK, linesBound ? GL_LINE : GL_FILL);
@@ -1418,6 +1406,7 @@ class Renderer {
             if (profiling) frameProfile.submit -= frameProfile.sort - sortBefore;
         }
         if (skinnedBound) gl.Uniform1i(materialUniforms.skinned, 0);
+        if (cubeBound) gl.Uniform1i(materialUniforms.propCubeOn, 0);
         if (linesBound) gl.PolygonMode(GL_FRONT_AND_BACK, GL_FILL);
         gl.DepthMask(GL_TRUE);
         gl.Disable(GL_POLYGON_OFFSET_FILL);
@@ -2163,6 +2152,95 @@ public:
         gl.ActiveTexture(GL_TEXTURE0);
     }
 
+    // The 3D sky's fog for the sky pass; the map's world fog (Map fog, off in Potato) for the main one.
+    std::array<float, 3> view_forward() const {
+        return {float(std::cos(lastPitch * native::radians) * std::cos(lastYaw * native::radians)),
+                float(std::cos(lastPitch * native::radians) * std::sin(lastYaw * native::radians)),
+                float(-std::sin(lastPitch * native::radians))};
+    }
+
+    // The map's fog and light for the models drawn in the world this frame (NativeViewmodel::world_light_uniforms).
+    NativeViewmodel::WorldLook frame_world_look(const float eye[3]) {
+        NativeViewmodel::WorldLook look;
+        look.active = true;
+        using Mode = native_render::ModelLightMode;
+        const auto setting = graphics.model_lighting;
+        look.mode = graphics.potato || graphics.fullbright               ? Mode::off
+                    : setting == GraphicsSettings::ModelLighting::full   ? Mode::full
+                    : setting == GraphicsSettings::ModelLighting::subtle ? Mode::subtle
+                                                                         : Mode::off;
+        if (world_fog_on()) {
+            const auto forward = view_forward();
+            look.fog_color = native_render::fog_view_color(
+                    worldFog.color, worldFog.color2, worldFog.dir, worldFog.blend, forward.data()
+            );
+            look.fog_range = {worldFog.start, worldFog.end, worldFog.max_density};
+        }
+        look.eye = {eye[0], eye[1], eye[2]};
+        look.exposure = exposure();
+        return look;
+    }
+
+    void set_fog_uniforms(bool sky) {
+        const auto view = view_forward();
+        const float *forward = view.data();
+        const auto skyFog = native_render::fog_view_color(
+                skyInfo.fog_color, skyInfo.fog_color2, skyInfo.fog_dir, skyInfo.fog_blend, forward
+        );
+        gl.Uniform3fv(loc(program, "skyFogColor"), 1, skyFog.data());
+        gl.Uniform3f(
+                loc(program, "skyFogRange"),
+                skyInfo.fog_start / std::max(skyInfo.scale, .001f),
+                skyInfo.fog_end / std::max(skyInfo.scale, .001f),
+                skyInfo.fog_max_density
+        );
+        const bool worldFogOn = !sky && world_fog_on();
+        const auto fog =
+                native_render::fog_view_color(worldFog.color, worldFog.color2, worldFog.dir, worldFog.blend, forward);
+        gl.Uniform3fv(loc(program, "worldFogColor"), 1, fog.data());
+        gl.Uniform3f(
+                loc(program, "worldFogRange"), worldFog.start, worldFog.end, worldFogOn ? worldFog.max_density : 0
+        );
+    }
+
+    bool world_fog_on() const { return hasWorldFog && graphics.map_fog && !graphics.potato; }
+
+    // The map's world fog, and its light on static props as a vertex attribute of the prop mesh.
+    void prepare_map_light() {
+        hasWorldFog = bh_world_fog(core, &worldFog) != 0;
+        if (mapPropMeshes) propCubes.reset(mapPropMeshes->props.instances().size());
+        size_t count = 0, prop_floats = 0;
+        const float *light = bh_prop_light(core, &count);
+        bh_prop_vertices(core, &prop_floats);
+        constexpr size_t prop_vertex_floats = 8, light_floats = 3;
+        if (!light || !propMesh.vao || count != prop_floats / prop_vertex_floats * light_floats) return;
+        const auto colors = native_render::prop_light_colors(light, count, lightmapInfo.hdr);
+        gl.BindVertexArray(propMesh.vao);
+        gl.GenBuffers(1, &propLightBuffer);
+        gl.BindBuffer(GL_ARRAY_BUFFER, propLightBuffer);
+        gl.BufferData(GL_ARRAY_BUFFER, colors.size() * sizeof(float), colors.data(), GL_STATIC_DRAW);
+        gl.EnableVertexAttribArray(prop_light_location);
+        gl.VertexAttribPointer(prop_light_location, 3, GL_FLOAT, GL_FALSE, light_floats * sizeof(float), nullptr);
+        gl.BindVertexArray(0);
+    }
+
+    // Props draw with the map's light (the "Prop lighting" setting) where it has some for them.
+    bool prop_lighting_on() const { return graphics.prop_lighting && !graphics.potato && !graphics.fullbright; }
+
+    // An animated prop takes its light cube; everything else its vertex light (static props) or none.
+    void bind_prop_cube(const native_render::SceneDraw &d, bool &bound) {
+        const native_render::LightCube *cube = nullptr;
+        if (d.skinned && prop_lighting_on()) {
+            const auto &origin = scene_transform(true, d.entity, 0).origin;
+            cube = propCubes.at(core, d.skinned - 1, origin, lightmapInfo.hdr);
+        }
+        if (cube) gl.Uniform3fv(materialUniforms.propCube, 6, cube->data());
+        if (bool(cube) != bound) {
+            gl.Uniform1i(materialUniforms.propCubeOn, cube != nullptr);
+            bound = cube != nullptr;
+        }
+    }
+
     void prepare_sky() {
         size_t sv = 0, si = 0, sg = 0;
         const float *skyVertices = bh_sky_vertices(core, &sv);
@@ -2336,6 +2414,7 @@ public:
         while (!props.step())
             co_yield "prop geometry";
         prepare_sky();
+        prepare_map_light();
         co_yield "lightmap";
         auto textures = prepare_textures();
         while (!textures.step())
@@ -2435,6 +2514,7 @@ public:
         mapPropMeshes.reset();
         destroy(worldMesh);
         destroy(propMesh);
+        if (propLightBuffer) gl.DeleteBuffers(1, &propLightBuffer);
         destroy(skyMesh);
         if (!ownedTextures.empty()) gl.DeleteTextures(ownedTextures.size(), ownedTextures.data());
         if (planesTexture) gl.DeleteTextures(1, &planesTexture);
@@ -3325,6 +3405,7 @@ public:
         const auto vp = camera(eye, lastYaw, lastPitch, aspect);
         resolve_look_lighting();
         prepare_sun_light(eye, seconds);
+        if (viewmodel) viewmodel->world_look(frame_world_look(eye));
         gl.Viewport(0, 0, width, height);
         plan_water(eye, vp);
         if (waterPlan.reflection_height) draw_water_reflection(eye, aspect, width, height, seconds);
@@ -3447,6 +3528,7 @@ public:
                 );
         }
         profile_elapsed(frameProfile.viewmodel, viewmodelStart);
+        if (viewmodel) viewmodel->world_look({});
         profile_elapsed(frameProfile.presentation, phaseStart);
         spectatedAttacks.clear();
         spectatedFlags = 0;  // Hidden third-person viewmodels must not replay stale pulses on return to eye mode.

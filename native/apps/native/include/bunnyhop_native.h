@@ -214,7 +214,8 @@ typedef struct BhTimingSegmentV2 {
 
 int bh_v29_check_abi(uint32_t version, size_t record_size, size_t segment_size);
 /* Begin first. Default frozen pair 210/2; set custom rates before the first command.
- * Later calls may mark timed_input, timed_presses, null_binds or w_release; rates cannot change. New BHRs append BHTS. */
+ * Later calls may mark timed_input, timed_presses, null_binds or w_release; rates cannot change.
+ * New BHRs append BHTS. */
 int bh_record_options_v29(BhContext *ctx, const BhRecordOptionsV29 *options);
 /* After bh_replay_load/seek on the live context: preserve full world/timer/filter
  * state, leave playback, invalidate ranked recording. Current map/style/settings/
@@ -279,6 +280,12 @@ typedef struct BhSkyInfo {
     float fog_color[3], fog_color2[3], fog_dir[3], fog_start, fog_end, fog_max_density;
 } BhSkyInfo;
 
+/* The map's world fog (env_fog_controller), drawn by view depth: colours 0..255. */
+typedef struct BhWorldFog {
+    uint32_t blend;
+    float color[3], color2[3], dir[3], start, end, max_density;
+} BhWorldFog;
+
 typedef struct BhMaterialExtra {
     int32_t texture2, detail;
     float detail_scale, detail_blend, fog_start, fog_end;
@@ -296,6 +303,13 @@ const uint32_t *bh_sky_indices(const BhContext *ctx, size_t *index_count);
 const BhGroup *bh_sky_groups(const BhContext *ctx, size_t *group_count);
 int bh_sky_info(BhContext *ctx, BhSkyInfo *out);
 const char *bh_sky_name(BhContext *ctx, size_t *byte_count);
+/* 0 when the map has no world fog, it is off, or the map switches fog while running. */
+int bh_world_fog(BhContext *ctx, BhWorldFog *out);
+/* The map's light at a point: linear RGB for +x, -x, +y, -y, +z, -z into out[18]; 0 where there is none. */
+int bh_light_cube(const BhContext *ctx, float x, float y, float z, float *out);
+/* Per prop vertex (bh_prop_vertices order), the map's light as linear RGB; -1 where there is none. Empty on maps
+ * drawn fullbright. */
+const float *bh_prop_light(const BhContext *ctx, size_t *float_count);
 /* Sky faces in Source +X,-X,+Y,-Y,+Z,-Z order; values index the shared global material buffer. */
 const int32_t *bh_sky_materials(const BhContext *ctx, size_t *count);
 const BhMaterialExtra *bh_material_extras(const BhContext *ctx, size_t *count);

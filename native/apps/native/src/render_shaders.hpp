@@ -104,15 +104,24 @@ inline const char *cutout_depth_fragment = R"(#version 330 core
 in vec2 uv;uniform sampler2D baseTexture;uniform float cutoff;uniform vec2 baseOffset;
 void main(){if(texture(baseTexture,uv+baseOffset).a<cutoff)discard;}
 )";
+// propLit: a static prop vertex's light from the map (bh_prop_light), or for an animated prop the map's light cube
+// at it by its normal (web map-props.ts litGeometry). Negative where the map has none.
 inline const std::string world_vertex = "#version 330 core\n" + skinning + R"(
 layout(location=0) in vec3 position;layout(location=1) in vec3 normal;
 layout(location=2) in vec2 baseUV;layout(location=3) in vec2 lightUV;layout(location=4) in float blendAlpha;
+layout(location=7) in vec3 propLight;
 uniform mat4 viewProjection,model;uniform float clipHeight;
-out vec2 uv,lm;out vec3 world,normalWorld;out float blend,depth;
+uniform bool propCubeOn;uniform vec3 propCube[6];
+out vec2 uv,lm;out vec3 world,normalWorld,propLit;out float blend,depth;
+vec3 cubeLight(vec3 n){
+ vec3 w=n*n;
+ return w.x*propCube[n.x<0.?1:0]+w.y*propCube[n.y<0.?3:2]+w.z*propCube[n.z<0.?5:4];
+}
 void main(){
  vec4 local=vec4(position,1);vec3 n=normal;
  if(skinned){mat4 s=skinMatrix();local=s*local;n=mat3(s)*normal;}
  vec4 w=model*local;world=w.xyz;normalWorld=mat3(model)*n;uv=baseUV;lm=lightUV;blend=blendAlpha;
+ propLit=propCubeOn?cubeLight(normalize(normalWorld)):propLight;
  gl_ClipDistance[0]=w.z-clipHeight;gl_Position=viewProjection*w;depth=gl_Position.w;
 }
 )";
@@ -204,7 +213,7 @@ vec3 sunLight(vec3 lit,vec3 albedo,vec3 n){
 
 inline std::string world_fragment() {
     return std::string("#version 330 core\n") + water + R"(
-in vec2 uv,lm;in vec3 world,normalWorld;in float blend,depth;
+in vec2 uv,lm;in vec3 world,normalWorld,propLit;in float blend,depth;
 uniform sampler2D baseTexture,lightTexture,secondaryTexture,detailTexture,normalTexture;uniform bool hasNormal,fullbright,potato;uniform vec3 sunDirection;
 uniform sampler2D sceneColor,sceneDepth,reflectionTexture;uniform bool captureReady,reflectionReady;
 uniform float reflectionHeight,waterFogEnd;uniform vec2 cameraNearFar;
@@ -213,6 +222,7 @@ uniform vec2 baseOffset;
 uniform int kind;uniform bool unlit,props,hasSecondary,hasDetail,aboveWater,skyPass,additive;
 uniform bool flashlight;uniform vec3 flashDirection;
 uniform vec3 skyFogColor;uniform vec3 skyFogRange;
+uniform vec3 worldFogColor;uniform vec3 worldFogRange;uniform bool propLighting;
 out vec4 color;
 )" + sun_light_shader
            + water_surface_shader + R"(
@@ -230,7 +240,9 @@ void main(){
  if(hasSecondary&&!potato)base=mix(base,texture(secondaryTexture,uv),clamp(blend,0.,1.));
  if(hasDetail)base.rgb*=mix(vec3(1),texture(detailTexture,uv*detailScale).rgb*2.,detailBlend);
  base*=vec4(tint,opacity);if(base.a<cutoff)discard;
- vec3 lighting=unlit?vec3(1):props?vec3(.5+.5*max(dot(n,normalize(vec3(.35,.45,.82))),0.)):texture(lightTexture,lm).rgb/lightmapScale;
+ vec3 standIn=vec3(.5+.5*max(dot(n,normalize(vec3(.35,.45,.82))),0.));
+ vec3 propShade=propLighting&&propLit.r>=0.?propLit:standIn;
+ vec3 lighting=unlit?vec3(1):props?propShade:texture(lightTexture,lm).rgb/lightmapScale;
  if(fullbright)lighting=vec3(1);
  if(hasNormal&&!potato&&!fullbright){vec3 flatN=n*(gl_FrontFacing?1.:-1.);vec3 q0=dFdx(world),q1=dFdy(world);vec2 st0=dFdx(uv),st1=dFdy(uv);vec3 q1p=cross(q1,flatN),q0p=cross(flatN,q0);vec3 t=q1p*st0.x+q0p*st1.x,b=q1p*st0.y+q0p*st1.y;float len=max(dot(t,t),dot(b,b));if(len>1e-12){vec3 sampled=texture(normalTexture,uv).xyz*2.-1.;vec3 mapped=normalize((t*sampled.x+b*sampled.y)*inversesqrt(len)+flatN*sampled.z);lighting*=clamp(1.+.35*(dot(mapped,sunDirection)-dot(flatN,sunDirection)),.65,1.35);}}
  if(flashlight){vec3 delta=world-cameraPosition;float dist=length(delta);float cone=smoothstep(.90,.975,dot(normalize(delta),flashDirection));lighting+=vec3(2.8,2.65,2.4)*cone*max(.12,dot(n,-normalize(delta)))/(1.+dist*dist/180000.);}
@@ -241,6 +253,8 @@ void main(){
  else if(kind==3&&!potato){vec4 surface=glassSurface(n,v);col=surface.rgb;alpha=surface.a;}
  if(!potato)col=waterFog(col,world);
  if(skyPass){float f=clamp(min(skyFogRange.z,(depth-skyFogRange.x)/max(skyFogRange.y-skyFogRange.x,.001)),0.,1.);col=mix(col,additive?vec3(0):skyFogColor,f);}
+ // The map's world fog (web depth-fog.ts), in gamma space after the output conversion, like the 3D sky's.
+ else if(worldFogRange.z>0.){float f=clamp(min(worldFogRange.z,(depth-worldFogRange.x)/max(worldFogRange.y-worldFogRange.x,.001)),0.,1.);col=mix(col,additive?vec3(0):worldFogColor,f);}
  color=vec4(col,alpha);
 }
 )";

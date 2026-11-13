@@ -29,6 +29,8 @@ struct PlayerProgram {
           glowNearFade = -1, glowDistance = -1;
     GLint ghost = -1, ghostRim = -1, opacity = -1, axisA = -1, axisB = -1, nearFade = -1, contour = -1;
     GLint hiltA = -1, hiltB = -1, hiltM = -1, camoC = -1, camoP = -1, camoScale = -1, camoTp = -1;
+    // The map's light and fog (web model-light.ts, depth-fog.ts); zero is the look without them.
+    GLint mapLight = -1, depthFogColor = -1, depthFogRange = -1;
 };
 
 // Source (x, y, z) -> three.js (x, z, -y).

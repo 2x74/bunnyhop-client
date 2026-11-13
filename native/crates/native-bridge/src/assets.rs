@@ -1,6 +1,18 @@
 //! Existing Source render/content builders exposed without a browser-owned renderer.
 use super::*;
 use bunnyhop_core::{props, studio};
+/// The world fog as the website draws it (depth-fog.ts): colours 0..255, view-depth start and end, max density.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct BhWorldFog {
+    pub blend: u32,
+    pub color: [f32; 3],
+    pub color2: [f32; 3],
+    pub dir: [f32; 3],
+    pub start: f32,
+    pub end: f32,
+    pub max_density: f32,
+}
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct BhSkyInfo {
@@ -68,6 +80,9 @@ pub struct Assets {
     pub light_styles: Option<bunnyhop_core::lightmap::StyleAtlas>,
     pub floor: Vec<BhFloorWeapon>,
     pub props: props::PropMesh,
+    /// The map's light on each prop vertex (core prop_light.rs), linear RGB; -1 where there is none. Empty on maps
+    /// drawn fullbright.
+    pub prop_light: Vec<f32>,
     pub prop_groups: Vec<BhPropGroup>,
     pub water: CString,
     pub bytes: Vec<u8>,

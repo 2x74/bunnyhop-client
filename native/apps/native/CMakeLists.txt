@@ -825,6 +825,11 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/src/timed_input_vectors.json")
     add_test(NAME native_timed_press_parity COMMAND bunnyhop-native-timed-input-parity-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/src/timed_press_vectors.json")
+    add_executable(bunnyhop-native-map-light-tests src/map_light_tests.cpp)
+    target_include_directories(bunnyhop-native-map-light-tests PRIVATE include vendor src)
+    target_link_libraries(bunnyhop-native-map-light-tests PRIVATE bunnyhop_core_native)
+    target_compile_options(bunnyhop-native-map-light-tests PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
+    add_test(NAME native_map_light COMMAND bunnyhop-native-map-light-tests)
     # The Bar look, in the same golden file as the rest of the movement HUD.
     add_executable(bunnyhop-native-strafe-trainer-bar-tests src/strafe_trainer_bar_tests.cpp)
     target_include_directories(bunnyhop-native-strafe-trainer-bar-tests PRIVATE include vendor src)

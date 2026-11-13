@@ -2349,7 +2349,9 @@ int run(const native::Options &opt) {
                         && free_cameras.wheel(event.wheel.y, room.spectator_target.has_value()))
                         break;
                     if (captured && !chat.active && event.wheel.y != 0)
-                        handle_code(event.wheel.y > 0 ? "MWheelUp" : "MWheelDown", true, false, true, event.wheel.timestamp);
+                        handle_code(
+                                event.wheel.y > 0 ? "MWheelUp" : "MWheelDown", true, false, true, event.wheel.timestamp
+                        );
                     break;
                 default:
                     break;
