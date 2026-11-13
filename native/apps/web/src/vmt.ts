@@ -133,6 +133,35 @@ export function loadVmt(path: string, read: (path: string) => Uint8Array | null,
   return vmt;
 }
 
+/**
+ * Textures the material system makes itself rather than loads: a `$basetexture` of one of these names is that solid
+ * colour (linear RGB), with no VTF anywhere. bhop_angst's hanging loops are `$basetexture "white"` on an UnlitGeneric,
+ * pure white in CS:S. (The engine has "black" and "grey" too, by memory; no local map uses them and nothing here
+ * confirms them, so they stay as they were.)
+ */
+const BUILT_IN_TEXTURES: Record<string, number> = { white: 1 };
+
+/** The solid colour of a built-in `$basetexture` (see BUILT_IN_TEXTURES), or null for any other texture. */
+export function builtInTextureColor(vmt: Vmt | null): [number, number, number] | null {
+  const v = BUILT_IN_TEXTURES[(vmt?.params.$basetexture ?? "").trim().toLowerCase().replace(/\\/g, "/").replace(/\.vtf$/, "")];
+  return v === undefined ? null : [v, v, v];
+}
+
+/**
+ * Whether the base texture's alpha is a mask for something else, so that it is no part of the surface's opacity once
+ * the surface blends. SDK 2013 stdshaders: the pixel shaders start from the modulation alpha and multiply the base
+ * texture's alpha in unless one of these is on (`lightmappedgeneric_ps2_3_x.h`: `!bBaseAlphaEnvmapMask && !bSelfIllum`;
+ * `vertexlit_and_unlit_generic_ps2x.fxc`: the same and `!bBlendTintByBaseAlpha`), and blending is on whenever the
+ * alpha is modulated, `$translucent` or not (`CBaseVSShader::EvaluateBlendRequirements`). UnlitGeneric clears
+ * `$selfillum` (`vertexlitgeneric_dx9_helper.cpp`), so there the alpha counts even with it set.
+ */
+export function baseAlphaIsMask(vmt: Vmt): boolean {
+  if (vmtFlag(vmt, "$basealphaenvmapmask")) return true;
+  const modelShader = vmt.shader === "unlitgeneric" || vmt.shader === "vertexlitgeneric";
+  if (modelShader && vmtFlag(vmt, "$blendtintbybasealpha")) return true;
+  return vmt.shader !== "unlitgeneric" && vmtFlag(vmt, "$selfillum");
+}
+
 export function vmtFloat(vmt: Vmt, key: string): number | undefined {
   const v = vmt.params[key];
   if (v === undefined) return undefined;

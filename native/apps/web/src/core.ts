@@ -930,6 +930,18 @@ export class Core {
       })));
   }
 
+  /** `entities()` with every key / value pair kept (an entity repeats an output key once per connection). */
+  entityPairs(): [string, string][][] {
+    const len = this.x.entities_text();
+    return this.str(this.x.scratch_str_ptr(), len)
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => line.split("\t").map((kv): [string, string] => {
+        const i = kv.indexOf("=");
+        return [kv.slice(0, i), kv.slice(i + 1)];
+      }));
+  }
+
   /** The BSP pakfile lump (a store-only zip of embedded content). */
   pakfile(): Uint8Array {
     const len = this.x.pak_len();
