@@ -557,7 +557,7 @@ export interface RankHistory {
   peak: { rank: number; day: string } | null;
 }
 
-export type CosmeticChoice = Record<"background" | "frame" | "title" | "ghost" | "trail" | "outfit" | "knife" | "finish" | "glove" | "hilt" | "hat" | "body" | "camo", string | null> & {
+export type CosmeticChoice = Record<"background" | "frame" | "title" | "ghost" | "trail" | "shape" | "outfit" | "knife" | "finish" | "glove" | "hilt" | "hat" | "body" | "camo", string | null> & {
   /** A wig's hair colour ("#rrggbb"), kept for players who own one; absent = the default. */
   hairColor?: string | null;
   /** The ponytail's length (a whole percent, progression.ts HAIR_LENGTH), kept for wig owners; absent = 100. */
@@ -686,19 +686,6 @@ export interface MapSummary {
   runners?: number;
   /** When the map came to bunnyhop.lol, ms (absent from older APIs). */
   added?: number;
-}
-
-/** A recently set personal best on a ranked board (newest first). rank 1 = world record. */
-export interface RecentRecord {
-  map: string;
-  style: string;
-  rank: number;
-  runId: string;
-  player: ApiPlayer;
-  ticks: number;
-  time: number;
-  /** ISO date the run was submitted. */
-  date: string;
 }
 
 /** GET /records/wrs: the home screen's recent world records (apps/api/src/recent-wrs.ts), newest first, every style. */
@@ -1303,10 +1290,6 @@ export const api = {
   /** Players streaming right now (the home screen's Live now, the LIVE marks in rooms: src/live.ts). */
   async live(): Promise<{ at: number; streams: LiveStream[] }> {
     return json<{ at: number; streams: LiveStream[] }>("/live");
-  },
-  /** Newest personal bests across all ranked boards (rank 1 = new world record). */
-  async recentRecords(style = "autohop", limit = 6): Promise<RecentRecord[]> {
-    return json<RecentRecord[]>(`/records/recent?style=${encodeURIComponent(style)}&limit=${limit}`);
   },
   async mapDetail(name: string): Promise<MapDetail> {
     return json<MapDetail>(`/maps/${encodeURIComponent(name)}`);

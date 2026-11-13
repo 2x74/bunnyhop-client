@@ -10,6 +10,7 @@
 // share the speed scale, the run-time span and the strip's bar scale, so they read as mirrors.
 
 import type { Rect } from "../h2h/layout";
+import { countWord } from "../hud/time-face";
 import { formatTime } from "../timer";
 import type { H2HSide } from "./h2h";
 import { finalRunTime } from "./player";
@@ -61,7 +62,7 @@ export function panelNumbers(s: H2HSide, at: number, showEarly = false): [string
   const out: [string, string][] = [
     [`${d.sync[i].toFixed(1)}%`, "sync"],
     [gains ? `${(gain / gains).toFixed(1)}%` : "—", "gain"],
-    [String(d.strafes[i]), "strafes"],
+    [String(d.strafes[i]), countWord(d.strafes[i], "strafe")],
   ];
   if (showEarly && s.timing) out.push([paired ? `${Math.round((earlyN / paired) * 100)}%` : "—", "early"]);
   return out;

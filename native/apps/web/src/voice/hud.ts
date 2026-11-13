@@ -1,6 +1,7 @@
-// Voice HUD: a talker list in the bottom left (each person talking: their picture, name and a live spectrum of their
-// voice), your own row while you hold the push to talk key, and a plain line when you can't talk (no account, muted in
-// the room, the microphone blocked). The spectrum comes from the decoded audio (voice/client.ts), never from the
+// Voice HUD: a talker list (each person talking: their picture, name and a live spectrum of their voice), your own row
+// while you hold the push to talk key, and a plain line when you can't talk (no account, muted in the room, the
+// microphone blocked). It is the HUD element "voice" (hud/layout.ts): bottom left under the chat by default, and Edit
+// layout moves, sizes and hides it like any other. The spectrum comes from the decoded audio (voice/client.ts), never from the
 // network. Clicking a row (while the cursor is free) opens the person's voice menu (voice/menu.ts).
 //
 // The look (v0.0.40): each row is a plate, the menu's leaning shape (notify.css). A supporter's row is their card in
@@ -72,7 +73,8 @@ export class VoiceHud {
 
   constructor(parent: HTMLElement) {
     this.el.append(this.list, this.line);
-    parent.append(this.el);
+    // In the HUD: inside its element's box (hud.ts), which places and scales it. Anywhere else: the old corner (voice.css).
+    (parent.querySelector(".hud-voice") ?? parent).append(this.el);
   }
 
   /** The people talking now (yours first when you transmit). */

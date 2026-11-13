@@ -8,7 +8,7 @@
 import { InputSampler, type SamplerOptions, type SamplerPolicy, type SampledInput, type SamplerReset, type Payload, type SamplerEvidence } from "./input-sampler";
 import { mapViewPitch } from "./input-view";
 import { validateMotion } from "./input-motion";
-import { TIMED_KEY_BITS, TimedInput } from "./timed-input";
+import { TIMED_KEY_BITS, TIMED_PRESSES, TimedInput } from "./timed-input";
 import type { Action } from "./ui/settings";
 import { DEFAULT_BINDS, guardSideMouseButtons, isWeaponAction, mouseCode, type BindAction } from "./binds";
 import { cursorFree, cursorHeld, endFreeCursorAsPause, setCursorFree } from "./free-cursor";
@@ -16,11 +16,12 @@ import { MouseFilter, type MotionSample } from "./mouse-filter";
 import { IN_GIVE_SHIFT, IN_WEAPON_COMMAND_MASK } from "./weapon-rules";
 import { noteInputEvent } from "./input-trust";
 import { countedYaw, norm360, YAW_SET_RAW, YAW_SET_SENSITIVITY, YAW_SET_SPAWN, YAW_SET_TURN, YAW_WITH_TURN, type LookSample } from "./replay";
-import { DEFAULT_TURN_SPEED, IN_LEFT, IN_RIGHT, IN_TURN_FAST, turnDelta, type TurnSpeed } from "./turn-binds";
+import { DEFAULT_TURN_SPEED, IN_LEFT, IN_RIGHT, IN_TURN_FAST, TURN_HOLD_BITS, turnDelta, type TurnSpeed } from "./turn-binds";
 import { resolveNullBinds } from "./null-binds";
 import { WRelease, type WReleaseContext } from "./w-release";
 import { keyForCode } from "./console/names";
 import { mixesMoveAndTurn, MOVE_TURN_REFUSAL, runPress, runRelease, type Aliases, type ChainOps } from "./console/bind-run";
+import { noteLockPath } from "./lock-path";
 
 /**
  * Whether `unadjustedMovement` really turns raw input on here (only for the diagnostics label): Chromium does (Windows,
@@ -101,6 +102,8 @@ export interface UserCmd {
   nullBinds?: boolean;
   /** Timestamped input built this command (timed-input.ts); the replay header records it. */
   timed?: boolean;
+  /** Its presses and wheel pulses were timed too (timed-input.ts TIMED_PRESSES); the replay header records it. */
+  timedPresses?: boolean;
   /** Release W on jump was on for this command (w-release.ts); the replay header records it. */
   wRelease?: boolean;
 }
@@ -127,6 +130,11 @@ export const ACTION_BITS: Partial<Record<Action, number>> = {
 };
 
 export { DEFAULT_BINDS } from "./binds";
+
+/** The bound actions whose holds go into commands as buttons (sample()), by the button they hold. */
+const ACTION_PRESS_BITS: Partial<Record<BindAction, number>> = { attack: IN_ATTACK, attack2: IN_ATTACK2, turnLeft: IN_LEFT, turnRight: IN_RIGHT, turnFast: IN_TURN_FAST };
+/** Those buttons: sample() adds them by its own rules (turn binds by style, the knife while locked). */
+const ACTION_PRESS_MASK = IN_ATTACK | IN_ATTACK2 | TURN_HOLD_BITS;
 
 /** The input experiment's sampler sees Hold jump (toggle) as a key with this code (never a KeyboardEvent.code). */
 export const JUMP_TOGGLE_CODE = "+jump_toggle";
@@ -239,7 +247,7 @@ export class Input {
       this.runChain(code, e, (ops) => runRelease(bound, this.aliases, ops));
     }
     this.untilKeyup.delete(code);
-    if (this.timedActive && this.heldCodes.has(code) && (this.codeBits.get(code) ?? 0) & TIMED_KEY_BITS) this.ti.addEdge(this.ti.stamp(e.timeStamp, performance.now()), code, false);
+    if (this.timedActive && this.heldCodes.has(code) && this.timedBitsOf(code)) this.ti.addEdge(this.ti.stamp(e.timeStamp, performance.now()), code, false);
     this.heldCodes.delete(code);
     if (this.isBound(code)) this.queue({type:"key", code, down:false, bits:0}, e.timeStamp);
   }
@@ -271,17 +279,39 @@ export class Input {
     v = !!v;
     if (v === this.timedOn) return;
     this.commitPending();
+    this.wheelBits |= this.ti.pendingPulse(); // (the next command, as a frame-sampled notch)
+    this.ti.clearPulses();
     this.timedOn = v;
     this.seedTimedKeys();
   }
   private timedOn = true;
+  /**
+   * Timed presses (timed-input.ts TIMED_PRESSES, the switch): with timed input on, every bound button and wheel pulse
+   * goes onto its tick by timestamp, not only W/A/S/D. Tests set it to compare with frame-sampled presses.
+   */
+  timedPresses = TIMED_PRESSES;
   private readonly ti = new TimedInput();
+  /** The buttons a key timed input holds gave at its press (a command bind's virtual key keeps them until its release lands). */
+  private readonly pressBits = new Map<string, number>();
   /** The pitch the last command took (timed input; the view's pitch otherwise). */
   private cmdPitch = 0;
   /** Motion event serial (timed input's per-command event count). */
   private motionSerial = 0;
   private get timedActive(): boolean {
     return this.timedOn && !this.sampler;
+  }
+  private get pressesTimed(): boolean {
+    return this.timedPresses && this.timedActive;
+  }
+  /**
+   * The buttons `code` holds if timed input takes it by timestamp, else 0: W/A/S/D keys, and with timed presses every
+   * bound button (jump, duck, use, the knife's attacks, the turn binds).
+   */
+  private timedBitsOf(code: string): number {
+    const b = this.codeBits.get(code) ?? 0;
+    if (!this.timedPresses) return b & TIMED_KEY_BITS ? b : 0;
+    const a = this.codeAction.get(code);
+    return b | (a ? (ACTION_PRESS_BITS[a] ?? 0) : 0);
   }
   /** Timed input's adapted holdback and its report counts (input stats, the experiment's sampler holdback). */
   get timedStats(): { holdbackMs: number; reports: number; late: number; pending: number; unreliable: boolean } {
@@ -297,10 +327,30 @@ export class Input {
   }
   private carryEvents = 0;
   private carryReports = 0;
-  /** Movement keys held right now become the timed state (turned on, rebinding): no edge for them is pending. */
+  /** Timed keys held right now become the timed state (turned on, rebinding): no edge for them is pending. */
   private seedTimedKeys(): void {
     this.ti.releaseKeys();
-    for (const c of this.heldCodes) if ((this.codeBits.get(c) ?? 0) & TIMED_KEY_BITS) this.ti.keys.add(c);
+    this.pressBits.clear();
+    for (const c of this.heldCodes) {
+      const b = this.timedBitsOf(c);
+      if (!b) continue;
+      this.ti.keys.add(c);
+      this.pressBits.set(c, b);
+    }
+  }
+
+  /** A timed key went down at `e`'s time (not already held). */
+  private timedPress(code: string, e: Event): void {
+    const b = this.timedBitsOf(code);
+    if (!b) return;
+    this.pressBits.set(code, b);
+    this.ti.addEdge(this.ti.stamp(e.timeStamp, performance.now()), code, true);
+  }
+
+  /** A wheel notch's buttons for one command: the next sample() frame-sampled, its own tick timed (TimedInput.addPulse). */
+  private pulse(bits: number, e: Event): void {
+    this.wheelBits |= bits;
+    if (this.pressesTimed) this.ti.addPulse(this.ti.stamp(e.timeStamp, performance.now()), bits);
   }
 
   /**
@@ -363,6 +413,8 @@ export class Input {
   rawRefusals = 0;
   /** The browser said it can't do raw (NotSupportedError): plain locks from now on. */
   private rawUnsupported = false;
+  /** A lock that asked for raw input came back with the OS's acceleration (lock-path.ts: main.ts says so once). */
+  onOsAccel: (() => void) | null = null;
   /** Spike filter, post-lock discard and input stats (mouse-filter.ts); `filter.enabled` is Settings → Spike filter. */
   readonly filter = new MouseFilter();
   /** Read coalesced reports even with the filter off (the diagnostics overlay's polling-rate estimate). */
@@ -452,6 +504,7 @@ export class Input {
         this.skipNextMove = false;
         this.filter.rearm(performance.now());
         this.resetSampler(performance.now(), "lock");
+        this.restoreDown();
       } else {
         this.releaseAll();
         this.lockMode = "none";
@@ -478,9 +531,10 @@ export class Input {
     document.addEventListener("fullscreenchange", () => (view(), rearm()));
     // Browsers can lose keyup while the window is inactive without immediately dropping pointer lock.
     // Discard held input on departure and return; subsequent key events can resume movement.
-    addEventListener("blur", () => this.releaseAll());
-    addEventListener("focus", () => { this.releaseAll(); rearm(); });
+    addEventListener("blur", () => (this.down.clear(), this.releaseAll()));
+    addEventListener("focus", () => { this.down.clear(); this.releaseAll(); rearm(); });
     document.addEventListener("visibilitychange", () => {
+      this.down.clear();
       this.releaseAll();
       if (document.visibilityState === "visible") rearm();
     });
@@ -501,7 +555,7 @@ export class Input {
         const cmdCode = this.cmdCodes.has(dir) ? dir : this.cmdCodes.has("MouseWheel") ? "MouseWheel" : null;
         if (cmdCode) return this.wheelCommand(cmdCode, e);
         const bits = (this.codeBits.get(dir) ?? 0) | (this.codeBits.get("MouseWheel") ?? 0);
-        this.wheelBits |= bits;
+        this.pulse(bits, e);
         this.queue({type:"pulse", bits}, e.timeStamp);
         const code = this.codeAction.has(dir) ? dir : "MouseWheel";
         const a = this.codeAction.get(code);
@@ -517,6 +571,7 @@ export class Input {
     document.addEventListener("mouseup", (e) => (noteInputEvent(e), this.releaseCode(mouseCode(e.button), e)));
     document.addEventListener("keydown", (e) => {
       noteInputEvent(e);
+      if (!isTextField(e.target)) this.down.add(e.code);
       // Typing into a text field (the chat, with the game still playing) never moves the player or fires binds.
       if (this.locked && !isTextField(e.target)) {
         if (MOD_CODES.has(e.code)) {
@@ -526,7 +581,25 @@ export class Input {
         this.press(e.code, e.repeat, e);
       }
     });
-    document.addEventListener("keyup", (e) => (noteInputEvent(e), this.mods.delete(e.code), this.releaseCode(e.code, e)));
+    document.addEventListener("keyup", (e) => (noteInputEvent(e), this.down.delete(e.code), this.mods.delete(e.code), this.releaseCode(e.code, e)));
+  }
+
+  /**
+   * Keys down on this page right now, locked or not (not typed into a text field). Pressed in a menu, or held through
+   * Esc and the click back in, they never reached the game: the press came while unlocked, and key repeat brings back
+   * only the last key pressed. Cleared with everything else when the window loses focus or the tab hides.
+   */
+  private readonly down = new Set<string>();
+
+  /** The lock is back: keys held since before it go down now, as fresh presses (holds only: no actions fire). */
+  private restoreDown(): void {
+    const e = { timeStamp: performance.now(), preventDefault() {} } as unknown as Event;
+    for (const c of this.down) {
+      if (this.heldCodes.has(c) || this.untilKeyup.has(c)) continue;
+      if (MOD_CODES.has(c)) this.mods.add(c);
+      const a = this.codeAction.get(c);
+      if (this.codeBits.has(c) || (a && ACTION_PRESS_BITS[a])) this.press(c, false, e);
+    }
   }
 
   /** Which event carries motion during this lock (diagnostics). */
@@ -722,7 +795,7 @@ export class Input {
     if (this.codeBits.has(code)) {
       // A key not held yet: a press, or a key repeat of one a release-all forgot while it stayed down (blur / focus).
       // Frame-sampled input re-adds it on that repeat too (heldCodes below), so timed input gives it back the same way.
-      if (this.timedActive && !this.heldCodes.has(code) && this.codeBits.get(code)! & TIMED_KEY_BITS) this.ti.addEdge(this.ti.stamp(e.timeStamp, performance.now()), code, true);
+      if (this.timedActive && !this.heldCodes.has(code)) this.timedPress(code, e);
       this.heldCodes.add(code);
       this.queue({type:"key", code, down:true, bits:this.codeBits.get(code)!}, e.timeStamp);
       e.preventDefault();
@@ -732,6 +805,7 @@ export class Input {
     const a = this.codeAction.get(code);
     if (a) {
       e.preventDefault();
+      if (this.timedActive && !this.heldCodes.has(code)) this.timedPress(code, e);
       this.heldCodes.add(code); // for actionHeld
       if (a === "attack" || a === "attack2") this.queue({type:"key", code, down:true, bits:a === "attack" ? IN_ATTACK : IN_ATTACK2}, e.timeStamp);
       else if (!repeat && (a === "turnLeft" || a === "turnRight" || a === "turnFast")) this.queue({type:"key", code, down:true, bits:a === "turnLeft" ? IN_LEFT : a === "turnRight" ? IN_RIGHT : IN_TURN_FAST}, e.timeStamp);
@@ -759,16 +833,19 @@ export class Input {
   }
 
   /**
-   * Commands after a `wait` in a key's chain (console/bind-run.ts): slot k runs right after the (k+1)th command from
-   * now, so they land one command later each, as Source runs them a frame later. Dropped by releaseAll.
+   * Commands after a `wait` in a key's chain (console/bind-run.ts): the part after k waits runs right after the (k+1)th
+   * command that took the key's press, so they land one command later each, as Source runs them a frame later. `t`:
+   * the press's time on timed input (a command whose cutoff is before it didn't take the press and doesn't count), else
+   * -Infinity (every command counts). Dropped by releaseAll.
    */
-  private later: { code: string; run: (ops: ChainOps) => void }[][] = [];
+  private later: { t: number; step: number; code: string; run: (ops: ChainOps) => void }[] = [];
 
   /** Runs a chain for key `code` now, its `wait` parts after the following commands. */
   private runChain(code: string, e: Event, run: (ops: ChainOps) => void): void {
     const now = this.chainOps(code, e);
+    const t = this.timedActive ? this.ti.stamp(e.timeStamp, performance.now()) : -Infinity;
     let step = -1;
-    const at = (f: (o: ChainOps) => void) => (step < 0 ? f(now) : (this.later[step] ??= []).push({ code, run: f }));
+    const at = (f: (o: ChainOps) => void) => (step < 0 ? f(now) : this.later.push({ t, step, code, run: f }));
     run({
       hold: (a, own) => at((o) => o.hold(a, own)),
       unhold: (a, own) => at((o) => o.unhold(a, own)),
@@ -778,10 +855,15 @@ export class Input {
     });
   }
 
-  /** After a command: the chain parts waiting for it (runChain), stamped just after its boundary `at`. */
-  private runLater(at: number): void {
-    const due = this.later.shift();
-    if (!due) return;
+  /** After a command with cutoff `cut`: the chain parts waiting for it (runChain), stamped just after its boundary `at`. */
+  private runLater(at: number, cut: number): void {
+    const due: { code: string; run: (ops: ChainOps) => void }[] = [];
+    this.later = this.later.filter((l) => {
+      if (l.t > cut) return true;
+      if (l.step-- > 0) return true;
+      due.push(l);
+      return false;
+    });
     const e = { timeStamp: at + 0.001, preventDefault() {} } as unknown as Event;
     for (const { code, run } of due) run(this.chainOps(code, e));
   }
@@ -831,7 +913,7 @@ export class Input {
       hold: (a) => {
         const bit = ACTION_BITS[a];
         if (bit) {
-          this.wheelBits |= bit;
+          this.pulse(bit, e);
           this.queue({type:"pulse", bits:bit}, e.timeStamp);
         } else this.onAction?.(a, code);
       },
@@ -950,6 +1032,7 @@ export class Input {
     this.mods.clear();
     this.commitPending(); // the view the player sees is the view the next command has
     this.ti.releaseKeys();
+    this.ti.clearPulses();
     this.wRelease.reset();
     this.wheelBits = 0;
     this.slot = 0;
@@ -997,22 +1080,26 @@ export class Input {
   private readonly wRelease = new WRelease();
 
   /**
-   * Timed input's command buttons: the movement keys as of the command's cutoff (in press order, for null binds), every
-   * other bound key as held now (jump, duck, use: unchanged), plus a pending wheel pulse.
+   * Timed input's command buttons: the timed keys as of the command's cutoff (in press order, for null binds), every
+   * other bound key as held now (frame-sampled: jump, duck, use without timed presses), plus the wheel pulse (`pulse`,
+   * this command's own, with timed presses; else the frame's). `acts`: the attack and turn-bind buttons the timed keys
+   * hold (timed presses), which sample() adds by its own rules.
    */
-  private get timedHeld(): number {
+  private timedHeld(pulse: number): { held: number; acts: number } {
     const pressed: number[] = [];
-    for (const c of this.heldCodes) {
-      const b = this.codeBits.get(c) ?? 0;
-      if (!(b & TIMED_KEY_BITS)) pressed.push(b);
+    for (const c of this.heldCodes) if (!this.timedBitsOf(c)) pressed.push(this.codeBits.get(c) ?? 0);
+    let acts = 0;
+    for (const c of this.ti.keys) {
+      const b = this.pressBits.get(c) ?? this.codeBits.get(c) ?? 0;
+      acts |= b & ACTION_PRESS_MASK;
+      pressed.push(b & ~ACTION_PRESS_MASK);
     }
-    for (const c of this.ti.keys) pressed.push(this.codeBits.get(c) ?? 0);
-    pressed.push(this.wheelBits);
+    pressed.push(this.timedPresses ? pulse : this.wheelBits);
     if (this.jumpLatched) pressed.push(IN_JUMP); // (no movement axis: null binds pass it through)
-    if (this.nullBinds) return resolveNullBinds(pressed);
+    if (this.nullBinds) return { held: resolveNullBinds(pressed), acts };
     let b = 0;
     for (const v of pressed) b |= v;
-    return b;
+    return { held: b, acts };
   }
 
   /** Buttons currently held (for the keys overlay; includes a pending wheel pulse). */
@@ -1066,6 +1153,7 @@ export class Input {
       const refused = await this.request({ unadjustedMovement: true });
       if (!refused) {
         this.lockMode = rawHonoured() ? "raw" : "os";
+        this.notePath(true);
         return true;
       }
       this.rawError = refused;
@@ -1078,7 +1166,15 @@ export class Input {
     }
     const ok = !(await this.request());
     this.lockMode = ok ? "os" : "none";
+    if (ok) this.notePath(this.rawInput);
     return ok;
+  }
+
+  /** A lock was taken (`asked`: with raw input requested): the path it gave, for Settings and the one-time line. */
+  private notePath(asked: boolean): void {
+    if (this.lockMode === "none") return;
+    noteLockPath(this.lockMode, asked);
+    if (asked && this.lockMode === "os") this.onOsAccel?.();
   }
 
   /** Once per rendered frame (rAF time): frame times for the input stats. */
@@ -1132,7 +1228,8 @@ export class Input {
     this.nullBinds = !!o.nullBinds;
     // Timed input: this tick's share of the motion and key edges (`at`: its boundary, main.ts frame()).
     const timed = this.timedActive;
-    let taken = { events: this.eventsSince, reports: this.reportsSince };
+    const presses = timed && this.timedPresses;
+    let taken = { events: this.eventsSince, reports: this.reportsSince, pulse: 0 };
     if (timed) {
       taken = this.ti.take(o.at, (_x, p) => (this.cmdPitch = Math.max(-89, Math.min(89, this.cmdPitch + p))));
       taken.events += this.carryEvents;
@@ -1141,14 +1238,17 @@ export class Input {
     this.carryEvents = this.carryReports = 0;
     // Keep mouse counts intact: replay analysis can check the fixed turn separately from mouse movement. A spawn,
     // teleport, pusher, sensitivity or raw set in this tick retains its own reason (including unexplained raw sets).
+    const { held, acts } = timed ? this.timedHeld(taken.pulse) : { held: this.held, acts: 0 };
+    // Timed presses: the attack and turn binds as held at this command's cutoff; else as held now.
+    const holds = (a: Action, bit: number) => (presses ? this.locked && (acts & bit) !== 0 : this.actionHeld(a));
     let turn = 0;
     this.lastTurn = 0;
     if (o.turnBinds && o.tickInterval && this.locked) {
-      const left = this.actionHeld("turnLeft"), right = this.actionHeld("turnRight");
+      const left = holds("turnLeft", IN_LEFT), right = holds("turnRight", IN_RIGHT);
       if (left !== right) turn = left ? IN_LEFT : IN_RIGHT;
       if (turn) {
         // Fast turn only goes on a command that turns (a lone IN_TURN_FAST is never recorded).
-        if (this.actionHeld("turnFast")) turn |= IN_TURN_FAST;
+        if (holds("turnFast", IN_TURN_FAST)) turn |= IN_TURN_FAST;
         this.lastTurn = turnDelta(turn, o.tickInterval, this.turnSpeed);
         this.yawBase = norm360(this.yawBase + this.lastTurn);
         this.yawKind = this.yawEpoch === this.sampledYawEpoch ? YAW_SET_TURN : this.yawKind | YAW_WITH_TURN;
@@ -1157,7 +1257,7 @@ export class Input {
     }
     // The knife binds are actions (the viewmodel swings on them), not movement bits: add their buttons here.
     // A weapon slot request (requestSlot) goes into this one command only.
-    let buttons = (timed ? this.timedHeld : this.held) | turn | (this.actionHeld("attack") ? IN_ATTACK : 0) | (this.actionHeld("attack2") ? IN_ATTACK2 : 0) | (this.slot << IN_SLOT_SHIFT) | this.weaponBits | (this.give << IN_GIVE_SHIFT);
+    let buttons = held | turn | (holds("attack", IN_ATTACK) ? IN_ATTACK : 0) | (holds("attack2", IN_ATTACK2) ? IN_ATTACK2 : 0) | (this.slot << IN_SLOT_SHIFT) | this.weaponBits | (this.give << IN_GIVE_SHIFT);
     // Release W on jump: only the forward bit changes, and forwardmove follows it below.
     if (o.wRelease) buttons = this.wRelease.apply(buttons, o.wRelease);
     else this.wRelease.reset();
@@ -1181,7 +1281,8 @@ export class Input {
     this.framesSince = this.eventsSince = this.reportsSince = 0;
     this.sampledYawEpoch = this.yawEpoch;
     const pitch = timed ? this.cmdPitch : this.pitch;
-    if (this.later.length) this.runLater(o.at ?? performance.now()); // (a chain's `wait`: from the next command)
-    return { pitch, yaw: countedYaw(this.yawBase, count, this.yawK), forwardmove, sidemove, buttons, look, ...(this.nullBinds ? { nullBinds: true } : {}), ...(timed ? { timed: true } : {}), ...(o.wRelease ? { wRelease: true } : {}) };
+    // (a chain's `wait`: from the next command that took its press)
+    if (this.later.length) this.runLater(o.at ?? performance.now(), timed && o.at !== undefined ? o.at - this.ti.holdbackMs : Infinity);
+    return { pitch, yaw: countedYaw(this.yawBase, count, this.yawK), forwardmove, sidemove, buttons, look, ...(this.nullBinds ? { nullBinds: true } : {}), ...(timed ? { timed: true } : {}), ...(presses ? { timedPresses: true } : {}), ...(o.wRelease ? { wRelease: true } : {}) };
   }
 }

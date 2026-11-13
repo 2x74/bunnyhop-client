@@ -34,11 +34,13 @@ pub struct Prop {
     /// looks as before. Only `add_game_props(.., true)` sets it, together with the owner: false everywhere else by
     /// construction (`add_props`, `static_props`, `Default`), which keeps the pre-0.0.37 look.
     pub animated: bool,
+    /// The static prop lump's lighting origin, when the prop sets one (`prop_light.rs`; render-only).
+    pub light_origin: Option<[f32; 3]>,
 }
 
 impl Default for Prop {
     fn default() -> Self {
-        Self { model: 0, origin: [0.0; 3], angles: [0.0; 3], skin: 0, owner: 0, sky3d: false, scale: 1.0, entity: false, animated: false }
+        Self { model: 0, origin: [0.0; 3], angles: [0.0; 3], skin: 0, owner: 0, sky3d: false, scale: 1.0, entity: false, animated: false, light_origin: None }
     }
 }
 
@@ -60,7 +62,7 @@ pub fn add_props(sp: &mut StaticProps, props: impl IntoIterator<Item = (String, 
                 sp.models.len() - 1
             }
         };
-        sp.props.push(Prop { model, origin, angles, skin, owner, sky3d: false, scale: 1.0, entity: true, animated: false });
+        sp.props.push(Prop { model, origin, angles, skin, owner, sky3d: false, scale: 1.0, entity: true, animated: false, light_origin: None });
     }
 }
 
@@ -89,7 +91,18 @@ pub fn static_props(bsp: &Bsp) -> StaticProps {
     let props = sp
         .occurrences
         .iter()
-        .map(|o| Prop { model: o.model as usize, origin: v(o.origin), angles: v(o.angles), skin: o.skin, owner: 0, sky3d: false, scale: o.uniform_scale.value(), entity: false, animated: false })
+        .map(|o| Prop {
+            model: o.model as usize,
+            origin: v(o.origin),
+            angles: v(o.angles),
+            skin: o.skin,
+            owner: 0,
+            sky3d: false,
+            scale: o.uniform_scale.value(),
+            entity: false,
+            animated: false,
+            light_origin: o.lighting_origin.map(v),
+        })
         .collect();
     StaticProps { models, props }
 }
@@ -275,6 +288,59 @@ pub fn model_geometry_body(mdl: &[u8], vvd: &[u8], vtx: &[u8], body: usize) -> O
     Some(ModelGeometry { vertices, meshes })
 }
 
+/// A model's strip groups in the order VRAD writes baked vertex lighting (`.vhv` mesh headers: every body part, model,
+/// LOD, mesh and strip group): `(lod, vertex count, vertices)`, where `vertices` are indices into `ModelGeometry`'s
+/// vertex list for the LOD 0 groups of each body part's first model (the ones `model_geometry` draws), else empty.
+pub fn lighting_groups(mdl: &[u8], vtx: &[u8]) -> Option<Vec<(usize, usize, Vec<u32>)>> {
+    if i32_at(vtx, 0)? != 7 {
+        return None;
+    }
+    let (mdl_nbp, mdl_bpi) = (idx(mdl, 232)?, idx(mdl, 236)?);
+    let (vtx_nbp, vtx_bpo) = (idx(vtx, 28)?, idx(vtx, 32)?);
+    if mdl_nbp != vtx_nbp {
+        return None;
+    }
+    let mut out = Vec::new();
+    for bp in 0..mdl_nbp.min(64) {
+        let mbp = mdl_bpi + bp * 16;
+        let vbp = vtx_bpo + bp * 8;
+        let models = idx(mdl, mbp + 4)?;
+        if models != idx(vtx, vbp)? {
+            return None;
+        }
+        for model in 0..models.min(64) {
+            let mmodel = mbp + idx(mdl, mbp + 12)? + model * 148;
+            let model_vert_start = idx(mdl, mmodel + 84)? / 48;
+            let (nmesh, meshi) = (idx(mdl, mmodel + 72)?, idx(mdl, mmodel + 76)?);
+            let vmodel = vbp + idx(vtx, vbp + 4)? + model * 8;
+            let (lods, lod_off) = (idx(vtx, vmodel)?, idx(vtx, vmodel + 4)?);
+            for lod in 0..lods.min(16) {
+                let vlod = vmodel + lod_off + lod * 12;
+                let (vnmesh, vmeshoff) = (idx(vtx, vlod)?, idx(vtx, vlod + 4)?);
+                if vnmesh != nmesh {
+                    return None;
+                }
+                for m in 0..nmesh {
+                    let mesh_vert_start = model_vert_start + idx(mdl, mmodel + meshi + m * 116 + 12)?;
+                    let vmesh = vlod + vmeshoff + m * 9;
+                    let (nsg, sgoff) = (idx(vtx, vmesh)?, idx(vtx, vmesh + 4)?);
+                    for g in 0..nsg {
+                        let sg = vmesh + sgoff + g * 25;
+                        let (nv, voff) = (idx(vtx, sg)?, idx(vtx, sg + 4)?);
+                        let vertices = if model == 0 && lod == 0 {
+                            (0..nv).map(|v| u16_at(vtx, sg + voff + v * 9 + 4).map(|o| (mesh_vert_start + o as usize) as u32)).collect::<Option<_>>()?
+                        } else {
+                            Vec::new()
+                        };
+                        out.push((lod, nv, vertices));
+                    }
+                }
+            }
+        }
+    }
+    Some(out)
+}
+
 /// Geometry sanity numbers for one model (see `audit_geometry`).
 #[derive(Debug, Default)]
 pub struct GeometryAudit {
@@ -345,10 +411,13 @@ pub struct PropMesh {
     /// Models that couldn't be built (files missing or unparsable).
     pub missing_models: Vec<String>,
     pub instances: usize,
+    /// Per vertex: `[prop (index into StaticProps::props), vertex of its model's LOD 0]`, for the lighting bake
+    /// (`prop_light.rs`). Render-only.
+    pub sources: Vec<[u32; 2]>,
 }
 
 /// Source `AngleMatrix` (pitch about Y, yaw about Z, roll about X), as rows applied to column vectors.
-fn angle_matrix([pitch, yaw, roll]: [f32; 3]) -> [[f32; 3]; 3] {
+pub(crate) fn angle_matrix([pitch, yaw, roll]: [f32; 3]) -> [[f32; 3]; 3] {
     let (sp, cp) = playsrc_collision::math::sin_cos(pitch.to_radians());
     let (sy, cy) = playsrc_collision::math::sin_cos(yaw.to_radians());
     let (sr, cr) = playsrc_collision::math::sin_cos(roll.to_radians());
@@ -380,8 +449,8 @@ pub fn model_material_names(vfs: &Vfs, tex: &MdlTextures) -> Vec<String> {
 pub fn build(sp: &StaticProps, vfs: &Vfs) -> PropMesh {
     let mut out = PropMesh::default();
     let mut material_ids: HashMap<String, u32> = HashMap::new();
-    // (owner, in the 3D skybox, material id) -> (vertices, indices)
-    let mut buckets: HashMap<(u32, bool, u32), (Vec<f32>, Vec<u32>)> = HashMap::new();
+    // (owner, in the 3D skybox, material id) -> (vertices, indices, vertex sources)
+    let mut buckets: HashMap<(u32, bool, u32), (Vec<f32>, Vec<u32>, Vec<[u32; 2]>)> = HashMap::new();
     let mut loaded: Vec<Option<(ModelGeometry, MdlTextures, Vec<String>)>> = Vec::with_capacity(sp.models.len());
     // Moving props are drawn in their idle pose (see `studio::root_pose_correction`), and so are other entity props when
     // that pose is exactly the correction (`studio::idle_pose_is_rigid`). Other skeletons keep their bind pose; static
@@ -415,7 +484,7 @@ pub fn build(sp: &StaticProps, vfs: &Vfs) -> PropMesh {
             }
         }
     }
-    for p in &sp.props {
+    for (pi, p) in sp.props.iter().enumerate() {
         let Some(Some((geo, tex, names))) = loaded.get(p.model) else { continue };
         out.instances += 1;
         let (angles, origin) = if p.owner != 0 { ([0.0; 3], [0.0; 3]) } else { (p.angles, p.origin) };
@@ -439,7 +508,7 @@ pub fn build(sp: &StaticProps, vfs: &Vfs) -> PropMesh {
                 out.materials.push(name.clone());
                 next
             });
-            let (verts, idx) = buckets.entry((p.owner, p.sky3d && p.owner == 0, mid)).or_default();
+            let (verts, idx, sources) = buckets.entry((p.owner, p.sky3d && p.owner == 0, mid)).or_default();
             // Re-index the used vertices of this mesh.
             let mut remap: HashMap<u32, u32> = HashMap::new();
             for &vi in tris {
@@ -449,6 +518,7 @@ pub fn build(sp: &StaticProps, vfs: &Vfs) -> PropMesh {
                     let n = xf(posed([v[3], v[4], v[5]], false));
                     let id = (verts.len() / PROP_VERTEX_FLOATS) as u32;
                     verts.extend_from_slice(&[pos[0] + origin[0], pos[1] + origin[1], pos[2] + origin[2], n[0], n[1], n[2], v[6], v[7]]);
+                    sources.push([pi as u32, vi]);
                     id
                 });
                 idx.push(ni);
@@ -458,7 +528,7 @@ pub fn build(sp: &StaticProps, vfs: &Vfs) -> PropMesh {
     let mut keys: Vec<(u32, bool, u32)> = buckets.keys().copied().collect();
     keys.sort_unstable();
     for k in keys {
-        let (verts, idx) = buckets.remove(&k).unwrap();
+        let (verts, idx, sources) = buckets.remove(&k).unwrap();
         let base = (out.vertices.len() / PROP_VERTEX_FLOATS) as u32;
         let (owner, sky3d, material) = k;
         if owner == 0 {
@@ -468,6 +538,7 @@ pub fn build(sp: &StaticProps, vfs: &Vfs) -> PropMesh {
             out.dynamic_groups.push([owner - 1, material, out.indices.len() as u32, idx.len() as u32]);
         }
         out.vertices.extend_from_slice(&verts);
+        out.sources.extend_from_slice(&sources);
         out.indices.extend(idx.iter().map(|i| i + base));
     }
     out

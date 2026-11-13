@@ -5,13 +5,15 @@
 
 import { statBoardsSection } from "./stat-boards";
 import "./stats-screen.css";
-import { api, type GameStats, type Profile } from "../api";
+import { api, ApiUnavailable, type GameStats, type Profile } from "../api";
+import { fmtHours } from "./card";
 import { clear, h } from "./dom";
 import { nameAttrs } from "./marks";
 import { navigate } from "./nav";
 import { styleLabel } from "../styles";
 import { formatTime } from "../timer";
 import { landRows } from "./land";
+import { loadFailed } from "./load-failed";
 import { profileFor } from "./account-state";
 
 export type PlayerStats = Awaited<ReturnType<typeof api.playerStats>>;
@@ -19,7 +21,8 @@ export type PlayerStats = Awaited<ReturnType<typeof api.playerStats>>;
 const DAY = 86_400_000;
 const number = (n: number) => n.toLocaleString();
 const plural = (n: number, one: string, many = `${one}s`) => `${number(n)} ${n === 1 ? one : many}`;
-const hours = (seconds: number) => `${(seconds / 3600).toLocaleString(undefined, { maximumFractionDigits: seconds < 360_000 ? 1 : 0 })}h`;
+/** Under an hour reads in minutes, as the profile card does ("11m", not "0.2h"). */
+const hours = (seconds: number) => (seconds < 3600 ? fmtHours(seconds) : `${(seconds / 3600).toLocaleString(undefined, { maximumFractionDigits: seconds < 360_000 ? 1 : 0 })}h`);
 const day = (at: number, utc = false) => new Date(at).toLocaleDateString(undefined, { month: "short", day: "numeric", ...(utc ? { timeZone: "UTC" } : {}) });
 const clock = (at: number) => new Date(at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 
@@ -213,7 +216,7 @@ export function playerStatsSection(id: string, o: { compact?: boolean; early?: P
             : h("div.st-cols", null, block("Styles", styleRows(s.styles)), block("Most played", mapRows(s.maps))),
         );
       })
-      .catch(() => box.replaceChildren(empty("Couldn't load activity."), h("button.btn", { type: "button", onclick: load }, "Try again")))
+      .catch((e: unknown) => box.replaceChildren(loadFailed("activity", load, e)))
       .finally(() => box.setAttribute("aria-busy", "false"));
   };
   load();
@@ -364,8 +367,7 @@ export function statsScreen(o: { tabsHost: HTMLElement; play?: () => void }): HT
   const loaded: Record<StatsTab, boolean> = { personal: false, game: false };
   const busy: Record<StatsTab, boolean> = { personal: false, game: false };
 
-  const failure = (tab: StatsTab, retry: () => void) =>
-    panels[tab].replaceChildren(h("div.st-error", null, empty("Couldn't load stats. Try again in a moment."), h("button.btn", { type: "button", onclick: retry }, "Try again")));
+  const failure = (tab: StatsTab, retry: () => void, e?: unknown) => panels[tab].replaceChildren(loadFailed("stats", retry, e));
 
   async function loadPersonal() {
     if (busy.personal || disposed) return;
@@ -373,7 +375,8 @@ export function statsScreen(o: { tabsHost: HTMLElement; play?: () => void }): HT
     panels.personal.replaceChildren(skeleton({ who: true, figs: 6 }));
     try {
       const user = await api.me();
-      if (!user) throw new Error("No account");
+      // No player because the session couldn't be read (api.meStale): the server is unreachable, as the other screens say.
+      if (!user) throw api.meStale() ? new ApiUnavailable() : new Error("No account");
       // (Your profile as home / the account chip just read it, if it's fresh: account-state.ts profileFor.)
       const [profile, stats] = await Promise.all([profileFor(user.id), api.playerStats(user.id).catch(() => null)]);
       if (disposed) return;
@@ -382,8 +385,8 @@ export function statsScreen(o: { tabsHost: HTMLElement; play?: () => void }): HT
       landRows(view.querySelectorAll(".st-row"));
       countUp(view);
       loaded.personal = true;
-    } catch {
-      if (!disposed) failure("personal", () => void loadPersonal());
+    } catch (e) {
+      if (!disposed) failure("personal", () => void loadPersonal(), e);
     } finally {
       busy.personal = false;
     }
@@ -408,8 +411,8 @@ export function statsScreen(o: { tabsHost: HTMLElement; play?: () => void }): HT
       if (!loaded.game) countUp(view);
       if (focused >= 0) buttonsOf()[focused]?.focus({ preventScroll: true });
       loaded.game = true;
-    } catch {
-      if (!disposed && !loaded.game) failure("game", () => void loadGame());
+    } catch (e) {
+      if (!disposed && !loaded.game) failure("game", () => void loadGame(), e);
     } finally {
       busy.game = false;
     }

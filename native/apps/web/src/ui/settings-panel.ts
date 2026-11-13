@@ -61,6 +61,8 @@ import { bindCommand, isChatCommand, uncommand } from "../console/exec";
 import { chatMessageOf, sayCommand } from "../console/bind-store";
 import "./settings.css";
 import { nativeClient, openClientSettings } from "../client-bridge";
+import { lockPathText } from "../lock-path";
+import { TIMED_PRESSES } from "../timed-input";
 import { GHOST_CSS, type GhostKind } from "../player/colors";
 import type { GhostRouteMode, GhostRouteSource } from "../ghost-route-data";
 import type { AutoRestartAction, AutoRestartWhen } from "../auto-restart";
@@ -242,7 +244,7 @@ function mouseSection(): SettingsContent {
           toggle("Separate vertical sensitivity", () => P().verticalSensitivityEnabled, (v) => up((p) => (p.verticalSensitivityEnabled = v)), { desc: "Use a separate sensitivity for looking up and down. Off: Sensitivity controls both axes.", keywords: "mouse pitch y axis vertical sensitivity" }),
           range("Vertical sensitivity", () => P().verticalSensitivity, (v) => up((p) => (p.verticalSensitivity = Math.round(v * 1000) / 1000)), { min: 0.1, max: 10, step: 0.01, inputRange: [0.01, 100], when: () => P().verticalSensitivityEnabled, desc: "Same CS:S units as Sensitivity. Invert mouse Y still applies.", keywords: "mouse pitch y axis vertical sensitivity" }),
           toggle("Invert mouse Y", () => P().invertY, (v) => up((p) => (p.invertY = v)), { desc: "Moving the mouse up looks down.", keywords: "pitch invert flip" }),
-          toggle("Raw input", () => P().rawInput, (v) => up((p) => (p.rawInput = v)), { desc: "Pointer lock with unadjusted movement (Chromium browsers): the OS pointer speed and acceleration don't touch your aim. Applies the next time you click into the game.", keywords: "acceleration accel unadjusted" }),
+          toggle("Raw input", () => P().rawInput, (v) => up((p) => (p.rawInput = v)), { desc: "Pointer lock with unadjusted movement (Chromium browsers): the OS pointer speed and acceleration don't touch your aim. Applies the next time you click into the game.", keywords: "acceleration accel unadjusted", readout: lockPathText() ? h("small.set-readout", null, lockPathText()) : undefined }),
         ),
       ],
       [
@@ -258,7 +260,7 @@ function mouseSection(): SettingsContent {
       group(
         "Mouse input",
         toggle("Spike filter", () => P().spikeFilter, (v) => up((p) => (p.spikeFilter = v)), { desc: "Some browsers now and then report a mouse jump you never made, mostly with a 1000 Hz or faster mouse when raw input is off or unsupported, and right after you click into the game. The filter drops a single mouse report only when it is far bigger than the ones around it, which no real flick is. Turn it off if your aim ever feels like it skips.", keywords: "flick flicks jump snap polling hz spike spikes skip skipping filter jitter" }),
-        toggle("Timestamped input", () => P().timedInput, (v) => up((p) => (p.timedInput = v)), { desc: "Each tick takes exactly the mouse movement and strafe keys you made before it, like CS:S at a high frame rate, instead of whatever the last frame had. Strafe gain and !ssj match CS:S at any monitor refresh rate. The view on screen is the same either way.", keywords: "timing timestamp gain ssj sync strafe tick subtick refresh fps aliasing source accurate" }),
+        toggle("Timestamped input", () => P().timedInput, (v) => up((p) => (p.timedInput = v)), { desc: TIMED_PRESSES ? "Each tick takes exactly the mouse movement, keys and scroll notches you made before it, like CS:S at a high frame rate, instead of whatever the last frame had. Strafe gain, !ssj and scroll jumps match CS:S at any monitor refresh rate. The view on screen is the same either way." : "Each tick takes exactly the mouse movement and strafe keys you made before it, like CS:S at a high frame rate, instead of whatever the last frame had. Strafe gain and !ssj match CS:S at any monitor refresh rate. The view on screen is the same either way.", keywords: "timing timestamp gain ssj sync strafe tick subtick refresh fps aliasing source accurate" }),
         toggle("Show input stats", () => P().inputStats, (v) => up((p) => (p.inputStats = v)), { desc: "While you play: mouse events and reports per second, the size of each movement, spikes the filter dropped, frame times and stutters (also ?inputdebug=1 in the address). Screenshot it when you report flicks or freezes.", keywords: "debug diagnostics polling hz rate stutter freeze frame time input stats overlay lag" }),
       ),
     ],
@@ -358,6 +360,7 @@ const ELEMENT_NOTES: Partial<Record<HudElId, string>> = {
   map: "Map, tier and style.",
   pb: "Your personal best on this map and track.",
   ammo: "Rounds left in the clip while a gun is out.",
+  voice: "Who is talking in a room. Edit layout moves it.",
 };
 
 function hudSection(ctx: Ctx): SettingsContent {
@@ -1135,6 +1138,27 @@ function graphicsSection(ctx: Ctx): SettingsContent {
             peek: true,
             desc: "Remove baked lighting from map surfaces and props to make dark platforms easier to see. Keeps textures, fog and transparency. Works in Potato mode. Local view only.",
             keywords: "fullbright full bright lighting dark map shadows visibility video",
+          }),
+          select("Model lighting", () => G().modelLighting, (v) => up((p) => (p.graphics.modelLighting = v)), [
+            ["off", "Off"], ["subtle", "Subtle"], ["full", "Full"],
+          ], {
+            hint: G().potato ? "Off in Potato mode" : undefined,
+            desc: "Hands, weapons and bunnies take the map's light, so they sit in dark and coloured rooms instead of glowing. Subtle keeps other players easy to see. Full follows the map further.",
+            keywords: "model lighting light dark players bunny hands viewmodel knife ambient glow map",
+          }),
+          toggle("Prop lighting", () => G().propLighting, (v) => up((p) => (p.graphics.propLighting = v)), {
+            desc: "Props take the map's light, as in CS:S. Turn it off to keep them bright on dark maps.",
+            keywords: "prop props lighting light dark bright map models static trees platforms visibility",
+          }),
+          toggle("Map fog", () => G().mapFog, (v) => up((p) => (p.graphics.mapFog = v)), {
+            hint: G().potato ? "Off in Potato mode" : undefined,
+            desc: "Fog the map was built with, drawn as in CS:S. It limits how far you can see on the maps that have it.",
+            keywords: "fog haze distance visibility map env_fog_controller far see",
+          }),
+          toggle("Map details", () => G().mapDetails, (v) => up((p) => (p.graphics.mapDetails = v)), {
+            hint: G().potato ? "Off in Potato mode" : undefined,
+            desc: "Signs, arrows, stains, glows and light beams the map was built with, drawn as in CS:S.",
+            keywords: "overlays decals sprites glows light beams spotlights signs arrows details map info_overlay infodecal env_sprite",
           }),
           toggle("Flashlight", () => G().flashlight, (v) => up((p) => (p.graphics.flashlight = v)), { hint: P().binds.flashlight?.[0] ? `${keyLabel(P().binds.flashlight[0])} in game` : undefined, desc: "Light up dark platforms where you look. Works in Potato mode and starts off on each map. Local view only; its state is not recorded in replays.", keywords: "flashlight torch dark lighting visibility lamp" }),
           mapLooksSettingsRow(),

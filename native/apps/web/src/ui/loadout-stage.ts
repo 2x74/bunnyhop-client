@@ -60,7 +60,7 @@ import { sharedRenderer } from "../shared-gl";
 export type StageView = "fp" | "close" | "bunny" | "ghost" | "gun" | "gunside";
 const gunView = (v: StageView) => v === "gun" || v === "gunside";
 /** What the bunny views dress the bunny in (the knife, gloves and hat come from the loadout). */
-export type StageLook = Pick<BunnyLook, "outfit" | "ghost" | "trail" | "veil" | "playerGlow" | "previewGlow">;
+export type StageLook = Pick<BunnyLook, "outfit" | "ghost" | "trail" | "shape" | "veil" | "playerGlow" | "previewGlow">;
 
 /** Thumbnail size in device pixels (16:10). */
 export const THUMB_W = 384;

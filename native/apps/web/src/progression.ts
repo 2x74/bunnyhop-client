@@ -806,7 +806,7 @@ export function earnedAchievements(s: ProgressStats): string[] {
 // ---------------------------------------------------------------------------------------------
 // Cosmetics (all unlocked by playing; card editor + ghost settings)
 
-export type CosmeticSlot = "background" | "frame" | "title" | "ghost" | "trail" | "outfit" | "knife" | "finish" | "glove" | "hilt" | "hat" | "body" | "camo";
+export type CosmeticSlot = "background" | "frame" | "title" | "ghost" | "trail" | "shape" | "outfit" | "knife" | "finish" | "glove" | "hilt" | "hat" | "body" | "camo";
 
 /**
  * The first-person loadout slots (apps/web/src/loadout.ts): what you hold, what its blade is painted with, its hilt (one
@@ -1574,6 +1574,26 @@ for (const c of COSMETICS) if (c.slot === "camo") {
   if (st && !st.items.includes(c.id)) (st.items as string[]).push(c.id);
 }
 
+// ---------------------------------------------------------------------------------------------
+// Trail shapes (v0.0.41; player/trail.ts draws them): what the trail behind your ghost is made of, picked apart from
+// its colour, so any shape goes with any trail colour. The ribbon is the default and free; the rest fill two levels and
+// four achievements that gave no loadout item. Ids are "shape-<player/trail.ts TrailShape>" and stable forever.
+COSMETICS.push(
+  { id: "shape-ribbon", slot: "shape", name: "Ribbon", unlock: free },
+  // Two thin rails.
+  { id: "shape-twin", slot: "shape", name: "Twin", unlock: lvl(6) },
+  // The ribbon cut into dashes that stay where they were laid.
+  { id: "shape-dashes", slot: "shape", name: "Dashes", unlock: lvl(13) },
+  // Eazy Money (bhop_eazy under a minute): a wide head that narrows at once into a long hairline.
+  { id: "shape-comet", slot: "shape", name: "Comet", unlock: ach("time_bhop_eazy_30") },
+  // Mini Gauntlet: seeds scattered off the path.
+  { id: "shape-seeds", slot: "shape", name: "Seeds", unlock: ach("gauntlet_mini") },
+  // Beat the Mapper: petals shed to either side, tumbling down.
+  { id: "shape-petals", slot: "shape", name: "Petals", unlock: ach(BEAT_MAPPER) },
+  // Fixture (25 top-10 places at once): a stem strung with four-leaf clovers.
+  { id: "shape-clover", slot: "shape", name: "Clover", unlock: ach("top10_25") },
+);
+
 /**
  * Retired cosmetic ids -> what replaced them (read everywhere through cosmetic(): saved choices, room rosters, replay
  * trailers, the local loadout cache), so an old save keeps an equivalent and is written back under the new id. The
@@ -1605,6 +1625,8 @@ export const DEFAULT_COSMETICS: Record<CosmeticSlot, string | null> = {
   title: null,
   ghost: "ghost-gold",
   trail: "trail-gold",
+  /** The trail's shape (v0.0.41): the ribbon it has always been. */
+  shape: "shape-ribbon",
   outfit: "outfit-cream",
   body: "body-a",
   knife: "knife-carrot",

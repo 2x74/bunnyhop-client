@@ -31,7 +31,7 @@
 
 import "./notify.css";
 import { h } from "../ui/dom";
-import { NotifyQueue, PRIORITY, type Note, type NoteEvent } from "./queue";
+import { gateFor, NotifyQueue, PRIORITY, quietNow, type Note, type NoteContext, type NoteEvent } from "./queue";
 import { EASE_IN, EASE_OUT, SPRINGS, spring, hopKeyframes, hopOffKeyframes, arcKeyframes, arcPoints } from "./spring";
 import { countUpValue, readingMs, TickPacer } from "./timing";
 import { burst, stopConfetti } from "./confetti";
@@ -162,7 +162,7 @@ export function setNotifySound(fn: (id: string, gain?: number, rate?: number) =>
 
 // The bunny's hop boings (very quietly); never while a run is going.
 setMascotSound((kind) => {
-  if (kind === "hop" && !q.isRunning) playSound("bunny_boing");
+  if (kind === "hop" && !quiet()) playSound("bunny_boing");
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -211,16 +211,25 @@ function inGame(): boolean {
   return c.contains("in-game") && !c.contains("menu-open") && !c.contains("viewer-open");
 }
 
+function context(): NoteContext {
+  const c = document.body.classList;
+  return { inGame: c.contains("in-game"), menuOpen: c.contains("menu-open"), viewerOpen: c.contains("viewer-open"), run: runFlag, hidden: held };
+}
+
+/** A run is going or the UI is hidden: notes make no sound, throw no confetti, and banners are compact. */
+const quiet = (): boolean => quietNow(context());
+
 function syncContext(): void {
   const t = now();
   q.setCapacity("toast", inGame() ? 1 : 3, t);
-  q.setRunning((runFlag && inGame()) || held, t);
-  if ((runFlag && inGame()) || held) stopConfetti();
+  // Moments and celebrations also wait under the pause menu (queue.ts gateFor).
+  q.setGate(gateFor(context()), t);
+  if (quiet()) stopConfetti();
   pump();
 }
 
 /** A timed run is going in game (celebrations are held; notify/item3d.ts builds models later then). */
-export const runGoing = (): boolean => q.isRunning;
+export const runGoing = (): boolean => quiet();
 
 /**
  * The HUD reports whether a timed run is going (on change only). While it is (and no menu is open), moments and
@@ -434,7 +443,7 @@ function showToast(n: Note<Data>, d: Extract<Data, { kind: "toast" }>): void {
   rendered.set(n.id, { el });
   announce(d.text, d.tone === "bad");
   // Every Notice lands on a soft tick (an error on the softer error click instead); not mid-run.
-  if (!q.isRunning) d.tone === "bad" ? playSound("ui_error", 0.6) : playSound("toast_pop");
+  if (!quiet()) d.tone === "bad" ? playSound("ui_error", 0.6) : playSound("toast_pop");
   if (reduced()) return void el.animate({ opacity: [0, 1] }, { duration: 120 });
   const top = inGame();
   // The hop: in along a short arc, landing with a squash (from above in game, from below in the menus).
@@ -464,7 +473,7 @@ function update(n: Note<Data>): void {
       if (d.action) r.el.append(actionButton(n, d.action));
     }
     announce(d.text, d.tone === "bad");
-    if (d.action && !q.isRunning) playSound("toast_pop");
+    if (d.action && !quiet()) playSound("toast_pop");
     if (reduced()) return;
     r.el.animate({ transform: ["scale(1.045)", "none"] }, spring(SPRINGS.pop));
     if (r.same > 1) c.animate({ transform: ["scale(0.4)", "none"], opacity: [0, 1] }, spring(SPRINGS.bouncy));
@@ -576,7 +585,7 @@ function showMoment(n: Note<Data>, s: CelebrationSpec): void {
   ringEl?.animate({ transform: ["scale(0.9)", "scale(1.8)"], opacity: [0.75, 0] }, { duration: 560, delay: 220, easing: EASE_OUT, fill: "both" });
   [kicker, title, detail].forEach((x, i) => x?.animate({ transform: ["translateX(-8px)", "none"], opacity: [0, 1] }, { duration: 260, delay: 140 + i * 55, easing: EASE_OUT, fill: "backwards" }));
   const timers = afterLanding(s, emblem, level, shine, 200);
-  if (s.confetti && !q.isRunning)
+  if (s.confetti && !quiet())
     timers.push(window.setTimeout(() => {
       const b = emblem.getBoundingClientRect();
       burst({ x: b.left + b.width / 2, y: b.top + b.height / 2, count: Math.min(120, typeof s.confetti === "number" ? s.confetti : 40), accent: color, feathers: s.feathers, ...(s.feathers ? { power: 0.7, spread: 120 } : {}) });
@@ -662,7 +671,7 @@ function showStage(n: Note<Data>, s: CelebrationSpec): void {
     timers.push(window.setTimeout(() => m.react("hop"), 640 + 330));
   }
   // 700: confetti from both bottom corners, upwards and inwards, so it stays on screen. Never mid-run, never on Potato.
-  if (s.confetti && !q.isRunning && !lite) {
+  if (s.confetti && !quiet() && !lite) {
     const count = Math.min(120, typeof s.confetti === "number" ? s.confetti * 1.5 : 110);
     timers.push(window.setTimeout(() => {
       const opts = { count: Math.round(count / 2), accent: color, feathers: s.feathers, spread: 30, power: 1.25 };
@@ -696,7 +705,7 @@ export function countUp(el: HTMLElement, from: number, to: number, ms = 700, onS
     if (v !== shown) {
       shown = v;
       el.textContent = fmt(v);
-      if (!q.isRunning && el.isConnected) {
+      if (!quiet() && el.isConnected) {
         const rate = ticks.next(now());
         if (rate !== null) playSound("count_tick", 1, rate);
       }
@@ -716,7 +725,7 @@ function showBanner(n: Note<Data>, s: BannerSpec): void {
   const title = h("b.nt-banner-title", null, s.title);
   const sub = s.sub ? h("span.nt-banner-sub", null, s.sub) : null;
   const band = h("div.nt-banner-band", null, title, sub);
-  const el = h(`div.nt-banner.tone-${s.tone ?? "info"}${q.isRunning || s.compact ? ".compact" : ""}`, null, band);
+  const el = h(`div.nt-banner.tone-${s.tone ?? "info"}${quiet() || s.compact ? ".compact" : ""}`, null, band);
   r.banners.replaceChildren(el);
   rendered.set(n.id, { el });
   announce(`${s.title}${s.sub ? `. ${s.sub}` : ""}`);
@@ -727,9 +736,9 @@ function showBanner(n: Note<Data>, s: BannerSpec): void {
   title.animate({ transform: ["scale(1.4)", "none"], opacity: [0, 1] }, { ...spring(SPRINGS.land), delay: 60, fill: "backwards" });
   sub?.animate({ transform: ["translateY(-6px)", "none"], opacity: [0, 1] }, { duration: 260, delay: 170, easing: EASE_OUT, fill: "backwards" });
   // The shine animates background-position (not compositable): menus and after a run only, never mid-run.
-  if (!q.isRunning) title.animate({ backgroundPosition: ["150% 0", "-50% 0"] }, { duration: 900, delay: 320, easing: "cubic-bezier(0.4, 0, 0.2, 1)", fill: "both" });
+  if (!quiet()) title.animate({ backgroundPosition: ["150% 0", "-50% 0"] }, { duration: 900, delay: 320, easing: "cubic-bezier(0.4, 0, 0.2, 1)", fill: "both" });
   // Confetti from both bottom corners (from the band itself it would leave the screen at once).
-  if (s.confetti && !q.isRunning)
+  if (s.confetti && !quiet())
     window.setTimeout(() => {
       burst({ x: 0, y: innerHeight, count: 55, spread: 30, power: 1.25, angle: 28 });
       burst({ x: innerWidth, y: innerHeight, count: 55, spread: 30, power: 1.25, angle: -28 });

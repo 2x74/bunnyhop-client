@@ -248,6 +248,14 @@ export const FLAG_TIMED_INPUT = 1 << 4;
  * re-simulate as always.
  */
 export const FLAG_W_RELEASE = 1 << 5;
+/**
+ * Timed presses built some of the recorded commands (timed-input.ts TIMED_PRESSES): jump, duck, use, attack and the turn
+ * binds were taken by their own timestamps like the movement keys, and each wheel notch went into the command for its
+ * own tick (not the frame's first). Set only with FLAG_TIMED_INPUT. Any version; only written when set, so other replays
+ * are byte-identical; older decoders ignore it. Information for the anticheat only (the scroll measures were calibrated
+ * on frame-bound presses): the commands re-simulate as always.
+ */
+export const FLAG_TIMED_PRESSES = 1 << 6;
 export const DEFAULT_CHECKPOINT_INTERVAL = 100;
 export const COSMETIC_MAGIC = 0x58434842; // "BHCX" little-endian
 export const LOADOUT_MAGIC = 0x4f4c4842; // "BHLO" little-endian
@@ -296,6 +304,8 @@ export interface ReplayHeader {
   nullBinds?: boolean;
   /** Timestamped input built some recorded command (FLAG_TIMED_INPUT). Absent when off. */
   timedInput?: boolean;
+  /** Timed presses built some recorded command (FLAG_TIMED_PRESSES). Absent when off. */
+  timedPresses?: boolean;
   /** Release W on jump was on during the recording (FLAG_W_RELEASE). Absent when off. */
   wRelease?: boolean;
   /** The turn binds' rates for the whole recording (the "BHTS" trailer). Absent: 210°/s, no fast turn. */
@@ -378,6 +388,8 @@ export class ReplayRecorder {
   nullBinds = false;
   /** Timestamped input built some recorded command (header.timedInput). */
   timedInput = false;
+  /** Timed presses built some recorded command (header.timedPresses). */
+  timedPresses = false;
   /** Release W on jump was on for some recorded command (header.wRelease). */
   wRelease = false;
   /** The turn binds' rates for this whole recording (header.turnSpeed); set at its start (session.ts). */
@@ -396,6 +408,7 @@ export class ReplayRecorder {
     this.looks = [];
     this.nullBinds = false;
     this.timedInput = false;
+    this.timedPresses = false;
     this.wRelease = false;
     this.turnSpeed = null;
     this.checkpoints = [];
@@ -467,7 +480,7 @@ export class ReplayRecorder {
   build(header: Omit<ReplayHeader, "totalTicks" | "checkpointInterval" | "version">): Replay {
     const n = this.n;
     return {
-      header: { ...header, version: replayVersionFor(header), totalTicks: n, checkpointInterval: this.checkpointInterval, ...(this.nullBinds ? { nullBinds: true } : {}), ...(this.timedInput ? { timedInput: true } : {}), ...(this.wRelease ? { wRelease: true } : {}), ...(this.turnSpeed ? { turnSpeed: { ...this.turnSpeed } } : {}) },
+      header: { ...header, version: replayVersionFor(header), totalTicks: n, checkpointInterval: this.checkpointInterval, ...(this.nullBinds ? { nullBinds: true } : {}), ...(this.timedInput ? { timedInput: true } : {}), ...(this.timedPresses ? { timedPresses: true } : {}), ...(this.wRelease ? { wRelease: true } : {}), ...(this.turnSpeed ? { turnSpeed: { ...this.turnSpeed } } : {}) },
       forward: this.forward.slice(0, n),
       side: this.side.slice(0, n),
       buttons: this.buttons.slice(0, n),
@@ -690,7 +703,7 @@ export function encodeRaw(r: Replay): Uint8Array {
   const fractional = counted?.count instanceof Float64Array;
   const version = fractional ? REPLAY_VERSION_FRACTIONAL : h.settings.stamina || h.style === "lowgrav" ? REPLAY_VERSION_STAMINA : counted ? REPLAY_VERSION_COUNTED : replayVersionFor(h);
   w.u16(version);
-  w.u16((h.settings.autohop ? FLAG_AUTOHOP : 0) | (h.settings.stamina ? FLAG_STAMINA : 0) | (version >= REPLAY_VERSION_STAMINA && counted ? FLAG_COUNTED : 0) | (h.nullBinds ? FLAG_NULL_BINDS : 0) | (h.timedInput ? FLAG_TIMED_INPUT : 0) | (h.wRelease ? FLAG_W_RELEASE : 0));
+  w.u16((h.settings.autohop ? FLAG_AUTOHOP : 0) | (h.settings.stamina ? FLAG_STAMINA : 0) | (version >= REPLAY_VERSION_STAMINA && counted ? FLAG_COUNTED : 0) | (h.nullBinds ? FLAG_NULL_BINDS : 0) | (h.timedInput ? FLAG_TIMED_INPUT : 0) | (h.timedPresses ? FLAG_TIMED_PRESSES : 0) | (h.wRelease ? FLAG_W_RELEASE : 0));
   w.str8(h.map);
   w.bytes(hexToBytes(h.mapSha256));
   const s = h.settings;
@@ -965,6 +978,7 @@ export function decodeRaw(buf: Uint8Array, opts: { commands?: boolean } = {}): R
       checkpointInterval,
       ...(flags & FLAG_NULL_BINDS ? { nullBinds: true } : {}),
       ...(flags & FLAG_TIMED_INPUT ? { timedInput: true } : {}),
+      ...(flags & FLAG_TIMED_PRESSES ? { timedPresses: true } : {}),
       ...(flags & FLAG_W_RELEASE ? { wRelease: true } : {}),
       ...(turnSpeed ? { turnSpeed } : {}),
     },

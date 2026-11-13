@@ -168,7 +168,7 @@ export interface GunDef {
   frame: Framing;
   /**
    * A wrist range of its own (deg; guns/pose.ts WristRange, on top of WRIST.grip / WRIST.support): a grip that needs the
-   * wrist set (a bullpup's thumbhole) allows that much more, so its forearm leaves the screen where it should.
+   * wrist set (the Jackrabbit's support hand) allows that much more, so its forearm leaves the screen where it should.
    */
   wrist?: { R?: Partial<WristRange>; L?: Partial<WristRange> };
   /** Elbow anchors (view space) the forearms aim toward; default guns/viewmodel.ts ELBOW (the pistols'). */

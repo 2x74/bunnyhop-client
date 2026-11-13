@@ -39,7 +39,7 @@ import { sfx } from "./audio";
 import { nudge, setRunActive, toast as notifyToast } from "./notify";
 import { spring, SPRINGS } from "./notify/spring";
 import { uiHidden } from "./ui/hide-ui";
-import { formatDelta, TimeFace } from "./hud/time-face";
+import { countWord, formatDelta, TimeFace } from "./hud/time-face";
 import { ResultCard } from "./hud/result";
 import type { UploadFailure } from "./uploads";
 import { hudLine, type GauntletProgress } from "./gauntlet/state";
@@ -224,7 +224,9 @@ export class Hud {
   private stageText = text();
   private stageEl!: HTMLElement;
   private statJumps = text();
+  private statJumpsWord = text();
   private statStrafes = text();
+  private statStrafesWord = text();
   private statSync = text();
   private trainer = new StrafeTrainer();
   private trainerView = new StrafeTrainerView();
@@ -337,8 +339,8 @@ export class Hud {
       stats: h(
         "div.hud-stats",
         null,
-        h("span", null, h("b", null, this.statJumps), " jumps"),
-        h("span", null, h("b", null, this.statStrafes), " strafes"),
+        h("span", null, h("b", null, this.statJumps), this.statJumpsWord),
+        h("span", null, h("b", null, this.statStrafes), this.statStrafesWord),
         h("span", null, h("b", null, this.statSync), " sync"),
         this.statPerf,
       ),
@@ -366,6 +368,12 @@ export class Hud {
       strafeTrainer: this.trainerView.el,
       spectators: this.specEl,
       practice: h("div.hud-practice", null, this.practiceText, h("span.hud-practice-warn", null, this.practiceWarnText)),
+      // The talker list (voice/hud.ts VoiceHud mounts #voice-hud in here while in a room); demo rows only in the layout editor.
+      voice: h(
+        "div.hud-voice",
+        null,
+        h("div.voice-demo", { "aria-hidden": "true" }, ...["hopper", "strafegod"].map((n) => h("div.vh-row", null, h("span.vh-av.letter", null, n[0].toUpperCase()), h("span.vh-name", null, n)))),
+      ),
     };
     const boxes: HTMLElement[] = [];
     for (const { id, label } of HUD_ELEMENTS) {
@@ -764,7 +772,8 @@ export class Hud {
   // -------------------------------------------------------------------------------------------
   // Per-frame update
 
-  update(frame: HudFrame): void {
+  /** `frames`: game frames this update covers (the uncapped loop draws the HUD once per display frame), for the FPS readout. */
+  update(frame: HudFrame, frames = 1): void {
     const sp0 = this.spectated;
     const f = this.editing ? { ...DEMO, place: this.p.hud.place === "place" ? "#4" : this.p.hud.place === "top" ? DEMO.place : null } : sp0 ? { ...frame, speed: sp0.speed, status: sp0.status, time: sp0.time, inStart: sp0.inStart, split: null, place: null, stage: null } : frame;
     const s = this.shown;
@@ -814,7 +823,7 @@ export class Hud {
     }
 
     // FPS (updated twice a second).
-    this.frames++;
+    this.frames += frames;
     if (now - this.fpsT > 500) {
       this.fpsText.data = String(Math.round((this.frames * 1000) / (now - this.fpsT)));
       const ping = prefs.get().hud.netGraph ? this.pingMs?.() ?? null : null;
@@ -902,7 +911,9 @@ export class Hud {
       this.els.stats.classList.toggle("empty", !stats);
       if (stats) {
         this.statJumps.data = String(f.jumps);
+        this.statJumpsWord.data = ` ${countWord(f.jumps, "jump")}`;
         this.statStrafes.data = String(f.strafes);
+        this.statStrafesWord.data = ` ${countWord(f.strafes, "strafe")}`;
         this.statSync.data = `${f.sync.toFixed(1)}%`;
       }
     }

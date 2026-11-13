@@ -10,7 +10,7 @@
 //   setDrawTargets((scene) => ({ screen, offscreen }))   the renderer front (pipeline.ts) says where `scene` is drawn
 //   await warmPrograms(renderer, root, camera, scene)       compiles `root`'s programs for those (serial without KHR)
 import * as THREE from "three";
-import { gammaBlendMeshes, isGammaBlend } from "./gamma-blend";
+import { isGammaBlend } from "./gamma-blend";
 
 export interface DrawTargets {
   /** Drawn straight to the canvas. */
@@ -45,6 +45,70 @@ function bound<T>(renderer: THREE.WebGLRenderer, target: THREE.WebGLRenderTarget
 /** A three.js program as WebGLRenderer.info lists it (isReady: KHR_parallel_shader_compile's completion status). */
 type Program = { isReady?: () => boolean; getUniforms: () => unknown };
 
+type Drawable = THREE.Object3D & { material?: THREE.Material | THREE.Material[] | null; geometry?: THREE.BufferGeometry };
+const drawable = (o: THREE.Object3D): o is Drawable => {
+  const d = o as THREE.Object3D & { isMesh?: boolean; isPoints?: boolean; isLine?: boolean; isSprite?: boolean };
+  return !!(d.isMesh || d.isPoints || d.isLine || d.isSprite);
+};
+
+/** Everything besides the material and the output that three builds a program from: the object's kind and its geometry's layout. */
+function layoutKey(object: Drawable): string {
+  const shape = object as Drawable & { isSkinnedMesh?: boolean; isInstancedMesh?: boolean; isBatchedMesh?: boolean; _colorsTexture?: unknown; instanceColor?: unknown; morphTexture?: unknown };
+  const geometry = object.geometry;
+  return [object.type, !!shape.isSkinnedMesh, !!shape.isInstancedMesh, !!shape.instanceColor, !!shape.morphTexture, !!shape.isBatchedMesh, !!shape._colorsTexture,
+    geometry?.attributes.color?.itemSize ?? 0, !!geometry?.attributes.tangent, !!geometry?.attributes.normal, !!geometry?.attributes.uv, !!geometry?.attributes.position,
+    !!geometry?.morphTargetsRelative, geometry?.morphAttributes.position?.length ?? 0, geometry?.morphAttributes.normal?.length ?? 0,
+    geometry?.morphAttributes.color?.length ?? 0].join("|");
+}
+
+/**
+ * Each material under `root` once per object layout, with the first object that draws it that way: that pair has every
+ * program the material can need for an output. A brush-heavy map gives every brush mesh the whole world material array
+ * (render.ts), so walking every mesh and material (as three's compile does) asks three for 1,361 x 276 programs on
+ * bhop_lol_plaza: seconds of main thread for under a hundred programs. `skip`: objects warmed already.
+ */
+function distinctMaterials(root: THREE.Object3D, skip?: ReadonlySet<THREE.Object3D> | null, keep: (m: THREE.Material) => boolean = () => true, objects: (o: Drawable) => boolean = () => true): Map<Drawable, THREE.Material[]> {
+  const seen = new Map<string, Set<THREE.Material | THREE.Material[]>>();
+  const out = new Map<Drawable, THREE.Material[]>();
+  root.traverse((o) => {
+    if (!drawable(o) || !o.material || skip?.has(o) || !objects(o)) return;
+    const layout = layoutKey(o);
+    let done = seen.get(layout);
+    if (!done) seen.set(layout, (done = new Set()));
+    // The same array on the same layout (every brush mesh of a map): nothing new.
+    if (Array.isArray(o.material)) {
+      if (done.has(o.material)) return;
+      done.add(o.material);
+    }
+    const fresh: THREE.Material[] = [];
+    for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+      if (!keep(m) || done.has(m)) continue;
+      done.add(m);
+      fresh.push(m);
+    }
+    if (fresh.length) out.set(o, fresh);
+  });
+  return out;
+}
+
+/** renderer.compile over `root` with each object holding only its materials in `only` (none if it isn't there); restored after. */
+function compileOnly(renderer: THREE.WebGLRenderer, root: THREE.Object3D, camera: THREE.Camera, scene: THREE.Scene, only: Map<Drawable, THREE.Material[]>): void {
+  const held: [Drawable, Drawable["material"]][] = [];
+  root.traverse((o) => {
+    if (!drawable(o) || !o.material) return;
+    const kept = only.get(o);
+    const all = Array.isArray(o.material) ? o.material.length : 1;
+    if (kept?.length === all) return;
+    held.push([o, o.material]);
+    o.material = kept && Array.isArray(o.material) ? kept : null;
+  });
+  try {
+    renderer.compile(root, camera, scene);
+  } finally {
+    for (const [o, material] of held) o.material = material;
+  }
+}
+
 const nextTask = () => new Promise<void>((resolve) => setTimeout(resolve, 10));
 
 /**
@@ -55,28 +119,27 @@ const nextTask = () => new Promise<void>((resolve) => setTimeout(resolve, 10));
  * uniform locations) runs here, outside a frame: in a frame its info-log query waits for the GPU process to finish
  * everything drawn before it in that frame (research/PERF-0.0.29-STALLS.md). Without KHR, the shared renderer queue
  * instead links one material/output/side, waits on its fence, builds its uniform table, then yields to the next.
+ * Each material is compiled once per object layout (distinctMaterials); objects in `skip` are left out.
  */
-export async function warmPrograms(renderer: THREE.WebGLRenderer, root: THREE.Object3D, camera: THREE.Camera, scene: THREE.Scene, diagnostics = true): Promise<void> {
+export async function warmPrograms(renderer: THREE.WebGLRenderer, root: THREE.Object3D, camera: THREE.Camera, scene: THREE.Scene, diagnostics = true, skip: ReadonlySet<THREE.Object3D> | null = null): Promise<void> {
   if (!renderer.extensions.has("KHR_parallel_shader_compile")) {
-    await serialPrograms(renderer, root, camera, scene, diagnostics);
+    await serialPrograms(renderer, root, camera, scene, diagnostics, undefined, skip);
     return;
   }
   const where = drawTargets(scene);
   const targets: (THREE.WebGLRenderTarget | null)[] = [];
   if (where.screen) targets.push(null);
   if (where.offscreen) targets.push(probeTarget());
+  const only = distinctMaterials(root, skip);
   for (let i = 0; i < targets.length; i++) {
     if (i) await nextTask();
-    bound(renderer, targets[i], () => renderer.compile(root, camera, scene));
+    bound(renderer, targets[i], () => compileOnly(renderer, root, camera, scene, only));
   }
   if (where.blendedOnScreen && !where.screen) {
     await nextTask();
-    // Each blended material on its own mesh's geometry, so only those get a canvas variant.
-    const blended = new THREE.Group();
-    for (const mesh of gammaBlendMeshes(root)) {
-      for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) if (isGammaBlend(m)) blended.add(new THREE.Mesh(mesh.geometry, m));
-    }
-    if (blended.children.length) bound(renderer, null, () => renderer.compile(blended, camera, scene));
+    // Only the blended materials get a canvas variant, on the main view's meshes (gamma-blend.ts draws them there).
+    const blended = distinctMaterials(root, skip, isGammaBlend, (o) => (o as THREE.Mesh).isMesh === true && o.layers.isEnabled(0));
+    if (blended.size) bound(renderer, null, () => compileOnly(renderer, root, camera, scene, blended));
   }
   // All of the renderer's programs: any still compiling may be this root's, and they all finish.
   const programs = () => (renderer.info.programs ?? []) as unknown as Program[];
@@ -134,14 +197,10 @@ function serialTask(renderer: THREE.WebGLRenderer, run: () => void | Promise<voi
   return next;
 }
 
-async function serialPrograms(renderer: THREE.WebGLRenderer, root: THREE.Object3D, camera: THREE.Camera, scene: THREE.Scene, diagnostics: boolean, onlyTargets?: (THREE.WebGLRenderTarget | null)[]): Promise<void> {
+async function serialPrograms(renderer: THREE.WebGLRenderer, root: THREE.Object3D, camera: THREE.Camera, scene: THREE.Scene, diagnostics: boolean, onlyTargets?: (THREE.WebGLRenderTarget | null)[], skip: ReadonlySet<THREE.Object3D> | null = null): Promise<void> {
   const where = drawTargets(scene);
   const jobs: Promise<void>[] = [];
-  const seen = new Set<string>();
-  root.traverse(object => {
-    const mesh = object as THREE.Mesh;
-    if (!mesh.material) return;
-    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+  for (const [mesh, materials] of distinctMaterials(root, skip)) {
     for (const material of materials) {
       const sides = material.transparent && material.side === THREE.DoubleSide && !material.forceSinglePass
         ? [THREE.BackSide, THREE.FrontSide] : [material.side];
@@ -150,15 +209,7 @@ async function serialPrograms(renderer: THREE.WebGLRenderer, root: THREE.Object3
         ...(where.offscreen ? [probeTarget()] : []),
       ];
       for (const target of targets) for (const side of sides) {
-        const shape = mesh as THREE.Mesh & { isSkinnedMesh?: boolean; isInstancedMesh?: boolean; isBatchedMesh?: boolean; _colorsTexture?: unknown; instanceColor?: unknown; morphTexture?: unknown };
-        const geometry = mesh.geometry;
-        const key = [material.uuid, target ? "target" : "screen", side, mesh.type, !!shape.isSkinnedMesh, !!shape.isInstancedMesh,
-          !!shape.instanceColor, !!shape.morphTexture, !!shape.isBatchedMesh, !!shape._colorsTexture, geometry?.attributes.color?.itemSize ?? 0,
-          !!geometry?.attributes.tangent, !!geometry?.attributes.normal, !!geometry?.attributes.uv, !!geometry?.morphTargetsRelative, geometry?.morphAttributes.position?.length ?? 0,
-          geometry?.morphAttributes.normal?.length ?? 0, geometry?.morphAttributes.color?.length ?? 0].join("|");
-        if (seen.has(key)) continue;
-        seen.add(key);
-        const copy = mesh.clone(false);
+        const copy = mesh.clone(false) as Drawable;
         copy.material = material;
         let disposed = false;
         const cancel = () => { disposed = true; };
@@ -191,7 +242,7 @@ async function serialPrograms(renderer: THREE.WebGLRenderer, root: THREE.Object3
         jobs.push(job);
       }
     }
-  });
+  }
   await Promise.all(jobs);
 }
 
@@ -240,8 +291,12 @@ async function presentedFrame(renderer: THREE.WebGLRenderer): Promise<void> {
 /** One geometry/output per task, fenced before the next: backend pipelines can depend on vertex layout as well as
  * program. A private framebuffer preserves canvas pixels; keeping three's screen output selects its exact sRGB
  * program instead of accidentally warming a new linear-output program in a regular render target. */
-export async function drawHiddenPrograms(renderer: THREE.WebGLRenderer, root: THREE.Object3D, camera: THREE.Camera, scene: THREE.Scene): Promise<void> {
-  if (renderer.extensions.has("KHR_parallel_shader_compile")) return;
+export async function drawHiddenPrograms(renderer: THREE.WebGLRenderer, root: THREE.Object3D, camera: THREE.Camera, scene: THREE.Scene, always = false): Promise<void> {
+  // (`always`: on KHR drivers too, without the frame of pacing between draws that software GL needs. A model that
+  // first appears mid-run, the gun viewmodel on a pickup, otherwise builds its backend pipeline in that frame: 167 ms
+  // on Metal with its program already linked.)
+  const paced = !renderer.extensions.has("KHR_parallel_shader_compile");
+  if (!always && !paced) return;
   const jobs: Promise<void>[] = [];
   const where = drawTargets(scene);
   root.updateMatrixWorld(true);
@@ -268,7 +323,7 @@ export async function drawHiddenPrograms(renderer: THREE.WebGLRenderer, root: TH
         material.addEventListener("dispose",cancel);
         const job = serialTask(renderer, async () => {
           // Separate uniform reflection from the first backend draw as well as successive layout draws.
-          await presentedFrame(renderer);
+          if (paced) await presentedFrame(renderer);
           if (disposed) return;
           const gl = renderer.getContext() as WebGL2RenderingContext;
           const target = renderer.getRenderTarget();
@@ -307,7 +362,7 @@ export async function drawHiddenPrograms(renderer: THREE.WebGLRenderer, root: TH
             renderer.setScissorTest(scissorTest);
           }
           await gpuIdle(renderer);
-          await presentedFrame(renderer);
+          if (paced) await presentedFrame(renderer);
         }, () => disposed).finally(() => material.removeEventListener("dispose",cancel));
         jobs.push(job);
       }

@@ -95,7 +95,7 @@ export class InputDebug {
       g.fillText(text, 6, y);
     };
     const lock = s.lock === "raw" ? "raw input" : s.lock === "os" ? `OS accel (no raw input${s.rawError ? `: ${s.rawError}` : ""})` : "not locked";
-    const timed = !s.timed ? "frame-timed" : s.timedOff ? "timed off (browser event times unusable)" : `timed ${s.holdbackMs} ms (late ${(s.lateShare * 100).toFixed(1)}%)`;
+    const timed = !s.timed ? "frame-timed" : s.timedOff ? "timed off (browser event times unusable)" : `timed${s.presses ? " with presses" : ""} ${s.holdbackMs} ms (late ${(s.lateShare * 100).toFixed(1)}%)`;
     line(4, `INPUT ${lock} · ${s.source} · filter ${s.filter ? "on" : "off"} · ${timed}`, s.lock === "os" ? "#ffb547" : s.lock === "raw" ? "#9fe0a8" : "#9aa3b2");
     line(17, `mouse ${s.pollHz ? `${s.pollHz} Hz` : "– Hz"} · ${s.reportHz} reports/s · ${s.eventHz} events/s · ${s.fps} fps`);
     line(30, `biggest move ${s.maxDelta} · spikes ${s.spikes}${s.spikes ? ` (max ${s.maxSpike})` : ""} · post-lock ${s.discards}${s.mismatches ? ` · sum≠ ${s.mismatches}` : ""}`, s.spikes ? "#ff8a80" : undefined);
@@ -194,6 +194,8 @@ export function summary(input: Input) {
     filter: input.filter.enabled,
     // Timed input (timed-input.ts): on, its adapted holdback, and the share of reports that missed their tick.
     timed: input.timed,
+    // Jump, duck, the wheel and the turn binds timed too (timed-input.ts TIMED_PRESSES).
+    presses: input.timed && input.timedPresses,
     holdbackMs: input.timedStats.holdbackMs,
     timedOff: input.timedStats.unreliable,
     lateShare: input.timedStats.reports ? Math.round((input.timedStats.late / input.timedStats.reports) * 1e4) / 1e4 : 0,

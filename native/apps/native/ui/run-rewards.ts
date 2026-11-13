@@ -38,6 +38,7 @@ const SLOT_NAMES: Record<CosmeticSlot, string> = {
   outfit: "colourway",
   ghost: "ghost",
   trail: "trail",
+  shape: "trail shape",
   knife: "knife",
   finish: "finish",
   glove: "gloves",

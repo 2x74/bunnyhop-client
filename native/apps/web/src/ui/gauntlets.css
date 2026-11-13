@@ -7,7 +7,17 @@
 .panel-gauntlets > .gx, .panel-gauntlet > .gx { position: relative; flex: 1 1 0; min-height: 0; overflow: hidden auto; overscroll-behavior: contain; padding-right: 0.4rem; }
 .gx-page { display: grid; grid-template-columns: fit-content(32rem) minmax(0, 1fr); gap: var(--sp-6); align-items: start; }
 @media (max-width: 52rem) { .gx-page { grid-template-columns: minmax(0, 1fr); } }
+/* A state in place of the page (couldn't load, no such gauntlet) sits in the middle like everywhere else, not in the first column. */
+.gx-page > .rb-state { grid-column: 1 / -1; }
 .gx-skel { height: 12rem; }
+/* The hub while it loads (gauntlets.ts hubSkeleton): the first cell is a title, not a rank; this week's lines. */
+.gx-sk tr.rb-skel td:first-child .rb-sk { width: min(11rem, 60%); margin-left: 0; }
+.gx-sk tr.rb-skel:nth-child(2n) td:first-child .rb-sk { width: min(8rem, 45%); }
+.gx-sk tr.rb-skel td:not(:first-child) .rb-sk { width: 3rem; margin-left: auto; }
+.gx-sk .gx-week-info { display: grid; gap: 0.9rem; padding-top: 0.4rem; }
+.gx-sk .gx-week-info .rb-sk { width: min(17rem, 70%); }
+.gx-sk .gx-week-info .rb-sk:nth-child(2) { width: min(26rem, 90%); }
+.gx-sk .gx-week-info .rb-sk:nth-child(3) { width: 9rem; height: 2rem; }
 
 .gx-title b { font-weight: 650; }
 .gx-title .rb-sub { margin-left: 0.55rem; }
@@ -66,6 +76,7 @@
    (a narrower hub left a wide empty strip down the right of the screen). */
 .gx-hub { display: flex; flex-direction: column; gap: var(--sp-6); }
 .gx-h { margin: 0 0 var(--sp-2); font-size: var(--fs-lg); font-weight: 750; }
+.gx-lead { margin: 0 0 calc(var(--sp-4) - var(--sp-6)); color: var(--cream-2); font-size: var(--fs-sm); }
 .gx-week { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-6); align-items: start; }
 @media (max-width: 52rem) { .gx-week { grid-template-columns: minmax(0, 1fr); } }
 .gx-week-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem var(--sp-3); margin: 0; }

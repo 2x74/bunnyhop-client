@@ -277,10 +277,10 @@ index 3e5e27c..7cbc6eb 100644
      }
  
 diff --git a/crates/core/src/lib.rs b/crates/core/src/lib.rs
-index aff53ab..42b80c7 100644
+index c9ee601..aa05647 100644
 --- a/crates/core/src/lib.rs
 +++ b/crates/core/src/lib.rs
-@@ -12,7 +12,7 @@ pub mod vfs;
+@@ -16,7 +16,7 @@ pub mod vfs;
  #[cfg(not(target_arch = "wasm32"))]
  #[doc(hidden)]
  pub mod test_maps;
@@ -289,9 +289,9 @@ index aff53ab..42b80c7 100644
  mod wasm;
  
  pub use game::{Cmd, Game, Settings};
-@@ -31,3 +31,6 @@ pub fn parse_bsp(bytes: &[u8]) -> Result<playsrc_bsp::Bsp, String> {
+@@ -45,3 +45,6 @@ fn bsp_limits() -> playsrc_bsp::Limits {
          max_light_samples: 32 * 1024 * 1024,
-         ..Default::default() }).map_err(|e| format!("bsp: {e:?}"))
+         ..Default::default() }
  }
 +
 +#[cfg(all(feature = "native-web", not(target_arch = "wasm32")))]
@@ -406,13 +406,13 @@ index 702314f..718cf65 100644
      let left = [sr * sp * cy - cr * sy, sr * sp * sy + cr * cy, sr * cp];
      let up = [cr * sp * cy + sr * sy, cr * sp * sy - sr * cy, cr * cp];
 diff --git a/crates/core/src/props.rs b/crates/core/src/props.rs
-index 2fc6932..c0105a5 100644
+index 051a366..cbfe4cd 100644
 --- a/crates/core/src/props.rs
 +++ b/crates/core/src/props.rs
-@@ -349,9 +349,9 @@ pub struct PropMesh {
+@@ -418,9 +418,9 @@ pub struct PropMesh {
  
  /// Source `AngleMatrix` (pitch about Y, yaw about Z, roll about X), as rows applied to column vectors.
- fn angle_matrix([pitch, yaw, roll]: [f32; 3]) -> [[f32; 3]; 3] {
+ pub(crate) fn angle_matrix([pitch, yaw, roll]: [f32; 3]) -> [[f32; 3]; 3] {
 -    let (sp, cp) = pitch.to_radians().sin_cos();
 -    let (sy, cy) = yaw.to_radians().sin_cos();
 -    let (sr, cr) = roll.to_radians().sin_cos();
@@ -423,7 +423,7 @@ index 2fc6932..c0105a5 100644
          [cp * cy, sr * sp * cy - cr * sy, cr * sp * cy + sr * sy],
          [cp * sy, sr * sp * sy + cr * cy, cr * sp * sy - sr * cy],
 diff --git a/crates/core/src/wasm.rs b/crates/core/src/wasm.rs
-index 043aa2c..74ef7da 100644
+index 6a508e1..d958345 100644
 --- a/crates/core/src/wasm.rs
 +++ b/crates/core/src/wasm.rs
 @@ -31,7 +31,7 @@ fn with<R>(f: impl FnOnce(&mut Ctx) -> R) -> R {
@@ -451,7 +451,7 @@ index 043aa2c..74ef7da 100644
  pub unsafe extern "C" fn load_map(ptr: *mut u8, len: usize) -> u32 {
      let bytes = unsafe { Vec::from_raw_parts(ptr, len, len) };
      with(|c| {
-@@ -82,7 +82,7 @@ pub unsafe extern "C" fn load_map(ptr: *mut u8, len: usize) -> u32 {
+@@ -80,7 +80,7 @@ pub unsafe extern "C" fn load_map(ptr: *mut u8, len: usize) -> u32 {
  
  /// Like `load_map`, but only builds the simulation (collision, triggers, entities): no render mesh, pakfile or
  /// materials. Used by the server-side verifier to keep memory within Worker limits. Same return convention.
@@ -460,8 +460,8 @@ index 043aa2c..74ef7da 100644
  pub unsafe extern "C" fn load_map_physics(ptr: *mut u8, len: usize) -> u32 {
      let bytes = unsafe { Vec::from_raw_parts(ptr, len, len) };
      with(|c| {
-@@ -113,23 +113,23 @@ pub unsafe extern "C" fn load_map_physics(ptr: *mut u8, len: usize) -> u32 {
-     })
+@@ -125,23 +125,23 @@ fn take_pakfile(bsp: playsrc_bsp::Bsp) -> Vec<u8> {
+     file
  }
  
 -#[unsafe(no_mangle)]
@@ -488,7 +488,7 @@ index 043aa2c..74ef7da 100644
          pub extern "C" fn $len() -> usize {
              with(|c| c.mesh.as_ref().map_or(0, |m| m.$field.len()))
          }
-@@ -142,7 +142,7 @@ mesh_buf!(mesh_sky_vertices_ptr, mesh_sky_vertices_len, sky_vertices, f32);
+@@ -154,7 +154,7 @@ mesh_buf!(mesh_sky_vertices_ptr, mesh_sky_vertices_len, sky_vertices, f32);
  mesh_buf!(mesh_sky_indices_ptr, mesh_sky_indices_len, sky_indices, u32);
  
  /// Sky face groups as u32 triples in the scratch buffer: model, first_index, index_count (into `mesh_sky_indices`).
@@ -497,7 +497,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn mesh_sky_groups() -> usize {
      with(|c| {
          c.scratch_u32.clear();
-@@ -155,7 +155,7 @@ pub extern "C" fn mesh_sky_groups() -> usize {
+@@ -167,7 +167,7 @@ pub extern "C" fn mesh_sky_groups() -> usize {
  
  /// Per group (parallel to `mesh_groups`), 1 if it's in the 3D skybox set (drawn by the skybox pass, not the main
  /// view; see `sky_camera`), into scratch_u32.
@@ -506,7 +506,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn mesh_group_sky3d() -> usize {
      with(|c| {
          c.scratch_u32.clear();
-@@ -169,7 +169,7 @@ pub extern "C" fn mesh_group_sky3d() -> usize {
+@@ -181,7 +181,7 @@ pub extern "C" fn mesh_group_sky3d() -> usize {
  /// The 3D skybox's `sky_camera` into scratch_f32 (`skybox.rs`); empty if the map has no usable 3D skybox:
  /// [origin x, y, z, scale, area, fog enable, fog blend, fogcolor r, g, b, fogcolor2 r, g, b (0..255),
  ///  fog dir x, y, z, fog start, fog end, fog max density].
@@ -515,7 +515,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn sky_camera() -> usize {
      with(|c| {
          c.scratch_f32.clear();
-@@ -187,7 +187,7 @@ pub extern "C" fn sky_camera() -> usize {
+@@ -199,7 +199,7 @@ pub extern "C" fn sky_camera() -> usize {
  }
  
  /// Groups as u32 quads: model, material, first_index, index_count.
@@ -524,7 +524,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn mesh_groups() -> usize {
      with(|c| {
          c.scratch_u32.clear();
-@@ -200,23 +200,23 @@ pub extern "C" fn mesh_groups() -> usize {
+@@ -212,23 +212,23 @@ pub extern "C" fn mesh_groups() -> usize {
      })
  }
  
@@ -552,7 +552,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn mesh_materials() -> usize {
      with(|c| {
          c.scratch_str.clear();
-@@ -230,7 +230,7 @@ pub extern "C" fn mesh_materials() -> usize {
+@@ -242,7 +242,7 @@ pub extern "C" fn mesh_materials() -> usize {
  }
  
  /// Raw entity lump as `classname\tkey=value\t...` lines.
@@ -561,7 +561,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn entities_text() -> usize {
      with(|c| {
          c.scratch_str.clear();
-@@ -245,19 +245,19 @@ pub extern "C" fn entities_text() -> usize {
+@@ -257,19 +257,19 @@ pub extern "C" fn entities_text() -> usize {
      })
  }
  
@@ -584,7 +584,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn material_info() -> usize {
      with(|c| {
          c.scratch_str.clear();
-@@ -272,14 +272,14 @@ pub extern "C" fn material_info() -> usize {
+@@ -284,14 +284,14 @@ pub extern "C" fn material_info() -> usize {
      })
  }
  
@@ -601,7 +601,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn texture_payload(index: usize, allow_s3tc: u32, need_alpha: u32) -> usize {
      with(|c| {
          c.scratch_u32.clear();
-@@ -307,13 +307,13 @@ pub extern "C" fn texture_payload(index: usize, allow_s3tc: u32, need_alpha: u32
+@@ -319,13 +319,13 @@ pub extern "C" fn texture_payload(index: usize, allow_s3tc: u32, need_alpha: u32
      })
  }
  
@@ -617,7 +617,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn lightmap_size() -> usize {
      with(|c| {
          c.scratch_u32.clear();
-@@ -324,12 +324,12 @@ pub extern "C" fn lightmap_size() -> usize {
+@@ -336,12 +336,12 @@ pub extern "C" fn lightmap_size() -> usize {
      })
  }
  
@@ -632,7 +632,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn set_settings(tick_interval: f32, air_accelerate: f32, accelerate: f32, friction: f32, stop_speed: f32, gravity: f32, max_speed: f32, autohop: u32) {
      with(|c| {
          if let Some(g) = c.game.as_mut() {
-@@ -341,7 +341,7 @@ pub extern "C" fn set_settings(tick_interval: f32, air_accelerate: f32, accelera
+@@ -353,7 +353,7 @@ pub extern "C" fn set_settings(tick_interval: f32, air_accelerate: f32, accelera
  }
  
  /// Enable CS:S stamina independently of the legacy settings ABI.
@@ -641,7 +641,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn set_stamina(enabled: u32) {
      with(|c| {
          if let Some(g) = c.game.as_mut() {
-@@ -363,7 +363,7 @@ pub extern "C" fn set_air_jump(enabled: u32) {
+@@ -375,7 +375,7 @@ pub extern "C" fn set_air_jump(enabled: u32) {
  /// Selects the physics version (`game::PHYSICS_V1`, `PHYSICS_V2`, ...; a loaded map starts at v1). Call after
  /// `load_map*` like `set_settings`; kept across `set_settings` and `reset`. Returns 1 if this build knows the version,
  /// else 0 (nothing changes). Clients feature-detect the export (builds without it are v1 only).
@@ -650,7 +650,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn set_physics_version(version: u32) -> u32 {
      if crate::game::physics_fixes(version).is_none() {
          return 0;
-@@ -376,7 +376,7 @@ pub extern "C" fn set_physics_version(version: u32) -> u32 {
+@@ -388,7 +388,7 @@ pub extern "C" fn set_physics_version(version: u32) -> u32 {
      1
  }
  
@@ -659,7 +659,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn reset() {
      with(|c| {
          if let Some(g) = c.game.as_mut() {
-@@ -386,7 +386,7 @@ pub extern "C" fn reset() {
+@@ -398,7 +398,7 @@ pub extern "C" fn reset() {
  }
  
  /// Advances one tick. Returns event bits, or u32::MAX on error.
@@ -668,7 +668,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn step(forward: f32, side: f32, yaw: f32, pitch: f32, buttons: u32) -> u32 {
      with(|c| {
          let Some(g) = c.game.as_mut() else { return u32::MAX };
-@@ -412,7 +412,7 @@ pub extern "C" fn step(forward: f32, side: f32, yaw: f32, pitch: f32, buttons: u
+@@ -424,7 +424,7 @@ pub extern "C" fn step(forward: f32, side: f32, yaw: f32, pitch: f32, buttons: u
  ///  v24 flight landing: where this tick's landing put the player x/y/z, crouched, before the normal step
  ///  (`Game::flight_landing`, EVENT_FLIGHT_LANDED; NaN position on every other tick)]
  /// (movement mode: playsrc `Mode` as a number; 6 = ladder. Style key filters exempt ladders, like bhoptimer.)
@@ -677,7 +677,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn player_state() -> usize {
      with(|c| {
          c.scratch_f32.clear();
-@@ -455,7 +455,7 @@ pub extern "C" fn player_state() -> usize {
+@@ -467,7 +467,7 @@ pub extern "C" fn player_state() -> usize {
  }
  
  /// Brush entity transforms into scratch_f32 as [model, x, y, z, pitch, yaw, roll] (7 floats each).
@@ -686,7 +686,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn brush_origins() -> usize {
      with(|c| {
          c.scratch_f32.clear();
-@@ -469,7 +469,7 @@ pub extern "C" fn brush_origins() -> usize {
+@@ -481,7 +481,7 @@ pub extern "C" fn brush_origins() -> usize {
  }
  
  /// Moving entity prop transforms (prop_door_rotating) into scratch_f32 as [entity, x, y, z, pitch, yaw, roll].
@@ -695,7 +695,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn prop_transforms() -> usize {
      with(|c| {
          c.scratch_f32.clear();
-@@ -497,19 +497,19 @@ pub extern "C" fn entity_instances() -> usize {
+@@ -509,19 +509,19 @@ pub extern "C" fn entity_instances() -> usize {
  }
  
  /// Factor the lightmap atlas was scaled by before sRGB encoding (multiply by its inverse after sampling).
@@ -718,7 +718,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn set_velocity(x: f32, y: f32, z: f32) {
      with(|c| {
          if let Some(g) = c.game.as_mut() {
-@@ -523,7 +523,7 @@ pub extern "C" fn set_velocity(x: f32, y: f32, z: f32) {
+@@ -535,7 +535,7 @@ pub extern "C" fn set_velocity(x: f32, y: f32, z: f32) {
  
  /// Brush entity render/collision state into scratch_f32 as [model, visible, solid] triples
  /// (killed/disabled func_brush, broken func_breakable, toggled func_wall_toggle, ...).
@@ -727,7 +727,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn brush_states() -> usize {
      with(|c| {
          c.scratch_f32.clear();
-@@ -537,7 +537,7 @@ pub extern "C" fn brush_states() -> usize {
+@@ -549,7 +549,7 @@ pub extern "C" fn brush_states() -> usize {
  }
  
  /// Presentation entity states [entity index, enabled], restored with simulation snapshots.
@@ -736,7 +736,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn effect_states() -> usize {
      with(|c| {
          c.scratch_f32.clear();
-@@ -553,7 +553,7 @@ pub extern "C" fn effect_states() -> usize {
+@@ -565,7 +565,7 @@ pub extern "C" fn effect_states() -> usize {
  /// Server rules: bhop_block_fix (0 = stock sinking doors, 1 = block fix), grace seconds before a
  /// standing player is sent through the block's teleport, teleport_keeps_velocity (Source = 1).
  /// Resets the map.
@@ -745,7 +745,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn set_rules(bhop_block_fix: u32, bhop_block_grace: f32, teleport_keeps_velocity: u32) {
      use crate::game::{BhopBlockMode, Rules};
      with(|c| {
-@@ -569,7 +569,7 @@ pub extern "C" fn set_rules(bhop_block_fix: u32, bhop_block_grace: f32, teleport
+@@ -581,7 +581,7 @@ pub extern "C" fn set_rules(bhop_block_fix: u32, bhop_block_grace: f32, teleport
  }
  
  /// Player extras into scratch_f32: [health, gravity_scale, speed_scale]; name via scratch_str.
@@ -754,7 +754,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn player_extras() -> usize {
      with(|c| {
          c.scratch_f32.clear();
-@@ -596,7 +596,7 @@ mod studio_exports;
+@@ -608,7 +608,7 @@ mod studio_exports;
  /// Restart point (start-zone restart): respawns the player at (x, y, z) feet facing `yaw` with zero
  /// velocity, settled onto the floor below; deaths respawn there until the next `reset`. Call right
  /// after `reset` (tick 0); replays store it in their header and re-apply it after reset.
@@ -763,7 +763,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn set_position(x: f32, y: f32, z: f32, yaw: f32) {
      with(|c| {
          if let Some(g) = c.game.as_mut() {
-@@ -608,7 +608,7 @@ pub extern "C" fn set_position(x: f32, y: f32, z: f32, yaw: f32) {
+@@ -620,7 +620,7 @@ pub extern "C" fn set_position(x: f32, y: f32, z: f32, yaw: f32) {
  /// Names the player gets at the restart point (call after `set_position`): `name_len` bytes of targetname then
  /// `class_len` bytes of classname (UTF-8; empty classname = "player") at `ptr` (from `alloc`; takes ownership).
  /// See `Game::set_restart_names`.
@@ -772,7 +772,7 @@ index 043aa2c..74ef7da 100644
  pub unsafe extern "C" fn set_restart_names(ptr: *mut u8, name_len: usize, class_len: usize) {
      let bytes = unsafe { Vec::from_raw_parts(ptr, name_len + class_len, name_len + class_len) };
      let name = String::from_utf8_lossy(&bytes[..name_len]);
-@@ -621,7 +621,7 @@ pub unsafe extern "C" fn set_restart_names(ptr: *mut u8, name_len: usize, class_
+@@ -633,7 +633,7 @@ pub unsafe extern "C" fn set_restart_names(ptr: *mut u8, name_len: usize, class_
  }
  
  /// Restart point since the last reset into scratch_f32: [] if none, else [x, y, z, yaw] (settled).
@@ -781,7 +781,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn restart_point() -> usize {
      with(|c| {
          c.scratch_f32.clear();
-@@ -636,7 +636,7 @@ pub extern "C" fn restart_point() -> usize {
+@@ -648,7 +648,7 @@ pub extern "C" fn restart_point() -> usize {
  /// bit0 downhill landing fix, bit1 uphill landing fix, bit2 rampbug fix, bit3 telehop fix,
  /// bit4 DISABLE per-material surface properties. Resets the map. Physics v17 runs RNGFix's versions of the downhill,
  /// uphill and telehop fixes itself (bit3 is ignored there; bit1's slide-stop variant stays available on top).
@@ -790,7 +790,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn set_movement_rules(flags: u32) {
      with(|c| {
          if let Some(g) = c.game.as_mut() {
-@@ -656,7 +656,7 @@ pub extern "C" fn set_movement_rules(flags: u32) {
+@@ -668,7 +668,7 @@ pub extern "C" fn set_movement_rules(flags: u32) {
  /// Static/dynamic prop collision hulls as a triangle soup (9 floats per triangle, world space) into
  /// scratch_f32. Props collide but their models are not rendered by the client; draw these so players
  /// can see what they hit.
@@ -799,7 +799,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn prop_collision_mesh() -> usize {
      with(|c| {
          c.scratch_f32.clear();
-@@ -670,7 +670,7 @@ pub extern "C" fn prop_collision_mesh() -> usize {
+@@ -682,7 +682,7 @@ pub extern "C" fn prop_collision_mesh() -> usize {
  // ---- physics content (prop collision models; see Game::physics_files) ----
  
  /// Collision files (`.phy` / `.mdl`) the loaded map's props need, newline-separated in scratch_str.
@@ -808,7 +808,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn physics_files() -> usize {
      with(|c| {
          c.scratch_str = c.game.as_ref().map(|g| g.physics_files().join("\n")).unwrap_or_default();
-@@ -679,7 +679,7 @@ pub extern "C" fn physics_files() -> usize {
+@@ -691,7 +691,7 @@ pub extern "C" fn physics_files() -> usize {
  }
  
  /// Prop models still without collision (their files weren't available), newline-separated in scratch_str.
@@ -817,7 +817,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn physics_missing() -> usize {
      with(|c| {
          c.scratch_str = c.game.as_ref().map(|g| g.missing_prop_models().join("\n")).unwrap_or_default();
-@@ -689,7 +689,7 @@ pub extern "C" fn physics_missing() -> usize {
+@@ -701,7 +701,7 @@ pub extern "C" fn physics_missing() -> usize {
  
  /// Rebuilds prop collision from the pakfile and the files added since the map loaded (content_add_file /
  /// fetched content), then resets the map. Call after hosted content arrived, before playing.
@@ -826,7 +826,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn physics_reload() {
      with(|c| {
          let Some(g) = c.game.as_mut() else { return };
-@@ -717,7 +717,7 @@ thread_local! {
+@@ -729,7 +729,7 @@ thread_local! {
  
  /// Captures the full simulation state (player, brush entities/doors, triggers, entity I/O queue). Returns a
  /// handle (>= 1) for `state_restore` / `state_free`, or 0 when no map is loaded.
@@ -835,7 +835,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn state_snapshot() -> u32 {
      let Some(s) = with(|c| c.game.as_ref().map(|g| g.save_state())) else { return 0 };
      SNAPSHOTS.with(|v| {
-@@ -737,7 +737,7 @@ pub extern "C" fn state_snapshot() -> u32 {
+@@ -749,7 +749,7 @@ pub extern "C" fn state_snapshot() -> u32 {
  
  /// Restores a capture made with `state_snapshot` on the currently loaded map. Returns 1 on success, 0 for an
  /// unknown handle or no map. Stepping afterwards is bit-identical to the run the capture was taken from.
@@ -844,7 +844,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn state_restore(handle: u32) -> u32 {
      SNAPSHOTS.with(|v| {
          let v = v.borrow();
-@@ -753,7 +753,7 @@ pub extern "C" fn state_restore(handle: u32) -> u32 {
+@@ -765,7 +765,7 @@ pub extern "C" fn state_restore(handle: u32) -> u32 {
  }
  
  /// Frees a capture (0 / unknown handles are ignored).
@@ -853,7 +853,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn state_free(handle: u32) {
      SNAPSHOTS.with(|v| {
          if let Some(slot) = v.borrow_mut().get_mut((handle as usize).wrapping_sub(1)) {
-@@ -763,7 +763,7 @@ pub extern "C" fn state_free(handle: u32) {
+@@ -775,7 +775,7 @@ pub extern "C" fn state_free(handle: u32) {
  }
  
  /// Approximate memory held by a capture in bytes (0 for unknown handles).
@@ -862,7 +862,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn state_snapshot_bytes(handle: u32) -> usize {
      SNAPSHOTS.with(|v| v.borrow().get((handle as usize).wrapping_sub(1)).and_then(|s| s.as_ref()).map_or(0, |s| s.approx_bytes()))
  }
-@@ -771,7 +771,7 @@ pub extern "C" fn state_snapshot_bytes(handle: u32) -> usize {
+@@ -783,7 +783,7 @@ pub extern "C" fn state_snapshot_bytes(handle: u32) -> usize {
  /// Camera collision: sweeps a cube of half-size `radius` from start to end (Source units) against the world,
  /// props and solid brush entities (MASK_SOLID, player clips ignored). Returns the clear fraction 0..1
  /// (1 = unobstructed); 1 when no map is loaded.
@@ -871,7 +871,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn trace_ray(sx: f32, sy: f32, sz: f32, ex: f32, ey: f32, ez: f32, radius: f32) -> f32 {
      with(|c| c.game.as_ref().map_or(1.0, |g| g.trace_camera([sx, sy, sz], [ex, ey, ez], radius)))
  }
-@@ -779,7 +779,7 @@ pub extern "C" fn trace_ray(sx: f32, sy: f32, sz: f32, ex: f32, ey: f32, ez: f32
+@@ -791,7 +791,7 @@ pub extern "C" fn trace_ray(sx: f32, sy: f32, sz: f32, ex: f32, ey: f32, ez: f32
  /// The player's attack this tick (after a step that returned EVENT_ATTACK) into scratch_f32:
  /// [weapon (WEAPON_* bit), mode (1 primary, 2 secondary), hit (0/1), start x,y,z, end x,y,z, normal x,y,z,
  ///  entity index or -1]; empty when the last step had no attack.
@@ -880,7 +880,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn attack_report() -> usize {
      with(|c| {
          c.scratch_f32.clear();
-@@ -798,7 +798,7 @@ pub extern "C" fn attack_report() -> usize {
+@@ -810,7 +810,7 @@ pub extern "C" fn attack_report() -> usize {
  /// id, primary id, secondary id, has knife, clip, clip size, reload ticks left, burst mode, floor items changed since
  /// the last floor_weapons call (0/1), the USP's silencer on (v7), silencer attach / detach ticks left (v7)]; valid every
  /// tick.
@@ -889,7 +889,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn weapon_report() -> usize {
      with(|c| {
          c.scratch_f32.clear();
-@@ -812,7 +812,7 @@ pub extern "C" fn weapon_report() -> usize {
+@@ -824,7 +824,7 @@ pub extern "C" fn weapon_report() -> usize {
  /// Every weapon_* item of the map into scratch_f32 as [entity, weapon id, flags, x, y, z, pitch, yaw, roll] (9 floats
  /// each, entity order, present or not; flags FLOOR_* = present 1, picked up 2, spawned 4, dropped 8, removed 16, moved 32
  /// since the previous call); research/WEAPONS.md "Floor weapons". No allocation once scratch_f32 has grown.
@@ -898,7 +898,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn floor_weapons() -> usize {
      with(|c| {
          let Ctx { game, scratch_f32: out, .. } = c;
-@@ -832,7 +832,7 @@ pub extern "C" fn floor_weapons() -> usize {
+@@ -844,7 +844,7 @@ pub extern "C" fn floor_weapons() -> usize {
  
  /// Practice noclip tick: the player at (x, y, z) with velocity (vx, vy, vz), no collision or trigger touches, while the
  /// world runs one tick (`Game::practice_noclip_tick`). Returns the event bits (0 with no map).
@@ -907,7 +907,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn practice_noclip_tick(x: f32, y: f32, z: f32, vx: f32, vy: f32, vz: f32) -> u32 {
      with(|c| match c.game.as_mut() {
          Some(g) => {
-@@ -845,7 +845,7 @@ pub extern "C" fn practice_noclip_tick(x: f32, y: f32, z: f32, vx: f32, vy: f32,
+@@ -857,7 +857,7 @@ pub extern "C" fn practice_noclip_tick(x: f32, y: f32, z: f32, vx: f32, vy: f32,
  
  /// Leaves practice noclip at (x, y, z) keeping the velocity, finding free space near it along the view (yaw, pitch)
  /// if the hull is stuck (`Game::practice_noclip_exit`). Returns 1 standing, 2 crouched, 0 stuck or no map.
@@ -916,7 +916,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn practice_noclip_exit(x: f32, y: f32, z: f32, vx: f32, vy: f32, vz: f32, yaw: f32, pitch: f32) -> u32 {
      with(|c| c.game.as_mut().map_or(0, |g| g.practice_noclip_exit([x, y, z], [vx, vy, vz], yaw, pitch)))
  }
-@@ -855,7 +855,7 @@ pub extern "C" fn practice_noclip_exit(x: f32, y: f32, z: f32, vx: f32, vy: f32,
+@@ -867,7 +867,7 @@ pub extern "C" fn practice_noclip_exit(x: f32, y: f32, z: f32, vx: f32, vy: f32,
  /// The volumes the client's trigger and clip overlays draw, into scratch_f32: per volume
  /// [kind (OVERLAY_*), entity (-1: world), model (-1: planes already in world space), flags (OVERLAY_WHEN_HIDDEN),
  ///  plane count, then per plane normal x, y, z, distance]. Needs a full `load_map` (it tells drawn faces apart).
@@ -925,7 +925,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn overlay_volumes() -> usize {
      with(|c| {
          c.scratch_f32.clear();
-@@ -873,7 +873,7 @@ pub extern "C" fn overlay_volumes() -> usize {
+@@ -885,7 +885,7 @@ pub extern "C" fn overlay_volumes() -> usize {
  
  /// Every entity's overlay state now (OVERLAY_STATE_* bits, `Game::overlay_state`) into scratch_u32, in entity order.
  /// Works on a physics-only load too (the replay viewer's).
@@ -934,7 +934,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn overlay_states() -> usize {
      with(|c| {
          c.scratch_u32.clear();
-@@ -999,15 +999,15 @@ pub extern "C" fn edge_observed() -> u32 {
+@@ -1011,15 +1011,15 @@ pub extern "C" fn edge_observed() -> u32 {
  }
  
  // Optional observational ABI v2. Does not change commands, snapshots or ranked timing.
@@ -953,7 +953,7 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn timing_path() -> usize {
      with(|c| {
          c.timing_f64.clear();
-@@ -1025,9 +1025,9 @@ pub extern "C" fn timing_path() -> usize {
+@@ -1037,9 +1037,9 @@ pub extern "C" fn timing_path() -> usize {
          c.timing_f64.len()
      })
  }
@@ -965,8 +965,8 @@ index 043aa2c..74ef7da 100644
  pub extern "C" fn timing_path_reason() -> usize {
      with(|c| {
          c.scratch_str = c.game.as_ref().and_then(|g| g.timing_path.as_ref())
-@@ -1035,3 +1035,7 @@ pub extern "C" fn timing_path_reason() -> usize {
-         c.scratch_str.len()
+@@ -1176,3 +1176,7 @@ pub extern "C" fn dressing_glow_visibility(x: f32, y: f32, z: f32, first: usize,
+         c.scratch_f32.len()
      })
  }
 +// The opt-in native adapter owns a thread per session; canonical WASM exports stay unchanged.
@@ -974,7 +974,7 @@ index 043aa2c..74ef7da 100644
 +#[path = "../../native-web/core.rs"]
 +pub mod native_web;
 diff --git a/crates/core/src/wasm_content.rs b/crates/core/src/wasm_content.rs
-index d1110a6..8062510 100644
+index 3d32b46..df66d0e 100644
 --- a/crates/core/src/wasm_content.rs
 +++ b/crates/core/src/wasm_content.rs
 @@ -43,7 +43,7 @@ unsafe fn owned_string(ptr: *mut u8, len: usize) -> String {
@@ -1145,7 +1145,7 @@ index d1110a6..8062510 100644
 +#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
  pub unsafe extern "C" fn props_load(ptr: *mut u8, len: usize) -> usize {
      let bytes = unsafe { owned(ptr, len) };
-     let bsp = crate::parse_bsp(&bytes).ok();
+     let bsp = crate::parse_bsp_owned(bytes).ok();
 @@ -371,7 +371,7 @@ pub unsafe extern "C" fn props_load(ptr: *mut u8, len: usize) -> usize {
  
  /// Builds the prop mesh from the loaded props and the current VFS. Material names go to scratch_str
@@ -1191,7 +1191,7 @@ index d1110a6..8062510 100644
  pub extern "C" fn props_group_sky3d() -> usize {
      with(|c| {
          PROPS.with(|p| {
-@@ -440,23 +440,45 @@ pub extern "C" fn props_group_sky3d() -> usize {
+@@ -440,12 +440,12 @@ pub extern "C" fn props_group_sky3d() -> usize {
      })
  }
  
@@ -1206,6 +1206,8 @@ index d1110a6..8062510 100644
  pub extern "C" fn props_indices_ptr() -> *const u32 {
      PROPS.with(|p| p.borrow().1.indices.as_ptr())
  }
+@@ -476,12 +476,12 @@ pub unsafe extern "C" fn props_lighting(out: *mut u8, len: usize) -> usize {
+ }
  
  /// Per mesh vertex, the displacement blend alpha (0 = `$basetexture`, 1 = `$basetexture2`).
 -#[unsafe(no_mangle)]
@@ -1219,7 +1221,10 @@ index d1110a6..8062510 100644
  pub extern "C" fn mesh_blend_len() -> usize {
      with(|c| c.mesh.as_ref().map_or(0, |m| m.blend.len()))
  }
-+
+@@ -500,4 +500,24 @@ pub extern "C" fn material_selfillum() -> usize {
+         }
+         c.scratch_f32.len()
+     })
 +#[cfg(all(feature = "native-web", not(target_arch = "wasm32")))]
 +pub(super) fn native_prop_vertices() -> Vec<f32> {
 +    PROPS.with(|p| p.borrow().1.vertices.clone())
@@ -1240,7 +1245,7 @@ index d1110a6..8062510 100644
 +pub(super) fn native_clear_all() {
 +    native_clear_map();
 +    CONTENT.with(|c| *c.borrow_mut() = Content::default());
-+}
+ }
 diff --git a/crates/core/src/wasm_studio.rs b/crates/core/src/wasm_studio.rs
 index e019b6f..dfc869b 100644
 --- a/crates/core/src/wasm_studio.rs

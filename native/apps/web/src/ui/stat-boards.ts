@@ -88,7 +88,7 @@ export function openStatBoardDialog(start: StatBoardId): void {
         you: (data, onPage) => (data?.me && !onPage ? h("span", null, "You're ", h("b", null, `#${data.me.rank}`), ` with ${boardOf(cur).unit(data.me)}`) : null),
         meta: (data) => h("span", null, h("b", null, n(data.total)), ` ${data.total === 1 ? "player" : "players"}`),
         empty: () => h("div.rb-state.empty", null, h("strong", null, "Nobody here yet")),
-        error: () => ({ cls: "error", title: "Couldn’t load the leaderboard", text: "Try again in a moment." }),
+        what: "the leaderboard",
         idOf: (e) => e.player.id,
         rankOf: (e) => e.rank,
         nameOf: (e) => e.player.name,

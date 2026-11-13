@@ -187,7 +187,7 @@ body.hud-editing .fdock, body.hud-editing #music-now, body.hud-editing #audio-bt
 #hud.editing .hud-el { pointer-events: auto; cursor: move; touch-action: none; outline: 1px dashed rgba(255, 255, 255, 0.45); outline-offset: 0.25rem; min-width: 1.2rem; min-height: 0.8rem; user-select: none; }
 #hud.editing .hud-el:hover { outline-color: rgba(255, 255, 255, 0.85); }
 #hud.editing .hud-el.sel { outline: 2px solid var(--accent); }
-/* A switched-off element stays out of the way until you pick it (its chip in the toolbar, or Tab). */
+/* A switched-off element stays out of the way until you pick it (its row in the element list, or Tab). */
 #hud.editing .hud-el.off.sel { display: block; opacity: 0.45; }
 #hud.editing .hud-el::before { content: attr(data-label); position: absolute; left: -0.25rem; bottom: calc(100% + 0.35rem); font: 600 11px/1.3 var(--font); letter-spacing: 0.02em; color: #fff; background: rgba(0, 0, 0, 0.72); padding: 1px 6px; border-radius: 3px; text-shadow: none; pointer-events: none; opacity: 0; }
 #hud.editing .hud-el:hover::before, #hud.editing .hud-el.sel::before { opacity: 1; }
@@ -200,23 +200,36 @@ body.hud-editing .fdock, body.hud-editing #music-now, body.hud-editing #audio-bt
 #hud .hud-guide.h { top: 50%; left: 0; right: 0; height: 1px; }
 #hud .hud-guide.show { display: block; }
 
-#hud-edit-bar { position: fixed; z-index: 60; top: 0.8rem; left: 50%; transform: translateX(-50%); width: min(60rem, 94vw); box-sizing: border-box; display: flex; flex-direction: column; gap: 0.45rem; padding: 0.6rem 0.8rem; font-size: 0.8rem; background: var(--ink-1); border: 1px solid var(--line-2); border-radius: var(--radius); box-shadow: var(--shadow); }
-#hud-edit-bar .he-head { display: flex; align-items: center; gap: 0.8rem; }
-#hud-edit-bar .he-head b { font-size: 0.95rem; }
-#hud-edit-bar .he-hint { flex: 1; color: var(--dim); font-size: 0.74rem; }
-#hud-edit-bar .he-chips { display: flex; flex-wrap: wrap; gap: 0.3rem; }
-#hud-edit-bar .he-chip { cursor: pointer; font-size: 0.74rem; padding: 0.2rem 0.55rem; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--faint); text-decoration: line-through; }
-#hud-edit-bar .he-chip.on { color: var(--text); background: var(--raise); text-decoration: none; }
-#hud-edit-bar .he-chip.sel { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
-#hud-edit-bar .he-info { color: var(--dim); font-variant-numeric: tabular-nums; min-height: 1.2em; }
-#hud-edit-bar .he-row { display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; }
-#hud-edit-bar .he-label { color: var(--faint); font-size: 0.72rem; width: 4.2rem; }
-#hud-edit-bar .he-presets { display: flex; gap: 0.3rem; }
-#hud-edit-bar .he-btn { padding: 0.3em 0.7em; font-size: 0.78rem; }
-#hud-edit-bar .he-btn.on { border-color: var(--accent); color: var(--accent); }
-#hud-edit-bar .he-snap { display: inline-flex; align-items: center; gap: 0.3rem; margin-left: auto; color: var(--dim); }
-#hud-edit-bar .he-io { flex: 1; min-width: 12rem; padding: 0.3rem 0.5rem; border-radius: 0.35rem; border: 1px solid var(--line-2); background: rgba(0, 0, 0, 0.3); font-family: var(--mono); font-size: 0.74rem; }
-#hud-edit-bar .he-msg { color: var(--gain); font-size: 0.74rem; }
+/* The editor's controls (hud/editor.ts): a slim bar, so the HUD it edits stays in view. The element list and the rest
+   are panels of Settings rows (ui/settings.css .quick-set) that drop from the bar when asked for. */
+#hud-edit-bar { position: fixed; z-index: 60; top: 0.8rem; left: 50%; transform: translateX(-50%); width: max-content; max-width: 94vw; box-sizing: border-box; display: flex; flex-direction: column; gap: 0.35rem; padding: 0.5rem 0.6rem; background: var(--panel-solid); border-radius: var(--radius); box-shadow: var(--shadow); }
+#hud-edit-bar.bottom { top: auto; bottom: 0.8rem; }
+#hud-edit-bar .he-main { display: flex; align-items: center; flex-wrap: wrap; gap: 0.4rem; }
+#hud-edit-bar .he-done { margin-left: var(--sp-3); }
+#hud-edit-bar .he-hint { margin: 0; padding: 0 0.2rem; max-width: 44rem; font-family: var(--font-text); font-size: var(--fs-xs); line-height: 1.3; color: var(--dim); }
+#hud-edit-bar .btn[aria-expanded="true"] { background: var(--raise-2); border-color: var(--line-2); }
+#hud-edit-bar .btn[aria-expanded] svg { transform: rotate(90deg); transition: transform var(--t-fast); }
+#hud-edit-bar .btn[aria-expanded="true"] svg { transform: rotate(-90deg); }
+#hud-edit-bar .he-panel { position: absolute; top: calc(100% + 0.4rem); left: 0; box-sizing: border-box; width: 17rem; max-height: calc(100vh - 100% - 2.4rem); overflow: hidden auto; scrollbar-width: thin; display: flex; flex-direction: column; gap: 2px; padding: 0.4rem; background: var(--panel-solid); border-radius: var(--radius); box-shadow: var(--shadow); }
+#hud-edit-bar .he-panel[hidden] { display: none; }
+#hud-edit-bar.bottom .he-panel { top: auto; bottom: calc(100% + 0.4rem); }
+#hud-edit-bar .he-more { left: auto; right: 0; width: 26rem; max-width: 94vw; }
+#hud-edit-bar .he-more .set-name { white-space: nowrap; }
+/* The element list: two columns, read down the first and then the second, so every piece shows without scrolling at
+   1280×720 and the list stays in the upper half, off the speed and timer. One column where two don't fit. */
+#hud-edit-bar .he-list { display: grid; grid-auto-flow: column; grid-template-columns: 1fr 1fr; grid-template-rows: repeat(var(--he-rows, 13), auto); gap: 2px 0.4rem; width: 34rem; max-width: 94vw; }
+#hud-edit-bar .he-list .set-row { min-height: 2rem; padding-top: 0.1rem; padding-bottom: 0.1rem; }
+@media (max-width: 36rem) { #hud-edit-bar .he-list { display: flex; width: 17rem; } }
+#hud-edit-bar .he-list .set-row.sel { background: var(--raise-2); }
+#hud-edit-bar .he-list .set-row.sel::before { content: ""; position: absolute; left: 0; top: 18%; bottom: 18%; width: 3px; border-radius: 2px; background: var(--accent); }
+#hud-edit-bar .he-name { align-self: stretch; padding: 0; border: 0; background: none; color: var(--text); font-size: var(--fs-sm); font-weight: 560; text-align: left; cursor: pointer; }
+#hud-edit-bar .he-name:focus-visible { outline: none; text-decoration: underline; text-underline-offset: 0.2em; }
+#hud-edit-bar .he-list .set-row:has(.switch:not(:checked)) .he-name { color: var(--faint); }
+#hud-edit-bar .he-more .share-row { justify-content: flex-end; }
+#hud-edit-bar .he-more .share-code { width: 8rem; }
+#hud-edit-bar .he-more .keys-table { margin-top: 0.3rem; }
+#hud-edit-bar .he-more .keys-table th { padding-left: 0.85rem; }
+#hud-edit-bar .he-more .keys-table td { padding-right: 0.55rem; text-align: right; font-size: var(--fs-sm); color: var(--text); }
 
 /* --- settings panel bits (HUD tab) --- */
 .set-sub { margin: 1.3rem 0 0.2rem; font-size: var(--fs-xs); font-weight: 650; color: var(--dim); }
@@ -225,4 +238,4 @@ body.hud-editing .fdock, body.hud-editing #music-now, body.hud-editing #audio-bt
 .share-row .share-code { width: 13rem; text-align: left; font-family: var(--mono); font-size: 0.78rem; }
 .share-msg:empty { display: none; }
 .btn.on { border-color: var(--accent); color: var(--accent); }
-#hud-edit-bar.bottom { top: auto; bottom: 0.8rem; }
+

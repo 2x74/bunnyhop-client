@@ -47,6 +47,14 @@ vec3 nativeEncode(vec3 c) {
   c = max(c, vec3(0.0));
   return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c));
 }
+// three.js colour-space functions the website's depth fog calls (depth-fog.ts). Native programs write sRGB, so the
+// fog's output test sees an encoded target and mixes in sRGB, as the website does on screen.
+vec4 linearToOutputTexel(vec4 c) { return vec4(nativeEncode(c.rgb), c.a); }
+vec4 sRGBTransferOETF(vec4 c) { return vec4(nativeEncode(c.rgb), c.a); }
+vec4 sRGBTransferEOTF(vec4 c) {
+  vec3 low = c.rgb * 0.0773993808, high = pow(c.rgb * 0.9478672986 + vec3(0.0521327014), vec3(2.4));
+  return vec4(mix(low, high, vec3(greaterThan(c.rgb, vec3(0.04045)))), c.a);
+}
 `;
 
 const COMMON = `

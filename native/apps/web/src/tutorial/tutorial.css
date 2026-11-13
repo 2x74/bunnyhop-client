@@ -2,8 +2,9 @@
    the HUD's own type (shadowed text over the world, no panels). Lesson titles and signs are painted in the map. */
 
 body.menu-open #tut-prompt, body.menu-open #tut-guide { visibility: hidden; }
-/* Lessons 1-3 are untimed practice (mode.ts): no run timer. The final course is a timed run and shows it. */
-body.tutorial-practice #hud .hud-timer { visibility: hidden; }
+/* Lessons 1-3 are untimed practice (mode.ts): no run timer, and none of a run's readouts (split, jumps / strafes / sync,
+   stage) beside the lesson's one line. The speed stays. The final course is a timed run and shows them all. */
+body.tutorial-practice #hud :is(.hud-timer, .hud-split, .hud-stats, .hud-stage) { visibility: hidden; }
 /* The final course's finish opens on the title line alone; the end card comes in after it (mode.ts TITLE_MS). */
 body.tutorial-title #hud-endcard { visibility: hidden; }
 
@@ -21,7 +22,8 @@ body.tutorial-title #hud-endcard { visibility: hidden; }
 .tp-line { min-height: 1.35em; font-size: 1.15em; font-weight: 650; line-height: 1.35; }
 /* A nudge: still white for contrast, marked with the accent underline. */
 .tp-line.nudge { text-decoration: underline 0.12em var(--accent); text-underline-offset: 0.3em; text-decoration-skip-ink: none; }
-.tp-hint { min-height: 1.5em; font-size: 0.8em; color: rgba(255, 255, 255, 0.62); }
+/* The HUD's small text weight (style.css .ec-hint), under the prompt's own halo. */
+.tp-hint { min-height: 1.5em; font-size: 0.86em; font-weight: 650; color: rgba(255, 255, 255, 0.9); }
 .tp-hint kbd { text-shadow: none; }
 
 /* Strafe guide: two arcs around the crosshair, one per strafe key. */

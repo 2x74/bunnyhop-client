@@ -25,6 +25,8 @@ import { requestRace, requestRaceAfterReload, type RaceRequest } from "./player/
 import { openReplayViewer } from "./viewer/request";
 import { me, myProfile } from "./ui/account";
 import { profileNotices } from "./ui/unlocks";
+import { openGiftDialog } from "./ui/gifting";
+import { scrollCue } from "./ui/scroll-cue";
 import { mapTier, tierBadge } from "./ui/maps";
 import { clampTier, tierLabel, tierName } from "./tiers";
 import { claimNextPop, onNavigate, requestSaveProgress, routeFromUrl, type NavRequest } from "./ui/nav";
@@ -32,12 +34,12 @@ import { ProfileHistory } from "./ui/profile-history";
 import { profileScreen, type ProfileActions, type ProfileOpen, type ProfileTab } from "./ui/profile";
 import { leaveRanksUrl, ranksScreen } from "./ui/ranks";
 import { gauntletResult, gauntletScreen, gauntletsScreen, leaveGauntletUrl, type GauntletScreens } from "./ui/gauntlets";
-import { STYLE_DEFS, styleForTrack, styleLabel, trackStyleLocked, type StyleId } from "./styles";
+import { STYLE_DEFS, STYLE_LINES, styleForTrack, styleLabel, trackStyleLocked, type StyleId } from "./styles";
 import { chatCommands } from "./chat-commands";
 import { helpPanelGroups } from "./chat-help";
 import { trackName } from "./zones";
-import { roomPanel, serverBrowser } from "./ui/servers";
-import { onRoomPresence, roomPresence } from "./net/presence";
+import { roomHeader, serverBrowser } from "./ui/servers";
+import { onRoomPresence, roomActions, roomPresence } from "./net/presence";
 import { audioCredits, sfx, uiOpen, uiSound } from "./audio";
 import { attractLeave } from "./attract";
 import { initGamepadNav } from "./ui/gamepad";
@@ -460,17 +462,6 @@ function railItem(label: string, fn: (() => void) | null, o: RailOpts = {}): HTM
   );
 }
 
-/** Card-style action (replays and server tabs). */
-function actionCard(label: string, fn: (() => void) | null, o: { sub?: string; hint?: string; icon?: IconName; primary?: boolean } = {}): HTMLButtonElement {
-  return h(
-    `button.action-card${o.primary ? ".primary" : ""}`,
-    { type: "button", disabled: !fn, onclick: fn ?? undefined },
-    o.icon ? h("span.ac-icon", { "aria-hidden": "true" }, icon(o.icon, { size: "1.2rem" })) : null,
-    h("span.ac-text", null, h("b", null, label), o.sub ? h("small", null, o.sub) : null),
-    o.hint ? h("kbd", null, o.hint) : null,
-  );
-}
-
 /** A small trailing chevron for a text link ("All HUD settings ›"), sat on the text's centre line. */
 function chev(): SVGSVGElement {
   const c = icon("chevronRight", { size: "0.95em" });
@@ -478,10 +469,38 @@ function chev(): SVGSVGElement {
   return c;
 }
 
-function loadReplayCard(a: MenuActions): HTMLElement {
+/**
+ * A row of a panel's list (the Replays and Server tabs), in the rail's look: an amber bar and a chevron under the
+ * pointer. A row that can't be used yet (no `fn`) says why in a line of its own; `sub` is a line a usable row keeps.
+ */
+function listRow(label: string, fn: (() => void) | null, o: { why?: string; sub?: string; detail?: string; hint?: string } = {}): HTMLButtonElement {
+  const small = fn ? o.sub : o.why;
+  return h(
+    "button.list-row",
+    { type: "button", disabled: !fn, onclick: fn ?? undefined, "data-item": itemSlug(label) },
+    h("span.lr-text", null, label, small ? h("small", null, small) : null),
+    fn && o.detail ? h("span.lr-detail", null, o.detail) : null,
+    fn && o.hint ? h("kbd", null, o.hint) : null,
+    fn ? icon("chevronRight", { size: "1rem" }) : null,
+  );
+}
+
+/** ↑ / ↓ along a vertical list of buttons (← is left alone: it goes back to the panel's tabs). */
+function upDown(list: HTMLElement): void {
+  list.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+    const items = [...list.querySelectorAll<HTMLElement>("button:not([disabled])")];
+    const i = items.indexOf(document.activeElement as HTMLElement);
+    if (i < 0) return;
+    e.preventDefault();
+    items[Math.max(0, Math.min(items.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)))].focus();
+  });
+}
+
+function loadReplayRow(a: MenuActions): HTMLElement {
   const input = h("input", { type: "file", accept: ".bhr,application/octet-stream", hidden: true, tabindex: "-1" });
   input.addEventListener("change", () => input.files?.[0] && a.onLoadReplay(input.files[0]));
-  const b = actionCard("Load replay file", () => input.click(), { sub: "From a .bhr file", icon: "upload" });
+  const b = listRow("Load replay file", () => input.click());
   b.append(input);
   return b;
 }
@@ -519,15 +538,14 @@ function styleTab(a: MenuActions, track: number): HTMLElement {
   const selected = a.style ?? "autohop";
   const bonuses = a.bonuses ?? [];
   const cycle = bindHint("cycleStyle");
+  const tracks = a.onTrack && bonuses.length ? [0, ...bonuses] : [];
   let styles: HTMLElement | null = null;
   if (a.onStyle && trackStyleLocked(track, a.map)) {
-    styles = h(
-      "div.pp-group",
-      null,
-      h("div.pp-group-head", null, h("span.kicker", null, "Style")),
-      h("div.style-locked", null, `${trackName(track)} · ${styleLabel(styleForTrack(selected as StyleId, track, a.map))}`, h("small.dim", null, " The final course is always Normal style.")),
-    );
+    styles = h("p.style-note", null, `The final course is always ${styleLabel(styleForTrack(selected as StyleId, track, a.map))} style.`);
   } else if (a.onStyle) {
+    // One line under the list, as under Settings: what changing does, or the full rule of the row under the pointer.
+    const rest = `Changing style restarts the run.${cycle ? ` ${cycle} picks the next one in game.` : ""}`;
+    const note = h("p.style-note", null, rest);
     const list = h(
       "div.style-list",
       { role: "radiogroup", "aria-label": "Style" },
@@ -537,76 +555,61 @@ function styleTab(a: MenuActions, track: number): HTMLElement {
         return h(
           `button.style-row${on ? ".on" : ""}`,
           { type: "button", role: "radio", "aria-checked": String(on), tabindex: on ? "0" : "-1", "data-style": d.id, onclick: () => a.onStyle!(d.id) },
-          h("span.sr-short", null, d.short),
-          h("span.sr-text", null, h("b", null, d.name), h("small", null, d.rule)),
-          pb ? h("span.sr-pb", null, h("small", null, "PB"), h("b", null, formatTime(pb.time))) : null,
+          h("b.sr-name", null, d.name),
+          h("span.sr-line", null, STYLE_LINES[d.id]),
+          pb ? h("span.sr-pb", { title: "Your best time" }, formatTime(pb.time)) : null,
         );
       }),
     );
-    list.addEventListener("keydown", (e) => {
-      if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
-      const items = [...list.querySelectorAll<HTMLElement>("button")];
-      const i = items.indexOf(document.activeElement as HTMLElement);
-      if (i < 0) return;
-      e.preventDefault();
-      items[Math.max(0, Math.min(items.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)))].focus();
-    });
-    styles = h(
-      "div.pp-group",
-      null,
-      h("div.pp-group-head", null, h("span.kicker", null, "Style", h("span.pp-note", null, " · changing it restarts the run")), cycle ? h("span.dim.small", null, h("kbd", null, cycle), " cycles in game") : null),
-      list,
-    );
+    const explain = (e: Event) => {
+      const id = e.type === "pointerover" || e.type === "focusin" ? (e.target as HTMLElement).closest<HTMLElement>(".style-row")?.dataset.style : undefined;
+      note.textContent = STYLE_DEFS.find((d) => d.id === id)?.rule ?? rest;
+    };
+    for (const type of ["pointerover", "pointerleave", "focusin", "focusout"]) list.addEventListener(type, explain);
+    upDown(list);
+    styles = h("div.pp-group", null, tracks.length ? h("h3.pp-group-title", null, "Style") : null, list, note);
   }
-  const tracks = a.onTrack && bonuses.length
+  const nextTrack = bindHint("restartBonus");
+  const trackGroup = tracks.length
     ? h(
         "div.pp-group",
         null,
-        h("div.pp-group-head", null, h("span.kicker", null, "Track"), bindHint("restartBonus") ? h("span.dim.small", null, h("kbd", null, bindHint("restartBonus")!), " next track") : null),
+        h("h3.pp-group-title", null, "Track"),
         h(
           "div.track-list",
           { role: "group", "aria-label": "Tracks" },
-          ...[0, ...bonuses].map((t) =>
-            h(
-              `button.track-btn${t === track ? ".on" : ""}`,
-              { type: "button", onclick: resumeAnd(() => a.onTrack!(t)), "aria-pressed": String(t === track) },
-              h("b", null, t ? trackName(t) : "Main"),
-              h("small", null, t === track ? "playing · restart" : styleLabel(styleForTrack(selected as StyleId, t, a.map))),
-            ),
+          ...tracks.map((t) =>
+            h(`button.track-btn${t === track ? ".on" : ""}`, { type: "button", onclick: resumeAnd(() => a.onTrack!(t)), "aria-pressed": String(t === track), title: t === track ? "Restart this track" : undefined }, t ? trackName(t) : "Main"),
           ),
         ),
+        nextTrack ? h("p.style-note", null, `${nextTrack} goes to the next track in game.`) : null,
       )
     : null;
-  return h("div.pp-style", null, styles, tracks);
+  return h("div.pp-style", null, styles, trackGroup);
 }
 
 function replaysTab(a: MenuActions, pb: ReturnType<typeof getPB>): HTMLElement {
   // What the last verified run earned, if it was restarted before the end card's reel finished (hud/reel.ts).
   const reel = lastRunReel();
+  // Share: the last verified run of this session (its /replay/<id> page unfurls with the run's card).
+  const shared = lastVerifiedRun();
+  const list = h(
+    "div.list-rows",
+    null,
+    listRow("Watch PB replay", a.onWatchPB, { why: "No PB on this track yet.", detail: pb ? formatTime(pb.time) : undefined }),
+    listRow("Watch last run", a.onWatchLast ?? null, { why: "Finish a run first.", hint: "V" }),
+    listRow("Export last run", a.onExportLast, { why: "Finish a run first." }),
+    loadReplayRow(a),
+    shared ? listRow("Share your last run", () => void shareWithToast({ url: runUrl(shared), title: `${a.map} · bunnyhop.lol` }, "Replay link copied")) : null,
+  );
+  upDown(list);
   return h(
     "div.pp-replays",
     null,
     reel ? h("section.pp-lastrun", null, h("h3", null, "Last run"), reel) : null,
-    h(
-      "div.card-grid",
-      null,
-      actionCard("Watch PB replay", a.onWatchPB, { sub: pb ? `${formatTime(pb.time)}, ${pb.jumps} jumps` : "No PB on this track yet", icon: "play", primary: !!a.onWatchPB }),
-      actionCard("Watch last run", a.onWatchLast ?? null, { sub: a.onWatchLast ? undefined : "Finish a run first", icon: "restart", hint: a.onWatchLast ? "V" : undefined }),
-      actionCard("Export last run", a.onExportLast, { sub: a.onExportLast ? "As a .bhr file" : "Finish a run first", icon: "download" }),
-      loadReplayCard(a),
-      shareRunCard(a),
-    ),
-    h("p.pp-foot.dim", null, "In the viewer, E exports an MP4."),
+    list,
+    h("p.pp-foot.dim", null, "Press E in the viewer to export a video."),
   );
-}
-
-/** Share the last verified run of this session (its /replay/<id> page unfurls with the run's card). */
-function shareRunCard(a: MenuActions): HTMLElement | null {
-  const id = lastVerifiedRun();
-  if (!id) return null;
-  const card = actionCard("Share your last run", () => void shareWithToast({ url: runUrl(id), title: `${a.map} · bunnyhop.lol` }, "Replay link copied"), { sub: "Copies a link to the verified replay", icon: "share" });
-  card.classList.add("ac-wide");
-  return card;
 }
 
 /**
@@ -670,12 +673,36 @@ function helpTab(inRoom: boolean): HTMLElement {
   );
 }
 
+/**
+ * Server tab (in a room): the room's line of the Play online table, then what you can do here as list rows. A row
+ * shows its key or chat command under the pointer, the way the rail shows its keys.
+ */
 function serverTab(): HTMLElement | null {
-  const room = roomPanel(() => S.hooks?.resume());
-  if (!room) return null;
-  const grid = room.querySelector(".pp-room-actions");
-  grid?.insertBefore(actionCard("Switch server", () => push("servers"), { icon: "swap" }), grid.lastElementChild);
-  return room;
+  const a = roomActions();
+  if (!a) return null;
+  const s = a.summary();
+  // Back in the game first: the numbered menus take the digit keys once the pointer is locked again.
+  const inGame = (fn: () => void) => () => {
+    S.hooks?.resume();
+    setTimeout(fn, 120);
+  };
+  const list = h(
+    "div.list-rows",
+    null,
+    s.lobby ? listRow("Copy invite link", () => a.invite(), { hint: "!invite" }) : null,
+    s.host ? listRow("Change lobby map", inGame(() => a.changeMap()), { hint: "!map" }) : null,
+    listRow("Scoreboard", inGame(() => a.scoreboard()), { hint: "Tab" }),
+    listRow(s.spectating ? "Spectate or respawn" : "Spectate", inGame(() => a.spectate()), { hint: "N" }),
+    listRow("Race a player", inGame(() => a.race()), { hint: "!race" }),
+    listRow("Nominate a map", inGame(() => a.nominate()), { hint: "!nominate" }),
+    listRow("Rock the vote", resumeAnd(() => a.rtv()), { detail: `${s.rtv.count} of ${s.rtv.needed}`, hint: "!rtv" }),
+    listRow("Gift Supporter", () => openGiftDialog({ roomId: s.id })),
+    // (Its own group, a gap above: these two take you out of the room.)
+    listRow("Switch server", () => push("servers")),
+    listRow("Leave server", () => a.leave(), { sub: "You keep playing this map solo." }),
+  );
+  upDown(list);
+  return h("div.pp-room", null, roomHeader(s), list);
 }
 
 function pauseScreen(): HTMLElement {
@@ -717,6 +744,7 @@ function pauseScreen(): HTMLElement {
   tabBar.classList.add("hop-host");
   hopIndicator(tabBar, ".pp-tab", { axis: "x", side: "end", inset: 4, selected: ".on" });
   const panelBody = h("div.pp-body", { id: "pause-panel", role: "tabpanel" });
+  scrollCue(panelBody); // Help and On screen run past the panel on most windows, with nothing to say so
   const show = (t: PauseTab, animate = true) => {
     const changed = t !== S.pauseTab || !panelBody.firstElementChild;
     S.pauseTab = t;
@@ -839,7 +867,7 @@ function pauseScreen(): HTMLElement {
   panelBody.addEventListener("keydown", (e) => {
     if (e.key !== "ArrowLeft" || e.defaultPrevented) return;
     const t = e.target as HTMLElement;
-    if (t instanceof HTMLInputElement || t.closest(".style-seg, .lb-tabrow, .track-list, .card-grid") && !isFirstInRow(t)) return;
+    if (t instanceof HTMLInputElement || t.closest(".style-seg, .lb-tabrow, .track-list") && !isFirstInRow(t)) return;
     e.preventDefault();
     focusTab();
   });
@@ -869,7 +897,7 @@ function pauseScreen(): HTMLElement {
 
 /** Leftmost focusable of a horizontal group (← from there leaves the panel). */
 function isFirstInRow(t: HTMLElement): boolean {
-  const g = t.closest<HTMLElement>(".style-seg, .lb-tabrow, .track-list, .card-grid");
+  const g = t.closest<HTMLElement>(".style-seg, .lb-tabrow, .track-list");
   if (!g) return true;
   const items = [...g.querySelectorAll<HTMLElement>("button:not([disabled])")];
   const left = Math.min(...items.map((x) => x.getBoundingClientRect().left));

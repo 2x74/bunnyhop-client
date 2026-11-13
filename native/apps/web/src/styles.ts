@@ -149,6 +149,26 @@ export const STYLE_DEFS: readonly StyleDef[] = [
 ];
 
 /**
+ * One short sentence or two per style for a list row (the pause menu's Style tab). `rule` stays the full text: that tab
+ * shows it for the row under the pointer, and !help <style> prints it. A style that adds nothing to the Overall rank
+ * (ranking.ts STYLE_WEIGHT 0) ends "Own board only.", the words How points work uses for it.
+ */
+export const STYLE_LINES: Record<StyleId, string> = {
+  autohop: "Hold jump to keep hopping. Every key works.",
+  legit: "Press jump for every hop. No autohop.",
+  scroll: "Scroll every hop, with CS:S run speed and stamina.",
+  wonly: "Only W works in the air.",
+  sideways: "Face sideways and strafe with W and S.",
+  hsw: "Hold W with A or D in the air.",
+  backwards: "Face back the way you came.",
+  adonly: "Strafe with A or D alone. The first one you use is the one you keep.",
+  lowgrav: "Half gravity. Own board only.",
+  segmented: "Save checkpoints and load them mid-run. Own board only.",
+  infinite: "Jump again in the air as often as you like.",
+  autostrafe: "Move the mouse and the game presses A and D for you. Own board only.",
+};
+
+/**
  * Legit Scroll uses shavit_misc_prespeed 2 (block prehops, no speed cap). EZ Scroll keeps its legacy cap. Infinite has
  * no cap either: arriving at the start fast is the style (native-bridge styles.rs has_prespeed_cap).
  */

@@ -1,11 +1,13 @@
-// A board row's stats card: hover a leaderboard row (about a quarter second) or move keyboard focus into it, or press
-// and hold it on a touch screen, and a small card shows what the row doesn't say about the run: when and where it was
+// A board row's stats card: rest the pointer on a leaderboard row (half a second after a real move: a menu that opens
+// under a resting cursor shows nothing) or move keyboard focus into it, or press and hold it on a touch screen, and a
+// small card shows what the row doesn't say about the run: when and where it was
 // played, the client and its frame rate, the mouse, and the player's attempts on the map (GET /runs/:id/stats, apps/api
 // src/run-stats.ts). Rows opt in with data-run (the run id) and data-run-title (the card's heading); bindRunStats on a
 // board's root does the rest. Clicks on the row are untouched (a hold that opened the card eats its own click).
 //
 // One card at a time, in the top layer (a manual popover, so it shows above the board's modal dialog), placed under
-// the row or above it, never off-screen. It never takes the pointer. Cards are fetched on first show and kept per run
+// the row or above it, clear of the columns the row marks .rs-keep (Time and Gap stay readable in the rows it covers),
+// never off-screen. It never takes the pointer. Cards are fetched on first show and kept per run
 // for the page's life; a run without one (old, not public, offline) shows nothing. Rows may carry data-run-points (the
 // board read's points for the record), which replaces the card's slower number.
 
@@ -14,10 +16,13 @@ import { fmtPoints } from "../ranking";
 import { styleDef, styleLabel } from "../styles";
 import { trackName } from "../zones";
 import { h } from "./dom";
+import { pointerMoved, watchPointer } from "./pointer-moved";
 import "./run-stats.css";
 
-/** Hover / focus time before the card shows. */
-const SHOW_MS = 250;
+/** How long the pointer rests on a row before the card shows. */
+const SHOW_MS = 500;
+/** Keyboard focus: at once, bar the rows Tab is only passing through. */
+const FOCUS_MS = 100;
 /** Press-and-hold time on a touch screen. */
 const HOLD_MS = 500;
 /** A hold that moves this far (px) is a scroll, not a hold. */
@@ -169,22 +174,45 @@ function cardEl(): HTMLElement {
   return card;
 }
 
-/** Under the anchor rect, or above it when there's no room below; x near `x`; always inside the viewport. */
-function place(el: HTMLElement, anchor: DOMRect, x: number): void {
+type Span = { left: number; right: number };
+
+/**
+ * The card's left edge for a row whose kept columns span `keep`: as far right as the row's last cell (`tail`, its left
+ * edge) when the card fits right of the kept columns; else beside the row on its left; else left of the kept columns.
+ * No kept columns, or no room anywhere (a phone): centred on `x`, inside the viewport.
+ */
+export function cardLeft(w: number, vw: number, x: number, row: Span, tail: number, keep: Span | null): number {
+  const max = Math.max(EDGE, vw - EDGE - w);
+  if (keep && keep.right + GAP <= max) return Math.max(keep.right + GAP, Math.min(max, tail));
+  if (keep && row.left - GAP - w >= EDGE) return row.left - GAP - w;
+  if (keep && keep.left - GAP - w >= EDGE) return keep.left - GAP - w;
+  return Math.min(Math.max(EDGE, x - w / 2), max);
+}
+
+/**
+ * Under the row, or above it when there's no room below (level with it when the card is wholly beside it); x from
+ * cardLeft; always inside the viewport.
+ */
+function place(el: HTMLElement, row: HTMLElement, x: number): void {
+  const anchor = row.getBoundingClientRect();
   const w = el.offsetWidth;
   const ht = el.offsetHeight;
-  const vw = document.documentElement.clientWidth;
   const vh = document.documentElement.clientHeight;
+  // The cells that are showing (a narrow board hides some), and the span of the ones marked .rs-keep.
+  const cells = [...row.children].map((c) => [c, c.getBoundingClientRect()] as const).filter(([, r]) => r.width);
+  const kept = cells.filter(([c]) => c.classList.contains("rs-keep")).map(([, r]) => r);
+  const keep = kept.length ? { left: Math.min(...kept.map((r) => r.left)), right: Math.max(...kept.map((r) => r.right)) } : null;
+  const left = cardLeft(w, document.documentElement.clientWidth, x, anchor, cells.at(-1)?.[1].left ?? anchor.right, keep);
   const below = anchor.bottom + GAP;
   const above = anchor.top - GAP - ht;
-  const top = below + ht <= vh - EDGE ? below : above >= EDGE ? above : Math.max(EDGE, vh - EDGE - ht);
-  const left = Math.min(Math.max(EDGE, x - w / 2), Math.max(EDGE, vw - EDGE - w));
+  const beside = left + w <= anchor.left || left >= anchor.right;
+  const top = beside ? Math.min(Math.max(EDGE, anchor.top), Math.max(EDGE, vh - EDGE - ht)) : below + ht <= vh - EDGE ? below : above >= EDGE ? above : Math.max(EDGE, vh - EDGE - ht);
   el.style.left = `${Math.round(left)}px`;
   el.style.top = `${Math.round(top)}px`;
 }
 
-/** What's shown or about to be: the row, where to put the card, and a token so a stale load doesn't draw. */
-let current: { row: HTMLElement; x: number; seq: number } | null = null;
+/** What's shown or about to be: the row, where to put the card, when the pointer last moved on the row, and a token so a stale load doesn't draw. */
+let current: { row: HTMLElement; x: number; seq: number; at: number } | null = null;
 let seq = 0;
 let timer: ReturnType<typeof setTimeout> | null = null;
 /** The row whose card was closed with Escape: it stays closed until the pointer leaves the row. */
@@ -208,7 +236,7 @@ function show(row: HTMLElement, x: number): void {
   const title = row.dataset.runTitle ?? "";
   const pts = livePoints(row);
   const my = ++seq;
-  current = { row, x, seq: my };
+  current = { row, x, seq: my, at: 0 };
   const el = cardEl();
   const draw = (nodes: Node[]) => {
     if (current?.seq !== my || !row.isConnected) return;
@@ -216,7 +244,7 @@ function show(row: HTMLElement, x: number): void {
     el.hidden = false;
     if (canPopover && !el.matches(":popover-open")) el.showPopover();
     row.setAttribute("aria-describedby", el.id);
-    place(el, row.getBoundingClientRect(), current.x);
+    place(el, row, current.x);
   };
   let settled = false;
   void load(id).then((s) => {
@@ -231,20 +259,28 @@ function show(row: HTMLElement, x: number): void {
   });
 }
 
+/** Shows the row's card once `ms` have passed since the pointer last moved on it (`current.at`). */
 function schedule(row: HTMLElement, x: number, ms: number): void {
   if (current?.row === row || muted === row) return;
   hideRunStats();
-  current = { row, x, seq: ++seq };
-  timer = setTimeout(() => {
-    timer = null;
-    if (current?.row === row) show(row, current.x);
-  }, ms);
+  current = { row, x, seq: ++seq, at: performance.now() };
+  const wait = (left: number) => {
+    timer = setTimeout(() => {
+      timer = null;
+      if (current?.row !== row) return;
+      const rest = current.at + ms - performance.now();
+      if (rest > 1) wait(rest);
+      else show(row, current.x);
+    }, left);
+  };
+  wait(ms);
 }
 
 let globalBound = false;
 function bindGlobal(): void {
   if (globalBound) return;
   globalBound = true;
+  watchPointer();
   // Escape closes the card first (not the dialog or menu under it).
   window.addEventListener(
     "keydown",
@@ -273,7 +309,7 @@ const rowOf = (t: EventTarget | null): HTMLElement | null => (t instanceof Eleme
 /** Stats cards for the rows under `root` that carry data-run (delegated: rows may be replaced freely). */
 export function bindRunStats(root: HTMLElement): void {
   bindGlobal();
-  root.addEventListener("pointerover", (e) => {
+  const hover = (e: PointerEvent) => {
     if (e.pointerType === "touch") return;
     // A player's name or picture shows their hover card instead (ui/hover-card.ts).
     if (e.target instanceof Element && e.target.closest("[data-pcard]")) {
@@ -281,13 +317,16 @@ export function bindRunStats(root: HTMLElement): void {
       return;
     }
     const row = rowOf(e.target);
-    if (row) schedule(row, e.clientX, SHOW_MS);
-    else if (current) hideRunStats(); // a header, a gap, or the rows were replaced under the pointer
-  });
-  root.addEventListener("pointermove", (e) => {
-    // Until it shows, the card follows the pointer along the row.
-    if (current && timer !== null && current.row === rowOf(e.target)) current.x = e.clientX;
-  });
+    if (!row) {
+      if (current && e.type === "pointerover") hideRunStats(); // a header or a gap
+    } else if (current?.row === row) {
+      // Until it shows, the card follows the pointer along the row and waits for it to rest.
+      if (timer !== null && pointerMoved(e)) Object.assign(current, { x: e.clientX, at: performance.now() });
+    } else if (pointerMoved(e)) schedule(row, e.clientX, SHOW_MS);
+    else if (current) hideRunStats(); // the rows scrolled or were replaced under a resting pointer
+  };
+  root.addEventListener("pointerover", hover);
+  root.addEventListener("pointermove", hover);
   root.addEventListener("pointerout", (e) => {
     if (e.pointerType === "touch") return;
     const row = rowOf(e.target);
@@ -299,7 +338,7 @@ export function bindRunStats(root: HTMLElement): void {
     const row = rowOf(e.target);
     if (!row || !(e.target as Element).matches(":focus-visible")) return;
     const r = (e.target as Element).getBoundingClientRect();
-    schedule(row, r.left + r.width / 2, SHOW_MS);
+    schedule(row, r.left + r.width / 2, FOCUS_MS);
   });
   root.addEventListener("focusout", (e) => {
     const row = rowOf(e.target);

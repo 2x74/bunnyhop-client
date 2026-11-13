@@ -8,6 +8,9 @@ import type { LightingProfileId } from "./profiles";
 export const GRAPHICS_PRESETS = ["source", "classic", "enhanced", "cinematic"] as const;
 export type GraphicsPreset = typeof GRAPHICS_PRESETS[number];
 export interface GraphicsOptions { preset: GraphicsPreset; potato: boolean; waterReflections?: boolean; contactShading?: boolean; atmosphere?: boolean; sunShafts?: boolean; depthOfField?: boolean; focusDistance?: number; bloom?: boolean; mapProfiles?: boolean; ambienceShowcase?: boolean; lightingProfile?: LightingProfileId; skyMode?: "map" | "procedural" | "pack"; skyPackId?: string | null; skyRotation?: number; skyExposure?: number; lightingSource?: "map" | "pack"; directContribution?: number; ambientContribution?: number; clouds?: boolean; cloudQuality?: "low" | "medium" | "high"; cloudCoverage?: number; cloudDensity?: number; materialResponse?: boolean; volumetric?: boolean; spatialAA?: boolean; temporalSamples?: 1 | 2 | 4 | 8; localLights?: boolean; localQuality?: "low" | "medium" | "high"; localBudget?: number; localStrength?: number; dynamicGI?: boolean; tracedGI?: boolean; giQuality?: "low" | "medium"; giStrength?: number; giRange?: number; dynamicShadows?: boolean; shadowQuality?: "low" | "medium" | "high"; shadowDistance?: number; shadowStrength?: number }
+/** "Model lighting": how far the map's light reaches into hands, weapons and bunnies (model-light.ts). */
+export const MODEL_LIGHTING_MODES = ["off", "subtle", "full"] as const;
+export type ModelLighting = typeof MODEL_LIGHTING_MODES[number];
 export function graphicsPreset(value: unknown): GraphicsPreset {
   return GRAPHICS_PRESETS.includes(value as GraphicsPreset) ? value as GraphicsPreset : "source";
 }

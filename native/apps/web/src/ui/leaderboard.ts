@@ -3,7 +3,7 @@ import { withReplayViews } from "./replay-views";
 // over a paged board (ui/board-pager.ts) sized to its panel. The WR stays pinned above every page and your row below
 // it when it's elsewhere; Watch / Race on every row and the rest in its ⋯ (ui/row-menu.ts). Offline / empty / error states included.
 
-import { api, ApiUnavailable, type Leaderboard, type LeaderboardEntry } from "../api";
+import { api, type Leaderboard, type LeaderboardEntry } from "../api";
 import { getPB } from "../pb";
 import { formatTime } from "../timer";
 import { h } from "./dom";
@@ -66,12 +66,13 @@ export function leaderboardPanel(map: string, style: string, opts: BoardOptions 
 
   const localPb = (): Node | null => {
     const pb = getPB(map, boardStyle(), track);
-    return pb ? h("span", null, "Your local PB ", h("b", null, formatTime(pb.time)), ` · ${pb.jumps} jumps · ${pb.sync.toFixed(1)}% sync`) : null;
+    return pb ? h("span", null, "Your local PB ", h("b", null, formatTime(pb.time)), ` · ${pb.jumps} ${pb.jumps === 1 ? "jump" : "jumps"} · ${pb.sync.toFixed(1)}% sync`) : null;
   };
 
   const board = pagedBoard<LeaderboardEntry>({
     base: 1,
     cols: 11,
+    what: "the leaderboard",
     label: `${map} leaderboard`,
     keys: opts.keys ?? "local",
     head: () =>
@@ -99,8 +100,9 @@ export function leaderboardPanel(map: string, style: string, opts: BoardOptions 
         { class: [e.rank <= 3 ? `top${e.rank}` : "", c.mine ? "me" : "", c.found ? "found" : ""].filter(Boolean).join(" ") || null, "data-run": e.runId, "data-run-title": name, "data-run-points": runPointsAttr(e.points) },
         h("td.rb-rank", null, String(e.rank)),
         playerCell(e.player, () => navigate({ screen: "profile", id: e.player.id })),
-        h("td.num.rb-strong", { title: [`${e.ticks.toLocaleString("en-US")} ticks`, physicsNote(e)].filter(Boolean).join(" · ") }, formatTime(e.time)),
-        h("td.num.rb-opt3", null, gap),
+        // .rs-keep: the row's stats card stays clear of these columns (ui/run-stats.ts).
+        h("td.num.rb-strong.rs-keep", { title: [`${e.ticks.toLocaleString("en-US")} ticks`, physicsNote(e)].filter(Boolean).join(" · ") }, formatTime(e.time)),
+        h("td.num.rb-opt3.rs-keep", null, gap),
         h("td.num.dim.rb-opt.lb-minor", null, String(e.jumps)),
         h("td.num.dim.rb-opt.lb-minor", null, e.strafes == null ? "—" : String(e.strafes)),
         h("td.num.dim.rb-opt.lb-perf", { title: e.perf == null ? "Not recorded for this run" : "Perfectly timed measured hops" }, e.perf == null ? "—" : `${e.perf.toFixed(1)}%`),
@@ -135,10 +137,7 @@ export function leaderboardPanel(map: string, style: string, opts: BoardOptions 
       following
         ? h("div.rb-state.empty", null, h("strong", null, "Nobody you follow has a time here"), h("span", null, "Follow players from their profile or a leaderboard row."))
         : h("div.rb-state.empty", null, h("strong", null, "No records yet"), h("span", null, `Finish a ${label()} run to set the first world record.`)),
-    error: (e) =>
-      e instanceof ApiUnavailable
-        ? { cls: "offline", title: "Leaderboards offline", text: "Your runs are saved on this device until the server is back." }
-        : { cls: "error", title: "Couldn't load the leaderboard", text: String((e as Error)?.message ?? e) },
+    unreachable: "The server can't be reached right now. Your runs are saved on this device until it's back.",
     idOf: (e) => e.player.id,
     rankOf: (e) => e.rank,
     nameOf: (e) => e.player.name,

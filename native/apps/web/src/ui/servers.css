@@ -18,6 +18,8 @@
 .srv-row.skeleton .srv-name small { width: 16rem; margin-top: 0.3rem; }
 .srv-row.skeleton { cursor: default; pointer-events: none; }
 .srv-status { margin: 0.8rem 0.6rem; }
+/* Above the list: why the Ping column is no reason to stay out (servers.ts PING_NOTE). */
+.srv-ping-note { margin: 0 0.6rem 0.7rem; font-family: var(--font-text); font-size: var(--fs-sm); color: var(--text); }
 /* Private lobby: one row of words and the invite field, no box. */
 .srv-lobby { margin: 1.4rem 0 0; padding: 0; border: 0; gap: 0.4rem; }
 .srv-lobby-row { display: flex; align-items: center; gap: 1.2rem; flex-wrap: wrap; padding: 0 0.6rem; }
@@ -29,5 +31,20 @@
 .srv-foot { margin-top: 1.6rem; padding: 0 0.6rem; justify-content: flex-start; }
 .srv-solo { padding-left: 0; color: var(--cream-2); }
 @media (prefers-reduced-motion: reduce) { .srv-table tbody.fresh .srv-bar i { animation: none; } }
-/* Phones: Server, Map and Players only (the table ran off the screen); the row itself joins. */
-@media (max-width: 40rem) { .srv-table th:nth-child(n+4), .srv-table td.srv-left, .srv-table td[class*="srv-ping"], .srv-table td.srv-actions { display: none; } }
+/* Phones: each server is two lines, its name with Join beside it, then its map and players. As a table the Players
+   column was cut off and the Join column hidden (only a tap on the row joined, and nothing said so). There is no hover
+   on a phone, so Join is always the amber button. */
+@media (max-width: 40rem) {
+  .srv-table, .srv-table tbody { display: block; }
+  .srv-table thead { display: none; }
+  .srv-table tr.srv-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name join" "map players"; align-items: center; gap: 0.55rem 0.9rem; padding: 0.8rem 0.6rem; border-top: 1px solid var(--ink-3); }
+  .srv-table tr.srv-row td { display: block; min-width: 0; padding: 0; border: 0; }
+  .srv-table tr.srv-row td.srv-left, .srv-table tr.srv-row td[class*="srv-ping"] { display: none; }
+  .srv-table tr.srv-row:hover td, .srv-table tr.srv-row:focus-within td { background: none; }
+  .srv-table td.srv-name { grid-area: name; }
+  .srv-table tr.srv-row td:nth-child(2) { grid-area: map; }
+  .srv-table td.srv-players { grid-area: players; min-width: 5.5rem; text-align: right; }
+  .srv-table td.srv-actions { grid-area: join; }
+  .srv-map { flex-wrap: wrap; }
+  .srv-join:not(:disabled) { background: var(--amber); color: var(--amber-ink); box-shadow: inset 0 -3px 0 var(--amber-deep); }
+}

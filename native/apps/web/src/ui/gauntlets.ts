@@ -21,6 +21,7 @@ import { gauntletHub } from "../shared-reads";
 import { fullDate, playerCell, relDate } from "./board-pager";
 import { h } from "./dom";
 import { icon } from "./icons";
+import { loadFailed } from "./load-failed";
 import { navigate } from "./nav";
 
 export interface GauntletScreens {
@@ -50,8 +51,6 @@ export function leaveGauntletUrl(): void {
 
 const iso = (ms: number) => new Date(ms).toISOString();
 const state = (title: string, text: string | null, cls = "empty") => h(`div.rb-state.${cls}`, null, h("strong", null, title), text ? h("span", null, text) : null);
-const failed = (e: unknown) =>
-  e instanceof ApiUnavailable ? state("Gauntlets are offline", "The server can't be reached right now.", "offline") : state("Couldn't load this", String((e as Error)?.message ?? e), "error");
 const tierCell = (t: number | null) => {
   const c = clampTier(t);
   return h(`td.gx-tier`, null, h(`span.hud-tier${c ? `.t${c}` : ".tx"}`, { title: c ? `Tier ${c}, ${tierName(c)}` : "Unrated" }, tierLabel(c)));
@@ -127,29 +126,51 @@ function linkRow(slug: string, a: GauntletScreens, ...cells: HTMLElement[]): HTM
 }
 
 const section = (title: string, ...body: (HTMLElement | null)[]) => h("section.gx-sec", { "aria-label": title }, h("h2.gx-h", null, title), ...body);
+/** What a gauntlet is, once, under the page's title (the rule used to appear only on an empty board). */
+const GAUNTLET_RULE = "A gauntlet is a list of maps cleared in order, in one attempt. The total of your times is ranked.";
 
 // ---------------------------------------------------------------------------------------------
 // /gauntlets
 
+/** Skeleton rows in a board table, the real rows' height. */
+const skelTable = (rows: number, cols: number) =>
+  h("table.rb-table.gx-table", null, h("tbody", null, ...Array.from({ length: rows }, () => h("tr.rb-skel", null, ...Array.from({ length: cols }, () => h("td", null, h("span.rb-sk")))))));
+
+/** The hub's shape while it loads (it was a blank page): the rule, this week's block, the list's rows. */
+const hubSkeleton = (): HTMLElement[] => [
+  h("p.gx-lead", null, GAUNTLET_RULE),
+  h(
+    "section.gx-sec.gx-sk",
+    { "aria-hidden": "true" },
+    h("h2.gx-h", null, "This week"),
+    h("div.gx-week", null, h("div.gx-week-info", null, h("span.rb-sk"), h("span.rb-sk"), h("span.rb-sk")), h("div.gx-week-top", null, skelTable(3, 3))),
+  ),
+  h("section.gx-sec.gx-sk", { "aria-hidden": "true" }, h("h2.gx-h", null, "More gauntlets"), skelTable(8, 4)),
+];
+
 export function gauntletsScreen(a: GauntletScreens): HTMLElement {
   syncUrl("/gauntlets");
-  const root = h("div.gx.gx-hub", null, h("div.gx-skel", { "aria-hidden": "true" }));
+  const root = h("div.gx.gx-hub");
   if (!api.available()) {
     root.replaceChildren(state("Gauntlets are offline", "The server can't be reached right now.", "offline"));
     return root;
   }
-  // The home screen's weekly line may have just read it (a minute, nothing written since: shared-reads.ts).
-  void gauntletHub(60_000, { sinceWrites: true }).then(
-    (hub) => {
-      const parts = [
-        hub.weekly ? section("This week", weeklyBlock(hub.weekly, a)) : null,
-        hub.gauntlets.length ? section("Gauntlets", listTable(hub.gauntlets, a)) : null,
-        hub.past.length ? section("Past weeks", pastTable(hub.past, a)) : null,
-      ].filter((x): x is HTMLElement => x !== null);
-      root.replaceChildren(...(parts.length ? parts : [state("No gauntlets yet", null)]));
-    },
-    (e) => root.replaceChildren(failed(e)),
-  );
+  const draw = (hub: GauntletHub) => {
+    const parts = [
+      hub.weekly ? section("This week", weeklyBlock(hub.weekly, a)) : null,
+      // Under the page's own "Gauntlets" title the list needs a heading only to part it from this week's.
+      hub.gauntlets.length ? (hub.weekly ? section("More gauntlets", listTable(hub.gauntlets, a)) : listTable(hub.gauntlets, a)) : null,
+      hub.past.length ? section("Past weeks", pastTable(hub.past, a)) : null,
+    ].filter((x): x is HTMLElement => x !== null);
+    root.replaceChildren(...(parts.length ? [h("p.gx-lead", null, GAUNTLET_RULE), ...parts] : [state("No gauntlets yet", GAUNTLET_RULE)]));
+  };
+  // The home screen's weekly line may have just read it (a minute, nothing written since: shared-reads.ts; a failed
+  // read is never kept, so Try again asks anew).
+  const load = () => {
+    root.replaceChildren(...hubSkeleton());
+    void gauntletHub(60_000, { sinceWrites: true }).then(draw, (e) => root.replaceChildren(loadFailed("gauntlets", load, e)));
+  };
+  load();
   return root;
 }
 
@@ -296,15 +317,20 @@ export function gauntletScreen(slug: string, a: GauntletScreens, o: { title: (t:
     root.replaceChildren(state("Gauntlets are offline", "The server can't be reached right now.", "offline"));
     return root;
   }
-  left.append(h("div.gx-skel", { "aria-hidden": "true" }));
-  void api.gauntlet(slug).then(
-    (d) => {
-      o.title(d.title);
-      left.replaceChildren(...sidePanel(d));
-      right.replaceChildren(board(d));
-    },
-    (e) => root.replaceChildren(e instanceof ApiError && e.status === 404 ? state("No such gauntlet", "It may have been taken down.") : failed(e)),
-  );
+  const load = () => {
+    left.replaceChildren(h("div.gx-skel", { "aria-hidden": "true" }));
+    right.replaceChildren();
+    root.replaceChildren(left, right);
+    void api.gauntlet(slug).then(
+      (d) => {
+        o.title(d.title);
+        left.replaceChildren(...sidePanel(d));
+        right.replaceChildren(board(d));
+      },
+      (e) => root.replaceChildren(e instanceof ApiError && e.status === 404 ? state("No such gauntlet", "It may have been taken down.") : loadFailed("this gauntlet", load, e)),
+    );
+  };
+  load();
   return root;
 }
 
@@ -478,7 +504,7 @@ function board(d: GauntletDetail): HTMLElement {
             : []),
         );
       },
-      (e) => rows.replaceChildren(h("tr.rb-state-row", null, h("td", { colspan: "6" }, failed(e)))),
+      (e) => rows.replaceChildren(h("tr.rb-state-row", null, h("td", { colspan: "6" }, loadFailed("the leaderboard", load, e)))),
     );
   };
   load();
@@ -534,7 +560,7 @@ export function gauntletResult(slug: string, attemptId: string, a: GauntletScree
       if (at.state === "complete") detail = await api.gauntlet(slug).catch(() => detail);
       draw(at);
     } catch (e) {
-      root.replaceChildren(e instanceof ApiError && e.status === 404 ? state("Not your attempt", "Results are shown to the player who ran them.") : failed(e));
+      root.replaceChildren(e instanceof ApiError && e.status === 404 ? state("Not your attempt", "Results are shown to the player who ran them.") : loadFailed("this attempt", () => void poll(), e));
     }
   };
   void (async () => {

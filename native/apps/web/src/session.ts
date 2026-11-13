@@ -30,7 +30,7 @@ import { ZoneEditor, ZoneView } from "./zone-editor";
 import { zoneWarningToast } from "./zone-warning";
 import { loadZones, nextTrack, parseZoneSet, touching, trackName, trackOf, tracksOf, zonesEqual, type Zone, type ZoneSet, zoneSetToJson } from "./zones";
 import { landingBonusRestart, restartPositionIn } from "./flight-landing";
-import { api } from "./api";
+import { api, type MapDetail } from "./api";
 import { placeBoard, worldRecord } from "./shared-reads";
 import { formatPlace, placeBoardFrom, placeFor, type PlaceBoard } from "./board-place";
 import type { AutoRestartRun, AutoRestartWhen } from "./auto-restart";
@@ -44,7 +44,10 @@ import { checkStartPoint, clearPracticeSpawns, clearStartPoint, loadStartPoint, 
 import { getHeldLoadout, getOutfit, knownOutfitUnlocks } from "./player/cosmetics";
 import { cosmetic } from "./progression";
 import { withTimeout } from "./content/fetch";
-import { pitchPlay, reportRun, RunWatch, SelfCheck, type RunPlay } from "./selfcheck";
+import { pitchPlay, reportRun, RunWatch, type RunPlay } from "./selfcheck";
+import { MapPhysics } from "./map-physics";
+import type { MapFile } from "./content/map-file";
+import { bigForDevice } from "./low-memory";
 import { RunClock } from "./run-clock";
 import { AttemptCounter, type AttemptClaim } from "./attempts";
 import { mapTime, type MapTimes } from "./map-time";
@@ -64,8 +67,15 @@ export interface SessionInit {
   canvas: HTMLCanvasElement;
   input: Input;
   map: string;
-  bsp: Uint8Array;
+  /** The map's BSP (its bytes until main.ts releases them after create(); a Blob after). */
+  bsp: MapFile;
+  /** sha256 (hex) of `bsp`: the map build runs and replays name. */
+  mapSha256: string;
+  /** GET /maps/:name, started at load (null: the API is off or the request failed). */
+  mapDetail?: Promise<MapDetail | null> | null;
   wasmBytes: Uint8Array;
+  /** The map's worker core starts after this (map-physics.ts; main.ts: the loading screen's end). */
+  physicsStart?: Promise<unknown>;
   /** Selected (main-track) style; its canonical settings drive the sim (styles.ts). */
   style: StyleId;
   /** main.ts: re-read core state into its prev/curr interpolation (after seeks / mode switches). */
@@ -214,7 +224,10 @@ export class RunSession {
   private runAttempt: AttemptClaim | null = null;
   /** The FPS limit setting and whether frames wait for the display (main.ts sets it): for the run's stats card. */
   frameCap: () => { limit: number; vsync: boolean } | null = () => null;
-  private selfCheck: SelfCheck | null = null;
+  /** Frames come from the uncapped loop (main.ts sets it): the HUD is then drawn once per display frame, not per frame. */
+  uncappedFrames: () => boolean = () => false;
+  /** The map's off-thread physics core: the self-check of submitted runs and the race ghosts (map-physics.ts). */
+  private physics!: MapPhysics;
 
   private constructor(private o: SessionInit) {
     this.selectedStyle = this.runStyle = o.style;
@@ -227,9 +240,9 @@ export class RunSession {
 
   static async create(o: SessionInit): Promise<RunSession> {
     const s = new RunSession(o);
-    s.mapSha256 = await sha256Hex(o.bsp as Uint8Array<ArrayBuffer>);
+    s.mapSha256 = o.mapSha256;
     s.clientBuild = `bunnyhop-web/${(await sha256Hex(o.wasmBytes as Uint8Array<ArrayBuffer>)).slice(0, 12)}`;
-    s.setZones(await loadZones(o.map, o.core.entities(), o.bsp, await s.pinnedZones()));
+    s.setZones(await loadZones(o.map, o.core.entities(), o.bsp.bytes, await s.pinnedZones()));
     setPBContext(o.map, s.mapSha256, s.zones ? await sha256Hex(new TextEncoder().encode(zoneSetToJson(s.zones))) : "no-zones");
     // (The zone editor is a dev tool: the dev server or ?debug=1, main.ts.)
     if (!s.zones) s.hud.toast(`No zones yet for ${o.map}${import.meta.env.DEV || debugHookOptIn() ? " · press Z to make some" : ""}`, 8000);
@@ -244,9 +257,10 @@ export class RunSession {
     const sp = o.core.state();
     s.spawn = { position: [...sp.position], yaw: sp.teleportAngles[1] };
     await withTimeout(me().then(() => syncPBs()), 2000, undefined);
-    // Race ghosts use an auxiliary physics core; PB replay downloads are limited to the active track.
+    // Race ghosts are re-simulated on the map's worker core; PB replay downloads are limited to the active track.
+    s.physics = new MapPhysics({ wasmBytes: o.wasmBytes, bsp: o.bsp, start: o.physicsStart, checkOnlyIfRunning: bigForDevice(o.bsp.size) });
     s.ghosts = new GhostManager({
-      scene: o.scene, core: o.core, map: o.map, style: s.selectedStyle, mapSha256: s.mapSha256, settings: s.settings, bsp: o.bsp, wasmBytes: o.wasmBytes,
+      scene: o.scene, core: o.core, map: o.map, style: s.selectedStyle, mapSha256: s.mapSha256, settings: s.settings, physics: s.physics,
       toast: (m, ms) => s.hud.toast(m, ms),
       onPBInputs: (track, inputs) => s.hud.setGhostInputs(track, inputs),
       renderer: o.renderer,
@@ -309,7 +323,7 @@ export class RunSession {
     if (!api.available()) return null;
     try {
       // A stalled API mustn't hold the loading screen: after 10 s, load as if it were offline.
-      const d = await withTimeout(api.mapDetail(this.o.map), 10_000, null);
+      const d = await withTimeout(this.o.mapDetail ?? api.mapDetail(this.o.map), 10_000, null);
       if (d && !d.ranked) this.rankedMap = false;
       return d && d.sha256 === this.mapSha256 ? d.zones : null;
     } catch {
@@ -392,7 +406,7 @@ export class RunSession {
       beforeStep(this.o.core, this.timer, c);
     }
     // v8: the live view state rides along to the recorder (a scripted command has none: that replay is written as v7).
-    return { forwardmove: c.forward, sidemove: c.side, yaw: c.yaw, pitch: c.pitch, buttons: c.buttons, ...(this.scripted || !look ? {} : { look }), ...(sample.nullBinds && !this.scripted ? { nullBinds: true } : {}), ...(sample.timed && !this.scripted ? { timed: true } : {}), ...(sample.wRelease && !this.scripted ? { wRelease: true } : {}) };
+    return { forwardmove: c.forward, sidemove: c.side, yaw: c.yaw, pitch: c.pitch, buttons: c.buttons, ...(this.scripted || !look ? {} : { look }), ...(sample.nullBinds && !this.scripted ? { nullBinds: true } : {}), ...(sample.timed && !this.scripted ? { timed: true } : {}), ...(sample.timedPresses && !this.scripted ? { timedPresses: true } : {}), ...(sample.wRelease && !this.scripted ? { wRelease: true } : {}) };
   }
 
   // -------------------------------------------------------------------------------------------
@@ -661,6 +675,7 @@ export class RunSession {
       this.recorder.push(cmd.forward, cmd.side, cmd.yaw, cmd.pitch, cmd.buttons, u.look ?? null);
       if (u.nullBinds) this.recorder.nullBinds = true; // header.nullBinds: the anticheat expects instant key switches
       if (u.timed) this.recorder.timedInput = true; // header.timedInput: per-tick input isn't frame-sampled
+      if (u.timedPresses) this.recorder.timedPresses = true; // header.timedPresses: nor are jump, duck, the wheel, turn binds
       if (u.wRelease) this.recorder.wRelease = true; // header.wRelease: forward let go on jumps by the setting
       this.recorder.maybeCheckpoint(state.tick, state.position, state.velocity);
     }
@@ -998,8 +1013,7 @@ export class RunSession {
       () => archive(),
     ).finally(() => uploaded(""));
     if (api.available()) {
-      this.selfCheck ??= new SelfCheck({ wasmBytes: this.o.wasmBytes, bsp: this.o.bsp });
-      void reportRun({ check: this.selfCheck.check(bytes), upload, watched, input: this.o.input, wasm: this.clientBuild, play: this.runPlay(watched.pollHz) });
+      void reportRun({ check: this.physics.check(bytes), upload, watched, input: this.o.input, wasm: this.clientBuild, play: this.runPlay(watched.pollHz) });
     }
     runEnded();
     await this.refreshMenu();
@@ -1146,7 +1160,7 @@ export class RunSession {
     if (!this.segmenting) return null;
     const n = this.recorder.length;
     if (this.segLog.length !== n || this.o.core.state().tick !== n) return null;
-    return this.segLog.mark({ nullBinds: this.recorder.nullBinds, timedInput: this.recorder.timedInput, wRelease: this.recorder.wRelease, turnSpeed: this.recorder.turnSpeed });
+    return this.segLog.mark({ nullBinds: this.recorder.nullBinds, timedInput: this.recorder.timedInput, timedPresses: this.recorder.timedPresses, wRelease: this.recorder.wRelease, turnSpeed: this.recorder.turnSpeed });
   }
 
   /** About how much memory the Segmented paths of the kept checkpoints take (practice-mode/checkpoints.ts budget). */
@@ -1215,12 +1229,37 @@ export class RunSession {
     // Your speed as the ghost's is measured: the last tick's move (none across a teleport: main.ts sets prev = curr).
     const mx = curr.position[0] - prev.position[0], my = curr.position[1] - prev.position[1];
     const ghostSplit = this.ghosts.frame(t, alpha, curr.position, this.cam, prev.tick !== curr.tick ? Math.sqrt(mx * mx + my * my) / t.tickInterval : null);
+    // The split beside the timer: the ghost's while running, held when the ghost has none this frame.
+    if (t.status !== "running") this.lastSplit = null;
+    else if (ghostSplit !== null) this.lastSplit = ghostSplit;
     this.watch.frame(now);
     this.clock.frame(this.o.input.locked);
     // --- /ghost
     this.editor?.frame();
     if (t.status === "idle") this.view.reset(); // back on the start: dropped curtains come up (cheap when none is down)
     this.view.frame(now ?? performance.now());
+    this.hudFrames++;
+    if (!this.uncappedFrames()) {
+      this.hudArgs = null;
+      this.drawHud(alpha, prev, curr);
+      return;
+    }
+    // Past the display's rate, the HUD is drawn just before the display's next frame, with the latest frame's state.
+    this.hudArgs = [alpha, prev, curr];
+    this.hudRaf ||= requestAnimationFrame(() => {
+      this.hudRaf = 0;
+      if (this.hudArgs) this.drawHud(...this.hudArgs);
+      this.hudArgs = null;
+    });
+  }
+  private hudFrames = 0;
+  private hudArgs: [number, PlayerState, PlayerState] | null = null;
+  private hudRaf = 0;
+
+  /** The HUD for the frame drawn last (`hudFrames`: game frames since the last call, for its FPS readout). */
+  private drawHud(alpha: number, prev: PlayerState, curr: PlayerState): void {
+    const t = this.timer;
+    const placeOn = prefs.get().hud.place === "place" || prefs.get().hud.place === "top";
     const vx = prev.velocity[0] + (curr.velocity[0] - prev.velocity[0]) * alpha;
     const vy = prev.velocity[1] + (curr.velocity[1] - prev.velocity[1]) * alpha;
     this.updateInfo();
@@ -1242,11 +1281,7 @@ export class RunSession {
           ? `CP ${t.splits.length}/${splitTotal}`
           : `Stage ${t.splits.length + 1}/${splitTotal + 1}`
         : null;
-    let split: number | null = null;
-    if (t.status === "running") split = ghostSplit;
-    else if (t.status === "finished" && pb) split = t.time() - pb.time;
-    if (split === null && t.status === "running") split = this.lastSplit;
-    this.lastSplit = t.status === "running" ? split : null;
+    const split = t.status === "running" ? this.lastSplit : t.status === "finished" && pb ? t.time() - pb.time : null;
     const time = t.status === "running" ? (t.ticks() + alpha) * t.tickInterval : t.time();
     this.hud.update({
       speed: Math.sqrt(vx * vx + vy * vy),
@@ -1270,7 +1305,8 @@ export class RunSession {
       // --- /UI ---
       track: t.track,
       stage,
-    });
+    }, this.hudFrames);
+    this.hudFrames = 0;
   }
   private lastSplit: number | null = null;
 
@@ -1453,6 +1489,8 @@ export class RunSession {
       /** A positional ghost (no simulation): frames are [x, y, z, flags, yaw, pitch] per tick (ghost.ts fromFrames). */
       ghostFrames: (name: string, frames: number[], startTick: number, endTick: number, tickInterval: number, track = 0) =>
         void this.ghosts.fromFrames(name, Float32Array.from(frames), startTick, endTick, tickInterval, track),
+      /** The loaded ghosts (load probes: when a PB / WR ghost arrived). */
+      ghosts: () => this.ghosts.list().map((g) => ({ kind: g.kind, name: g.d.name, track: g.track, ticks: g.ticks })),
     };
     (window as unknown as { __bunnyhop: unknown }).__bunnyhop = hook;
   }

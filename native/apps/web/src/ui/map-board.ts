@@ -90,7 +90,7 @@ export function mapBoard(o: MapBoardOptions): HTMLElement {
       { class: [e.rank <= 3 ? `top${e.rank}` : "", mine ? "me" : ""].filter(Boolean).join(" ") || null, "data-run": e.runId, "data-run-title": `#${e.rank} · ${e.player.name}`, "data-run-points": runPointsAttr(e.points) },
       h("td.rb-rank", null, String(e.rank)),
       playerCell(e.player, () => navigate({ screen: "profile", id: e.player.id })),
-      h("td.num.mbd-time", { title: gap ? `${gap.slice(1)} behind the world record` : e.rank === 1 ? "World record" : null }, h("b", null, formatTime(e.time)), gap ? h("small", null, gap) : null),
+      h("td.num.mbd-time.rs-keep", { title: gap ? `${gap.slice(1)} behind the world record` : e.rank === 1 ? "World record" : null }, h("b", null, formatTime(e.time)), gap ? h("small", null, gap) : null),
     );
   };
 

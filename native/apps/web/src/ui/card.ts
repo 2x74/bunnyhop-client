@@ -10,6 +10,7 @@ import { peakOf, STAFF_LABEL, staffBadgeOf, type NameLook, type PeakTier } from 
 import { fmtPoints, topPercent } from "../ranking";
 import { styleLabel } from "../styles";
 import { CARD_TIERS, cardTierCounts, cardTierLabel, tierColor, tierLabel } from "../tiers";
+import { countWord } from "../hud/time-face";
 import { formatTime } from "../timer";
 import { trackName } from "../zones";
 import { badgeChip } from "./badges";
@@ -90,7 +91,7 @@ export function featTile(r: RunCard): HTMLElement {
     `div.pc-feat-tile.t${r.tier ?? "x"}`,
     { "data-run": r.runId },
     h("div.pc-feat-top", null, h(`span.pc-tier.t${r.tier ?? "x"}`, null, tierLabel(r.tier)), place),
-    h("div.pc-feat-map", null, r.map.replace(/^bhop_/, "")),
+    h("div.pc-feat-map", null, r.map),
     h("div.pc-feat-row", null, h("span.pc-feat-time", null, formatTime(r.time)), pts),
     tags ? h("div.pc-feat-tag", null, tags) : null,
   );
@@ -273,10 +274,10 @@ export function playerCard(p: Profile, o: CardOverrides = {}): HTMLElement {
       h(
         "footer.pc-band",
         null,
-        h("span", null, h("b", null, s.runs.toLocaleString("en-US")), " runs"),
+        h("span", null, h("b", null, s.runs.toLocaleString("en-US")), ` ${countWord(s.runs, "run")}`),
         h("span", null, h("b", null, fmtHours(s.playtime ?? 0)), " played"),
-        h("span", null, h("b", null, s.jumps.toLocaleString("en-US")), " jumps"),
-        s.replayViews ? h("span", { title: "Views of this player's replays" }, h("b", null, s.replayViews.toLocaleString("en-US")), " replay views") : null,
+        h("span", null, h("b", null, s.jumps.toLocaleString("en-US")), ` ${countWord(s.jumps, "jump")}`),
+        s.replayViews ? h("span", { title: "Views of this player's replays" }, h("b", null, s.replayViews.toLocaleString("en-US")), ` ${countWord(s.replayViews, "replay view")}`) : null,
       ),
       h("div.pc-sheen", { "aria-hidden": "true" }),
       o.enter ? h("div.pc-sweep", { "aria-hidden": "true" }) : null,

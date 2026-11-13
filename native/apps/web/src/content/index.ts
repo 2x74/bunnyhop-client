@@ -101,6 +101,8 @@ export interface ContentProgress {
 export interface PrepareContentOptions {
   bsp?: Uint8Array;
   mapSha256?: string;
+  /** Content fetched while the BSP downloaded (prefetchMapContent): used only if it is for `mapSha256`. */
+  early?: ContentPrefetch | null;
   /** Play without textures: download only the collision models (the simulation needs them), no materials or props. */
   skip?: boolean;
   /** Aborting it stops the texture download where it is (collision models still finish): the map loads with what arrived. */
@@ -124,6 +126,84 @@ async function pool<T>(items: T[], limit: number, task: (item: T) => Promise<voi
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
 }
 
+type ManifestFile = ContentManifest["files"][string];
+const manifestBase = (m: ContentManifest) => (m as ContentManifest & { base?: string }).base ?? CONTENT_BASE;
+
+/** The files to download: collision models first (the simulation needs them; a few small files), then the rest unless `skip`. */
+function contentQueue(manifest: ContentManifest, skip: boolean): [string, ManifestFile][] {
+  const physicsPaths = manifest.physics?.files ?? {};
+  const all = Object.entries(manifest.files).sort(([a], [b]) => Number(b in physicsPaths) - Number(a in physicsPaths));
+  return skip ? all.filter(([path]) => path in physicsPaths) : all;
+}
+
+/** One hosted file, checked against its sha256 (throws if unavailable). */
+async function fetchContentFile(base: string, path: string, f: ManifestFile, signal: AbortSignal | undefined, onProgress: (n: number) => void): Promise<Uint8Array> {
+  const b = await fetchBytes(`${base}/${contentKey(f.sha256)}`, {
+    cacheSha256: f.sha256,
+    attempts: 3,
+    headerTimeoutMs: 15_000,
+    idleTimeoutMs: 15_000,
+    signal,
+    // Decoded bytes against the manifest size: the edge compresses content downloads (no usable Content-Length).
+    expectedSize: f.size,
+    onProgress,
+    onRetry: (attempt, e) => console.warn(`content: ${path}: ${e.message}, retrying (${attempt}/3)`),
+  });
+  if ((await sha256Hex(b)) !== f.sha256) throw new Error("hash mismatch");
+  return b;
+}
+
+/** A map's manifest and files, fetched ahead of its build. */
+export interface ContentPrefetch {
+  /** The map build it was started for (the map index's sha). */
+  sha: string;
+  manifest: Promise<ContentManifest | null>;
+  /** The files started so far, by content sha. */
+  files: Map<string, Promise<Uint8Array>>;
+  /** No more files start; `drop` also abandons the ones in flight. */
+  stop(drop: boolean): void;
+}
+
+/**
+ * Starts fetching the content of map build `mapSha` (the map index's sha) while its BSP downloads: the manifest, then
+ * its files, 12 at a time (collision models only when `skip`). prepareMapContent takes over the files not started yet,
+ * and uses any of it only if the downloaded BSP has that sha.
+ */
+export function prefetchMapContent(mapSha: string, skip: boolean): ContentPrefetch {
+  const ctl = new AbortController();
+  let stopped = false;
+  const p: ContentPrefetch = {
+    sha: mapSha,
+    manifest: fetchManifest(mapSha, ctl.signal),
+    files: new Map(),
+    stop: (drop) => {
+      stopped = true;
+      if (drop) ctl.abort();
+    },
+  };
+  void p.manifest.then(async (m) => {
+    if (!m || stopped) return;
+    await pool(contentQueue(m, skip), 12, async ([path, f]) => {
+      if (stopped || p.files.has(f.sha256)) return;
+      const got = fetchContentFile(manifestBase(m), path, f, ctl.signal, () => {});
+      p.files.set(f.sha256, got);
+      await got.catch(() => {});
+    });
+  });
+  return p;
+}
+
+/** `p`, or a rejection once `signal` aborts first. */
+function unlessAborted<T>(p: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return p;
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(new Error("aborted"));
+    if (signal.aborted) return abort();
+    signal.addEventListener("abort", abort, { once: true });
+    p.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
+}
+
 /**
  * Loads hosted stock content for the loaded map and resolves its materials (+ skybox faces).
  * Also builds the static prop mesh (core.propsMesh()). Returns the extra material names core
@@ -135,11 +215,15 @@ export async function prepareMapContent(
   core: Core,
   opts: PrepareContentOptions = {},
 ): Promise<{ sky: string | null; extra: string[]; propMaterials: string[] }> {
-  if (!core.hasContentApi()) return { sky: null, extra: [], propMaterials: [] };
+  if (!core.hasContentApi()) {
+    opts.early?.stop(true);
+    return { sky: null, extra: [], propMaterials: [] };
+  }
   const t0 = performance.now();
   const world = core.entities().find((e) => e.classname === "worldspawn");
   const sky = world?.skyname?.trim() || null;
-  const extra = [...(sky ? skyMaterials(sky) : []), ...effectMaterialNames(core.entities())];
+  // Then the map's overlays, decals, sprites and beams (map-dressing.ts).
+  const extra = [...(sky ? skyMaterials(sky) : []), ...effectMaterialNames(core.entities()), ...core.dressingMaterials()];
   const meshCount = core.mesh().materials.length;
   // WindowImposter / Aftershock materials are drawn by the renderer (imposter.ts): not missing.
   const countMissing = () => core.materials().slice(0, meshCount).filter((d) => d.kind === MaterialKind.Missing && !CLIENT_DRAWN_SHADERS.has(d.shader)).length;
@@ -149,7 +233,11 @@ export async function prepareMapContent(
   const missingWithoutContent = countMissing();
 
   const mapSha = opts.mapSha256 ?? (opts.bsp ? await sha256Hex(opts.bsp) : null);
-  const manifest = mapSha ? await fetchManifest(mapSha, opts.signal) : null;
+  // What was fetched early counts only for the build that was downloaded; a BSP with another sha loads as before.
+  const early = opts.early && opts.early.sha === mapSha ? opts.early : null;
+  if (opts.early && !early) opts.early.stop(true);
+  const manifest = mapSha ? await (early?.manifest ?? fetchManifest(mapSha, opts.signal)) : null;
+  early?.stop(false);
   // Map-specific material overrides (maps/<map>.json `materialOverrides`): they win over the pakfile, and apply even
   // when textures are skipped (the replacement is then missing: the plain fallback, never the covered art).
   if (manifest?.materialOverrides) core.contentMaterialOverrides(manifest.materialOverrides);
@@ -161,13 +249,11 @@ export async function prepareMapContent(
   let skipped = 0;
   let bytes = 0;
   if (manifest) {
-    const base = (manifest as ContentManifest & { base?: string }).base ?? CONTENT_BASE;
+    const base = manifestBase(manifest);
     const got: [string, Uint8Array][] = [];
-    // Collision models first (the simulation needs them; a few small files), then everything the renderer uses.
     const physicsPaths = manifest.physics?.files ?? {};
-    const all = Object.entries(manifest.files).sort(([a], [b]) => Number(b in physicsPaths) - Number(a in physicsPaths));
-    const queue = opts.skip ? all.filter(([path]) => path in physicsPaths) : all;
-    skipped = all.length - queue.length;
+    const queue = contentQueue(manifest, !!opts.skip);
+    skipped = Object.keys(manifest.files).length - queue.length;
     const progress: ContentProgress = { files: queue.length, done: 0, failed: 0, bytes: 0, totalBytes: queue.reduce((n, [, f]) => n + (f.size || 0), 0) };
     opts.onProgress?.({ ...progress });
     await pool(queue, 12, async ([path, f]) => {
@@ -178,23 +264,16 @@ export async function prepareMapContent(
         return;
       }
       let seen = 0;
+      const onBytes = (n: number) => {
+        progress.bytes += n - seen;
+        seen = n;
+        opts.onProgress?.({ ...progress });
+      };
+      const signal = isPhysics ? undefined : opts.signal;
       try {
-        const b = await fetchBytes(`${base}/${contentKey(f.sha256)}`, {
-          cacheSha256: f.sha256,
-          attempts: 3,
-          headerTimeoutMs: 15_000,
-          idleTimeoutMs: 15_000,
-          signal: isPhysics ? undefined : opts.signal,
-          // Decoded bytes against the manifest size: the edge compresses content downloads (no usable Content-Length).
-          expectedSize: f.size,
-          onProgress: (n) => {
-            progress.bytes += n - seen;
-            seen = n;
-            opts.onProgress?.({ ...progress });
-          },
-          onRetry: (attempt, e) => console.warn(`content: ${path}: ${e.message}, retrying (${attempt}/3)`),
-        });
-        if ((await sha256Hex(b)) !== f.sha256) throw new Error("hash mismatch");
+        const started = early?.files.get(f.sha256);
+        const b = started ? await unlessAborted(started, signal) : await fetchContentFile(base, path, f, signal, onBytes);
+        if (started) onBytes(b.length);
         got.push([path, b]);
       } catch (e) {
         progress.bytes -= seen;

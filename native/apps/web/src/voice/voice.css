@@ -1,11 +1,17 @@
-/* Voice chat (voice/hud.ts): the talker list in the bottom left, under the chat, and the speaker mark by talking names.
-   Same face and panel tone as the chat (net/net.css); sizes follow the HUD scale (--hs). */
+/* Voice chat (voice/hud.ts): the talker list and the speaker mark by talking names. The list is the HUD element "voice"
+   (hud/layout.ts): its box places it (bottom left under the chat by default) and sizes it with the element and HUD
+   scales, like the chat. Same face and panel tone as the chat (net/net.css). */
 
-#voice-hud {
-  position: absolute; left: 1.2vw; bottom: var(--voice-bottom, 3vh); z-index: 6;
-  display: none; flex-direction: column; align-items: flex-start; gap: 0.3em;
-  font-size: calc(0.86rem * var(--hs, 1)); pointer-events: none;
-}
+#voice-hud { display: none; flex-direction: column; align-items: flex-start; gap: 0.3em; font-size: 0.86em; pointer-events: none; }
+/* Not in the HUD's box (a page without the game HUD): the corner it had before it was an element. */
+:not(.hud-voice) > #voice-hud { position: absolute; left: 1.2vw; bottom: 3vh; z-index: 6; font-size: calc(0.86rem * var(--hs, 1)); }
+/* Above the other elements, so its rows take the click while the cursor is free. */
+#hud .hud-el[data-el="voice"] { z-index: 6; }
+/* The layout editor shows two demo rows in its place (hud.ts). */
+.hud-voice .voice-demo { display: none; flex-direction: column; align-items: flex-start; gap: 0.3em; font-size: 0.86em; }
+#hud.editing .hud-voice .voice-demo { display: flex; }
+#hud.editing .hud-voice #voice-hud { display: none; }
+.voice-demo .vh-av.letter { background: var(--cream-2); }
 #voice-hud.on { display: flex; }
 .vh-list { display: flex; flex-direction: column; align-items: flex-start; gap: 0.3em; }
 /* A row is a plate: ink with a leaning left edge (::before, so the avatar standing on that edge isn't clipped). */

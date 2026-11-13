@@ -211,7 +211,7 @@ function openPanel(title: string, rows: HTMLElement[]): void {
 registerChatCommand({
   name: "jhud",
   args: "[on|off]",
-  help: "jump hud",
+  help: "JHUD",
   about: "speed and gain of every jump near the crosshair, coloured by how it went. !jhud opens its settings; !jhud on or off just switches it.",
   group: "more",
   where: "both",

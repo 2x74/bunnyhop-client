@@ -12,6 +12,7 @@ export interface StageLook {
   outfit?: string | null;
   ghost?: string | null;
   trail?: string | null;
+  shape?: string | null;
   veil?: boolean;
   playerGlow?: PlayerGlow | null;
   previewGlow?: boolean;

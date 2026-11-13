@@ -348,7 +348,7 @@ thread_local! {
 #[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
 pub unsafe extern "C" fn props_load(ptr: *mut u8, len: usize) -> usize {
     let bytes = unsafe { owned(ptr, len) };
-    let bsp = crate::parse_bsp(&bytes).ok();
+    let bsp = crate::parse_bsp_owned(bytes).ok();
     let mut sp = bsp.as_ref().map(crate::props::static_props).unwrap_or_default();
     let n_static = sp.props.len();
     // Entity props (physics props at their settled pose, prop_dynamic, prop_door_rotating) render with them.
@@ -450,6 +450,31 @@ pub extern "C" fn props_indices_ptr() -> *const u32 {
     PROPS.with(|p| p.borrow().1.indices.as_ptr())
 }
 
+/// The map's light on the prop mesh of the last `props_build` (`prop_light.rs`): one linear RGB triple per vertex
+/// (parallel to `props_vertices_ptr`), written as little-endian f32 into the caller's buffer `out` of `len` bytes (from
+/// `alloc`; the caller frees it). Returns the floats written, 3 per vertex; 0 when there is nothing to write (a map
+/// drawn fullbright or without ambient data, no prop mesh, a buffer too small), and the caller keeps its own shading.
+/// A vertex the map has no light for carries -1 in all three. Once per `props_build`: the call frees what the bake
+/// needs (8 bytes per vertex), so a second one writes nothing.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn props_lighting(out: *mut u8, len: usize) -> usize {
+    with(|c| {
+        PROPS.with(|p| {
+            let mut p = p.borrow_mut();
+            let written = match c.mesh.as_ref().and_then(|m| m.lighting.as_ref()) {
+                Some(lighting) if !p.1.sources.is_empty() && len >= p.1.sources.len() * 12 => {
+                    let colors = crate::prop_light::bake(&p.0, &p.1, &c.vfs, lighting);
+                    unsafe { std::ptr::copy_nonoverlapping(colors.as_ptr().cast::<u8>(), out, colors.len() * 4) };
+                    colors.len()
+                }
+                _ => 0,
+            };
+            p.1.sources = Vec::new();
+            written
+        })
+    })
+}
+
 /// Per mesh vertex, the displacement blend alpha (0 = `$basetexture`, 1 = `$basetexture2`).
 #[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
 pub extern "C" fn mesh_blend_ptr() -> *const f32 {
@@ -461,6 +486,20 @@ pub extern "C" fn mesh_blend_len() -> usize {
     with(|c| c.mesh.as_ref().map_or(0, |m| m.blend.len()))
 }
 
+/// Per resolved material (parallel to `material_info`), 4 floats in scratch_f32: `$selfillum` [1, tint r, g, b], or
+/// [0, 0, 0, 0] (`MaterialDesc::selfillum`). Render-only.
+#[unsafe(no_mangle)]
+pub extern "C" fn material_selfillum() -> usize {
+    with(|c| {
+        c.scratch_f32.clear();
+        for d in &c.materials.descs {
+            match d.selfillum {
+                Some([r, g, b]) => c.scratch_f32.extend_from_slice(&[1.0, r, g, b]),
+                None => c.scratch_f32.extend_from_slice(&[0.0; 4]),
+            }
+        }
+        c.scratch_f32.len()
+    })
 #[cfg(all(feature = "native-web", not(target_arch = "wasm32")))]
 pub(super) fn native_prop_vertices() -> Vec<f32> {
     PROPS.with(|p| p.borrow().1.vertices.clone())

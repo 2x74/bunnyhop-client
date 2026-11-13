@@ -89,7 +89,7 @@ export class NativeCosmetics {
       setOutfit(this.choice.outfit);
       setKnifePool(this.choice.knifePool ?? null);
       setLoadout(loadoutFor(this.choice, getLoadout().crown ?? null));
-      setGhostCosmetics(this.choice.ghost, this.choice.trail);
+      setGhostCosmetics(this.choice.ghost, this.choice.trail, this.choice.shape);
     } finally {
       this.syncing = false;
     }

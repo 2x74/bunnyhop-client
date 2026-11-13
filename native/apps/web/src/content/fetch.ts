@@ -1,4 +1,5 @@
 import { cachedContent } from "./client-cache";
+import { detach } from "./map-file";
 
 // Map loading fetches with timeouts and retries (the BSP, the content manifest, each hosted content file).
 //
@@ -203,6 +204,10 @@ export async function fetchBytes(url: string, o: FetchRetryOptions = {}): Promis
   return cachedContent(o.cacheSha256, () => downloadBytes(url, o), o.signal, o.onProgress);
 }
 
+/**
+ * The chunks as one buffer. Each chunk is freed (detached) once copied, so a big map's download doesn't leave a second
+ * copy of itself behind as garbage until the next GC.
+ */
 function join(p: Partial): Uint8Array {
   if (p.chunks.length === 1) return p.chunks[0];
   const out = new Uint8Array(p.got);
@@ -210,7 +215,10 @@ function join(p: Partial): Uint8Array {
   for (const c of p.chunks) {
     out.set(c, at);
     at += c.length;
+    if (c.byteOffset === 0 && c.byteLength === c.buffer.byteLength) detach(c.buffer as ArrayBuffer);
   }
+  p.chunks = [];
+  p.got = 0;
   return out;
 }
 

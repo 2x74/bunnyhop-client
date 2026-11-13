@@ -62,6 +62,7 @@ export const SLOT_NAMES: Record<CosmeticSlot, string> = {
   outfit: "Colourway",
   ghost: "Ghost",
   trail: "Trail",
+  shape: "Trail shape",
   knife: "Knife",
   finish: "Finish",
   glove: "Gloves",
@@ -324,7 +325,7 @@ const COMMUNITY_WHY: Record<string, string> = {
 };
 const COMMUNITY_KICKER: Partial<Record<CosmeticSlot, string>> = { glove: "New gloves", outfit: "New colourway", trail: "New trail", title: "New title", hat: "New hat" };
 /** Which of an achievement's items leads its card (the rest are named in the detail). */
-const SLOT_ORDER: CosmeticSlot[] = ["hat", "glove", "finish", "hilt", "knife", "outfit", "trail", "ghost", "frame", "background", "title"];
+const SLOT_ORDER: CosmeticSlot[] = ["hat", "glove", "finish", "hilt", "knife", "outfit", "shape", "trail", "ghost", "frame", "background", "title"];
 
 function communityNote(p: Profile): void {
   const uid = p.player.id;

@@ -41,7 +41,8 @@ export class WaterCapture {
   private surfaces: Surface[] = [];
   private color = new THREE.WebGLRenderTarget(1, 1, { depthBuffer: true });
   private reflections: THREE.WebGLRenderTarget[] = [];
-  private camera = new THREE.PerspectiveCamera();
+  /** The mirrored view (tagged: what the scene sees from it isn't the player's view, e.g. for glow visibility). */
+  private camera = Object.assign(new THREE.PerspectiveCamera(), { userData: { mirror: true } });
   private rendering = false;
   private captureType: THREE.TextureDataType = THREE.UnsignedByteType;
   /** Captured last frame (CAPTURE_MARGIN applies). */

@@ -26,6 +26,7 @@ import { getGhostCosmetics, getKnifePool, getLoadout, getOutfit, onGhostCosmetic
 import { previewOf } from "../notify/item-preview";
 import type { Loadout, NewTracker } from "./card-editor";
 import { arrowNav, h } from "./dom";
+import { scrollCue } from "./scroll-cue";
 import type { LoadoutStage, StageLook, StageView, ThumbJob } from "./loadout-stage";
 import { loadoutSwatch, shownCosmetic } from "./loadout-ui";
 import { EMPTYABLE, isLoadoutCategory, LOADOUT_CATEGORIES, loadoutCategories, loadoutSections, noneLabel, stageKind, type LoadoutCategory } from "./cosmetic-slots";
@@ -78,6 +79,7 @@ const pick = (c: Record<string, unknown>): LoadoutChoice => ({
   camo: (c.camo as string | null | undefined) ?? null,
   ghost: (c.ghost as string | null | undefined) ?? DEFAULT_COSMETICS.ghost,
   trail: (c.trail as string | null | undefined) ?? DEFAULT_COSMETICS.trail,
+  shape: (c.shape as string | null | undefined) ?? DEFAULT_COSMETICS.shape,
   hairColor: (c.hairColor as string | null | undefined) ?? null,
   hairLength: hairLengthOf(c.hairLength),
 });
@@ -116,7 +118,7 @@ export function localModel(): LoadoutModel {
   const choice = (): LoadoutChoice => {
     const g = getGhostCosmetics();
     const l = getLoadout();
-    return pick({ ...(l as unknown as Record<string, string>), hairColor: l.hairColor !== undefined ? hairHex(l.hairColor) : null, hairLength: l.hairLength ?? null, outfit: getOutfit(), ghost: g.ghostId, trail: g.trailId });
+    return pick({ ...(l as unknown as Record<string, string>), hairColor: l.hairColor !== undefined ? hairHex(l.hairColor) : null, hairLength: l.hairLength ?? null, outfit: getOutfit(), ghost: g.ghostId, trail: g.trailId, shape: g.shapeId });
   };
   return {
     userId: null,
@@ -128,7 +130,7 @@ export function localModel(): LoadoutModel {
     equip: (slot, id) => {
       const c = choice();
       if (slot === "outfit") setOutfit(id);
-      else if (slot === "ghost" || slot === "trail") setGhostCosmetics(slot === "ghost" ? id : c.ghost, slot === "trail" ? id : c.trail);
+      else if (slot === "ghost" || slot === "trail" || slot === "shape") setGhostCosmetics(slot === "ghost" ? id : c.ghost, slot === "trail" ? id : c.trail, slot === "shape" ? id : c.shape);
       else setLoadout(loadoutFor({ ...c, [slot]: id }));
       status = { kind: "saved", text: "Saved on this device" };
     },
@@ -169,7 +171,7 @@ let lastGunView: StageView = "gun";
 
 const NAME: Record<LoadoutCategory, string> = Object.fromEntries(LOADOUT_CATEGORIES.map((c) => [c.slot, c.label])) as Record<LoadoutCategory, string>;
 /** The caption's second line per category (what the item is). */
-const KIND: Record<LoadoutCategory, string> = { knife: "Knife", finish: "Finish", hilt: "Hilt", glove: "Gloves", camo: "Gun camo", outfit: "Colourway", hat: "Hat", ghost: "Ghost colour", trail: "Trail" };
+const KIND: Record<LoadoutCategory, string> = { knife: "Knife", finish: "Finish", hilt: "Hilt", glove: "Gloves", camo: "Gun camo", outfit: "Colourway", hat: "Hat", ghost: "Ghost colour", trail: "Trail", shape: "Trail shape" };
 
 export interface LoadoutViewOpts {
   playerGlow?: () => import("../player/glow-config").PlayerGlow | null;
@@ -242,7 +244,7 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
    */
   const lookOf = (c: LoadoutChoice): StageLook => {
     const editing = o.playerGlow?.() ?? null;
-    return { playerGlow: editing ?? m.playerGlow?.() ?? null, previewGlow: !!editing, outfit: c.outfit, ghost: c.ghost, trail: c.trail, veil: veiled(cosmetic(c.outfit)) };
+    return { playerGlow: editing ?? m.playerGlow?.() ?? null, previewGlow: !!editing, outfit: c.outfit, ghost: c.ghost, trail: c.trail, shape: c.shape, veil: veiled(cosmetic(c.outfit)) };
   };
   const viewFor = (s: LoadoutCategory): StageView => (stageKind(s) === "hands" ? lastHandsView : stageKind(s) === "guns" ? lastGunView : stageKind(s) === "bunny" ? "bunny" : "ghost");
 
@@ -332,6 +334,8 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
 
   // --- categories across the top, the grid beside the stage
   const tabs = h("div.lo-tabs", { role: "tablist", "aria-label": "Loadout" });
+  // Nine categories don't fit a 1024 px window: the row scrolls, and the edge with more fades (it ran off with no cue).
+  scrollCue(tabs, "x");
   const status = h("span.lo-status", { role: "status", "aria-live": "polite" });
   const clearIndicators = h("button.link-btn.lo-clear", { type: "button", onclick: () => m.clearIndicators() }, "Mark all seen");
   clearIndicators.hidden = !!o.previewOnly;
@@ -552,7 +556,8 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
       if (slot === "hilt") return { key: `h|${l.knife}|${l.finish}|${l.hilt ?? ""}|${outfit}`, kind: "knife", knife: l.knife, loadout: l, focus: "hilt" };
       return { key: `k|${l.knife}|${l.finish}|${l.hilt ?? ""}|${outfit}`, kind: "knife", knife: l.knife, loadout: l };
     }
-    const spec = previewOf({ cosmetic: c }, { outfit, body: choice().body });
+    const tc = cosmetic(choice().trail);
+    const spec = previewOf({ cosmetic: c }, { outfit, body: choice().body, trail: tc?.color ? { color: tc.color, color2: tc.color2 } : null, shape: choice().shape });
     if (spec && veiled(c)) return { key: `i|${spec.key}|veil`, kind: "item", spec: { ...spec, veil: true } };
     return spec ? { key: `i|${spec.key}`, kind: "item", spec } : null;
   }
@@ -637,10 +642,11 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
     const canvas = h("canvas", { width: 384, height: 240, "aria-hidden": "true" }) as HTMLCanvasElement;
     const thumb = h(`span.lo-thumb${veiled(c) ? ".lo-veiled" : ""}`, null, veiled(c) ? h("span.pf-sw.lo-sw-none", { "aria-hidden": "true" }) : swatch(c), canvas, h("span.lo-on", { html: CHECK_SVG, "aria-hidden": "true" }));
     // The line under the name: how to get a locked item, or in the Supporter and Staff sections the item's set
-    // ("Geode"). An item you own says nothing more: no rarity anywhere (owner 11-12).
+    // ("Geode"), unless that is the item's own name (the Geode colourway read "Geode / Geode"). An item you own says
+    // nothing more: no rarity anywhere (owner 11-12).
     const sub = lock
       ? h("span.lo-sub.lo-lock", { title: lock.hint }, h("span.lo-lock-i", { html: LOCK_SVG }), goalText(c, group ?? lock.goal, true))
-      : group
+      : group && group !== nameOf(c)
         ? h("span.lo-sub", null, group)
         : null;
     const id = c?.id ?? "";

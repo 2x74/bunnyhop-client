@@ -34,6 +34,7 @@ import { SUPPORTER_FX } from "./card-fx";
 import { h } from "./dom";
 import { liveMark, nameAttrs, nameMarks } from "./marks";
 import { liveOf } from "../live";
+import { pointerMoved, watchPointer } from "./pointer-moved";
 import { hideRunStats } from "./run-stats";
 import "./hover-card.css";
 
@@ -154,7 +155,7 @@ export function hoverCardBody(p: Who, v: PlayerCardView): HTMLElement {
                 `li.t${t.tier ?? "x"}`,
                 null,
                 h("span.hc-tier", null, tierLabel(t.tier)),
-                h("span.hc-map", null, t.map.replace(/^bhop_/, "")),
+                h("span.hc-map", null, t.map),
                 h("span.hc-time", null, formatTime(t.time)),
                 h("span.hc-rp", null, t.points ? fmtPoints(t.points) : "", t.points ? h("small", null, " pts") : null),
               ),
@@ -244,14 +245,18 @@ function bind(): void {
       if (current?.el === el) show(el);
     }, optsOf.get(el)?.quietWhileTyping && typing() ? TYPING_SHOW_MS : SHOW_MS);
   };
-  document.addEventListener("pointerover", (e) => {
+  // Only when the pointer really moved onto (or on) the name: not when a menu opens under a resting cursor.
+  watchPointer();
+  const hover = (e: PointerEvent) => {
     if (e.pointerType === "touch") return;
     const el = targetOf(e.target);
-    if (el) {
+    if (el && pointerMoved(e)) {
       lastPointer = { x: e.clientX, y: e.clientY };
       schedule(el);
     }
-  });
+  };
+  document.addEventListener("pointerover", hover);
+  document.addEventListener("pointermove", hover);
   document.addEventListener("pointerout", (e) => {
     const el = targetOf(e.target);
     if (el && current?.el === el && !targetOf(e.relatedTarget)) hideHoverCard();

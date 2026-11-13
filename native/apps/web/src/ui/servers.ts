@@ -1,20 +1,28 @@
-import { openGiftDialog } from "./gifting";
 // Server browser (home screen "Play online" and the pause menu's "Servers"): the persistent rooms from GET /servers
 // with their current map + tier, players, time left and ping. Join loads the room's map with ?server=<id>
 // (net/mp.ts takes over from there); "Play solo" opens the map browser as before.
-// Also the pause menu's room block while connected (net/presence.ts roomActions()).
+// Also the room's own line at the top of the pause menu's Server tab (roomHeader).
 
 import "../net/net.css";
 import { api, ApiError, type ServerListing } from "../api";
 import { goToLobby, lobbyIdFromParam } from "../net/lobby";
-import { roomActions, roomPresence, roomUrl } from "../net/presence";
+import { roomPresence, roomUrl, type RoomActions } from "../net/presence";
 import { openAccount } from "./account-state";
 import { arrowNav, h } from "./dom";
 import { tierBadge } from "./maps";
 import { landRows } from "./land";
+import { loadFailed } from "./load-failed";
 import "./servers.css";
 
 const REFRESH_MS = 10_000;
+
+/**
+ * Why a far-away server is fine, under Home's Play online button and under the server list (whose Ping column would
+ * otherwise read as a reason not to join): your movement is simulated on your machine exactly as in solo play, the
+ * room only relays it to the others, and the run is verified from its replay (net/mp.ts). Ping changes how the other
+ * players look to you, nothing about your run.
+ */
+export const PING_NOTE = "Your run is timed on your machine, so ping doesn't matter.";
 
 function clock(ms: number): string {
   const s = Math.max(0, Math.ceil(ms / 1000));
@@ -104,6 +112,7 @@ export function serverBrowser(o: ServerBrowserOpts): HTMLElement {
   const root = h(
     "div.servers",
     null,
+    api.available() ? h("p.srv-ping-note", null, PING_NOTE) : null,
     table,
     status,
     api.available() ? lobbyBlock(o.map ?? null) : null,
@@ -118,6 +127,8 @@ export function serverBrowser(o: ServerBrowserOpts): HTMLElement {
   const pings = new Map<string, number | null>();
   const deadlines = new Map<string, number>();
   let rows: ServerListing[] = [];
+  /** The couldn't-load state, while the list has never arrived. */
+  let failed: HTMLElement | null = null;
   // Supporters may take one slot over a full room (apps/api src/rooms/room.ts): the room decides, this only offers it.
   let supporter = false;
   void api.me().then((u) => {
@@ -174,10 +185,19 @@ export function serverBrowser(o: ServerBrowserOpts): HTMLElement {
       for (const s of rows) if (s.timeLeftMs !== null) deadlines.set(s.id, now + s.timeLeftMs);
       render();
       for (const s of rows) if (!pings.has(s.id) && s.online) void measurePing(s.id).then((p) => (pings.set(s.id, p), root.isConnected && render()));
-    } catch {
-      status.textContent = "Couldn't reach the servers. Retrying…";
-      status.hidden = false;
-      if (!rows.length) tbody.replaceChildren();
+      failed?.remove();
+      failed = null;
+      table.hidden = false;
+    } catch (e) {
+      // A list already on screen stays, with a line saying it's stale. Without one: the shared couldn't-load state
+      // (it keeps retrying on its own too).
+      status.textContent = rows.length ? "Couldn't reach the servers. Retrying…" : "";
+      status.hidden = !rows.length;
+      if (!rows.length && !failed) {
+        table.hidden = true;
+        failed = loadFailed("the servers", () => void load(), e);
+        table.after(failed);
+      }
     }
   };
   void load();
@@ -209,55 +229,39 @@ export function onlineSummary(): HTMLElement {
   return el;
 }
 
-/** Pause menu "Server" tab while in a room: room status + Scoreboard / Spectate / Nominate / RTV / Leave. */
-export function roomPanel(resume: () => void): HTMLElement | null {
-  const a = roomActions();
-  if (!a) return null;
-  const s = a.summary();
-  const then = (fn: () => void) => () => {
-    resume();
-    // After the pointer is locked again, so the numbered menu takes the digit keys.
-    setTimeout(fn, 120);
-  };
-  const card = (label: string, fn: () => void, o: { sub?: string; hint?: string; icon?: string; danger?: boolean } = {}) =>
-    h(
-      `button.action-card${o.danger ? ".danger" : ""}`,
-      { type: "button", onclick: fn },
-      o.icon ? h("span.ac-icon", { "aria-hidden": "true" }, o.icon) : null,
-      h("span.ac-text", null, h("b", null, label), o.sub ? h("small", null, o.sub) : null),
-      o.hint ? h("kbd", null, o.hint) : null,
-    );
-  const fill = Math.round((100 * s.players) / Math.max(1, s.max));
+/**
+ * The room you're in, as its line of the Play online table: map, players, time left (pause menu Server tab; menu.ts
+ * lists what you can do there under it).
+ */
+export function roomHeader(s: ReturnType<RoomActions["summary"]>): HTMLElement {
+  // Only news: an open room is the normal case (you're in it), so it says nothing; a lost connection does.
+  const news = s.status === "open" ? null : s.status === "closed" ? "Disconnected" : s.status === "connecting" ? "Connecting…" : "Reconnecting…";
+  const next = /^changing to (.+)$/.exec(s.timeLeft)?.[1];
+  const full = s.max > 0 && s.players >= s.max;
   return h(
-    "div.pp-room",
+    "div.room-head",
     null,
+    h("h3.room-name", null, s.name, news ? h("span.room-live", null, news) : null),
     h(
-      "div.room-card",
+      "table.srv-table.room-facts",
       null,
-      // Only news: an open room is the normal case (you're in it), so it says nothing; a vote or a map change does.
-      s.status !== "open" ? h("div.room-live", null, s.status) : null,
-      h("b.room-name", null, s.name),
-      h("div.room-map", null, h("span", null, s.map), s.tier ? tierBadge(s.tier) : null),
+      h("thead", null, h("tr", null, h("th", null, "Map"), h("th", null, "Players"), h("th", null, "Time left"))),
       h(
-        "div.room-stats",
+        "tbody",
         null,
-        h("div", null, h("small", null, "Players"), h("b", null, `${s.players}`, h("span.dim", null, ` / ${s.max}`)), h("span.srv-bar", null, h("i", { style: `width:${fill}%` }))),
-        h("div", null, h("small", null, "Time left"), h("b", null, s.timeLeft.replace(/ left$/, ""))),
-        h("div", null, h("small", null, "Rock the vote"), h("b", null, `${s.rtv.count}`, h("span.dim", null, ` / ${s.rtv.needed}`))),
+        h(
+          "tr",
+          null,
+          h("td", null, h("div.srv-map", null, h("span.srv-mapname", null, next ? `→ ${next}` : s.map), next ? null : tierBadge(s.tier))),
+          h(
+            "td.srv-players",
+            null,
+            h("span", null, h("b", null, String(s.players)), h("span.dim", null, ` / ${s.max}`)),
+            h(`span.srv-bar${full ? ".full" : ""}`, null, h("i", { style: `transform:scaleX(${Math.min(1, s.players / Math.max(1, s.max)).toFixed(3)})` })),
+          ),
+          h("td", null, next ? "changing" : s.timeLeft.replace(/ left$/, "") || "—"),
+        ),
       ),
-    ),
-    h(
-      "div.card-grid.pp-room-actions",
-      null,
-      s.lobby ? card("Copy invite link", () => a.invite(), { icon: "⧉", sub: "Send it to friends · !invite" }) : null,
-      s.host ? card("Change lobby map", then(() => a.changeMap()), { icon: "⇢", sub: "Host · !map" }) : null,
-      card("Gift Supporter", () => openGiftDialog({ roomId: s.id }), { icon: "✦", sub: "Give Supporter to players in this room" }),
-      card("Scoreboard", then(() => a.scoreboard()), { hint: "Tab", icon: "≡" }),
-      card(s.spectating ? "Spectate / respawn" : "Spectate", then(() => a.spectate()), { hint: "N", icon: "◉" }),
-      card("Race a player", then(() => a.race()), { icon: "⚑", sub: "!race" }),
-      card("Nominate a map", then(() => a.nominate()), { icon: "✚", sub: "!nominate" }),
-      card("Rock the vote", () => (a.rtv(), resume()), { icon: "↻", sub: `${s.rtv.count}/${s.rtv.needed} · !rtv` }),
-      card("Leave server", () => a.leave(), { icon: "⏏", sub: "Keep playing this map solo", danger: true }),
     ),
   );
 }

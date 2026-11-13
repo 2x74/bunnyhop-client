@@ -3,7 +3,7 @@
 // sync bar, keycaps and speed graph — at the positions of the player's HUD layout (prefs.hud.layout), with rem
 // computed by the same clamp() the page uses for that frame size. Also the intro title card and the outro card.
 
-import { formatDelta, splitLead } from "../hud/time-face";
+import { countWord, formatDelta, splitLead } from "../hud/time-face";
 import { formatSpeedDiff } from "../closest-pos";
 import { anchorX, anchorY, hudPoints, hudRem, type HudElId, type HudPoint, type HudPlace, type KeysPrefs } from "../hud/layout";
 import { IN_BACK, IN_DUCK, IN_FORWARD, IN_JUMP, IN_MOVELEFT, IN_MOVERIGHT } from "../input";
@@ -298,8 +298,8 @@ export class CanvasHud {
 
   private stats(g: G, v: HudValues, fs: number): Box {
     const parts: [string, string][] = [
-      [String(v.jumps), " jumps"],
-      [String(v.strafes), " strafes"],
+      [String(v.jumps), ` ${countWord(v.jumps, "jump")}`],
+      [String(v.strafes), ` ${countWord(v.strafes, "strafe")}`],
       [`${v.sync.toFixed(1)}%`, " sync"],
     ];
     if (v.perfText && !prefs.get().hud.layout.sync.on) parts.push([v.perfText, ""]);
@@ -653,8 +653,8 @@ export function drawOutroCard(g: G, w: number, h: number, c: CardInfo, t: number
   center(g, c.time === null ? "DNF" : formatTime(c.time), cx, h * 0.27 + 150 * u, 150 * u, 800, "#fff", -0.02);
   center(g, c.player, cx, h * 0.27 + 210 * u, 34 * u, 700, "rgba(238,241,246,0.85)");
   const stats: [string, string][] = [
-    [String(c.jumps), "jumps"],
-    [String(c.strafes), "strafes"],
+    [String(c.jumps), countWord(c.jumps, "jump")],
+    [String(c.strafes), countWord(c.strafes, "strafe")],
     [`${c.sync.toFixed(1)}%`, "sync"],
     [`${Math.round(c.maxSpeed)}`, "max u/s"],
   ];
@@ -755,7 +755,7 @@ export function drawBranding(g: G, w: number, h: number): void {
 }
 
 function drawLeaderboard(g: G, board: NonNullable<CardInfo["leaderboard"]>, cx: number, y: number, width: number, px: number): number {
-  let height = wrappedCenter(g, `#${board.rank.toLocaleString()} of ${board.total.toLocaleString()} players`, cx, y, width, px * 1.2, 800, ACCENT, 1);
+  let height = wrappedCenter(g, `#${board.rank.toLocaleString()} of ${board.total.toLocaleString()} ${countWord(board.total, "player")}`, cx, y, width, px * 1.2, 800, ACCENT, 1);
   if (board.points !== null) {
     height += px * 0.2;
     height += wrappedCenter(g, `${board.points.toLocaleString(undefined, { maximumFractionDigits: 2 })} points`, cx, y + height, width, px, 700, "#eef1f6", 1);

@@ -8,6 +8,7 @@ import { ANGLE_SPEED_KEY_RANGE, YAW_SPEED_RANGE } from "../turn-binds";
 import { M_YAW_RANGE, SENS_RANGE, sensProblem } from "../sens-convert";
 import { HUD_ELEMENTS, HUD_SCALE, type HudElId } from "../hud/layout";
 import { COLOR_BLIND_MODES } from "../palette";
+import { MODEL_LIGHTING_MODES } from "../graphics/presets";
 import { KINDS, TRIGGER_OPACITY, TRIGGER_STYLES, TRIGGER_THICKNESS } from "../triggers/volumes";
 import { JHUD_BANDS } from "../ssj/jhud";
 import { PAINT_COLORS } from "../paint/prefs";
@@ -247,6 +248,10 @@ export const CVARS: readonly Cvar[] = [
   sw("mat_antialias", "Antialiasing, after a reload.", (p) => p.graphics.antialias, (p, v) => (p.graphics.antialias = v)),
   { name: "mat_forceaniso", help: "Texture filtering: 1, 2, 4, 8 or 16.", range: [1, 16], int: true, get: (p) => p.graphics.anisotropy, set: (p, v) => (p.graphics.anisotropy = n(v)), check: (_p, v) => ([1, 2, 4, 8, 16].includes(n(v)) ? null : "mat_forceaniso is 1, 2, 4, 8 or 16.") },
   sw("r_waterreflections", "Reflective water in the Source look.", (p) => p.graphics.waterReflections, (p, v) => (p.graphics.waterReflections = v)),
+  sw("r_proplighting", "Props lit by the map; off keeps them bright.", (p) => p.graphics.propLighting, (p, v) => (p.graphics.propLighting = v)),
+  sw("fog_enable", "The map's own fog.", (p) => p.graphics.mapFog, (p, v) => (p.graphics.mapFog = v)),
+  sw("r_mapdetails", "The map's overlays, decals, glows and light beams.", (p) => p.graphics.mapDetails, (p, v) => (p.graphics.mapDetails = v)),
+  pick("r_modellighting", "The map's light on hands, weapons and bunnies: off, subtle or full.", MODEL_LIGHTING_MODES, (p) => p.graphics.modelLighting, (p, v) => (p.graphics.modelLighting = v)),
   sw("r_bloom", "Bloom.", (p) => p.graphics.bloom, (p, v) => (p.graphics.bloom = v)),
   sw("r_shadows", "Dynamic shadows (Enhanced, Cinematic).", (p) => p.graphics.dynamicShadows, (p, v) => (p.graphics.dynamicShadows = v)),
   sw("mat_fullbright", "Fullbright on every map without its own setting.", (p) => p.graphics.fullbright, (p, v) => (p.graphics.fullbright = v)),

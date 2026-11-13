@@ -17,6 +17,9 @@
 }
 .nt-whisper.at { position: fixed; bottom: auto; translate: -50% -100%; font-size: 0.85rem; }
 .nt-whisper.at.below { translate: -50% 0; }
+/* A line already up when the replay viewer's Export opens (a .rv-modal inside #rv, under this layer) would sit on its
+   options: it steps out. Lines at a control (.at) belong to what was pressed and stay. */
+body:has(#rv .rv-modal) .nt-whisper:not(.at) { visibility: hidden; }
 html.nt-has-cel .nt-whisper:not(.at) { bottom: calc(1.9rem + var(--nt-cel-h, 0px)); }
 #nt-toasts:has(> .nt-toast) ~ #nt-whispers .nt-whisper:not(.at) { bottom: calc(1.9rem + 3.3rem); }
 body.in-game:not(.menu-open) .nt-whisper:not(.at) { bottom: auto; top: max(30vh, calc(var(--endcard-bottom, 0px) + var(--sp-3))); font-size: 1rem; }
@@ -66,6 +69,9 @@ body.in-game:not(.menu-open) .nt-toast::after { display: none; }
    peeks over it. A lip in the moment's colour (a rarity's, else amber) and a wash of it under the reward. No time
    bar, no ×: a click or a swipe dismisses it. */
 #nt-cels { left: 50%; bottom: calc(1.6rem + env(safe-area-inset-bottom, 0px)); translate: -50% 0; }
+/* The pause menu: a plate that was up when it opened finishes its time there (queue.ts setGate), lifted clear of the
+   panel's last row, where the leaderboard's pager is. (The panel's height is style.css .pause.) */
+body.in-game.menu-open[data-screen="pause"]:not(.viewer-open) #nt-cels { bottom: calc((100vh - min(46rem, 100vh - 2.5rem)) / 2 + 4.6rem); }
 .nt-cel { --c: var(--accent); position: relative; pointer-events: auto; padding-top: 2rem; touch-action: pan-y; cursor: pointer; }
 .nt-cel-slab {
   position: relative; z-index: 1; display: flex; align-items: center; gap: 0.85rem; box-sizing: border-box;

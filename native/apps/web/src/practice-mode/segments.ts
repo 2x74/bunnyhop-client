@@ -75,6 +75,8 @@ export interface SegmentMark {
   frame0Events: number;
   nullBinds: boolean;
   timedInput: boolean;
+  /** Timed presses (header.timedPresses); absent on marks from before it existed. */
+  timedPresses?: boolean;
   /** Release W on jump (header.wRelease); absent on marks from before it existed. */
   wRelease?: boolean;
   turnSpeed: TurnSpeed | null;
@@ -216,13 +218,13 @@ export class SegmentLog {
    * The current path as a checkpoint mark, or null when the log is full. `flags`: the recorder's header flags now. The
    * mark holds its path until drop(m) (retainedBytes).
    */
-  mark(flags: { nullBinds: boolean; timedInput: boolean; wRelease?: boolean; turnSpeed: TurnSpeed | null }): SegmentMark | null {
+  mark(flags: { nullBinds: boolean; timedInput: boolean; timedPresses?: boolean; wRelease?: boolean; turnSpeed: TurnSpeed | null }): SegmentMark | null {
     if (this.full) return null;
     this.commit();
     const m: SegmentMark = {
       gen: this.gen, tip: this.tip, ticks: this.ticks, loadCount: this.loads,
       frame0: this.frame0, frame0Events: this.frame0Events,
-      nullBinds: flags.nullBinds, timedInput: flags.timedInput, wRelease: !!flags.wRelease, turnSpeed: flags.turnSpeed ? { ...flags.turnSpeed } : null,
+      nullBinds: flags.nullBinds, timedInput: flags.timedInput, timedPresses: !!flags.timedPresses, wRelease: !!flags.wRelease, turnSpeed: flags.turnSpeed ? { ...flags.turnSpeed } : null,
     };
     retain(m.tip);
     this.held.add(m);
@@ -296,6 +298,7 @@ export class SegmentLog {
     rec.turnSpeed = m.turnSpeed ? { ...m.turnSpeed } : null;
     rec.nullBinds = m.nullBinds;
     rec.timedInput = m.timedInput;
+    rec.timedPresses = !!m.timedPresses;
     rec.wRelease = !!m.wRelease;
     const checkpoints: Checkpoint[] = [];
     const cosmetic: CosmeticEvent[] = [];

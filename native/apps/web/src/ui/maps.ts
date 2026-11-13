@@ -509,7 +509,7 @@ export function mapBrowser(o: { current: string | null; focus?: string | null; s
             type: "button",
             role: "radio",
             "aria-checked": String(on),
-            title: t === "all" ? "Every tier" : t === "x" ? `Unrated (${counts.get(t)} maps)` : `Tier ${tierNum(Number(t))}, ${tierName(Number(t))} (${counts.get(t)} maps)`,
+            title: t === "all" ? "Every tier" : `${t === "x" ? "Unrated" : `Tier ${tierNum(Number(t))}, ${tierName(Number(t))}`} (${counts.get(t)} ${counts.get(t) === 1 ? "map" : "maps"})`,
             onclick: () => ((tierFilter = t), refilter()),
           },
           t === "all" ? "All" : t === "x" ? "?" : tierNum(Number(t)),

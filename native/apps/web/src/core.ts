@@ -12,6 +12,70 @@ export interface MeshGroup {
 }
 
 /**
+ * The map's world fog (crates/core/src/fog.rs: its master `env_fog_controller`), as CS:S draws it over the main view:
+ * linear in view depth from `start` to `end`, capped at `maxDensity`. Colours are the keyvalues (0..255, gamma space).
+ */
+export interface WorldFog {
+  enable: boolean;
+  /** Mix `color` and `color2` by the view direction against `dir`. */
+  blend: boolean;
+  color: [number, number, number];
+  color2: [number, number, number];
+  dir: [number, number, number];
+  start: number;
+  end: number;
+  maxDensity: number;
+  /** The controller's far clip distance (`farz`), -1 or 0 for none. Not applied. */
+  farZ: number;
+}
+
+/** Floats per vertex of `Core.dressingMesh`: the world mesh's ten, then fade origin xyz, fade min², fade max². */
+export const DRESSING_STRIDE = 15;
+
+/** A run of `Core.dressingMesh` triangles with one material (`material`: index into `Core.dressingMaterials()`). */
+export interface DressingGroup {
+  material: number;
+  firstIndex: number;
+  indexCount: number;
+  /** 0 = overlay, 1 = infodecal. */
+  kind: number;
+  /** The overlay's render order (0..3). */
+  order: number;
+  sky3d: boolean;
+}
+
+export const GlowKind = { Sprite: 0, LightGlow: 1, Spotlight: 2 } as const;
+
+/**
+ * An env_sprite / env_glow, env_lightglow or point_spotlight the map starts with and never switches (crates/core/src/
+ * dressing.rs). Positions in Source space; colours are the keyvalues (0..255).
+ */
+export interface DressingGlow {
+  kind: (typeof GlowKind)[keyof typeof GlowKind];
+  /** Index into `Core.dressingMaterials()`. */
+  material: number;
+  origin: [number, number, number];
+  color: [number, number, number];
+  alpha: number;
+  renderMode: number;
+  renderFx: number;
+  /** Sprite: scale. Light glow: HorizontalGlowSize. Spotlight: beam width. */
+  size: number;
+  /** Sprite: framerate. Light glow: VerticalGlowSize. Spotlight: beam length to what it hits. */
+  size2: number;
+  hdrScale: number;
+  /** Sprite: angles. Light glow, spotlight: forward direction. */
+  dir: [number, number, number];
+  /** Sprite: [GlowProxySize]. Light glow: [MinDist, MaxDist, OuterMaxDist, GlowProxySize]. Spotlight: [spotlightlength]. */
+  dist: [number, number, number, number];
+  spawnflags: number;
+  /** The brush model it rides on (-1 none), with that entity's spawn origin and angles. */
+  parentModel: number;
+  parentOrigin: [number, number, number];
+  parentAngles: [number, number, number];
+}
+
+/**
  * The map's `sky_camera` (Source's 3D skybox, crates/core/src/skybox.rs): the miniature around `origin` is drawn
  * behind the main view from `origin + eye / scale`, with this fog (distances in world units, colours 0..255).
  */
@@ -465,6 +529,17 @@ interface Exports {
   brush_states?: () => number;
   effect_states?: () => number;
   sky_camera?: () => number;
+  world_fog?: () => number;
+  light_cube?: (x: number, y: number, z: number) => number;
+  dressing_materials?: () => number;
+  dressing_build?: () => number;
+  dressing_vertices_ptr?: () => number;
+  dressing_vertices_len?: () => number;
+  dressing_indices_ptr?: () => number;
+  dressing_indices_len?: () => number;
+  dressing_groups?: () => number;
+  dressing_glows?: () => number;
+  dressing_glow_visibility?: (x: number, y: number, z: number, first: number, count: number) => number;
   map_sound_serial?: () => number;
   map_sound_states?: () => number;
   prop_anim_serial?: () => number;
@@ -664,8 +739,8 @@ export class Core {
     if (!x.mesh_sky_vertices_ptr || !x.mesh_sky_vertices_len || !x.mesh_sky_indices_ptr || !x.mesh_sky_indices_len || !x.mesh_sky_groups) return null;
     const vertices = this.f32(x.mesh_sky_vertices_ptr(), x.mesh_sky_vertices_len()).slice();
     const indices = this.u32(x.mesh_sky_indices_ptr(), x.mesh_sky_indices_len()).slice();
-    const groupLen = x.mesh_sky_groups();
-    const g = this.u32(x.scratch_u32_ptr(), groupLen);
+    const groupWords = x.mesh_sky_groups(); // (first: the call can move the scratch buffer)
+    const g = this.u32(x.scratch_u32_ptr(), groupWords);
     const groups = [];
     for (let i = 0; i + 3 <= g.length; i += 3) groups.push({ model: g[i], firstIndex: g[i + 1], indexCount: g[i + 2] });
     return { vertices, indices, groups };
@@ -695,6 +770,104 @@ export class Core {
         maxDensity: f[18],
       },
     };
+  }
+
+  /**
+   * The map's world fog, or null: no fog controller, a map that changes its fog while it runs (fog.rs), or a wasm
+   * build without the export.
+   */
+  worldFog(): WorldFog | null {
+    const n = this.x.world_fog?.() ?? 0;
+    if (n < 15) return null;
+    const f = this.f32(this.x.scratch_f32_ptr(), n);
+    return {
+      enable: f[0] !== 0,
+      blend: f[1] !== 0,
+      color: [f[2], f[3], f[4]],
+      color2: [f[5], f[6], f[7]],
+      dir: [f[8], f[9], f[10]],
+      start: f[11],
+      end: f[12],
+      maxDensity: f[13],
+      farZ: f[14],
+    };
+  }
+
+  /**
+   * The map's light at a point in Source space (crates/core/src/lighting.rs: the leaf's ambient cube plus the lights
+   * that reach it) into `out`: six linear RGB colours for +x, -x, +y, -y, +z, -z. False (and `out` untouched) where
+   * there is none: a map drawn fullbright or without ambient data, a point in solid, a wasm build without the export.
+   */
+  lightCube(x: number, y: number, z: number, out: Float32Array): boolean {
+    if ((this.x.light_cube?.(x, y, z) ?? 0) < 18) return false;
+    out.set(this.f32(this.x.scratch_f32_ptr(), 18));
+    return true;
+  }
+
+  /**
+   * Material names of the map's overlays, infodecals, sprites, light glows and spotlight beams (crates/core/src/
+   * dressing.rs), for resolving with the map's other materials. Empty with a wasm build without the export.
+   */
+  dressingMaterials(): string[] {
+    const n = this.x.dressing_materials?.() ?? 0;
+    return n ? this.str(this.x.scratch_str_ptr(), n).split("\n") : [];
+  }
+
+  /**
+   * Builds the overlay and infodecal geometry (call after resolving content: a decal's size comes from its material's
+   * texture) and returns copies, or null when the map has none or the wasm build lacks the export. Vertex layout:
+   * DRESSING_STRIDE floats; groups in draw order.
+   */
+  dressingMesh(): { vertices: Float32Array; indices: Uint32Array; groups: DressingGroup[] } | null {
+    const x = this.x;
+    if (!x.dressing_build || !x.dressing_groups || !x.dressing_vertices_ptr || !x.dressing_vertices_len || !x.dressing_indices_ptr || !x.dressing_indices_len) return null;
+    if (!x.dressing_build()) return null;
+    const vertices = this.f32(x.dressing_vertices_ptr(), x.dressing_vertices_len()).slice();
+    const indices = this.u32(x.dressing_indices_ptr(), x.dressing_indices_len()).slice();
+    // (The count first: filling the scratch buffer can move it.)
+    const n = x.dressing_groups();
+    const g = this.u32(x.scratch_u32_ptr(), n);
+    const groups: DressingGroup[] = [];
+    for (let i = 0; i + 6 <= g.length; i += 6) groups.push({ material: g[i], firstIndex: g[i + 1], indexCount: g[i + 2], kind: g[i + 3], order: g[i + 4], sky3d: g[i + 5] !== 0 });
+    return { vertices, indices, groups };
+  }
+
+  /** The map's glows and beams (see DressingGlow); empty with a wasm build without the export. */
+  dressingGlows(): DressingGlow[] {
+    const n = this.x.dressing_glows?.() ?? 0;
+    const f = this.f32(this.x.scratch_f32_ptr(), n);
+    const out: DressingGlow[] = [];
+    const v3 = (o: number): [number, number, number] => [f[o], f[o + 1], f[o + 2]];
+    for (let o = 0; o + 30 <= f.length; o += 30)
+      out.push({
+        kind: f[o] as DressingGlow["kind"],
+        material: f[o + 1],
+        origin: v3(o + 2),
+        color: v3(o + 5),
+        alpha: f[o + 8],
+        renderMode: f[o + 9],
+        renderFx: f[o + 10],
+        size: f[o + 11],
+        size2: f[o + 12],
+        hdrScale: f[o + 13],
+        dir: v3(o + 14),
+        dist: [f[o + 17], f[o + 18], f[o + 19], f[o + 20]],
+        spawnflags: f[o + 21],
+        parentModel: f[o + 22],
+        parentOrigin: v3(o + 23),
+        parentAngles: v3(o + 26),
+      });
+    return out;
+  }
+
+  /**
+   * Whether glows `first .. first + count` (`dressingGlows` order) can be seen from `x, y, z` (Source space): 1 or 0
+   * each, by a trace through the world's opaque brushes. Null when the map has no trace data (drawn fullbright) or the
+   * wasm build lacks the export.
+   */
+  dressingGlowVisibility(x: number, y: number, z: number, first: number, count: number): Float32Array | null {
+    const n = this.x.dressing_glow_visibility?.(x, y, z, first, count) ?? 0;
+    return n ? this.f32(this.x.scratch_f32_ptr(), n).slice() : null;
   }
 
   /** Resolved materials, parallel to `mesh().materials`. */
@@ -898,29 +1071,65 @@ export class Core {
    * these keys (the same values; the replay viewer's trail history reads a few models every tick).
    */
   brushOrigins(only?: ReadonlySet<number>): Map<number, BrushTransform> {
+    // The full map is this core's own, refilled in place every call (a frame's worth of garbage otherwise: a Map and an
+    // array per model, research/PERF in the 0.0.40 audit): read it now, don't keep it. `only` gets a new map to keep.
+    const out = only ? new Map<number, BrushTransform>() : this.origins;
+    const pass = ++this.originsPass;
+    const put = (key: number, n: 6 | 7 | 8, a: number, b: number, c: number, d: number, e: number, f: number, g = 0, h = 0) => {
+      if (only && !only.has(key)) return;
+      if (!only) this.originsAt.set(key, pass);
+      const t = out.get(key);
+      if (only || !t || t.length !== n) out.set(key, n === 6 ? [a, b, c, d, e, f] : n === 7 ? [a, b, c, d, e, f, g] : [a, b, c, d, e, f, g, h]);
+      else {
+        t[0] = a; t[1] = b; t[2] = c; t[3] = d; t[4] = e; t[5] = f;
+        if (n > 6) t[6] = g;
+        if (n > 7) t[7] = h;
+      }
+    };
+    // Each export refills the scratch buffer: the origins are copied out before the states are asked for.
     const len = this.x.brush_origins();
-    const b = this.f32(this.x.scratch_f32_ptr(), len);
-    const out = new Map<number, BrushTransform>();
-    for (let i = 0; i < b.length; i += 7) if (!only || only.has(b[i])) out.set(b[i], [b[i + 1], b[i + 2], b[i + 3], b[i + 4], b[i + 5], b[i + 6]]);
+    const b = (this.originsBuf = this.originsBuf.length >= len ? this.originsBuf : new Float32Array(len));
+    b.set(this.f32(this.x.scratch_f32_ptr(), len));
+    const states = this.brushStates;
     if (this.x.brush_states) {
       const slen = this.x.brush_states();
       const st = this.f32(this.x.scratch_f32_ptr(), slen);
       for (let i = 0; i + 3 <= st.length; i += 3) {
-        const t = out.get(st[i]);
-        if (t && t.length === 6) out.set(st[i], [t[0], t[1], t[2], t[3], t[4], t[5], st[i + 1]] as BrushTransform);
+        if (this.brushStatesAt.get(st[i]) === pass) continue; // (the first one counts)
+        states.set(st[i], st[i + 1]);
+        this.brushStatesAt.set(st[i], pass);
       }
     }
-    const propVisibility = new Map((this.propAnims() ?? []).map(p => [p.entity, !p.hidden && !p.removed]));
+    for (let i = 0; i + 7 <= len; i += 7) {
+      const model = b[i];
+      if (this.brushStatesAt.get(model) === pass) put(model, 7, b[i + 1], b[i + 2], b[i + 3], b[i + 4], b[i + 5], b[i + 6], states.get(model)!);
+      else put(model, 6, b[i + 1], b[i + 2], b[i + 3], b[i + 4], b[i + 5], b[i + 6]);
+    }
+    const anims = this.propAnims();
+    if (this.propVisibility.of !== anims) this.propVisibility = { of: anims, shown: new Map((anims ?? []).map((p) => [p.entity, !p.hidden && !p.removed])) };
+    const shown = this.propVisibility.shown;
     // Moving props (doors) ride along under PROP_TRANSFORM_KEY + entity.
     const plen = this.x.prop_transforms?.() ?? 0;
     const p = this.f32(this.x.scratch_f32_ptr(), plen);
-    for (let i = 0; i < p.length; i += 7) if (!only || only.has(PROP_TRANSFORM_KEY + p[i])) out.set(PROP_TRANSFORM_KEY + p[i], [p[i + 1], p[i + 2], p[i + 3], p[i + 4], p[i + 5], p[i + 6], propVisibility.get(p[i]) === false ? 0 : 1]);
-    for (const i of this.entityInstances()) {
-      const key = PROP_TRANSFORM_KEY + i.entity;
-      if (!only || only.has(key)) out.set(key, [i.origin[0], i.origin[1], i.origin[2], i.angles[0], i.angles[1], i.angles[2], i.visible ? 1 : 0, PROP_TRANSFORM_KEY + i.source]);
-    }
+    for (let i = 0; i + 7 <= plen; i += 7) put(PROP_TRANSFORM_KEY + p[i], 7, p[i + 1], p[i + 2], p[i + 3], p[i + 4], p[i + 5], p[i + 6], shown.get(p[i]) === false ? 0 : 1);
+    // Runtime maker copies (entityInstances), read straight from the export.
+    const n = this.x.entity_instances?.() ?? 0;
+    const f = this.f32(this.x.scratch_f32_ptr(), n);
+    for (let i = 0; i + 9 <= n; i += 9) put(PROP_TRANSFORM_KEY + f[i], 8, f[i + 2], f[i + 3], f[i + 4], f[i + 5], f[i + 6], f[i + 7], f[i + 8] !== 0 ? 1 : 0, PROP_TRANSFORM_KEY + f[i + 1]);
+    if (!only) out.forEach((_, key) => this.originsAt.get(key) !== pass && (out.delete(key), this.originsAt.delete(key)));
     return out;
   }
+
+  /** brushOrigins' map without `only`, refilled in place; the pass each key was last written in. */
+  private readonly origins = new Map<number, BrushTransform>();
+  private readonly originsAt = new Map<number, number>();
+  private originsPass = 0;
+  private originsBuf = new Float32Array(0);
+  /** `brush_states` per model and the pass it was last given in. */
+  private readonly brushStates = new Map<number, number>();
+  private readonly brushStatesAt = new Map<number, number>();
+  /** Whether each animated prop is shown (not hidden or removed), for the propAnims() array it was read from. */
+  private propVisibility: { of: readonly PropAnimState[] | null | undefined; shown: Map<number, boolean> } = { of: undefined, shown: new Map() };
 
   /**
    * The volumes the trigger / clip overlays draw (crates/core/src/game/overlay.rs, triggers/): which brushes trigger or
@@ -1069,6 +1278,27 @@ export class Core {
     return this.lines(this.cx.props_build());
   }
 
+  /**
+   * The map's light on the prop mesh of the last `propsBuild` (crates/core/src/prop_light.rs): linear RGB per vertex,
+   * parallel to `propsMesh().vertices` (`vertexCount` of them). Baked per-vertex lighting where the map packs it, else
+   * the light at the prop's lighting origin. A vertex without any carries -1. Null when the map has none to give (drawn
+   * fullbright, no ambient data) or the wasm build lacks the export: the caller shades the props itself. Once per
+   * `propsBuild` (the core frees the bake's inputs): a second call returns null.
+   */
+  propsLighting(vertexCount: number): Float32Array | null {
+    const lighting = this.cx.props_lighting;
+    if (!lighting || vertexCount <= 0) return null;
+    const bytes = vertexCount * 12;
+    const ptr = this.x.alloc(bytes);
+    try {
+      const n = lighting(ptr, bytes);
+      // (Read after the call: it can grow the memory. The allocation has no alignment, so copy the bytes out first.)
+      return n === vertexCount * 3 ? new Float32Array(this.x.memory.buffer.slice(ptr, ptr + bytes)) : null;
+    } finally {
+      this.x.dealloc(ptr, bytes);
+    }
+  }
+
   /** The static prop mesh from the last `propsBuild` (copies). Vertex layout: position, normal, uv. */
   propsMesh(): {
     vertices: Float32Array;
@@ -1150,6 +1380,19 @@ export class Core {
     const f = this.f32(this.x.scratch_f32_ptr(), len);
     const out: MaterialExtras[] = [];
     for (let i = 0; i < f.length; i += 4) out.push({ texture2: f[i], detail: f[i + 1], detailScale: f[i + 2], detailBlend: f[i + 3] });
+    return out;
+  }
+
+  /**
+   * Per resolved material (parallel to `materials()`): its `$selfillum` tint (the lightmap gives way to tint x texture
+   * where the base texture's alpha is), or null. Empty with a wasm build without the export.
+   */
+  materialSelfIllum(): ([number, number, number] | null)[] {
+    if (typeof this.cx.material_selfillum !== "function") return [];
+    const len = this.cx.material_selfillum();
+    const f = this.f32(this.x.scratch_f32_ptr(), len);
+    const out: ([number, number, number] | null)[] = [];
+    for (let i = 0; i + 4 <= f.length; i += 4) out.push(f[i] ? [f[i + 1], f[i + 2], f[i + 3]] : null);
     return out;
   }
 
@@ -1272,6 +1515,7 @@ interface ContentExports {
   content_resolve(extraPtr: number, extraLen: number): number;
   content_material_overrides?(textPtr: number, textLen: number): number;
   material_extras(): number;
+  material_selfillum?(): number;
   material_water(): number;
   water_volumes(): number;
   water_planes(): number;
@@ -1287,6 +1531,7 @@ interface ContentExports {
   props_groups(): number;
   props_dynamic_groups?(): number;
   props_group_sky3d?(): number;
+  props_lighting?(ptr: number, len: number): number;
   props_vertices_ptr(): number;
   props_indices_ptr(): number;
   mesh_blend_ptr(): number;

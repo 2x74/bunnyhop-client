@@ -68,7 +68,7 @@ export class Loadout {
       rememberUnlocks([...this.owned]);
       if (this.choice.outfit && this.choice.outfit !== getOutfit()) setOutfit(this.choice.outfit);
       const g = getGhostCosmetics();
-      if (g.ghostId !== this.choice.ghost || g.trailId !== this.choice.trail) setGhostCosmetics(this.choice.ghost, this.choice.trail);
+      if (g.ghostId !== this.choice.ghost || g.trailId !== this.choice.trail || g.shapeId !== this.choice.shape) setGhostCosmetics(this.choice.ghost, this.choice.trail, this.choice.shape);
       this.syncLoadout();
     }
   }
@@ -140,7 +140,7 @@ export class Loadout {
         if (this.p.mine) refreshMyProfile();
         // Anything picked while this save was in flight wins over the server's echo.
         this.choice = { ...res, ...this.pending };
-        setGhostCosmetics(this.choice.ghost, this.choice.trail);
+        setGhostCosmetics(this.choice.ghost, this.choice.trail, this.choice.shape);
         if ("outfit" in patch) setOutfit(this.choice.outfit);
         this.syncLoadout();
         this.setStatus({ kind: "saved", text: label ? `${label} saved` : "Saved", undo });

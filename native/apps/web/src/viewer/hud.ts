@@ -7,7 +7,7 @@ import { StrafeTrainer } from "../hud/strafe-trainer";
 import { StrafeTrainerView } from "../hud/strafe-trainer-view";
 import { replayStyle } from "../replay";
 import { AUTOSTRAFE_LEAD_FROM } from "../styles";
-import { formatDelta, TimeFace } from "../hud/time-face";
+import { countWord, formatDelta, TimeFace } from "../hud/time-face";
 import { SpeedGraph } from "../hud/graph";
 import { KeysOverlay } from "../hud/keys";
 import { HUD_ELEMENTS, hudPoints, hudRem, placeStyle, type HudElId } from "../hud/layout";
@@ -134,7 +134,7 @@ export class ViewerHud {
   private gspeedEl = h("div.hud-gspeed", null, this.gspeedText, h("span.unit", null, " u/s"));
   private trackText = document.createTextNode("");
   private stageText = document.createTextNode("");
-  private stats = { j: document.createTextNode(""), s: document.createTextNode(""), y: document.createTextNode("") };
+  private stats = { j: document.createTextNode(""), jw: document.createTextNode(" jumps"), s: document.createTextNode(""), sw: document.createTextNode(" strafes"), y: document.createTextNode("") };
   private syncFill = h("i.sync-fill");
   private syncText = document.createTextNode("");
   private perfText = document.createTextNode("");
@@ -161,7 +161,7 @@ export class ViewerHud {
       ghostSpeed: this.gspeedEl,
       track: h("div.hud-track", null, this.trackText),
       stage: h("div.hud-stage", null, this.stageText),
-      stats: h("div.hud-stats", null, h("span", null, h("b", null, this.stats.j), " jumps"), h("span", null, h("b", null, this.stats.s), " strafes"), h("span", null, h("b", null, this.stats.y), " sync"), this.statPerf),
+      stats: h("div.hud-stats", null, h("span", null, h("b", null, this.stats.j), this.stats.jw), h("span", null, h("b", null, this.stats.s), this.stats.sw), h("span", null, h("b", null, this.stats.y), " sync"), this.statPerf),
       sync: h("div.hud-sync", null, h("div.sync-readouts", null, h("span.sync-label", null, "sync ", h("b", null, this.syncText)), h("span.sync-label.hud-perf", null, this.perfText)), h("span.sync-bar", null, this.syncFill)),
       keys: this.keys.el,
       graph: this.graph.el,
@@ -272,7 +272,9 @@ export class ViewerHud {
     this.els.stage.classList.toggle("empty", !v.stage);
     this.els.stats.classList.toggle("empty", !v.showStats);
     setText(this.stats.j, String(v.jumps));
+    setText(this.stats.jw, ` ${countWord(v.jumps, "jump")}`);
     setText(this.stats.s, String(v.strafes));
+    setText(this.stats.sw, ` ${countWord(v.strafes, "strafe")}`);
     setText(this.stats.y, `${v.sync.toFixed(1)}%`);
     const sync = Math.round(v.sync);
     setText(this.syncText, `${sync}%`);
