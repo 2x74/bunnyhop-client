@@ -17,6 +17,7 @@ mod map_audio;
 pub use map_audio::*;
 mod map_load;
 pub use map_load::{bh_load_map_begin, bh_load_map_poll, bh_load_map_cancel};
+mod material_overrides;
 mod release_crypto;
 mod assets;
 mod map_motion;
@@ -485,6 +486,8 @@ impl Map {
             material_index(&material);
         }
         let dressing_materials = mesh.dressing.materials.iter().map(&mut material_index).collect::<Vec<_>>();
+        // After every index is handed out: a replacement takes the place of the material it covers.
+        let names = material_overrides::MaterialOverrides::beside(root.as_deref(), &map_sha256).apply(names);
         let materials = loop {
             check()?;
             let m = materials::resolve(&fs, &names);
