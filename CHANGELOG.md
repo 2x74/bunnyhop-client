@@ -38,6 +38,9 @@ are kept. On a Mac this is the first update since v0.9.0, so it also brings ever
 - Learn to bhop: lessons show only your speed and your keys.
 - "1 jump" and "1 strafe" under the timer. "R to go again" is easier to read on bright maps, and the strafe trainer
   steps aside while the end card is up.
+- Play online shows who is in each server, with their picture, name and badges, and a picture of the map it's on.
+  Click a name for their profile. Each server says where it is.
+- Two new servers in Europe: EU Easy and EU Hard. The two in US East are now called NA Easy and NA Hard.
 - The menu matches the website: Play online and Play solo on the home screen, the plain pause menu tabs, the new Ranks
   explanation and the rest of v0.0.41's menu changes.
 
