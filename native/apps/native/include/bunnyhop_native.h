@@ -194,6 +194,7 @@ uint32_t bh_abi_version(void);
 #define BH_FLAG_NULL_BINDS (1u << 3)
 #define BH_FLAG_TIMED_INPUT (1u << 4)
 #define BH_FLAG_W_RELEASE (1u << 5)
+#define BH_FLAG_TIMED_PRESSES (1u << 6)
 #define BH_IN_TURN_FAST (1u << 6)
 
 typedef struct BhRecordOptionsV29 {
@@ -202,6 +203,7 @@ typedef struct BhRecordOptionsV29 {
     uint32_t timed_input;             /* sticky after real timed input contributes, 0 or 1 */
     uint32_t null_binds;              /* sticky once null binds resolve a recorded command, 0 or 1 */
     uint32_t w_release;               /* sticky once Release W on jump is on for a recorded command, 0 or 1 */
+    uint32_t timed_presses;           /* sticky; presses and wheel notches timed too. Only with timed_input */
 } BhRecordOptionsV29;
 
 typedef struct BhTimingSegmentV2 {
@@ -212,7 +214,7 @@ typedef struct BhTimingSegmentV2 {
 
 int bh_v29_check_abi(uint32_t version, size_t record_size, size_t segment_size);
 /* Begin first. Default frozen pair 210/2; set custom rates before the first command.
- * Later calls may mark timed_input, null_binds or w_release; rates cannot change. New BHRs append BHTS. */
+ * Later calls may mark timed_input, timed_presses, null_binds or w_release; rates cannot change. New BHRs append BHTS. */
 int bh_record_options_v29(BhContext *ctx, const BhRecordOptionsV29 *options);
 /* After bh_replay_load/seek on the live context: preserve full world/timer/filter
  * state, leave playback, invalidate ranked recording. Current map/style/settings/

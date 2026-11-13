@@ -141,11 +141,12 @@ fn w_release_flag_matches_the_website_header() {
 
 #[test]
 fn v29_layout_freezing_and_observation_preserve_simulation() {
-    assert_eq!(size_of::<BhRecordOptionsV29>(), 28);
+    assert_eq!(size_of::<BhRecordOptionsV29>(), 32);
     assert_eq!(size_of::<BhTimingSegmentV2>(), 72);
-    assert_eq!(bh_v29_check_abi(1, 28, 72), 1);
-    assert_eq!(bh_v29_check_abi(2, 28, 72), 0);
-    assert_eq!(bh_v29_check_abi(1, 24, 72), 0);
+    assert_eq!(bh_v29_check_abi(1, 32, 72), 1);
+    assert_eq!(bh_v29_check_abi(2, 32, 72), 0);
+    // The layout before timed_presses is refused rather than read short.
+    assert_eq!(bh_v29_check_abi(1, 28, 72), 0);
     let fixture = Fixture::new();
     let map = fixture.file("fixture.bsp", &bsp(&[]));
     unsafe {
@@ -288,4 +289,43 @@ fn replay_takeover_preserves_world_and_rejects_old_or_wrong_styles() {
         assert_eq!(bh_practice_from_replay(c, c"autohop".as_ptr()), 0);
         bh_destroy(c);
     }
+}
+
+#[test]
+fn timed_presses_flag_matches_the_website_header_and_needs_timed_input() {
+    let timed = sample_recording(BhRecordOptionsV29 {
+        timed_input: 1,
+        ..BhRecordOptionsV29::default()
+    })
+    .encode_raw()
+    .unwrap();
+    assert_eq!(u16::from_le_bytes(timed[6..8].try_into().unwrap()) & 64, 0);
+    let raw = sample_recording(BhRecordOptionsV29 {
+        timed_input: 1,
+        timed_presses: 1,
+        ..BhRecordOptionsV29::default()
+    })
+    .encode_raw()
+    .unwrap();
+    // replay.ts FLAG_TIMED_PRESSES = 1 << 6, only with FLAG_TIMED_INPUT = 1 << 4
+    assert_eq!(u16::from_le_bytes(raw[6..8].try_into().unwrap()) & (64 | 16), 64 | 16);
+    let info: serde_json::Value =
+        serde_json::from_slice(replay::Decoded::parse(&raw).unwrap().info.as_bytes()).unwrap();
+    assert_eq!(info["timedPresses"], true);
+    assert_eq!(info["timedInput"], true);
+    // Only the flag differs: the commands are recorded as they went out.
+    let mut flagged = raw;
+    flagged[6] &= !64;
+    assert_eq!(flagged, timed);
+    let alone = BhRecordOptionsV29 {
+        timed_presses: 1,
+        ..BhRecordOptionsV29::default()
+    };
+    assert!(alone.checked().is_err());
+    let invalid = BhRecordOptionsV29 {
+        timed_input: 1,
+        timed_presses: 2,
+        ..BhRecordOptionsV29::default()
+    };
+    assert!(invalid.checked().is_err());
 }

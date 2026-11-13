@@ -10,18 +10,21 @@ public:
 
     bool begin(BhContext *core, TurnSettings settings) {
         turns = settings;
-        options_ = {BH_V29_ABI_VERSION, sizeof(BhRecordOptionsV29), turns.yaw_speed, turns.angle_speed_key, 0, 0, 0};
+        options_ = {BH_V29_ABI_VERSION, sizeof(BhRecordOptionsV29), turns.yaw_speed, turns.angle_speed_key, 0, 0, 0, 0};
         active_ = bh_record_options_v29(core, &options_) != 0;
         return active_;
     }
 
+    // Timed input times wheel notches and every bound press too, so both flags go on together, as on the website.
     bool mark_timed(BhContext *core, bool contributed) {
         if (!active_ || !contributed || options_.timed_input) {
             return true;
         }
         options_.timed_input = 1;
+        options_.timed_presses = 1;
         if (!bh_record_options_v29(core, &options_)) {
             options_.timed_input = 0;
+            options_.timed_presses = 0;
             return false;
         }
         return true;

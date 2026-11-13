@@ -125,6 +125,7 @@ fn main() {
                 yaw_speed: o["yawSpeed"].as_f64().unwrap() as f32,
                 angle_speed_key: o["angleSpeedKey"].as_f64().unwrap() as f32,
                 timed_input: u32::from(o["timedInput"].as_bool().unwrap_or(false)),
+                timed_presses: u32::from(o["timedPresses"].as_bool().unwrap_or(false)),
                 ..BhRecordOptionsV29::default()
             };
             ok(c, bh_record_options_v29(c, &options));

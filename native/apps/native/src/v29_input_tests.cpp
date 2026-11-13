@@ -132,7 +132,7 @@ struct Fixture {
         BhState state{};
         check(bh_step_look_v2(core.get(), &command, &*look, &state), core.get());
         if (tick == 1) {
-            BhRecordOptionsV29 changed{1, sizeof(BhRecordOptionsV29), 301, 2.5, 0, 0, 0};
+            BhRecordOptionsV29 changed{1, sizeof(BhRecordOptionsV29), 301, 2.5, 0, 0, 0, 0};
             assert(!bh_record_options_v29(core.get(), &changed));
         }
     }

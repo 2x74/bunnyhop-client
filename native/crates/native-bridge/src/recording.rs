@@ -84,6 +84,11 @@ impl ReplayData {
         } else {
             0
         };
+        let timed_presses_flag = if options.timed_presses != 0 {
+            crate::v29::FLAG_TIMED_PRESSES
+        } else {
+            0
+        };
         let h = &self.header;
         let settings = &h["settings"];
         let flag = |key: &str| settings[key].as_bool().unwrap_or(false);
@@ -128,6 +133,7 @@ impl ReplayData {
                 | (u16::from(version >= 9 && counted.is_some()) << 2)
                 | null_binds_flag
                 | timed_input_flag
+                | timed_presses_flag
                 | w_release_flag,
         );
         w.str8(h["map"].as_str().ok_or("missing map")?)?;

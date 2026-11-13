@@ -1,5 +1,7 @@
-// Native timed input against golden vectors from the web's TimedInput (native/tools/timed-input/generate-vectors.ts):
-// every tick must take exactly the counts, pitch and keys the web class gave it.
+// Native timed input against golden vectors from the web's TimedInput: every tick must take exactly the counts, pitch
+// and keys the web class gave it. timed_input_vectors.json comes from native/tools/timed-input/generate-vectors.ts;
+// timed_press_vectors.json (jump, duck and use edges, wheel pulses) is the website's
+// tools/input/timed-press-vectors.json, copied unchanged.
 #include "input_timeline.hpp"
 #include "settings.hpp"
 #include <nlohmann/json.hpp>
@@ -83,7 +85,9 @@ private:
     void deliver(const nlohmann::json &event) {
         const uint64_t stamp = start_ns_ + event.at(1).get<uint64_t>();
         const uint64_t received = arrival(event);
-        if (event.at(0) == "m") {
+        if (event.at(0) == "p") {
+            timeline_.pulse(input_, event.at(3).get<uint32_t>(), stamp, received);
+        } else if (event.at(0) == "m") {
             timeline_.motion(
                     input_,
                     stamp,
@@ -108,7 +112,8 @@ private:
         timeline_.take_tick(input_, sim_ns, kTickNs, false);
         const double counts = input_.yaw_counts - counts_before;
         const uint32_t reports = input_.motion_events - reports_before;
-        const uint32_t held = timeline_.held(held_codes_);
+        // A tick's buttons include the wheel pulse it took, for this command only.
+        const uint32_t held = timeline_.held(held_codes_) | input_.pulse;
         if (counts != expected.at(1).get<double>()) {
             return fail({name_, index, "counts " + std::to_string(counts) + ", web " + expected.at(1).dump()});
         }

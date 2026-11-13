@@ -110,6 +110,18 @@ public:
         }
     }
 
+    // A wheel notch on a bound button. Timed, it goes into the command of its own stamp (TimedInput::add_pulse);
+    // otherwise into the next command.
+    void pulse(Input &input, uint32_t bits, uint64_t stamp, uint64_t received) {
+        if (!timed_ || camera_) {
+            input.pulse |= bits;
+            return;
+        }
+        const uint64_t event_time = stamps_.time(EventStamps::kKeys, stamp, received);
+        const int64_t at = queue_.stamp(int64_t(event_time), int64_t(received), queue_.pulse_tail());
+        queue_.add_pulse(at, bits);
+    }
+
     // Before the frame's ticks. When nothing will tick, pending input goes to the view now.
     void begin_frame(Input &input, bool simulating, uint64_t wall_ns) {
         if (!simulating) {
@@ -127,6 +139,7 @@ public:
         if (frames_mode) {
             commit_pending(input);
             input.consume_all();
+            input.pulse |= queue_.take_pulses(INT64_MAX);
             return;
         }
         const uint64_t start = sim_ns;
@@ -136,7 +149,8 @@ public:
             const auto reports =
                     queue_.take(int64_t(sim_ns), [&input](const TimedInput::Report &report) { apply(input, report); });
             const bool folded_edges = queue_.take_folded_edges();
-            tick_contributed_ = reports != 0 || edges != queue_.pending_edges() || folded_edges;
+            input.pulse |= queue_.pulse;
+            tick_contributed_ = reports != 0 || edges != queue_.pending_edges() || folded_edges || queue_.pulse != 0;
         } else {
             input.take_tick(start, sim_ns);
         }

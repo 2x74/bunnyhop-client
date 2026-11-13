@@ -509,6 +509,9 @@ impl Decoded {
         if flags & crate::v29::FLAG_TIMED_INPUT != 0 {
             metadata["timedInput"] = true.into();
         }
+        if flags & crate::v29::FLAG_TIMED_PRESSES != 0 {
+            metadata["timedPresses"] = true.into();
+        }
         if flags & crate::v29::FLAG_NULL_BINDS != 0 {
             metadata["nullBinds"] = true.into();
         }

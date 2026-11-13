@@ -1767,6 +1767,7 @@ int run(const native::Options &opt) {
                 if (!wheel) input.null_presses.edge(code, input_timeline.binds().of(code), down);
                 input_timeline.key(held_codes, code, down, wheel, stamp, SDL_GetTicksNS());
                 input.held = 0;
+                uint32_t wheel_bits = 0;
                 const auto bindings = input_timeline.binds().snapshot();
                 for (const auto &binding : *bindings) {
                     const auto bit = binding.bit;
@@ -1783,12 +1784,13 @@ int run(const native::Options &opt) {
                             if (bh_weapon_report(core.get(), &weapon)) scope.secondary(weapon.active);
                         }
                         if (wheel && matching && down)
-                            input.pulse |= bit;
+                            wheel_bits |= bit;
                         else if (held)
                             input.held |= bit;
                     } else if (matching && down && !repeat)
                         act(binding.action, wheel);
                 }
+                if (wheel_bits) input_timeline.pulse(input, wheel_bits, stamp, SDL_GetTicksNS());
                 input.held |= command_hold_bits();
                 if (renderer)
                     native_render::surface_tool_key(
@@ -2347,7 +2349,7 @@ int run(const native::Options &opt) {
                         && free_cameras.wheel(event.wheel.y, room.spectator_target.has_value()))
                         break;
                     if (captured && !chat.active && event.wheel.y != 0)
-                        handle_code(event.wheel.y > 0 ? "MWheelUp" : "MWheelDown", true, false, true);
+                        handle_code(event.wheel.y > 0 ? "MWheelUp" : "MWheelDown", true, false, true, event.wheel.timestamp);
                     break;
                 default:
                     break;

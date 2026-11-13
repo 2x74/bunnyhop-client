@@ -61,6 +61,13 @@ public:
         bool down;
     };
 
+    // A one-command press (a wheel notch: Source presses and releases the bound key at once, so the button counts for
+    // one usercmd only).
+    struct Pulse {
+        int64_t t;
+        uint32_t bits;
+    };
+
     double holdback_ms = holdback_start_ms;
     double holdback_max_ms = holdback_limit_ms;
     // Motion received but not yet in a tick: what the camera shows beyond the last tick.
@@ -68,6 +75,8 @@ public:
     double pending_p = 0;
     // Movement-key codes held as of the last tick, in press order.
     std::vector<std::string> keys;
+    // Pulse bits the last take() gave its command alone.
+    uint32_t pulse = 0;
     // Since the session began.
     uint64_t reports = 0;
     uint64_t late = 0;
@@ -80,6 +89,7 @@ public:
     TimedInput() {
         motion_.reserve(storage_limit);
         edges_.reserve(storage_limit);
+        pulses_.reserve(storage_limit);
         keys.reserve(128);
     }
 
@@ -130,9 +140,13 @@ public:
 
     int64_t edge_tail() const { return edge_head_ < edges_.size() ? edges_.back().t : 0; }
 
+    int64_t pulse_tail() const { return pulse_head_ < pulses_.size() ? pulses_.back().t : 0; }
+
     size_t pending() const { return motion_.size() - head_ + bool(folded_); }
 
     size_t pending_edges() const { return edges_.size() - edge_head_; }
+
+    size_t pending_pulses() const { return pulses_.size() - pulse_head_; }
 
     void add_motion(int64_t t, double x, double p) {
         const bool is_late = have_cut_ && t <= cut_;
@@ -167,6 +181,19 @@ public:
         }
     }
 
+    // A wheel notch made at |t| goes into the first command whose cutoff is at or after it, for that command only.
+    // Notches in one command merge into one press, as in CS:S. One stamped at or before a command that already ran
+    // goes into the next one, like a late report.
+    void add_pulse(int64_t t, uint32_t bits) {
+        if (!bits) {
+            return;
+        }
+        if (pulses_.size() - pulse_head_ >= storage_limit) {
+            throw std::runtime_error("Input exceeds the retained pulse window");
+        }
+        insert(pulses_, pulse_head_, Pulse{t, bits});
+    }
+
     // The tick whose boundary is |at|: applies the motion (|apply(x, p)| per report, in order) and the key edges
     // stamped at or before at - holdback. Returns how many reports it took.
     template <class Apply>
@@ -189,7 +216,18 @@ public:
             apply_edge(edges_[edge_head_++]);
         }
         compact(edges_, edge_head_);
+        pulse = take_pulses(until);
         return taken;
+    }
+
+    // The pulse bits stamped at or before |until|, taken out of the queue.
+    uint32_t take_pulses(int64_t until) {
+        uint32_t bits = 0;
+        while (pulse_head_ < pulses_.size() && pulses_[pulse_head_].t <= until) {
+            bits |= pulses_[pulse_head_++].bits;
+        }
+        compact(pulses_, pulse_head_);
+        return bits;
     }
 
     // Pending motion in order, without taking it (the render camera's preview).
@@ -203,7 +241,8 @@ public:
         }
     }
 
-    // Everything pending, now: nothing is ticking, the sensitivity changed, or --frames. Key edges fold into |keys|.
+    // Everything pending, now: nothing is ticking, the sensitivity changed, or --frames. Key edges fold into |keys|;
+    // pulses stay for the next command that takes them.
     template <class Apply>
     uint32_t flush(Apply &&apply) {
         uint32_t taken = take_folded(INT64_MAX, apply);
@@ -238,6 +277,13 @@ public:
         }
     }
 
+    // Pending pulses dropped (capture lost), as a frame-sampled notch was.
+    void clear_pulses() {
+        pulses_.clear();
+        pulse_head_ = 0;
+        pulse = 0;
+    }
+
     // Back to the start. The holdback keeps what it learned.
     void reset() {
         motion_.clear();
@@ -247,6 +293,7 @@ public:
         pending_x = 0;
         pending_p = 0;
         release_keys();
+        clear_pulses();
         have_cut_ = false;
         cut_ = 0;
     }
@@ -262,6 +309,8 @@ private:
     size_t head_ = 0;
     std::vector<Edge> edges_;
     size_t edge_head_ = 0;
+    std::vector<Pulse> pulses_;
+    size_t pulse_head_ = 0;
     // The newest cutoff: a report stamped at or before it is late.
     int64_t cut_ = 0;
     bool have_cut_ = false;
