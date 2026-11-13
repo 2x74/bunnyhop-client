@@ -230,6 +230,7 @@ inline GLuint link_program(Gl &gl, const char *vertex_source, const char *fragme
 #include "native_viewmodel.hpp"
 #include "actor_warmup.hpp"
 #include "native_map_effects.hpp"
+#include "map_glows.hpp"
 // Standard headers must be included at file scope before these GL-dependent definitions.
 #include "source_hdr.hpp"
 #include "enhanced_look.hpp"
@@ -463,6 +464,7 @@ class Renderer {
     // The map's overlays and infodecals (core dressing.rs), and the material looks they and $selfillum need.
     Geometry dressingMesh;
     std::vector<BhDressingGroup> dressingGroups;
+    std::unique_ptr<MapGlows> mapGlows;
     std::vector<BhMaterialLook> materialLooks;
     NativeMapEffects mapEffects;
     std::unique_ptr<NativePresentation> presentation;
@@ -716,7 +718,8 @@ class Renderer {
     }
 
     // BhMaterial flags (bunnyhop_core's MAT_TRANSLUCENT, MAT_ALPHATEST, MAT_UNLIT).
-    static constexpr uint32_t material_translucent = 1, material_alpha_test = 2, material_unlit = 16;
+    static constexpr uint32_t material_translucent = 1, material_alpha_test = 2, material_additive = 8,
+                              material_unlit = 16, material_textured = 0;
     // Textures a cutout or translucent material reads alpha from (texture_bleed.hpp).
     std::unordered_set<int32_t> cutoutTextures;
 
@@ -1431,6 +1434,7 @@ class Renderer {
         gl.DepthMask(GL_TRUE);
         gl.Disable(GL_POLYGON_OFFSET_FILL);
         gl.Disable(GL_BLEND);
+        if (!sky && !reflection) draw_glows(vp, eye, time);
     }
 
     double lastYaw = 0, lastPitch = 0;
@@ -2280,6 +2284,91 @@ public:
         gl.BindVertexArray(0);
     }
 
+    // Sprites, light glows and spotlight beams (map_glows.hpp), their textures and an animated sprite's frames.
+    ResourceLoading prepare_glows() {
+        size_t count = 0;
+        const auto *raw = bh_dressing_glows(core, &count);
+        if (!raw || !count) co_return;
+        float probe = 0;
+        const bool traced = bh_dressing_glow_visibility(core, 0, 0, 0, 0, 1, &probe) > 0;
+        std::vector<std::pair<int32_t, std::vector<GLuint>>> books;
+        const auto texture_of = [&](uint32_t index, bool animated) -> std::optional<MapGlows::Texture> {
+            if (index >= materials.size()) return std::nullopt;
+            const auto &m = materials[index];
+            if (m.kind != material_textured || m.texture < 0) return std::nullopt;
+            MapGlows::Texture out;
+            out.id = texture(m.texture);
+            if (!out.id) return std::nullopt;
+            const auto size = textureSizes.find(m.texture);
+            if (size != textureSizes.end()) {
+                out.width = float(size->second.first);
+                out.height = float(size->second.second);
+            }
+            out.additive = (m.flags & material_additive) != 0;
+            out.translucent = (m.flags & material_translucent) != 0;
+            out.alpha_test = (m.flags & material_alpha_test) != 0;
+            out.orientation = index < materialLooks.size() ? materialLooks[index].sprite_orientation : 0;
+            if (animated) out.frames = sprite_frames(m.texture);
+            return out;
+        };
+        auto glows = std::make_unique<MapGlows>(gl);
+        glows->load(std::span(raw, count), texture_of, traced);
+        co_yield "glows";
+        if (!glows->empty()) mapGlows = std::move(glows);
+    }
+
+    // An animated sprite's frames 1.. (frame 0 is the texture itself), uploaded once per texture.
+    std::vector<GLuint> sprite_frames(int32_t index) {
+        const auto found = spriteFrames.find(index);
+        if (found != spriteFrames.end()) return found->second;
+        uint32_t count = 1;
+        std::vector<GLuint> frames;
+        if (bh_texture_flipbook(core, index, &count) && count > 1) {
+            for (uint32_t frame = 1; frame < count; ++frame) {
+                BhImage image{};
+                if (!bh_texture_frame(core, index, frame, &image)) break;
+                frames.push_back(upload(image, true, true));
+                ownedTextures.push_back(frames.back());
+            }
+            if (frames.size() + 1 != count) frames.clear();
+        }
+        spriteFrames.emplace(index, frames);
+        return frames;
+    }
+
+    std::unordered_map<int32_t, std::vector<GLuint>> spriteFrames;
+
+    bool glows_on() const { return mapGlows && graphics.map_details && !graphics.potato; }
+
+    // Glows and beams in the main view: solid sprites, then the blended ones and the beams, then the glows drawn over
+    // everything (their visibility traced first). The world program is bound again after.
+    void draw_glows(const native::Matrix &vp, const float eye[3], double seconds) {
+        if (!glows_on()) return;
+        const auto forward = view_forward();
+        const float right[3] = {
+                float(std::sin(lastYaw * native::radians)), float(-std::cos(lastYaw * native::radians)), 0
+        };
+        const float up[3] = {
+                right[1] * forward[2] - right[2] * forward[1],
+                right[2] * forward[0] - right[0] * forward[2],
+                right[0] * forward[1] - right[1] * forward[0]
+        };
+        std::array<float, 3> fogColor{}, fogRange{0, 1, 0};
+        if (world_fog_on()) {
+            fogColor = native_render::fog_view_color(
+                    worldFog.color, worldFog.color2, worldFog.dir, worldFog.blend, forward.data()
+            );
+            fogRange = {worldFog.start, worldFog.end, worldFog.max_density};
+        }
+        const MapGlows::View view{vp, eye, right, up, seconds, fogColor, fogRange};
+        mapGlows->draw(MapGlows::Layer::solid, view, core);
+        mapGlows->draw(MapGlows::Layer::blended, view, core);
+        mapGlows->observe(core, eye, vp, double(SDL_GetTicksNS()) / 1e9);
+        mapGlows->draw(MapGlows::Layer::overlay, view, core);
+        gl.Enable(GL_DEPTH_TEST);
+        gl.UseProgram(program);
+    }
+
     bool details_on() const { return graphics.map_details && !graphics.potato && !dressingGroups.empty(); }
 
     // Overlays and decals draw with the world (web map-dressing.ts): the opaque ones after its opaque surfaces, the
@@ -2530,6 +2619,9 @@ public:
         auto water = prepare_water();
         while (!water.step())
             co_yield "water";
+        auto glows = prepare_glows();
+        while (!glows.step())
+            co_yield "glows";
         prepare_uniforms();
     }
 
@@ -2620,6 +2712,7 @@ public:
         viewmodel.reset();
         actorWarmup.reset();
         mapPropMeshes.reset();
+        mapGlows.reset();
         destroy(worldMesh);
         destroy(propMesh);
         destroy(dressingMesh);

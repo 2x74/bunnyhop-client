@@ -21,6 +21,29 @@ pub struct BhMaterialLook {
     pub decal_modulate: u32,
     pub selfillum: u32,
     pub selfillum_tint: [f32; 3],
+    /// `$spriteorientation`: 0 vp_parallel (the default), 1 parallel_upright, 2 oriented.
+    pub sprite_orientation: u32,
+}
+/// A sprite, light glow or spotlight (core dressing.rs Glow), its material an index into bh_materials.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct BhDressingGlow {
+    /// 0 sprite (env_sprite / env_glow), 1 light glow (env_lightglow), 2 spotlight (point_spotlight).
+    pub kind: u32,
+    pub material: u32,
+    pub origin: [f32; 3],
+    pub color: [f32; 3],
+    pub alpha: f32,
+    pub render_mode: u32,
+    pub render_fx: u32,
+    pub size: f32,
+    pub size2: f32,
+    pub dir: [f32; 3],
+    pub dist: [f32; 4],
+    pub spawnflags: u32,
+    pub parent_model: i32,
+    pub parent_origin: [f32; 3],
+    pub parent_angles: [f32; 3],
 }
 /// The world fog as the website draws it (depth-fog.ts): colours 0..255, view-depth start and end, max density.
 #[repr(C)]
@@ -105,6 +128,7 @@ pub struct Assets {
     /// drawn fullbright.
     pub prop_light: Vec<f32>,
     pub dressing_groups: Vec<BhDressingGroup>,
+    pub dressing_glows: Vec<BhDressingGlow>,
     pub material_looks: Vec<BhMaterialLook>,
     pub prop_groups: Vec<BhPropGroup>,
     pub water: CString,

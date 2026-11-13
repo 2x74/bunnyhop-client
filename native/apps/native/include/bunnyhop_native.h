@@ -313,7 +313,29 @@ typedef struct BhDressingGroup {
 typedef struct BhMaterialLook {
     uint32_t decal_modulate, selfillum;
     float selfillum_tint[3];
+    uint32_t sprite_orientation; /* $spriteorientation: 0 vp_parallel, 1 parallel_upright, 2 oriented */
 } BhMaterialLook;
+
+/* A sprite (kind 0), light glow (1) or spotlight (2) of the map; material indexes bh_materials. size, size2 and dist
+ * mean per kind: sprite scale, framerate, proxy size; light glow horizontal and vertical size, min / max / outer max
+ * distance and proxy size; spotlight width, beam length, spotlightlength. dir: a sprite's angles, else forward. */
+typedef struct BhDressingGlow {
+    uint32_t kind, material;
+    float origin[3], color[3], alpha;
+    uint32_t render_mode, render_fx;
+    float size, size2, dir[3], dist[4];
+    uint32_t spawnflags;
+    int32_t parent_model;
+    float parent_origin[3], parent_angles[3];
+} BhDressingGlow;
+
+const BhDressingGlow *bh_dressing_glows(const BhContext *ctx, size_t *count);
+/* 1 / 0 per glow first..first+count into out: seen from the eye past the world's drawn opaque brushes. Returns how
+ * many were written; 0 on a map without trace data. */
+size_t
+bh_dressing_glow_visibility(const BhContext *ctx, float x, float y, float z, size_t first, size_t count, float *out);
+/* A sprite texture's VTF frame count into out (1 for a still one); frames 1.. come once each from bh_texture_frame. */
+int bh_texture_flipbook(BhContext *ctx, int32_t texture, uint32_t *out);
 
 /* Overlays and infodecals: 15 floats a vertex (position, normal, uv, lightmap uv, fade origin, fade min and max
  * distance squared), u32 indices, and their groups. */

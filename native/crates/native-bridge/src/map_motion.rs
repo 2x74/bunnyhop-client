@@ -545,6 +545,22 @@ pub unsafe extern "C" fn bh_material_motion(ctx: *mut BhContext, count: *mut usi
 
 /// Frame `frame` (1..frames) of texture `texture`'s flipbook. Each frame is handed over once; the pixels stay valid
 /// until the next texture request.
+/// A sprite texture's VTF frames (env_sprite plays them at `framerate`): the frame count into `out` (1 for a still
+/// texture), frames 1.. then handed over once each by bh_texture_frame.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bh_texture_flipbook(ctx: *mut BhContext, texture: i32, out: *mut u32) -> c_int {
+    unsafe {
+        call(ctx, |c| {
+            let m = c.map()?;
+            m.prepare_motion(&|| Ok(()))?;
+            let mut frames = std::mem::take(&mut m.motion.frames);
+            let count = m.flipbook(texture, &mut Flipbooks::default(), &mut frames);
+            m.motion.frames = frames;
+            output(out, count.max(1))
+        })
+    }
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bh_texture_frame(ctx: *mut BhContext, texture: i32, frame: u32, out: *mut BhImage) -> c_int {
     unsafe {
