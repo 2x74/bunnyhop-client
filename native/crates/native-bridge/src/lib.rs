@@ -25,6 +25,8 @@ pub use map_motion::{
     bh_texture_frame,
 };
 mod material_alpha;
+mod brush_render;
+pub use brush_render::{BhMaterialBlend, bh_dynamic_render_entities, bh_material_blend};
 pub use material_alpha::{BhAlphaProgram, bh_material_alpha, bh_material_alpha_run, bh_material_alpha_vars};
 mod map_props;
 pub use map_props::{

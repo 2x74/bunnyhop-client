@@ -46,6 +46,10 @@ pub(super) struct Motion {
     wireframes: Vec<BhMaterialWireframe>,
     /// Each material's `$alpha` chain (material_alpha.rs), read the first time one is asked for.
     pub(super) alpha: Option<Vec<Option<super::material_alpha::AlphaProgram>>>,
+    /// Each material's blend facts (brush_render.rs), read with the chains.
+    pub(super) blend: Vec<super::brush_render::BhMaterialBlend>,
+    /// Entities whose render keys the map changes while it runs (brush_render.rs), found the first time asked.
+    pub(super) dynamic_render: Option<Vec<u32>>,
 }
 
 /// Flipbooks decoded so far: frames per texture, and the pixels they count against the map's budget.
@@ -154,9 +158,11 @@ pub(super) struct Proxy {
     pub params: HashMap<String, String>,
 }
 
-/// A VMT as vmt.ts reads it: its top-level parameters (lower case keys, the last value wins) and its proxies.
+/// A VMT as vmt.ts reads it: its shader (lower case, the included one for a patch), its top-level parameters (lower
+/// case keys, the last value wins) and its proxies.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(super) struct Vmt {
+    pub shader: String,
     pub params: HashMap<String, String>,
     pub proxies: Vec<Proxy>,
 }
@@ -210,7 +216,10 @@ pub(super) fn load_vmt(read: &mut dyn FnMut(&str) -> Option<Vec<u8>>, path: &str
     }
     let (shader, body) = parse_key_values(&read(path)?)?;
     if shader != "patch" {
-        let mut vmt = Vmt::default();
+        let mut vmt = Vmt {
+            shader,
+            ..Vmt::default()
+        };
         flatten(&body, &mut vmt);
         return Some(vmt);
     }
@@ -462,6 +471,8 @@ impl Map {
         let mut motion = Motion {
             ready: true,
             alpha: self.motion.alpha.take(),
+            blend: std::mem::take(&mut self.motion.blend),
+            dynamic_render: self.motion.dynamic_render.take(),
             ..Motion::default()
         };
         motion

@@ -455,23 +455,25 @@ pub struct BhAlphaProgram {
 }
 
 impl Map {
-    /// Every material's `$alpha` chain, read once from the VMTs.
-    fn alpha_programs(&mut self) -> Result<&[Option<AlphaProgram>], String> {
+    /// Every material's `$alpha` chain, and its blend facts (brush_render.rs), read once from the VMTs.
+    pub(super) fn alpha_programs(&mut self) -> Result<&[Option<AlphaProgram>], String> {
         if self.motion.alpha.is_none() {
             let names: Vec<String> = serde_json::from_slice(self.assets.material_names.to_bytes())
                 .map_err(|e| e.to_string())?;
-            let programs = names
-                .iter()
-                .map(|name| {
-                    let vmt = map_motion::load_vmt(
-                        &mut |path| self.content(path).ok(),
-                        &map_motion::vmt_path(name),
-                        0,
-                    )?;
-                    alpha_program(&vmt)
-                })
-                .collect();
+            let mut programs = Vec::with_capacity(names.len());
+            let mut blend = Vec::with_capacity(names.len());
+            for (index, name) in names.iter().enumerate() {
+                let vmt = map_motion::load_vmt(
+                    &mut |path| self.content(path).ok(),
+                    &map_motion::vmt_path(name),
+                    0,
+                );
+                programs.push(vmt.as_ref().and_then(alpha_program));
+                let desc = self.materials.descs.get(index);
+                blend.push(brush_render::material_blend(vmt.as_ref(), desc));
+            }
             self.motion.alpha = Some(programs);
+            self.motion.blend = blend;
         }
         Ok(self.motion.alpha.as_deref().unwrap_or_default())
     }
