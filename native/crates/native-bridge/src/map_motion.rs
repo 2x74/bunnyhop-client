@@ -44,6 +44,8 @@ pub(super) struct Motion {
     /// Decoded flipbook frames 1.. by texture index (frame 0 is the texture itself).
     frames: HashMap<(i32, u32), map_load::PreparedTexture>,
     wireframes: Vec<BhMaterialWireframe>,
+    /// Each material's `$alpha` chain (material_alpha.rs), read the first time one is asked for.
+    pub(super) alpha: Option<Vec<Option<super::material_alpha::AlphaProgram>>>,
 }
 
 /// Flipbooks decoded so far: frames per texture, and the pixels they count against the map's budget.
@@ -190,7 +192,7 @@ fn flatten(body: &[(String, Kv)], vmt: &mut Vmt) {
 }
 
 /// `materials/<name>.vmt` for a material name or include value (vmt.ts vmtPath).
-fn vmt_path(name: &str) -> String {
+pub(super) fn vmt_path(name: &str) -> String {
     let lower = name.to_lowercase().replace('\\', "/");
     let trimmed = lower.trim_start_matches('/');
     let bare = trimmed.strip_prefix("materials/").unwrap_or(trimmed);
@@ -275,7 +277,7 @@ fn number(params: &HashMap<String, String>, key: &str, fallback: f64) -> f64 {
 }
 
 /// JavaScript's `Number` on one whitespace-free token: the whole token, an empty one is 0, `0x` / `0o` / `0b` prefixes.
-fn js_number(token: &str) -> Option<f64> {
+pub(super) fn js_number(token: &str) -> Option<f64> {
     if token.is_empty() {
         return Some(0.0);
     }
@@ -459,6 +461,7 @@ impl Map {
             serde_json::from_slice(self.assets.material_names.to_bytes()).map_err(|e| e.to_string())?;
         let mut motion = Motion {
             ready: true,
+            alpha: self.motion.alpha.take(),
             ..Motion::default()
         };
         motion

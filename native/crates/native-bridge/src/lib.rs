@@ -24,6 +24,8 @@ pub use map_motion::{
     BhMaterialMotion, BhMaterialWireframe, bh_material_motion, bh_material_wireframes, bh_texture_flipbook,
     bh_texture_frame,
 };
+mod material_alpha;
+pub use material_alpha::{BhAlphaProgram, bh_material_alpha, bh_material_alpha_run, bh_material_alpha_vars};
 mod map_props;
 pub use map_props::{
     BhAnimatedProp, BhEntityInstance, BhPropAnimState, BhPropTransform, bh_animated_props, bh_entity_instances,
