@@ -64,6 +64,14 @@ const DRY_FIRE_SECONDS = 0.5;
  */
 const GRIP_INDEX_OFF = 0.28;
 const GRIP_LEFT_OPEN = 0.3;
+// The camo codes' bits in the client's player program key (player_program_key.hpp): kinds plus one in 4 bits, stamps
+// in 3. A code past its field would compile another camo's program, so the export stops instead.
+const PROGRAM_CAMO_KINDS = 15;
+const PROGRAM_CAMO_STAMPS = 8;
+for (const [name, code] of Object.entries(CAMO_KIND_CODE))
+  if (code >= PROGRAM_CAMO_KINDS) throw new Error(`Camo kind ${name} (${code}) needs a wider program key`);
+for (const [name, code] of Object.entries(CAMO_STAMP_CODE))
+  if (code >= PROGRAM_CAMO_STAMPS) throw new Error(`Camo stamp ${name} (${code}) needs a wider program key`);
 // Floats per vertex: position 3, normal 3, partColor 3, skinIndex 4, skinWeight 4, accent 1, finishUV 4, headwear 1.
 const STRIDE = 26;
 const pieces: Buffer[] = [];

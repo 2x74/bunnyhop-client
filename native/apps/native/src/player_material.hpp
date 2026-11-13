@@ -1,5 +1,6 @@
 #pragma once
 #include "native_math.hpp"
+#include "player_program_key.hpp"
 #include <array>
 #include <cmath>
 #include <filesystem>
@@ -12,8 +13,6 @@
 // knives and guns all run the website's own GLSL. Those shaders work in three.js's Y-up world, so every draw hands
 // them its model, camera and view in that space; native skinning and projection stay in Source space.
 namespace native_render {
-
-enum class PlayerMaterial { solid, ghost, gun, world_gun };
 
 // Uniform locations, looked up once per program.
 struct PlayerProgram {
@@ -87,13 +86,6 @@ struct PlayerShaderSources {
         , ghost(read(root / "player-ghost.glsl"))
         , gun(read(root / "player-gun.glsl")) {}
 };
-
-inline int player_program_key(
-        int finish, bool glove, bool detail, bool hilt, int camo, int stamp, int sheen, PlayerMaterial material
-) {
-    return (finish & 63) | (glove ? 1 << 6 : 0) | (detail ? 1 << 7 : 0) | (hilt ? 1 << 8 : 0) | ((camo + 1) << 9)
-           | (stamp << 13) | (sheen << 15) | (int(material) << 17);
-}
 
 // The #defines three.js would give the same material (viewmodel/finishes/shader.ts lookDefines, guns/material.ts).
 inline std::string player_defines(
