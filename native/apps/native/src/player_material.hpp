@@ -31,6 +31,7 @@ struct PlayerProgram {
     GLint hiltA = -1, hiltB = -1, hiltM = -1, camoC = -1, camoP = -1, camoScale = -1, camoTp = -1;
     // The map's light and fog (web model-light.ts, depth-fog.ts); zero is the look without them.
     GLint mapLight = -1, depthFogColor = -1, depthFogRange = -1;
+    GLint garmentPattern = -1, garmentPatternShape = -1, garmentPatternColors = -1;
 };
 
 // Source (x, y, z) -> three.js (x, z, -y).

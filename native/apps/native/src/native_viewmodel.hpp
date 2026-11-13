@@ -43,6 +43,9 @@ class NativeViewmodel {
         bool hoodDown = false;
         std::array<float, 24> palette{};
         std::array<float, 15> gloveColors{};
+        // The colourway's pattern on the hoodie (web fabric.ts setGarmentPattern): kind 0 is none.
+        std::array<float, 4> patternKind{0, 1, 1, 0}, patternShape{};
+        std::array<float, 6> patternColors{};
         std::array<float, 3> accent{}, hairColor{};
         // The ponytail's length over the built one (loadout.hairLength / 100).
         float hairLength = 1;
@@ -226,6 +229,19 @@ class NativeViewmodel {
     }
 
     // The website's hat fit for this body (player/bunny/hat-fit.ts, exported per look and hat) and which mesh it wears.
+    void read_pattern(Look &out) const {
+        const auto &patterns = metadata.at("outfitPatterns");
+        const auto found = patterns.find(out.outfit);
+        if (found == patterns.end()) return;
+        const auto copy = [](const nlohmann::json &values, auto &into) {
+            for (size_t i = 0; i < into.size(); ++i)
+                into[i] = values.at(i).get<float>();
+        };
+        copy(found->at("kind"), out.patternKind);
+        copy(found->at("shape"), out.patternShape);
+        copy(found->at("colors"), out.patternColors);
+    }
+
     void fit_headwear(Look &out) const {
         out.bodyLook = body_look(out.outfit);
         if (!out.hat.empty()) {
@@ -314,6 +330,7 @@ class NativeViewmodel {
         for (size_t slot = 0; slot < 8; ++slot)
             linearColor(palette.at(slots[slot]), out.palette.data() + slot * 3);
         linearColor(palette.at("accent"), out.accent.data());
+        read_pattern(out);
         const auto &glove = metadata.at("gloves").at(out.gloveId);
         const char *gloveSlots[] = {"base", "fingers", "tips", "strap", "detail"};
         for (size_t slot = 0; slot < 5; ++slot)
@@ -420,6 +437,9 @@ class NativeViewmodel {
         p.hiltM = at("uHiltM");
         p.camoC = at("uCamoC");
         p.mapLight = at("uMapLight");
+        p.garmentPattern = at("uGarmPat");
+        p.garmentPatternShape = at("uGarmPatP");
+        p.garmentPatternColors = at("uGarmPatC");
         p.depthFogColor = at("uDepthFogColor");
         p.depthFogRange = at("uDepthFogRange");
         p.camoP = at("uCamoP");
@@ -810,6 +830,9 @@ class NativeViewmodel {
         gl.Uniform3fv(p.palette, 8, look.palette.data());
         gl.Uniform3fv(p.accent, 1, look.accent.data());
         gl.Uniform3fv(p.glove, 5, look.gloveColors.data());
+        gl.Uniform4fv(p.garmentPattern, 1, look.patternKind.data());
+        gl.Uniform4fv(p.garmentPatternShape, 1, look.patternShape.data());
+        gl.Uniform3fv(p.garmentPatternColors, 2, look.patternColors.data());
         gl.Uniform3fv(p.hiltA, 3, look.hiltA.data());
         gl.Uniform3fv(p.hiltB, 3, look.hiltB.data());
         gl.Uniform3fv(p.hiltM, 1, look.hiltM.data());
