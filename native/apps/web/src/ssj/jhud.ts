@@ -9,7 +9,8 @@
 //     horizontal speed) (ticks without a turn count as 0), averaged over the jump's air ticks. 100% is the ideal turn;
 //     over is too fast. JumpStats' formula (blankbhop/jhud uses asin and the 3D speed, see research/SSJ.md).
 //   colours: the speed table for the first jumps (it asks "is this speed on pace for jump N?"), gain after that.
-// The count starts over as in !ssj: standing still, or a jump from a start zone. A teleport doesn't, as in neither plugin.
+// The count starts over as in !ssj: after standing still. Hops in a start zone count and a teleport doesn't reset it, as
+// in both plugins.
 
 import { SsjTracker, type SsjCmd, type SsjState, type SsjTick } from "./stats";
 

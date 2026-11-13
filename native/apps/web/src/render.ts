@@ -37,6 +37,8 @@ import { ModelLight } from "./model-light";
 import type { ModelLighting } from "./graphics/presets";
 import { glassMaterial, setWaterVisualTime, updateWaterUniforms, waterSurfaceMaterial, waterVolumes, withWaterFog } from "./water";
 import { mapSmoke, brushBounds, materialName } from "./map-effects/smoke";
+import { alphaProgram, type AlphaProgram } from "./material-alpha";
+import { areaportalWindows, BrushFades } from "./brush-fades";
 import { spriteTrails } from "./sprite-trails";
 import { crashExplosions, CRASH_BSP_SHA } from "./map-effects/crash-explosions";
 import { smokeStacks } from "./smokestacks";
@@ -771,8 +773,9 @@ export async function buildWorld(
     /**
      * World material `i`. `waterFog`: the water volumes' fog (built-in materials; the water and glass shaders carry
      * their own). `haze`: the view's linear fog, the world's or the 3D skybox's (depth-fog.ts), over all of them.
+     * Every call makes a new material (an imposter's is shared unless `own`).
      */
-    const worldMaterial = (i: number, waterFog: boolean, haze: DepthFogUniforms | null): THREE.Material => {
+    const worldMaterial = (i: number, waterFog: boolean, haze: DepthFogUniforms | null, own = false): THREE.Material => {
       const fog = <M extends THREE.Material>(m: M): M => {
         const w = waterFog ? fogged(m) : m;
         return haze ? withDepthFog(w, haze) : w;
@@ -783,7 +786,8 @@ export async function buildWorld(
       if (desc?.kind === MaterialKind.Water) return hazed(waterSurfaceMaterial(desc, water[i], { doubleSided: !hasBeneath && water[i]?.aboveWater !== false }));
       if (desc?.kind === MaterialKind.Glass) return hazed(glassMaterial(desc));
       if (desc?.kind === MaterialKind.Flat) return fog(flatMaterial(desc, lightMap, lightMapIntensity));
-      const imp = imposterAt(i);
+      // `own` (brush-fades.ts): an instance of its own, for a surface with its own opacity.
+      const imp = own && imposterAt(i) ? imposters.material(info.name, desc.shader) : imposterAt(i);
       // (One material per imposter, shared by the main view and the skybox: it keeps the first fog it was given.)
       if (imp) return imp.kind === "window" && !imp.params.nofog && !imp.material.userData.fogged ? ((imp.material.userData.fogged = true), fog(imp.material)) : imp.material;
       const map = desc && desc.texture >= 0 ? texture(desc.texture) : null;
@@ -885,6 +889,8 @@ export async function buildWorld(
 
   let potatoOn = false;
   let detailsOn = true;
+  let fadeTime = 0;
+  const fadeEye = new THREE.Vector3();
   // (Declared before the meshes: Potato and the setting reach them through this.)
   const applyDetails = () => {
     for (const m of [...(dressing?.main ?? []), ...(dressing?.sky ?? []), ...(glows ? [glows.root] : []), ...(beams ? [beams.mesh] : [])]) m.visible = detailsOn && !potatoOn;
@@ -976,6 +982,55 @@ export async function buildWorld(
     else boundObject(mesh);
   };
   for (const mesh of worldMeshes) cullMesh(mesh);
+
+  // Brushes that fade (brush-fades.ts): func_areaportalwindow's window brushes by the eye's distance, and materials
+  // whose proxies drive `$alpha`. `?fades=0` draws them as plain brushes (before / after comparisons).
+  const fades = new BrushFades();
+  if (params.get("fades") !== "0") {
+    const windows = areaportalWindows(core.entities());
+    const programs = new Map<number, AlphaProgram | null>();
+    const programAt = (i: number): AlphaProgram | null => {
+      if (!programs.has(i)) programs.set(i, alphaProgram(loadVmt(vmtPath(materials[i].name), (p) => core.contentRead(p))));
+      return programs.get(i)!;
+    };
+    const usedBy = new Map<number, Set<number>>();
+    for (const g of groups) {
+      if (hiddenModels.has(g.model) || (sky3d && g.sky3d)) continue;
+      let used = usedBy.get(g.model);
+      if (!used) usedBy.set(g.model, (used = new Set()));
+      used.add(g.material);
+    }
+    const point = new THREE.Vector3();
+    for (const [model, used] of usedBy) {
+      const mesh = models.get(model);
+      const window = windows.get(model) ?? null;
+      const chains = new Map<number, AlphaProgram>();
+      for (const i of used) {
+        const program = programAt(i);
+        // (The world's own faces have no entity to measure from: material-alpha.ts.)
+        if (program && (model !== 0 || !program.perEntity)) chains.set(i, program);
+      }
+      if (!mesh || mesh.material !== built.mats || (!window && !chains.size)) continue;
+      // The model's bounds in its own space, from the faces it draws.
+      const box = new THREE.Box3();
+      if (model !== 0) for (const g of groups) if (g.model === model) for (let k = g.firstIndex; k < g.firstIndex + g.indexCount; k++) box.expandByPoint(point.fromArray(vertices, indices[k] * stride));
+      mesh.material = built.mats.slice();
+      fades.add(mesh, model, [...used], box, window, chains, (i) => built.worldMaterial(i, true, worldFog, true));
+    }
+    if (fades.size) {
+      // The faded surfaces' materials on a mesh that draws nothing, so everything that walks the world's materials
+      // (program warm-up, Fullbright, disposal) finds them whichever ones the brushes wear at the time.
+      const geo = new THREE.BufferGeometry();
+      for (const [name, attribute] of Object.entries({ position, normal, uv, uv1 })) geo.setAttribute(name, attribute);
+      geo.setIndex(index);
+      geo.setDrawRange(0, 0);
+      const holder = new THREE.Mesh(geo, fades.materials);
+      holder.name = "brush-fade-materials";
+      holder.visible = false;
+      holder.frustumCulled = false;
+      root.add(holder);
+    }
+  }
 
   // Sky faces: brush entity ones ride on their model's mesh (moved by `update`).
   const skyMeshes = skyFaceMeshes(core.skyMesh() ?? { vertices: new Float32Array(0), indices: new Uint32Array(0), groups: [] });
@@ -1218,7 +1273,7 @@ export async function buildWorld(
       if (imp?.kind === "wireframe") return { key: `w${i}`, material: () => imp.material };
       if (imp?.kind === "window") {
         const c = colors[i];
-        return imp.params.alpha < 1 || imp.params.fade
+        return imp.params.alpha < 1
           ? { key: `i${i}`, material: () => tint(new THREE.Color(c[0], c[1], c[2]), imp.params.alpha * 0.5, THREE.FrontSide) }
           : { key: "unlit", material: merged(false, THREE.FrontSide) };
       }
@@ -1354,6 +1409,7 @@ export async function buildWorld(
       (scrolls.size ? ` ${scrolls.size} scrolling materials,` : "") +
       (scrolls.animatedCount ? ` ${scrolls.animatedCount} flipbook materials,` : "") +
       (animProps ? ` ${animProps.count} animated props,` : "") +
+      (fades.size ? ` ${fades.size} fading brushes,` : "") +
       (smokeVolumes ? ` ${smokeVolumes.count} smoke volumes,` : "") +
       (dressing?.draws ? ` dressing ${dressing.triangles} tris / ${dressing.draws} draws,` : "") +
       (glows ? ` ${glows.sprites} sprites, ${glows.lightGlows} light glows / ${glows.draws} draws,` : "") +
@@ -1406,7 +1462,8 @@ export async function buildWorld(
     // func_brush, broken or killed entities, point_template copies not (yet / again) in the world. In the main view
     // and the 3D skybox (miku_v2's equalizer). bhop_monster_jam's `bw` wall disappears when its button breaks it
     // and comes back with its template 14 s later.
-    if (t.length > 6) { mesh.visible = t[6] !== 0; mesh.userData.giDisabled = t[6] === 0; }
+    // (A brush faded out entirely stays hidden: brush-fades.ts.)
+    if (t.length > 6) { mesh.userData.stateShown = t[6] !== 0; mesh.visible = t[6] !== 0 && !mesh.userData.fadeHidden; mesh.userData.giDisabled = t[6] === 0; }
   };
 
   return {
@@ -1415,6 +1472,7 @@ export async function buildWorld(
     skyFaces: [...skyMeshes.values()],
     sky3d: sky3dState,
     update(transforms, visualTime = 0, effectStates, propAnims) {
+      fadeTime = visualTime;
       modelLight.setTime(visualTime);
       setWaterVisualTime(visualTime);
       scrolls.update(visualTime);
@@ -1478,6 +1536,8 @@ export async function buildWorld(
     lightEye(roots, camera, exposure) { modelLight.eye(roots, camera, exposure); },
     cull(camera) {
       culler.cull(camera);
+      // Distance fades from the view (not a water reflection's mirrored one, nor a shadow pass).
+      if (fades.size && (camera as THREE.PerspectiveCamera).isPerspectiveCamera && !camera.userData.mirror) fades.update(root.worldToLocal(camera.getWorldPosition(fadeEye)), fadeTime, potatoOn);
       // Glow visibility from the view (not a water reflection's mirrored one).
       if (glows && detailsOn && !potatoOn && (camera as THREE.PerspectiveCamera).isPerspectiveCamera && !camera.userData.mirror) glows.observe(camera);
       explosions?.sort(camera);

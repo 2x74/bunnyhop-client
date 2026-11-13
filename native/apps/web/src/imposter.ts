@@ -6,8 +6,8 @@
 //   infinitely distant scene (a fake sky / space backdrop). There is no parallax origin: the SDK shader declares only
 //   $envmap. Skies whose faces are WindowImposter materials (bhop_angst's stormydaysprx_cubemap) draw the same cube map
 //   around the camera.
-//   bhop_angst's player_fade_nebula drives $alpha with a PlayerProximity proxy chain ($distmin..$distmax): drawn here as
-//   the same fade from the camera to the brush entity's origin.
+//   bhop_angst's player_fade_nebula drives $alpha with a PlayerProximity proxy chain: brush-fades.ts runs it, like any
+//   other material's, and gives each brush wearing it its own instance.
 //
 // Aftershock (aftershock_helper.cpp, aftershock_ps2x.fxc): a refraction of the frame buffer behind the surface, tinted
 //   by $colortint towards the middle of the object and brightened at the silhouette by $silhouettecolor, with alpha =
@@ -31,8 +31,6 @@ export interface ImposterParams {
   color: [number, number, number];
   alpha: number;
   nofog: boolean;
-  /** PlayerProximity-driven alpha: 0 at `min` units from the entity's origin, 1 at `max` and beyond. */
-  fade: { min: number; max: number } | null;
 }
 
 export interface AftershockParams {
@@ -48,16 +46,11 @@ export function windowImposterParams(vmt: Vmt): ImposterParams | null {
   const envmap = vmt.params.$envmap?.trim();
   // `env_cubemap` (the nearest env_cubemap) has no texture of its own here.
   if (!envmap || envmap.toLowerCase() === "env_cubemap") return null;
-  const proximity = vmt.proxies.some((p) => p.name === "playerproximity");
-  const toAlpha = vmt.proxies.some((p) => (p.params.resultvar ?? "").toLowerCase() === "$alpha");
-  const min = vmtFloat(vmt, "$distmin");
-  const max = vmtFloat(vmt, "$distmax");
   return {
     envmap: vtfPath(envmap),
     color: vmtColor(vmt, "$color") ?? [1, 1, 1],
     alpha: Math.min(1, Math.max(0, vmtFloat(vmt, "$alpha") ?? 1)),
     nofog: vmtFlag(vmt, "$nofog"),
-    fade: proximity && toAlpha && min !== undefined && max !== undefined && max > min ? { min, max } : null,
   };
 }
 
@@ -127,18 +120,10 @@ export type ToSourceUniform = { value: THREE.Matrix3 };
 const IMPOSTER_VERT = /* glsl */ `
   #include <common>
   varying vec3 vImpWorld;
-  #ifdef IMP_FADE
-  varying float vImpOrigin;
-  uniform vec2 uImpFade;
-  #endif
   void main() {
     vec3 transformed = position;
     #include <project_vertex>
     vImpWorld = (modelMatrix * vec4(position, 1.0)).xyz;
-    #ifdef IMP_FADE
-    // PlayerProximity: distance from the viewer to the brush entity's origin (the model's origin).
-    vImpOrigin = clamp((distance((modelMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz, cameraPosition) - uImpFade.x) / (uImpFade.y - uImpFade.x), 0.0, 1.0);
-    #endif
   }`;
 
 const IMPOSTER_FRAG = /* glsl */ `
@@ -147,30 +132,22 @@ const IMPOSTER_FRAG = /* glsl */ `
   uniform mat3 uImpToSource;
   uniform vec4 uImpColor;
   varying vec3 vImpWorld;
-  #ifdef IMP_FADE
-  varying float vImpOrigin;
-  #endif
   void main() {
     vec3 dir = uImpToSource * (vImpWorld - cameraPosition);
     gl_FragColor = vec4(textureCube(uImpEnv, dir).rgb * uImpColor.rgb, uImpColor.a);
-    #ifdef IMP_FADE
-    gl_FragColor.a *= vImpOrigin;
-    #endif
     #include <colorspace_fragment>
     #include <fog_fragment>
   }`;
 
-/** A WindowImposter surface (world brushes). Opaque unless $alpha < 1 or alpha is proxy-driven. */
+/** A WindowImposter surface (world brushes). Opaque unless $alpha < 1; `uImpColor.a` is its opacity (brush-fades.ts). */
 export function windowImposterMaterial(p: ImposterParams, env: THREE.CubeTexture, toSource: ToSourceUniform): THREE.ShaderMaterial {
-  const translucent = p.alpha < 1 || !!p.fade;
+  const translucent = p.alpha < 1;
   const m = new THREE.ShaderMaterial({
     uniforms: {
       uImpEnv: { value: env },
       uImpToSource: toSource,
       uImpColor: { value: new THREE.Vector4(...p.color, p.alpha) },
-      ...(p.fade ? { uImpFade: { value: new THREE.Vector2(p.fade.min, p.fade.max) } } : {}),
     },
-    defines: p.fade ? { IMP_FADE: "" } : {},
     vertexShader: IMPOSTER_VERT,
     fragmentShader: IMPOSTER_FRAG,
     transparent: translucent,

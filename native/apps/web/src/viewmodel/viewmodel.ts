@@ -61,6 +61,7 @@ import { clampFingers } from "./fingers";
 import { motionScale, ViewFeel } from "./feel";
 import { angleMatrix } from "./math";
 import { HandIdle } from "./idle";
+import { poseLeftThumb } from "./leftthumb";
 import { VIEWMODEL_BOB } from "./defaults";
 
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
@@ -617,6 +618,8 @@ export class Viewmodel {
         for (let k = 0; k < 12; k++) W[o + k] = src[so + k];
       }
       void d;
+      // The left thumb's last joint back on its hinge (leftthumb.ts); the rest of the left arm is the sequence's.
+      poseLeftThumb(W, r);
     } else {
       this.proc.pose(this.action, this.actionT, W);
     }

@@ -693,6 +693,9 @@ export class Hud {
    */
   tick(cmd: TickCmd, state: PlayerState, events: number, trainer?: { settings: Settings; noclip?: boolean; turnYaw?: number }): void {
     if (this.editing) return;
+    // Spectating: the graph draws the watched player's speed. The room sends their position and speed but not their
+    // keys, so the keys, trainer and jump readouts (hidden meanwhile, net.css) have nothing true to show.
+    if (this.spectated) return this.graph.push(this.spectated.speed);
     const v = state.velocity;
     const speed = Math.sqrt(v[0] * v[0] + v[1] * v[1]);
     if (trainer && this.p.hud.layout.strafeTrainer.on) this.trainer.feed(cmd, {
@@ -771,7 +774,8 @@ export class Hud {
 
   /**
    * Spectating (net/mp.ts, per rendered frame): the watched player's speed and timer show in your HUD in place of
-   * yours; null gives them back. Your own run's other readouts hide meanwhile (net.css body.mp-spectating).
+   * yours, and the speed graph draws their speed (tick); null gives them back. Your own run's other readouts hide
+   * meanwhile (net.css body.mp-spectating).
    */
   setSpectated(v: { speed: number; status: RunStatus; time: number; inStart: boolean } | null): void {
     this.spectated = v;

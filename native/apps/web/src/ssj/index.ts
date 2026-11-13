@@ -50,7 +50,7 @@ export class LiveSsj {
 
   /**
    * A checkpoint teleport, a Segmented load, practice from a replay: play goes on from `state`. The jump count and the
-   * stats carry on, as in CS:S, where only standing still or a jump from a start zone starts them over (shavit's
+   * stats carry on, as in CS:S, where only standing still starts them over (shavit's
    * !tele is a teleport like a map's, and no SSJ plugin hooks it; research/SSJ.md). The start prespeed starts over.
    */
   moved(state: PlayerState): void {
@@ -126,7 +126,7 @@ export function ssjRows(): HTMLElement[] {
       keywords: "ssj gain filter minimum threshold only good jumps bash 80 90 chat log",
     }),
     segmented<SsjMode>("Jumps", () => P().mode, (v) => up((p) => (p.hud.ssj.mode = v)), MODES, {
-      desc: "The jump count starts over after standing still or a jump in a start zone. 6th jump and Every 6th add up the jumps since the last report.",
+      desc: "The jump count starts over once you stand still. Hops in the start zone count. 6th jump and Every 6th add up the jumps since the last report.",
       keywords: "ssj mode sixth every repeat usage",
     }),
     h(

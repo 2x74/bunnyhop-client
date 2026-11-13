@@ -1027,7 +1027,7 @@ export class Multiplayer {
       // Like joining spectators in CS:S: your run is reset; you respawn in the start zone when you're back.
       this.o.restart(0);
       this.o.input.releaseAll();
-    }
+    } else this.o.session.hud.resetTicks(); // the speed graph starts on the new player
     this.chat.add({ kind: "local", text: `Spectating ${this.name(slot)}. Mouse 1 and 2 switch players, Space changes the camera, ${this.stopKey()} stops watching.` });
   }
 
