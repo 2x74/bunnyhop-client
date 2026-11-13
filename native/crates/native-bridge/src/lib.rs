@@ -17,12 +17,18 @@ mod map_audio;
 pub use map_audio::*;
 mod map_load;
 pub use map_load::{bh_load_map_begin, bh_load_map_poll, bh_load_map_cancel};
+mod material_overrides;
 mod release_crypto;
 mod assets;
 mod map_motion;
 pub use map_motion::{
-    BhMaterialMotion, BhMaterialWireframe, bh_material_motion, bh_material_wireframes, bh_texture_frame,
+    BhMaterialMotion, BhMaterialWireframe, bh_material_motion, bh_material_wireframes, bh_texture_flipbook,
+    bh_texture_frame,
 };
+mod material_alpha;
+mod brush_render;
+pub use brush_render::{BhMaterialBlend, bh_dynamic_render_entities, bh_material_blend};
+pub use material_alpha::{BhAlphaProgram, bh_material_alpha, bh_material_alpha_run, bh_material_alpha_vars};
 mod map_props;
 pub use map_props::{
     BhAnimatedProp, BhEntityInstance, BhPropAnimState, BhPropTransform, bh_animated_props, bh_entity_instances,
@@ -62,7 +68,9 @@ mod adonly_tests;
 #[cfg(test)]
 mod autostrafe_v28_tests;
 pub use assets::{BhAttackReport, BhFloorWeapon, BhWeaponReport};
-pub use assets::{BhMaterialExtra, BhPropGroup, BhSkyInfo};
+pub use assets::{
+    BhDressingGlow, BhDressingGroup, BhMaterialExtra, BhMaterialLook, BhPropGroup, BhSkyInfo, BhWorldFog,
+};
 pub use look::{BhLookSample, BhLookSampleV2};
 pub use practice::{
     bh_practice_from_replay,
@@ -397,7 +405,7 @@ impl Map {
             content::cached_physics_content(path)
         };
         check()?;
-        let mesh = mesh::build(&bsp);
+        let mut mesh = mesh::build(&bsp);
         let mut names = mesh
             .materials
             .iter()
@@ -443,6 +451,14 @@ impl Map {
                 break p;
             }
         };
+        let mut props = props;
+        let prop_light = mesh
+            .lighting
+            .as_ref()
+            .map(|lighting| bunnyhop_core::prop_light::bake(&sp, &props, &fs, lighting))
+            .unwrap_or_default();
+        // Kept only for the bake.
+        props.sources = Vec::new();
         let mut material_index = |name: &String| -> u32 {
             if let Some(i) = names.iter().position(|n| n == name) {
                 i as u32
@@ -469,6 +485,9 @@ impl Map {
         for material in assets::crash_particle_materials(&map_sha256) {
             material_index(&material);
         }
+        let dressing_materials = mesh.dressing.materials.iter().map(&mut material_index).collect::<Vec<_>>();
+        // After every index is handed out: a replacement takes the place of the material it covers.
+        let names = material_overrides::MaterialOverrides::beside(root.as_deref(), &map_sha256).apply(names);
         let materials = loop {
             check()?;
             let m = materials::resolve(&fs, &names);
@@ -476,6 +495,65 @@ impl Map {
                 break m;
             }
         };
+        // Decals take their size from their materials' textures, which are here now.
+        mesh.dressing.build(&|name| bunnyhop_core::dressing::decal_size(&fs, name));
+        let dressing_groups = mesh
+            .dressing
+            .groups
+            .iter()
+            .map(|g| BhDressingGroup {
+                material: dressing_materials[g.material as usize],
+                first_index: g.first_index,
+                index_count: g.index_count,
+                kind: g.kind,
+                order: g.order,
+                sky3d: u32::from(g.sky3d),
+            })
+            .collect::<Vec<_>>();
+        let dressing_glows = mesh
+            .dressing
+            .glows
+            .iter()
+            .map(|g| BhDressingGlow {
+                kind: g.kind as u32,
+                material: dressing_materials[g.material as usize],
+                origin: g.origin,
+                color: g.color,
+                alpha: g.alpha,
+                render_mode: g.render_mode,
+                render_fx: g.render_fx,
+                size: g.size,
+                size2: g.size2,
+                dir: g.dir,
+                dist: g.dist,
+                spawnflags: g.spawnflags,
+                parent_model: g.parent_model,
+                parent_origin: g.parent_origin,
+                parent_angles: g.parent_angles,
+            })
+            .collect::<Vec<_>>();
+        let mut material_looks = materials
+            .descs
+            .iter()
+            .map(|m| BhMaterialLook {
+                decal_modulate: u32::from(m.shader.eq_ignore_ascii_case("decalmodulate")),
+                selfillum: u32::from(m.selfillum.is_some()),
+                selfillum_tint: m.selfillum.unwrap_or([0.0; 3]),
+                sprite_orientation: 0,
+            })
+            .collect::<Vec<_>>();
+        // Sprites face the view the way their VMT says (web map-glows.ts).
+        for glow in &dressing_glows {
+            let Some(look) = material_looks.get_mut(glow.material as usize) else { continue };
+            let Some(name) = names.get(glow.material as usize) else { continue };
+            let orientation = bunnyhop_core::materials::vmt_params(&fs, name)
+                .and_then(|(_, params)| params.get("$spriteorientation").map(|o| o.trim().to_ascii_lowercase()));
+            look.sprite_orientation = match orientation.as_deref() {
+                Some("parallel_upright") => 1,
+                Some("oriented") => 2,
+                _ => 0,
+            };
+        }
         let mut prop_groups = props
             .groups
             .iter()
@@ -540,6 +618,10 @@ impl Map {
                 .map_err(|e| e.to_string())?,
             floor: Vec::new(),
             props,
+            prop_light,
+            dressing_groups,
+            dressing_glows,
+            material_looks,
             prop_groups,
             water: CString::new(
                 serde_json::json!({"volumes":mesh.water,"planes":mesh.water_planes}).to_string(),
@@ -1472,6 +1554,44 @@ buffer!(bh_material_extras, BhMaterialExtra, assets.extras);
 buffer!(bh_prop_vertices, f32, assets.props.vertices);
 buffer!(bh_prop_indices, u32, assets.props.indices);
 buffer!(bh_prop_groups, BhPropGroup, assets.prop_groups);
+buffer!(bh_prop_light, f32, assets.prop_light);
+buffer!(bh_dressing_vertices, f32, mesh.dressing.vertices);
+buffer!(bh_dressing_indices, u32, mesh.dressing.indices);
+buffer!(bh_dressing_groups, BhDressingGroup, assets.dressing_groups);
+buffer!(bh_material_looks, BhMaterialLook, assets.material_looks);
+buffer!(bh_dressing_glows, BhDressingGlow, assets.dressing_glows);
+
+/// Whether glows `first .. first + count` (bh_dressing_glows order) can be seen from the eye: 1 where no drawn opaque
+/// world brush lies between (core lighting.rs hit_seen, the website's dressingGlowVisibility), else 0, into `out`.
+/// Returns how many were written; 0 on a map without trace data (drawn fullbright).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bh_dressing_glow_visibility(
+    ctx: *const BhContext,
+    x: f32,
+    y: f32,
+    z: f32,
+    first: usize,
+    count: usize,
+    out: *mut f32,
+) -> usize {
+    unsafe {
+        read(ctx, 0, |c| {
+            let Some(m) = &c.map else { return 0 };
+            let Some(light) = m.mesh.lighting.as_ref() else { return 0 };
+            if out.is_null() {
+                return 0;
+            }
+            let eye = [x, y, z];
+            let mut written = 0;
+            for glow in m.mesh.dressing.glows.iter().skip(first).take(count) {
+                let seen = light.hit_seen(eye, glow.visibility_target(eye)).is_none();
+                *out.add(written) = if seen { 1.0 } else { 0.0 };
+                written += 1;
+            }
+            written
+        })
+    }
+}
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bh_sky_info(ctx: *mut BhContext, out: *mut BhSkyInfo) -> c_int {
     unsafe {
@@ -1501,6 +1621,54 @@ pub unsafe extern "C" fn bh_sky_info(ctx: *mut BhContext, out: *mut BhSkyInfo) -
         })
     }
 }
+/// The map's world fog (core fog.rs: its master env_fog_controller). 0 when the map has none, it is off, or the map
+/// changes its fog while running.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bh_world_fog(ctx: *mut BhContext, out: *mut BhWorldFog) -> c_int {
+    unsafe {
+        call(ctx, |c| {
+            let f = c
+                .map()?
+                .mesh
+                .world_fog
+                .as_ref()
+                .filter(|f| f.enable && f.end > f.start && f.max_density > 0.0)
+                .ok_or("map has no world fog")?;
+            output(
+                out,
+                BhWorldFog {
+                    blend: u32::from(f.blend),
+                    color: f.color,
+                    color2: f.color2,
+                    dir: f.dir,
+                    start: f.start,
+                    end: f.end,
+                    max_density: f.max_density.min(1.0),
+                },
+            )
+        })
+    }
+}
+
+/// The map's light at a point (core lighting.rs): six linear RGB colours for +x, -x, +y, -y, +z, -z into `out`
+/// (18 floats). 0 where there is none: a map drawn fullbright, a point in solid or outside the map.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bh_light_cube(ctx: *const BhContext, x: f32, y: f32, z: f32, out: *mut f32) -> c_int {
+    unsafe {
+        read(ctx, 0, |c| {
+            let Some(m) = &c.map else { return 0 };
+            let Some(cube) = m.mesh.lighting.as_ref().and_then(|l| l.cube([x, y, z])) else { return 0 };
+            if out.is_null() {
+                return 0;
+            }
+            for (i, value) in cube.iter().flatten().enumerate() {
+                *out.add(i) = *value;
+            }
+            1
+        })
+    }
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bh_sky_name(ctx: *mut BhContext, count: *mut usize) -> *const c_char {
     let mut result = ptr::null();

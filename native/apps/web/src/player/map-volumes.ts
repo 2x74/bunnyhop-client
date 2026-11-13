@@ -199,20 +199,6 @@ export function waterTest(bsp: Uint8Array): MapVolumes["water"] {
   let anyWater = false;
   for (let i = 0; i < leafCount; i++) if (dv.getInt32(leafs.ofs + i * LEAF, true) & WATER) anyWater = true;
   if (!anyWater) return null;
-  const contents = (head: number, x: number, y: number, z: number): number => {
-    let n = head;
-    for (let guard = 0; n >= 0 && guard < 4096; guard++) {
-      if (n >= nodeCount) return 0;
-      const o = nodes.ofs + n * 32;
-      const pi = dv.getInt32(o, true);
-      if (pi < 0 || pi >= planeCount) return 0;
-      const po = planes.ofs + pi * 20;
-      const d = dv.getFloat32(po, true) * x + dv.getFloat32(po + 4, true) * y + dv.getFloat32(po + 8, true) * z - dv.getFloat32(po + 12, true);
-      n = dv.getInt32(o + (d >= 0 ? 4 : 8), true);
-    }
-    const leaf = -1 - n;
-    return leaf >= 0 && leaf < leafCount ? dv.getInt32(leafs.ofs + leaf * LEAF, true) : 0;
-  };
   const model = (i: number) => {
     const o = models.ofs + i * 48;
     return { mins: [0, 4, 8].map((k) => dv.getFloat32(o + k, true)), maxs: [12, 16, 20].map((k) => dv.getFloat32(o + k, true)), head: dv.getInt32(o + 36, true) };
@@ -235,6 +221,35 @@ export function waterTest(bsp: Uint8Array): MapVolumes["water"] {
       analog.push({ head: md.head, ox: org ? +org[1] : 0, oy: org ? +org[2] : 0, oz: org ? +org[3] : 0, mins: md.mins, maxs: md.maxs });
     }
   }
+  // The test keeps copies of the three lumps it reads, built outside this scope: a closure here would keep the whole
+  // file in memory for the page's life.
+  const own = (l: { ofs: number; len: number }) => new DataView(bsp.slice(l.ofs, l.ofs + l.len).buffer);
+  return waterContents(own(nodes), own(planes), own(leafs), { nodeCount, planeCount, leafCount, LEAF }, world, analog);
+}
+
+function waterContents(
+  nodeDv: DataView,
+  planeDv: DataView,
+  leafDv: DataView,
+  counts: { nodeCount: number; planeCount: number; leafCount: number; LEAF: number },
+  world: number,
+  analog: { head: number; ox: number; oy: number; oz: number; mins: number[]; maxs: number[] }[],
+): NonNullable<MapVolumes["water"]> {
+  const { nodeCount, planeCount, leafCount, LEAF } = counts;
+  const contents = (head: number, x: number, y: number, z: number): number => {
+    let n = head;
+    for (let guard = 0; n >= 0 && guard < 4096; guard++) {
+      if (n >= nodeCount) return 0;
+      const o = n * 32;
+      const pi = nodeDv.getInt32(o, true);
+      if (pi < 0 || pi >= planeCount) return 0;
+      const po = pi * 20;
+      const d = planeDv.getFloat32(po, true) * x + planeDv.getFloat32(po + 4, true) * y + planeDv.getFloat32(po + 8, true) * z - planeDv.getFloat32(po + 12, true);
+      n = nodeDv.getInt32(o + (d >= 0 ? 4 : 8), true);
+    }
+    const leaf = -1 - n;
+    return leaf >= 0 && leaf < leafCount ? leafDv.getInt32(leaf * LEAF, true) : 0;
+  };
   return (x, y, z) => {
     if (contents(world, x, y, z) & WATER) return true;
     for (const a of analog) {

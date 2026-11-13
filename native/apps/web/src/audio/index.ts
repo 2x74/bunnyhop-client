@@ -125,8 +125,9 @@ export function initAudio(): void {
   music.onTrack = (t) => {
     // The now-playing control says it in the menus; in game (and the viewer) a toast does.
     const shown = document.getElementById("music-now")?.classList.contains("on");
-    // Not over an open dialog (the replay export's music choice plays its track: the name landed on the dialog).
-    const dialogOpen = typeof document !== "undefined" && !!document.querySelector("dialog[open]");
+    // Not over an open dialog (the replay export's music choice plays its track: the name landed on the dialog). The
+    // viewer's Export is a .rv-modal, not a <dialog>.
+    const dialogOpen = typeof document !== "undefined" && !!document.querySelector("dialog[open], .rv-modal");
     if (!shown && !dialogOpen && t.role === "game" && t.id !== lastToast) whisper(`♪ ${trackName(t)}`, { key: "audio", ms: 2600 });
     lastToast = t.id;
   };

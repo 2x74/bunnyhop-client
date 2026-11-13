@@ -61,6 +61,7 @@ import { clampFingers } from "./fingers";
 import { motionScale, ViewFeel } from "./feel";
 import { angleMatrix } from "./math";
 import { HandIdle } from "./idle";
+import { poseLeftThumb } from "./leftthumb";
 import { VIEWMODEL_BOB } from "./defaults";
 
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
@@ -380,6 +381,11 @@ export class Viewmodel {
     return this.cs ? "cs" : "procedural";
   }
 
+  /** The viewmodel's clock (s): what its idle life and breathing run on. An export steps it by exactly 1 / fps a frame. */
+  get clock(): number {
+    return this.now;
+  }
+
   /** The bob / sway / crouch / landing feel (3x4, view space) of the last update: the gun viewmodel rides it too. */
   get feelMatrix(): Float32Array {
     return this.V;
@@ -464,7 +470,7 @@ export class Viewmodel {
     this.setAction(a);
     this.actionT = t;
     this.play.prevSeq = -1;
-    if (this.cs) this.play.cycle = clamp(t * this.cs.bs.cycleRate(this.play.seq), 0, 1);
+    if (this.cs) this.play.cycle = clamp(t * this.rate(this.play.seq), 0, 1);
   }
 
   private setAction(a: VmAction): void {
@@ -498,7 +504,18 @@ export class Viewmodel {
       p.fadeT = 0;
     }
     p.seq = seq;
-    p.cycle = clamp(t * cs.bs.cycleRate(seq), 0, 1);
+    p.cycle = clamp(t * this.rate(seq), 0, 1);
+  }
+
+  /**
+   * How fast a sequence plays (cycles per second). The idle is held at its start: v_knife_t's 12.5 s idle rests for
+   * 3 s, then from 5.5 s to 11 s lays the knife flat against the left palm, a move for the CS knife and a CS hand. On
+   * these knives it read as the knife drifting sideways for five seconds in every twelve (most of a run, where nobody
+   * swings; first seen in exported videos). The idle's life is the hands' own (idle.ts).
+   */
+  private rate(seq: number): number {
+    const cs = this.cs!;
+    return seq === cs.seqs.idle ? 0 : cs.bs.cycleRate(seq);
   }
 
   private duration(a: VmAction): number {
@@ -578,12 +595,12 @@ export class Viewmodel {
     if (cs) {
       const { bs, d, map } = cs;
       const p = this.play;
-      p.cycle = Math.min(1, p.cycle + dt * bs.cycleRate(p.seq));
+      p.cycle = Math.min(1, p.cycle + dt * this.rate(p.seq));
       bs.initPose();
       let w = 1;
       if (p.prevSeq >= 0 && p.fade > 0) {
         p.fadeT += dt;
-        p.prevCycle = Math.min(1, p.prevCycle + dt * bs.cycleRate(p.prevSeq));
+        p.prevCycle = Math.min(1, p.prevCycle + dt * this.rate(p.prevSeq));
         const f = clamp(p.fadeT / p.fade, 0, 1);
         if (f >= 1) p.prevSeq = -1;
         else {
@@ -601,6 +618,8 @@ export class Viewmodel {
         for (let k = 0; k < 12; k++) W[o + k] = src[so + k];
       }
       void d;
+      // The left thumb's last joint back on its hinge (leftthumb.ts); the rest of the left arm is the sequence's.
+      poseLeftThumb(W, r);
     } else {
       this.proc.pose(this.action, this.actionT, W);
     }

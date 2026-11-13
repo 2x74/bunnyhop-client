@@ -10,7 +10,7 @@ import { compileModel } from "../player/bunny/prebuild";
 import { cosmetic } from "../progression";
 import type { CosmeticLoadout } from "../loadout";
 import { PlayerModel, type PlayerPose } from "../player/model";
-import { Trail } from "../player/trail";
+import { laidShape, Trail, trailShapeOf } from "../player/trail";
 
 export interface BunnyLook {
   /** "solid" = your bunny (colourway, hat, knife, gloves); "ghost" = your PB ghost (ghost + trail colours). */
@@ -20,6 +20,8 @@ export interface BunnyLook {
   previewGlow?: boolean;
   ghost: string | null;
   trail: string | null;
+  /** The trail's shape ("shape-*"; absent = the ribbon). */
+  shape?: string | null;
   /** Knife, finish, gloves and hat the bunny wears. */
   loadout: CosmeticLoadout;
   /** Solid: a secret colourway not earned yet, as a flat "???" silhouette (no colours; drag to turn still works). */
@@ -87,7 +89,7 @@ export class BunnyScene {
     this.model.setNearFade(0, 0);
     this.model.setOpacity(look.mode === "ghost" ? 0.75 : 1);
     this.model.bunnyModel?.setSilhouette(!!look.veil && look.mode === "solid");
-    this.trail = new Trail(colorOf(look.trail, "#ffc23d"), this.pts.length / 3, color2Of(look.trail));
+    this.trail = new Trail(colorOf(look.trail, "#ffc23d"), this.pts.length / 3, color2Of(look.trail), trailShapeOf(look.shape));
     this.scene.add(this.model.root, this.trail.mesh);
     this.advance(this.reduced ? 1.2 : STEP);
   }
@@ -110,6 +112,7 @@ export class BunnyScene {
     if (look.loadout !== prev.loadout) this.model.setLoadout(look.loadout);
     this.model.bunnyModel?.setSilhouette(!!look.veil && look.mode === "solid");
     this.trail.setColor(colorOf(look.trail, "#ffc23d"), color2Of(look.trail));
+    this.trail.setShape(trailShapeOf(look.shape));
     if (look.mode !== prev.mode) this.advance(0);
   }
 
@@ -230,17 +233,21 @@ export class BunnyScene {
     if (ghost) {
       // The hop circle and the highest hop, seen from a little above.
       this.frame(GHOST_PITCH, R + 18, 0, JUMP_TOP + 80);
-      const n = this.pts.length / 3;
+      // The path at fixed steps (so a shape laid per sample stays where it was laid), then the head.
+      const first = Math.ceil((this.t - TRAIL_S) / STEP);
       const v = new THREE.Vector3();
-      for (let i = 0; i < n; i++) {
-        const tt = this.t - TRAIL_S + (TRAIL_S * i) / (n - 1);
+      let n = 0;
+      const push = (tt: number) => {
         const p = this.hopPose(tt).position;
         toThree(p[0], p[1], p[2] + 34, v);
-        this.pts[i * 3] = v.x;
-        this.pts[i * 3 + 1] = v.y;
-        this.pts[i * 3 + 2] = v.z;
-      }
-      this.trail.set(this.pts, n, cam.position, 0.9, 5);
+        this.pts[n * 3] = v.x;
+        this.pts[n * 3 + 1] = v.y;
+        this.pts[n * 3 + 2] = v.z;
+        n++;
+      };
+      for (let k = first; k * STEP < this.t && n < this.pts.length / 3 - 1; k++) push(k * STEP);
+      push(this.t);
+      this.trail.set(this.pts, n, cam.position, 0.9, laidShape(trailShapeOf(this.look.shape)) ? 3 : 5, first);
     } else {
       // The body as it turns (a cylinder about its middle: the framing holds still while it turns), hat and ears in.
       const b = this.body;

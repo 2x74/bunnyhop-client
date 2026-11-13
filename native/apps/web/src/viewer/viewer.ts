@@ -36,6 +36,7 @@ import { openFeedback } from "../feedback/state";
 import { worldRecord } from "../shared-reads";
 import { fetchExportLeaderboard } from "./export-leaderboard";
 import { Core, floorWeapons, traceRay, WEAPON_IDS, weaponReport, type BrushTransform } from "../core";
+import type { MapFile } from "../content/map-file";
 import { Ghost } from "../ghost";
 import { GHOST_CSS, type GhostKind } from "../player/colors";
 import { PlayerModel } from "../player/model";
@@ -83,7 +84,8 @@ export interface ViewerHost {
   camera: THREE.PerspectiveCamera;
   world: WorldView;
   map: string;
-  bsp: Uint8Array;
+  /** The map's BSP (a Blob by the time the viewer opens: streamed into the viewer's cores). */
+  bsp: MapFile;
   wasmBytes: Uint8Array;
   mapSha256: string;
   /** Selected main-track style (default for PB lookups). */
@@ -480,7 +482,7 @@ export class ReplayViewer implements ExportSource {
   private viewerCore(): Promise<Core> {
     this.corePromise ??= (async () => {
       const c = await Core.create(this.host.wasmBytes as Uint8Array<ArrayBuffer>);
-      c.loadMapPhysics(this.host.bsp);
+      await c.loadMapPhysicsStream(this.host.bsp.stream(), this.host.bsp.size);
       this.core = c;
       return c;
     })();
@@ -651,7 +653,7 @@ export class ReplayViewer implements ExportSource {
     const notes: string[] = [];
     if (h0.mapSha256 !== this.host.mapSha256) notes.push("Recorded on a different build of this map, so playback may desync.");
     if (d.desyncTick !== null) notes.push(`Desync at tick ${d.desyncTick}: this build doesn't reproduce the recording exactly.`);
-    if (d.styleViolations) notes.push(`${d.styleViolations} commands break the ${styleLabel(replayStyle(h0))} rules (filtered as the verifier does).`);
+    if (d.styleViolations) notes.push(`${d.styleViolations} ${d.styleViolations === 1 ? "command breaks" : "commands break"} the ${styleLabel(replayStyle(h0))} rules (filtered as the verifier does).`);
     if (styleDef(replayStyle(h0))?.airJump) notes.push(INFINITE_NOTE);
     this.notice = notes.join(" ");
     this.updateTitle();
@@ -1476,7 +1478,11 @@ export class ReplayViewer implements ExportSource {
     }
     this.host.graphicsPipeline.render(this.host.scene, cam,t*d.interval);
     // The export draws it after its frame is complete (drawViewmodel): motion-blur samples composite first.
-    if (!this.exporting) this.arms?.render(this.host.renderer, cam);
+    if (!this.exporting && this.arms) {
+      // The in-eye hands take the map's fog and light at the eye, like your own (model-light.ts).
+      this.host.world.lightEye([this.arms.knife.scene, this.arms.guns.vm.scene], cam, this.host.graphicsPipeline.getSourceExposure());
+      this.arms.render(this.host.renderer, cam);
+    }
   }
 
   /** What the trails read (render(): the world's trailHistory), null without trails. */
@@ -1678,6 +1684,7 @@ export class ReplayViewer implements ExportSource {
     const d = this.data;
     if (!arms || !d || !this.player) return;
     this.armsFrame(arms, dt, sampleAt(d, t, this.sample), rig.firstPerson && this.weaponNow.eye, this.player.brushOrigins());
+    this.host.world.lightEye([arms.knife.scene, arms.guns.vm.scene], this.host.camera, this.host.graphicsPipeline.getSourceExposure());
     arms.render(this.host.renderer, this.host.camera);
   }
 

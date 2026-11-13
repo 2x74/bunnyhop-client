@@ -1,6 +1,62 @@
 //! Existing Source render/content builders exposed without a browser-owned renderer.
 use super::*;
 use bunnyhop_core::{props, studio};
+/// An overlay or infodecal group (core dressing.rs DressGroup), its material an index into bh_materials.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct BhDressingGroup {
+    pub material: u32,
+    pub first_index: u32,
+    pub index_count: u32,
+    /// 0 = overlay, 1 = decal; drawn in this order, overlays by `order`.
+    pub kind: u32,
+    pub order: u32,
+    pub sky3d: u32,
+}
+/// What the world shader needs beyond BhMaterial (parallel to it): Source's DecalModulate blend, and `$selfillum`
+/// with its tint (the base texture's alpha is the mask).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct BhMaterialLook {
+    pub decal_modulate: u32,
+    pub selfillum: u32,
+    pub selfillum_tint: [f32; 3],
+    /// `$spriteorientation`: 0 vp_parallel (the default), 1 parallel_upright, 2 oriented.
+    pub sprite_orientation: u32,
+}
+/// A sprite, light glow or spotlight (core dressing.rs Glow), its material an index into bh_materials.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct BhDressingGlow {
+    /// 0 sprite (env_sprite / env_glow), 1 light glow (env_lightglow), 2 spotlight (point_spotlight).
+    pub kind: u32,
+    pub material: u32,
+    pub origin: [f32; 3],
+    pub color: [f32; 3],
+    pub alpha: f32,
+    pub render_mode: u32,
+    pub render_fx: u32,
+    pub size: f32,
+    pub size2: f32,
+    pub dir: [f32; 3],
+    pub dist: [f32; 4],
+    pub spawnflags: u32,
+    pub parent_model: i32,
+    pub parent_origin: [f32; 3],
+    pub parent_angles: [f32; 3],
+}
+/// The world fog as the website draws it (depth-fog.ts): colours 0..255, view-depth start and end, max density.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct BhWorldFog {
+    pub blend: u32,
+    pub color: [f32; 3],
+    pub color2: [f32; 3],
+    pub dir: [f32; 3],
+    pub start: f32,
+    pub end: f32,
+    pub max_density: f32,
+}
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct BhSkyInfo {
@@ -68,6 +124,12 @@ pub struct Assets {
     pub light_styles: Option<bunnyhop_core::lightmap::StyleAtlas>,
     pub floor: Vec<BhFloorWeapon>,
     pub props: props::PropMesh,
+    /// The map's light on each prop vertex (core prop_light.rs), linear RGB; -1 where there is none. Empty on maps
+    /// drawn fullbright.
+    pub prop_light: Vec<f32>,
+    pub dressing_groups: Vec<BhDressingGroup>,
+    pub dressing_glows: Vec<BhDressingGlow>,
+    pub material_looks: Vec<BhMaterialLook>,
     pub prop_groups: Vec<BhPropGroup>,
     pub water: CString,
     pub bytes: Vec<u8>,

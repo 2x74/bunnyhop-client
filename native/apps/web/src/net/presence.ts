@@ -2,6 +2,7 @@
 // menus can ask without importing the multiplayer layer. Set by net/mp.ts while connected.
 
 import { appHref } from "../platform/navigation";
+import type { RosterPlayer } from "./protocol";
 
 export interface RoomPresence {
   id: string;
@@ -122,6 +123,8 @@ export interface RoomActions {
   rtv(): void;
   leave(): void;
   scoreboard(): void;
+  /** You, as your own roster has you (the server list draws your entry in your own room from it: ui/servers-who.ts). */
+  self?(): RosterPlayer | null;
 }
 
 let actions: RoomActions | null = null;

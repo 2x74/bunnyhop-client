@@ -192,7 +192,7 @@ test("onboarding offers name and password first, then Discord and email", async 
     const intro = page.getByRole("dialog", { name: "Welcome to bunnyhop.lol" });
     await intro.getByRole("button", { name: "Already play? Sign in" }).click();
     await intro.getByRole("textbox", { name: "Name or email" }).waitFor();
-    await intro.getByText("makes this guest a separate account").waitFor();
+    await intro.getByText("saves this guest as a new account").waitFor();
     const order = await intro
       .locator(".native-intro-signin > *")
       .evaluateAll((items) => items.map((item) => item.tagName + (item.className ? `.${item.className}` : "")));

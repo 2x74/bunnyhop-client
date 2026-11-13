@@ -11,6 +11,7 @@ import { buildBunnyGeometry } from "../../web/src/player/bunny/mesh";
 import { BunnyProcedural } from "../../web/src/player/bunny/procedural";
 import { COSMETICS, HAIR_HATS, LENGTH_HATS, HAIR_LENGTH } from "../../web/src/progression";
 import { COLOURWAYS } from "../../web/src/player/bunny/palettes";
+import { garmentPatternUniforms, setGarmentPattern } from "../../web/src/player/fabric";
 import { hatGeometry, headwearKey } from "../../web/src/player/bunny/hats";
 import { hatFit } from "../../web/src/player/bunny/hat-fit";
 import { ensureHeadwear } from "../../web/src/player/hat-detail";
@@ -63,6 +64,14 @@ const DRY_FIRE_SECONDS = 0.5;
  */
 const GRIP_INDEX_OFF = 0.28;
 const GRIP_LEFT_OPEN = 0.3;
+// The camo codes' bits in the client's player program key (player_program_key.hpp): kinds plus one in 4 bits, stamps
+// in 3. A code past its field would compile another camo's program, so the export stops instead.
+const PROGRAM_CAMO_KINDS = 15;
+const PROGRAM_CAMO_STAMPS = 8;
+for (const [name, code] of Object.entries(CAMO_KIND_CODE))
+  if (code >= PROGRAM_CAMO_KINDS) throw new Error(`Camo kind ${name} (${code}) needs a wider program key`);
+for (const [name, code] of Object.entries(CAMO_STAMP_CODE))
+  if (code >= PROGRAM_CAMO_STAMPS) throw new Error(`Camo stamp ${name} (${code}) needs a wider program key`);
 // Floats per vertex: position 3, normal 3, partColor 3, skinIndex 4, skinWeight 4, accent 1, finishUV 4, headwear 1.
 const STRIDE = 26;
 const pieces: Buffer[] = [];
@@ -545,6 +554,23 @@ const ids = [
   "sg550",
   "m249",
 ];
+
+/** Each patterned colourway's uniforms as the website sets them (fabric.ts setGarmentPattern), linear colours. */
+function outfitPatterns(): Record<string, { kind: number[]; shape: number[]; colors: number[] }> {
+  const out: Record<string, { kind: number[]; shape: number[]; colors: number[] }> = {};
+  for (const [id, colourway] of Object.entries(COLOURWAYS)) {
+    if (!colourway.pattern) continue;
+    const uniforms = garmentPatternUniforms();
+    setGarmentPattern(uniforms, colourway.pattern);
+    out[id] = {
+      kind: uniforms.uGarmPat.value.toArray(),
+      shape: uniforms.uGarmPatP.value.toArray(),
+      colors: uniforms.uGarmPatC.value.flatMap((color) => color.toArray()),
+    };
+  }
+  return out;
+}
+
 await mkdir(directory, { recursive: true });
 const compressed = deflateSync(Buffer.concat(pieces), { level: 9 });
 await writeFile(resolve(directory, "viewmodels.bin.z"), compressed);
@@ -580,6 +606,7 @@ await writeFile(
     gunHolds: Object.fromEntries(GUNS.map((def) => [def.id, holdData(bunnyHold(def))])),
     fists: Object.fromEntries(Object.entries(fistFrames(br)).map(([key, m]) => [key, Array.from(m)])),
     outfits: COLOURWAYS,
+    outfitPatterns: outfitPatterns(),
     hats: hatMeshes,
     hatFits,
     hair: { hats: HAIR_HATS, lengthHats: LENGTH_HATS, length: HAIR_LENGTH, defaultColor: HAIR_DEFAULT },

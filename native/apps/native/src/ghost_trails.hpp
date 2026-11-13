@@ -164,8 +164,12 @@ struct GhostPath {
 class GhostTrails {
     std::array<Vec3, ghost_trail_capacity> points_{};
     size_t count_ = 0;
+    uint32_t first_sample_ = 0;
 
 public:
+    // The sample number of the last recorded() trail's first point: the trail shapes lay their marks by it.
+    int64_t phase() const { return first_sample_ / ghost_trail_step; }
+
     // Recorded frames make pause, scrubbing and low presentation FPS produce the same ribbon.
     std::span<const Vec3> recorded(const GhostPath &path, double tick) {
         count_ = 0;
@@ -183,6 +187,7 @@ public:
                 }
             }
             if (valid_ghost_position(path.frames[sample])) {
+                if (!count_) first_sample_ = sample;
                 points_[count_++] = ghost_feet(path.frames[sample]);
             } else {
                 count_ = 0;

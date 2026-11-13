@@ -576,7 +576,7 @@ function render(): void {
         "section.panel.panel-wide.native-servers",
         null,
         heading("Play online"),
-        serverBrowser({ map: state.map, onSolo: () => show("maps") }),
+        serverBrowser({ map: state.map, onSolo: () => show("maps"), profile: (id) => openProfile(id) }),
       ),
     );
   } else if (screen === "room") {

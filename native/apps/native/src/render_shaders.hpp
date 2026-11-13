@@ -104,15 +104,27 @@ inline const char *cutout_depth_fragment = R"(#version 330 core
 in vec2 uv;uniform sampler2D baseTexture;uniform float cutoff;uniform vec2 baseOffset;
 void main(){if(texture(baseTexture,uv+baseOffset).a<cutoff)discard;}
 )";
+// propLit: a static prop vertex's light from the map (bh_prop_light), or for an animated prop the map's light cube
+// at it by its normal (web map-props.ts litGeometry). Negative where the map has none.
 inline const std::string world_vertex = "#version 330 core\n" + skinning + R"(
 layout(location=0) in vec3 position;layout(location=1) in vec3 normal;
 layout(location=2) in vec2 baseUV;layout(location=3) in vec2 lightUV;layout(location=4) in float blendAlpha;
-uniform mat4 viewProjection,model;uniform float clipHeight;
-out vec2 uv,lm;out vec3 world,normalWorld;out float blend,depth;
+layout(location=7) in vec3 propLight;layout(location=8) in vec3 fadeOrigin;layout(location=9) in vec2 fadeRange;
+uniform mat4 viewProjection,model;uniform float clipHeight;uniform vec3 cameraPosition;
+uniform bool propCubeOn,dressing;uniform vec3 propCube[6];
+out vec2 uv,lm;out vec3 world,normalWorld,propLit;out float blend,depth,dressFade;
+vec3 cubeLight(vec3 n){
+ vec3 w=n*n;
+ return w.x*propCube[n.x<0.?1:0]+w.y*propCube[n.y<0.?3:2]+w.z*propCube[n.z<0.?5:4];
+}
 void main(){
  vec4 local=vec4(position,1);vec3 n=normal;
  if(skinned){mat4 s=skinMatrix();local=s*local;n=mat3(s)*normal;}
  vec4 w=model*local;world=w.xyz;normalWorld=mat3(model)*n;uv=baseUV;lm=lightUV;blend=blendAlpha;
+ propLit=propCubeOn?cubeLight(normalize(normalWorld)):propLight;
+ // Overlay fade distances (web map-dressing.ts): by the view's distance to the overlay's origin.
+ vec3 fadeTo=(model*vec4(fadeOrigin,1)).xyz-cameraPosition;
+ dressFade=dressing&&fadeRange.y>0.?clamp((fadeRange.y-dot(fadeTo,fadeTo))/max(fadeRange.y-fadeRange.x,1.),0.,1.):1.;
  gl_ClipDistance[0]=w.z-clipHeight;gl_Position=viewProjection*w;depth=gl_Position.w;
 }
 )";
@@ -204,7 +216,7 @@ vec3 sunLight(vec3 lit,vec3 albedo,vec3 n){
 
 inline std::string world_fragment() {
     return std::string("#version 330 core\n") + water + R"(
-in vec2 uv,lm;in vec3 world,normalWorld;in float blend,depth;
+in vec2 uv,lm;in vec3 world,normalWorld,propLit;in float blend,depth,dressFade;
 uniform sampler2D baseTexture,lightTexture,secondaryTexture,detailTexture,normalTexture;uniform bool hasNormal,fullbright,potato;uniform vec3 sunDirection;
 uniform sampler2D sceneColor,sceneDepth,reflectionTexture;uniform bool captureReady,reflectionReady;
 uniform float reflectionHeight,waterFogEnd;uniform vec2 cameraNearFar;
@@ -213,6 +225,8 @@ uniform vec2 baseOffset;
 uniform int kind;uniform bool unlit,props,hasSecondary,hasDetail,aboveWater,skyPass,additive;
 uniform bool flashlight;uniform vec3 flashDirection;
 uniform vec3 skyFogColor;uniform vec3 skyFogRange;
+uniform vec3 worldFogColor;uniform vec3 worldFogRange;uniform bool propLighting;
+uniform bool dressing,decalModulate,selfIllum,alphaMask;uniform vec3 selfIllumTint;
 out vec4 color;
 )" + sun_light_shader
            + water_surface_shader + R"(
@@ -230,17 +244,29 @@ void main(){
  if(hasSecondary&&!potato)base=mix(base,texture(secondaryTexture,uv),clamp(blend,0.,1.));
  if(hasDetail)base.rgb*=mix(vec3(1),texture(detailTexture,uv*detailScale).rgb*2.,detailBlend);
  base*=vec4(tint,opacity);if(base.a<cutoff)discard;
- vec3 lighting=unlit?vec3(1):props?vec3(.5+.5*max(dot(n,normalize(vec3(.35,.45,.82))),0.)):texture(lightTexture,lm).rgb/lightmapScale;
+ // A blended brush whose texture alpha is a mask (brush_fades.hpp): only its opacity blends it.
+ if(alphaMask)base.a=opacity;
+ if(dressing){if(dressFade<=0.)discard;base.a*=dressFade;}
+ vec3 standIn=vec3(.5+.5*max(dot(n,normalize(vec3(.35,.45,.82))),0.));
+ vec3 propShade=propLighting&&propLit.r>=0.?propLit:standIn;
+ vec3 lighting=unlit?vec3(1):props?propShade:texture(lightTexture,lm).rgb/lightmapScale;
  if(fullbright)lighting=vec3(1);
  if(hasNormal&&!potato&&!fullbright){vec3 flatN=n*(gl_FrontFacing?1.:-1.);vec3 q0=dFdx(world),q1=dFdy(world);vec2 st0=dFdx(uv),st1=dFdy(uv);vec3 q1p=cross(q1,flatN),q0p=cross(flatN,q0);vec3 t=q1p*st0.x+q0p*st1.x,b=q1p*st0.y+q0p*st1.y;float len=max(dot(t,t),dot(b,b));if(len>1e-12){vec3 sampled=texture(normalTexture,uv).xyz*2.-1.;vec3 mapped=normalize((t*sampled.x+b*sampled.y)*inversesqrt(len)+flatN*sampled.z);lighting*=clamp(1.+.35*(dot(mapped,sunDirection)-dot(flatN,sunDirection)),.65,1.35);}}
  if(flashlight){vec3 delta=world-cameraPosition;float dist=length(delta);float cone=smoothstep(.90,.975,dot(normalize(delta),flashDirection));lighting+=vec3(2.8,2.65,2.4)*cone*max(.12,dot(n,-normalize(delta)))/(1.+dist*dist/180000.);}
  vec3 lit=base.rgb*lighting;
  if(sunActive&&!unlit&&!potato&&!fullbright&&!skyPass&&kind<2&&base.a>.99)lit=sunLight(lit,base.rgb,n*(gl_FrontFacing?1.:-1.));
- vec3 col=encode(lit);float alpha=base.a;
+ float alpha=base.a;
+ // $selfillum (web render.ts withSelfIllum): the base alpha is a mask where the texture times the tint shows unlit.
+ if(selfIllum&&!potato){lit=mix(lit,base.rgb*selfIllumTint,clamp(base.a,0.,1.));alpha=opacity;}
+ vec3 col=encode(lit);
+ // Source's DecalModulate: the blend doubles what's under it, so mid-grey leaves it, and alpha fades towards that grey.
+ if(decalModulate){col=mix(vec3(.5),encode(base.rgb),clamp(base.a,0.,1.));alpha=1.;}
  if(kind==2&&!potato){vec4 surface=waterSurface(n,v);col=surface.rgb;alpha=surface.a;}
  else if(kind==3&&!potato){vec4 surface=glassSurface(n,v);col=surface.rgb;alpha=surface.a;}
- if(!potato)col=waterFog(col,world);
+ if(!potato&&!decalModulate)col=waterFog(col,world);
  if(skyPass){float f=clamp(min(skyFogRange.z,(depth-skyFogRange.x)/max(skyFogRange.y-skyFogRange.x,.001)),0.,1.);col=mix(col,additive?vec3(0):skyFogColor,f);}
+ // The map's world fog (web depth-fog.ts), in gamma space after the output conversion, like the 3D sky's.
+ else if(worldFogRange.z>0.){float f=clamp(min(worldFogRange.z,(depth-worldFogRange.x)/max(worldFogRange.y-worldFogRange.x,.001)),0.,1.);col=mix(col,additive?vec3(0):decalModulate?vec3(.5):worldFogColor,f);}
  color=vec4(col,alpha);
 }
 )";

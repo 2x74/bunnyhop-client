@@ -58,6 +58,10 @@ pub struct MaterialDesc {
     pub fog_start: f32,
     pub fog_end: f32,
     pub above_water: bool,
+    /// `$selfillum` lit by the base texture's alpha (LightmappedGeneric: the lightmap gives way to `$selfillumtint`
+    /// times the texture where the alpha is): the tint, or None. Not for blended or cut-out materials (their alpha is
+    /// coverage) or a mask taken from elsewhere (`$selfillummask`, `$selfillum_envmapmask_alpha`).
+    pub selfillum: Option<[f32; 3]>,
 }
 
 #[derive(Default)]
@@ -307,6 +311,7 @@ pub fn resolve(vfs: &Vfs, names: &[String]) -> Materials {
             fog_start: 0.0,
             fog_end: 0.0,
             above_water: true,
+            selfillum: None,
         };
         let tex;
         let mut flat = false;
@@ -340,6 +345,13 @@ pub fn resolve(vfs: &Vfs, names: &[String]) -> Materials {
             }
             if let Some(c) = color(p, "$color") {
                 desc.color = c;
+            }
+            if truthy(p, "$selfillum")
+                && !p.contains_key("$selfillummask")
+                && !truthy(p, "$selfillum_envmapmask_alpha")
+                && desc.flags & (FLAG_TRANSLUCENT | FLAG_ALPHATEST | FLAG_ADDITIVE) == 0
+            {
+                desc.selfillum = Some(color(p, "$selfillumtint").unwrap_or([1.0; 3]));
             }
             if vmt.shader == "water" {
                 desc.kind = Kind::Water;
@@ -724,6 +736,21 @@ mod tests {
         let mut v = Vfs::default();
         v.mount(Source::loose("t", files.iter().map(|(p, b)| (p.to_string(), Rc::from(b.as_bytes()))).collect()));
         v
+    }
+
+    #[test]
+    fn selfillum_by_base_alpha_only() {
+        let v = vfs(&[
+            ("materials/a/lit.vmt", r#""LightmappedGeneric" { "$basetexture" "a/t" "$selfillum" 1 "$selfillumtint" "[2 1 0.5]" }"#),
+            ("materials/a/plain.vmt", r#""LightmappedGeneric" { "$basetexture" "a/t" "$selfillum" "1" }"#),
+            ("materials/a/glass.vmt", r#""LightmappedGeneric" { "$basetexture" "a/t" "$selfillum" 1 "$translucent" 1 }"#),
+            ("materials/a/masked.vmt", r#""LightmappedGeneric" { "$basetexture" "a/t" "$selfillum" 1 "$selfillummask" "a/m" }"#),
+            ("materials/a/off.vmt", r#""LightmappedGeneric" { "$basetexture" "a/t" "$selfillum" 0 }"#),
+            ("materials/a/t.vtf", "vtf"),
+        ]);
+        let names: Vec<String> = ["a/lit", "a/plain", "a/glass", "a/masked", "a/off"].map(String::from).to_vec();
+        let d = resolve(&v, &names).descs;
+        assert_eq!(d.iter().map(|d| d.selfillum).collect::<Vec<_>>(), vec![Some([2.0, 1.0, 0.5]), Some([1.0; 3]), None, None, None]);
     }
 
     #[test]

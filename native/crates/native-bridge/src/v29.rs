@@ -7,6 +7,9 @@ pub const TURN_SPEED_MAGIC: u32 = 0x53544842;
 pub const FLAG_NULL_BINDS: u16 = 1 << 3;
 pub const FLAG_TIMED_INPUT: u16 = 1 << 4;
 pub const FLAG_W_RELEASE: u16 = 1 << 5;
+// Jump, duck, use, attack, the turn binds and wheel notches were taken by their own times too. Only with
+// FLAG_TIMED_INPUT; information for the anticheat, the commands re-simulate as always.
+pub const FLAG_TIMED_PRESSES: u16 = 1 << 6;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
@@ -18,6 +21,7 @@ pub struct BhRecordOptionsV29 {
     pub timed_input: u32,
     pub null_binds: u32,
     pub w_release: u32,
+    pub timed_presses: u32,
 }
 impl Default for BhRecordOptionsV29 {
     fn default() -> Self {
@@ -29,6 +33,7 @@ impl Default for BhRecordOptionsV29 {
             timed_input: 0,
             null_binds: 0,
             w_release: 0,
+            timed_presses: 0,
         }
     }
 }
@@ -44,6 +49,8 @@ impl BhRecordOptionsV29 {
             || self.timed_input > 1
             || self.null_binds > 1
             || self.w_release > 1
+            || self.timed_presses > 1
+            || (self.timed_presses != 0 && self.timed_input == 0)
         {
             return Err("invalid turn rates or input flags".into());
         }
@@ -59,7 +66,8 @@ pub extern "C" fn bh_v29_check_abi(version: u32, record_size: usize, segment_siz
         && segment_size == size_of::<BhTimingSegmentV2>()) as c_int
 }
 
-/// Rates freeze at the first command. timed_input, null_binds and w_release are sticky and may be marked later.
+/// Rates freeze at the first command. timed_input, timed_presses, null_binds and w_release are sticky and may be
+/// marked later.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bh_record_options_v29(
     ctx: *mut BhContext,
@@ -92,6 +100,7 @@ pub unsafe extern "C" fn bh_record_options_v29(
             recorder.data.options.timed_input |= options.timed_input;
             recorder.data.options.null_binds |= options.null_binds;
             recorder.data.options.w_release |= options.w_release;
+            recorder.data.options.timed_presses |= options.timed_presses;
             Ok(())
         })
     }

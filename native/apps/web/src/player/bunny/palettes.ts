@@ -1,5 +1,9 @@
 // Bunny colourways (the cosmetic "outfit" slot in progression.ts; equipped through player/cosmetics.ts). Each fills the
 // mesh's palette slots (mesh.ts SLOT order) plus the accent (visor, ear panels, stripes, soles, logo, drawstrings).
+// A set's colourway can also carry the pattern its finish and gun camo have (PATTERNS below; fabric.ts draws it on the
+// hoodie), so the set reads as a set on the bunny too.
+
+import type { GarmentPattern } from "../fabric";
 
 export interface Colourway {
   hoodie: number;
@@ -11,6 +15,8 @@ export interface Colourway {
   glove: number;
   detail: number;
   accent: number;
+  /** The print on the hoodie's cloth (fabric.ts GarmentPattern); absent = plain. */
+  pattern?: GarmentPattern;
 }
 
 export const COLOURWAYS: Record<string, Colourway> = {
@@ -84,6 +90,28 @@ export const COLOURWAYS: Record<string, Colourway> = {
   "outfit-whiteout": { hoodie: 0xf4f6fb, trim: 0xd9deea, pants: 0xe9ecf3, pantsTrim: 0xc4cbda, shoe: 0xffffff, face: 0x0d1018, glove: 0xf4f6fb, detail: 0xffffff, accent: 0xf2f4ff },
   "outfit-palmera": { hoodie: 0x2bb6b0, trim: 0xff7ac0, pants: 0x6f58b8, pantsTrim: 0xff7ac0, shoe: 0xfff0f6, face: 0x1a1030, glove: 0x2bb6b0, detail: 0xffe9a8, accent: 0xffa04a },
 };
+
+/**
+ * The sets whose colourway carries a pattern (v0.0.41), each the one its finish and / or gun camo already draws
+ * (viewmodel/finishes/shader.ts, camo.ts), in the colourway's own colours.
+ */
+const PATTERNS: Record<string, GarmentPattern> = {
+  // Dev Grid (fin-devgrid, camo-devgrid): the developer texture. Pale minor lines, an orange line every fourth.
+  "outfit-devgrid": { kind: "grid", colors: [0xb9bcc0, 0xf08a24], cells: 16, p: [4, 0.6, 0, 0.045], legs: true },
+  // Draftsman (fin-linework, camo-draftsman): a blueprint. Pale blue lines, a white one every fifth.
+  "outfit-draftsman": { kind: "grid", colors: [0xbfe0ff, 0xffffff], cells: 20, p: [5, 0.42, 0, 0.04], legs: true },
+  // Fluorescent (camo-backrooms): the Backrooms' wallpaper stripes, a darker band and a thin pale line between.
+  "outfit-fluorescent": { kind: "stripes", colors: [0xc2ab52, 0xeadc94], cells: 16, p: [0, 0, 0.2, 0] },
+  // Meadow (camo-meadow): daisies on the clover green.
+  "outfit-meadow": { kind: "daisies", colors: [0xfff8ec, 0xffc93a], cells: 10, p: [0.7, 0, 0, 0] },
+  // Geode (fin-geode, camo-geode): crystal facets, some turned amethyst, aqua where two meet.
+  "outfit-geode": { kind: "facets", colors: [0x7a5ce8, 0x5ff2df], cells: 12, p: [0.55, 0.04, 0.42, 0] },
+  // High Roller (camo-highroller): argyle in a deeper felt green with gold lines.
+  "outfit-highroller": { kind: "argyle", colors: [0x0a3f28, 0xe0b13a], cells: 16, p: [0.3, 0.026, 0, 0] },
+  // Lapis (camo-lapis): the stone's gold veins.
+  "outfit-lapis": { kind: "veins", colors: [0xd9b45a, 0x4a58c8], cells: 9, p: [3, 1.2, 0.1, 0.5], legs: true },
+};
+for (const [id, pattern] of Object.entries(PATTERNS)) COLOURWAYS[id] = { ...COLOURWAYS[id], pattern };
 
 export const DEFAULT_COLOURWAY = "outfit-cream";
 

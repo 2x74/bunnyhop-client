@@ -14,7 +14,8 @@ export class Fullbright {
       // Prop lighting is baked into vertex colours; Potato retains this attribute alongside its colour average.
       const prop = !!mesh.geometry.getAttribute("fullbrightShade");
       for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
-        if (!(m instanceof THREE.MeshBasicMaterial) || (!m.lightMap && !prop) || !m.colorWrite || this.patched.has(m)) continue;
+        // (A prop material that takes no vertex light, UnlitGeneric, is at full brightness already.)
+        if (!(m instanceof THREE.MeshBasicMaterial) || (!m.lightMap && !(prop && m.vertexColors)) || !m.colorWrite || this.patched.has(m)) continue;
         this.patched.add(m);
         const before = m.onBeforeCompile;
         const key = m.customProgramCacheKey;

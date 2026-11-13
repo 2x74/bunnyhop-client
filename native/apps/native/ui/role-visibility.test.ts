@@ -45,5 +45,6 @@ test("recorded and remote staff loadouts render for observers, with no holder fi
     "Hat",
     "Ghost",
     "Trail",
+    "Trail shape",
   ]);
 });

@@ -7,9 +7,9 @@
 //
 // Per tick, with the state from BEFORE the tick (the plugin reads it in OnPlayerRunCmd, before the movement runs):
 //   on the ground: count ground ticks; more than BHOP_FRAMES (10) of them start the jump count over. The tick that
-//     jumps (jump held on the first ground tick) is sampled like an air tick; a jump from a start zone starts the count
-//     over first (neko-pm/ssj). Nothing else does: teleports, map triggers and checkpoints carry the count on, as on
-//     CS:S servers (research/SSJ.md, "When the count starts over").
+//     jumps (jump held on the first ground tick) is sampled like an air tick. Nothing else does: hops in a start zone
+//     count like any others, and teleports, map triggers and checkpoints carry the count on, as on CS:S servers
+//     (research/SSJ.md, "When the count starts over").
 //   in the air (not on a ladder, not noclipping): sample.
 //   sample: horizontal velocity v, wish direction d from the command's forward / side move and yaw:
 //     gain tick = (30 - |v·d|) / 30 when v·d < 30 (Source air acceleration adds speed only then; 30 is its wish speed
@@ -80,7 +80,7 @@ export interface SsjCmd {
 export interface SsjTick {
   /** The tick jumped (EVENT_JUMPED). */
   jumped: boolean;
-  /** The player stood in a start zone before the tick: a jump from there starts the count over (neko-pm/ssj). */
+  /** The player stood in a start zone before the tick (the start prespeed readout; the jump count ignores it). */
   inStart?: boolean;
   /** Run time (s) if the timer is running, for the time field. */
   time?: number | null;
@@ -89,7 +89,7 @@ export interface SsjTick {
 }
 
 export interface SsjReport {
-  /** Jump number in the chain (1 = the first jump after standing, or the last one taken off in a start zone). */
+  /** Jump number in the chain (1 = the first jump after standing). */
   jump: number;
   /** Horizontal speed at take-off, rounded down (u/s). */
   speed: number;
@@ -167,7 +167,7 @@ export class SsjTracker {
     this.initialSpeed = this.initialHeight = this.oldSpeed = this.oldHeight = 0;
   }
 
-  /** The plugins' "on the ground too long" reset (also a jump from a start zone). */
+  /** The plugins' "on the ground too long" reset. */
   private clearChain(): void {
     this.jump = 0;
     this.clearWindow();
@@ -192,7 +192,6 @@ export class SsjTracker {
     if (pre.grounded) {
       if (this.groundTicks++ > BHOP_FRAMES) this.clearChain();
       if (cmd.buttons & IN_JUMP && this.groundTicks === 1) {
-        if (t.inStart) this.clearChain();
         this.sample(pre, cmd);
         this.groundTicks = 0;
       }
@@ -200,8 +199,8 @@ export class SsjTracker {
       if (!pre.onLadder) this.sample(pre, cmd);
       this.groundTicks = 0;
     }
-    // A teleport (a map's trigger, a checkpoint) changes nothing here: in the plugins only ground time and a start zone
-    // start the count over (research/SSJ.md, "When the count starts over").
+    // Hopping in a start zone and a teleport (a map's trigger, a checkpoint) change nothing here: in shavit's SSJ only
+    // ground time starts the count over, so it starts over once you let go of jump and land (research/SSJ.md).
     return t.jumped ? this.onJump(pre, t.time ?? null) : null;
   }
 

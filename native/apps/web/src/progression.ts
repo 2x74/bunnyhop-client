@@ -806,7 +806,7 @@ export function earnedAchievements(s: ProgressStats): string[] {
 // ---------------------------------------------------------------------------------------------
 // Cosmetics (all unlocked by playing; card editor + ghost settings)
 
-export type CosmeticSlot = "background" | "frame" | "title" | "ghost" | "trail" | "outfit" | "knife" | "finish" | "glove" | "hilt" | "hat" | "body" | "camo";
+export type CosmeticSlot = "background" | "frame" | "title" | "ghost" | "trail" | "shape" | "outfit" | "knife" | "finish" | "glove" | "hilt" | "hat" | "body" | "camo";
 
 /**
  * The first-person loadout slots (apps/web/src/loadout.ts): what you hold, what its blade is painted with, its hilt (one
@@ -1090,10 +1090,10 @@ export const COSMETICS: CosmeticDef[] = [
   // v0.0.30: a talon with a three-petal spinner on its bolster (viewmodel/knives/whirligig.ts; kill's ask).
   { id: "knife-whirligig", slot: "knife", name: "Whirligig", unlock: free, color: "#f2a93b", rarity: 4 },
   // Supporter (SUPPORTER): the only knives that aren't free, standalone (no set). The two bayonets
-  // (viewmodel/knives/thornback.ts, thistle.ts): a big sawback clip point with a muzzle ring; a slim spinner with a
-  // thistle-head pommel. v0.0.38 (owner 11-06): the Leek Saber (leek.ts, a long curved white-to-green saber; Heirloom like
+  // (viewmodel/knives/thornback.ts, thistle.ts): a big clip point grown from a rose stem, thorns along its spine; a
+  // slim spinner with a thistle-head pommel. v0.0.38 (owner 11-06): the Leek Saber (leek.ts, a long curved white-to-green saber; Heirloom like
   // every Supporter item) and Twin Sprouts (sprouts.ts, two golden tines from a seed).
-  { id: "knife-thornback", slot: "knife", name: "Thornback", unlock: ach(SUPPORTER), color: "#2b6870", rarity: 4 },
+  { id: "knife-thornback", slot: "knife", name: "Thornback", unlock: ach(SUPPORTER), color: "#b52a3c", rarity: 4 },
   { id: "knife-thistle", slot: "knife", name: "Thistle", unlock: ach(SUPPORTER), color: "#b46ad8", rarity: 4 },
   { id: "knife-leek", slot: "knife", name: "Leek Saber", unlock: ach(SUPPORTER), color: "#8fdc6a", rarity: 4 },
   { id: "knife-sprouts", slot: "knife", name: "Twin Sprouts", unlock: ach(SUPPORTER), color: "#ffb04a", rarity: 4 },
@@ -1528,15 +1528,15 @@ for (const set of SUPPORTER_SETS) for (const id of set.items) {
 COSMETICS.push(
   // Solids and two-tones.
   { id: "camo-field", slot: "camo", name: "Field", unlock: ach("tier_1"), color: "#6b6f4a", rarity: 1 },
-  { id: "camo-graphite", slot: "camo", name: "Graphite", unlock: lvl(7), color: "#2e3036", rarity: 1 },
+  { id: "camo-graphite", slot: "camo", name: "Graphite", unlock: lvl(7), color: "#7b818b", rarity: 1 },
   { id: "camo-split", slot: "camo", name: "Split", unlock: ach("style_hsw"), color: "#eae2cf", rarity: 2 },
   // Game-native, early.
   { id: "camo-carrot-patch", slot: "camo", name: "Carrot Patch", unlock: lvl(9), color: "#ff7a1a", rarity: 2 },
   { id: "camo-picnic", slot: "camo", name: "Picnic", unlock: lvl(11), color: "#f08a8a", rarity: 2 },
   { id: "camo-paws", slot: "camo", name: "Paw Prints", unlock: lvl(14), color: "#7a5236", rarity: 2 },
-  // The classics, one per unassisted style's first clear.
+  // One per unassisted style's first clear. v0.0.41: the army patterns became garden ones (Woodland: fallen leaves).
   { id: "camo-woodland", slot: "camo", name: "Woodland", unlock: ach("style_legit"), color: "#5f7a45", rarity: 2 },
-  { id: "camo-desert", slot: "camo", name: "Desert", unlock: ach("style_scroll"), color: "#d8c49a", rarity: 2 },
+  { id: "camo-desert", slot: "camo", name: "Flagstone", unlock: ach("style_scroll"), color: "#d8c49a", rarity: 2 },
   { id: "camo-urban", slot: "camo", name: "Urban", unlock: ach("style_wonly"), color: "#8c9096", rarity: 2 },
   { id: "camo-reeds", slot: "camo", name: "Reeds", unlock: ach("style_sideways"), color: "#8a9a5b", rarity: 2 },
   // Longer goals.
@@ -1545,8 +1545,8 @@ COSMETICS.push(
   { id: "camo-carbon", slot: "camo", name: "Carbon", unlock: ach("top10_1"), color: "#3a3e46", rarity: 3 },
   { id: "camo-finish-line", slot: "camo", name: "Finish Line", unlock: ach("photo_finish"), color: "#f4f4f6", rarity: 3 },
   { id: "camo-meadow", slot: "camo", name: "Meadow", unlock: ach("scenic_route"), color: "#5f9a4a", rarity: 3 },
-  { id: "camo-snow", slot: "camo", name: "Snowfield", unlock: ach("scroll_10"), color: "#c9d1dc", rarity: 3 },
-  { id: "camo-night", slot: "camo", name: "Night Woodland", unlock: ach("legitscroll_10"), color: "#2a3346", rarity: 3 },
+  { id: "camo-snow", slot: "camo", name: "Snowfield", unlock: ach("scroll_10"), color: "#dfe7f1", rarity: 3 },
+  { id: "camo-night", slot: "camo", name: "Fireflies", unlock: ach("legitscroll_10"), color: "#2a3346", rarity: 3 },
   { id: "camo-crab", slot: "camo", name: "Crab Shell", unlock: ach("sideways_10"), color: "#f08a4b", rarity: 3 },
   { id: "camo-backrooms", slot: "camo", name: "Backrooms", unlock: ach(TRUE_ARCHITECT), color: "#d9c46a", rarity: 3 },
   { id: "camo-devgrid", slot: "camo", name: "Dev Grid", unlock: ach("gauntlet_classic"), color: "#e8862a", rarity: 4 },
@@ -1573,6 +1573,26 @@ for (const c of COSMETICS) if (c.slot === "camo") {
   const st = c.set ? SUPPORTER_SETS.find((x) => x.id === c.set) : c.roleSet ? ROLE_SETS.find((x) => x.id === c.roleSet) : null;
   if (st && !st.items.includes(c.id)) (st.items as string[]).push(c.id);
 }
+
+// ---------------------------------------------------------------------------------------------
+// Trail shapes (v0.0.41; player/trail.ts draws them): what the trail behind your ghost is made of, picked apart from
+// its colour, so any shape goes with any trail colour. The ribbon is the default and free; the rest fill two levels and
+// four achievements that gave no loadout item. Ids are "shape-<player/trail.ts TrailShape>" and stable forever.
+COSMETICS.push(
+  { id: "shape-ribbon", slot: "shape", name: "Ribbon", unlock: free },
+  // Two thin rails.
+  { id: "shape-twin", slot: "shape", name: "Twin", unlock: lvl(6) },
+  // The ribbon cut into dashes that stay where they were laid.
+  { id: "shape-dashes", slot: "shape", name: "Dashes", unlock: lvl(13) },
+  // Eazy Money (bhop_eazy under a minute): a wide head that narrows at once into a long hairline.
+  { id: "shape-comet", slot: "shape", name: "Comet", unlock: ach("time_bhop_eazy_30") },
+  // Mini Gauntlet: seeds scattered off the path.
+  { id: "shape-seeds", slot: "shape", name: "Seeds", unlock: ach("gauntlet_mini") },
+  // Beat the Mapper: petals shed to either side, tumbling down.
+  { id: "shape-petals", slot: "shape", name: "Petals", unlock: ach(BEAT_MAPPER) },
+  // Fixture (25 top-10 places at once): a stem strung with four-leaf clovers.
+  { id: "shape-clover", slot: "shape", name: "Clover", unlock: ach("top10_25") },
+);
 
 /**
  * Retired cosmetic ids -> what replaced them (read everywhere through cosmetic(): saved choices, room rosters, replay
@@ -1605,6 +1625,8 @@ export const DEFAULT_COSMETICS: Record<CosmeticSlot, string | null> = {
   title: null,
   ghost: "ghost-gold",
   trail: "trail-gold",
+  /** The trail's shape (v0.0.41): the ribbon it has always been. */
+  shape: "shape-ribbon",
   outfit: "outfit-cream",
   body: "body-a",
   knife: "knife-carrot",

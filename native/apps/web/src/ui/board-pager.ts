@@ -11,6 +11,7 @@ import "./boards.css";
 import { avatarImg, pictureOf } from "./avatar";
 import { h } from "./dom";
 import { landRows } from "./land";
+import { loadFailed } from "./load-failed";
 import { icon } from "./icons";
 import { nameAttrs, nameMarks } from "./marks";
 import { decorated } from "./avatar-deco";
@@ -67,8 +68,10 @@ export interface BoardView<E> {
   /** Rows of room the page keeps free besides the pinned rows and your strip (the rank board's taller top three). */
   spare?: number;
   empty(): HTMLElement;
-  /** Title + text for a failed load (e.g. "offline" for an unreachable server). */
-  error?(e: unknown): { cls: string; title: string; text: string };
+  /** What a failed load couldn't load: "ranks", "the leaderboard" (ui/load-failed.ts; default "this page"). */
+  what?: string;
+  /** Its sentence when the server can't be reached, when the board has more to say than the default. */
+  unreachable?: string;
   idOf(e: E): string;
   rankOf(e: E): number;
   nameOf(e: E): string;
@@ -253,13 +256,6 @@ export function pagedBoard<E>(view: BoardView<E>): PagedBoard<E> {
     if (hadFocus) pager.querySelector<HTMLElement>(".rb-pg.on")?.focus({ preventScroll: true });
   }
 
-  function state(cls: string, title: string, text = ""): void {
-    table.classList.add("is-empty");
-    rows.replaceChildren(h("tr.rb-state-row", null, h("td", { colspan: view.cols }, h(`div.rb-state.${cls}`, null, h("strong", null, title), text ? h("span", null, text) : null))));
-    pins.replaceChildren();
-    foot.replaceChildren();
-  }
-
   function skeleton(): void {
     table.classList.remove("is-empty");
     rows.replaceChildren(...Array.from({ length: per }, skeletonRow));
@@ -303,8 +299,10 @@ export function pagedBoard<E>(view: BoardView<E>): PagedBoard<E> {
       if (o.around) focusRow(o.around);
     } catch (e) {
       if (my !== seq || (e as Error)?.name === "AbortError") return;
-      const m = view.error?.(e) ?? { cls: "error", title: "Couldn't load this page", text: String((e as Error)?.message ?? e) };
-      state(m.cls, m.title, m.text);
+      table.classList.add("is-empty");
+      rows.replaceChildren(h("tr.rb-state-row", null, h("td", { colspan: view.cols }, loadFailed(view.what ?? "this page", () => void go(page, o), e, view.unreachable))));
+      pins.replaceChildren();
+      foot.replaceChildren();
     }
   }
 

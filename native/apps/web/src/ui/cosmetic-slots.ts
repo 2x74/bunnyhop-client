@@ -1,11 +1,11 @@
 // Where each cosmetic is picked (v0.0.9): every in-game look is in the Loadout (knife, finish, hilt, gloves, colourway, hat,
-// ghost, trail), the profile card's own parts are edited on the card itself (background, frame, title, badges, links).
+// ghost, trail, trail shape), the profile card's own parts are edited on the card itself (background, frame, title, badges, links).
 // DOM-free and three-free: the profile, the Loadout, the unlock notes and apps/api/test/cosmetic-slots.test.ts share it.
 
 import { ROLE_SETS, SUPPORTER_SETS, supporterItem, type CosmeticDef, type CosmeticSlot } from "../progression";
 
 /** Loadout categories, in tab order. */
-export type LoadoutCategory = "knife" | "finish" | "hilt" | "glove" | "camo" | "outfit" | "hat" | "ghost" | "trail";
+export type LoadoutCategory = "knife" | "finish" | "hilt" | "glove" | "camo" | "outfit" | "hat" | "ghost" | "trail" | "shape";
 export const LOADOUT_CATEGORIES: readonly { slot: LoadoutCategory; label: string }[] = [
   { slot: "knife", label: "Knife" },
   { slot: "finish", label: "Finish" },
@@ -16,16 +16,17 @@ export const LOADOUT_CATEGORIES: readonly { slot: LoadoutCategory; label: string
   { slot: "hat", label: "Hat" },
   { slot: "ghost", label: "Ghost" },
   { slot: "trail", label: "Trail" },
+  { slot: "shape", label: "Trail shape" },
 ];
 export const isLoadoutCategory = (s: unknown): s is LoadoutCategory => LOADOUT_CATEGORIES.some((c) => c.slot === s);
 
 /**
  * What the Loadout's stage shows for a category: your hands in first person (knife, finish, hilt, gloves), a gun in the
- * camo (gun camo), your bunny (colourway, hat), or your PB ghost hopping with its trail (ghost, trail).
+ * camo (gun camo), your bunny (colourway, hat), or your PB ghost hopping with its trail (ghost, trail, trail shape).
  */
 export type StageKind = "hands" | "guns" | "bunny" | "ghost";
 export function stageKind(slot: LoadoutCategory): StageKind {
-  return slot === "camo" ? "guns" : slot === "outfit" || slot === "hat" ? "bunny" : slot === "ghost" || slot === "trail" ? "ghost" : "hands";
+  return slot === "camo" ? "guns" : slot === "outfit" || slot === "hat" ? "bunny" : slot === "ghost" || slot === "trail" || slot === "shape" ? "ghost" : "hands";
 }
 
 /** Categories to show: the hat only for whoever has one (owner-only items never show as a goal). */

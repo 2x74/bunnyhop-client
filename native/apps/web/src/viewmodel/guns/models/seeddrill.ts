@@ -86,16 +86,21 @@ export const seeddrill: GunDef = {
   blurb: "A pebble-smooth bullpup fed from a pea pod.",
   cls: "smg",
   build,
+  // v0.0.41: a pistol hold on the thumbhole grip, like the other long guns' (the old placement, knuckles across the
+  // gun, was seated onto the hand stop under the nose: the firing forearm ran in from the right edge over the
+  // receiver). The hand is turned 15 deg out so its cuff clears the stock behind the grip, and the elbow is low and
+  // out: the forearm drops away under the stock.
   right: {
-    o: [0.2, 0.0, -1.4],
-    up: [-0.1, 0, 0.99],
-    fwd: [0.172, 0.979, 0.017],
-    index: { c: [14, 30, 18], spread: -4 },
+    o: [0.25, 0.0, -2.0],
+    up: [-0.208, 0, 0.978],
+    fwd: [0.866, 0.444, 0.182],
+    index: { c: [16, 34, 20], spread: -4 },
     middle: { c: [84, 98, 75] },
     ring: { c: [88, 98, 75] },
     pinky: { c: [92, 96, 75] },
-    thumb: { c: [14, 14, 8], spread: -6 },
+    thumb: { c: [12, 10, 6], spread: -10 },
     wrap: ["Middle", "Ring", "Pinky", "Thumb"],
+    triggerRest: true,
     seat: -0.02,
   },
   // v0.0.38 gun grips: the support hand turned with the front of the body across its palm (knuckles 12 deg forward,
@@ -129,12 +134,9 @@ export const seeddrill: GunDef = {
   },
   frame: { o: [21, -6.4, -6.2], a: [-1, 4, -4] },
   trigger: TRIGGER,
-  elbows: { R: [8, -18, -18], L: [21.7, 2.15, -14.75] },
+  elbows: { R: [10, -14, -22], L: [21.7, 2.15, -14.75] },
   // On the pod (reload, inspect): the support forearm comes up diagonally from the lower left, not across the view.
   workElbow: [12, 16, -26],
-  // The thumbhole grip sets the firing wrist a little flexed (about 14 deg; a straighter one sends the sleeve across the
-  // top of the screen): its range allows that much.
-  wrist: { R: { flex: 18 } },
   muzzle: [9.3, 0, 0.35],
   eject: { p: [-2.5, 0, -0.6], dir: [0, -0.2, -1] },
   shell: "smg",

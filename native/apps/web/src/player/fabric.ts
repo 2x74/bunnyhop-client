@@ -15,6 +15,7 @@
 // scene in the visor. Detail fades out by screen size (units per pixel) before it can shimmer, so a bunny across the
 // map shades like a plain one.
 
+import * as THREE from "three";
 import type { Fin } from "./bunny/builder";
 
 export const GARMENT = {
@@ -60,15 +61,69 @@ export const gfin = (mat: number, x: number, y: number, ao = 0): Fin => [x, y, 8
 /** A garment point with no seams. */
 export const gplain = (mat: number, ao = 0): Fin => [NO_SEAM, NO_SEAM, 8 + mat, ao];
 
+// ---------------------------------------------------------------------------------------------
+// Outfit patterns (v0.0.41): a set's colourway can carry the print its finish and gun camo already have (Dev Grid's
+// grid, Meadow's daisies), drawn on the hoodie's fleece (and the joggers when `legs`) by garmentOf. One optional
+// pattern per colourway (bunny/palettes.ts Colourway.pattern), per-model uniforms, no program variant: a bunny without
+// one pays a single uniform test. Laid out in the cloth's own coordinates (finishUV: units round the part, units along
+// it), so it wraps limbs like printed fabric and breaks at the seams a real garment has; `veins` runs through the bind
+// position instead (stone has no seams). Drawn from Source up (uPlayerLook >= 1): Potato and Plain keep flat colours.
+// It fades out before its cells get smaller than a couple of pixels.
+
+export type GarmentPatternKind = "grid" | "stripes" | "daisies" | "facets" | "argyle" | "veins";
+const PATTERN_CODE: Record<GarmentPatternKind, number> = { grid: 1, stripes: 2, daisies: 3, facets: 4, argyle: 5, veins: 6 };
+/** Units round the hoodie's body (bunny/mesh.ts): a cell size that divides it meets itself round the back. */
+export const BODY_ROUND = around(52.5) * 0.32;
+
+export interface GarmentPattern {
+  kind: GarmentPatternKind;
+  /** The pattern's two colours (sRGB) over the cloth's own: what each means per kind (garmentPattern below). */
+  colors: readonly [number, number];
+  /** How many cells go round the hoodie's body (the cell size is BODY_ROUND over this); veins: the vein spacing in units. */
+  cells: number;
+  /** Per-kind shape values. */
+  p: readonly [number, number, number, number];
+  /** On the joggers too. */
+  legs?: boolean;
+}
+
+export interface GarmentPatternUniforms {
+  /** x kind (0 none), y cell size (units), z cells round the body, w 1 hoodie / 2 hoodie and joggers. */
+  uGarmPat: THREE.IUniform<THREE.Vector4>;
+  uGarmPatP: THREE.IUniform<THREE.Vector4>;
+  uGarmPatC: THREE.IUniform<THREE.Color[]>;
+}
+
+export const garmentPatternUniforms = (): GarmentPatternUniforms => ({
+  uGarmPat: { value: new THREE.Vector4() },
+  uGarmPatP: { value: new THREE.Vector4() },
+  uGarmPatC: { value: [new THREE.Color(), new THREE.Color()] },
+});
+
+/** Puts a colourway's pattern (or none) on a model's uniforms. */
+export function setGarmentPattern(u: GarmentPatternUniforms, p: GarmentPattern | null | undefined): void {
+  if (!p) {
+    u.uGarmPat.value.set(0, 1, 1, 0);
+    return;
+  }
+  const veins = p.kind === "veins";
+  u.uGarmPat.value.set(PATTERN_CODE[p.kind], veins ? p.cells : BODY_ROUND / p.cells, veins ? 1 : p.cells, p.legs ? 2 : 1);
+  u.uGarmPatP.value.set(...p.p);
+  u.uGarmPatC.value.forEach((c, i) => c.setHex(p.colors[i]));
+}
+
 /** Vertex: declarations. finishUV is the finishes' attribute; declared here when no finish / glove look did. */
 export const FABRIC_VERTEX_PARS = /* glsl */ `
 #if !defined(FINISH) && !defined(GLOVE) && !defined(HILT)
 attribute vec4 finishUV;
 #endif
-varying vec4 vGarm;`;
+varying vec4 vGarm;
+varying float vGarmCloth;`;
 
 export const FABRIC_VERTEX_MAIN = /* glsl */ `
-  vGarm = finishUV;`;
+  vGarm = finishUV;
+  // Which cloth a pattern may print on (garmentPattern): 1 the hoodie's own colour (palette slot 0), 2 the joggers' (2).
+  vGarmCloth = accent > 2.5 && accent < 3.5 ? 1.0 : accent > 4.5 && accent < 5.5 ? 2.0 : 0.0;`;
 
 /** Fragment: declarations + the garment recipes (needs vFabricPos, uFabric, vWorldPos declared before it). */
 export const FABRIC_FRAGMENT_PARS = /* glsl */ `
@@ -76,6 +131,7 @@ uniform float uPlayerLook;
 uniform samplerCube uPlayerEnv;
 uniform float uPlayerEnvOn;
 varying vec4 vGarm;
+varying float vGarmCloth;
 const float G_STITCH = ${STITCH.toFixed(2)};
 struct Garment { vec3 n; vec3 alb; float aoA; float aoK; float sheen; float spec; float pw; float env; float glow; };
 float gHash(vec3 p) {
@@ -104,6 +160,101 @@ float gStitch(float d, float a) {
 }
 // A seam's groove: darker right at the join.
 float gGroove(float d) { return 1.0 - smoothstep(0.015, 0.07, abs(d)); }
+// --- Outfit patterns (GarmentPattern above).
+uniform vec4 uGarmPat;
+uniform vec4 uGarmPatP;
+uniform vec3 uGarmPatC[2];
+float gpHash(vec2 p) { return gHash(vec3(p, 7.31)); }
+// A line's coverage: within w of its middle (d: distance to it), a pixel of antialiasing (aw: units per pixel), fainter
+// once it's thinner than a pixel.
+float gpLine(float d, float w, float aw) { return clamp((w - d) / aw + 0.5, 0.0, 1.0) * min(1.0, 2.0 * w / aw); }
+// The cloth colour with the colourway's pattern on it. m: the garment id; gx, gy: finishUV.xy's screen derivatives;
+// upp: units per pixel.
+vec3 garmentPattern(vec3 alb, float m, vec2 gx, vec2 gy, float upp) {
+  if (vGarmCloth < 0.5 || (vGarmCloth > 1.5 && uGarmPat.w < 1.5) || !(m < 1.5 || (m > 2.5 && m < 3.5))) return alb;
+  float kind = uGarmPat.x, s = uGarmPat.y;
+  vec3 c1 = uGarmPatC[0], c2 = uGarmPatC[1];
+  if (kind > 5.5) {
+    // Veins (lapis and its gold): thin veins along a warped wave through the body, a soft halo round them.
+    vec3 P = vFabricPos / s;
+    float wv = (P.x * 0.35 + P.z * 0.8 + (gNoise(P * 0.8) * 0.6 + gNoise(P * 1.7 + 11.7) * 0.4 - 0.5) * uGarmPatP.x) * uGarmPatP.y;
+    float v = abs(sin(wv * 3.14159));
+    float aw = upp / s * 3.14159 * uGarmPatP.y;
+    float vein = gpLine(v, uGarmPatP.z, aw);
+    float halo = 1.0 - smoothstep(0.0, uGarmPatP.z * 5.0, v);
+    return mix(alb, mix(mix(alb, c2, halo * uGarmPatP.w), c1, vein), 1.0 - smoothstep(0.5, 1.1, aw));
+  }
+  // The rest are printed on the cloth, in its own coordinates: units round the part, units along it.
+  vec2 uv = vec2(vGarm.y * G_STITCH, vGarm.x) / s;
+  vec2 aw = vec2(max(abs(gx.y), abs(gy.y)) * G_STITCH, max(abs(gx.x), abs(gy.x))) / s;
+  vec3 hd = vFabricPos - vec3(0.0, 0.55, 69.35);
+  if (m < 0.5 && vGarm.x < 900.0 && hd.z > -6.6) {
+    // The hood (its own coordinates close to a point at the back of the head): printed flat from behind, from each side
+    // and from above instead, which meet along the edges between them.
+    vec3 ha = abs(hd);
+    uv = (ha.y >= ha.x && ha.y >= ha.z ? hd.xz : ha.x >= ha.z ? vec2(hd.y * sign(hd.x), hd.z) : hd.xy) / s;
+    aw = vec2(upp / s);
+  } else if (vGarm.x > 900.0) {
+    // Parts without cloth coordinates (ears, the seat of the joggers): printed flat from the front.
+    uv = vFabricPos.xz / s;
+    aw = vec2(upp / s);
+  }
+  float am = max(aw.x, aw.y);
+  float near = 1.0 - smoothstep(0.3, 0.6, am);
+  if (near <= 0.0) return kind > 4.5 ? mix(alb, c1, 0.5) : alb;
+  vec3 c = alb, far = alb;
+  if (kind < 1.5) {
+    // Grid (c1 the minor lines at strength p.y, c2 a major line every p.x cells; p.w the line's half width in cells).
+    vec2 d = abs(fract(uv + 0.5) - 0.5);
+    float minor = max(gpLine(d.x, uGarmPatP.w, aw.x), gpLine(d.y, uGarmPatP.w, aw.y));
+    vec2 dm = abs(fract(uv / uGarmPatP.x + 0.5) - 0.5) * uGarmPatP.x;
+    float major = max(gpLine(dm.x, uGarmPatP.w * 2.2, aw.x), gpLine(dm.y, uGarmPatP.w * 2.2, aw.y));
+    c = mix(mix(alb, c1, minor * uGarmPatP.y), c2, major);
+  } else if (kind < 2.5) {
+    // Stripes down the cloth (c1 a stripe of half width p.z cells, c2 a thin one between each pair).
+    float st = clamp((uGarmPatP.z - abs(fract(uv.x) - 0.5)) / aw.x + 0.5, 0.0, 1.0);
+    float st2 = gpLine(abs(fract(uv.x + 0.5) - 0.5), uGarmPatP.z * 0.3, aw.x);
+    c = mix(mix(alb, c2, st2), c1, st);
+    far = mix(alb, c1, 2.0 * uGarmPatP.z);
+  } else if (kind < 3.5) {
+    // Daisies in offset rows (c1 six petals, c2 the middle), in p.x of the cells.
+    uv.x += 0.5 * mod(floor(uv.y), 2.0);
+    vec2 cell = vec2(mod(floor(uv.x), uGarmPat.z), floor(uv.y));
+    float h = gpHash(cell);
+    vec2 q = fract(uv) - 0.5 - (vec2(gpHash(cell + 4.0), gpHash(cell + 9.0)) - 0.5) * 0.2;
+    float r = length(q);
+    float has = step(1.0 - uGarmPatP.x, gpHash(cell + 2.5));
+    float midM = clamp((0.1 - r) / am + 0.5, 0.0, 1.0);
+    float pet = clamp((0.3 * (0.72 + 0.28 * abs(cos((atan(q.y, q.x) + h * 3.0) * 3.0))) - r) / am + 0.5, 0.0, 1.0);
+    c = mix(mix(alb, c1, pet * has), c2, midM * has);
+  } else if (kind < 4.5) {
+    // Facets: crystal faces in the cloth's colour, some turned toward c1, a line of c2 where two meet.
+    vec2 i = floor(uv), f = fract(uv);
+    float d1 = 9.0, d2 = 9.0, id = 0.0;
+    for (int y = -1; y <= 1; y++)
+      for (int x = -1; x <= 1; x++) {
+        vec2 g = vec2(float(x), float(y));
+        vec2 ci = vec2(mod(i.x + g.x, uGarmPat.z), i.y + g.y);
+        float h = gpHash(ci);
+        vec2 o = g + vec2(h, gpHash(ci + 19.7)) * 0.8 + 0.1 - f;
+        float d = dot(o, o);
+        if (d < d1) { d2 = d1; d1 = d; id = h; } else if (d < d2) d2 = d;
+      }
+    c = mix(alb * (0.72 + 0.5 * id), c1, smoothstep(0.62, 1.0, id) * uGarmPatP.x) * (0.9 + 0.25 * sqrt(d1));
+    c = mix(c, c2, gpLine(sqrt(d2) - sqrt(d1), uGarmPatP.y, am) * uGarmPatP.z);
+  } else {
+    // Argyle: every other diamond in c1, thin lines of c2 crossing through the diamonds' middles.
+    vec2 d = vec2(uv.x * 0.5 + uv.y * uGarmPatP.x, uv.x * 0.5 - uv.y * uGarmPatP.x);
+    float ad = aw.x * 0.5 + aw.y * uGarmPatP.x;
+    vec2 e = abs(fract(d + 0.5) - 0.5);
+    // (The diamonds' own edges, antialiased: the checker's sign through a pixel-wide ramp.)
+    vec2 sg = clamp((0.25 - abs(fract(d * 0.5) - 0.5)) / (ad * 0.5), -1.0, 1.0);
+    c = mix(alb, c1, 0.5 + 0.5 * sg.x * sg.y);
+    c = mix(c, c2, max(gpLine(e.x, uGarmPatP.y, ad), gpLine(e.y, uGarmPatP.y, ad)));
+    far = mix(alb, c1, 0.5);
+  }
+  return mix(far, c, near);
+}
 // Sky over ground for the glossy bits when there's no scene capture: a cool sky, a bright horizon, dark ground, a soft
 // light where the key comes from.
 vec3 gSky(vec3 R) {
@@ -131,6 +282,7 @@ Garment garmentOf(vec3 n, vec3 alb, vec3 dpx, vec3 dpy, vec2 gx, vec2 gy) {
   bool rich = uPlayerLook > 1.5;
   // Units per pixel: detail finer than a couple of pixels fades out (no shimmer on far bunnies).
   float upp = max(length(dpx), length(dpy));
+  if (uGarmPat.x > 0.5) g.alb = alb = garmentPattern(alb, m, gx, gy, upp);
   float near = 1.0 - smoothstep(0.04, 0.085, upp);
   float mid = 1.0 - smoothstep(0.07, 0.13, upp);
   if (mid <= 0.0) {

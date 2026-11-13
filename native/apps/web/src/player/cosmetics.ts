@@ -2,7 +2,7 @@
 // localStorage, so ghost.ts and the editor can share it without importing each other.
 //
 // Hook: getGhostCosmetics() → { ghost, trail } CSS colours (+ ghost2 / trail2: the rim glow and trail tail of two-tone
-// items) for YOUR PB ghost; onGhostCosmetics(fn) to restyle live.
+// items) and the trail's shape for YOUR PB ghost; onGhostCosmetics(fn) to restyle live.
 // The card editor calls setGhostCosmetics() with ids from progression.ts COSMETICS (validated server-side when
 // online); offline the choice is local only and limited to the free colours by the editor.
 
@@ -17,6 +17,8 @@ export interface GhostCosmetics {
   /** progression.ts cosmetic ids. */
   ghostId: string;
   trailId: string;
+  /** The trail's shape ("shape-*", player/trail.ts trailShapeOf). */
+  shapeId: string;
   /** Resolved colours. */
   ghost: string;
   trail: string;
@@ -31,29 +33,31 @@ export interface GhostCosmetics {
 type Listener = (c: GhostCosmetics) => void;
 const listeners = new Set<Listener>();
 
-function resolve(ghostId: string | null | undefined, trailId: string | null | undefined): GhostCosmetics {
+function resolve(ghostId: string | null | undefined, trailId: string | null | undefined, shapeId: string | null | undefined): GhostCosmetics {
   const g = cosmetic(ghostId);
   const t = cosmetic(trailId);
+  const s = cosmetic(shapeId);
   const gid = g?.slot === "ghost" ? g.id : DEFAULT_COSMETICS.ghost!;
   const tid = t?.slot === "trail" ? t.id : DEFAULT_COSMETICS.trail!;
+  const sid = s?.slot === "shape" ? s.id : DEFAULT_COSMETICS.shape!;
   const gc = cosmetic(gid), tc = cosmetic(tid);
   const ghost = gc?.color ?? GHOST_CSS.pb, trail = tc?.color ?? GHOST_CSS.pb;
-  return { ghostId: gid, trailId: tid, ghost, trail, ghost2: gc?.color2 ?? ghost, trail2: tc?.color2 ?? trail };
+  return { ghostId: gid, trailId: tid, shapeId: sid, ghost, trail, ghost2: gc?.color2 ?? ghost, trail2: tc?.color2 ?? trail };
 }
 
 export function getGhostCosmetics(): GhostCosmetics {
   try {
-    const v = JSON.parse(localStorage.getItem(KEY) ?? "{}") as { ghost?: string; trail?: string };
-    return resolve(v.ghost, v.trail);
+    const v = JSON.parse(localStorage.getItem(KEY) ?? "{}") as { ghost?: string; trail?: string; shape?: string };
+    return resolve(v.ghost, v.trail, v.shape);
   } catch {
-    return resolve(null, null);
+    return resolve(null, null, null);
   }
 }
 
-export function setGhostCosmetics(ghostId: string | null, trailId: string | null): void {
-  const c = resolve(ghostId, trailId);
+export function setGhostCosmetics(ghostId: string | null, trailId: string | null, shapeId: string | null): void {
+  const c = resolve(ghostId, trailId, shapeId);
   try {
-    localStorage.setItem(KEY, JSON.stringify({ ghost: c.ghostId, trail: c.trailId }));
+    localStorage.setItem(KEY, JSON.stringify({ ghost: c.ghostId, trail: c.trailId, shape: c.shapeId }));
   } catch {
     /* private mode */
   }

@@ -141,7 +141,8 @@ pub struct Bsp {
     pub container_version: i32,
     pub map_revision: i32,
     pub lumps: Vec<Lump>,
-    source: Arc<[u8]>,
+    // bunnyhop patch: the file itself, kept without a copy when it is parsed by value (`parse_owned`).
+    source: Arc<Vec<u8>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -155,6 +156,11 @@ pub struct PhysicsModel<'source> {
 impl Bsp {
     pub fn source_bytes(&self) -> &[u8] {
         &self.source
+    }
+
+    /// bunnyhop patch: the file's bytes, given back (copied only if another `Bsp` clone still shares them).
+    pub fn into_source(self) -> Vec<u8> {
+        Arc::try_unwrap(self.source).unwrap_or_else(|shared| shared.as_ref().clone())
     }
 
     pub fn lump(&self, index: usize) -> Option<&Lump> {
@@ -335,6 +341,17 @@ impl fmt::Display for ParseError {
 impl std::error::Error for ParseError {}
 
 pub fn parse(source: &[u8], profile: Profile, limits: Limits) -> Result<Bsp, ParseError> {
+    let (container_version, lumps) = parse_lumps(source, profile, limits)?;
+    Ok(Bsp { profile, container_version, map_revision: i32_at(source, 1_032), lumps, source: Arc::new(source.to_vec()) })
+}
+
+/// bunnyhop patch: `parse` taking the file by value; the `Bsp` keeps it as it is, so a parse holds one copy of the file.
+pub fn parse_owned(source: Vec<u8>, profile: Profile, limits: Limits) -> Result<Bsp, ParseError> {
+    let (container_version, lumps) = parse_lumps(&source, profile, limits)?;
+    Ok(Bsp { profile, container_version, map_revision: i32_at(&source, 1_032), lumps, source: Arc::new(source) })
+}
+
+fn parse_lumps(source: &[u8], profile: Profile, limits: Limits) -> Result<(i32, Vec<Lump>), ParseError> {
     if source.len() > limits.max_input_bytes {
         return Err(failure(
             ErrorCode::InputLimit,
@@ -567,13 +584,7 @@ pub fn parse(source: &[u8], profile: Profile, limits: Limits) -> Result<Bsp, Par
         }
     }
 
-    Ok(Bsp {
-        profile,
-        container_version,
-        map_revision: i32_at(source, 1_032),
-        lumps,
-        source: Arc::from(source),
-    })
+    Ok((container_version, lumps))
 }
 
 /// bunnyhop patch: `count` RGBE samples of a CS:GO (v21) lighting lump starting at byte `offset`
@@ -798,6 +809,25 @@ mod tests {
         assert_eq!(bsp.lumps[1].encoded_range, 17..17);
         assert_eq!(bsp.lumps[1].raw_fourth_field, 123_i32.to_le_bytes());
         assert_eq!(bsp.source_bytes(), bytes);
+    }
+
+    #[test]
+    fn parse_owned_matches_parse_and_keeps_the_file_without_a_copy() {
+        let mut bytes = empty_bsp();
+        bytes.extend_from_slice(b"abc");
+        set_lump(&mut bytes, 0, HEADER_BYTES as i32, 3, 4, 0);
+        set_lump(&mut bytes, 1, 17, 0, 9, 123);
+        let by_ref = parse(&bytes, Profile::Source2013V20, Limits::default()).unwrap();
+        let owned = parse_owned(bytes.clone(), Profile::Source2013V20, Limits::default()).unwrap();
+        assert_eq!(owned.lumps, by_ref.lumps);
+        assert_eq!((owned.map_revision, owned.container_version, owned.profile), (by_ref.map_revision, by_ref.container_version, by_ref.profile));
+        assert_eq!(owned.source_bytes(), by_ref.source_bytes());
+        let moved = bytes;
+        let ptr = moved.as_ptr();
+        let kept = parse_owned(moved, Profile::Source2013V20, Limits::default()).unwrap();
+        assert_eq!(kept.source_bytes().as_ptr(), ptr);
+        let back = kept.into_source();
+        assert_eq!(back.as_ptr(), ptr);
     }
 
     #[test]

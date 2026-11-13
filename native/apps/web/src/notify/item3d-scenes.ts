@@ -15,7 +15,7 @@ import { colourway, paletteOf } from "../player/bunny/palettes";
 import { hatGeometry, headwearKey } from "../player/bunny/hats";
 import { playerUniforms, silhouetteMaterial, solidMaterial, type PlayerUniforms } from "../player/materials";
 import { PlayerModel } from "../player/model";
-import { Trail } from "../player/trail";
+import { laidShape, Trail, trailShapeOf } from "../player/trail";
 import { applyLoadoutUniforms, specOf } from "../viewmodel/finishes/shader";
 import { carrot } from "../viewmodel/knives/carrot";
 import { knifeById } from "../viewmodel/knives/index";
@@ -228,27 +228,28 @@ function bunnyScene(spec: PreviewSpec, ghost: boolean): ItemScene {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Trail: the in-game ribbon behind a run of bunny hops, seen from the side: it draws on behind its head during the
-// reveal, then the hops keep sliding through it while the card is up.
+// Trail: the in-game trail (in its shape) behind a run of bunny hops, seen from the side: it draws on behind its head
+// during the reveal, then the hops keep sliding back through it while the card is up.
 
 function trailScene(spec: PreviewSpec): ItemScene {
   const { scene, pivot } = base();
   const N = 120;
   const color = spec.color ?? "#ffc23d";
-  const trail = new Trail(color, N, spec.color2 ?? null);
+  const shape = trailShapeOf(spec.shape);
+  const trail = new Trail(color, N + 2, spec.color2 ?? null, shape);
   scene.add(trail.mesh);
   const head = new THREE.Mesh(new THREE.SphereGeometry(8, 16, 10), new THREE.MeshBasicMaterial({ color }));
   pivot.add(head);
   /** Half width, hop length and height (units: a hop at 300 u/s is about this long). */
   const W = 150, L = 100, H = 58;
   const local = new THREE.Vector3();
-  /** Pivot-local point i of the ribbon (0 = tail at the left, N-1 = head at the right) with the hops moved on by `phase`. */
-  const at = (i: number, phase: number, out: THREE.Vector3) => {
-    const x = -W + (2 * W * i) / (N - 1);
-    const u = ((((x - phase) % L) + L) % L) / L;
+  /** The path sample step, and the pivot-local point at x (tail at -W, head at W) with the hops moved back by `phase`. */
+  const DX = (2 * W) / (N - 1);
+  const at = (x: number, phase: number, out: THREE.Vector3) => {
+    const u = ((((x + phase) % L) + L) % L) / L;
     return out.set(x, 4 * H * u * (1 - u) - H * 0.55, 22 * Math.sin(x / 55));
   };
-  const pts = new Float32Array(N * 3);
+  const pts = new Float32Array((N + 2) * 3);
   let phase = 0;
   return {
     scene,
@@ -257,15 +258,22 @@ function trailScene(spec: PreviewSpec): ItemScene {
     frame(dt, cam, reveal) {
       phase += dt * 130;
       pivot.updateMatrixWorld(true);
-      const n = Math.max(2, Math.round(N * reveal));
-      for (let i = 0; i < n; i++) {
-        at(i, phase, local).applyMatrix4(pivot.matrixWorld);
-        pts[i * 3] = local.x;
-        pts[i * 3 + 1] = local.y;
-        pts[i * 3 + 2] = local.z;
-      }
-      at(n - 1, phase, head.position);
-      trail.set(pts, n, cam.position, 1, 10 * pivot.scale.x);
+      // Fixed samples of the path (they slide back with the hops, so a shape laid per sample stays on its hop), then
+      // the head.
+      const headX = -W + 2 * W * Math.max(1 / N, reveal);
+      const first = Math.ceil((phase - W) / DX);
+      let n = 0;
+      const push = (x: number) => {
+        at(x, phase, local).applyMatrix4(pivot.matrixWorld);
+        pts[n * 3] = local.x;
+        pts[n * 3 + 1] = local.y;
+        pts[n * 3 + 2] = local.z;
+        n++;
+      };
+      for (let k = first; k * DX - phase < headX && n <= N; k++) push(k * DX - phase);
+      push(headX);
+      at(headX, phase, head.position);
+      trail.set(pts, n, cam.position, 1, (laidShape(shape) ? 6 : 10) * pivot.scale.x, first);
     },
     dispose: () => {
       trail.dispose();

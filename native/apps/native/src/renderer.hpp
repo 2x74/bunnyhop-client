@@ -8,6 +8,7 @@
 #include "water_capture.hpp"
 #include "texture_bleed.hpp"
 #include "ghost_trails.hpp"
+#include "trail_shapes.hpp"
 #include "graphics_settings.hpp"
 #include "runner_view.hpp"
 #include "paint.hpp"
@@ -25,7 +26,10 @@
 #include "first_person_weapons.hpp"
 #include "map_props.hpp"
 #include "runtime_prop_copies.hpp"
+#include "map_light.hpp"
+#include "model_light.hpp"
 #include "texture_motion.hpp"
+#include "brush_fades.hpp"
 #include <span>
 #include "nlohmann/json.hpp"
 #include <filesystem>
@@ -50,6 +54,7 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <numeric>
 #include <stdexcept>
 #include <string>
@@ -227,6 +232,7 @@ inline GLuint link_program(Gl &gl, const char *vertex_source, const char *fragme
 #include "native_viewmodel.hpp"
 #include "actor_warmup.hpp"
 #include "native_map_effects.hpp"
+#include "map_glows.hpp"
 // Standard headers must be included at file scope before these GL-dependent definitions.
 #include "source_hdr.hpp"
 #include "enhanced_look.hpp"
@@ -440,6 +446,8 @@ class Renderer {
     std::unordered_map<int32_t, std::pair<uint32_t, uint32_t>> textureSizes;
     std::unordered_map<int32_t, std::array<float, 3>> textureAverages;
     std::vector<BhGroup> groups, skyGroups;
+    // Window brushes and $alpha-driven materials, faded from the eye each frame (brush_fades.hpp).
+    native_render::BrushFades brushFades;
     std::vector<BhPropGroup> propGroups;
     RuntimePropCopies propCopies;
     std::unique_ptr<CrashExplosions> crashExplosions;
@@ -452,6 +460,16 @@ class Renderer {
     std::array<int32_t, 6> skyMaterials{-1, -1, -1, -1, -1, -1};
     BhSkyInfo skyInfo{};
     bool hasSky = false;
+    // The map's own fog and its light on props (map_light.hpp).
+    BhWorldFog worldFog{};
+    bool hasWorldFog = false;
+    GLuint propLightBuffer = 0;
+    native_render::PropCubes propCubes;
+    // The map's overlays and infodecals (core dressing.rs), and the material looks they and $selfillum need.
+    Geometry dressingMesh;
+    std::vector<BhDressingGroup> dressingGroups;
+    std::unique_ptr<MapGlows> mapGlows;
+    std::vector<BhMaterialLook> materialLooks;
     NativeMapEffects mapEffects;
     std::unique_ptr<NativePresentation> presentation;
     std::unique_ptr<ActorWarmup> actorWarmup;
@@ -704,7 +722,8 @@ class Renderer {
     }
 
     // BhMaterial flags (bunnyhop_core's MAT_TRANSLUCENT, MAT_ALPHATEST, MAT_UNLIT).
-    static constexpr uint32_t material_translucent = 1, material_alpha_test = 2, material_unlit = 16;
+    static constexpr uint32_t material_translucent = 1, material_alpha_test = 2, material_additive = 8,
+                              material_unlit = 16, material_textured = 0;
     // Textures a cutout or translucent material reads alpha from (texture_bleed.hpp).
     std::unordered_set<int32_t> cutoutTextures;
 
@@ -887,7 +906,8 @@ class Renderer {
         GLint model = -1, flatColor = -1, hasNormal = -1, hasSecondary = -1, hasDetail = -1, detailScale = -1;
         GLint detailBlend = -1, tint = -1, opacity = -1, cutoff = -1, unlit = -1, props = -1, kind = -1;
         GLint aboveWater = -1, captureReady = -1, waterFogEnd = -1, additive = -1;
-        GLint baseOffset = -1, skinned = -1, boneBase = -1;
+        GLint baseOffset = -1, skinned = -1, boneBase = -1, propCubeOn = -1, propCube = -1;
+        GLint dressing = -1, decalModulate = -1, selfIllum = -1, selfIllumTint = -1, alphaMask = -1;
 
         void read(Gl &gl, GLuint program) {
             const std::pair<GLint *, const char *> uniforms[] = {
@@ -911,6 +931,13 @@ class Renderer {
                     {&baseOffset, "baseOffset"},
                     {&skinned, "skinned"},
                     {&boneBase, "boneBase"},
+                    {&propCubeOn, "propCubeOn"},
+                    {&propCube, "propCube"},
+                    {&dressing, "dressing"},
+                    {&decalModulate, "decalModulate"},
+                    {&selfIllum, "selfIllum"},
+                    {&selfIllumTint, "selfIllumTint"},
+                    {&alphaMask, "alphaMask"},
             };
             for (const auto &[location, name] : uniforms)
                 *location = gl.GetUniformLocation(program, name);
@@ -959,6 +986,14 @@ class Renderer {
             gl.Uniform1f(materialUniforms.waterFogEnd, std::max(1.f, e.fog_end));
         }
         gl.Uniform1i(materialUniforms.additive, (m.flags & 8) != 0);
+        const BhMaterialLook plain{};
+        const auto &look = index < materialLooks.size() ? materialLooks[index] : plain;
+        gl.Uniform1i(materialUniforms.decalModulate, look.decal_modulate != 0);
+        // UnlitGeneric drops $selfillum (SDK vertexlitgeneric_dx9_helper.cpp), as the website.
+        const bool selfLit = look.selfillum && !(m.flags & 16);
+        gl.Uniform1i(materialUniforms.selfIllum, selfLit);
+        if (selfLit) gl.Uniform3fv(materialUniforms.selfIllumTint, 1, look.selfillum_tint);
+        gl.Uniform1i(materialUniforms.alphaMask, 0);
         const bool doubleSided = m.kind == 2 ? native_render::water_face_double_sided(waterBeneathFaces, e.above_water)
                                              : (m.flags & 4) != 0;
         if (doubleSided)
@@ -1070,6 +1105,9 @@ class Renderer {
 
     // Moving textures and animated map props (texture_motion.hpp, map_prop_meshes.hpp), on the world's visual time.
     static constexpr GLint map_prop_bone_unit = 12;
+    // The prop mesh's light per vertex (world_vertex propLight), and the dressing's fade attributes.
+    static constexpr GLuint prop_light_location = 7, fade_origin_location = 8, fade_range_location = 9;
+    static constexpr int dressing_vertex_floats = 15;
     native_render::TextureMotion textureMotion;
     std::unique_ptr<MapPropMeshes> mapPropMeshes;
     double worldTime = -1, worldSeconds = 0;
@@ -1116,6 +1154,7 @@ class Renderer {
         worldSeconds = worldTime >= 0 ? worldTime : seconds;
         worldTime = -1;
         textureMotion.update(worldSeconds);
+        update_brush_fades(eye);
         refresh_prop_transforms();
         propCopies.refresh(core);
         if (mapPropMeshes) {
@@ -1237,6 +1276,8 @@ class Renderer {
                 bh_prop_transform(core, entity, &cached.value);
             else if (!prop && model)
                 bh_model_transform(core, model, &cached.value);
+            // A brush entity faded out entirely isn't drawn (brush_fades.hpp).
+            if (!prop && model && brushFades.hidden(model)) cached.value.visible = 0;
             cached.scene = sceneNumber;
         }
         return cached.value;
@@ -1286,32 +1327,8 @@ class Renderer {
                 std::cos(lastPitch * native::radians) * std::sin(lastYaw * native::radians),
                 -std::sin(lastPitch * native::radians)
         );
-        float fog[3] = {skyInfo.fog_color[0] / 255.f, skyInfo.fog_color[1] / 255.f, skyInfo.fog_color[2] / 255.f};
-        if (skyInfo.fog_blend) {
-            const float dx = std::cos(lastPitch * native::radians) * std::cos(lastYaw * native::radians),
-                        dy = std::cos(lastPitch * native::radians) * std::sin(lastYaw * native::radians),
-                        dz = -std::sin(lastPitch * native::radians);
-            const float len = std::hypot(std::hypot(skyInfo.fog_dir[0], skyInfo.fog_dir[1]), skyInfo.fog_dir[2]);
-            const float t = len > 0 ? std::clamp(
-                                              .5f
-                                                      + .5f
-                                                                * (dx * skyInfo.fog_dir[0] + dy * skyInfo.fog_dir[1]
-                                                                   + dz * skyInfo.fog_dir[2])
-                                                                / len,
-                                              0.f,
-                                              1.f
-                                      )
-                                    : 0;
-            for (int k = 0; k < 3; k++)
-                fog[k] = (skyInfo.fog_color[k] * t + skyInfo.fog_color2[k] * (1 - t)) / 255.f;
-        }
-        gl.Uniform3fv(loc(program, "skyFogColor"), 1, fog);
-        gl.Uniform3f(
-                loc(program, "skyFogRange"),
-                skyInfo.fog_start / std::max(skyInfo.scale, .001f),
-                skyInfo.fog_end / std::max(skyInfo.scale, .001f),
-                skyInfo.fog_max_density
-        );
+        set_fog_uniforms(sky);
+        gl.Uniform1i(loc(program, "propLighting"), propLightBuffer && prop_lighting_on());
         gl.ActiveTexture(GL_TEXTURE1);
         gl.BindTexture(GL_TEXTURE_2D, lightmap);
         ++sceneNumber;
@@ -1358,7 +1375,7 @@ class Renderer {
         if (profiling) frameProfile.survivors += draws.size();
         profile_elapsed(frameProfile.buildCull, phaseStart);
         pose_map_props(draws);
-        bool skinnedBound = false, linesBound = false;
+        bool skinnedBound = false, linesBound = false, cubeBound = false;
         const bool visibleWater =
                 hasWaterMaterials && std::any_of(draws.begin(), draws.end(), [&](const native_render::SceneDraw &d) {
                     return d.material < materials.size() && materials[d.material].kind == 2;
@@ -1367,12 +1384,16 @@ class Renderer {
             const double sortBefore = frameProfile.sort;
             phaseStart = profile_now();
             if (pass) {
+                if (skinnedBound) gl.Uniform1i(materialUniforms.skinned, 0);
+                skinnedBound = false;
+                draw_dressing(false, sky);
                 if (!sky && !reflection && waterPlan.refract && visibleWater) {
                     capture_refraction();
                     sceneCaptured = true;
                 }
                 gl.Enable(GL_BLEND);
                 gl.DepthMask(GL_FALSE);
+                draw_dressing(true, sky);
                 auto sortStart = profile_now();
                 sceneDrawList.back_to_front();
                 profile_elapsed(frameProfile.sort, sortStart);
@@ -1385,16 +1406,26 @@ class Renderer {
             std::optional<GLuint> boundVao;
             for (const auto &d : draws) {
                 const auto &m = d.material < materials.size() ? materials[d.material] : materials.front();
-                if (transparent(m) != (pass != 0) || (reflection && m.kind == 2)) continue;
+                const auto *fade = surface_fade(d);
+                const bool blends = fade_blends(fade);
+                if ((transparent(m) || blends) != (pass != 0) || (reflection && m.kind == 2)) continue;
                 const auto &transform = scene_transform(d.prop, d.entity, d.model);
                 if (!transform.visible) continue;
                 const auto model = scene_model(d.prop, d.entity, d.model);
                 gl.UniformMatrix4fv(materialUniforms.model, 1, GL_FALSE, model.data());
-                if (boundMaterial != std::pair(d.material, d.prop)) {
+                if (boundMaterial != std::pair(d.material, d.prop) || fade) {
                     bind_material(d.material, d.prop);
                     boundMaterial = std::pair(d.material, d.prop);
                 }
+                // A faded or tinted surface draws at its own alpha and colour; the next draw binds its material afresh.
+                if (fade) {
+                    if (blends) gl.Uniform1f(materialUniforms.opacity, fade->alpha);
+                    if (blends && fade->mask) gl.Uniform1i(materialUniforms.alphaMask, 1);
+                    if (fade->tint) gl.Uniform3fv(materialUniforms.tint, 1, fade->tint->data());
+                    boundMaterial.reset();
+                }
                 bind_skinning(materialUniforms.skinned, materialUniforms.boneBase, d.skinned, skinnedBound);
+                bind_prop_cube(d, cubeBound);
                 if (wireframe(d.material) != linesBound) {
                     linesBound = !linesBound;
                     gl.PolygonMode(GL_FRONT_AND_BACK, linesBound ? GL_LINE : GL_FILL);
@@ -1418,10 +1449,12 @@ class Renderer {
             if (profiling) frameProfile.submit -= frameProfile.sort - sortBefore;
         }
         if (skinnedBound) gl.Uniform1i(materialUniforms.skinned, 0);
+        if (cubeBound) gl.Uniform1i(materialUniforms.propCubeOn, 0);
         if (linesBound) gl.PolygonMode(GL_FRONT_AND_BACK, GL_FILL);
         gl.DepthMask(GL_TRUE);
         gl.Disable(GL_POLYGON_OFFSET_FILL);
         gl.Disable(GL_BLEND);
+        if (!sky && !reflection) draw_glows(vp, eye, time);
     }
 
     double lastYaw = 0, lastPitch = 0;
@@ -1434,6 +1467,9 @@ class Renderer {
     std::array<bool, 4> routeAvailable{true, true, true, true};
     std::array<float, 3> ghostRouteColor{1, .761f, .239f};
     std::array<std::array<float, 3>, 2> trailColors{{{1, .761f, .239f}, {1, .761f, .239f}}};
+    // The trail's shape (the Loadout's Trail shape); the ribbon is drawn as it always was.
+    native_render::TrailShape trailShape = native_render::TrailShape::ribbon;
+    native_render::TrailShapes trailShapes;
 
     struct QueuedShot {
         BhAttackReport report;
@@ -1653,6 +1689,10 @@ class Renderer {
         if (path.source != native_render::GhostSource::pb) {
             colors.fill(native_render::ghost_source_color(path.source));
         }
+        if (trailShape != native_render::TrailShape::ribbon) {
+            draw_shaped_trail(points, colors, actor.opacity, eye);
+            return;
+        }
         for (size_t i = 1; i < points.size(); ++i) {
             const float progress = float(i) / float(points.size() - 1);
             const auto &point = points[i];
@@ -1660,6 +1700,22 @@ class Renderer {
             const auto color = native_render::trail_color(colors, progress, actor.opacity, distance);
             presentation->ribbon(points[i - 1], point, 2.5f * (.15f + .85f * progress), color, eye);
         }
+    }
+
+    // The website's ghost trail width and opacity (ghost.ts: half width 2.5, opacity x 1.2).
+    void draw_shaped_trail(
+            std::span<const native_render::Vec3> points,
+            const std::array<std::array<float, 3>, 2> &colors,
+            float opacity,
+            const float eye[3]
+    ) {
+        constexpr float trail_half_width = 2.5f, trail_opacity_boost = 1.2f;
+        const native_render::TrailShapes::Colors tones{colors[0], colors[1]};
+        const float shown = std::min(1.f, opacity * trail_opacity_boost);
+        const auto emit = [this](const native_render::TrailQuad &quad) {
+            presentation->quad(quad.corners, {quad.color[0], quad.color[1], quad.color[2], 1}, 0, quad.alpha);
+        };
+        trailShapes.build(trailShape, points, eye, tones, shown, trail_half_width, ghostTrails.phase(), emit);
     }
 
     int selected_route_slot() const {
@@ -1967,7 +2023,8 @@ public:
         if (viewmodel) viewmodel->glow_visibility(show, firstPerson);
     }
 
-    void set_ghost_cosmetics(const std::string &ghostId, const std::string &trailId) {
+    void set_ghost_cosmetics(const std::string &ghostId, const std::string &trailId, const std::string &shapeId) {
+        trailShape = native_render::trail_shape_of(shapeId);
         if (viewmodel) {
             viewmodel->ghost_cosmetics(ghostId);
             trailColors = viewmodel->cosmetic_colors(trailId);
@@ -2108,6 +2165,7 @@ public:
         if (!nv || !ni || !ng || !rawGroups) throw std::runtime_error("Map has no drawable native mesh");
         if (rawMaterials && nm) materials.assign(rawMaterials, rawMaterials + nm);
         if (materials.empty()) materials.push_back({-1, 1, 0, 1, .5f, {1, 1, 1}});
+        resolve_builtin_textures();
         if (rawExtras && ne) extras.assign(rawExtras, rawExtras + ne);
         groups.assign(rawGroups, rawGroups + ng);
         hasWaterMaterials =
@@ -2120,6 +2178,143 @@ public:
         for (const auto &item : groups) {
             record_group_bounds(item.first_index, item.first_index, item.index_count, verts, nv, 10, indices, ni);
             co_yield "resource";
+        }
+    }
+
+    // The brushes not drawn plainly (brush_fades.hpp): each func_areaportalwindow's target, every brush wearing a
+    // material whose proxies drive $alpha (the world's own faces only for chains that need no entity), the brush
+    // entities' render keys, and the classes CS:S never draws. Water and glass keep their own looks.
+    void prepare_brush_fades() {
+        brushFades = {};
+        size_t count = 0;
+        const char *raw = bh_entities_json(core, &count);
+        const auto entities = raw && count ? nlohmann::json::parse(raw, raw + count) : nlohmann::json::array();
+        const auto windows = native_render::areaportal_windows(entities);
+        size_t changingCount = 0;
+        const uint32_t *changing = bh_dynamic_render_entities(core, &changingCount);
+        const std::unordered_set<uint32_t> changingSet(changing, changing ? changing + changingCount : changing);
+        const auto renders = native_render::brush_renders(entities, changingSet, windows);
+        const auto undrawn = native_render::undrawn_class_models(entities);
+        for (const uint32_t model : undrawn)
+            brushFades.hide(model);
+        std::map<uint32_t, std::vector<uint32_t>> used;
+        std::unordered_map<uint32_t, native_render::Bounds> boxes;
+        for (const auto &g : groups) {
+            if (g.sky3d || undrawn.contains(g.model)) continue;
+            auto &materialsOfModel = used[g.model];
+            if (std::find(materialsOfModel.begin(), materialsOfModel.end(), g.material) == materialsOfModel.end())
+                materialsOfModel.push_back(g.material);
+            const auto &bounds = groupBounds.at(g.first_index);
+            auto [box, first] = boxes.try_emplace(g.model, bounds);
+            for (int k = 0; !first && k < 3; k++) {
+                box->second.lo[k] = std::min(box->second.lo[k], bounds.lo[k]);
+                box->second.hi[k] = std::max(box->second.hi[k], bounds.hi[k]);
+            }
+        }
+        for (const auto &[model, used_materials] : used) {
+            native_render::BrushSpec spec;
+            if (const auto window = windows.find(model); window != windows.end()) spec.window = window->second;
+            if (const auto render = renders.find(model); model && render != renders.end()) {
+                spec.render = render->second.keys;
+                spec.index = render->second.index;
+            }
+            add_brush_fade(model, used_materials, boxes[model], spec);
+        }
+    }
+
+    // One brush model's surfaces that can take an opacity: their $alpha chains, whether the entity's render keys apply
+    // (no chain, a VMT $color and $alpha of 1), and whether their texture alpha is a mask once they blend.
+    void add_brush_fade(
+            uint32_t model,
+            const std::vector<uint32_t> &used_materials,
+            const native_render::Bounds &box,
+            const native_render::BrushSpec &spec
+    ) {
+        static constexpr uint32_t coverage = 1 | 2, unlit = 16;
+        std::vector<native_render::BrushFades::Surface> surfaces;
+        bool anyChain = false;
+        for (const uint32_t material : used_materials) {
+            if (material >= materials.size() || materials[material].kind == 2 || materials[material].kind == 3)
+                continue;
+            const auto &m = materials[material];
+            BhAlphaProgram chain{};
+            const bool hasChain = bh_material_alpha(core, material, &chain);
+            const bool runs = hasChain && (model != 0 || !chain.per_entity);
+            native_render::BrushFades::Surface surface;
+            surface.material = material;
+            surface.base = m.alpha;
+            if (runs) {
+                surface.vars.resize(chain.vars);
+                surface.chain = bh_material_alpha_vars(core, material, surface.vars.data(), surface.vars.size());
+                anyChain |= surface.chain;
+            }
+            surface.keyed =
+                    spec.render && !hasChain && m.alpha == 1 && m.color[0] == 1 && m.color[1] == 1 && m.color[2] == 1;
+            BhMaterialBlend blend{};
+            bh_material_blend(core, material, &blend);
+            const bool selfLit =
+                    material < materialLooks.size() && materialLooks[material].selfillum && !(m.flags & unlit);
+            surface.mask = blend.base_alpha_mask && !(m.flags & coverage) && !selfLit;
+            surfaces.push_back(std::move(surface));
+        }
+        if (!spec.window && !anyChain && !spec.render) return;
+        brushFades.add(model, box, spec, std::move(surfaces), used_materials.size());
+    }
+
+    // This frame's fades from the main view's eye (not a water reflection's, nor the sun's).
+    void update_brush_fades(const float eye[3]) {
+        if (!brushFades.size()) return;
+        const float yaw = float(lastYaw * native::radians), pitch = float(lastPitch * native::radians);
+        const native_render::Vec3 forward = {
+                std::cos(pitch) * std::cos(yaw), std::cos(pitch) * std::sin(yaw), -std::sin(pitch)
+        };
+        brushFades.update(
+                {eye[0], eye[1], eye[2]},
+                forward,
+                worldSeconds,
+                graphics.potato,
+                [this](uint32_t model) {
+                    BhTransform t{};
+                    t.visible = 1;
+                    bh_model_transform(core, model, &t);
+                    return native::model_matrix(t);
+                },
+                [this](uint32_t material,
+                       std::vector<double> &vars,
+                       double distance,
+                       double time,
+                       uint32_t seed,
+                       uint32_t &noise) {
+                    double alpha = 1;
+                    bh_material_alpha_run(
+                            core, material, vars.data(), vars.size(), distance, time, seed, &noise, &alpha
+                    );
+                    return alpha;
+                }
+        );
+    }
+
+    // A world surface's fade or tint this frame (brush_fades.hpp); nothing for one drawn as the map draws it.
+    const native_render::SurfaceFade *surface_fade(const native_render::SceneDraw &d) const {
+        if (d.prop) return nullptr;
+        const auto *fade = brushFades.surface(d.model, d.material);
+        return fade && (!fade->plain || fade->tint) ? fade : nullptr;
+    }
+
+    // Potato draws a see-through brush flat and opaque, tinted; otherwise below full strength it blends.
+    bool fade_blends(const native_render::SurfaceFade *fade) const { return fade && !fade->plain && !graphics.potato; }
+
+    // A built-in `$basetexture "white"` with no VTF (bhop_angst's hanging loops): solid white times $color, as the
+    // material system draws it, instead of the missing-material stand-in.
+    void resolve_builtin_textures() {
+        static constexpr uint32_t missing = 1, flat = 4;
+        for (uint32_t i = 0; i < materials.size(); i++) {
+            if (materials[i].kind != missing) continue;
+            BhMaterialBlend blend{};
+            if (bh_material_blend(core, i, &blend) && blend.builtin_white) {
+                materials[i].kind = flat;
+                materials[i].texture = -1;
+            }
         }
     }
 
@@ -2161,6 +2356,243 @@ public:
             co_yield "animated prop";
         mapPropMeshes->bind_bones(GL_TEXTURE0 + map_prop_bone_unit);
         gl.ActiveTexture(GL_TEXTURE0);
+    }
+
+    // The 3D sky's fog for the sky pass; the map's world fog (Map fog, off in Potato) for the main one.
+    std::array<float, 3> view_forward() const {
+        return {float(std::cos(lastPitch * native::radians) * std::cos(lastYaw * native::radians)),
+                float(std::cos(lastPitch * native::radians) * std::sin(lastYaw * native::radians)),
+                float(-std::sin(lastPitch * native::radians))};
+    }
+
+    // The map's fog and light for the models drawn in the world this frame (NativeViewmodel::world_light_uniforms).
+    NativeViewmodel::WorldLook frame_world_look(const float eye[3]) {
+        NativeViewmodel::WorldLook look;
+        look.active = true;
+        using Mode = native_render::ModelLightMode;
+        const auto setting = graphics.model_lighting;
+        look.mode = graphics.potato || graphics.fullbright               ? Mode::off
+                    : setting == GraphicsSettings::ModelLighting::full   ? Mode::full
+                    : setting == GraphicsSettings::ModelLighting::subtle ? Mode::subtle
+                                                                         : Mode::off;
+        if (world_fog_on()) {
+            const auto forward = view_forward();
+            look.fog_color = native_render::fog_view_color(
+                    worldFog.color, worldFog.color2, worldFog.dir, worldFog.blend, forward.data()
+            );
+            look.fog_range = {worldFog.start, worldFog.end, worldFog.max_density};
+        }
+        look.eye = {eye[0], eye[1], eye[2]};
+        look.exposure = exposure();
+        return look;
+    }
+
+    void set_fog_uniforms(bool sky) {
+        const auto view = view_forward();
+        const float *forward = view.data();
+        const auto skyFog = native_render::fog_view_color(
+                skyInfo.fog_color, skyInfo.fog_color2, skyInfo.fog_dir, skyInfo.fog_blend, forward
+        );
+        gl.Uniform3fv(loc(program, "skyFogColor"), 1, skyFog.data());
+        gl.Uniform3f(
+                loc(program, "skyFogRange"),
+                skyInfo.fog_start / std::max(skyInfo.scale, .001f),
+                skyInfo.fog_end / std::max(skyInfo.scale, .001f),
+                skyInfo.fog_max_density
+        );
+        const bool worldFogOn = !sky && world_fog_on();
+        const auto fog =
+                native_render::fog_view_color(worldFog.color, worldFog.color2, worldFog.dir, worldFog.blend, forward);
+        gl.Uniform3fv(loc(program, "worldFogColor"), 1, fog.data());
+        gl.Uniform3f(
+                loc(program, "worldFogRange"), worldFog.start, worldFog.end, worldFogOn ? worldFog.max_density : 0
+        );
+    }
+
+    bool world_fog_on() const { return hasWorldFog && graphics.map_fog && !graphics.potato; }
+
+    // Overlays and infodecals: the world's vertex layout (position, normal, uv, lightmap uv), then the fade origin and
+    // the fade distances squared.
+    void prepare_dressing() {
+        size_t looks = 0, groups = 0, floats = 0, count = 0;
+        const auto *rawLooks = bh_material_looks(core, &looks);
+        if (rawLooks && looks) materialLooks.assign(rawLooks, rawLooks + looks);
+        const auto *rawGroups = bh_dressing_groups(core, &groups);
+        const float *vertices = bh_dressing_vertices(core, &floats);
+        const uint32_t *indices = bh_dressing_indices(core, &count);
+        dressingMesh = geometry(vertices, floats, dressing_vertex_floats, indices, count);
+        if (!dressingMesh.vao) return;
+        if (rawGroups && groups) dressingGroups.assign(rawGroups, rawGroups + groups);
+        gl.BindVertexArray(dressingMesh.vao);
+        gl.BindBuffer(GL_ARRAY_BUFFER, dressingMesh.vbo);
+        const auto attribute = [&](GLuint location, GLint size, size_t offset) {
+            gl.EnableVertexAttribArray(location);
+            gl.VertexAttribPointer(
+                    location,
+                    size,
+                    GL_FLOAT,
+                    GL_FALSE,
+                    dressing_vertex_floats * sizeof(float),
+                    reinterpret_cast<void *>(offset * sizeof(float))
+            );
+        };
+        attribute(3, 2, 8);
+        attribute(fade_origin_location, 3, 10);
+        attribute(fade_range_location, 2, 13);
+        gl.BindVertexArray(0);
+    }
+
+    // Sprites, light glows and spotlight beams (map_glows.hpp), their textures and an animated sprite's frames.
+    ResourceLoading prepare_glows() {
+        size_t count = 0;
+        const auto *raw = bh_dressing_glows(core, &count);
+        if (!raw || !count) co_return;
+        float probe = 0;
+        const bool traced = bh_dressing_glow_visibility(core, 0, 0, 0, 0, 1, &probe) > 0;
+        std::vector<std::pair<int32_t, std::vector<GLuint>>> books;
+        const auto texture_of = [&](uint32_t index, bool animated) -> std::optional<MapGlows::Texture> {
+            if (index >= materials.size()) return std::nullopt;
+            const auto &m = materials[index];
+            if (m.kind != material_textured || m.texture < 0) return std::nullopt;
+            MapGlows::Texture out;
+            out.id = texture(m.texture);
+            if (!out.id) return std::nullopt;
+            const auto size = textureSizes.find(m.texture);
+            if (size != textureSizes.end()) {
+                out.width = float(size->second.first);
+                out.height = float(size->second.second);
+            }
+            out.additive = (m.flags & material_additive) != 0;
+            out.translucent = (m.flags & material_translucent) != 0;
+            out.alpha_test = (m.flags & material_alpha_test) != 0;
+            out.orientation = index < materialLooks.size() ? materialLooks[index].sprite_orientation : 0;
+            if (animated) out.frames = sprite_frames(m.texture);
+            return out;
+        };
+        auto glows = std::make_unique<MapGlows>(gl);
+        glows->load(std::span(raw, count), texture_of, traced);
+        co_yield "glows";
+        if (!glows->empty()) mapGlows = std::move(glows);
+    }
+
+    // An animated sprite's frames 1.. (frame 0 is the texture itself), uploaded once per texture.
+    std::vector<GLuint> sprite_frames(int32_t index) {
+        const auto found = spriteFrames.find(index);
+        if (found != spriteFrames.end()) return found->second;
+        uint32_t count = 1;
+        std::vector<GLuint> frames;
+        if (bh_texture_flipbook(core, index, &count) && count > 1) {
+            for (uint32_t frame = 1; frame < count; ++frame) {
+                BhImage image{};
+                if (!bh_texture_frame(core, index, frame, &image)) break;
+                frames.push_back(upload(image, true, true));
+                ownedTextures.push_back(frames.back());
+            }
+            if (frames.size() + 1 != count) frames.clear();
+        }
+        spriteFrames.emplace(index, frames);
+        return frames;
+    }
+
+    std::unordered_map<int32_t, std::vector<GLuint>> spriteFrames;
+
+    bool glows_on() const { return mapGlows && graphics.map_details && !graphics.potato; }
+
+    // Glows and beams in the main view: solid sprites, then the blended ones and the beams, then the glows drawn over
+    // everything (their visibility traced first). The world program is bound again after.
+    void draw_glows(const native::Matrix &vp, const float eye[3], double seconds) {
+        if (!glows_on()) return;
+        const auto forward = view_forward();
+        const float right[3] = {
+                float(std::sin(lastYaw * native::radians)), float(-std::cos(lastYaw * native::radians)), 0
+        };
+        const float up[3] = {
+                right[1] * forward[2] - right[2] * forward[1],
+                right[2] * forward[0] - right[0] * forward[2],
+                right[0] * forward[1] - right[1] * forward[0]
+        };
+        std::array<float, 3> fogColor{}, fogRange{0, 1, 0};
+        if (world_fog_on()) {
+            fogColor = native_render::fog_view_color(
+                    worldFog.color, worldFog.color2, worldFog.dir, worldFog.blend, forward.data()
+            );
+            fogRange = {worldFog.start, worldFog.end, worldFog.max_density};
+        }
+        const MapGlows::View view{vp, eye, right, up, seconds, fogColor, fogRange};
+        mapGlows->draw(MapGlows::Layer::solid, view, core);
+        mapGlows->draw(MapGlows::Layer::blended, view, core);
+        mapGlows->observe(core, eye, vp, double(SDL_GetTicksNS()) / 1e9);
+        mapGlows->draw(MapGlows::Layer::overlay, view, core);
+        gl.Enable(GL_DEPTH_TEST);
+        gl.UseProgram(program);
+    }
+
+    bool details_on() const { return graphics.map_details && !graphics.potato && !dressingGroups.empty(); }
+
+    // Overlays and decals draw with the world (web map-dressing.ts): the opaque ones after its opaque surfaces, the
+    // blended ones before its blended ones, a little in front of their faces and without writing depth.
+    void draw_dressing(bool blended, bool sky) {
+        if (!details_on()) return;
+        const auto identity = native::model_matrix(BhTransform{{0, 0, 0}, {0, 0, 0}, 1});
+        gl.UniformMatrix4fv(materialUniforms.model, 1, GL_FALSE, identity.data());
+        gl.Uniform1i(materialUniforms.dressing, 1);
+        gl.BindVertexArray(dressingMesh.vao);
+        gl.DepthMask(GL_FALSE);
+        for (const auto &group : dressingGroups) {
+            if (bool(group.sky3d) != sky || group.material >= materials.size()) continue;
+            const auto &material = materials[group.material];
+            const bool modulate = group.material < materialLooks.size() && materialLooks[group.material].decal_modulate;
+            if ((transparent(material) || modulate) != blended || material.texture < 0) continue;
+            bind_material(group.material, false);
+            gl.Enable(GL_POLYGON_OFFSET_FILL);
+            gl.PolygonOffset(-1, -4);
+            if (modulate) gl.BlendFunc(GL_DST_COLOR, GL_SRC_COLOR);
+            gl.DrawElements(
+                    GL_TRIANGLES,
+                    GLsizei(group.index_count),
+                    GL_UNSIGNED_INT,
+                    reinterpret_cast<void *>(uintptr_t(group.first_index) * sizeof(uint32_t))
+            );
+        }
+        gl.Disable(GL_POLYGON_OFFSET_FILL);
+        gl.Uniform1i(materialUniforms.dressing, 0);
+        gl.DepthMask(blended ? GL_FALSE : GL_TRUE);
+    }
+
+    // The map's world fog, and its light on static props as a vertex attribute of the prop mesh.
+    void prepare_map_light() {
+        hasWorldFog = bh_world_fog(core, &worldFog) != 0;
+        if (mapPropMeshes) propCubes.reset(mapPropMeshes->props.instances().size());
+        size_t count = 0, prop_floats = 0;
+        const float *light = bh_prop_light(core, &count);
+        bh_prop_vertices(core, &prop_floats);
+        constexpr size_t prop_vertex_floats = 8, light_floats = 3;
+        if (!light || !propMesh.vao || count != prop_floats / prop_vertex_floats * light_floats) return;
+        const auto colors = native_render::prop_light_colors(light, count, lightmapInfo.hdr);
+        gl.BindVertexArray(propMesh.vao);
+        gl.GenBuffers(1, &propLightBuffer);
+        gl.BindBuffer(GL_ARRAY_BUFFER, propLightBuffer);
+        gl.BufferData(GL_ARRAY_BUFFER, colors.size() * sizeof(float), colors.data(), GL_STATIC_DRAW);
+        gl.EnableVertexAttribArray(prop_light_location);
+        gl.VertexAttribPointer(prop_light_location, 3, GL_FLOAT, GL_FALSE, light_floats * sizeof(float), nullptr);
+        gl.BindVertexArray(0);
+    }
+
+    // Props draw with the map's light (the "Prop lighting" setting) where it has some for them.
+    bool prop_lighting_on() const { return graphics.prop_lighting && !graphics.potato && !graphics.fullbright; }
+
+    // An animated prop takes its light cube; everything else its vertex light (static props) or none.
+    void bind_prop_cube(const native_render::SceneDraw &d, bool &bound) {
+        const native_render::LightCube *cube = nullptr;
+        if (d.skinned && prop_lighting_on()) {
+            const auto &origin = scene_transform(true, d.entity, 0).origin;
+            cube = propCubes.at(core, d.skinned - 1, origin, lightmapInfo.hdr);
+        }
+        if (cube) gl.Uniform3fv(materialUniforms.propCube, 6, cube->data());
+        if (bool(cube) != bound) {
+            gl.Uniform1i(materialUniforms.propCubeOn, cube != nullptr);
+            bound = cube != nullptr;
+        }
     }
 
     void prepare_sky() {
@@ -2336,6 +2768,9 @@ public:
         while (!props.step())
             co_yield "prop geometry";
         prepare_sky();
+        prepare_map_light();
+        prepare_dressing();
+        prepare_brush_fades();
         co_yield "lightmap";
         auto textures = prepare_textures();
         while (!textures.step())
@@ -2343,6 +2778,9 @@ public:
         auto water = prepare_water();
         while (!water.step())
             co_yield "water";
+        auto glows = prepare_glows();
+        while (!glows.step())
+            co_yield "glows";
         prepare_uniforms();
     }
 
@@ -2433,8 +2871,11 @@ public:
         viewmodel.reset();
         actorWarmup.reset();
         mapPropMeshes.reset();
+        mapGlows.reset();
         destroy(worldMesh);
         destroy(propMesh);
+        destroy(dressingMesh);
+        if (propLightBuffer) gl.DeleteBuffers(1, &propLightBuffer);
         destroy(skyMesh);
         if (!ownedTextures.empty()) gl.DeleteTextures(ownedTextures.size(), ownedTextures.data());
         if (planesTexture) gl.DeleteTextures(1, &planesTexture);
@@ -3325,6 +3766,7 @@ public:
         const auto vp = camera(eye, lastYaw, lastPitch, aspect);
         resolve_look_lighting();
         prepare_sun_light(eye, seconds);
+        if (viewmodel) viewmodel->world_look(frame_world_look(eye));
         gl.Viewport(0, 0, width, height);
         plan_water(eye, vp);
         if (waterPlan.reflection_height) draw_water_reflection(eye, aspect, width, height, seconds);
@@ -3447,6 +3889,7 @@ public:
                 );
         }
         profile_elapsed(frameProfile.viewmodel, viewmodelStart);
+        if (viewmodel) viewmodel->world_look({});
         profile_elapsed(frameProfile.presentation, phaseStart);
         spectatedAttacks.clear();
         spectatedFlags = 0;  // Hidden third-person viewmodels must not replay stale pulses on return to eye mode.

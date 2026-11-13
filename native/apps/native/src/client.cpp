@@ -342,7 +342,7 @@ int run(const native::Options &opt) {
         }
     };
     std::string selected_style = opt.style, active_style = opt.style, outfit, packed_loadout,
-                ghost_cosmetic = "ghost-default", trail_cosmetic = "trail-none";
+                ghost_cosmetic = "ghost-default", trail_cosmetic = "trail-none", shape_cosmetic = "shape-ribbon";
     // The style the player last picked starts the next launch too (saved_style.hpp); --style wins for that launch.
     const auto style_path = cache / "style.json";
     if (persist_window && !opt.style_set) try {
@@ -787,8 +787,9 @@ int run(const native::Options &opt) {
                              canonical
                      );
         curr = restart.state;
-        if (tutorial_runner.lesson && tutorial_runner.lesson->is_active())
-            tutorial_runner.restart(core.get(), active_style, curr);
+        const bool in_lesson = tutorial_runner.lesson && tutorial_runner.lesson->is_active();
+        if (in_lesson) tutorial_runner.restart(core.get(), active_style, curr);
+        hud.set_lesson(in_lesson && tutorial_runner.lesson->lesson_id() != "final");
         // The knife pool moves on before the attempt starts, so the whole run holds one knife.
         if (held_knife.advance(next_knife_event) && menu && menu_ready) menu->evaluate_js(held_knife.menu_script());
         next_knife_event = native::KnifePoolEvent::restart;
@@ -1014,6 +1015,7 @@ int run(const native::Options &opt) {
         if (action.restart && core) {
             if (tutorial_runner.lesson) tutorial_runner.lesson->stop();
             tutorial_runner.demo = false;
+            // A race's style is for the race only: it doesn't replace the style you picked for the next launch.
             if (!action.style.empty()) selected_style = action.style;
             active_track = action.track;
             if (action.canonical_start) {
@@ -1082,7 +1084,7 @@ int run(const native::Options &opt) {
         reset();
         apply_preferences();
         renderer->set_cosmetics(outfit, held_knife.loadout());
-        renderer->set_ghost_cosmetics(ghost_cosmetic, trail_cosmetic);
+        renderer->set_ghost_cosmetics(ghost_cosmetic, trail_cosmetic, shape_cosmetic);
         apply_room_mode(room_modes.map_loaded(map_id, room.spectator_target.has_value(), epoch_ms()));
     };
     auto request_map = [&](const std::string &id) {
@@ -1767,6 +1769,7 @@ int run(const native::Options &opt) {
                 if (!wheel) input.null_presses.edge(code, input_timeline.binds().of(code), down);
                 input_timeline.key(held_codes, code, down, wheel, stamp, SDL_GetTicksNS());
                 input.held = 0;
+                uint32_t wheel_bits = 0;
                 const auto bindings = input_timeline.binds().snapshot();
                 for (const auto &binding : *bindings) {
                     const auto bit = binding.bit;
@@ -1783,12 +1786,13 @@ int run(const native::Options &opt) {
                             if (bh_weapon_report(core.get(), &weapon)) scope.secondary(weapon.active);
                         }
                         if (wheel && matching && down)
-                            input.pulse |= bit;
+                            wheel_bits |= bit;
                         else if (held)
                             input.held |= bit;
                     } else if (matching && down && !repeat)
                         act(binding.action, wheel);
                 }
+                if (wheel_bits) input_timeline.pulse(input, wheel_bits, stamp, SDL_GetTicksNS());
                 input.held |= command_hold_bits();
                 if (renderer)
                     native_render::surface_tool_key(
@@ -2347,7 +2351,9 @@ int run(const native::Options &opt) {
                         && free_cameras.wheel(event.wheel.y, room.spectator_target.has_value()))
                         break;
                     if (captured && !chat.active && event.wheel.y != 0)
-                        handle_code(event.wheel.y > 0 ? "MWheelUp" : "MWheelDown", true, false, true);
+                        handle_code(
+                                event.wheel.y > 0 ? "MWheelUp" : "MWheelDown", true, false, true, event.wheel.timestamp
+                        );
                     break;
                 default:
                     break;
@@ -3080,12 +3086,13 @@ int run(const native::Options &opt) {
                         );
                         ghost_cosmetic = message.value("ghostId", ghost_cosmetic);
                         trail_cosmetic = message.value("trailId", trail_cosmetic);
-                        if (ghost_cosmetic.size() > 64 || trail_cosmetic.size() > 64)
+                        shape_cosmetic = message.value("shapeId", shape_cosmetic);
+                        if (ghost_cosmetic.size() > 64 || trail_cosmetic.size() > 64 || shape_cosmetic.size() > 64)
                             throw std::runtime_error("Invalid ghost cosmetic");
                         if (renderer) {
                             renderer->set_player_glow(player_glow);
                             renderer->set_cosmetics(outfit, held_knife.loadout());
-                            renderer->set_ghost_cosmetics(ghost_cosmetic, trail_cosmetic);
+                            renderer->set_ghost_cosmetics(ghost_cosmetic, trail_cosmetic, shape_cosmetic);
                         }
                     } else if (type == "roomEvent") {
                         apply_room_event(message);
@@ -3434,6 +3441,7 @@ int run(const native::Options &opt) {
         }
         if (spectator != observed_spectator) {
             native::announce_watching(chat, room, observed_spectator, spectator, input_timeline.binds(), epoch_ms());
+            hud.clear_speed_graph();
             if (spectator) {
                 bh_record_end(core.get());
                 recorder.clear(true);
@@ -4002,6 +4010,8 @@ int run(const native::Options &opt) {
                     state.player.view_offset_z = target->frame.view_offset_z;
                     state.player.grounded = !!(target->frame.flags & 2);
                     state.player.crouched = !!(target->frame.flags & 1);
+                    // The speed graph draws the watched player's speed, a bar per tick of theirs, as on the website.
+                    hud.tick(state.player);
                     camera_input.set_angles(target->frame.pitch, target->frame.yaw);
                     renderer->set_cosmetics(target->outfit, target->loadout);
                     renderer->set_player_glow(target->playerGlow);

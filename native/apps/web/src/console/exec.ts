@@ -371,7 +371,7 @@ export class ConsoleRunner {
       case "key_listboundkeys": {
         const lines = listBinds(h.get());
         for (const l of lines) h.print(l, "dim");
-        return h.print(`${lines.length} keys bound.`);
+        return h.print(`${lines.length} ${lines.length === 1 ? "key" : "keys"} bound.`);
       }
       case "bind":
         return this.bind(args);

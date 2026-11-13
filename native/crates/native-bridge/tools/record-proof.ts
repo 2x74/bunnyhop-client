@@ -10,8 +10,11 @@ import { gunzipSync } from "node:zlib";
 import {foldCommand,hashHex,RUN_HASH_SEED} from "../../../apps/web/src/run-hash";
 import { verifyReplay } from "../../../apps/web/src/verifier";
 import { StyleFilter, styleDef } from "../../../apps/web/src/styles";
-const { values }=parseArgs({args:Bun.argv.slice(2),options:{map:{type:"string"},replay:{type:"string"},wasm:{type:"string"},output:{type:"string"},"client-build":{type:"string"}}});
-if(!values.map||!values.replay)throw new Error("--map MAP.bsp --replay ROUTE.bhr [--wasm production.wasm] [--output DIR]");
+const { values }=parseArgs({args:Bun.argv.slice(2),options:{map:{type:"string"},replay:{type:"string"},wasm:{type:"string"},output:{type:"string"},"client-build":{type:"string"},"timed-presses":{type:"boolean"}}});
+if(!values.map||!values.replay)throw new Error("--map MAP.bsp --replay ROUTE.bhr [--wasm production.wasm] [--output DIR] [--timed-presses]");
+// --timed-presses: record as the client does with timed input on, so the BHR carries the timedInput and timedPresses
+// header flags (replay.ts FLAG_TIMED_INPUT, FLAG_TIMED_PRESSES), and check the shared encoder and verifier agree.
+const timedPresses=!!values["timed-presses"];
 const root=resolve(import.meta.dir,"../../..");const map=resolve(values.map);const output=resolve(values.output??join(root,"target/native-record-proof"));mkdirSync(output,{recursive:true});
 const source=await decodeReplay(readFileSync(values.replay));
 
@@ -39,11 +42,12 @@ for(let i=0;i<source.header.totalTicks;i++){
 if(timer.status!=="finished")throw new Error("current-physics fixture did not finish");
 const spec=join(output,"spec.json"),recording=join(output,"recording.jsonl");if(existsSync(recording))throw new Error("choose a new --output directory; recording exists");
 const runHash=commands.slice(timer.startTick).reduce((h,c)=>foldCommand(h,c.forward,c.side,c.buttons,c.yaw,c.pitch),RUN_HASH_SEED);
-writeFileSync(spec,JSON.stringify({...source.header,...(values["client-build"]?{nativeClientBuild:values["client-build"]}:{}),commands,expected,runStartIndex:timer.startTick,runHash:hashHex(runHash)}));
+writeFileSync(spec,JSON.stringify({...source.header,...(values["client-build"]?{nativeClientBuild:values["client-build"]}:{}),...(timedPresses?{recordOptions:{yawSpeed:210,angleSpeedKey:2,timedInput:true,timedPresses:true}}:{}),commands,expected,runStartIndex:timer.startTick,runHash:hashHex(runHash)}));
 const child=Bun.spawn(["cargo","run","--release","--locked","-p","bunnyhop-native-bridge","--bin","record-proof","--",map,spec,recording],{cwd:root,stdout:"pipe",stderr:"inherit"});const native=await new Response(child.stdout).text();if(await child.exited)throw new Error("native record proof failed");console.log(native.trim());
 const nativeHeartbeats=native.trim().split("\n").map(line=>JSON.parse(line)).find(row=>Array.isArray(row.nativeHeartbeats))?.nativeHeartbeats;if(!nativeHeartbeats)throw new Error("Native command heartbeat proof missing");
 const rows=readFileSync(recording,"utf8").trim().split("\n").map(l=>JSON.parse(l));const header=rows[0],summary=rows.at(-1);if(!summary.valid||summary.timer.status!=="finished")throw new Error("native recording is invalid or unfinished");
 const rec=new ReplayRecorder(header.checkpointInterval);
+if(timedPresses){rec.timedInput=true;rec.timedPresses=true;}
 for(const row of rows.filter(r=>r.type==="tick")){const c=row.command;rec.push(c.forward,c.side,fromBits(c.yawBits),fromBits(c.pitchBits),c.buttons);const b=row.state.floatBits;rec.maybeCheckpoint(row.state.tick,b.slice(0,3).map(fromBits),b.slice(3,6).map(fromBits));}
 const final=summary.finalState.floatBits;rec.addCheckpoint(summary.totalTicks,final.slice(0,3).map(fromBits),final.slice(3,6).map(fromBits));
 const replay=rec.build({map:header.map,mapSha256:header.mapSha256,settings:header.settings,prespeedCap:header.prespeedCap,startTick:summary.timer.startTick,endTick:summary.timer.endTick,track:summary.timer.track,
@@ -56,6 +60,7 @@ const decoded=await decodeReplay(readFileSync(nativeBhr));const checked=simulate
 if(!checked.checkpointsMatch||checked.timer.status!=="finished"||checked.timer.startTick!==summary.timer.startTick||checked.timer.endTick!==summary.timer.endTick)throw new Error("native BHR failed canonical replay verification");
 const verified=verifyReplay(core,decoded,decoded.header.zones,{mapSha256:hash,ranked:true});
 if(!verified.valid)throw new Error("native BHR rejected by shared ranked verifier: "+verified.problems.join("; "));
+if(timedPresses&&!(decoded.header.timedInput&&decoded.header.timedPresses))throw new Error("native BHR lost the timed presses flags");
 const offTicks = Array.from(decoded.buttons).filter(buttons => buttons & IN_NO_LANDFIX).length;
 if (offTicks) {
   const removed = structuredClone(decoded);
@@ -76,7 +81,7 @@ if(retimedLegacy)console.error(`rules-1 fixture: native ${summary.timer.timeMs} 
 const changed=await decodeReplay(readFileSync(nativeBhr));changed.checkpoints[0].position[0]=Math.fround(changed.checkpoints[0].position[0]+1);
 const mutation=verifyReplay(core,changed,changed.header.zones,{mapSha256:hash,ranked:true});
 if(mutation.valid||mutation.checkpointsMatch)throw new Error("shared verifier accepted mutated native checkpoint");
-const report={pass:true,nativeHeartbeats,nativeReplayPlayback:true,nativeReplaySeek:true,ghostStatePreserved:true,offlineVerifierValid:verified.valid,rankedVerifier:true,mutatedCheckpointRejected:!mutation.valid,verifierProblems:verified.problems,physics:PHYSICS_VERSION,wasmSha256:new Bun.CryptoHasher("sha256").update(wasm).digest("hex"),mapSha256:hash,recording,bhr:nativeBhr,nativeRawBytes: nativeRaw.length,nativeRawEqualsSharedEncoderPlusBhts:true,runHash:hashHex(runHash),statesCompared:commands.length,timerRowsCompared:commands.length,
+const report={pass:true,timedPresses:!!decoded.header.timedPresses,nativeHeartbeats,nativeReplayPlayback:true,nativeReplaySeek:true,ghostStatePreserved:true,offlineVerifierValid:verified.valid,rankedVerifier:true,mutatedCheckpointRejected:!mutation.valid,verifierProblems:verified.problems,physics:PHYSICS_VERSION,wasmSha256:new Bun.CryptoHasher("sha256").update(wasm).digest("hex"),mapSha256:hash,recording,bhr:nativeBhr,nativeRawBytes: nativeRaw.length,nativeRawEqualsSharedEncoderPlusBhts:true,runHash:hashHex(runHash),statesCompared:commands.length,timerRowsCompared:commands.length,
  checkpointsChecked:checked.checkpointsChecked,startTick:checked.timer.startTick,endTick:checked.timer.endTick,time:checked.timer.time(),
  nativeTimeMs:summary.timer.timeMs,timingPolicy:summary.timer.timingPolicy,webTimeMs:verified.timeMs,serverVerified:false,submissionEnabled:false};
 const landfixProof = { ...report, offTicks, flagRemovalRejected: offTicks ? true : null, legacyFlagRejected: offTicks ? true : null };

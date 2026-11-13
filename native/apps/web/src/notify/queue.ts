@@ -13,10 +13,38 @@
 //   note takes it: a burst cascades in instead of landing as one block.
 // - Defer. `defer` notes (celebrations) wait while gameplay is running. If a run starts while one is on screen it
 //   leaves; if it was up for less than `minSeen` ms it goes back to the front of the queue with its remaining time.
+//   The pause menu holds back the celebration lane alone (gateFor): plates that are waiting keep waiting, but one already
+//   on screen stays for the rest of its time, because its button needs the cursor that only the menu gives.
 // - Overflow. More than `maxWaiting` waiting notes in a lane: the lowest priority, oldest one is dropped.
 // - Hold. Hovering / focusing a note freezes its timer (`hold`); releasing gives it back what was left (at least 1 s).
 
 export type Lane = "whisper" | "toast" | "celebration" | "banner";
+
+/** Where the game is, as the notes see it (notify/index.ts reads it off the body's classes). */
+export interface NoteContext {
+  inGame: boolean;
+  menuOpen: boolean;
+  viewerOpen: boolean;
+  /** The HUD's timer is running. */
+  run: boolean;
+  /** Hide UI is on. */
+  hidden: boolean;
+}
+
+/** A run is going (in game, no menu or viewer over it) or the UI is hidden: no sounds, no confetti, compact banners. */
+export const quietNow = (c: NoteContext): boolean => (c.run && c.inGame && !c.menuOpen && !c.viewerOpen) || c.hidden;
+
+/** Which deferrable notes wait: every lane's, one lane's, or none. */
+export type Gate = "all" | Lane | null;
+
+/**
+ * The gate for a context (setGate). Quiet: everything deferrable waits. A menu open over a game (the pause menu and the
+ * screens opened from it): moments and celebrations that haven't shown yet still wait, since that panel fills the
+ * middle of the screen and a plate arriving at the bottom centre covered its pager; notices (a friend's message) show
+ * there. A plate already up when the menu opens finishes its time (setGate). The plates show in the front menus, or in
+ * game once no run is going.
+ */
+export const gateFor = (c: NoteContext): Gate => (quietNow(c) ? "all" : c.inGame && c.menuOpen && !c.viewerOpen ? "celebration" : null);
 
 export interface LaneRules {
   capacity: number;
@@ -78,7 +106,7 @@ export class NotifyQueue<T> {
   private notes: Note<T>[] = [];
   private seq = 0;
   private ids = 0;
-  private running = false;
+  private gate: Gate = null;
   private lastShow: Record<Lane, number> = { whisper: -Infinity, toast: -Infinity, celebration: -Infinity, banner: -Infinity };
   private lastHide: Record<Lane, number> = { whisper: -Infinity, toast: -Infinity, celebration: -Infinity, banner: -Infinity };
   /** Events produced outside step() (merges, cuts) for the next step() to return. */
@@ -134,7 +162,7 @@ export class NotifyQueue<T> {
     const r = this.rules[note.lane];
     // A full lane and a note that outranks everything on it: cut the lowest one short.
     const shown = this.shown(note.lane);
-    if (shown.length >= r.capacity && shown.every((s) => s.priority < note.priority) && (!note.defer || !this.running)) {
+    if (shown.length >= r.capacity && shown.every((s) => s.priority < note.priority) && !this.waits(note)) {
       const low = shown.reduce((a, b) => (b.priority < a.priority || (b.priority === a.priority && b.seq < a.seq) ? b : a));
       this.cut(low, now);
     }
@@ -151,11 +179,19 @@ export class NotifyQueue<T> {
 
   /** Gameplay running (a timed run in progress, no menu): deferrable notes wait, and visible ones leave. */
   setRunning(running: boolean, now: number): void {
-    if (running === this.running) return;
-    this.running = running;
-    if (!running) return;
+    this.setGate(running ? "all" : null, now);
+  }
+
+  /**
+   * Deferrable notes behind the gate wait. A run starting ("all") also sends the visible ones away; a lane's own gate
+   * (the pause menu) lets a note that is already up finish: the player may have opened the menu to press its button.
+   */
+  setGate(gate: Gate, now: number): void {
+    if (gate === this.gate) return;
+    this.gate = gate;
+    if (gate !== "all") return;
     for (const n of this.notes) {
-      if (n.state !== "shown" || !n.defer) continue;
+      if (n.state !== "shown" || !this.waits(n)) continue;
       const seen = now - (n.shownAt ?? now);
       if (seen < this.minSeen) {
         // Barely seen: back to the front of the queue with what it had left.
@@ -172,7 +208,11 @@ export class NotifyQueue<T> {
   }
 
   get isRunning(): boolean {
-    return this.running;
+    return this.gate === "all";
+  }
+
+  private waits(n: Note<T>): boolean {
+    return n.defer && (this.gate === "all" || this.gate === n.lane);
   }
 
   setCapacity(lane: Lane, capacity: number, now: number): void {
@@ -222,7 +262,7 @@ export class NotifyQueue<T> {
     for (const lane of ["banner", "celebration", "toast", "whisper"] as Lane[]) {
       const r = this.rules[lane];
       for (;;) {
-        const next = this.waiting(lane).find((n) => !n.defer || !this.running);
+        const next = this.waiting(lane).find((n) => !this.waits(n));
         if (!next || this.shown(lane).length >= r.capacity) break;
         if (now < this.lastShow[lane] + r.stagger || now < this.lastHide[lane] + r.rest) break;
         next.state = "shown";
@@ -242,7 +282,7 @@ export class NotifyQueue<T> {
     for (const n of this.notes) if (n.state === "shown" && n.until !== null) t = Math.min(t, n.until);
     for (const lane of ["banner", "celebration", "toast", "whisper"] as Lane[]) {
       const r = this.rules[lane];
-      const next = this.waiting(lane).find((n) => !n.defer || !this.running);
+      const next = this.waiting(lane).find((n) => !this.waits(n));
       if (!next || this.shown(lane).length >= r.capacity) continue;
       t = Math.min(t, Math.max(now, this.lastShow[lane] + r.stagger, this.lastHide[lane] + r.rest));
     }

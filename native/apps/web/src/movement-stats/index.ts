@@ -103,7 +103,7 @@ export function registerMovementStats(): void {
   ] as const) registerChatCommand({ name, aliases: [...aliases], help, group: "more", where: "both", args: "[on|off]", run: (ctx, arg) => {
     const value = arg.toLowerCase();
     if (value && value !== "on" && value !== "off") return void ctx.reply(`Usage: !${name} [on|off]`);
-    const on = value ? value === "on" : !get(); set(on); ctx.reply(`${help} ${on ? "on" : "off"}. Settings → HUD.`);
+    const on = value ? value === "on" : !get(); set(on); ctx.reply(`${help[0].toUpperCase()}${help.slice(1)} ${on ? "on" : "off"}. Settings → HUD.`);
   } });
   registerChatCommand({ name: "ljlast", help: "view or share your last jump", group: "more", where: "both", key: "lastLj", run: openLastJump });
 }

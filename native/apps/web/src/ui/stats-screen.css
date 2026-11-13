@@ -4,7 +4,6 @@
 .st-body { flex: 1; min-height: 0; overflow: hidden auto; overscroll-behavior: contain; padding: var(--sp-2) var(--sp-2) var(--sp-2) 0; scrollbar-gutter: stable; }
 .st-page { display: flex; flex-direction: column; gap: 2.2rem; padding-top: var(--sp-4); }
 .st-empty { margin: 0; color: var(--dim); font-size: var(--fs-sm); }
-.st-error { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-8) 0; }
 
 /* Who you are, and the way to your profile. */
 .st-who { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sp-4); }

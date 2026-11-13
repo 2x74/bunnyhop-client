@@ -61,6 +61,12 @@ pub struct Mesh {
     pub sky_groups: Vec<[u32; 3]>,
     /// The map's `sky_camera` when it has a usable 3D skybox (`Group::sky3d` marks its geometry). Render-only.
     pub sky_camera: Option<crate::skybox::SkyCamera>,
+    /// The master `env_fog_controller`'s fog (`fog.rs`). Render-only.
+    pub world_fog: Option<crate::fog::WorldFog>,
+    /// The map's light for models (`lighting.rs`); None on maps drawn fullbright or without ambient data. Render-only.
+    pub lighting: Option<crate::lighting::Lighting>,
+    /// Overlays, infodecals, glows and beams (`dressing.rs`). Render-only.
+    pub dressing: crate::dressing::Dressing,
 }
 
 const CONTENTS_SLIME: i32 = 0x10;
@@ -185,6 +191,11 @@ struct Builder<'a> {
     model_sky: Vec<bool>,
     // per model: sky face triangles (positions + local indices)
     sky_buckets: Vec<(Vec<f32>, Vec<u32>)>,
+    // Faces whose triangles the dressing needs (`dressing::Plan::faces`), and those triangles.
+    capture: std::collections::HashSet<usize>,
+    captured: HashMap<usize, crate::dressing::FaceTris>,
+    // While capturing a displacement: its vertices before displacement.
+    flat_out: Option<Vec<[f32; 3]>>,
     mesh: Mesh,
 }
 
@@ -290,7 +301,15 @@ impl<'a> Builder<'a> {
                 })
                 .collect();
             let key = self.key(model, face_index, material);
+            let capture = self.capture.contains(&face_index);
+            let (base, first) = self.buckets.get(&key).map_or((0, 0), |(v, i)| ((v.len() / VERTEX_FLOATS) as u32, i.len()));
+            if capture {
+                self.flat_out = Some(Vec::new());
+            }
             self.add_displacement(key, face, &polygon, &corner_luxels, normal, &uv, &lm_uv);
+            if let Some(flat) = self.flat_out.take() {
+                self.capture_face(face_index, key, base, first, normal, flat, true);
+            }
             return;
         }
 
@@ -298,6 +317,7 @@ impl<'a> Builder<'a> {
         let (verts, idx) = self.buckets.entry(key).or_default();
         self.blend_buckets.entry(key).or_default().extend(std::iter::repeat_n(0.0, polygon.len()));
         let base = (verts.len() / VERTEX_FLOATS) as u32;
+        let first = idx.len();
         for p in &polygon {
             let t = uv(*p);
             let l = lm_uv(luxel(*p));
@@ -307,6 +327,22 @@ impl<'a> Builder<'a> {
             // Source winds faces clockwise seen from the front; emit CCW for GL front faces.
             idx.extend_from_slice(&[base, base + i + 1, base + i]);
         }
+        if self.capture.contains(&face_index) {
+            self.capture_face(face_index, key, base, first, normal, polygon, false);
+        }
+    }
+
+    /// Keeps a copy of the triangles a face just added to bucket `key` (from vertex `base`, index `first`) for the
+    /// dressing, with `flat` its positions before displacement.
+    #[allow(clippy::too_many_arguments)]
+    fn capture_face(&mut self, face_index: usize, key: (u32, bool, u32), base: u32, first: usize, normal: [f32; 3], flat: Vec<[f32; 3]>, disp: bool) {
+        let Some((verts, idx)) = self.buckets.get(&key) else { return };
+        let tris: Vec<u32> = idx[first..].iter().map(|i| i - base).collect();
+        if tris.is_empty() {
+            return;
+        }
+        let verts = verts[base as usize * VERTEX_FLOATS..].to_vec();
+        self.captured.insert(face_index, crate::dressing::FaceTris { verts, flat, tris, normal, disp, sky3d: key.1 });
     }
 
     /// A sky face as its flat base polygon (positions only; see `Mesh::sky_vertices`).
@@ -375,6 +411,9 @@ impl<'a> Builder<'a> {
                 };
                 let t = uv(flat);
                 let l = lm_uv(lerp2(lleft, lright, tx));
+                if let Some(f) = self.flat_out.as_mut() {
+                    f.push(flat);
+                }
                 blend.push(dv.map_or(0.0, |d| (d.alpha.value() / 255.0).clamp(0.0, 1.0)));
                 verts.extend_from_slice(&[p[0], p[1], p[2], normal[0], normal[1], normal[2], t[0], t[1], l[0], l[1]]);
             }
@@ -429,9 +468,13 @@ pub fn build(bsp: &Bsp) -> Mesh {
     let faces: &[Face] = lump!(bsp, playsrc_bsp::FACES, Faces);
     let texinfo: &[TextureInfo] = lump!(bsp, playsrc_bsp::TEXINFO, TextureInfo);
     let lm = lightmap::build(bsp, faces, texinfo);
-    let skybox = crate::skybox::find(bsp, &crate::entities::parse(&crate::content::entity_text(bsp)));
+    let entities = crate::entities::parse(&crate::content::entity_text(bsp));
+    let skybox = crate::skybox::find(bsp, &entities);
     let skybox = skybox.as_ref();
     let (water, water_planes) = water_geometry(bsp);
+    // A map drawn fullbright (no lightmapped face: `lightmap::is_unlit`) lights its models as before, too.
+    let lighting = lm.rects.iter().any(Option::is_some).then(|| crate::lighting::Lighting::new(bsp, lm.atlas.hdr)).flatten();
+    let plan = crate::dressing::plan(bsp, &entities, &|a, b| lighting.as_ref().and_then(|l| l.hit_leaving(a, b)).unwrap_or(1.0));
     let mut b = Builder {
         planes: lump!(bsp, playsrc_bsp::PLANES, Planes),
         texdata: lump!(bsp, playsrc_bsp::TEXDATA, TextureData),
@@ -450,7 +493,10 @@ pub fn build(bsp: &Bsp) -> Mesh {
         face_sky: skybox.map(|s| s.faces.clone()).unwrap_or_default(),
         model_sky: skybox.map(|s| s.models.clone()).unwrap_or_default(),
         sky_buckets: Vec::new(),
-        mesh: Mesh { lightmap: lm.atlas, water, water_planes, sky_camera: skybox.map(|s| s.camera.clone()), ..Mesh::default() },
+        capture: plan.faces,
+        captured: HashMap::new(),
+        flat_out: None,
+        mesh: Mesh { lightmap: lm.atlas, water, water_planes, sky_camera: skybox.map(|s| s.camera.clone()), world_fog: crate::fog::find(&entities), lighting, ..Mesh::default() },
     };
     let models: &[Model] = lump!(bsp, playsrc_bsp::MODELS, Models);
     for (mi, model) in models.iter().enumerate() {
@@ -460,6 +506,11 @@ pub fn build(bsp: &Bsp) -> Mesh {
             b.add_face(mi as u32, fi, face);
         }
     }
+    let mut dressing = plan.dressing;
+    dressing.faces = std::mem::take(&mut b.captured);
+    // Decals need their materials' sizes, known once content is loaded (the wasm export rebuilds with them).
+    dressing.build(&|_| None);
+    b.mesh.dressing = dressing;
 
     // Static skybox brush models: moved to their entity origin and merged into the world's skybox groups.
     let merge: Vec<(u32, [f32; 3])> = skybox.iter().flat_map(|s| s.merge.iter().enumerate().filter_map(|(m, o)| o.map(|o| (m as u32, o)))).collect();

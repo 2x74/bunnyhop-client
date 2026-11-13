@@ -35,6 +35,7 @@ function localChoice(base: CosmeticChoice): CosmeticChoice {
     outfit: getOutfit(),
     ghost: getGhostCosmetics().ghostId,
     trail: getGhostCosmetics().trailId,
+    shape: getGhostCosmetics().shapeId,
     knifePool: getKnifePool(),
   };
 }
@@ -89,7 +90,7 @@ export class NativeCosmetics {
       setOutfit(this.choice.outfit);
       setKnifePool(this.choice.knifePool ?? null);
       setLoadout(loadoutFor(this.choice, getLoadout().crown ?? null));
-      setGhostCosmetics(this.choice.ghost, this.choice.trail);
+      setGhostCosmetics(this.choice.ghost, this.choice.trail, this.choice.shape);
     } finally {
       this.syncing = false;
     }
@@ -160,6 +161,7 @@ function sendCosmetics(): void {
     packedLoadout: packLoadout(getLoadout()),
     ghostId: getGhostCosmetics().ghostId,
     trailId: getGhostCosmetics().trailId,
+    shapeId: getGhostCosmetics().shapeId,
     playerGlow: getPlayerGlow(),
     knifePool,
     knifePick: storedKnifePick(),

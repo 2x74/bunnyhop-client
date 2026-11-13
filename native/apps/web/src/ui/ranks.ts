@@ -5,9 +5,9 @@
 // Formula: ranking.ts, research/RANKS.md.
 
 import { appLocation } from "../platform/navigation";
-import { api, ApiUnavailable, type RankBoard, type RankEntry } from "../api";
-import { BONUS_MAX_TIER, BONUS_TRACK_FACTOR, CLEAR_FLOOR, CLEAR_TIME, CLEAR_WEIGHT, fmtPoints, isRankedStyle, PLACEMENT_WEIGHT, PLAYERS_POWER, RANK_GROUPS, RECORD_WEIGHTING, STYLE_WEIGHT, TIER_BASE, topPercent, WR_FULL_PLAYERS } from "../ranking";
-import { tierLabel } from "../tiers";
+import { api, type RankBoard, type RankEntry } from "../api";
+import { fmtPoints, isRankedStyle, topPercent } from "../ranking";
+import { pointsGuide } from "./points-guide";
 import { STYLE_DEFS, styleLabel } from "../styles";
 import { h } from "./dom";
 import { icon } from "./icons";
@@ -39,11 +39,18 @@ export function leaveRanksUrl(): void {
 /** Points rounded for the table; small gaps keep a decimal so a 0.4-point race doesn't read "0". */
 const pts = (p: number) => (Math.abs(p) < 10 ? (Math.round(p * 10) / 10).toLocaleString("en-US") : fmtPoints(p));
 
+/** A small two-column table in the boards' look (boards.css .rb-table). */
+function guideTable(head: [string, string], rows: (readonly [string | HTMLElement, string])[]): HTMLElement {
+  return h(
+    "table.rb-table",
+    null,
+    h("thead", null, h("tr", null, h("th", { scope: "col" }, head[0]), h("th.num", { scope: "col" }, head[1]))),
+    h("tbody", null, ...rows.map(([a, b]) => h("tr", null, h("td", null, a), h("td.num.dim", null, b)))),
+  );
+}
+
 function howItWorks(): void {
-  const tiers = Object.entries(TIER_BASE).map(([t, v]) => `${tierLabel(Number(t))} ${v}`).join(" · ");
-  const styles = Object.entries(STYLE_WEIGHT).filter(([, w]) => w > 0).map(([s, w]) => `${styleLabel(s)} ×${w}`).join(" · ");
-  // Weight-0 styles (Auto-strafe): a ranking of their own, nothing towards Overall.
-  const separate = Object.entries(STYLE_WEIGHT).filter(([, w]) => w === 0).map(([s]) => styleLabel(s)).join(" and ");
+  const g = pointsGuide();
   const d = h("dialog.acct-dialog.rk-how-dialog", { "aria-label": "How points work" }) as HTMLDialogElement;
   d.addEventListener("keydown", (e) => {
     e.stopPropagation();
@@ -56,30 +63,15 @@ function howItWorks(): void {
     h(
       "div.acct-body.rk-how-body",
       null,
+      ...g.intro.map((t) => h("p", null, t)),
       h(
-        "ul",
+        "div.rk-how-tables",
         null,
-        h("li", null, "Every verified personal best on a tiered map scores ", h("b", null, "clear + placement"), "."),
-        h("li", null, "Clear pays for finishing: ", h("b", null, `${CLEAR_WEIGHT} × base × (${CLEAR_FLOOR} + ${CLEAR_TIME} × (WR time ÷ your time)²)`), "."),
-        h("li", null, "Placement pays for the players you beat: ", h("b", null, `${PLACEMENT_WEIGHT} × √(base ÷ 10) × ((players ÷ place)^${PLAYERS_POWER} − 1) × (1 + 1 ÷ place)`), "."),
-        h("li", null, `A WR pays 2× second place from ${WR_FULL_PLAYERS} players up and less on smaller boards. Alone on a board you get the clear only.`),
-        h("li", null, `Base by tier: ${tiers}. ${BONUS_MAX_TIER >= 1 ? `Bonus tracks: ×${BONUS_TRACK_FACTOR}, scored as T${BONUS_MAX_TIER} at most.` : "Bonus tracks give no points."} Maps without a tier (T?) give no points.`),
-        h("li", null, `Overall rank weights styles: ${styles}. Each style also has its own board.${separate ? ` ${separate} is ranked on its own board only and doesn't count towards Overall.` : ""}`),
-        h("li", null, `Your total adds your records best first, each worth ${RECORD_WEIGHTING}× the one before, so a strong set of records beats grinding easy maps.`),
-        h("li", null, "Your own points and rank update as soon as your run is verified. Everyone else on that board follows within about 10 minutes, or an hour on the biggest maps. Past the top 10, players and places round to small steps, so your points move when you cross a step."),
+        guideTable(["Tier", "Base points"], g.tiers),
+        guideTable(["Style", "Weight in Overall"], g.styles),
+        guideTable(["Title", "Needs"], g.ladder.map((r) => [h("span.rk-how-title", { style: `color:${r.color}` }, r.name), r.needs] as const)),
       ),
-      h(
-        "div.rk-how-groups",
-        null,
-        ...RANK_GROUPS.map((g) =>
-          h(
-            "div",
-            null,
-            h("span.rb-group", { style: `--rank:${g.color}` }, g.name),
-            h("small", null, `${g.maxRank === 1 ? "#1" : g.maxRank ? `top ${g.maxRank}` : g.top! < 1 ? `top ${Math.round(g.top! * 100)}%` : "everyone else"}${g.minPoints >= 1 ? ` · ${g.minPoints}+ pts` : ""}`),
-          ),
-        ),
-      ),
+      h("details.rk-how-exact", null, h("summary", null, "The exact formula"), ...g.exact.map((t) => h("p", null, t))),
     ),
   );
   document.body.append(d);
@@ -153,10 +145,7 @@ export function ranksScreen(initial = "all", o: RanksOptions = {}): HTMLElement 
     meta: () => null,
     foot: () => h("button.link-btn.rk-how", { type: "button", onclick: howItWorks }, "How points work"),
     empty: () => h("div.rb-state.empty", null, h("strong", null, "Nobody ranked yet"), h("span", null, "Finish a run on a tiered map to earn the first points.")),
-    error: (e) =>
-      e instanceof ApiUnavailable
-        ? { cls: "offline", title: "Ranks offline", text: "The leaderboard server can't be reached right now." }
-        : { cls: "error", title: "Couldn't load ranks", text: String((e as Error)?.message ?? e) },
+    what: "ranks",
     idOf: (e) => e.player.id,
     rankOf: (e) => e.rank ?? 0,
     nameOf: (e) => e.player.name,

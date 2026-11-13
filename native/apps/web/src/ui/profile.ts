@@ -54,6 +54,8 @@ import { topPoints } from "./profile-points";
 import { profileCompare } from "./profile-compare";
 import { profileRankHistory } from "./profile-rank-history";
 import { h } from "./dom";
+import { loadFailed, nothingHere } from "./load-failed";
+import { scrollCue } from "./scroll-cue";
 import { tierBadge } from "./maps";
 import { navigate, profileUrl } from "./nav";
 import { share } from "./share";
@@ -175,24 +177,35 @@ export function profileScreen(id: string, a: ProfileActions, open: ProfileOpen =
     return root;
   }
   const accountEpoch = accountGeneration();
-  const early = earlyReads(id, profileTarget(open.tab, open.slot).tab);
-  // GET /config first (cached, one request per page): whether the Discord server rewards are listed (ui/community.ts).
-  // Your own profile may come from the home screen's read (account-state.ts profileFor).
-  Promise.all([profileFor(id), communityConfig()])
-    .then(([p]) => {
-      if (!root.isConnected) return;
-      if (accountEpoch !== accountGeneration()) { tabs.replaceChildren(); root.replaceChildren(h("p.dim",null,"Account changed. Reopen this profile.")); return; }
-      render(root, p, a, open, tabs, p.player.id === early.id ? early : { id: p.player.id });
-      if (ownTabs) root.prepend(tabs);
-    })
-    .catch((e) => {
-      // The server's unreachable: your own loadout still works, on this device.
-      if (e instanceof ApiUnavailable && profileTarget(open.tab, open.slot).tab === "loadout") return offlineLoadout(root, tabs, open);
-      const msg = e instanceof ApiUnavailable ? "Leaderboard server unreachable." : e instanceof ApiError && e.status === 404 ? "No player with that id." : String(e?.message ?? e);
-      tabs.replaceChildren();
-      root.replaceChildren(h("div.lb-state.error", null, h("strong", null, "Couldn't load profile"), h("span", null, msg)));
-    })
-    .finally(() => root.removeAttribute("aria-busy"));
+  const load = () => {
+    const early = earlyReads(id, profileTarget(open.tab, open.slot).tab);
+    // GET /config first (cached, one request per page): whether the Discord server rewards are listed (ui/community.ts).
+    // Your own profile may come from the home screen's read (account-state.ts profileFor).
+    Promise.all([profileFor(id), communityConfig()])
+      .then(([p]) => {
+        if (!root.isConnected) return;
+        if (accountEpoch !== accountGeneration()) { tabs.replaceChildren(); root.replaceChildren(h("p.dim",null,"Account changed. Reopen this profile.")); return; }
+        render(root, p, a, open, tabs, p.player.id === early.id ? early : { id: p.player.id });
+        if (ownTabs) root.prepend(tabs);
+      })
+      .catch((e) => {
+        // The server's unreachable: your own loadout still works, on this device.
+        if (e instanceof ApiUnavailable && profileTarget(open.tab, open.slot).tab === "loadout") return offlineLoadout(root, tabs, open);
+        tabs.replaceChildren();
+        // A missing player is not an error: one neutral line. Anything else can be tried again.
+        if (e instanceof ApiError && e.status === 404) return root.replaceChildren(nothingHere("No player with that id."));
+        root.replaceChildren(
+          loadFailed("this profile", () => {
+            root.setAttribute("aria-busy", "true");
+            root.replaceChildren(skeleton(tabs, profileTarget(open.tab, open.slot).tab, !!id && lastKnownMe()?.id === id));
+            if (ownTabs) root.prepend(tabs);
+            load();
+          }, e),
+        );
+      })
+      .finally(() => root.removeAttribute("aria-busy"));
+  };
+  load();
   return root;
 }
 
@@ -328,6 +341,8 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
     // Where the player stands goes with the card (the right column is their runs).
     fresh ? null : h("div.pf-hero-secs", null, ranksSection(), profileRankHistory(p)),
   );
+  // Ranks and Rank history can sit under the column's fold: its bottom edge fades while there is more below.
+  scrollCue(hero);
 
   function ranksSection(): HTMLElement | null {
     // Most points first: where the player is strongest leads (rank breaks a tie).
@@ -446,6 +461,7 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
   const tabs = TABS.filter(([t]) => (t === "loadout" ? p.mine : t === "compare" ? canCompare : true));
   let tab: ProfileTab = tabs.some(([t]) => t === target.tab) ? target.tab : "overview";
   const tabBar = h("div.pf-tabs", { role: "tablist", "aria-label": "Profile sections" });
+  scrollCue(tabBar, "x"); // a phone cut "Compare" to "Comp" with nothing to say the row scrolls
   const panel = h("div.pf-panel", { role: "tabpanel", id: "pf-panel", tabindex: "-1" });
   // (Knives aren't unlocks: every knife is free, except the Supporter set's.)
   const loIds = COSMETICS.filter((c) => isLoadoutCategory(c.slot) && (c.slot !== "knife" || supporterItem(c))).map((c) => c.id);
@@ -488,7 +504,7 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
       h(
         "span.pf-run-map",
         null,
-        h("button.link-btn", { type: "button", onclick: () => a.play(run.map, run.style), title: `Play ${run.map} (tier ${t ?? "?"})` }, o.mini ? run.map.replace(/^bhop_/, "") : run.map),
+        h("button.link-btn", { type: "button", onclick: () => a.play(run.map, run.style), title: `Play ${run.map} (tier ${t ?? "?"})` }, run.map),
         h("small", null, o.mini ? ago(run.date) : tags),
       ),
       h("span.pf-run-time", { title: wr ? "World record" : undefined }, formatTime(run.time)),
@@ -539,16 +555,18 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
         p.mine ? null : h("p.pf-empty", null, `${p.player.name} hasn't finished a map yet.`),
       );
     }
+    // A reason every row shares ("2/3 T1 clears to move up") is said once, beside the heading, not under each map.
+    const shared = p.suggestions.length > 1 && p.suggestions.every((s) => s.reason === p.suggestions[0].reason) ? p.suggestions[0].reason : null;
     const next =
       p.mine && p.suggestions.length
         ? h(
             "section.pf-sec.pf-next",
             null,
-            h("h3", null, "Next up"),
+            h("h3", null, "Next up", shared ? h("small", null, shared) : null),
             h(
               "div.pf-rows",
               null,
-              ...p.suggestions.map((s) => h(`button.pf-next-row.t${s.tier ?? "x"}`, { type: "button", onclick: () => a.play(s.map), title: `Play ${s.map}` }, h("span.pf-run-map", null, h("b", null, s.map), h("small", null, s.reason)), h("span.pf-go", null, "Play ›"))),
+              ...p.suggestions.map((s) => h(`button.pf-next-row.t${s.tier ?? "x"}`, { type: "button", onclick: () => a.play(s.map), title: `Play ${s.map}` }, h("span.pf-run-map", null, h("b", null, s.map), shared ? null : h("small", null, s.reason)), h("span.pf-go", null, "Play ›"))),
             ),
           )
         : null;
@@ -562,7 +580,9 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
       : null;
     const { points, gauntlets, stats } = early;
     Object.assign(early, { points: undefined, gauntlets: undefined, stats: undefined });
-    return h("div.pf-ov", null, next, recent, topPoints(p, points), profileMapper(p), profileGauntlets(p.player.id, gauntlets), playerStatsSection(p.player.id, { compact: true, early: stats }));
+    const ov = h("div.pf-ov", null, next, recent, topPoints(p, points), profileMapper(p), profileGauntlets(p.player.id, gauntlets), playerStatsSection(p.player.id, { compact: true, early: stats }));
+    scrollCue(ov);
+    return ov;
   }
 
   // --- runs (virtualised)

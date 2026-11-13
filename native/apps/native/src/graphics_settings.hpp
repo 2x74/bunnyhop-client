@@ -33,6 +33,10 @@ inline nlohmann::json default_graphics_settings() {
             {"graphicsGamma", 1.},
             {"graphicsVibrance", 1.},
             {"graphicsFullbright", false},
+            {"graphicsMapFog", true},
+            {"graphicsModelLighting", "subtle"},
+            {"graphicsPropLighting", true},
+            {"graphicsMapDetails", true},
             {"graphicsResolutionScale", 1.},
             {"graphicsAspect", "native"},
             {"graphicsAspectFit", "stretch"},
@@ -142,6 +146,8 @@ inline bool patch_graphics_setting(nlohmann::json &out, const std::string &key, 
         graphics_choice(value, {"stretch", "bars"});
     else if (key == "graphicsMenuBackground")
         graphics_choice(value, {"live", "still", "off"});
+    else if (key == "graphicsModelLighting")
+        graphics_choice(value, {"off", "subtle", "full"});
     else if (key == "graphicsAnisotropy" || key == "graphicsMenuFps") {
         if (!value.is_number()) throw std::runtime_error("Graphics choice must be numeric");
         const double number = value.get<double>();
@@ -172,6 +178,9 @@ struct GraphicsSettings {
     bool bars = false, pixelated = false, fullbright = false, potato = false, source = true;
     bool bloom = true, material_response = true, flashlight = false, tags_players = true, tags_through_walls = false;
     bool water_reflections = true;
+    // The map's own fog, its light on props, and how far its light reaches the models (model_light.hpp).
+    bool map_fog = true, prop_lighting = true, map_details = true;
+    enum class ModelLighting { off, subtle, full } model_lighting = ModelLighting::subtle;
     enum class Background { live, still, off } background = Background::live;
     LookSettings look;
 
@@ -199,6 +208,13 @@ struct GraphicsSettings {
         result.material_response = values.at("graphicsMaterialResponse");
         result.flashlight = values.at("graphicsFlashlight");
         result.sky_exposure = values.at("graphicsSkyExposure");
+        result.map_fog = values.at("graphicsMapFog");
+        result.prop_lighting = values.at("graphicsPropLighting");
+        result.map_details = values.at("graphicsMapDetails");
+        const auto &model_lighting = values.at("graphicsModelLighting");
+        result.model_lighting = model_lighting == "off"    ? ModelLighting::off
+                                : model_lighting == "full" ? ModelLighting::full
+                                                           : ModelLighting::subtle;
         result.tags_players = values.at("tagsPlayers");
         result.tags_through_walls = values.at("tagsThroughWalls");
         const auto &aspect = values.at("graphicsAspect");

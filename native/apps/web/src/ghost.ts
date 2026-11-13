@@ -11,7 +11,8 @@
 import * as THREE from "three";
 import { api, lastKnownMe } from "./api";
 import { worldRecord } from "./shared-reads";
-import { Core, traceRay, type Settings } from "./core";
+import { traceRay, type Core, type Settings } from "./core";
+import type { GhostSim, MapPhysics } from "./map-physics";
 import { formatDelta, type GhostInputs } from "./hud";
 import { GHOST_COLORS, GHOST_CSS, type GhostKind } from "./player/colors";
 import { getGhostCosmetics, onGhostCosmetics } from "./player/cosmetics";
@@ -19,11 +20,11 @@ import { PlayerModel, type PlayerPose } from "./player/model";
 import { onRaceRequest, type RaceRequest } from "./player/race";
 import { NameTag, TagSight, type SightTrace } from "./player/tag";
 import { probeFromTrace } from "./player/bunny/legs";
-import { Trail } from "./player/trail";
+import { Trail, trailShapeOf } from "./player/trail";
 import { DEFAULT_LOADOUT, type CosmeticLoadout } from "./loadout";
 import { cosmeticBetween, decodeReplay, inspectBetween, replayStyle, type CosmeticEvent, type Replay } from "./replay";
 import { styleForTrack, type StyleId } from "./styles";
-import { FRAME_CROUCHED, FRAME_GROUNDED, FRAME_LADDER, FRAME_STRIDE, simulate } from "./sim";
+import { FRAME_CROUCHED, FRAME_GROUNDED, FRAME_LADDER, FRAME_STRIDE } from "./sim";
 import { TickStepper, type TickSource } from "./player/tick-stepper";
 import { mapVolumes, recordedModes, type MapVolumes } from "./player/map-volumes";
 import { formatTime, type RunTimer } from "./timer";
@@ -136,12 +137,13 @@ export class Ghost {
     const color = mine?.ghost ?? GHOST_COLORS[d.kind];
     this.routeColor = color;
     this.model = new PlayerModel({ style: "ghost", color, rim: mine?.ghost2, loadout: d.loadout ?? (d.kind === "pb" ? undefined : { ...DEFAULT_LOADOUT }) });
-    this.trail = new Trail(mine?.trail ?? color, undefined, mine?.trail2);
+    this.trail = new Trail(mine?.trail ?? color, undefined, mine?.trail2, trailShapeOf(mine?.shapeId));
     this.tag = new NameTag(mine?.ghost ?? GHOST_CSS[d.kind]);
     if (mine)
       this.offCosmetics = onGhostCosmetics((c) => {
         this.model.setStyle("ghost", c.ghost, undefined, c.ghost2);
         this.trail.setColor(c.trail, c.trail2);
+        this.trail.setShape(trailShapeOf(c.shapeId));
         this.routeColor = c.ghost;
         this.route?.setColor(c.ghost);
       });
@@ -328,12 +330,15 @@ export class Ghost {
         count++;
       };
       const first = Math.ceil(from / TRAIL_STEP) * TRAIL_STEP;
+      // The sample the trail starts at: shapes laid per sample (player/trail.ts) stay where they were laid.
+      let start = first;
       for (let k = first; k < t && count < 398; k += TRAIL_STEP) {
         if (count > 0 && this.teleportBetween(Math.max(0, k - TRAIL_STEP), k)) count = 0;
+        if (!count) start = k;
         push(k);
       }
       push(t);
-      this.trail.set(pts, count, camera, Math.min(1, o.opacity * 1.2), 2.5);
+      this.trail.set(pts, count, camera, Math.min(1, o.opacity * 1.2), 2.5, start / TRAIL_STEP);
     } else this.trail.clear();
 
     // Tag above the head; fades when the camera is right next to it.
@@ -403,15 +408,15 @@ export class Ghost {
 
 export interface GhostHost {
   scene: THREE.Scene;
-  /** Main core (only used for loadPB during startup, before the run's first reset). */
+  /** Main core (the ghosts' name tag sight traces). */
   core: Core;
   map: string;
   /** Selected style (styles.ts styleForTrack: every track but the tutorial's final course). See GhostManager.setStyle. */
   style: StyleId;
   mapSha256: string;
   settings: Settings;
-  bsp: Uint8Array;
-  wasmBytes: Uint8Array;
+  /** The map's worker core: every ghost's re-simulation runs there, never on the main thread. */
+  physics: Pick<MapPhysics, "ghost">;
   toast: (msg: string, ms?: number) => void;
   /** PB ghost commands per track changed (HUD ghost keys overlay); null = removed. */
   onPBInputs?: (track: number, inputs: GhostInputs | null) => void;
@@ -423,12 +428,16 @@ const KIND_ORDER: GhostKind[] = ["pb", "wr", "custom"];
 
 export class GhostManager {
   private ghosts = new Map<string, Ghost>();
-  private aux: Promise<Core> | null = null;
   /** WR fetch state per `${style}:${track}`. */
   private wr = new Map<string, "loading" | "done">();
   /** Replay commands of each PB ghost (key as `ghosts`), for the HUD ghost keys overlay. */
   private pbInputs = new Map<string, GhostInputs>();
-  private hidden = false;
+  private viewing = false;
+  private lessons = false;
+  /** No ghosts at all (and so no split): watching a replay, or in a tutorial lesson. */
+  private get hidden(): boolean {
+    return this.viewing || this.lessons;
+  }
   private last = performance.now();
   private lastStatus = "idle";
   private finishedAt = 0;
@@ -511,14 +520,14 @@ export class GhostManager {
 
   // --- Sources ---------------------------------------------------------------------------------
 
-  private fromSim(kind: GhostKind, name: string, replay: Replay, sim: ReturnType<typeof simulate>): Ghost {
+  private fromSim(kind: GhostKind, name: string, replay: Replay, sim: GhostSim): Ghost {
     return this.put(
       new Ghost({
         kind,
         track: sim.track,
         style: kind === "custom" ? "*" : replayStyle(replay.header),
         name,
-        frames: sim.frames!,
+        frames: sim.frames,
         frameEvents: sim.frameEvents,
         startTick: sim.startTick,
         endTick: sim.endTick,
@@ -542,29 +551,14 @@ export class GhostManager {
     return this.put(new Ghost({ kind: "custom", track, style: "*", name, frames, startTick, endTick, tickInterval: Math.fround(tickInterval) }));
   }
 
-  /** PB ghost from a stored replay, re-simulated on the MAIN core. Startup only: the caller resets the core afterwards. */
-  async loadPB(bytes: Uint8Array, track: number): Promise<void> {
-    const replay = await decodeReplay(bytes);
-    if (replay.header.mapSha256 !== this.h.mapSha256) throw new Error("PB replay is for a different map build");
-    const sim = simulate(this.h.core, replay, replay.header.zones, { frames: true });
-    this.h.core.setSettings(this.h.settings);
-    if (!sim.checkpointsMatch || !sim.endTick || sim.track !== track) {
-      this.h.toast("Your PB ghost doesn't work on this version.", 6000);
-      return;
-    }
-    this.fromSim("pb", `PB · ${pbName(replay)}`, replay, sim);
-  }
-
-  /** Account PB loaded after startup: the auxiliary core leaves the live attempt untouched. */
+  /** The PB ghost of `track` from its stored replay, re-simulated on the worker core (the live attempt is untouched). */
   async loadSyncedPB(bytes: Uint8Array, track: number, current: () => boolean): Promise<[number, number][] | null> {
     const replay = await decodeReplay(bytes);
     if (!current() || replay.header.mapSha256 !== this.h.mapSha256) return null;
-    const core = await this.auxCore();
-    if (!current()) return null;
-    const sim = simulate(core, replay, replay.header.zones, { frames: true });
+    const sim = await this.h.physics.ghost(bytes);
     if (!current() || !sim.checkpointsMatch || !sim.endTick || sim.track !== track) return null;
     this.fromSim("pb", `PB · ${pbName(replay)}`, replay, sim);
-    return sim.timer.splits.map((s) => [s.index, s.ticks]);
+    return sim.splits;
   }
 
   /** PB ghost straight from the frames recorded live during the run that just set it. */
@@ -590,17 +584,7 @@ export class GhostManager {
     );
   }
 
-  /** Second wasm instance (physics only) so ghosts can be re-simulated mid-session without touching the live run. */
-  private auxCore(): Promise<Core> {
-    this.aux ??= (async () => {
-      const c = await Core.create(this.h.wasmBytes as Uint8Array<ArrayBuffer>);
-      c.loadMapPhysics(this.h.bsp);
-      return c;
-    })();
-    return this.aux;
-  }
-
-  /** Adds a ghost from .bhr bytes (re-simulated on the aux core). Returns null (with a toast) if unusable. */
+  /** Adds a ghost from .bhr bytes (re-simulated on the worker core). Returns null (with a toast) if unusable. */
   async addReplay(bytes: Uint8Array, kind: GhostKind, name?: string): Promise<Ghost | null> {
     let replay: Replay;
     try {
@@ -615,8 +599,7 @@ export class GhostManager {
       return null;
     }
     if (hd.mapSha256 !== this.h.mapSha256) this.h.toast("Ghost replay was recorded on a different build of this map", 5000);
-    const core = await this.auxCore();
-    const sim = simulate(core, replay, hd.zones, { frames: true });
+    const sim = await this.h.physics.ghost(bytes);
     if (!sim.checkpointsMatch) {
       console.warn(`ghost: replay desyncs at tick ${sim.firstMismatchTick}`);
       this.h.toast("That ghost doesn't play back on this version.", 6000);
@@ -688,8 +671,14 @@ export class GhostManager {
 
   /** Hidden while watching a replay. */
   setHidden(hidden: boolean): void {
-    this.hidden = hidden;
+    this.viewing = hidden;
     if (hidden) for (const g of this.ghosts.values()) g.setVisible(false);
+  }
+
+  /** Hidden in the tutorial's lessons (tutorial/mode.ts): the demo ghost is the only one there until the final course. */
+  setLessons(on: boolean): void {
+    this.lessons = on;
+    if (on) for (const g of this.ghosts.values()) g.setVisible(false);
   }
 
   // --- Per frame -------------------------------------------------------------------------------

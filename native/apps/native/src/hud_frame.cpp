@@ -65,6 +65,9 @@ void HudFrame::draw_layout_editor() const {
 }
 
 void HudFrame::draw_status(const BhCmd &shown, const BhWeaponReport &weapon) const {
+    // The strafe trainer steps aside while the end card is up, as on the website: the card covers its place.
+    const double seconds = double(SDL_GetTicksNS()) / nanoseconds_per_second;
+    const bool trainer_shown = prefs.strafe_trainer && !hud.result.visible(seconds);
     hud.draw(
             width,
             height,
@@ -81,7 +84,7 @@ void HudFrame::draw_status(const BhCmd &shown, const BhWeaponReport &weapon) con
             weapon,
             prefs.jump_stats ? hud.ssj_line() : std::string_view(),
             feedback.ssj_gain,
-            prefs.strafe_trainer ? feedback.strafe_reading : std::nullopt,
+            trainer_shown ? feedback.strafe_reading : std::nullopt,
             prefs.strafe_trainer_hints,
             &hud_layout,
             prefs.hud_scale,

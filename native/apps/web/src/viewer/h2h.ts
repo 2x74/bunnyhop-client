@@ -16,6 +16,7 @@
 import * as THREE from "three";
 import type { RunInfo } from "../api";
 import { Core, traceRay, type BrushTransform } from "../core";
+import type { MapFile } from "../content/map-file";
 import { Ghost } from "../ghost";
 import { gapSeries, partnerTick, runFrames, sharedEnd, type GapSeries } from "../h2h/align";
 import { jumpRows, meanGain, type JumpRow } from "../h2h/jumps";
@@ -75,9 +76,9 @@ export interface H2HHost {
 }
 
 /** A Core with the map's physics, for the second run. */
-export async function sideCore(wasm: Uint8Array, bsp: Uint8Array): Promise<Core> {
+export async function sideCore(wasm: Uint8Array, bsp: Pick<MapFile, "stream" | "size">): Promise<Core> {
   const c = await Core.create(wasm as Uint8Array<ArrayBuffer>);
-  c.loadMapPhysics(bsp);
+  await c.loadMapPhysicsStream(bsp.stream(), bsp.size);
   return c;
 }
 

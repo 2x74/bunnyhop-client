@@ -361,6 +361,10 @@ export class Attract {
     a.unwatch = prefs.watch((p) => {
       a.world?.setPotato(p.graphics.potato);
       a.world?.setFullbright(p.graphics.fullbright);
+      a.world?.setFog(p.graphics.mapFog);
+      a.world?.setPropLighting(p.graphics.propLighting);
+      a.world?.setDetails(p.graphics.mapDetails);
+      a.world?.setModelLighting(p.graphics.modelLighting);
       const m = reducedMotion() ? "still" : mode();
       // Any settings change resizes the shared canvas (main.ts resize()), which clears it: a still frame (Still, or
       // reduced motion) is drawn again on the next frame, or the menu would sit on black until the window resizes.
@@ -465,6 +469,10 @@ export class Attract {
       this.world = world;
       world.setPotato(prefs.get().graphics.potato);
       world.setFullbright(prefs.get().graphics.fullbright);
+      world.setFog(prefs.get().graphics.mapFog);
+      world.setPropLighting(prefs.get().graphics.propLighting);
+      world.setDetails(prefs.get().graphics.mapDetails);
+      world.setModelLighting(prefs.get().graphics.modelLighting);
       this.effectTime = 12;
       this.updateEffects = time => world.update(core.brushOrigins(), time, core.effectStates(), core.propAnims());
       this.updateEffects(this.effectTime);

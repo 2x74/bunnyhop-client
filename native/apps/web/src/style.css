@@ -328,36 +328,25 @@ select option { background: var(--panel-solid); color: var(--text); }
 .pp-body.swap > * { animation: tab-in 0.2s var(--ease) both; }
 @keyframes tab-in { from { opacity: 0; transform: translateY(0.35rem); } }
 .pp-group { display: flex; flex-direction: column; gap: var(--sp-2); }
-.pp-group-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
-.pp-note { font-weight: 450; color: var(--faint); }
-.pp-style { display: flex; flex-direction: column; gap: var(--sp-6); }
-.pp-style .style-seg { gap: var(--sp-2); }
-.pp-style .style-opt { padding: 0.75rem 0.3rem 0.6rem; gap: 0.15rem; }
-.pp-style .style-opt b { font-size: 1.1rem; }
-.pp-style .style-opt span { font-size: var(--fs-xs); }
-.pp-style .style-rule { font-size: var(--fs-sm); min-height: 0; }
-.track-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); gap: var(--sp-2); }
-.track-btn { display: flex; flex-direction: column; align-items: flex-start; gap: 0.1rem; padding: 0.6rem 0.85rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--raise); color: var(--text); text-align: left; cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast), box-shadow var(--t-fast); }
-.track-btn b { font-size: var(--fs-md); }
-.track-btn small { font-size: var(--fs-xs); color: var(--dim); }
-.track-btn:hover { background: var(--raise-2); border-color: var(--line-2); }
-.track-btn:focus-visible { outline: none; box-shadow: var(--ring); }
-.track-btn.on { border-color: color-mix(in srgb, var(--accent) 60%, transparent); background: var(--accent-soft); }
-.track-btn.on small { color: var(--accent); }
-/* action cards (pause replays + server tabs) */
-.card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-2); }
-.card-grid > .ac-wide { grid-column: 1 / -1; }
-.action-card { display: flex; align-items: center; gap: var(--sp-3); min-height: 4.3rem; padding: var(--sp-3) var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius); background: var(--raise); color: var(--text); text-align: left; cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast), transform var(--t-fast), box-shadow var(--t-fast); }
-.ac-icon { flex: none; display: grid; place-items: center; width: 2.3rem; height: 2.3rem; border-radius: 0.6rem; background: var(--raise-2); color: var(--accent); font-size: 1rem; }
-.ac-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.15rem; }
-.ac-text b { font-size: var(--fs-md); font-weight: 700; }
-.ac-text small { font-size: var(--fs-xs); color: var(--dim); }
-.action-card:hover:not(:disabled) { background: var(--raise-2); border-color: var(--line-2); transform: translateY(-1px); }
-.action-card:focus-visible { outline: none; box-shadow: var(--ring); }
-.action-card.primary .ac-icon { background: var(--accent); color: var(--accent-ink); }
-.action-card.danger .ac-icon { color: var(--loss); }
-.action-card:disabled { opacity: 0.45; cursor: not-allowed; }
-.pp-foot { margin: var(--sp-4) 0 0; font-size: var(--fs-sm); }
+.pp-style { display: flex; flex-direction: column; gap: var(--sp-4); }
+.track-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr)); gap: 1px var(--sp-2); }
+.track-btn { position: relative; padding: 0.46rem 0.8rem 0.46rem 0.9rem; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text); font-size: var(--fs-md); font-weight: 620; text-align: left; cursor: pointer; transition: background var(--t-fast); }
+/* Replays and Server tabs (menu.ts replaysTab, serverTab, listRow): the rail's rows. The amber bar and a chevron show
+   under the pointer; a row that can't be used yet says why in a line of its own. */
+.pp-replays, .pp-room { max-width: 34rem; }
+.list-rows { display: flex; flex-direction: column; gap: 1px; }
+.list-row { position: relative; display: flex; align-items: center; gap: 0.6rem; width: 100%; min-height: 2.5rem; padding: 0.4rem 0.8rem 0.4rem 0.9rem; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text); font-size: var(--fs-md); font-weight: 620; text-align: left; cursor: pointer; transition: background var(--t-fast); }
+.list-row::before { content: ""; position: absolute; left: 0; top: 22%; bottom: 22%; width: 3px; border-radius: 2px; background: var(--accent); transform: scaleY(0); transition: transform var(--t-hop) var(--ease-land); }
+.list-row:focus-visible { outline: none; }
+.list-row:hover:not(:disabled), .list-rows:not(:hover) .list-row:focus-visible { background: var(--raise-2); }
+.list-row:hover:not(:disabled)::before, .list-rows:not(:hover) .list-row:focus-visible::before { transform: none; }
+.lr-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.1rem; line-height: 1.2; }
+.lr-text small { font-size: var(--fs-xs); font-weight: 500; color: var(--dim); }
+.lr-detail { font-size: var(--fs-sm); font-weight: 500; font-variant-numeric: tabular-nums; color: var(--dim); }
+.list-row > svg { flex: none; color: var(--faint); opacity: 0; transform: translateX(-4px); transition: opacity var(--t-fast), transform var(--t-fast); }
+.list-row:hover > svg, .list-rows:not(:hover) .list-row:focus-visible > svg { opacity: 1; transform: none; }
+.list-row:disabled { color: var(--faint); cursor: default; }
+.pp-foot { margin: var(--sp-3) 0 0; padding: 0 0.9rem; font-size: var(--fs-sm); }
 /* On screen tab (menu.ts screenTab): the rows are Settings' (ui/settings.css .quick-set). */
 .pp-screen { display: flex; flex-direction: column; gap: var(--sp-3); max-width: 42rem; }
 .pp-screen-foot { display: flex; align-items: center; gap: var(--sp-4); margin-top: var(--sp-1); }
@@ -380,36 +369,34 @@ select option { background: var(--panel-solid); color: var(--text); }
 @media (max-width: 40rem) { .pp-help .keys-table .pp-help-cmd { white-space: normal; overflow-wrap: anywhere; } }
 .pp-help-cmd { font-family: var(--mono); font-size: var(--fs-sm); color: var(--dim); }
 .pp-help .pp-screen-foot { justify-content: space-between; font-size: var(--fs-sm); }
-/* server tab (in a room) */
-.room-card { display: grid; gap: 0.35rem; padding: var(--sp-4) var(--sp-5); margin-bottom: var(--sp-3); border-radius: var(--radius); background: linear-gradient(120deg, rgba(255, 180, 58, 0.13), rgba(255, 180, 58, 0.03) 60%); border: 1px solid rgba(255, 180, 58, 0.28); }
-.room-live { font-size: var(--fs-xs); font-weight: 650; color: var(--accent); }
-.room-name { font-size: var(--fs-xl); font-weight: 800; letter-spacing: -0.01em; }
-.room-map { display: flex; align-items: center; gap: var(--sp-2); color: var(--dim); font-weight: 600; }
-.room-map .badge { backdrop-filter: none; }
-.room-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-4); margin-top: var(--sp-2); font-variant-numeric: tabular-nums; }
-.room-stats > div { display: flex; flex-direction: column; gap: 0.1rem; }
-.room-stats small { font-size: 0.7rem; font-weight: 600; letter-spacing: 0; color: var(--faint); }
-.room-stats b { font-size: var(--fs-lg); }
-@media (max-width: 52rem) { .pause { grid-template-columns: 1fr; height: auto; } .card-grid { grid-template-columns: 1fr; } }
-.style-list { display: flex; flex-direction: column; gap: 2px; }
-.style-row { display: grid; grid-template-columns: 3.4rem minmax(0, 1fr) auto; align-items: center; gap: var(--sp-4); padding: 0.35rem 1rem 0.35rem 0.5rem; border: 1px solid transparent; border-radius: var(--radius-sm); background: var(--raise); color: var(--text); text-align: left; cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast), box-shadow var(--t-fast); }
-.sr-short { display: grid; place-items: center; height: 2.1rem; border-radius: var(--radius-sm); background: var(--raise-2); font-weight: 850; font-size: var(--fs-md); letter-spacing: 0.02em; }
-.sr-text { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
-.sr-text b { font-size: var(--fs-md); }
-.sr-text small { font-size: var(--fs-xs); color: var(--dim); }
-.sr-pb { display: flex; flex-direction: column; align-items: flex-end; font-variant-numeric: tabular-nums; }
-.sr-pb small { font-size: var(--fs-2xs); font-weight: 750; letter-spacing: 0.08em; color: var(--faint); }
-.sr-pb b { font-size: var(--fs-md); }
-.sr-pb b.dim { color: var(--faint); font-weight: 500; }
-.style-row:hover { background: var(--raise-2); }
-.style-row:focus-visible { outline: none; box-shadow: var(--ring); }
-.style-row.on { border-color: color-mix(in srgb, var(--accent) 60%, transparent); background: var(--accent-soft); }
-.style-row.on .sr-short { background: var(--accent); color: var(--accent-ink); }
-.style-row.on .sr-pb b:not(.dim) { color: var(--accent); }
+/* Server tab (in a room; ui/servers.ts roomHeader): the room's name, then its line of the Play online table. Nothing to
+   press there, so no hover; the cells line up with the list rows under it. */
+.room-head { margin-bottom: var(--sp-3); }
+.room-name { display: flex; align-items: baseline; gap: var(--sp-3); margin: 0; padding: 0 0.9rem; font-size: var(--fs-xl); font-weight: 800; letter-spacing: -0.01em; }
+.room-live { font-size: var(--fs-sm); font-weight: 650; letter-spacing: 0; color: var(--accent); }
+.room-facts { margin-top: var(--sp-1); }
+.srv-table.room-facts th, .srv-table.room-facts td { padding-left: 0.9rem; }
+.room-facts .badge { backdrop-filter: none; }
+.pp-room .list-row[data-item="switch-server"] { margin-top: var(--sp-2); }
+@media (max-width: 52rem) { .pause { grid-template-columns: 1fr; height: auto; } }
+/* Style tab (menu.ts styleTab): one line a style, like the rail's rows: name, a short rule, your best time. The amber
+   bar marks the one you play; the line under the list is Settings' help line. */
+.style-list { display: flex; flex-direction: column; gap: 1px; }
+.style-row { position: relative; display: grid; grid-template-columns: 8.2rem minmax(0, 1fr) auto; align-items: baseline; gap: var(--sp-3); width: 100%; padding: 0.46rem 0.8rem 0.46rem 0.9rem; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text); font-size: var(--fs-md); text-align: left; cursor: pointer; transition: background var(--t-fast); }
+.style-row::before, .track-btn::before { content: ""; position: absolute; left: 0; top: 22%; bottom: 22%; width: 3px; border-radius: 2px; background: var(--accent); transform: scaleY(0); transition: transform var(--t-med) var(--ease); }
+.style-row.on::before, .track-btn.on::before { transform: none; }
+.sr-name { font-weight: 620; white-space: nowrap; }
+.sr-line { font-size: var(--fs-sm); color: var(--dim); }
+.sr-pb { font-size: var(--fs-sm); font-variant-numeric: tabular-nums; color: var(--dim); }
+.style-row:hover, .style-row.on, .track-btn:hover, .track-btn.on { background: var(--raise-2); }
+.style-row:focus-visible, .track-btn:focus-visible { outline: none; background: var(--raise-2); box-shadow: inset 0 0 0 1px var(--line-2); }
+.style-row.on .sr-pb { color: var(--text); }
 /* the assisted style (Auto-strafe) follows the others after a gap */
-.style-list .style-row[data-style="autostrafe"] { margin-top: var(--sp-3); }
-.pp-style .style-locked { display: flex; flex-direction: column; gap: 0.2rem; padding: 0.8rem 1rem; border-radius: var(--radius); background: var(--raise); border: 1px dashed var(--line-2); font-weight: 700; }
-.pp-style .style-locked small { font-weight: 450; font-size: var(--fs-sm); }
+.style-list .style-row[data-style="autostrafe"] { margin-top: var(--sp-2); }
+.style-note { margin: var(--sp-1) 0 0; min-height: 2.6em; padding: 0 0.9rem; font-family: var(--font-text); font-size: var(--fs-sm); line-height: 1.3; color: var(--dim); text-wrap: pretty; }
+.track-list + .style-note { min-height: 0; }
+.pp-group-title { margin: 0; padding: 0 0.9rem; font-size: var(--fs-xs); font-weight: 650; color: var(--dim); }
+@media (max-width: 40rem) { .style-row { grid-template-columns: minmax(0, 1fr) auto; row-gap: 0.1rem; } .sr-line { grid-column: 1 / -1; grid-row: 2; } }
 /* leaderboard inside the pause panel: compact rows, flex-free cells so row borders line up */
 .lb-table td.player { display: table-cell; white-space: nowrap; }
 .lb-table td.player > * { vertical-align: middle; }
@@ -437,11 +424,6 @@ select option { background: var(--panel-solid); color: var(--text); }
 .lb-table td.player .avatar { width: 1.25rem; height: 1.25rem; }
 .lb-table tr.gap td { text-align: center; color: var(--faint); padding: 0.1rem; }
 .lb-table .date { font-size: 0.8rem; }
-.lb-state { display: flex; flex-direction: column; gap: 0.3rem; align-items: center; justify-content: center; text-align: center; padding: 2.2rem 1rem; border: 1px dashed var(--line-2); border-radius: var(--radius-sm); color: var(--dim); min-height: 8rem; }
-.lb-state strong { color: var(--text); font-size: 1rem; }
-.lb-state.offline strong::before { content: ""; display: inline-block; width: 0.55rem; height: 0.55rem; border-radius: 50%; background: var(--faint); margin-right: 0.5rem; vertical-align: 0.08em; }
-.lb-state.error strong { color: var(--loss); }
-.lb-state.loading strong { color: var(--dim); }
 .lb-local { color: var(--dim); font-size: 0.82rem; margin: 0.8rem 0 0; }
 
 /* ------------------------------------------------------------------ map art + badges (the map list itself: ui/maps.css) */
@@ -686,7 +668,7 @@ body:not(.in-game) #hud { display: none; }
 .ec-card > .endcard-extra:empty, .ec-card > .endcard-extra[hidden] { display: none; }
 .ec-card > .ec-keep { grid-column: 1 / -1; font-size: 0.9em; font-weight: 600; color: var(--cream-2); }
 .ec-card > .ec-keep[hidden] { display: none; }
-#hud.result .hud-el:is([data-el="timer"], [data-el="split"], [data-el="stats"], [data-el="stage"], [data-el="sync"]) { visibility: hidden; }
+#hud.result .hud-el:is([data-el="timer"], [data-el="split"], [data-el="stats"], [data-el="stage"], [data-el="sync"], [data-el="strafeTrainer"]) { visibility: hidden; }
 .ec-track { font-weight: 750; color: var(--amber); }
 .ec-time { position: relative; font-size: 3.4em; font-weight: 800; font-stretch: 90%; line-height: 1.04; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
 .ec-time .t-lead { opacity: 0.4; }
@@ -717,7 +699,17 @@ body:not(.in-game) #hud { display: none; }
 .endcard-progress { height: 2px; margin: 0.45em auto 0; width: 12em; background: rgba(255, 255, 255, 0.15); }
 .endcard-progress i { display: block; height: 100%; background: var(--cream-2); transform-origin: left; transition: transform 0.4s ease-out; }
 .endcard-extra { white-space: normal; }
-.ec-hint { margin-top: 0.6em; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7); font-size: 0.86em; color: rgba(255, 255, 255, 0.62); animation: ec-hint-in 0.4s 2s both; }
+/* Scroll cues (ui/scroll-cue.ts): the edge with more past it fades out. */
+.scroll-cue.more-below { mask-image: linear-gradient(to bottom, #000 calc(100% - 2.6rem), transparent); }
+.scroll-cue-x { scrollbar-width: none; }
+.scroll-cue-x.more-right { mask-image: linear-gradient(to right, #000 calc(100% - 2.2rem), transparent); }
+.scroll-cue-x.more-left { mask-image: linear-gradient(to left, #000 calc(100% - 2.2rem), transparent); }
+.scroll-cue-x.more-left.more-right { mask-image: linear-gradient(to right, transparent, #000 2.2rem, #000 calc(100% - 2.2rem), transparent); }
+
+/* One-line prompts over the world ("R to go again"; the tutorial's key hint and the spectator bar's hint follow it in
+   tutorial.css and net.css): the HUD's small text (.hud-map: its weight and tight double shadow), so they read over a
+   bright sky or a white floor. At 62 % white and regular weight they were all but invisible there. */
+.ec-hint { margin-top: 0.6em; font-size: 0.86em; font-weight: 650; color: rgba(255, 255, 255, 0.9); text-shadow: 0 0 3px rgba(0, 0, 0, 0.85), 0 1px 2px rgba(0, 0, 0, 0.85); animation: ec-hint-in 0.4s 2s both; }
 @keyframes ec-hint-in { from { opacity: 0; } }
 /* The reward reel (hud/reel.ts) */
 .endcard-reel { display: flex; flex-direction: column; align-items: center; gap: 0.4em; margin-top: 0.45em; }
@@ -789,7 +781,7 @@ body:not(.in-game) #hud { display: none; }
 @keyframes wm-slide { from { opacity: 0; transform: translateX(-0.4em); } }
 
 /* menu column: big uppercase items, the landing dot (ui/hop.ts) marks the one you're on; PLAY leans like a strafe */
-.home-menu { gap: 0.1rem; margin-top: clamp(1.2rem, 5vh, 3.4rem); max-width: 26rem; padding-left: 1.6rem; margin-left: -1.6rem; }
+.home-menu { gap: 0.1rem; margin-top: clamp(1.2rem, 5vh, 3.4rem); max-width: 27rem; padding-left: 1.6rem; margin-left: -1.6rem; }
 .home-item { position: relative; justify-content: flex-start; padding: 0.42rem 0.4rem 0.42rem 0.55rem; background: transparent; border: 0; border-radius: 0; transition: transform var(--t-step) var(--ease-glide), color var(--t-step) var(--ease-glide); }
 .home-item .mb-label { flex-direction: row; align-items: baseline; gap: 0.75rem; }
 .home-item .mb-title { font-size: 1.4rem; font-weight: 800; letter-spacing: 0.035em; text-transform: uppercase; line-height: 1.1; text-shadow: 0 1px 10px rgba(0, 0, 0, 0.45); }
@@ -802,7 +794,12 @@ body:not(.in-game) #hud { display: none; }
 .home-item.primary { margin: 0 0 0.6rem; padding: 0.7rem 1.4rem 0.62rem 1.6rem; background: var(--amber); color: var(--amber-ink); clip-path: polygon(var(--lean) 0, 100% 0, 100% 100%, 0 100%); box-shadow: inset 0 -0.2rem 0 var(--amber-deep); transition: transform var(--t-step) var(--ease-glide), background var(--t-step), box-shadow var(--t-tick); }
 .home-item.primary .mb-title { font-size: 1.9rem; font-weight: 850; letter-spacing: 0.03em; text-shadow: none; }
 .home-item.primary small, .home-item.primary .mb-hint { font-family: var(--font-text); font-size: var(--fs-sm); color: rgba(29, 19, 6, 0.66); font-weight: 600; }
-.home-item.primary .mb-hint { margin-left: 0.8rem; align-self: center; }
+.home-item.primary .mb-hint { margin-left: auto; padding-left: 0.8rem; align-self: center; }
+/* Play online and Play solo (ui/home.ts): the two ways in, the same slab each, online first. They hold still under the
+   pointer (one sliding beside the other reads as misaligned). */
+.home-item.primary .mb-title, .home-item.primary small { white-space: nowrap; }
+.home-menu:has(.home-item.primary ~ .home-item.primary) .home-item.primary:is(:hover, :focus-visible) { transform: none; }
+.home-menu:has(.home-item.primary ~ .home-item.primary) .home-item.primary:active:not(:disabled) { transform: translateY(2px); }
 .home-item.primary:hover, .home-item.primary:focus-visible { background: var(--amber-hi); color: var(--amber-ink); transform: translateX(0.3rem); box-shadow: inset 0 -0.2rem 0 var(--amber-deep); }
 .home-item.primary:active:not(:disabled) { transform: translateX(0.3rem) translateY(2px); box-shadow: inset 0 -0.06rem 0 var(--amber-deep); }
 /* footer: you, then one quiet row of words (no pills); Support is the warm one, the version the faintest */
@@ -1006,7 +1003,9 @@ body.potato.arrive #hud .hud-el { animation: none; }
      sat over the second row at 900 x 900. */
   .home-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .home-right { padding-bottom: 5.5rem; }
-  #menu.screen-home::after { content: ""; position: fixed; left: 0; right: 0; bottom: 0; height: 6.5rem; background: linear-gradient(rgba(11, 11, 14, 0), rgba(11, 11, 14, 0.94) 55%); pointer-events: none; }
+  /* The stacked home is taller than a phone: it scrolls (it was clipped, the rest out of reach), and what scrolls
+     fades out above the dock, so the bell, Friends and the speaker never sit on a map picture. */
+  #menu.screen-home { overflow: hidden auto; mask-image: linear-gradient(#000 calc(100% - 6.5rem), transparent calc(100% - 3.6rem)); }
 }
 @media (max-width: 36rem) { .home-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
@@ -1235,8 +1234,8 @@ button:active:not(:disabled) { transform: translateY(1px); }
 .pp-lastrun { margin-bottom: var(--sp-4); }
 .pp-lastrun h3 { margin: 0 0 var(--sp-2); font-size: var(--fs-md); font-weight: 750; color: var(--cream-2); }
 /* Key hints in the pause rail: the key's name as quiet text, shown on the row you're on (not a keycap on every row). */
-.rail-item kbd, .action-card kbd { font-family: var(--font-ui); font-size: var(--fs-xs); font-weight: 650; padding: 0; border: 0; background: none; color: var(--cream-3); opacity: 0; transition: opacity var(--t-step) var(--ease-glide); }
-.rail-item:hover kbd, .rail-item:focus-visible kbd, .action-card:hover kbd, .action-card:focus-visible kbd { opacity: 1; }
+.rail-item kbd, .list-row kbd { font-family: var(--font-ui); font-size: var(--fs-xs); font-weight: 650; padding: 0; border: 0; background: none; color: var(--cream-3); opacity: 0; transition: opacity var(--t-step) var(--ease-glide); }
+.rail-item:hover kbd, .rail-item:focus-visible kbd, .list-row:hover kbd, .list-rows:not(:hover) .list-row:focus-visible kbd { opacity: 1; }
 .rail-item.primary kbd { color: rgba(29, 19, 6, 0.6); background: none; border: 0; }
 .rail-item.pause-home kbd { background: none; border: 0; }
 

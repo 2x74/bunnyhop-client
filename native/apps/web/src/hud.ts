@@ -28,7 +28,7 @@ import type { MovementReading } from "./movement-stats";
 import type { LjReport } from "./movement-stats/stats";
 import { LjView, fjtNodes, offsetNodes, startPreNodes } from "./movement-stats/view";
 import { KeysOverlay, PREVIEW_BITS } from "./hud/keys";
-import { HUD_ELEMENTS, hudPoints, keepOnScreen, placeStyle, remFraction, type HudElId, type HudLayout } from "./hud/layout";
+import { EDGE_PAD, HUD_ELEMENTS, hudPoints, keepOnScreen, placeStyle, remFraction, type HudElId, type HudLayout } from "./hud/layout";
 import { spectatorLines } from "./net/spectators";
 import { EVENT_RESPAWNED, formatTime, type RunStatus, type TickCmd } from "./timer";
 import { h } from "./ui/dom";
@@ -39,7 +39,7 @@ import { sfx } from "./audio";
 import { nudge, setRunActive, toast as notifyToast } from "./notify";
 import { spring, SPRINGS } from "./notify/spring";
 import { uiHidden } from "./ui/hide-ui";
-import { formatDelta, TimeFace } from "./hud/time-face";
+import { countWord, formatDelta, TimeFace } from "./hud/time-face";
 import { ResultCard } from "./hud/result";
 import type { UploadFailure } from "./uploads";
 import { hudLine, type GauntletProgress } from "./gauntlet/state";
@@ -224,7 +224,9 @@ export class Hud {
   private stageText = text();
   private stageEl!: HTMLElement;
   private statJumps = text();
+  private statJumpsWord = text();
   private statStrafes = text();
+  private statStrafesWord = text();
   private statSync = text();
   private trainer = new StrafeTrainer();
   private trainerView = new StrafeTrainerView();
@@ -337,8 +339,8 @@ export class Hud {
       stats: h(
         "div.hud-stats",
         null,
-        h("span", null, h("b", null, this.statJumps), " jumps"),
-        h("span", null, h("b", null, this.statStrafes), " strafes"),
+        h("span", null, h("b", null, this.statJumps), this.statJumpsWord),
+        h("span", null, h("b", null, this.statStrafes), this.statStrafesWord),
         h("span", null, h("b", null, this.statSync), " sync"),
         this.statPerf,
       ),
@@ -366,6 +368,12 @@ export class Hud {
       strafeTrainer: this.trainerView.el,
       spectators: this.specEl,
       practice: h("div.hud-practice", null, this.practiceText, h("span.hud-practice-warn", null, this.practiceWarnText)),
+      // The talker list (voice/hud.ts VoiceHud mounts #voice-hud in here while in a room); demo rows only in the layout editor.
+      voice: h(
+        "div.hud-voice",
+        null,
+        h("div.voice-demo", { "aria-hidden": "true" }, ...["hopper", "strafegod"].map((n) => h("div.vh-row", null, h("span.vh-av.letter", null, n[0].toUpperCase()), h("span.vh-name", null, n)))),
+      ),
     };
     const boxes: HTMLElement[] = [];
     for (const { id, label } of HUD_ELEMENTS) {
@@ -388,7 +396,7 @@ export class Hud {
     this.editor = new HudEditor({
       root: this.root,
       els: this.els,
-      preview: (id, place) => this.placeAll({ ...this.p.hud.layout, [id]: place }),
+      preview: (id, place, at) => this.placeAll({ ...this.p.hud.layout, [id]: place }, at && { id, ...at }),
       setEditing: (on) => this.setEditing(on),
     });
     this.p = prefs.get();
@@ -408,7 +416,7 @@ export class Hud {
    * Positions every element for `layout` at the HUD scale (hud/layout.ts hudPoints: the gaps grow with the scale too),
    * then keeps them on screen (fit). Layout changes only, never per frame.
    */
-  private placeAll(layout: HudLayout): void {
+  private placeAll(layout: HudLayout, held?: { id: HudElId; left: number; top: number }): void {
     const at = hudPoints(layout, this.p.hud.scale, remFraction(innerWidth, innerHeight));
     for (const { id } of HUD_ELEMENTS) {
       const el = this.els[id];
@@ -418,6 +426,14 @@ export class Hud {
       el.style.top = st.top;
       el.style.translate = st.translate;
       el.style.setProperty("--s", String(p.s));
+    }
+    // The element being dragged in the layout editor sits exactly where the pointer holds it (CSS px), whatever its
+    // place works out to on the way; the others are laid out around the place it would take.
+    if (held) {
+      const el = this.els[held.id];
+      el.style.left = `${held.left}px`;
+      el.style.top = `${held.top}px`;
+      el.style.translate = "none";
     }
     this.fit();
   }
@@ -436,7 +452,7 @@ export class Hud {
       const r = el.getBoundingClientRect();
       if (!r.width && !r.height) continue; // not shown (off, or no HUD on screen)
       const old = this.shift.get(el) ?? { dx: 0, dy: 0 };
-      const n = keepOnScreen({ left: r.left - old.dx, top: r.top - old.dy, width: r.width, height: r.height }, vw, vh, 2);
+      const n = keepOnScreen({ left: r.left - old.dx, top: r.top - old.dy, width: r.width, height: r.height }, vw, vh, EDGE_PAD);
       if (n.dx !== old.dx || n.dy !== old.dy) moves.push([el, n]);
     }
     for (const [el, n] of moves) {
@@ -677,6 +693,9 @@ export class Hud {
    */
   tick(cmd: TickCmd, state: PlayerState, events: number, trainer?: { settings: Settings; noclip?: boolean; turnYaw?: number }): void {
     if (this.editing) return;
+    // Spectating: the graph draws the watched player's speed. The room sends their position and speed but not their
+    // keys, so the keys, trainer and jump readouts (hidden meanwhile, net.css) have nothing true to show.
+    if (this.spectated) return this.graph.push(this.spectated.speed);
     const v = state.velocity;
     const speed = Math.sqrt(v[0] * v[0] + v[1] * v[1]);
     if (trainer && this.p.hud.layout.strafeTrainer.on) this.trainer.feed(cmd, {
@@ -755,7 +774,8 @@ export class Hud {
 
   /**
    * Spectating (net/mp.ts, per rendered frame): the watched player's speed and timer show in your HUD in place of
-   * yours; null gives them back. Your own run's other readouts hide meanwhile (net.css body.mp-spectating).
+   * yours, and the speed graph draws their speed (tick); null gives them back. Your own run's other readouts hide
+   * meanwhile (net.css body.mp-spectating).
    */
   setSpectated(v: { speed: number; status: RunStatus; time: number; inStart: boolean } | null): void {
     this.spectated = v;
@@ -764,7 +784,8 @@ export class Hud {
   // -------------------------------------------------------------------------------------------
   // Per-frame update
 
-  update(frame: HudFrame): void {
+  /** `frames`: game frames this update covers (the uncapped loop draws the HUD once per display frame), for the FPS readout. */
+  update(frame: HudFrame, frames = 1): void {
     const sp0 = this.spectated;
     const f = this.editing ? { ...DEMO, place: this.p.hud.place === "place" ? "#4" : this.p.hud.place === "top" ? DEMO.place : null } : sp0 ? { ...frame, speed: sp0.speed, status: sp0.status, time: sp0.time, inStart: sp0.inStart, split: null, place: null, stage: null } : frame;
     const s = this.shown;
@@ -814,7 +835,7 @@ export class Hud {
     }
 
     // FPS (updated twice a second).
-    this.frames++;
+    this.frames += frames;
     if (now - this.fpsT > 500) {
       this.fpsText.data = String(Math.round((this.frames * 1000) / (now - this.fpsT)));
       const ping = prefs.get().hud.netGraph ? this.pingMs?.() ?? null : null;
@@ -902,7 +923,9 @@ export class Hud {
       this.els.stats.classList.toggle("empty", !stats);
       if (stats) {
         this.statJumps.data = String(f.jumps);
+        this.statJumpsWord.data = ` ${countWord(f.jumps, "jump")}`;
         this.statStrafes.data = String(f.strafes);
+        this.statStrafesWord.data = ` ${countWord(f.strafes, "strafe")}`;
         this.statSync.data = `${f.sync.toFixed(1)}%`;
       }
     }

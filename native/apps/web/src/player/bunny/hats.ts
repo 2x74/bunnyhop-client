@@ -235,10 +235,12 @@ function halo(): THREE.BufferGeometry {
   // floating above the ear tips, tipped back a little toward the third-person camera; three amethyst segments are inset
   // in it. A short arc of light goes round it every few seconds (hat-fx.ts).
   const [, u, v] = frame(HALO_N, [1, 0, 0]);
-  const R = 3.4, N = 48;
+  // (v0.0.41: R 3.4 -> 5 and a thicker section, 0.92 x 0.64 -> 1.2 x 0.9: from 300 units at 1080p the old ring was
+  // about 24 px wide and 10 tall, the new one about 34 by 19.)
+  const R = 5, N = 48;
   const at = (a: number, dr: number, dn: number): V3 => add(add(HALO_C, scale(HALO_N, dn)), add(scale(u, Math.cos(a) * (R + dr)), scale(v, Math.sin(a) * (R + dr))));
   const SEC = 6;
-  const sec: [number, number][] = Array.from({ length: SEC }, (_, j) => [Math.cos((j / SEC) * Math.PI * 2) * 0.92, Math.sin((j / SEC) * Math.PI * 2) * 0.64]);
+  const sec: [number, number][] = Array.from({ length: SEC }, (_, j) => [Math.cos((j / SEC) * Math.PI * 2) * 1.2, Math.sin((j / SEC) * Math.PI * 2) * 0.9]);
   const rows: V3[][] = [];
   for (let i = 0; i <= N; i++) rows.push(sec.map(([dr, dn]) => at((i / N) * Math.PI * 2, dr, dn)));
   // Face k of the section sits between points k and k + 1: its direction is (k + 0.5) * 60 degrees (0 = outward).
@@ -397,12 +399,13 @@ function auroraRibbon(): THREE.BufferGeometry {
   const b = new Builder();
   // A ribbon of light floating above the ears: a wavy band (it rises and dips three times round), green at its foot
   // into teal and violet at its top, self-lit with a swell flowing round it (hat-fx.ts code 11).
-  const R = 3.6, N = 60, H = 1.35;
+  // (v0.0.41: a curtain, not a strip: R 3.6 -> 4.8, H 1.35 -> 3.8, deeper waves. The strip read as a squiggle.)
+  const R = 4.8, N = 60, H = 3.8;
   const rows: V3[][] = [0, 0.33, 0.66, 1].map((f) =>
     Array.from({ length: N }, (_, j) => {
       const a = (j / N) * Math.PI * 2;
-      const r = R + 0.25 * Math.sin(a * 2 + 0.6);
-      return add(AURORA_C, [Math.cos(a) * r, Math.sin(a) * r, 0.4 * Math.sin(a * 3) + (f - 0.5) * H * (0.8 + 0.2 * Math.cos(a * 3))]);
+      const r = R + 0.45 * Math.sin(a * 2 + 0.6);
+      return add(AURORA_C, [Math.cos(a) * r, Math.sin(a) * r, 0.6 * Math.sin(a * 3) + (f - 0.5) * H * (0.8 + 0.2 * Math.cos(a * 3))]);
     }),
   );
   const COL = [0x3ff0a0, 0x2fd6c8, 0x8a6bff];
@@ -662,7 +665,10 @@ function wreath(): THREE.BufferGeometry {
     return norm([p[0] / HOOD_R[0] ** 2, (p[1] - HOOD_C[1]) / HOOD_R[1] ** 2, (p[2] - HOOD_C[2]) / HOOD_R[2] ** 2]);
   };
   const rad = (d: number) => (d * Math.PI) / 180;
-  const BACK = 90, GAP = 52, STEPS = 11;
+  // (v0.0.41, for play distance: the branches reach further round to the brow, GAP 52 -> 36; the leaves are a third
+  // longer and wider and lift off the hood, LIFT, so their points show round the head's outline. Lying flat they were
+  // silver on a pale hood, seen as a few spikes at one temple.)
+  const BACK = 90, GAP = 36, STEPS = 12, LIFT = 0.5;
   for (const dir of [1, -1]) {
     const end = BACK + dir * (180 - GAP);
     // The stem.
@@ -680,9 +686,9 @@ function wreath(): THREE.BufferGeometry {
       if (up[2] < 0) up = scale(up, -1);
       const side = i % 2 ? -1 : 1;
       const tilt = rad(44);
-      const d = norm(add(scale(grow, Math.cos(tilt)), scale(up, side * Math.sin(tilt))));
+      const d = norm(add(add(scale(grow, Math.cos(tilt)), scale(up, side * Math.sin(tilt))), scale(out, LIFT)));
       // Slim and pointed (widest a third of the way up), folded along the midrib so the two halves catch light apart.
-      const L = 2.5 - 0.9 * s, Wd = 0.3 * L, T = 0.07, FOLD = 0.35;
+      const L = 3.4 - 1.0 * s, Wd = 0.34 * L, T = 0.09, FOLD = 0.35;
       const across = norm(cross(out, d));
       const SEG = 8;
       const rows: V3[][] = [];

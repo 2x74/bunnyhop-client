@@ -3,7 +3,7 @@
 // physics-only core (like race ghosts), so it never touches the live run.
 
 import type * as THREE from "three";
-import { Core } from "../core";
+import type { Core } from "../core";
 import { Ghost } from "../ghost";
 import { decodeReplay } from "../replay";
 import { FRAME_STRIDE, simulate } from "../sim";
@@ -22,10 +22,10 @@ export class DemoGhost {
     scene.add(ghost.root);
   }
 
-  static async create(o: { wasmBytes: Uint8Array; bsp: Uint8Array; scene: THREE.Scene; demo: string; aux?: Core; loop?: boolean }): Promise<DemoGhost> {
+  /** `aux`: a physics-only core with the map loaded (the tutorial's, tutorial/mode.ts). */
+  static async create(o: { scene: THREE.Scene; demo: string; aux: Core; loop?: boolean }): Promise<DemoGhost> {
     const replay = await decodeReplay(base64Bytes(o.demo));
-    const core = o.aux ?? (await Core.create(o.wasmBytes as Uint8Array<ArrayBuffer>));
-    if (!o.aux) core.loadMapPhysics(o.bsp);
+    const core = o.aux;
     // A demo is shown even if a newer build simulates it slightly differently (checkpoints aren't required to match).
     const sim = simulate(core, replay, replay.header.zones, { frames: true });
     const frames = sim.frames!;

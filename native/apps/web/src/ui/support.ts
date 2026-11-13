@@ -25,8 +25,9 @@ import { playerGlowControls } from "./player-glow-controls";
 import { WAVEDASH } from "../platform/env";
 import { wavedashCopy } from "../platform/wavedash";
 import "./support.css";
-import { api, lastKnownMe, type MySupport, type Profile, type TopSupporter } from "../api";
+import { api, lastKnownMe, type MySupport, type Profile, type TopSupporter, type User } from "../api";
 import { NAME_COLORS, peakOf, type NameColorId } from "../creators";
+import { askOf, supportStatus } from "../support-ask";
 import { lookSaver, PREVIEW_LOOK, savedPicks, type LookPicks } from "../support-look";
 import { nameStyleShown } from "../supporter-looks";
 import { COSMETICS, cosmetic, DEFAULT_COSMETICS, supporterItem, SUPPORTER_MIN_USD, SUPPORTER_SETS, type SupporterSetId } from "../progression";
@@ -41,6 +42,7 @@ import { hopIndicator } from "./hop";
 import { loadoutView, type LoadoutChoice, type LoadoutModel } from "./loadout-view";
 import { nameAttrs, supporterMark } from "./marks";
 import { navigate } from "./nav";
+import { scrollCue } from "./scroll-cue";
 import { profileWriteGuard } from "./profile-write";
 import { supportGifting } from "./support-gifting";
 import { borderChoices, cardEffectChoices, cardFxSwatch, COLOUR_CHOICES, DECO_CHOICES, decoSwatch, EFFECT_CHOICES, FONT_CHOICES, HOVER_FX_CHOICES, hoverFxSwatch, nameSample, styleChoices } from "./supporter-pickers";
@@ -62,7 +64,7 @@ function setLook(id: SupporterSetId): LoadoutChoice {
   const st = SUPPORTER_SETS.find((x) => x.id === id) ?? SUPPORTER_SETS[0];
   // The set's gun camo (progression.ts: every Supporter set has one).
   const camo = COSMETICS.find((c) => c.slot === "camo" && c.set === st.id)?.id ?? null;
-  return { body: getLoadout().body ?? "body-a", knife: getLoadout().knife ?? DEFAULT_COSMETICS.knife, camo, ...st.look };
+  return { body: getLoadout().body ?? "body-a", knife: getLoadout().knife ?? DEFAULT_COSMETICS.knife, camo, shape: DEFAULT_COSMETICS.shape, ...st.look };
 }
 
 /** The Loadout's model for trying the set on: every supporter item shown and clickable, nothing saved. */
@@ -261,6 +263,8 @@ export function supportScreen(o: SupportScreenOpts): HTMLElement {
       return;
     }
     if (s?.payments) return drawPay(s);
+    // No answer (the status or the session couldn't be read): not a guess that payments are closed (support-ask.ts).
+    if (api.available() && askOf(s) === "failed") return ask.replaceChildren(...failedAsk());
     // Payments aren't open (the API has no Stripe key): the plan in plain words, and a button that can't be pressed
     // where the real one goes.
     const discord = discordLink("sp-discord", "the Discord");
@@ -351,14 +355,38 @@ export function supportScreen(o: SupportScreenOpts): HTMLElement {
       if (disposed) return;
       ask.classList.replace("pending", "arrive");
       perksLine.style.visibility = "";
-      ask.replaceChildren(
-        h("p.sp-lead", null, "Support bunnyhop.lol"),
-        h("p", { role: "status" }, "Couldn't load your support status. You can keep previewing the perks, or reopen Support to try again."),
-      );
+      ask.replaceChildren(...failedAsk());
     }, 8000);
   };
+  // The status couldn't be read (or is taking too long): say so, and offer the read again.
+  let retry = () => {};
+  const failedAsk = () => [
+    h("p.sp-lead", null, "Support bunnyhop.lol"),
+    h("p", { role: "status" }, "Couldn't load your support status."),
+    h("div.sp-actions", null, h("button.btn", { type: "button", onclick: () => retry() }, "Try again")),
+  ];
+  // Who is playing, then their status, then the ask. `named` gets the player as soon as they're known.
+  const loadAsk = (named: (u: User | null) => void) => {
+    const generation = accountGeneration();
+    const live = () => generation === accountGeneration() && !disposed;
+    const known = (u: User | null) => {
+      if (!live()) return;
+      signedInAs = u;
+      named(u);
+    };
+    retry = () => {
+      drawPending();
+      loadAsk(named);
+    };
+    void supportStatus(me, (u) => (known(u), readSupport())).then(({ user, status }) => {
+      if (!live()) return;
+      if (!user) known(null);
+      drawAsk(status?.s ?? null, status?.revision, status?.editRevision);
+      if (tab === "top") drawTopPage();
+    });
+  };
   if (api.available()) drawPending();
-  else drawAsk(null);
+  else drawAsk(null); // a build without a server
 
   // --- Top supporters, a tab of its own (with the API only)
   const topPage = h("div.sp-top-page", { role: "tabpanel", "aria-labelledby": "sp-tab-top" });
@@ -388,6 +416,7 @@ export function supportScreen(o: SupportScreenOpts): HTMLElement {
     ...(api.available() ? [["top", "Top supporters"] as [SupportTab, string]] : []),
   ];
   const tabBar = h("div.pf-tabs", { role: "tablist", "aria-label": "Support" });
+  scrollCue(tabBar, "x");
   const drawTabs = () =>
     tabBar.replaceChildren(
       ...tabs.map(([t, label]) =>
@@ -422,38 +451,22 @@ export function supportScreen(o: SupportScreenOpts): HTMLElement {
   });
   drawTabs();
   o.tabsHost.append(tabBar);
-  const openingGeneration = accountGeneration();
   if (api.available()) {
     void api.supporters().then(
       (r) => ((top = r.top), tab === "top" && drawTopPage()),
       () => ((top = "failed"), tab === "top" && drawTopPage()),
     );
-    void me()
-      .then((u) => {
-        if (openingGeneration !== accountGeneration()) return null;
-        signedInAs = u;
-        if (u && look.name === "Your name") look.set({ name: u.name });
-        return u ? readSupport() : null;
-      })
-      .then(
-        (result) => { if (openingGeneration === accountGeneration()) { drawAsk(result?.s ?? null, result?.revision, result?.editRevision); if (tab === "top") drawTopPage(); } },
-        () => { if (openingGeneration === accountGeneration()) drawAsk(null); },
-      );
+    loadAsk((u) => u && look.name === "Your name" && look.set({ name: u.name }));
     if (reopenTop) select("top");
   }
   onAccountChange(root, () => {
-    const generation = accountGeneration();
     glowEditor.reset();
     saver.reset();
     status("");
     signedInAs = null;
     supporter = false; drawPending();
     deck.reload();
-    void me().then(u => {
-      if (generation !== accountGeneration() || disposed) return null;
-      signedInAs = u; look.set({ name: u?.name ?? "Your name" });
-      return u ? readSupport() : null;
-    }).then(result => { if (generation === accountGeneration() && !disposed) drawAsk(result?.s ?? null, result?.revision, result?.editRevision); }).catch(() => { if (generation === accountGeneration() && !disposed) drawAsk(null); });
+    loadAsk((u) => look.set({ name: u?.name ?? "Your name" }));
   });
   reopenTop = false;
   return root;

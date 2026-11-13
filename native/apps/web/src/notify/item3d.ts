@@ -18,7 +18,7 @@
 import * as THREE from "three";
 import { sharedRenderer } from "../shared-gl";
 import { softwareContext } from "../gfx-auto";
-import { getLoadout, getOutfit } from "../player/cosmetics";
+import { getGhostCosmetics, getLoadout, getOutfit } from "../player/cosmetics";
 import { HERO, previewOf, turntable, type PreviewItem, type PreviewSpec } from "./item-preview";
 import { simulateSpring, SPRINGS } from "./spring";
 import type { ItemScene } from "./item3d-scenes";
@@ -424,7 +424,8 @@ export function liveEmblem(item: PreviewItem, runGoing = false): LiveEmblem | nu
   // (On software GL a model's shaders alone take seconds of the game's GPU thread: the flat icon.)
   if (!r || softwareContext(r.getContext())) return null;
   const l = getLoadout();
-  const spec = previewOf(item, { knife: l.knife, finish: l.finish, hilt: l.hilt, outfit: getOutfit() });
+  const g = getGhostCosmetics();
+  const spec = previewOf(item, { knife: l.knife, finish: l.finish, hilt: l.hilt, outfit: getOutfit(), trail: { color: g.trail, ...(g.trail2 !== g.trail ? { color2: g.trail2 } : {}) }, shape: g.shapeId });
   if (!spec) return null;
   const p = new Preview(spec, r);
   if (!runGoing) p.prep();

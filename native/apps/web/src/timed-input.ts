@@ -27,6 +27,15 @@
 
 /** Movement direction bits (input.ts IN_FORWARD | IN_BACK | IN_MOVELEFT | IN_MOVERIGHT): timed like the mouse. */
 export const TIMED_KEY_BITS = (1 << 3) | (1 << 4) | (1 << 9) | (1 << 10);
+/**
+ * TIMED PRESSES (v0.0.41; the switch). On: every other bound button (jump, duck, use, attack, the turn binds) is timed
+ * like W/A/S/D, and a wheel notch is a pulse in the first command whose cutoff is at or after its stamp, for that one
+ * command (addPulse). Before, those were read once per rendered frame and a notch went into the frame's first tick:
+ * at 60 Hz a scroll jump could reach 60% of ticks, and in a long frame a press landed on the first catch-up tick.
+ * Recordings made this way carry the replay header flag timedPresses (replay.ts FLAG_TIMED_PRESSES), which the
+ * anticheat reads (apps/api/src/input-analysis.ts). Off: those inputs are frame-sampled as before and no flag is written.
+ */
+export const TIMED_PRESSES = true;
 /** Holdback at the start of a session (ms). */
 export const HOLDBACK_START = 2;
 export const HOLDBACK_MAX = 8;
@@ -57,11 +66,17 @@ interface Edge {
   code: string;
   down: boolean;
 }
+interface Pulse {
+  t: number;
+  bits: number;
+}
 
 export interface Taken {
   /** Motion events (distinct) and reports this command took. */
   events: number;
   reports: number;
+  /** Pulse bits (wheel notches) this command holds for itself alone. */
+  pulse: number;
 }
 
 /** Sorted insert from the back (reports arrive in order nearly always). */
@@ -87,6 +102,8 @@ export class TimedInput {
   private head = 0;
   private edges: Edge[] = [];
   private edgeHead = 0;
+  private pulses: Pulse[] = [];
+  private pulseHead = 0;
   /** The newest command cutoff (a report stamped at or before it is late). */
   private cut = -Infinity;
   private winSeen = 0;
@@ -132,6 +149,22 @@ export class TimedInput {
   }
   /** The newest edge time per key code (addEdge). */
   private readonly lastEdge = new Map<string, number>();
+
+  /**
+   * A one-command press made at `t` (a wheel notch: Source presses and releases the bound key at once, and the button
+   * counts for the next usercmd only). Notches in the same command merge into one press, as they do in CS:S. A notch
+   * stamped at or before a command that already ran goes into the next one, like a late report.
+   */
+  addPulse(t: number, bits: number): void {
+    if (bits) insert(this.pulses, this.pulseHead, { t, bits });
+  }
+
+  /** Pulses not yet in a command, as bits (timed presses turned off: they go into the next command). */
+  pendingPulse(): number {
+    let b = 0;
+    for (let i = this.pulseHead; i < this.pulses.length; i++) b |= this.pulses[i].bits;
+    return b;
+  }
 
   private adapt(): void {
     const share = this.winLate / this.winSeen;
@@ -186,7 +219,11 @@ export class TimedInput {
       if (k.down) this.keys.add(k.code);
     }
     if (this.edgeHead === e.length) e.length = this.edgeHead = 0;
-    return { events, reports };
+    let pulse = 0;
+    const ps = this.pulses;
+    while (this.pulseHead < ps.length && ps[this.pulseHead].t <= cut) pulse |= ps[this.pulseHead++].bits;
+    if (this.pulseHead === ps.length) ps.length = this.pulseHead = 0;
+    return { events, reports, pulse };
   }
 
   /** Everything pending into the next command now (`onMotion` per report): a sensitivity change, a release. */
@@ -203,7 +240,7 @@ export class TimedInput {
     const reports = this.motion.length - this.head;
     this.motion.length = this.head = 0;
     this.pendingX = this.pendingP = 0;
-    return { events, reports };
+    return { events, reports, pulse: 0 };
   }
 
   /** The view's yaw was set (spawn, restart, raw set): pending yaw motion is forgotten (pitch stays). */
@@ -218,10 +255,15 @@ export class TimedInput {
     this.pendingP = 0;
   }
 
-  /** Keys released (blur, unlock, rebinding): no held movement keys and no pending edges. */
+  /** Keys released (blur, unlock, rebinding): no held keys and no pending edges. Pending pulses stay (clearPulses). */
   releaseKeys(): void {
     this.keys.clear();
     this.edges.length = this.edgeHead = 0;
+  }
+
+  /** Pending pulses dropped (blur, unlock: as a frame-sampled wheel notch was). */
+  clearPulses(): void {
+    this.pulses.length = this.pulseHead = 0;
   }
 
   /** Back to the start (turned on / off): the holdback keeps what it learned. */
@@ -229,6 +271,7 @@ export class TimedInput {
     this.motion.length = this.head = 0;
     this.pendingX = this.pendingP = 0;
     this.releaseKeys();
+    this.clearPulses();
     this.cut = -Infinity;
   }
 }

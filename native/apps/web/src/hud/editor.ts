@@ -2,18 +2,32 @@
 // screen centre lines, nudge with the arrow keys, toggle elements, apply presets, reset, and
 // export/import the layout as a short string. Opened from Settings → HUD → "Edit layout" or the
 // hudEditor bind (default F2). Changes preview live and are saved to prefs on release.
+//
+// Its controls are a slim bar (presets, Elements, More, Done) so the HUD it edits stays in view. The element list and
+// the rest (HUD scale, snap, the layout code, the keys) are two panels of Settings rows that open from the bar.
+//
+// Nothing of the editor may be in a piece's way. A dragged piece is held exactly under the pointer (hud.ts places it in
+// CSS px while it is held; its stored place is worked out from that box on every move). The bar takes whichever edge,
+// top or bottom, is clear of the piece being dragged or selected and covers the fewest others (layout.ts barSide), so
+// a piece under the bar is freed by picking it (the Elements list, Tab) or by dragging another piece there. An open
+// panel closes when a drag starts and when the piece picked from it sits underneath it. The selected piece is drawn
+// over the others, so one that another piece covers can be grabbed once it is picked.
 
 import { takeFreeCursor } from "../free-cursor";
 import { h } from "../ui/dom";
+import { icon } from "../ui/icons";
 import { keyLabel, prefs } from "../ui/settings";
-import { range } from "../ui/controls";
-import { anchorX, anchorY, clampScale, CLASSIC, presetLayout, decodeLayout, encodeLayout, HUD_ELEMENTS, HUD_SCALE, placeFromRect, PRESETS, remFraction, sameLayout, unzoomPlace, type HudElId, type HudLayout, type HudPlace } from "./layout";
+import { range, row, toggle } from "../ui/controls";
+import { anchorX, anchorY, barSide, clampScale, dragBox, presetLayout, decodeLayout, encodeLayout, HUD_ELEMENTS, HUD_SCALE, placeFromRect, PRESETS, remFraction, sameLayout, unzoomPlace, type Box, type HudElId, type HudLayout, type HudPlace } from "./layout";
 
 export interface EditorHost {
   root: HTMLElement;
   els: Record<HudElId, HTMLElement>;
-  /** Applies a place to an element's DOM without saving (live drag preview). */
-  preview(id: HudElId, p: HudPlace): void;
+  /**
+   * Applies a place to an element's DOM without saving (live drag preview). `at`: the element's top-left corner in CSS
+   * px while the pointer holds it there (a move; a resize has none).
+   */
+  preview(id: HudElId, p: HudPlace, at?: { left: number; top: number }): void;
   /** Called when edit mode starts / ends (the HUD swaps in demo content while editing). */
   setEditing(on: boolean): void;
 }
@@ -28,10 +42,18 @@ export function openHudEditor(): boolean {
   return !!opener;
 }
 
-const GRID = 8;
-const SNAP = 8;
 const ANCHOR_NAMES = ["top-left", "top", "top-right", "left", "centre", "right", "bottom-left", "bottom", "bottom-right"];
-const label = (id: HudElId) => HUD_ELEMENTS.find((e) => e.id === id)!.label;
+/** Where an element sits, for its row's tooltip. */
+const placeReadout = (p: HudPlace): string => `Anchored ${ANCHOR_NAMES[p.a]}, x ${(p.x * 100).toFixed(1)}%, y ${(p.y * 100).toFixed(1)}%, size ${Math.round(p.s * 100)}%`;
+/** The keys the bar's two sentences leave out (the More panel lists them). */
+const KEYS: [string, string][] = [
+  ["Nudge the selected piece", "Arrow keys"],
+  ["Nudge it 10 pixels", "Shift + arrow keys"],
+  ["Resize it", "+ and −, or the wheel"],
+  ["Hide or show it", "H"],
+  ["Pick the next piece", "Tab"],
+  ["Drag without snapping", "Hold Alt"],
+];
 
 export class HudEditor {
   active = false;
@@ -40,9 +62,10 @@ export class HudEditor {
   private grid: HTMLElement;
   private guideV: HTMLElement;
   private guideH: HTMLElement;
-  private info: HTMLElement | null = null;
-  private chips = new Map<HudElId, HTMLButtonElement>();
+  private rows = new Map<HudElId, { row: HTMLElement; sw: HTMLInputElement }>();
   private presetBtns = new Map<string, HTMLButtonElement>();
+  /** The panel showing under the bar, if any, and what closes it. */
+  private panel: { el: HTMLElement; hide: () => void } | null = null;
   private snap = true;
   private relock = false;
   private drag: { id: HudElId; mode: "move" | "resize"; x0: number; y0: number; r0: DOMRect; p0: HudPlace; pid: number; cur: HudPlace } | null = null;
@@ -75,9 +98,11 @@ export class HudEditor {
     return prefs.get().hud.layout;
   }
 
-  private commit(fn: (l: HudLayout) => void): void {
+  /** `way`: false from the element list's own switches, which must not move the list from under the pointer. */
+  private commit(fn: (l: HudLayout) => void, way = true): void {
     prefs.update((p) => fn(p.hud.layout));
     this.paint();
+    if (way) this.makeWay();
   }
 
   toggle(): void {
@@ -99,6 +124,32 @@ export class HudEditor {
     this.select(this.selected ?? "speed");
   }
 
+  /** The box of a piece as it shows now, or null when it shows nothing (switched off and not the selected one). */
+  private boxOf(id: HudElId): Box | null {
+    const r = this.host.els[id].getBoundingClientRect();
+    return r.width && r.height ? { left: r.left, top: r.top, width: r.width, height: r.height } : null;
+  }
+
+  /**
+   * Keeps the editor out of the selected piece's way: the bar goes to the edge that is clear of `must` (the selected
+   * piece; while dragging, the held box and the pointer) and covers the fewest other pieces. An open panel closes when
+   * the bar moves, or when the piece sits under it.
+   */
+  private makeWay(must: Box[] | null = null): void {
+    const bar = this.bar;
+    if (!bar) return;
+    const sel = this.selected ? this.boxOf(this.selected) : null;
+    must ??= sel ? [sel] : [];
+    const b = bar.getBoundingClientRect();
+    const others = HUD_ELEMENTS.filter(({ id }) => id !== this.selected && this.layout[id].on).flatMap(({ id }) => this.boxOf(id) ?? []);
+    const now = bar.classList.contains("bottom") ? "bottom" : "top";
+    const side = barSide(now, { left: b.left, top: b.top, width: b.width, height: b.height }, innerHeight, must, others);
+    bar.classList.toggle("bottom", side === "bottom");
+    if (!this.panel) return;
+    const p = this.panel.el.getBoundingClientRect();
+    if (side !== now || must.some((m) => m.left < p.right && m.left + m.width > p.left && m.top < p.bottom && m.top + m.height > p.top)) this.panel.hide();
+  }
+
   close(): void {
     if (!this.active) return;
     this.active = false;
@@ -110,6 +161,7 @@ export class HudEditor {
     this.guideH.remove();
     this.bar?.remove();
     this.bar = null;
+    this.panel = null;
     for (const el of Object.values(this.host.els)) el.classList.remove("sel");
     this.host.setEditing(false);
     dispatchEvent(new CustomEvent(EDITOR_CLOSED));
@@ -125,108 +177,127 @@ export class HudEditor {
   // Toolbar
 
   private buildBar(): HTMLElement {
-    this.chips.clear();
+    this.rows.clear();
     this.presetBtns.clear();
-    const chips = h("div.he-chips", { role: "group", "aria-label": "HUD elements" });
-    for (const { id, label: l } of HUD_ELEMENTS) {
-      const b = h("button.he-chip", { type: "button", title: "Click: select · double-click: show/hide", "aria-pressed": "false" }, l);
-      b.addEventListener("click", () => {
-        if (this.selected === id) this.setOn(id, !this.layout[id].on);
-        else this.select(id);
-      });
-      this.chips.set(id, b);
-      chips.append(b);
-    }
-    const presets = h("div.he-presets");
+    const presets = h("div.seg", { role: "group", "aria-label": "Layout presets" });
     for (const p of PRESETS) {
-      const b = h("button.btn.he-btn", { type: "button", onclick: () => this.commit((l) => Object.assign(l, presetLayout(p.layout, l))) }, p.label);
+      const b = h("button", { type: "button", onclick: () => this.commit((l) => Object.assign(l, presetLayout(p.layout, l))) }, p.label);
       this.presetBtns.set(p.id, b);
       presets.append(b);
     }
-    const snap = h("input", { type: "checkbox", id: "he-snap" });
-    snap.checked = this.snap;
-    snap.addEventListener("change", () => (this.snap = snap.checked));
-    const io = h("input.he-io", { type: "text", placeholder: "Paste a layout code (bhl1.…)", "aria-label": "Layout code", spellcheck: "false" });
-    const msg = h("span.he-msg", { role: "status" });
-    const say = (t: string) => {
-      msg.textContent = t;
-      setTimeout(() => msg.textContent === t && (msg.textContent = ""), 3000);
+
+    // The element list: Settings rows in two columns (all of them in view at once, with the lower HUD still showing). A
+    // row's name selects the element, its switch shows or hides it.
+    const list = h("div.he-panel.he-list.quick-set", { role: "group", "aria-label": "HUD elements", hidden: true });
+    list.style.setProperty("--he-rows", String(Math.ceil(HUD_ELEMENTS.length / 2)));
+    for (const { id, label: l } of HUD_ELEMENTS) {
+      const sw = h("input.switch.sm", { type: "checkbox", role: "switch", "aria-label": `Show ${l}` });
+      sw.addEventListener("change", () => {
+        this.selected = id;
+        this.commit((l) => (l[id].on = sw.checked), false);
+        sw.blur(); // the editor's keys (arrows, H) work again at once
+      });
+      const r = h("div.set-row.compact", null, h("button.he-name", { type: "button", onclick: () => this.select(id) }, l), h("div.set-control", null, sw));
+      this.rows.set(id, { row: r, sw });
+      list.append(r);
+    }
+
+    const bar = h("div#hud-edit-bar", { role: "dialog", "aria-label": "HUD layout editor" });
+    const more = h("div.he-panel.he-more.quick-set", { hidden: true }, ...this.moreRows());
+    const opener = (text: string, cls: string, panel: HTMLElement) => {
+      const b = h(`button.btn.btn-sm.${cls}`, { type: "button", "aria-expanded": "false" }, text, icon("chevronRight", { size: "0.9em" }));
+      const hide = () => {
+        panel.hidden = true;
+        b.setAttribute("aria-expanded", "false");
+        if (this.panel?.hide === hide) this.panel = null;
+      };
+      b.addEventListener("click", () => {
+        const open = panel.hidden;
+        this.panel?.hide();
+        if (!open) return;
+        panel.hidden = false;
+        b.setAttribute("aria-expanded", "true");
+        this.panel = { el: panel, hide };
+        if (panel === list && this.selected) this.rows.get(this.selected)?.row.scrollIntoView({ block: "nearest" });
+      });
+      return b;
     };
-    const exportBtn = h("button.btn.he-btn", { type: "button" }, "Export");
+    const bind = prefs.get().binds.hudEditor[0];
+    bar.append(
+      h(
+        "div.he-main",
+        null,
+        presets,
+        opener("Elements", "he-open-list", list),
+        opener("More", "he-open-more", more),
+        h("button.btn.btn-sm.primary.he-done", { type: "button", onclick: () => this.close() }, `Done${bind ? ` (${keyLabel(bind)})` : ""}`),
+      ),
+      h("p.he-hint", null, "Drag a piece to move it, or its corner to resize it. The arrow keys nudge the selected piece and H hides it."),
+      list,
+      more,
+    );
+    return bar;
+  }
+
+  /** The More panel: the settings that go with the layout, then the keys the bar's two sentences leave out. */
+  private moreRows(): HTMLElement[] {
+    const code = h("input.text-input.share-code", { type: "text", placeholder: "bhl1.…", "aria-label": "Layout code", spellcheck: "false" });
+    const flash = (b: HTMLElement, t: string) => {
+      const was = b.textContent;
+      b.textContent = t;
+      setTimeout(() => (b.textContent = was), 1500);
+    };
+    const exportBtn = h("button.btn.btn-sm", { type: "button" }, "Export");
     exportBtn.addEventListener("click", () => {
       const p = prefs.get().hud;
-      io.value = encodeLayout(p.layout, p.keys);
-      io.select();
-      void navigator.clipboard?.writeText(io.value).then(
-        () => say("Copied"),
-        () => say("Select and copy"),
+      code.value = encodeLayout(p.layout, p.keys);
+      code.select();
+      void navigator.clipboard?.writeText(code.value).then(
+        () => flash(exportBtn, "Copied"),
+        () => flash(exportBtn, "Select + copy"),
       );
     });
-    const importBtn = h("button.btn.he-btn", { type: "button" }, "Import");
+    const importBtn = h("button.btn.btn-sm", { type: "button" }, "Import");
     importBtn.addEventListener("click", () => {
-      const r = decodeLayout(io.value);
-      if (!r) return say("Not a valid layout code");
+      const r = decodeLayout(code.value);
+      if (!r) return flash(importBtn, "Not a code");
       prefs.update((p) => {
         p.hud.layout = r.layout;
         p.hud.keys = r.keys;
       });
       this.paint();
-      say("Imported");
+      this.makeWay();
     });
-    this.info = h("div.he-info", { "aria-live": "polite" });
-    const bind = prefs.get().binds.hudEditor[0];
-    return h(
-      "div#hud-edit-bar",
-      { role: "dialog", "aria-label": "HUD layout editor" },
-      h(
-        "div.he-head",
-        null,
-        h("b", null, "HUD layout"),
-        h("span.he-hint", null, "Drag to move · corner to resize · arrows nudge (Shift ×10) · +/− size · H hide · Tab next · hold Alt: no snap"),
-        h("button.btn.he-btn", { type: "button", title: "Move this bar to the other edge of the screen", onclick: (e: Event) => (e.currentTarget as HTMLElement).closest("#hud-edit-bar")!.classList.toggle("bottom") }, "⇅"),
-        h("button.btn.primary.he-done", { type: "button", onclick: () => this.close() }, `Done${bind ? ` (${keyLabel(bind)})` : ""}`),
-      ),
-      chips,
-      this.info,
-      h(
-        "div.he-row",
-        null,
-        h("span.he-label", null, "Presets"),
-        presets,
-        h("label.he-snap", { for: "he-snap" }, snap, " Snap"),
-        h("button.btn.he-btn", { type: "button", onclick: () => this.commit((l) => Object.assign(l, presetLayout(CLASSIC, l))) }, "Reset to default"),
-      ),
-      h("div.he-row", null, h("span.he-label", null, "HUD scale"), this.scaleControl()),
-      h("div.he-row", null, h("span.he-label", null, "Share"), io, exportBtn, importBtn, msg),
-    );
-  }
-
-  /** Settings → HUD → HUD scale's slider and number box, without its row (the bar has its own labels). */
-  private scaleControl(): HTMLElement {
-    const r = range("HUD scale", () => prefs.get().hud.scale, (v) => prefs.update((p) => (p.hud.scale = v)), { ...HUD_SCALE, scale: 100, unit: "%" });
-    r.querySelector("input[type=range]")?.setAttribute("aria-label", "HUD scale");
-    return r.querySelector<HTMLElement>(".range") ?? r;
+    return [
+      range("HUD scale", () => prefs.get().hud.scale, (v) => prefs.update((p) => (p.hud.scale = v)), { ...HUD_SCALE, scale: 100, unit: "%" }),
+      toggle("Snap to the grid", () => this.snap, (v) => (this.snap = v)),
+      row("Layout code", h("div.share-row", null, code, exportBtn, importBtn)),
+      h("table.keys-table", null, h("tbody", null, ...KEYS.map(([what, key]) => h("tr", null, h("th", null, what), h("td", null, key))))),
+    ];
   }
 
   private paint(): void {
     const l = this.layout;
-    for (const [id, b] of this.chips) {
-      b.classList.toggle("on", l[id].on);
-      b.classList.toggle("sel", id === this.selected);
-      b.setAttribute("aria-pressed", String(l[id].on));
+    for (const [id, { row: r, sw }] of this.rows) {
+      sw.checked = l[id].on;
+      r.classList.toggle("sel", id === this.selected);
+      r.title = placeReadout(l[id]);
     }
-    for (const p of PRESETS) this.presetBtns.get(p.id)?.classList.toggle("on", sameLayout(l, p.layout));
+    for (const p of PRESETS) {
+      const on = sameLayout(l, p.layout);
+      const b = this.presetBtns.get(p.id);
+      b?.classList.toggle("on", on);
+      b?.setAttribute("aria-pressed", String(on));
+    }
     for (const [id, el] of Object.entries(this.host.els) as [HudElId, HTMLElement][]) el.classList.toggle("sel", id === this.selected);
-    const id = this.selected;
-    if (this.info && id) {
-      const p = l[id];
-      this.info.textContent = `${label(id)}${p.on ? "" : " (hidden)"} · anchor ${ANCHOR_NAMES[p.a]} · x ${(p.x * 100).toFixed(1)}% · y ${(p.y * 100).toFixed(1)}% · size ${Math.round(p.s * 100)}%`;
-    }
   }
 
   private select(id: HudElId): void {
     this.selected = id;
     this.paint();
+    this.makeWay();
+    const r = this.rows.get(id)?.row;
+    if (r && r.offsetParent) r.scrollIntoView({ block: "nearest" });
   }
 
   private setOn(id: HudElId, on: boolean): void {
@@ -242,7 +313,8 @@ export class HudEditor {
     const id = this.selected;
     if (!id) return;
     const r = this.host.els[id].getBoundingClientRect();
-    const p = this.fromRect(id, { left: r.left + dx, top: r.top + dy, width: r.width, height: r.height }, this.layout[id]);
+    const b = dragBox({ left: r.left + dx, top: r.top + dy, width: r.width, height: r.height }, innerWidth, innerHeight, false);
+    const p = this.fromRect(id, { left: b.left, top: b.top, width: r.width, height: r.height }, this.layout[id]);
     this.commit((l) => (l[id] = p));
   }
 
@@ -261,6 +333,7 @@ export class HudEditor {
     if (!el) return;
     e.preventDefault();
     const id = el.dataset.el as HudElId;
+    this.panel?.hide(); // arranging now: the list would only be in the way
     this.select(id);
     el.setPointerCapture(e.pointerId);
     const p0 = { ...this.layout[id] };
@@ -282,41 +355,17 @@ export class HudEditor {
       const s = clampScale(d.p0.s * (Math.hypot(e.clientX - ax, e.clientY - ay) / d0));
       d.cur = { ...d.p0, s };
       this.host.preview(d.id, d.cur);
-      this.showInfo(d.cur);
       return;
     }
-    let left = d.r0.left + dx;
-    let top = d.r0.top + dy;
     const w = d.r0.width;
     const hh = d.r0.height;
-    let gv = false;
-    let gh = false;
-    if (this.snap && !e.altKey) {
-      const cx = left + w / 2;
-      const cy = top + hh / 2;
-      if (Math.abs(cx - vw / 2) < SNAP) (left = vw / 2 - w / 2), (gv = true);
-      else {
-        // Snap the anchor-side edge (left / centre / right) to the grid, measured from its screen anchor.
-        const col = cx < vw / 3 ? 0 : cx < (2 * vw) / 3 ? 1 : 2;
-        const px = left + (col / 2) * w - (col / 2) * vw;
-        left += Math.round(px / GRID) * GRID - px;
-      }
-      if (Math.abs(cy - vh / 2) < SNAP) (top = vh / 2 - hh / 2), (gh = true);
-      else {
-        const row = cy < vh / 3 ? 0 : cy < (2 * vh) / 3 ? 1 : 2;
-        const py = top + (row / 2) * hh - (row / 2) * vh;
-        top += Math.round(py / GRID) * GRID - py;
-      }
-    }
-    this.guideV.classList.toggle("show", gv);
-    this.guideH.classList.toggle("show", gh);
-    d.cur = this.fromRect(d.id, { left, top, width: w, height: hh }, d.p0);
-    this.host.preview(d.id, d.cur);
-    this.showInfo(d.cur);
-  }
-
-  private showInfo(p: HudPlace): void {
-    if (this.info && this.selected) this.info.textContent = `${label(this.selected)} · anchor ${ANCHOR_NAMES[p.a]} · x ${(p.x * 100).toFixed(1)}% · y ${(p.y * 100).toFixed(1)}% · size ${Math.round(p.s * 100)}%`;
+    const at = dragBox({ left: d.r0.left + dx, top: d.r0.top + dy, width: w, height: hh }, vw, vh, this.snap && !e.altKey);
+    this.guideV.classList.toggle("show", at.centreV);
+    this.guideH.classList.toggle("show", at.centreH);
+    const box = { left: at.left, top: at.top, width: w, height: hh };
+    d.cur = this.fromRect(d.id, box, d.p0);
+    this.host.preview(d.id, d.cur, at);
+    this.makeWay([box, { left: e.clientX, top: e.clientY, width: 0, height: 0 }]);
   }
 
   private onUp(e: PointerEvent): void {
@@ -350,6 +399,7 @@ export class HudEditor {
       case "Escape":
       case "Enter":
         if (typing) (t as HTMLElement).blur();
+        else if (e.key === "Escape" && this.panel) this.panel.hide();
         else this.close();
         break;
       case "ArrowLeft":

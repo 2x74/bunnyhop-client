@@ -41,7 +41,7 @@ export function renderCreditsPage(html: string, maps: readonly CreditMap[]): str
     groups.set(letter, group);
   }
   const list = [...groups].sort(([a], [b]) => a.localeCompare(b, "en")).map(([letter, entries]) =>
-    `<details class="credits-letter"><summary>${letter} <span>(${entries.length} maps)</span></summary>` +
+    `<details class="credits-letter"><summary>${letter} <span>(${entries.length} ${entries.length === 1 ? "map" : "maps"})</span></summary>` +
     `<div class="legal-table-wrap"><table><caption>Map credits: ${letter}</caption>` +
     `<thead><tr><th scope="col">Map</th><th scope="col">Credit as recorded</th><th scope="col">Source</th><th scope="col">Licence as recorded</th></tr></thead><tbody>` +
     entries.map((map) => `<tr><th scope="row">${esc(map.name)}${map.source === "original" ? `<small>Original for bunnyhop.lol</small>` : ""}</th>` +

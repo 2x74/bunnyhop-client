@@ -21,9 +21,10 @@ import { Attract } from "./attract";
 import { Arrival } from "./arrival";
 import { backdropLive, backdropRendered } from "./ui/backdrop";
 import { takeLocalPop } from "./ui/nav";
+import { loadFlags } from "./ui/country-flag";
 import { stopMenuWork } from "./ui/menu-work";
 import { attackReport, restartPoint, Core, DEFAULT_SETTINGS, EVENT_ANGLES_CHANGED, EVENT_ATTACK, EVENT_JUMPED, EVENT_TELEPORTED, traceRay, weaponReport, type PlayerState, type RestartPoint } from "./core";
-import { hasRawUpdate, Input, isTextField, type UserCmd } from "./input";
+import { hasRawUpdate, IN_FORWARD, Input, isTextField, type UserCmd } from "./input";
 import { ExperimentWeapons, LiveInputCapture, InputExperimentCapture, experimentRejection, localInputExperimentAllowed, pumpInputExperiment } from "./input-experiment";
 import type { SampledInput, SamplerSource } from "./input-sampler";
 import { InputDebug, summary as inputSummary } from "./input-debug";
@@ -51,10 +52,12 @@ import { afterPaint, fmtBytes } from "./ui/dom";
 import { countJump, hasFinishedAMap, recordMapPlayed } from "./ui/stats";
 import { startFirstPlay } from "./first-play";
 import { STUCK_LINE, StuckHint } from "./ui/stuck-hint";
+import { OS_ACCEL_LINE, sayOsAccelOnce } from "./lock-path";
+import { STANDING_JUMP_LINE, StandingJumpHint } from "./standing-jump-hint";
 import { tutorialProgress } from "./tutorial/flag";
 import { api, ApiError } from "./api";
 import { goToLobby, lobbyIdFromParam } from "./net/lobby";
-import { decodeReplay, INSPECT_HOLD, INSPECT_RELEASE, YAW_SET_PUSHER, YAW_SET_SPAWN, YAW_SET_TELEPORT } from "./replay";
+import { decodeReplay, sha256Hex, INSPECT_HOLD, INSPECT_RELEASE, YAW_SET_PUSHER, YAW_SET_SPAWN, YAW_SET_TELEPORT } from "./replay";
 import { clearEyeZ, hullTop, type TraceFn } from "./viewer/cameras";
 import { ReplayViewer } from "./viewer/viewer";
 import { watchFromUrl } from "./gauntlet/watch";
@@ -79,7 +82,10 @@ import { registerAudioSettings } from "./audio/settings-section";
 import { TUTORIAL_MAP } from "./tutorial/data";
 import { fetchBytes, withTimeout } from "./content/fetch";
 import { bspUrl, indexSha, mapParam } from "./content/map-url";
-import { contentLoading, loadErrorActions } from "./content/load-screen";
+import { MapFile } from "./content/map-file";
+import { BIG_MAP_NOTICE, bigForDevice } from "./low-memory";
+import { contentLoading, loadErrorActions, playingWithoutTextures } from "./content/load-screen";
+import { prefetchMapContent, type ContentPrefetch } from "./content";
 import { RestartGuard, type GuardedAction } from "./restart-guard";
 import { CONFIRM_MS, LeaveHold } from "./leave-confirm";
 import { SoloChat } from "./solo-chat";
@@ -243,6 +249,10 @@ prefs.watch((p) => {
     world.setPotato(p.graphics.potato);
     world.setFlashlight(p.graphics.flashlight);
     world.setFullbright(mapLook(p, lookMap).fullbright);
+    world.setFog(p.graphics.mapFog);
+    world.setPropLighting(p.graphics.propLighting);
+    world.setDetails(p.graphics.mapDetails);
+    world.setModelLighting(p.graphics.modelLighting);
     applyAnisotropy(world.root, p.graphics.anisotropy);
   }
 });
@@ -296,7 +306,7 @@ wasmBytesP.catch(() => {}); // reported by the map load that awaits it
  * Content-Length is missing or the compressed size (research/COMPRESSION.md). Timeouts and retries (`onRetry`: attempt
  * about to start, why the last one failed).
  */
-async function downloadMap(name: string, onProgress: (got: number, total: number | null) => void, onRetry?: (attempt: number, why: string) => void, buildSha: string | null = null): Promise<Uint8Array> {
+async function downloadMap(name: string, onProgress: (got: number, total: number | null) => void, onRetry?: (attempt: number, why: string) => void, buildSha: string | null = null, onSha?: (sha: string) => void): Promise<Uint8Array> {
   // The index is usually loaded already (menu, map browser); a direct ?map= link fetches it alongside the BSP.
   let indexSize: number | null = null;
   const entry = fetchMapIndex().then((maps) => {
@@ -310,6 +320,7 @@ async function downloadMap(name: string, onProgress: (got: number, total: number
   // `buildSha`: a particular build of the map (a gauntlet's split replays on the build it was run on).
   const sha = buildSha ?? indexSha(identity);
   if (buildSha && identity?.sha256 !== buildSha) indexSize = null;
+  if (sha) onSha?.(sha);
   try {
     return await fetchBytes(bspUrl(name, sha), {
       cacheSha256: nativeClient() ? sha ?? undefined : undefined,
@@ -443,6 +454,8 @@ if (params.get("privacy") === "data") {
     history.replaceState(null, "", url.pathname + url.search + url.hash);
   });
 }
+// The home screen's records and live rooms show flags: their stylesheet loads alongside the screen's data.
+if (!params.get("map") && !replayMap) void loadFlags();
 const mapName = params.get("map") || replayMap || (await showHome());
 // Run style: ?style=<id> (e.g. links from a leaderboard) else the last one picked (map browser / pause menu / F3).
 const styleParam = params.get("style");
@@ -463,18 +476,37 @@ const loadStart = performance.now();
 const firstPlay = viewerStart || replayMap ? null : startFirstPlay({ map: mapName, tutorial: mapName === TUTORIAL_MAP, room: !!params.get("server"), tick: DEFAULT_SETTINGS.tickInterval, lessons: mapName === TUTORIAL_MAP ? () => Object.keys(tutorialProgress().lessons).length : undefined }, hasFinishedAMap());
 // Never finished a map: after a while stuck here, one line points to the tutorial and other maps (ui/stuck-hint.ts).
 const stuckHint = !hasFinishedAMap() && mapName !== TUTORIAL_MAP && !params.get("server") && !viewerStart && !replayMap ? new StuckHint() : null;
+// A new player hopping in place holding W (standing-jump-hint.ts): one line, until their first finish. The same gate as
+// the Stuck line (never finished a map, solo, not the tutorial).
+const standingJumpHint = stuckHint ? StandingJumpHint.start() : null;
+// A lock that asked for raw input came back with the OS's acceleration: said once in this browser (lock-path.ts).
+input.onOsAccel = () => void (sayOsAccelOnce() && session.hud.toast(OS_ACCEL_LINE, 9000));
 await loading.stage("Downloading map", 0);
+// A big map on a low-memory device (low-memory.ts): said before it downloads.
+void withTimeout(fetchMapIndex(), 1500, []).then((maps) => {
+  const size = maps.find((m) => m.name === mapName)?.size;
+  if (size && bigForDevice(size)) loading.notice(BIG_MAP_NOTICE);
+});
+// Map detail (the server's zones for this build) doesn't wait for the map: asked now, used in "Preparing run".
+const mapDetail = api.available() ? api.mapDetail(mapName).catch(() => null) : null;
 
 let core: Core;
-let bsp: Uint8Array | undefined;
+/** The map's BSP: its bytes for the load, then a Blob for the page's later readers (content/map-file.ts). */
+let mapFile: MapFile | undefined;
+/** sha256 of the BSP, hashed once: the content manifest, texture packs and the run's map build all use it. */
+let mapSha256 = "";
 let wasmBytes: Uint8Array<ArrayBuffer>;
 let content: ReturnType<typeof contentLoading> | null = null;
 let worldPrograms: Promise<void> = Promise.resolve();
+/** The world's objects as its programs were warmed (the scene's warm-up skips them; anything added later it doesn't). */
+const worldWarmed = new Set<THREE.Object3D>();
 let sharedPlayerPrograms: Promise<void> | null = null;
+/** The map's hosted content, fetched from the index's sha while the BSP downloads (used only if the BSP has that sha). */
+let contentEarly: ContentPrefetch | null = null;
 try {
   let lastPaint = 0;
   const cached = attract?.takeBsp(mapName);
-  bsp = cached ?? await downloadMap(
+  const bsp = cached ?? await downloadMap(
     mapName,
     (got, total) => {
       const now = performance.now();
@@ -484,8 +516,11 @@ try {
     },
     (attempt, why) => void loading.stage("Downloading map", null, /resuming/.test(why) ? `${why}…` : `${why}: retrying (${attempt}/4)…`),
     mapName === replayMap ? replayBuild : null,
+    (sha) => (contentEarly = prefetchMapContent(sha, playingWithoutTextures())),
   );
+  mapFile = new MapFile(bsp);
   await loading.stage("Starting engine", 0.72, fmtBytes(bsp.length));
+  const bspSha = sha256Hex(bsp as Uint8Array<ArrayBuffer>);
   wasmBytes = await wasmBytesP;
   core = await Core.create(wasmBytes);
   await loading.stage("Parsing BSP", 0.76);
@@ -495,7 +530,8 @@ try {
   await loading.stage("Building world", 0.82, "textures, lightmaps, geometry");
   await afterPaint();
   content = contentLoading(loading, 0.82, 0.92);
-  world = await buildWorld(core, renderer, { bsp, content: content.options });
+  mapSha256 = await bspSha;
+  world = await buildWorld(core, renderer, { bsp, mapSha256, content: { ...content.options, early: contentEarly } });
   setMapVolumes(volumesOf(bsp)); // water + ladders for the bunnies' swim / climb (player/map-volumes.ts)
   content.done();
   attract?.stop();
@@ -504,10 +540,15 @@ try {
   world.setPotato(prefs.get().graphics.potato);
   world.setFlashlight(prefs.get().graphics.flashlight);
   world.setFullbright(mapLook(prefs.get(), lookMap).fullbright);
+  world.setFog(prefs.get().graphics.mapFog);
+  world.setPropLighting(prefs.get().graphics.propLighting);
+  world.setDetails(prefs.get().graphics.mapDetails);
+  world.setModelLighting(prefs.get().graphics.modelLighting);
   applyAnisotropy(world.root, prefs.get().graphics.anisotropy);
   scene.add(world.root);
   // Every program the map draws with, culled parts included, for the screen and the look's render targets (water
   // captures, the HDR scene target): started now, compiling in parallel while the run is set up (awaited before Ready).
+  world.root.traverse((o) => void worldWarmed.add(o));
   worldPrograms = warmPrograms(renderer, world.root, camera, scene).catch(() => {});
   if (params.get("server") && !renderer.extensions.has("KHR_parallel_shader_compile")) {
     sharedPlayerPrograms = import("./player/bunny/prewarm-shared")
@@ -528,7 +569,7 @@ try {
   }
   if (why === "missing") showError("That map didn't load", "It isn't on the server.", [], { cause, back: "maps" });
   else if (why === "network") showError("That map didn't load", "The download stopped. Check your connection and try again.", loadErrorActions(false), { cause });
-  else showError("That map didn't load", "Something went wrong while building it.", loadErrorActions(!!bsp), { cause });
+  else showError("That map didn't load", "Something went wrong while building it.", loadErrorActions(!!mapFile), { cause });
   throw e;
 }
 const w = world!;
@@ -541,7 +582,7 @@ const hitEffects = new HitEffects();
 scene.add(hitEffects.root);
 const playerAudio = new PlayerAudio();
 // What the map itself plays. Reads files in the background; a map without an allow list gets nothing here.
-const mapSounds = startMapSounds(core, bsp ?? null);
+const mapSounds = startMapSounds(core, mapFile!.bytes);
 if (import.meta.env.DEV) Object.assign(window, { __mapSounds: mapSounds });
 
 const eyeTrace: TraceFn = (a, b, r) => traceRay(core, a, b, r);
@@ -638,8 +679,10 @@ const zoneEditorAllowed = import.meta.env.DEV || debugHookOptIn();
 // Timer, zones, replays, PB ghost, HUD, zone editor and replay watching (see session.ts).
 await loading.stage("Preparing run", 0.94, "zones, PB ghost");
 await afterPaint();
+let mapLoaded!: () => void;
 run = await RunSession.create({
-  core, scene, canvas, input, map: mapName, bsp, wasmBytes, style, renderer,
+  core, scene, canvas, input, map: mapName, bsp: mapFile!, mapSha256, mapDetail, wasmBytes, style, renderer,
+  physicsStart: new Promise<void>((done) => (mapLoaded = done)),
   mainTrackOnly: !!gauntletStart,
   zoneWarning: (await withTimeout(fetchMapIndex(), 1500, [])).find((m) => m.name === mapName)?.zoneWarning ?? null,
   practiceSpawns: !practiceUnavailable({ inRoom: !!params.get("server"), tutorial: mapName === TUTORIAL_MAP, gauntlet: !!gauntletStart }),
@@ -648,6 +691,8 @@ run = await RunSession.create({
   tick,
 });
 const session = run;
+// Everything that parses the map during its load has it now: from here on only a Blob of it is kept (content/map-file.ts).
+mapFile!.release();
 // The renderer's per-map choices (lighting profiles, the Ambience showcase) from the first frame, not after the ready screen.
 graphicsPipeline.setMap(mapName, session.mapSha256);
 // Leave guard: a timed attempt counts as in progress (play-lock.ts; it also guards whenever you're playing).
@@ -738,25 +783,30 @@ if (gauntletStart) startGauntletMode(gauntletStart, session);
 // A set played in order: the next map after a finish (queue-mode.ts).
 startQueueMode({ session, map: mapName, arrived: queued, gauntlet: !!gauntletStart });
 // Tutorial mode on the tutorial map: lessons, strafe guide, demos (tutorial/mode.ts, loaded on demand).
-const tutorial = mapName === TUTORIAL_MAP ? await (await import("./tutorial/mode")).startTutorialMode({ session, core, input, scene, bsp, wasmBytes, restart }) : null;
-// The rest of the scene (your own bunny, zones, floor guns) joins the world's programs, so no part of the map, its
-// water or its HDR target compiles a program inside a frame. A slow driver gets 10 s; the rest finishes in the background.
+const tutorial = mapName === TUTORIAL_MAP ? await (await import("./tutorial/mode")).startTutorialMode({ session, core, input, scene, bsp: mapFile!, wasmBytes, restart }) : null;
+// The rest of the scene (your own bunny, zones, floor guns) joins the world's programs (warmed at build, so skipped
+// here), so no part of the map, its water or its HDR target compiles a program inside a frame. A slow driver gets 10 s;
+// the rest finishes in the background.
 // Then the whole map is drawn once through the look's offscreen passes (water captures, HDR target), so the GPU's
 // first draws into them happen here too, not when a part of the map is first seen; Ready waits for the GPU to finish.
 await loading.stage("Compiling shaders", 0.97);
+// The menu's boards and the room scoreboard show flags: their stylesheet loads now that the map is downloaded.
+void loadFlags();
 try {
   graphicsPipeline.compilePasses(scene);
 } catch (e) {
   console.warn("compile passes:", e);
 }
 await Promise.race([
-  Promise.all([worldPrograms, warmPrograms(renderer, scene, camera, scene).catch(() => {})])
+  // (The gun viewmodel is its own scene, drawn over this one: warmed here on a map with floor guns.)
+  Promise.all([worldPrograms, warmPrograms(renderer, scene, camera, scene, true, worldWarmed).catch(() => {}), gunView.warm(renderer).catch(() => {})])
     .then(() => graphicsPipeline.warmDraw(scene, camera))
     .catch((e) => console.warn("warm draw:", e)),
   new Promise((r) => setTimeout(r, 10_000)),
 ]);
 if (sharedPlayerPrograms) await sharedPlayerPrograms;
 await loading.stage("Ready", 1);
+mapLoaded();
 // A new player's first look (until their first finish on a real map, and always in the tutorial): the world and one
 // "Click to start" line, not the pause menu with its empty leaderboard. Esc opens the menu. Returning players get the
 // menu as before (style, board and replays before a run). Not in rooms or when opening a replay; not on phones.
@@ -786,7 +836,7 @@ if (firstLook) showStartPrompt(mapName === TUTORIAL_MAP ? undefined : styleDef(s
 
 // Replay viewer: its own physics-only sim instance; the live run below is paused, never stepped or restored by it.
 viewer = new ReplayViewer({
-  renderer, graphicsPipeline, scene, camera, world: w, map: mapName, bsp, wasmBytes, mapSha256: session.mapSha256,
+  renderer, graphicsPipeline, scene, camera, world: w, map: mapName, bsp: mapFile!, wasmBytes, mapSha256: session.mapSha256,
   style: () => session.selectedStyle,
   resize,
   practiceFrom: (replay, tick) => practice?.fromReplay(replay, tick) ?? "Practice isn't available here.",
@@ -887,6 +937,7 @@ session.frameCap = () => {
   const g = prefs.get().graphics;
   return { limit: g.fpsLimit, vsync: !(g.uncapped || browserUncapped) };
 };
+session.uncappedFrames = () => frameLoop.uncappedActive;
 // F10 → Benchmark: frame times over 30 s of play (benchmark.ts).
 const benchmark = desktopClient?.onBenchmark
   ? new FrameBenchmark({
@@ -1250,6 +1301,7 @@ function applyTick(sample: UserCmd, diagnostic?: SampledInput, generatedGive = 0
   curr = session.afterStep(cmd, events);
   firstPlay?.tick(events, curr.position, curr.velocity, input.locked, session.timer.status, () => session.timer.time(), prev.position);
   if (stuckHint?.tick(events, input.locked, session.timer.status === "finished", session.settings.tickInterval)) session.hud.toast(STUCK_LINE, 8000);
+  if (standingJumpHint?.tick(events, (input.held & IN_FORWARD) !== 0, Math.hypot(curr.velocity[0], curr.velocity[1]), session.timer.status === "finished")) session.hud.toast(STANDING_JUMP_LINE, 8000);
   if (diagnostic && pre) liveCapture.applied({ sample:diagnostic, applied:cmd, generatedGive,
     chatSuppressed:filtered !== sample, pre, post:curr, events,
     startTick:session.timer.status === "idle" ? 0 : session.timer.startTick,
@@ -1486,6 +1538,7 @@ function frame(now: number) {
   // The gun viewmodel rides the knife viewmodel's bob / sway (which keeps animating while hidden); hidden while scoped.
   gunView.setVisible(inEyeWeapons && !arms.scoped);
   gunView.frame(frameDt, vm.feelMatrix, origins, vmInput);
+  world?.lightEye([vm.scene, gunView.vm.scene], camera, graphicsPipeline.getSourceExposure());
   if (vm.inspects.holding !== inspectHeld) {
     inspectHeld = vm.inspects.holding;
     session.recordInspect(inspectHeld ? INSPECT_HOLD : INSPECT_RELEASE);

@@ -194,6 +194,7 @@ uint32_t bh_abi_version(void);
 #define BH_FLAG_NULL_BINDS (1u << 3)
 #define BH_FLAG_TIMED_INPUT (1u << 4)
 #define BH_FLAG_W_RELEASE (1u << 5)
+#define BH_FLAG_TIMED_PRESSES (1u << 6)
 #define BH_IN_TURN_FAST (1u << 6)
 
 typedef struct BhRecordOptionsV29 {
@@ -202,6 +203,7 @@ typedef struct BhRecordOptionsV29 {
     uint32_t timed_input;             /* sticky after real timed input contributes, 0 or 1 */
     uint32_t null_binds;              /* sticky once null binds resolve a recorded command, 0 or 1 */
     uint32_t w_release;               /* sticky once Release W on jump is on for a recorded command, 0 or 1 */
+    uint32_t timed_presses;           /* sticky; presses and wheel notches timed too. Only with timed_input */
 } BhRecordOptionsV29;
 
 typedef struct BhTimingSegmentV2 {
@@ -212,7 +214,8 @@ typedef struct BhTimingSegmentV2 {
 
 int bh_v29_check_abi(uint32_t version, size_t record_size, size_t segment_size);
 /* Begin first. Default frozen pair 210/2; set custom rates before the first command.
- * Later calls may mark timed_input, null_binds or w_release; rates cannot change. New BHRs append BHTS. */
+ * Later calls may mark timed_input, timed_presses, null_binds or w_release; rates cannot change.
+ * New BHRs append BHTS. */
 int bh_record_options_v29(BhContext *ctx, const BhRecordOptionsV29 *options);
 /* After bh_replay_load/seek on the live context: preserve full world/timer/filter
  * state, leave playback, invalidate ranked recording. Current map/style/settings/
@@ -277,6 +280,12 @@ typedef struct BhSkyInfo {
     float fog_color[3], fog_color2[3], fog_dir[3], fog_start, fog_end, fog_max_density;
 } BhSkyInfo;
 
+/* The map's world fog (env_fog_controller), drawn by view depth: colours 0..255. */
+typedef struct BhWorldFog {
+    uint32_t blend;
+    float color[3], color2[3], dir[3], start, end, max_density;
+} BhWorldFog;
+
 typedef struct BhMaterialExtra {
     int32_t texture2, detail;
     float detail_scale, detail_blend, fog_start, fog_end;
@@ -294,6 +303,53 @@ const uint32_t *bh_sky_indices(const BhContext *ctx, size_t *index_count);
 const BhGroup *bh_sky_groups(const BhContext *ctx, size_t *group_count);
 int bh_sky_info(BhContext *ctx, BhSkyInfo *out);
 const char *bh_sky_name(BhContext *ctx, size_t *byte_count);
+
+/* An overlay or infodecal group; material indexes bh_materials. kind 0 = overlay, 1 = decal, in draw order. */
+typedef struct BhDressingGroup {
+    uint32_t material, first_index, index_count, kind, order, sky3d;
+} BhDressingGroup;
+
+/* Parallel to bh_materials: Source's DecalModulate blend, and $selfillum with its tint (mask in the base alpha). */
+typedef struct BhMaterialLook {
+    uint32_t decal_modulate, selfillum;
+    float selfillum_tint[3];
+    uint32_t sprite_orientation; /* $spriteorientation: 0 vp_parallel, 1 parallel_upright, 2 oriented */
+} BhMaterialLook;
+
+/* A sprite (kind 0), light glow (1) or spotlight (2) of the map; material indexes bh_materials. size, size2 and dist
+ * mean per kind: sprite scale, framerate, proxy size; light glow horizontal and vertical size, min / max / outer max
+ * distance and proxy size; spotlight width, beam length, spotlightlength. dir: a sprite's angles, else forward. */
+typedef struct BhDressingGlow {
+    uint32_t kind, material;
+    float origin[3], color[3], alpha;
+    uint32_t render_mode, render_fx;
+    float size, size2, dir[3], dist[4];
+    uint32_t spawnflags;
+    int32_t parent_model;
+    float parent_origin[3], parent_angles[3];
+} BhDressingGlow;
+
+const BhDressingGlow *bh_dressing_glows(const BhContext *ctx, size_t *count);
+/* 1 / 0 per glow first..first+count into out: seen from the eye past the world's drawn opaque brushes. Returns how
+ * many were written; 0 on a map without trace data. */
+size_t
+bh_dressing_glow_visibility(const BhContext *ctx, float x, float y, float z, size_t first, size_t count, float *out);
+/* A sprite texture's VTF frame count into out (1 for a still one); frames 1.. come once each from bh_texture_frame. */
+int bh_texture_flipbook(BhContext *ctx, int32_t texture, uint32_t *out);
+
+/* Overlays and infodecals: 15 floats a vertex (position, normal, uv, lightmap uv, fade origin, fade min and max
+ * distance squared), u32 indices, and their groups. */
+const float *bh_dressing_vertices(const BhContext *ctx, size_t *float_count);
+const uint32_t *bh_dressing_indices(const BhContext *ctx, size_t *index_count);
+const BhDressingGroup *bh_dressing_groups(const BhContext *ctx, size_t *group_count);
+const BhMaterialLook *bh_material_looks(const BhContext *ctx, size_t *count);
+/* 0 when the map has no world fog, it is off, or the map switches fog while running. */
+int bh_world_fog(BhContext *ctx, BhWorldFog *out);
+/* The map's light at a point: linear RGB for +x, -x, +y, -y, +z, -z into out[18]; 0 where there is none. */
+int bh_light_cube(const BhContext *ctx, float x, float y, float z, float *out);
+/* Per prop vertex (bh_prop_vertices order), the map's light as linear RGB; -1 where there is none. Empty on maps
+ * drawn fullbright. */
+const float *bh_prop_light(const BhContext *ctx, size_t *float_count);
 /* Sky faces in Source +X,-X,+Y,-Y,+Z,-Z order; values index the shared global material buffer. */
 const int32_t *bh_sky_materials(const BhContext *ctx, size_t *count);
 const BhMaterialExtra *bh_material_extras(const BhContext *ctx, size_t *count);
@@ -357,6 +413,40 @@ typedef struct BhMaterialWireframe {
 } BhMaterialWireframe;
 
 const BhMaterialWireframe *bh_material_wireframes(BhContext *ctx, size_t *count);
+
+/* Proxies that drive a material's $alpha (PlayerProximity, Sine, EntityRandom, GaussianNoise and the math between
+ * them): bh_material_alpha says whether material `material` has such a chain (1) and how many variables it keeps.
+ * Each brush entity keeps its own variables (start them with bh_material_alpha_vars) and runs the chain once a frame
+ * with bh_material_alpha_run: `distance` from the entity's middle to the player's, map time, the entity's model as
+ * `seed`, and `noise` counting its noise draws this frame (0 at the start of each frame, shared by its materials). */
+typedef struct BhAlphaProgram {
+    uint32_t vars, per_entity;
+} BhAlphaProgram;
+
+int bh_material_alpha(BhContext *ctx, uint32_t material, BhAlphaProgram *out);
+int bh_material_alpha_vars(BhContext *ctx, uint32_t material, double *vars, size_t count);
+int bh_material_alpha_run(
+        BhContext *ctx,
+        uint32_t material,
+        double *vars,
+        size_t count,
+        double distance,
+        double time,
+        uint32_t seed,
+        uint32_t *noise,
+        double *alpha
+);
+
+/* What blending a brush and the built-in textures need, per material: base_alpha_mask, the base texture's alpha is a
+ * mask for something else (no part of the opacity once the surface blends); builtin_white, a `$basetexture "white"`
+ * with no VTF on a one-texture shader, solid white times $color. */
+typedef struct BhMaterialBlend {
+    uint32_t base_alpha_mask, builtin_white;
+} BhMaterialBlend;
+
+int bh_material_blend(BhContext *ctx, uint32_t material, BhMaterialBlend *out);
+/* Indices into bh_entities_json of the entities whose render keys the map changes while it runs, ascending. */
+const uint32_t *bh_dynamic_render_entities(BhContext *ctx, size_t *count);
 /* Water geometry JSON: volumes [minx,miny,minz,maxx,maxy,maxz] and convex plane lists [nx,ny,nz,d]. */
 const char *bh_water_json(BhContext *ctx, size_t *byte_count);
 /* Read/decode Source content with pakfile precedence; buffers last until next request of same kind. */

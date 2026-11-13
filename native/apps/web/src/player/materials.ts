@@ -20,12 +20,13 @@
 import * as THREE from "three";
 import { HAIR_DEFAULT } from "../loadout";
 import { HAT_FX_FRAGMENT_GHOST, HAT_FX_FRAGMENT_PARS, HAT_FX_FRAGMENT_SOLID, HAT_FX_VERTEX_NORMAL, HAT_FX_VERTEX_PARS, HAT_FX_VERTEX_POSITION } from "./hat-fx";
-import { FABRIC_FRAGMENT_PARS, FABRIC_VERTEX_MAIN, FABRIC_VERTEX_PARS } from "./fabric";
+import { FABRIC_FRAGMENT_PARS, FABRIC_VERTEX_MAIN, FABRIC_VERTEX_PARS, garmentPatternUniforms, type GarmentPatternUniforms } from "./fabric";
 import { PLAYER_LOOK_UNIFORMS, type PlayerLookUniforms } from "./look-tier";
 import { HAT_DETAIL_FRAGMENT_PARS, HAT_DETAIL_FRAGMENT_SOLID } from "./hat-detail";
+import { DEPTH_FOG_FRAGMENT_PARS, DEPTH_FOG_OFF, DEPTH_FOG_VERTEX_MAIN, DEPTH_FOG_VERTEX_PARS, depthFogFragment, type DepthFogUniforms } from "../depth-fog";
 import { finishUniforms, FRAGMENT_IS_BLADE, FRAGMENT_PARS, GLOVE_FRAGMENT_ALBEDO, GLOVE_FRAGMENT_LIGHT, HILT_FRAGMENT_ALBEDO, HILT_FRAGMENT_LIGHT, lookDefines, NO_LOOK, VERTEX_MAIN, VERTEX_PARS, type FinishUniforms, type MaterialLook } from "../viewmodel/finishes/shader";
 
-export interface PlayerUniforms extends FinishUniforms, PlayerLookUniforms {
+export interface PlayerUniforms extends FinishUniforms, PlayerLookUniforms, DepthFogUniforms, GarmentPatternUniforms {
   [name: string]: THREE.IUniform;
   uAccent: THREE.IUniform<THREE.Color>;
   uGhost: THREE.IUniform<THREE.Color>;
@@ -72,6 +73,11 @@ export interface PlayerUniforms extends FinishUniforms, PlayerLookUniforms {
   uHeadwearFaceOffset: THREE.IUniform<THREE.Vector3>;
   /** A wig's hair colour (linear; loadout.hairColor), for hair faces (hat-fx.ts codes -9..-11). */
   uHairColor: THREE.IUniform<THREE.Color>;
+  /**
+   * The map's light on this model (model-light.ts), as the offset from the studio light: the shaded colour is
+   * multiplied by 1 + uMapLight, so 0 (the default: previews, the Loadout, Model lighting off) is the look as it was.
+   */
+  uMapLight: THREE.IUniform<THREE.Vector3>;
 }
 
 export function playerUniforms(): PlayerUniforms {
@@ -96,8 +102,12 @@ export function playerUniforms(): PlayerUniforms {
     uPropellerAngle: { value: 0 },
     uCapybara: { value: new THREE.Vector4() },
     uPonytail: { value: new THREE.Vector4() },
+    uMapLight: { value: new THREE.Vector3() },
+    ...garmentPatternUniforms(),
     ...finishUniforms(),
     ...PLAYER_LOOK_UNIFORMS,
+    // The map's fog (depth-fog.ts): none until the model stands in a world that has some (model-light.ts links it).
+    ...DEPTH_FOG_OFF,
   };
 }
 
@@ -115,6 +125,7 @@ varying vec3 vColor;
 varying float vGlow;
 varying vec3 vNormalW;
 varying vec3 vWorldPos;
+${DEPTH_FOG_VERTEX_PARS}
 ${VERTEX_PARS}
 ${FABRIC_VERTEX_PARS}
 ${HAT_FX_VERTEX_PARS}
@@ -151,6 +162,7 @@ ${HAT_FX_VERTEX_POSITION}
   vGlow = accent > 1.5 && accent < 2.5 ? 1.0 : 0.0;
 ${FABRIC_VERTEX_MAIN}
 ${VERTEX_MAIN}
+  ${DEPTH_FOG_VERTEX_MAIN}
 }`;
 
 const common = /* glsl */ `
@@ -187,6 +199,8 @@ ${HAT_DETAIL_FRAGMENT_PARS}
 ${common}
 uniform float uGlowEdge;
 uniform float uSolidFade;
+uniform vec3 uMapLight;
+${DEPTH_FOG_FRAGMENT_PARS}
 /** 0 near, 1 far (the distance contour, uContour): from the camera to the body's middle. */
 float farness() {
   if (uContour <= 0.0) return 0.0;
@@ -255,8 +269,11 @@ ${HAT_DETAIL_FRAGMENT_SOLID}
   if (${FRAGMENT_IS_BLADE}) col = finishShade(n, V, L, ambient, key);
 #endif
   gl_FragColor = vec4(col, 1.0);
+  // The map's light on the studio light (uMapLight). Self-lit parts keep their glow: accent strips, the lit hats.
+  gl_FragColor.rgb *= mix(vec3(1.0) + uMapLight, vec3(1.0), max(vGlow, step(3.5, vFx)));
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
+${depthFogFragment()}
 }`;
 
 const ghostFragment = /* glsl */ `
@@ -270,6 +287,7 @@ varying vec3 vNormalW;
 varying vec3 vWorldPos;
 ${HAT_FX_FRAGMENT_PARS}
 ${common}
+${DEPTH_FOG_FRAGMENT_PARS}
 void main() {
   vec3 n = normalize(vNormalW);
   if (!gl_FrontFacing) n = -n;
@@ -297,6 +315,7 @@ ${HAT_FX_FRAGMENT_GHOST}
 #endif
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
+${depthFogFragment()}
 }`;
 
 const silhouetteFragment = /* glsl */ `

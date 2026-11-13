@@ -35,6 +35,8 @@ export const HUD_ELEMENTS = [
   { id: "jhud", label: "JHUD" },
   // Your speed against the race ghost's at the closest point on its route (closest-pos.ts), beside the speed.
   { id: "ghostSpeed", label: "Speed vs ghost" },
+  // Who is talking in a room (voice/hud.ts mounts its list in this box), bottom left under the chat.
+  { id: "voice", label: "Voice list" },
 ] as const;
 
 export type HudElId = (typeof HUD_ELEMENTS)[number]["id"];
@@ -89,6 +91,8 @@ export const CLASSIC: HudLayout = {
   practice: P(true, 4, 0, 0.032),
   jhud: P(false, 4, 0, -0.06),
   ghostSpeed: P(false, 7, 0.072, -0.262, 0.9),
+  // Where the list always was: 1.2vw in, 3vh up, under the chat.
+  voice: P(true, 6, 0.012, -0.03),
 };
 
 export const MINIMAL: HudLayout = {
@@ -117,6 +121,8 @@ export const MINIMAL: HudLayout = {
   practice: P(true, 4, 0, 0.024, 0.85),
   jhud: P(false, 4, 0, -0.06, 0.85),
   ghostSpeed: P(false, 4, 0.06, 0.07, 0.8),
+  // Above the chat, which sits in the bottom corner here.
+  voice: P(true, 6, 0.012, -0.2, 0.9),
 };
 
 export const STREAMER: HudLayout = {
@@ -146,6 +152,8 @@ export const STREAMER: HudLayout = {
   practice: P(true, 4, 0, 0.035, 1),
   jhud: P(false, 4, 0, -0.06),
   ghostSpeed: P(false, 7, 0.085, -0.2, 1.05),
+  // Top left under the map line: the keys overlay has the bottom corner here.
+  voice: P(true, 0, 0.015, 0.07),
 };
 
 /**
@@ -172,6 +180,9 @@ export function moveRetiredPlaces(layout: Record<string, Partial<HudPlace> | und
   const speed = layout.speed;
   if (!layout.ghostSpeed && speed && typeof speed === "object" && !found) layout.ghostSpeed = { on: false, a: speed.a, x: (speed.x ?? 0) + 0.072, y: speed.y, s: (speed.s ?? 1) * 0.9 };
   else if (!layout.ghostSpeed) layout.ghostSpeed = { ...preset.ghostSpeed };
+  // A layout saved before the voice list was an element: a preset's layout takes that preset's place for it, so it
+  // still reads as the preset. Any other layout keeps the list where it always was (Classic's corner).
+  if (!layout.voice) layout.voice = { ...preset.voice };
   for (const [id, olds] of Object.entries(RETIRED_PLACES) as [HudElId, Omit<HudPlace, "on">[]][]) {
     const p = layout[id];
     if (!p || typeof p !== "object" || !olds.some((o) => samePlace(p, o))) continue;
@@ -253,7 +264,7 @@ export function placeFromRect(r: { left: number; top: number; width: number; hei
 export const EL_HEIGHT: Partial<Record<HudElId, number>> = {
   speed: 2.1, timer: 1.5, split: 1.15, track: 1, stage: 0.95, stats: 1.05, sync: 1.3, keys: 5.55, ghostKeys: 6.25, graph: 3.6,
   jumpStats: 2.15, map: 0.95, pb: 0.95, fps: 0.85, chat: 2.4, ammo: 2.1, strafeTrainer: 1.7, startPre: 0.85, strafeOffsets: 1.05,
-  firstJump: 1.05, longJump: 2.8, spectators: 3.3, practice: 1.08, jhud: 2.3, ghostSpeed: 1.15,
+  firstJump: 1.05, longJump: 2.8, spectators: 3.3, practice: 1.08, jhud: 2.3, ghostSpeed: 1.15, voice: 1.85,
 };
 /** For an element missing from EL_HEIGHT (one added later). */
 const EL_HEIGHT_DEFAULT = 1.2;
@@ -281,6 +292,9 @@ const centreColumn = (p: HudPlace) => p.a % 3 === 1;
  * groups' extents (Practice shows only now and then, and counting it would pin Classic's block where it is).
  */
 const CROSSHAIR_LABELS: ReadonlySet<HudElId> = new Set<HudElId>(["practice"]);
+
+/** `p` is where a preset puts `id` (its anchor and offset; its size and on / off aside): the player never moved it. */
+const atPreset = (id: HudElId, p: HudPlace): boolean => [CLASSIC, MINIMAL, STREAMER].some((l) => l[id].a === p.a && Math.abs(l[id].x - p.x) < 1e-6 && Math.abs(l[id].y - p.y) < 1e-6);
 
 /** Room kept clear around the crosshair when a big HUD scale pushes the centre column's groups towards it. */
 export const CROSSHAIR_CLEAR = 0.02;
@@ -331,10 +345,12 @@ function zoomPoint(id: HudElId, p: HudPlace, hs: number, pv: ReturnType<typeof c
   const y = ay + p.y;
   if (CROSSHAIR_LABELS.has(id)) {
     // Under the crosshair while the group below leaves room; once a big scale brings that group up to it, the same
-    // distance above the crosshair instead.
+    // distance above the crosshair instead. Only from where a preset puts it: a label the player placed shows exactly
+    // where they put it. (It used to give way from anywhere in the middle third of the screen that was lower than the
+    // block's top, so dragged below the keys or to the bottom of the screen it showed mirrored above the crosshair.)
     const off = (y - 0.5) * hs;
     const h = (EL_HEIGHT[id] ?? EL_HEIGHT_DEFAULT) * p.s * remFrac * hs;
-    const crowded = off > 0 && pv.belowTop !== null && 0.5 + off + h / 2 > pv.belowTop - h * 0.15;
+    const crowded = off > 0 && atPreset(id, p) && pv.belowTop !== null && 0.5 + off + h / 2 > pv.belowTop - h * 0.15;
     return { x: 0.5 + p.x * hs, y: 0.5 + (crowded ? -off : off) };
   }
   const h = (EL_HEIGHT[id] ?? EL_HEIGHT_DEFAULT) * p.s * remFrac;
@@ -355,13 +371,18 @@ export function hudPoints(layout: HudLayout, hs: number, remFrac: number): Recor
  * The stored (100%) place for element `id` that shows at `screen` (a place read off the screen as if the scale were
  * 100%, e.g. placeFromRect) at HUD scale `hs`: the editor drops an element where it was dragged, at any scale. Inverse
  * of hudPoints for that element (the centre column's pivots depend on the element's own place, so it's solved for).
+ *
+ * One place has no exact answer: above 100%, a centre-column element whose box would straddle the crosshair's line (the
+ * groups above and below it each keep to their own side as they grow). There the nearest place that can show is taken.
  */
 export function unzoomPlace(layout: HudLayout, id: HudElId, screen: HudPlace, hs: number, remFrac: number): HudPlace {
-  if (Math.abs(hs - 1) < 1e-6) return { ...screen };
+  if (Math.abs(hs - 1) < 1e-6) return ownPlace(layout, id, { ...screen }, hs, remFrac);
   const out: HudPlace = { ...screen, x: round4(screen.x / hs) };
   if (!centreColumn(screen)) return { ...out, y: round4(screen.y / hs) };
   const ay = anchorY(screen.a);
   const sy = ay + screen.y;
+  // A crosshair label zooms around the crosshair alone.
+  if (CROSSHAIR_LABELS.has(id)) return ownPlace(layout, id, { ...out, y: round4(0.5 + (sy - 0.5) / hs - ay) }, hs, remFrac);
   const trial = { ...layout };
   const shown = (y: number) => {
     trial[id] = { ...out, y: y - ay };
@@ -375,8 +396,85 @@ export function unzoomPlace(layout: HudLayout, id: HudElId, screen: HudPlace, hs
     if (shown(mid) < sy) lo = mid;
     else hi = mid;
   }
-  const y = (lo + hi) / 2;
+  // The bisection ends on the crosshair's line when nothing shows exactly there: take whichever side lands nearer.
+  const y = [lo, hi].map((v) => round4(v - ay) + ay).flatMap((v) => [v - 1e-4, v, v + 1e-4]).reduce((best, v) => (Math.abs(shown(v) - sy) < Math.abs(shown(best) - sy) ? v : best));
   return { ...out, y: round4(y - ay) };
+}
+
+/**
+ * A crosshair label dropped exactly where a preset has it would give way to the block below again (zoomPoint) and show
+ * somewhere else. Stored a hair off (a ten-thousandth of the screen, a tenth of a pixel) it is the player's own place
+ * and stays where it was dropped.
+ */
+function ownPlace(layout: HudLayout, id: HudElId, p: HudPlace, hs: number, remFrac: number): HudPlace {
+  if (!CROSSHAIR_LABELS.has(id) || !centreColumn(p) || !atPreset(id, p)) return p;
+  const trial = { ...layout, [id]: p };
+  const at = zoomPoint(id, p, hs, centrePivots(trial, remFrac, hs), remFrac).y;
+  return Math.abs(at - (0.5 + (anchorY(p.a) + p.y - 0.5) * hs)) < 1e-9 ? p : { ...p, y: round4(p.y + 1e-4) };
+}
+
+/** The layout editor's grid (CSS px), and how near a screen centre line a box's centre snaps onto it. */
+export const SNAP_GRID = 8;
+export const SNAP_CENTRE = 8;
+/**
+ * The room the HUD keeps between an element and the screen's edge (hud.ts fit). The editor stops a dragged box there
+ * too, so the place it stores is the place that shows.
+ */
+export const EDGE_PAD = 2;
+
+export interface Box {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Where the layout editor puts a box the pointer asks to be at `r` (CSS px) on a `vw`×`vh` screen. With `snap`: its
+ * centre onto a screen centre line within SNAP_CENTRE (`centreV` / `centreH`: which guide to light), otherwise its
+ * anchor-side edge (left, centre or right; top, middle or bottom: the third of the screen its centre is in) onto the
+ * grid measured from that side of the screen. Then kept on the screen, EDGE_PAD in: a box pushed at an edge stops flush
+ * against it, and one bigger than the screen keeps its top-left corner.
+ */
+export function dragBox(r: Box, vw: number, vh: number, snap: boolean): { left: number; top: number; centreV: boolean; centreH: boolean } {
+  let { left, top } = r;
+  let centreV = false;
+  let centreH = false;
+  if (snap) {
+    const cx = left + r.width / 2;
+    const cy = top + r.height / 2;
+    if (Math.abs(cx - vw / 2) < SNAP_CENTRE) (left = vw / 2 - r.width / 2), (centreV = true);
+    else {
+      const col = cx < vw / 3 ? 0 : cx < (2 * vw) / 3 ? 1 : 2;
+      const px = left + (col / 2) * r.width - (col / 2) * vw;
+      left += Math.round(px / SNAP_GRID) * SNAP_GRID - px;
+    }
+    if (Math.abs(cy - vh / 2) < SNAP_CENTRE) (top = vh / 2 - r.height / 2), (centreH = true);
+    else {
+      const row = cy < vh / 3 ? 0 : cy < (2 * vh) / 3 ? 1 : 2;
+      const py = top + (row / 2) * r.height - (row / 2) * vh;
+      top += Math.round(py / SNAP_GRID) * SNAP_GRID - py;
+    }
+  }
+  const keep = (v: number, size: number, room: number) => Math.max(EDGE_PAD, Math.min(room - EDGE_PAD - size, v));
+  return { left: keep(left, r.width, vw), top: keep(top, r.height, vh), centreV, centreH };
+}
+
+/**
+ * Which edge of the screen the layout editor's bar takes so that it is never in the way. `bar`: its box where it is
+ * now, on a screen `vh` tall (the other edge mirrors it). `must`: boxes it may not cover if either edge is clear of
+ * them (the piece being dragged or selected, the pointer during a drag). Otherwise the edge where it covers fewer of
+ * `others` (every shown piece); it stays where it is on a tie.
+ */
+export function barSide(now: "top" | "bottom", bar: Box, vh: number, must: Box[], others: Box[], near = 12): "top" | "bottom" {
+  const other = now === "top" ? "bottom" : "top";
+  const mirrored = { ...bar, top: vh - bar.top - bar.height };
+  const hits = (zone: Box, b: Box) => b.left < zone.left + zone.width + near && b.left + b.width > zone.left - near && b.top < zone.top + zone.height + near && b.top + b.height > zone.top - near;
+  const count = (zone: Box, boxes: Box[]) => boxes.filter((b) => hits(zone, b)).length;
+  const here = count(bar, must);
+  const there = count(mirrored, must);
+  if (here !== there) return here > there ? other : now;
+  return count(mirrored, others) < count(bar, others) ? other : now;
 }
 
 /**
@@ -431,10 +529,11 @@ export const DEFAULT_KEYS: KeysPrefs = {
 };
 
 // Version byte: 1 = first 14, 2 = first 15, 3 = first 16, 4 = first 17 (through strafe trainer), 5 = first 18,
-// 6 = first 21 (through longjump stats), 7 = first 22 (through the spectator list), 8 = first 23 (through Practice), 9 = all.
+// 6 = first 21 (through longjump stats), 7 = first 22 (through the spectator list), 8 = first 23 (through Practice),
+// 9 = first 25 (through Speed vs ghost), 10 = all (the voice list).
 // Elements an older code doesn't carry keep the Classic placement. The "bhl1." prefix names the format.
-const VERSION = 9;
-const ELEMENTS_IN: Record<number, number> = { 1: 14, 2: 15, 3: 16, 4: 17, 5: 18, 6: 21, 7: 22, 8: 23, [VERSION]: HUD_ELEMENTS.length };
+const VERSION = 10;
+const ELEMENTS_IN: Record<number, number> = { 1: 14, 2: 15, 3: 16, 4: 17, 5: 18, 6: 21, 7: 22, 8: 23, 9: 25, [VERSION]: HUD_ELEMENTS.length };
 const PREFIX = "bhl1.";
 
 function rgb(hex: string): number[] {

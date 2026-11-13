@@ -53,14 +53,12 @@ pub unsafe extern "C" fn load_map(ptr: *mut u8, len: usize) -> u32 {
         c.mesh = None;
         c.vfs = Vfs::default();
         c.materials = Materials::default();
-        // parse_bsp copies the bytes into the Bsp: free the input before building (lower peak memory).
-        let parsed = crate::parse_bsp(&bytes);
-        drop(bytes);
-        let result = parsed.and_then(|bsp| {
+        // The Bsp keeps the input as it is (one copy of the map), and the pakfile is cut from it in place.
+        let result = crate::parse_bsp_owned(bytes).and_then(|bsp| {
             let game = Game::load_with_content(&bsp, content::loose_source())?;
             let mesh = mesh::build(&bsp);
-            let pak = bsp.lump(playsrc_bsp::PAKFILE).map(|l| l.bytes(&bsp).to_vec()).unwrap_or_default();
-            Ok((game, mesh, pak, mesh::texinfo_drawn(&bsp)))
+            let drawn = mesh::texinfo_drawn(&bsp);
+            Ok((game, mesh, take_pakfile(bsp), drawn))
         });
         match result {
             Ok((game, mesh, pak, drawn)) => {
@@ -90,9 +88,8 @@ pub unsafe extern "C" fn load_map_physics(ptr: *mut u8, len: usize) -> u32 {
         c.mesh = None;
         c.vfs = Vfs::default();
         c.materials = Materials::default();
-        // parse_bsp copies the bytes into the Bsp: free the input before building (lower peak memory).
-        let parsed = crate::parse_bsp(&bytes);
-        drop(bytes);
+        // The Bsp keeps the input as it is: one copy of the map.
+        let parsed = crate::parse_bsp_owned(bytes);
         // The entity lump is parsed up front (outputs straight into the runtime form, without their key/value pairs)
         // and its decoded copy released before the build.
         let loaded = parsed.and_then(|mut bsp| {
@@ -111,6 +108,21 @@ pub unsafe extern "C" fn load_map_physics(ptr: *mut u8, len: usize) -> u32 {
             }
         }
     })
+}
+
+/// The pakfile's bytes, moved to the front of the map file's own buffer, which is then cut to them (no second copy).
+fn take_pakfile(bsp: playsrc_bsp::Bsp) -> Vec<u8> {
+    let Some(lump) = bsp.lump(playsrc_bsp::PAKFILE) else { return Vec::new() };
+    let range = lump.encoded_range.clone();
+    // A decoded (LZMA) pakfile isn't the file's bytes: copied as before.
+    if lump.bytes(&bsp).as_ptr() != lump.encoded_bytes(&bsp).as_ptr() {
+        return lump.bytes(&bsp).to_vec();
+    }
+    let mut file = bsp.into_source();
+    file.copy_within(range.clone(), 0);
+    file.truncate(range.len());
+    file.shrink_to_fit();
+    file
 }
 
 #[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
@@ -1033,6 +1045,135 @@ pub extern "C" fn timing_path_reason() -> usize {
         c.scratch_str = c.game.as_ref().and_then(|g| g.timing_path.as_ref())
             .and_then(|p| p.unsupported).unwrap_or("").to_string();
         c.scratch_str.len()
+    })
+}
+
+// ---- map fog and light for the renderer (appended; render-only) ----
+
+/// The map's world fog (`fog.rs`: the master `env_fog_controller`) into scratch_f32; empty when the map has no
+/// controller or changes its fog while running:
+/// [enable, blend, fogcolor r, g, b, fogcolor2 r, g, b (0..255), fog dir x, y, z, start, end, max density, farz].
+#[unsafe(no_mangle)]
+pub extern "C" fn world_fog() -> usize {
+    with(|c| {
+        c.scratch_f32.clear();
+        if let Some(f) = c.mesh.as_ref().and_then(|m| m.world_fog.as_ref()) {
+            c.scratch_f32.extend_from_slice(&[f.enable as u32 as f32, f.blend as u32 as f32]);
+            c.scratch_f32.extend_from_slice(&f.color);
+            c.scratch_f32.extend_from_slice(&f.color2);
+            c.scratch_f32.extend_from_slice(&f.dir);
+            c.scratch_f32.extend_from_slice(&[f.start, f.end, f.max_density, f.far_z]);
+        }
+        c.scratch_f32.len()
+    })
+}
+
+/// The map's light at a point (`lighting.rs`: the leaf's ambient cube plus the world lights that reach it) into
+/// scratch_f32: six linear RGB colours for the directions +x, -x, +y, -y, +z, -z (18 floats). Empty where there is
+/// none: a map drawn fullbright or without ambient data, a point in solid or outside the map.
+#[unsafe(no_mangle)]
+pub extern "C" fn light_cube(x: f32, y: f32, z: f32) -> usize {
+    with(|c| {
+        c.scratch_f32.clear();
+        if let Some(cube) = c.mesh.as_ref().and_then(|m| m.lighting.as_ref()).and_then(|l| l.cube([x, y, z])) {
+            c.scratch_f32.extend(cube.iter().flatten());
+        }
+        c.scratch_f32.len()
+    })
+}
+
+// ---- map dressing for the renderer (appended; render-only) ----
+
+/// Material names the dressing uses (`dressing.rs`: overlays, infodecals, sprites, light glows, spotlight beams),
+/// newline-separated in scratch_str. Indices are what `dressing_groups` and `dressing_glows` refer to. Available right
+/// after `load_map`, so the host can resolve them with the map's other materials (`content_resolve` extras).
+#[unsafe(no_mangle)]
+pub extern "C" fn dressing_materials() -> usize {
+    with(|c| {
+        c.scratch_str = c.mesh.as_ref().map(|m| m.dressing.materials.join("\n")).unwrap_or_default();
+        c.scratch_str.len()
+    })
+}
+
+/// Rebuilds the overlay and decal geometry against the current VFS (decals take their size from their material's
+/// files, so call it after resolving content). Returns the group count (`dressing_groups`).
+#[unsafe(no_mangle)]
+pub extern "C" fn dressing_build() -> usize {
+    with(|c| {
+        let Ctx { mesh, vfs, .. } = c;
+        let Some(m) = mesh.as_mut() else { return 0 };
+        m.dressing.build(&|name| crate::dressing::decal_size(vfs, name));
+        m.dressing.groups.len()
+    })
+}
+
+/// Dressing vertices (`dressing::VERTEX_FLOATS` floats each: the world mesh's layout, then fade origin xyz, fade
+/// min², fade max²) and u32 indices, valid until the next `dressing_build` or map load.
+#[unsafe(no_mangle)]
+pub extern "C" fn dressing_vertices_ptr() -> *const f32 {
+    with(|c| c.mesh.as_ref().map_or(std::ptr::null(), |m| m.dressing.vertices.as_ptr()))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dressing_vertices_len() -> usize {
+    with(|c| c.mesh.as_ref().map_or(0, |m| m.dressing.vertices.len()))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dressing_indices_ptr() -> *const u32 {
+    with(|c| c.mesh.as_ref().map_or(std::ptr::null(), |m| m.dressing.indices.as_ptr()))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dressing_indices_len() -> usize {
+    with(|c| c.mesh.as_ref().map_or(0, |m| m.dressing.indices.len()))
+}
+
+/// Dressing groups into scratch_u32, 6 each: material, first_index, index_count, kind (0 overlay, 1 decal), render
+/// order, in the 3D skybox (0/1). In draw order.
+#[unsafe(no_mangle)]
+pub extern "C" fn dressing_groups() -> usize {
+    with(|c| {
+        c.scratch_u32.clear();
+        if let Some(m) = &c.mesh {
+            for g in &m.dressing.groups {
+                c.scratch_u32.extend_from_slice(&[g.material, g.first_index, g.index_count, g.kind, g.order, g.sky3d as u32]);
+            }
+        }
+        c.scratch_u32.len()
+    })
+}
+
+/// Glows and beams into scratch_f32, `dressing::GLOW_FLOATS` each (`Glow::floats`): kind, material, origin xyz,
+/// rendercolor rgb, renderamt, rendermode, renderfx, size, size2, HDR colour scale, dir xyz, dist[4], spawnflags,
+/// parent brush model (-1), parent origin xyz, parent angles xyz, 0.
+#[unsafe(no_mangle)]
+pub extern "C" fn dressing_glows() -> usize {
+    with(|c| {
+        c.scratch_f32.clear();
+        if let Some(m) = &c.mesh {
+            for g in &m.dressing.glows {
+                c.scratch_f32.extend_from_slice(&g.floats());
+            }
+        }
+        c.scratch_f32.len()
+    })
+}
+
+/// Whether glows `first .. first + count` (`dressing_glows` order) can be seen from `x, y, z`, into scratch_f32: 1 when
+/// no drawn opaque world brush lies between the eye and the glow (`Glow::visibility_target`), else 0. Returns the count
+/// written, or 0 when the map has no trace data (drawn fullbright). Render-only: the light module's trace, not the sim's.
+#[unsafe(no_mangle)]
+pub extern "C" fn dressing_glow_visibility(x: f32, y: f32, z: f32, first: usize, count: usize) -> usize {
+    with(|c| {
+        c.scratch_f32.clear();
+        let Some(m) = c.mesh.as_ref() else { return 0 };
+        let Some(light) = m.lighting.as_ref() else { return 0 };
+        let eye = [x, y, z];
+        for g in m.dressing.glows.iter().skip(first).take(count) {
+            c.scratch_f32.push(if light.hit_seen(eye, g.visibility_target(eye)).is_none() { 1.0 } else { 0.0 });
+        }
+        c.scratch_f32.len()
     })
 }
 // The opt-in native adapter owns a thread per session; canonical WASM exports stay unchanged.

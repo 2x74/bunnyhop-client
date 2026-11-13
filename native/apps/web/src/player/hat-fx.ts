@@ -30,11 +30,14 @@ export const ORBIT_C: V3 = [0, 1.0, 86.9];
 export const ORBIT_R = 4.7;
 /** Where gem i (0..3) sits on the ring at rest: 45, 135, 225, 315 degrees (none straight in front of the face). */
 export const orbitAngle = (i: number) => Math.PI / 4 + (i * Math.PI) / 2;
-/** Bind-space centre and tilt (unit normal) of the Halo, above the ear tips. */
-export const HALO_C: V3 = [0, 0.9, 86.7];
-export const HALO_N: V3 = [0, 0.26, 0.966];
-/** Bind-space centre of the Aurora ribbon (above the ear tips). */
-export const AURORA_C: V3 = [0, 1.0, 87.9];
+/**
+ * Bind-space centre and tilt (unit normal) of the Halo, above the ear tips. Tipped back 30 degrees (v0.0.41; it was 15):
+ * nearly level, it showed its edge to anyone at eye height, a flat pill.
+ */
+export const HALO_C: V3 = [0, 0.9, 87.0];
+export const HALO_N: V3 = [0, 0.5, 0.866];
+/** Bind-space centre of the Aurora ribbon (above the ear tips; raised with its height in v0.0.41). */
+export const AURORA_C: V3 = [0, 1.0, 88.4];
 /** Bind-space centre of the Circlet's band (round the hood). */
 export const CROWN_C: V3 = [0, 0.55, 73.0];
 /** Toy rotor, forward of the ears; negative accent keeps it separate from crystal and glove codes. */

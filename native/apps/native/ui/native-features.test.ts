@@ -267,7 +267,7 @@ test("credits are the website's page, with the map credits from the index and th
     ]);
     // The map table is the web's, filled from the index once it loads.
     await credits.getByText("2 maps from our public catalogue", { exact: false }).waitFor();
-    await credits.getByText("A (1 maps)").click();
+    await credits.getByText("A (1 map)").click();
     expect(await credits.getByRole("row", { name: /bhop_arcane/ }).textContent()).toContain(
       "Uploaded by Arcane Mapper",
     );

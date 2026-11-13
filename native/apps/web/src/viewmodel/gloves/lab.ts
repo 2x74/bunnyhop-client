@@ -3,7 +3,7 @@
 //
 //   ?mode=fp&cells=glove-moto-boom:karrotbit:idle,glove-sport-vice:carrot:inspect:1.2     glove:knife:action[:t]
 //   ?mode=open&glove=glove-paws-snow&cells=0,90,180,270                                     bind pose, yaw[/pitch]
-//   ?mode=hand&glove=glove-driver-tan&knife=carrot&cells=0,90,180                          around the posed fist
+//   ?mode=hand&glove=glove-driver-tan&knife=carrot&cells=0,90,180                          around the posed fist (&side=left: the off hand)
 //   ?mode=tp&cells=glove-moto-boom:karrotbit:full,glove-moto-boom:karrotbit:hand           glove:knife:shot
 //   &concepts=1: the v0.0.38 set concepts (gloves/concepts.ts) as ids "concept-glove-<id>" / "concept-outfit-<id>";
 //   fp cells take a 6th field and tp cells a 4th: the colourway for that cell (glove:knife:act:t:hand:outfit, glove:knife:shot:outfit);
@@ -22,6 +22,7 @@ import { VIEWMODEL_POS } from "../defaults";
 import { applyLoadoutUniforms } from "../finishes/shader";
 import { CARROT_HOLD, clearGripCache } from "../knives/hold";
 import { KNIVES, knifeById } from "../knives/index";
+import { LEFT_THUMB } from "../leftthumb";
 import type { KnifeDef } from "../knives/types";
 import { viewmodelGeometry } from "../mesh";
 import type { VmAction } from "../procedural";
@@ -83,6 +84,13 @@ function frame(): void {
 }
 
 const specs = (dflt: string) => (q.get("cells") ?? dflt).split(",");
+// The left thumb's correction (leftthumb.ts LEFT_THUMB) per cell in turn: &lt=0|on (0 = v_knife_t's own thumb, a number
+// = that many degrees, "on" = the shipped one).
+const ltShipped = LEFT_THUMB.tip;
+const ltCells = q.get("lt")?.split("|").map((s) => (s === "on" ? ltShipped : Number(s)));
+const setThumb = (i: number) => void (ltCells && (LEFT_THUMB.tip = ltCells[i % ltCells.length]));
+// (A screenshot driver flips it on a loaded page: window.__leftThumb.tip = 0.)
+Object.assign(window, { __leftThumb: LEFT_THUMB });
 
 // ---------------------------------------------------------------------------------------------
 
@@ -109,7 +117,7 @@ async function firstPerson(): Promise<void> {
   const zoom = Number(q.get("zoom") ?? 1), cx = Number(q.get("cx") ?? 0.5), cy = Number(q.get("cy") ?? 0.5);
   const sp = specs("glove-sport-carrot:carrot:idle,glove-sport-carrot:karrotbit:idle");
   cols = Number(q.get("cols") ?? Math.min(sp.length, 3));
-  cells = sp.map((s) => {
+  cells = sp.map((s, ci) => {
     // (7th / 8th fields: a hilt skin and a finish for the cell, "black" or "hilt-black", "sunset" or "fin-sunset".)
     const [glove, kid, act = "idle", t = "0", hand = "right", cellOutfit, cellHilt, cellFinish] = s.split(":");
     const k = knifeOf(kid);
@@ -123,6 +131,7 @@ async function firstPerson(): Promise<void> {
         vm.setLoadout(loadoutOf(glove, k, cellHilt, cellFinish));
         prefs.get().viewmodel.hand = hand === "left" ? "left" : "right";
         vm.seek(act as VmAction | "inspect", Number(t));
+        setThumb(ci);
         world.aspect = w / h;
         world.updateProjectionMatrix();
         if (zoom !== 1) vm.camera.setViewOffset(w, h, cx * w - w / (2 * zoom), cy * h - h / (2 * zoom), w / zoom, h / zoom);
@@ -136,7 +145,9 @@ async function firstPerson(): Promise<void> {
     const k = knifeOf(q.get("knife"));
     const orbit = new THREE.PerspectiveCamera(30, 1, 0.1, 200);
     const r = vmRig();
-    const hb = r.bone("Right_Hand"), kb = r.bone("Knife_Handle");
+    // &side=left: around the open off hand instead of the knife fist.
+    const leftSide = q.get("side") === "left";
+    const hb = r.bone(leftSide ? "Left_Hand" : "Right_Hand"), kb = r.bone(leftSide ? "Left_Middle02" : "Knife_Handle");
     const dist = Number(q.get("dist") ?? 15);
     const v = specs("20,80,140,200,260,320");
     cols = Number(q.get("cols") ?? 3);
@@ -150,6 +161,7 @@ async function firstPerson(): Promise<void> {
           vm.setLoadout(loadoutOf(glove, k));
           prefs.get().viewmodel.hand = "right";
           vm.seek((q.get("act") ?? "idle") as VmAction | "inspect", Number(q.get("t") ?? 0));
+          setThumb(i);
           world.aspect = w / h;
           world.updateProjectionMatrix();
           vm.update(0, still, held);

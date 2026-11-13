@@ -14,6 +14,7 @@
 import { appLocation } from "../platform/navigation";
 import type * as THREE from "three";
 import type { Core, PlayerState, RestartPoint } from "../core";
+import type { MapFile } from "../content/map-file";
 import type { Input, UserCmd } from "../input";
 import type { RunSession } from "../session";
 import { h } from "../ui/dom";
@@ -39,7 +40,7 @@ export interface TutorialHost {
   core: Core;
   input: Input;
   scene: THREE.Scene;
-  bsp: Uint8Array;
+  bsp: MapFile;
   wasmBytes: Uint8Array;
   /** main.ts restart(track, at). */
   restart: (track?: number, at?: RestartPoint | null) => void;
@@ -205,8 +206,10 @@ export class TutorialMode {
     this.showUntil = now + INSTRUCTION_MS;
     this.hintUntil = now + INSTRUCTION_MS;
     this.marks.setExit(i, g.done);
-    // Lessons 1-3 are untimed practice: no run timer (it would sit at 00:00.000). The final course shows it.
+    // Lessons 1-3 are untimed practice: no run timer (it would sit at 00:00.000), no split, stats or stage line
+    // (tutorial.css) and no PB / WR ghost, so the lesson's one line is all there is to read. The final course shows them.
     document.body.classList.toggle("tutorial-practice", i !== FINAL);
+    this.host.session.ghosts.setLessons(i !== FINAL);
     this.stopDemo();
     // Show, don't tell: the first time in a lesson, the demo ghost runs it once (X hides it, or brings it back).
     if (!tutorialProgress().lessons[l.id] && !this.autoPlayed.has(l.id) && l.id !== "final") {
@@ -399,9 +402,9 @@ export class TutorialMode {
     try {
       if (!this.aux) {
         this.aux = await (await import("../core")).Core.create(this.host.wasmBytes as Uint8Array<ArrayBuffer>);
-        this.aux.loadMapPhysics(this.host.bsp);
+        await this.aux.loadMapPhysicsStream(this.host.bsp.stream(), this.host.bsp.size);
       }
-      const d = await DemoGhost.create({ wasmBytes: this.host.wasmBytes, bsp: this.host.bsp, scene: this.host.scene, demo: src, aux: this.aux, loop });
+      const d = await DemoGhost.create({ scene: this.host.scene, demo: src, aux: this.aux, loop });
       if (this.lesson !== l || this.demo) return d.dispose();
       this.demo = d;
     } catch (e) {
@@ -477,5 +480,6 @@ export class TutorialMode {
     this.guide.el.remove();
     document.removeEventListener("pointerlockchange", this.onLock);
     document.body.classList.remove("tutorial-mode", "tutorial-practice", "tutorial-title");
+    this.host.session.ghosts.setLessons(false);
   }
 }

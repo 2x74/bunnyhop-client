@@ -4,6 +4,7 @@
 #include "gun_hold.hpp"
 #include "third_person_events.hpp"
 #include "first_person_weapons.hpp"
+#include "model_light.hpp"
 #include <charconv>
 #include <optional>
 #include <span>
@@ -42,6 +43,9 @@ class NativeViewmodel {
         bool hoodDown = false;
         std::array<float, 24> palette{};
         std::array<float, 15> gloveColors{};
+        // The colourway's pattern on the hoodie (web fabric.ts setGarmentPattern): kind 0 is none.
+        std::array<float, 4> patternKind{0, 1, 1, 0}, patternShape{};
+        std::array<float, 6> patternColors{};
         std::array<float, 3> accent{}, hairColor{};
         // The ponytail's length over the built one (loadout.hairLength / 100).
         float hairLength = 1;
@@ -64,6 +68,7 @@ class NativeViewmodel {
     std::unordered_map<std::string, std::unique_ptr<native_actor_anim::State>> actorAnimationStates;
     BhContext *groundCore = nullptr;
     double motionScale = 1;
+    native_render::ModelLight modelLight;
     Gl &gl;
     using PlayerProgram = native_render::PlayerProgram;
     using PlayerMaterial = native_render::PlayerMaterial;
@@ -224,6 +229,19 @@ class NativeViewmodel {
     }
 
     // The website's hat fit for this body (player/bunny/hat-fit.ts, exported per look and hat) and which mesh it wears.
+    void read_pattern(Look &out) const {
+        const auto &patterns = metadata.at("outfitPatterns");
+        const auto found = patterns.find(out.outfit);
+        if (found == patterns.end()) return;
+        const auto copy = [](const nlohmann::json &values, auto &into) {
+            for (size_t i = 0; i < into.size(); ++i)
+                into[i] = values.at(i).get<float>();
+        };
+        copy(found->at("kind"), out.patternKind);
+        copy(found->at("shape"), out.patternShape);
+        copy(found->at("colors"), out.patternColors);
+    }
+
     void fit_headwear(Look &out) const {
         out.bodyLook = body_look(out.outfit);
         if (!out.hat.empty()) {
@@ -312,6 +330,7 @@ class NativeViewmodel {
         for (size_t slot = 0; slot < 8; ++slot)
             linearColor(palette.at(slots[slot]), out.palette.data() + slot * 3);
         linearColor(palette.at("accent"), out.accent.data());
+        read_pattern(out);
         const auto &glove = metadata.at("gloves").at(out.gloveId);
         const char *gloveSlots[] = {"base", "fingers", "tips", "strap", "detail"};
         for (size_t slot = 0; slot < 5; ++slot)
@@ -417,6 +436,12 @@ class NativeViewmodel {
         p.hiltB = at("uHiltB");
         p.hiltM = at("uHiltM");
         p.camoC = at("uCamoC");
+        p.mapLight = at("uMapLight");
+        p.garmentPattern = at("uGarmPat");
+        p.garmentPatternShape = at("uGarmPatP");
+        p.garmentPatternColors = at("uGarmPatC");
+        p.depthFogColor = at("uDepthFogColor");
+        p.depthFogRange = at("uDepthFogRange");
         p.camoP = at("uCamoP");
         p.camoScale = at("uCamoScale");
         p.camoTp = at("uCamoTp");
@@ -783,12 +808,31 @@ class NativeViewmodel {
         gl.Uniform2f(p.nearFade, 0, 0);
         // The distance contour is for world bunnies only; the first-person hands share the solid program.
         gl.Uniform1f(p.contour, 0);
+        // Previews and the Loadout show the plain model; world draws set the map's (world_light_uniforms).
+        gl.Uniform3f(p.mapLight, 0, 0, 0);
+        gl.Uniform3f(p.depthFogRange, 0, 1, 0);
+    }
+
+    // The map's fog and light on a model drawn in the world, while the renderer has set them for this frame. `lit`:
+    // ghost-style models keep their own look and only take the fog.
+    void world_light_uniforms(
+            const PlayerProgram &p, const std::string &key, const float at[3], double seconds, float exposure, bool lit
+    ) {
+        if (!worldLook.active) return;
+        gl.Uniform3fv(p.depthFogColor, 1, worldLook.fog_color.data());
+        gl.Uniform3fv(p.depthFogRange, 1, worldLook.fog_range.data());
+        if (!lit) return;
+        const auto light = modelLight.light(groundCore, key, at, seconds, exposure);
+        gl.Uniform3fv(p.mapLight, 1, light.data());
     }
 
     void bind_look(const PlayerProgram &p, const Look &look) {
         gl.Uniform3fv(p.palette, 8, look.palette.data());
         gl.Uniform3fv(p.accent, 1, look.accent.data());
         gl.Uniform3fv(p.glove, 5, look.gloveColors.data());
+        gl.Uniform4fv(p.garmentPattern, 1, look.patternKind.data());
+        gl.Uniform4fv(p.garmentPatternShape, 1, look.patternShape.data());
+        gl.Uniform3fv(p.garmentPatternColors, 2, look.patternColors.data());
         gl.Uniform3fv(p.hiltA, 3, look.hiltA.data());
         gl.Uniform3fv(p.hiltB, 3, look.hiltB.data());
         gl.Uniform3fv(p.hiltM, 1, look.hiltM.data());
@@ -1539,8 +1583,27 @@ public:
         motionScale = native::motion_scale(reduced_motion);
     }
 
+    // The map's fog and light for this frame's world draws (the renderer sets it before them and clears it after).
+    struct WorldLook {
+        bool active = false;
+        native_render::ModelLightMode mode = native_render::ModelLightMode::off;
+        std::array<float, 3> fog_color{}, fog_range{0, 1, 0}, eye{};
+        // The HDR look's exposure: the viewmodels are drawn after it.
+        float exposure = 1;
+    };
+
+    void world_look(const WorldLook &look) {
+        worldLook = look;
+        modelLight.set_mode(look.mode);
+    }
+
+    WorldLook worldLook;
+    // The first-person hands and weapon, lit at the eye.
+    inline static const std::string eye_light_key = "\x01eye";
+
     // Drops an actor's animation and gesture state, so its next pose starts from scratch.
     void forget_actor(const std::string &id) {
+        modelLight.forget(id);
         actorAnimationStates.erase(id);
         actorActions.erase(id);
         actorHolds.erase(id);
@@ -1656,6 +1719,10 @@ public:
         const float ponytail[4] = {float(tail.pitch), float(tail.side), l.hairLength, 0};
         gl.Uniform4fv(actorProgram.ponytail, 1, ponytail);
         world_body_uniforms(actorProgram, origin.data());
+        constexpr float chest_units = 40;
+        const float chest[3] = {origin[0], origin[1], origin[2] + chest_units};
+        const bool solid = source == native_render::GhostSource::none;
+        world_light_uniforms(actorProgram, actor.id, chest, seconds, 1, solid);
         if (source != native_render::GhostSource::none) ghost_uniforms(actorProgram, actor, source);
         const auto visibleParts = parts_for(actor, l);
         gl.Enable(GL_DEPTH_TEST);
@@ -1835,6 +1902,7 @@ private:
         options.glow = firstPersonGlow && localGlow ? &*localGlow : nullptr;
         const auto model = native::multiply(native::model_matrix(turn), to_matrix(view));
         const auto &handsProgram = bind(equipped, projection, model, eye, seconds, options);
+        world_light_uniforms(handsProgram, eye_light_key, worldLook.eye.data(), seconds, worldLook.exposure, true);
         gl.FrontFace(leftHand ? GL_CW : GL_CCW);
         for (const auto &part : layer.entry->meshes)
             mesh(part);

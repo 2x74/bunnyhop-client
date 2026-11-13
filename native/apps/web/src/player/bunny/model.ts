@@ -28,6 +28,7 @@ import { bunnyGeometry, type BunnyHood } from "./mesh";
 import { hoodOf } from "./prebuild-parts";
 import type { KnifeDef } from "../../viewmodel/knives/types";
 import { colourway, paletteOf, type Colourway } from "./palettes";
+import { setGarmentPattern } from "../fabric";
 import { BunnyProcedural } from "./procedural";
 import { BodyBank } from "./bank";
 import { LegLayer, type GroundProbe } from "./legs";
@@ -543,6 +544,7 @@ export class BunnyModel implements PlayerModelImpl {
     this.uniforms.uFabric.value = this.bodyLook === "plush" ? 1 : 0;
     const pal = paletteOf(this.colours);
     this.uniforms.uPalette.value.forEach((c, i) => c.set(pal[i]));
+    setGarmentPattern(this.uniforms, this.colours.pattern);
     if (this.style === "solid") this.uniforms.uAccent.value.set(this.accentOverride ?? this.colours.accent);
   }
 

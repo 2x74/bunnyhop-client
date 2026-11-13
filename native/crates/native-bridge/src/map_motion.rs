@@ -44,6 +44,12 @@ pub(super) struct Motion {
     /// Decoded flipbook frames 1.. by texture index (frame 0 is the texture itself).
     frames: HashMap<(i32, u32), map_load::PreparedTexture>,
     wireframes: Vec<BhMaterialWireframe>,
+    /// Each material's `$alpha` chain (material_alpha.rs), read the first time one is asked for.
+    pub(super) alpha: Option<Vec<Option<super::material_alpha::AlphaProgram>>>,
+    /// Each material's blend facts (brush_render.rs), read with the chains.
+    pub(super) blend: Vec<super::brush_render::BhMaterialBlend>,
+    /// Entities whose render keys the map changes while it runs (brush_render.rs), found the first time asked.
+    pub(super) dynamic_render: Option<Vec<u32>>,
 }
 
 /// Flipbooks decoded so far: frames per texture, and the pixels they count against the map's budget.
@@ -152,9 +158,11 @@ pub(super) struct Proxy {
     pub params: HashMap<String, String>,
 }
 
-/// A VMT as vmt.ts reads it: its top-level parameters (lower case keys, the last value wins) and its proxies.
+/// A VMT as vmt.ts reads it: its shader (lower case, the included one for a patch), its top-level parameters (lower
+/// case keys, the last value wins) and its proxies.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(super) struct Vmt {
+    pub shader: String,
     pub params: HashMap<String, String>,
     pub proxies: Vec<Proxy>,
 }
@@ -190,7 +198,7 @@ fn flatten(body: &[(String, Kv)], vmt: &mut Vmt) {
 }
 
 /// `materials/<name>.vmt` for a material name or include value (vmt.ts vmtPath).
-fn vmt_path(name: &str) -> String {
+pub(super) fn vmt_path(name: &str) -> String {
     let lower = name.to_lowercase().replace('\\', "/");
     let trimmed = lower.trim_start_matches('/');
     let bare = trimmed.strip_prefix("materials/").unwrap_or(trimmed);
@@ -208,7 +216,10 @@ pub(super) fn load_vmt(read: &mut dyn FnMut(&str) -> Option<Vec<u8>>, path: &str
     }
     let (shader, body) = parse_key_values(&read(path)?)?;
     if shader != "patch" {
-        let mut vmt = Vmt::default();
+        let mut vmt = Vmt {
+            shader,
+            ..Vmt::default()
+        };
         flatten(&body, &mut vmt);
         return Some(vmt);
     }
@@ -275,7 +286,7 @@ fn number(params: &HashMap<String, String>, key: &str, fallback: f64) -> f64 {
 }
 
 /// JavaScript's `Number` on one whitespace-free token: the whole token, an empty one is 0, `0x` / `0o` / `0b` prefixes.
-fn js_number(token: &str) -> Option<f64> {
+pub(super) fn js_number(token: &str) -> Option<f64> {
     if token.is_empty() {
         return Some(0.0);
     }
@@ -459,6 +470,9 @@ impl Map {
             serde_json::from_slice(self.assets.material_names.to_bytes()).map_err(|e| e.to_string())?;
         let mut motion = Motion {
             ready: true,
+            alpha: self.motion.alpha.take(),
+            blend: std::mem::take(&mut self.motion.blend),
+            dynamic_render: self.motion.dynamic_render.take(),
             ..Motion::default()
         };
         motion
@@ -545,6 +559,22 @@ pub unsafe extern "C" fn bh_material_motion(ctx: *mut BhContext, count: *mut usi
 
 /// Frame `frame` (1..frames) of texture `texture`'s flipbook. Each frame is handed over once; the pixels stay valid
 /// until the next texture request.
+/// A sprite texture's VTF frames (env_sprite plays them at `framerate`): the frame count into `out` (1 for a still
+/// texture), frames 1.. then handed over once each by bh_texture_frame.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bh_texture_flipbook(ctx: *mut BhContext, texture: i32, out: *mut u32) -> c_int {
+    unsafe {
+        call(ctx, |c| {
+            let m = c.map()?;
+            m.prepare_motion(&|| Ok(()))?;
+            let mut frames = std::mem::take(&mut m.motion.frames);
+            let count = m.flipbook(texture, &mut Flipbooks::default(), &mut frames);
+            m.motion.frames = frames;
+            output(out, count.max(1))
+        })
+    }
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bh_texture_frame(ctx: *mut BhContext, texture: i32, frame: u32, out: *mut BhImage) -> c_int {
     unsafe {

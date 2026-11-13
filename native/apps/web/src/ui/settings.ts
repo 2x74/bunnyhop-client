@@ -2,7 +2,7 @@ import { videoGrade, VIDEO_LIMITS, type VideoGrade } from "../video-settings";
 import { sanitizeMapLooks, type MapLook } from "../map-look";
 import { ANGLE_SPEED_KEY_RANGE, YAW_SPEED_RANGE } from "../turn-binds";
 import type { LightingProfileId } from "../graphics/profiles";
-import { graphicsPreset as lookPreset, type GraphicsPreset as LookPreset } from "../graphics/presets";
+import { graphicsPreset as lookPreset, MODEL_LIGHTING_MODES, type GraphicsPreset as LookPreset, type ModelLighting } from "../graphics/presets";
 import { DEFAULT_MOUSE_DPI } from "../mouse-settings";
 import { M_YAW, M_YAW_RANGE } from "../sens-convert";
 import { sanitizeAliases, sanitizeCmdBinds } from "../console/bind-store";
@@ -307,6 +307,14 @@ export interface Prefs {
     preset: LookPreset;
     /** Reflective water in the Source look (re-renders the scene for water in view, like CS:S). */
     waterReflections: boolean;
+    /** The map's own fog (env_fog_controller), as CS:S draws it. Never in Potato mode. */
+    mapFog: boolean;
+    /** The map's overlays, decals, glows and light beams (map-dressing.ts), as CS:S draws them. Never in Potato mode. */
+    mapDetails: boolean;
+    /** The map's light on hands, weapons and bunnies (model-light.ts). Potato and Fullbright behave as "off". */
+    modelLighting: ModelLighting;
+    /** Props lit by the map (as CS:S lights them) or, off, by the plain shading they had before 0.0.41. */
+    propLighting: boolean;
     bloom: boolean;
     mapProfiles: boolean;
     ambienceShowcase: boolean;
@@ -597,7 +605,7 @@ export const DEFAULT_PREFS: Prefs = {
   showPlayers: true,
   firstPersonGlow: true,
   mapLooks: {},
-  graphics: { preset: "source", waterReflections: true, bloom: true, mapProfiles: false, ambienceShowcase: false, lightingProfile: "map", skyMode: "map", skyPackId: null, skyRotation: 0, skyExposure: 0, lightingSource: "map", directContribution: 1, ambientContribution: 1, clouds: false, cloudQuality: "low", cloudCoverage: .45, cloudDensity: 1, contactShading: false, atmosphere: false, sunShafts: false, materialResponse: true, volumetric: false, spatialAA: true, localLights: false, localQuality: "medium", localBudget: 1, localStrength: .2, dynamicGI: false, tracedGI: false, giQuality: "low", giStrength: .25, giRange: 256, dynamicShadows: false, shadowQuality: "medium", shadowDistance: 1024, shadowStrength: .18, resolutionScale: 1, antialias: true, aspect: "native", aspectFit: "stretch", pixelated: false, anisotropy: 8, brightness: 1, gamma: 1, vibrance: 1, fullbright: false, menuBackground: "live", fullscreen: true, potato: false, flashlight: false, fpsLimit: 1000, uncapped: false, lowLatency: false, menuFps: 0 },
+  graphics: { preset: "source", waterReflections: true, mapFog: true, mapDetails: true, modelLighting: "subtle", propLighting: true, bloom: true, mapProfiles: false, ambienceShowcase: false, lightingProfile: "map", skyMode: "map", skyPackId: null, skyRotation: 0, skyExposure: 0, lightingSource: "map", directContribution: 1, ambientContribution: 1, clouds: false, cloudQuality: "low", cloudCoverage: .45, cloudDensity: 1, contactShading: false, atmosphere: false, sunShafts: false, materialResponse: true, volumetric: false, spatialAA: true, localLights: false, localQuality: "medium", localBudget: 1, localStrength: .2, dynamicGI: false, tracedGI: false, giQuality: "low", giStrength: .25, giRange: 256, dynamicShadows: false, shadowQuality: "medium", shadowDistance: 1024, shadowStrength: .18, resolutionScale: 1, antialias: true, aspect: "native", aspectFit: "stretch", pixelated: false, anisotropy: 8, brightness: 1, gamma: 1, vibrance: 1, fullbright: false, menuBackground: "live", fullscreen: true, potato: false, flashlight: false, fpsLimit: 1000, uncapped: false, lowLatency: false, menuFps: 0 },
   viewmodel: { show: true, ...VIEWMODEL_POS, bob: VIEWMODEL_BOB, sway: 1, hand: "right", inspect: "tricks", landSettle: false, speedFov: false, rev: VIEWMODEL_REV },
   binds: DEFAULT_BINDS,
   cmdBinds: {},
@@ -851,6 +859,7 @@ export function parsePrefs(raw: string | null): Prefs {
   for (const code of Object.keys(p.cmdBinds)) for (const a of Object.keys(p.binds) as Action[]) p.binds[a] = p.binds[a].filter((c) => c !== code);
   if (!COLOR_BLIND_MODES.some(([m]) => m === p.colorBlind)) p.colorBlind = DEFAULT_PREFS.colorBlind;
   p.graphics.preset = lookPreset(p.graphics.preset);
+  if (!MODEL_LIGHTING_MODES.includes(p.graphics.modelLighting)) p.graphics.modelLighting = DEFAULT_PREFS.graphics.modelLighting;
   return p;
 }
 
@@ -915,8 +924,36 @@ class PrefStore {
 
 export const prefs = new PrefStore();
 
-/** Human label for a bind code ("KeyW" -> "W", "MouseWheel" -> "Wheel"). */
+/**
+ * The keyboard layout's character for each key code (navigator.keyboard.getLayoutMap(): Chromium), or null where the
+ * browser has none. Binds stay positional (by code); only their names follow the layout, so an AZERTY player's
+ * forward key (KeyW) reads "Z". Read at load and whenever the window comes back (the OS layout may have changed).
+ */
+let layout: ReadonlyMap<string, string> | null = null;
+/** Letter and symbol keys (not digits: their keycaps print the digit on every layout). */
+const LAYOUT_CODE = /^(Key[A-Z]|Backquote|Minus|Equal|BracketLeft|BracketRight|Backslash|Semicolon|Quote|Comma|Period|Slash|IntlBackslash)$/;
+/** Sets the layout keyLabel names keys by (tests; the browser's own otherwise). */
+export function setKeyLayout(m: ReadonlyMap<string, string> | null): void {
+  layout = m;
+}
+function readKeyLayout(): void {
+  try {
+    const kb = (navigator as Navigator & { keyboard?: { getLayoutMap?: () => Promise<ReadonlyMap<string, string>> } }).keyboard;
+    kb?.getLayoutMap?.().then(setKeyLayout, () => {});
+  } catch {
+    /* not allowed here (a cross-origin frame): QWERTY names */
+  }
+}
+if (typeof window !== "undefined" && typeof navigator !== "undefined") {
+  readKeyLayout();
+  window.addEventListener?.("focus", readKeyLayout);
+}
+
+/** Human label for a bind code ("KeyW" -> "W", "MouseWheel" -> "Wheel"), by the keyboard's layout where known. */
 export function keyLabel(code: string): string {
+  const ch = layout && LAYOUT_CODE.test(code) ? layout.get(code) : undefined;
+  // In capitals, as keycaps print letters; a character with no single capital stays itself (ß would read "SS").
+  if (ch && ch.length === 1 && ch.trim()) return ch.toUpperCase().length === 1 ? ch.toUpperCase() : ch;
   const special: Record<string, string> = {
     Space: "Space",
     ControlLeft: "L-Ctrl",

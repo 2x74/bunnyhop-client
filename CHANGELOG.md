@@ -1,5 +1,58 @@
 # Changelog
 
+## v0.9.2 — Native
+
+Matches website v0.0.41. Update from Settings → Updates: press Update, then Restart. Your settings, replays and maps
+are kept.
+
+This update is for Windows and Linux. The macOS build follows: GitHub again had no Mac build machines free today, and
+we don't ship a Mac package that wasn't built and checked there. Mac players stay on v0.9.0 until then.
+
+- Scroll jumps land on the tick you scrolled in, like the mouse and strafe keys already did. Before, a wheel notch went
+  into the frame's first tick, so at 60 Hz a scroll jump could miss landings. Your existing runs don't change.
+- Maps draw their own fog, as in CS:S. Turn it off with Settings → Graphics → Map fog.
+- Hands, weapons and bunnies take the map's light, so they no longer glow in dark maps. Settings → Graphics → Model
+  lighting: Off, Subtle or Full. Props are lit by the map too; Settings → Graphics → Prop lighting keeps them bright.
+- Maps show more of what their mappers put in them: overlays and decals (arrows, signs, credits, stains), sprites,
+  light glows, spotlight beams and self-lit textures, drawn like in CS:S. Settings → Graphics → Map details turns the
+  overlays, decals, glows and beams off.
+- Windows and doorways that maps close off from a distance open up as you approach, like in CS:S. On bhop_angst the
+  doorway at 40 seconds shows the next room, and the black floors clear as you fall towards them. Surfaces that maps
+  fade by distance or pulse over time now do so: the platforms on the badges maps that only appear up close, combine
+  shields, pulsing boosters on bhop_avantasia.
+- Brushes that maps hide, make see-through, tint, blink or show as holograms now draw that way, like in CS:S: glass
+  you can see through, coloured blocks, bhop_vacban's blinking walls, and the invisible blocks on bhop_union.
+- bhop_angst's hanging loops are white again, as in CS:S.
+- Jump stats and the JHUD keep counting while you hop in the start zone. The count starts over once you let go of
+  jump and stand still, as on CS:S servers.
+- While you spectate someone in a server, the speed graph shows their speed.
+- The Loadout no longer flickers when you move over items: the picture stays until the next one is ready, and items
+  you have already looked at show at once.
+- The voice list is part of the HUD layout: move it, resize it or hide it with Edit layout. Layout codes from the
+  website's v0.0.41 import here, and older codes still work. A piece dragged to the edge of the screen stops there
+  instead of going off it.
+- Trails have shapes: Twin, Dashes, Comet, Seeds, Petals and Clover, picked in the Loadout's Trail shape tab. Any
+  shape goes with any trail colour.
+- Seven colourways carry their set's pattern on your bunny: Dev Grid, Draftsman, Fluorescent, Meadow, Geode, High
+  Roller and Lapis.
+- Halo, Aurora, Capybara, Maxwell and Silver Wreath are bigger and easier to see on other players.
+- Thornback and Thistle have new garden looks. Six gun camos are restyled: Woodland, Flagstone (was Desert), Snowfield,
+  Fireflies (was Night Woodland), Graphite and Carbon.
+- Learn to bhop: lessons show only your speed and your keys.
+- "1 jump" and "1 strafe" under the timer. "R to go again" is easier to read on bright maps, and the strafe trainer
+  steps aside while the end card is up.
+- Play online shows who is in each server, with their picture, name and badges, and a picture of the map it's on.
+  Click a name for their profile. Each server says where it is.
+- Two new servers in Europe: EU Easy and EU Hard. The two in US East are now called NA Easy and NA Hard.
+- The menu matches the website: Play online and Play solo on the home screen, the plain pause menu tabs, the new Ranks
+  explanation and the rest of v0.0.41's menu changes.
+
+Not in the desktop client yet, coming in a later update:
+
+- Keys held while you click back into the game don't move you until you press them again.
+- Still missing from v0.9.1: bonus tracks in other styles, the strafe trainer in every style, the new notices,
+  supporter name colours and effects in the game, the LIVE mark and choosing your microphone.
+
 ## v0.9.1 — Native
 
 Voice chat and the new Auto-strafe timing from website v0.0.40, plus fixes for v0.9.0. Update from Settings →

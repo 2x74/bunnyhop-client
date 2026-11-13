@@ -88,7 +88,7 @@ int main(int argc, char **argv) {
         native::Renderer renderer(gl, core.get());
         renderer.set_viewmodel_visible(false);
         renderer.set_zones_visible(false);
-        renderer.set_ghost_cosmetics("ghost-geode", "trail-geode");
+        renderer.set_ghost_cosmetics("ghost-geode", "trail-geode", "shape-ribbon");
         std::vector<native_render::Actor> actors;
         for (unsigned slot = 0; slot < 3; ++slot) {
             auto path = fixture_path(spawn, slot);
@@ -125,6 +125,12 @@ int main(int argc, char **argv) {
         capture("ghost-colours-pb-wr-custom");
         preferences["ghostTrail"] = true;
         capture("recorded-trails");
+        // The website's trail shapes (trail_shapes.hpp), each on the same recorded paths.
+        for (const char *shape : {"comet", "twin", "dashes", "seeds", "petals", "clover"}) {
+            renderer.set_ghost_cosmetics("ghost-geode", "trail-geode", std::string("shape-") + shape);
+            capture((std::string("trail-shape-") + shape).c_str());
+        }
+        renderer.set_ghost_cosmetics("ghost-geode", "trail-geode", "shape-ribbon");
         preferences["ghostRoute"] = true;
         preferences["ghostRouteMode"] = "path";
         capture("route-guide");

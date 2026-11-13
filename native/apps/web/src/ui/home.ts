@@ -1,4 +1,5 @@
-// Home (title) screen: the menu column over the live map background (attract.ts), and on the right six maps to try
+// Home (title) screen: the menu column over the live map background (attract.ts), led by its two play buttons (Play
+// online, Play solo), and on the right six maps to try
 // (the one behind the menu first, then what to play next) as quick links with their pictures, with the recent world
 // records under them (ui/home-records.ts; four maps then, unless the window is tall), and above those, while someone is
 // streaming, Live now (ui/home-live.ts). The tutorial is on the menu for a new player's first two
@@ -63,11 +64,12 @@ const LAST_MAP = "bunnyhop:last-map";
 /** PBs and WRs on the home screen follow the selected style (ui/style-picker.ts). */
 const STYLE = selectedStyle();
 
-function item(label: string, sub: string | HTMLElement | null, fn: () => void, o: { primary?: boolean; hint?: string } = {}): HTMLElement {
+/** `primary`: one of the two amber buttons. `lead`: the one the menu opens on (Enter). `slug`: its data-item, when the label isn't it. */
+function item(label: string, sub: string | HTMLElement | null, fn: () => void, o: { primary?: boolean; lead?: boolean; hint?: string; slug?: string } = {}): HTMLElement {
   return h(
     `button.menu-btn.home-item${o.primary ? ".primary" : ""}`,
     // data-item: a hook custom CSS may rely on (/custom-css). Renaming a label? Keep its old data-item.
-    { type: "button", onclick: fn, "data-autofocus": o.primary ? "" : undefined, "data-item": itemSlug(label) },
+    { type: "button", onclick: fn, "data-autofocus": o.lead ? "" : undefined, "data-item": o.slug ?? itemSlug(label) },
     h("span.mb-label", null, h("span.mb-title", null, label), sub ? h("small", null, sub) : null),
     o.hint ? h("span.mb-hint", { "aria-hidden": "true" }, o.hint) : null,
   );
@@ -278,14 +280,18 @@ export function homeScreen(a: HomeActions): HTMLElement {
   let plateMap: string | null = null;
   const play = () => (!last && plateMap ? a.pick(plateMap) : a.play());
   const learnSub = tutorialSub();
+  // The two ways in, the same button each, online first: the menu opens on it, so Enter goes there. Its second line is
+  // the live player count from the server list (refreshed while shown). Without servers (an offline build) there is
+  // one button, Play, as before. (Why ping doesn't matter is said on the Play online screen itself: servers.ts.)
+  const online = api.available() && a.servers ? a.servers : null;
   const menu = h(
     "nav.menu-list.home-menu",
     { "aria-label": "Main menu" },
-    item("Play", null, play, { primary: true, hint: "Enter" }),
+    online ? item("Play online", onlineSummary(), online, { primary: true, lead: true, hint: "Enter" }) : null,
+    // (data-item stays "play": themes style it.)
+    item(online ? "Play solo" : "Play", null, play, { primary: true, lead: !online, hint: online ? undefined : "Enter", slug: "play" }),
     // Progress only ("2 of 4 lessons done"); a fresh tutorial needs no caption.
     learn ? item("Learn to bhop", /lessons done|Finished/.test(learnSub) ? learnSub : null, () => openTutorial(a.pick)) : null,
-    // The live player count from the server list (refreshed while shown) is its second line.
-    api.available() && a.servers ? item("Play online", onlineSummary(), a.servers) : null,
     a.gauntlets ? item("Gauntlets", weeklySub(), a.gauntlets) : null,
     last ? item("Continue", h("span.cont-sub", null, h("b", null, last), lastPB ? h("span", null, formatTime(lastPB.time)) : null), () => a.pick(last)) : null,
     api.available() ? profileItem(a) : a.loadout ? loadoutItem(a.loadout) : null,

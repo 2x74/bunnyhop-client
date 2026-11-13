@@ -146,10 +146,17 @@ export class CellCuller {
   private data = new WeakMap<THREE.BufferGeometry, Culled>();
   private meshes: THREE.Mesh[] = [];
 
-  /** Culls `mesh` per cell (whatever geometry it has at render time: Potato mode swaps them). */
-  add(mesh: THREE.Mesh): void {
+  private anyOrder = new WeakSet<THREE.Mesh>();
+
+  /**
+   * Culls `mesh` per cell (whatever geometry it has at render time: Potato mode swaps them). `anyOrder`: its blended
+   * groups may be split by cell too: the order between a group's own triangles doesn't show (the map's overlays and
+   * decals, one material per group, which seldom overlap).
+   */
+  add(mesh: THREE.Mesh, anyOrder = false): void {
     mesh.frustumCulled = false; // the cells do it
     this.meshes.push(mesh);
+    if (anyOrder) this.anyOrder.add(mesh);
   }
 
   /** Rewrites each mesh's groups to the cells `camera` sees. Call before projecting (scene.onBeforeRender). */
@@ -161,7 +168,8 @@ export class CellCuller {
       if (!d) {
         if (!geo.getIndex() || !geo.groups.length) continue;
         const mats = mesh.material;
-        this.data.set(geo, (d = split(geo, (i) => !!(Array.isArray(mats) ? mats[i] : mats)?.transparent)));
+        const anyOrder = this.anyOrder.has(mesh);
+        this.data.set(geo, (d = split(geo, (i) => !anyOrder && !!(Array.isArray(mats) ? mats[i] : mats)?.transparent)));
       }
       if (!mesh.visible) continue;
       mesh.updateWorldMatrix(true, false);

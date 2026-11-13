@@ -25,7 +25,7 @@
 
 import type * as THREE from "three";
 import type { CosmeticLoadout } from "../../loadout";
-import { floorWeapons, silencerTime, WEAPON_EVENT_DRY_FIRE, WEAPON_EVENT_MODE, WEAPON_EVENT_PICKED_UP, WEAPON_EVENT_RELOAD_FINISHED, WEAPON_EVENT_RELOAD_STARTED, WEAPON_EVENT_RESTORED, WEAPON_EVENT_SILENCER, WEAPON_IDS, type AttackReport, type BrushTransform, type Core, type WeaponReport } from "../../core";
+import { FLOOR_STRIDE, floorWeapons, silencerTime, WEAPON_EVENT_DRY_FIRE, WEAPON_EVENT_MODE, WEAPON_EVENT_PICKED_UP, WEAPON_EVENT_RELOAD_FINISHED, WEAPON_EVENT_RELOAD_STARTED, WEAPON_EVENT_RESTORED, WEAPON_EVENT_SILENCER, WEAPON_IDS, type AttackReport, type BrushTransform, type Core, type WeaponReport } from "../../core";
 import { impactSurface, modelOfEntity, playImpact } from "../../audio/impacts";
 import { gunById } from "./index";
 import { GunImpacts } from "./impacts";
@@ -35,6 +35,7 @@ import { GunViewmodel } from "./viewmodel";
 import { HOLSTER_TIME } from "./anim";
 import type { GunMotionInput } from "./motion";
 import { FloorGuns } from "./world";
+import { drawHiddenPrograms, warmPrograms } from "../../graphics/warm-programs";
 
 /** Sim tick length (s): the core's reload ticks become animation seconds with it. */
 const TICK = 0.01;
@@ -113,6 +114,40 @@ export class GunPresenter {
     const vm = new GunViewmodel(this.h.replay ? { loadout: this.h.replay.loadout } : {});
     vm.onSound = (kind, gain, rate) => this.sound(this.active, kind, gain, rate);
     return vm;
+  }
+
+  /**
+   * On a map with floor guns: compiles the gun viewmodel's programs (the hands + gun in your gloves and camo, its muzzle
+   * flash and shells) with the rest of the map's shader warm-up, and solves and builds the map's guns when the browser
+   * is idle, so the first pickup draws at once (it compiled in that frame: 441-467 ms on bhop_eazy, cold). Every gun
+   * shares the one material, so one gun's geometry stands for all. Resolves when they're ready; at once on a map
+   * without guns.
+   */
+  async warm(renderer: THREE.WebGLRenderer): Promise<void> {
+    const defs = this.floorDefs();
+    if (!defs.length) return;
+    const vm = this.cur, had = vm.def;
+    void vm.fx;
+    if (!had) vm.setGun(defs[0]);
+    try {
+      await warmPrograms(renderer, vm.scene, vm.camera, vm.scene);
+      await drawHiddenPrograms(renderer, vm.scene, vm.camera, vm.scene, true);
+    } finally {
+      if (!had) vm.setGun(this.active);
+    }
+    vm.prewarm(defs);
+  }
+
+  /** The distinct gun models among the map's weapon items (in the world now or not). */
+  private floorDefs(): GunDef[] {
+    const items = floorWeapons(this.h.core), out: GunDef[] = [];
+    // (Reading the floor report clears the weapon report's "floor changed": shown here, so no change goes unseen.)
+    if (!this.h.replay) this.floor.update(items);
+    for (let i = 0; i + FLOOR_STRIDE <= items.length; i += FLOOR_STRIDE) {
+      const def = gunForWeapon(items[i + 1]);
+      if (def && !out.includes(def)) out.push(def);
+    }
+    return out;
   }
 
   /** Gloves (and accents) on both gun viewmodels (the replay viewer's runner; yours follow your loadout). */

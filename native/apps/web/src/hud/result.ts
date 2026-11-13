@@ -22,7 +22,7 @@ import { spring, SPRINGS } from "../notify/spring";
 import { noteVerifiedRun } from "../ui/share";
 import { celebrateRun, openCustomise, runRewards } from "../ui/unlocks";
 import { hideUiHint, hideUiKey, uiHidden } from "../ui/hide-ui";
-import { formatDelta, splitLead } from "./time-face";
+import { countWord, formatDelta, splitLead } from "./time-face";
 import { hasRewards, playReel } from "./reel";
 import { playedText } from "../map-time";
 import type { Submission } from "../api";
@@ -88,8 +88,8 @@ export class ResultCard {
     const stats = h(
       "div.ec-stats",
       null,
-      h("span", null, h("b", null, String(r.jumps)), " jumps"),
-      h("span", null, h("b", null, String(r.strafes)), " strafes"),
+      h("span", null, h("b", null, String(r.jumps)), ` ${countWord(r.jumps, "jump")}`),
+      h("span", null, h("b", null, String(r.strafes)), ` ${countWord(r.strafes, "strafe")}`),
       h("span", null, h("b", null, `${r.sync.toFixed(1)}%`), " sync"),
       onMap?.attempts ? h("span", null, h("b", null, String(onMap.attempts)), onMap.attempts === 1 ? " attempt" : " attempts") : null,
       onMap && onMap.seconds >= 60 ? h("span", null, h("b", null, playedText(onMap.seconds)), " played") : null,

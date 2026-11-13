@@ -30,7 +30,7 @@ const FAR = 4096;
 const NEAR_STEP = 1 / 20;
 const FAR_STEP = 1 / 6;
 
-/** Prop lighting (render.ts PROP_LIGHT): a constant ambient plus a fixed directional term in vertex colours. */
+/** Stand-in prop shading (render.ts PROP_LIGHT): a constant ambient plus a fixed directional term in vertex colours. */
 const PROP_LIGHT = new THREE.Vector3(0.35, 0.45, 0.82).normalize();
 
 /** What the client knows about a prop without the core's states (`update` without them): its keyvalues. */
@@ -302,6 +302,36 @@ interface Instance {
   sizedFor: number;
   /** RandomAnimation props (until the map's I/O sets a sequence). */
   random: RandomAnimator | null;
+  /** The map's light where it stands (six linear RGB colours, core.ts lightCube), null: none, the stand-in shading. */
+  cube: Float32Array | null;
+  /** Its own copy of each geometry it has worn, coloured by `cube`. */
+  lit: Map<THREE.BufferGeometry, THREE.BufferGeometry>;
+}
+
+/**
+ * `base` (shared by every prop of the model) with this prop's own vertex colours: the map's light cube at the prop by
+ * each normal, turned by the prop's rotation (`cube`: +x, -x, +y, -y, +z, -z; Source's AmbientLight weights).
+ */
+function litGeometry(base: THREE.BufferGeometry, cube: Float32Array, rotation: THREE.Euler): THREE.BufferGeometry {
+  const geo = new THREE.BufferGeometry();
+  for (const name of Object.keys(base.attributes)) if (name !== "color") geo.setAttribute(name, base.getAttribute(name));
+  geo.setIndex(base.getIndex());
+  for (const g of base.groups) geo.addGroup(g.start, g.count, g.materialIndex);
+  geo.boundingSphere = base.boundingSphere;
+  geo.boundingBox = base.boundingBox;
+  const normal = base.getAttribute("normal");
+  const turn = new THREE.Matrix4().makeRotationFromEuler(rotation);
+  const colors = new Float32Array(normal.count * 3);
+  for (let i = 0; i < normal.count; i++) {
+    const n = tmpVec.fromBufferAttribute(normal, i).transformDirection(turn).toArray();
+    for (let axis = 0; axis < 3; axis++) {
+      const side = (axis * 2 + (n[axis] < 0 ? 1 : 0)) * 3;
+      const w = n[axis] * n[axis];
+      for (let k = 0; k < 3; k++) colors[i * 3 + k] += cube[side + k] * w;
+    }
+  }
+  geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  return geo;
 }
 
 export interface AnimatedProps {
@@ -313,6 +343,8 @@ export interface AnimatedProps {
   setViewer(position: THREE.Vector3): void;
   /** Potato: the frozen groups instead (no posing at all). */
   setEnabled(on: boolean): void;
+  /** Prop lighting: the map's light (on, the default) or the stand-in shading, live. */
+  setLit(on: boolean): void;
   dispose(): void;
   /** Poses computed since the last call (perf counter). */
   takePoseCount(): number;
@@ -332,6 +364,8 @@ export interface AnimatedPropsInput {
   mapSeed?: number;
   /** The core's moving prop meshes by entity (render.ts propsMesh). */
   fallbacks: Map<number, THREE.Mesh>;
+  /** The map's light cube at a Source-space point (core.ts lightCube); absent: the stand-in shading. */
+  light?: (x: number, y: number, z: number, out: Float32Array) => boolean;
   /** Prop materials and their names (parallel). */
   materials: THREE.Material[];
   materialNames: string[];
@@ -459,6 +493,12 @@ export function animatedProps(o: AnimatedPropsInput): AnimatedProps | null {
       continue;
     }
     const skeleton = new PropSkeleton(model.data.bones);
+    // Lit where it spawns, a little above its origin (which often sits in the floor).
+    const at = fallback.position;
+    const cube = new Float32Array(18);
+    const lit = !!o.light && [16, 0, 48].some((dz) => o.light!(at.x, at.y, at.z + dz, cube));
+    const worn = new Map<THREE.BufferGeometry, THREE.BufferGeometry>();
+    if (lit) worn.set(geo, (geo = litGeometry(geo, cube, fallback.rotation)));
     const mesh = new THREE.SkinnedMesh(geo, o.materials);
     mesh.bindMode = THREE.DetachedBindMode;
     mesh.bind(skeleton, new THREE.Matrix4());
@@ -471,7 +511,7 @@ export function animatedProps(o: AnimatedPropsInput): AnimatedProps | null {
     mesh.position.copy(fallback.position);
     mesh.rotation.copy(fallback.rotation);
     mesh.scale.setScalar(info.scale ?? 1);
-    const inst: Instance = { entity: info.entity, model, mesh, skeleton, fallback, info, state: null, stamp: NaN, stillAt: null, seq: -1, sizedFor: -2, random: null };
+    const inst: Instance = { entity: info.entity, model, mesh, skeleton, fallback, info, state: null, stamp: NaN, stillAt: null, seq: -1, sizedFor: -2, random: null, cube: lit ? cube : null, lit: worn };
     if (info.random) inst.random = new RandomAnimator(hashSeed(model.data.info.path, (o.mapSeed ?? 0) ^ Math.imul(info.entity + 1, 0x9e3779b1)), info.random.min, info.random.max, randomSource(model));
     skeleton.compute = () => pose(inst);
     instances.push(inst);
@@ -485,6 +525,7 @@ export function animatedProps(o: AnimatedPropsInput): AnimatedProps | null {
 
   let time = 0;
   let enabled = true;
+  let lit = true;
   let poses = 0;
   const viewer = new THREE.Vector3(Infinity, Infinity, Infinity);
   const byEntity = new Map<number, { state: PropAnimState | null }>([...instances, ...frozen].map((i) => [i.entity, i]));
@@ -604,6 +645,11 @@ export function animatedProps(o: AnimatedPropsInput): AnimatedProps | null {
         const key = `${skin}:${body}`;
         let geo = inst.model.geos.get(key);
         if (geo === undefined) inst.model.geos.set(key, geo = buildGeometry(inst.model.data, skin, body, matIndex, o.materials));
+        if (geo && inst.cube && lit) {
+          let own = inst.lit.get(geo);
+          if (!own) inst.lit.set(geo, (own = litGeometry(geo, inst.cube, inst.fallback.rotation)));
+          geo = own;
+        }
         if (geo) inst.mesh.geometry = geo;
         else inst.mesh.visible = false;
         // Parented props move with their parent (world.update placed the frozen group).
@@ -625,10 +671,24 @@ export function animatedProps(o: AnimatedPropsInput): AnimatedProps | null {
       enabled = on;
       applyVisibility();
     },
+    setLit(on) {
+      lit = on;
+      // Now, not at the next update (a paused view): each prop's own lit copy of what it wears, or the shared one.
+      for (const inst of instances) {
+        if (!inst.cube) continue;
+        const worn = inst.mesh.geometry;
+        const base = inst.lit.has(worn) ? worn : [...inst.lit].find(([, own]) => own === worn)?.[0];
+        if (!base) continue;
+        let own = inst.lit.get(base);
+        if (on && !own) inst.lit.set(base, (own = litGeometry(base, inst.cube, inst.fallback.rotation)));
+        inst.mesh.geometry = on ? own! : base;
+      }
+    },
     dispose() {
       for (const inst of instances) {
         inst.mesh.removeFromParent();
         inst.skeleton.dispose();
+        for (const g of inst.lit.values()) g.dispose();
       }
       for (const m of models.values()) for (const g of m?.geos.values() ?? []) g?.dispose();
     },

@@ -3,6 +3,9 @@
 
 import { h } from "../ui/dom";
 
+/** A counted word for the stats rows: "jump" for 1, "jumps" otherwise ("1 strafes" read wrong). */
+export const countWord = (n: number, one: string): string => (n === 1 ? one : `${one}s`);
+
 /** Index where the significant part of a formatted time begins: "00:31.420" -> 3, "01:02.500" -> 1, "-00:..." -> 0. */
 export function leadLength(s: string): number {
   if (!/^\d+:\d\d\.\d{3}$/.test(s)) return 0;

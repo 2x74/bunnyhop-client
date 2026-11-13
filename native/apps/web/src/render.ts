@@ -1,6 +1,6 @@
 import { appLocation } from "./platform/navigation";
 import { embeddedNormalPath, normalTextureSupported, mapSunDirection, withWorldNormal } from "./world-normal";
-import { hiddenTriggerModels } from "./brush-visibility";
+import { hiddenTriggerModels, undrawnClassModels } from "./brush-visibility";
 import { sourceLightColor } from "./graphics/source-light-color";
 import { authoredLocalLights } from "./graphics/authored-lights";
 import { withMaterialDetail, withShowcaseAlbedo } from "./material-detail";
@@ -24,16 +24,22 @@ import {
   MAT_ALPHATEST,
   MAT_NOCULL,
   MAT_TRANSLUCENT,
-  MAT_UNLIT,
+  MAT_HAS_VMT, MAT_UNLIT,
   MaterialKind,
   type MaterialExtras,
   type SkyCamera,
   TextureFormat,
 } from "./core";
 import { prepareMapContent, type PrepareContentOptions } from "./content";
-import { markGammaBlend, outputsLinear } from "./graphics/gamma-blend";
+import { markGammaBlend } from "./graphics/gamma-blend";
+import { depthFogColor, depthFogUniforms, withDepthFog, type DepthFogUniforms } from "./depth-fog";
+import { ModelLight } from "./model-light";
+import type { ModelLighting } from "./graphics/presets";
 import { glassMaterial, setWaterVisualTime, updateWaterUniforms, waterSurfaceMaterial, waterVolumes, withWaterFog } from "./water";
 import { mapSmoke, brushBounds, materialName } from "./map-effects/smoke";
+import { alphaProgram, type AlphaProgram } from "./material-alpha";
+import { areaportalWindows, BrushFades, setMaterialTint } from "./brush-fades";
+import { dynamicRenderEntities, fxIsFrameFade, fxIsTimed, RENDER_NONE, renderKeys, type RenderKeys } from "./brush-render";
 import { spriteTrails } from "./sprite-trails";
 import { crashExplosions, CRASH_BSP_SHA } from "./map-effects/crash-explosions";
 import { smokeStacks } from "./smokestacks";
@@ -43,6 +49,10 @@ import { ImposterSet, type ImposterKind } from "./imposter";
 import { CLIENT_DRAWN_SHADERS } from "./vmt";
 import { TextureScrolls } from "./texture-scroll";
 import { animatedPropEntities, animatedProps, hashSeed, type AnimatedProps } from "./map-props";
+import { decalModulateMaterial, dressingMeshes, withDecalBias, withDressingFade } from "./map-dressing";
+import { mapGlows, type GlowMaterialInfo } from "./map-glows";
+import { mapBeams } from "./map-beams";
+import { baseAlphaIsMask, builtInTextureColor, loadVmt, vmtPath } from "./vmt";
 import { StudioData } from "./player/studio/data";
 
 export interface WorldView {
@@ -71,6 +81,23 @@ export interface WorldView {
   setFlashlight(on: boolean): void;
   /** Bypass baked map/prop lighting while retaining textures and fog; local rendering only. */
   setFullbright(on: boolean): void;
+  /** The map's own fog (env_fog_controller) on or off, live. Never drawn in Potato mode. */
+  setFog(on: boolean): void;
+  /**
+   * Props lit by the map (on, the default) or by the stand-in shading they had before (the one Fullbright draws them
+   * with), live: static, moving, 3D skybox and animated props, in Potato mode too.
+   */
+  setPropLighting(on: boolean): void;
+  /** The map's overlays, decals, glows and beams (map-dressing.ts) on or off, live. Never drawn in Potato mode. */
+  setDetails(on: boolean): void;
+  /** How far the map's light reaches into the game's own models (model-light.ts). Off in Potato and Fullbright. */
+  setModelLighting(mode: ModelLighting): void;
+  /**
+   * Names the scenes drawn over this world from `camera` this frame (the first-person hands and weapon), which take
+   * the world's fog and light like the models in its scene do (model-light.ts). `exposure`: the HDR look's, as they
+   * are drawn after it.
+   */
+  lightEye(roots: readonly THREE.Object3D[], camera: THREE.Camera, exposure?: number): void;
   /**
    * Skips the parts of the big meshes outside `camera`'s view (cull.ts). Before each render of the world, in the
    * scene's onBeforeRender; a world never culled draws everything.
@@ -250,24 +277,80 @@ function addSecondaryMaps(m: THREE.MeshBasicMaterial, map2: THREE.Texture | null
   m.userData.giDiffuseHook = m.onBeforeCompile;
 }
 
+/**
+ * `$selfillum` on a lightmapped world material (SDK LightmappedGeneric): where the base texture's alpha is, the
+ * lightmap gives way to the texture times `$selfillumtint`, so the lit parts of a sign or a lamp panel don't darken in
+ * a dark room. The alpha is that mask, not coverage (the core sets it only on materials that don't blend or cut out).
+ */
+export function withSelfIllum(m: THREE.MeshBasicMaterial, tint: readonly [number, number, number]): THREE.MeshBasicMaterial {
+  const prev = m.onBeforeCompile;
+  const key = m.customProgramCacheKey;
+  m.onBeforeCompile = (shader, renderer) => {
+    prev.call(m, shader, renderer);
+    shader.uniforms.uSelfIllumTint = { value: new THREE.Vector3(...tint) };
+    shader.fragmentShader = shader.fragmentShader
+      .replace("#include <common>", "#include <common>\nuniform vec3 uSelfIllumTint;")
+      .replace(
+        "#include <opaque_fragment>",
+        // (The alpha is the mask: what is left to blend is the material's opacity, 1 unless the brush fades.)
+        "outgoingLight = mix( outgoingLight, diffuseColor.rgb * uSelfIllumTint, clamp( diffuseColor.a, 0.0, 1.0 ) );\ndiffuseColor.a = opacity;\n#include <opaque_fragment>",
+      );
+  };
+  m.customProgramCacheKey = () => `${key.call(m)}+selfillum`;
+  return m;
+}
+
+/** Draws a material without its texture's alpha (a mask for something else): only its opacity blends it. */
+function withoutTextureAlpha(m: THREE.MeshBasicMaterial): THREE.MeshBasicMaterial {
+  const prev = m.onBeforeCompile;
+  const key = m.customProgramCacheKey;
+  m.onBeforeCompile = (shader, renderer) => {
+    prev.call(m, shader, renderer);
+    shader.fragmentShader = shader.fragmentShader.replace("#include <map_fragment>", "#include <map_fragment>\ndiffuseColor.a = opacity;");
+  };
+  m.customProgramCacheKey = () => `${key.call(m)}+noalpha`;
+  return m;
+}
+
 // --- Static props ----------------------------------------------------------------------------
 
 const viewerPos = new THREE.Vector3();
 
-/** Fixed light direction (Source space) for the props' simple ambient + diffuse term. */
+/**
+ * Fixed light direction (Source space) for the props' stand-in shading: a constant ambient plus one diffuse term.
+ * What props are drawn with in Fullbright, and where the map has no light for them (`Core.propsLighting`).
+ */
 const PROP_LIGHT = new THREE.Vector3(0.35, 0.45, 0.82).normalize();
+
+/**
+ * Linear light as an LDR map's lightmaps show it. Their texels are Source's `0.5 * L^(1/2.2)`, which the GPU reads
+ * back as sRGB (crates/core/src/lightmap.rs): the same light comes out up to 2.3 times brighter near black, the same
+ * from half brightness up, and never past four times overbright. Props on those maps take the same curve, so a prop
+ * and the wall behind it show the same light the same. (CS:S decodes prop light with the exact power, which leaves
+ * props darker than their walls in dim rooms.) `?proplift=0` draws the exact value.
+ */
+export function ldrLightmapLook(light: number): number {
+  const t = 0.5 * Math.pow(Math.min(Math.max(light, 0), 4), 1 / 2.2);
+  return (t <= 0.04045 ? t / 12.92 : Math.pow((t + 0.055) / 1.055, 2.4)) / 0.21763764;
+}
 
 function hiddenToolMaterial(name: string): boolean {
   const normalized = name.toLowerCase().replaceAll("\\", "/");
   return normalized.startsWith("tools/") && normalized !== "tools/toolsblack" && normalized !== "tools/toolswhite";
 }
 
-function propMaterial(desc: MaterialDesc | undefined, map: THREE.Texture | null, name: string): THREE.Material {
+/**
+ * A prop's material, lit through the mesh's vertex colours. UnlitGeneric takes no light in CS:S (lamp strips, neon
+ * tubes, bhop_angst's hanging white loops): drawn at full brightness, unless `lightUnlit` (Potato, whose vertex
+ * colours carry the flat colour too; `?propunlit=0` for comparisons).
+ */
+export function propMaterial(desc: MaterialDesc | undefined, map: THREE.Texture | null, name: string, lightUnlit = false): THREE.Material {
   // Invisible tool textures on models follow the world mesh; toolsblack/toolswhite remain visible.
   // An invisible group material tells three.js to skip the group.
   if (hiddenToolMaterial(name)) return new THREE.MeshBasicMaterial({ visible: false });
   if (desc?.kind === MaterialKind.Glass) return glassMaterial(desc);
-  if (desc?.kind === MaterialKind.Flat) return new THREE.MeshBasicMaterial({ color: new THREE.Color(...desc.color), vertexColors: true });
+  const lit = lightUnlit || !desc || !(desc.flags & MAT_UNLIT);
+  if (desc?.kind === MaterialKind.Flat) return new THREE.MeshBasicMaterial({ color: new THREE.Color(...desc.color), vertexColors: lit });
   if (!desc || !map) {
     // Unavailable prop material: neutral grey (lit by vertex colours).
     return new THREE.MeshBasicMaterial({ color: new THREE.Color().setHSL(hashHue(name), 0.1, 0.55, THREE.SRGBColorSpace), vertexColors: true });
@@ -276,7 +359,7 @@ function propMaterial(desc: MaterialDesc | undefined, map: THREE.Texture | null,
   const m = new THREE.MeshBasicMaterial({
     map,
     color: new THREE.Color(...desc.color),
-    vertexColors: true,
+    vertexColors: lit,
     transparent: translucent,
     opacity: desc.alpha,
     depthWrite: !translucent,
@@ -288,21 +371,48 @@ function propMaterial(desc: MaterialDesc | undefined, map: THREE.Texture | null,
 }
 
 /**
- * All static props as one mesh. Lighting is a first pass: a constant ambient term plus a fixed
- * directional term baked into vertex colours (Source lights props per vertex from the map's lighting).
+ * `$selfillum` on a prop's lit material (SDK VertexLitGeneric): where the base texture's alpha is, the vertex light
+ * gives way to the texture times `$selfillumtint`. The alpha is that mask, not coverage (as in `withSelfIllum`).
  */
-function propsMesh(
+export function withPropSelfIllum(m: THREE.MeshBasicMaterial, tint: readonly [number, number, number]): THREE.MeshBasicMaterial {
+  const prev = m.onBeforeCompile;
+  const key = m.customProgramCacheKey;
+  m.onBeforeCompile = (shader, renderer) => {
+    prev.call(m, shader, renderer);
+    shader.uniforms.uSelfIllumTint = { value: new THREE.Vector3(...tint) };
+    shader.fragmentShader = shader.fragmentShader
+      .replace("#include <common>", "#include <common>\nuniform vec3 uSelfIllumTint;")
+      // (Before the vertex colours multiply in.)
+      .replace("#include <color_fragment>", "vec3 selfIllumAlbedo = diffuseColor.rgb;\n#include <color_fragment>")
+      .replace(
+        "#include <opaque_fragment>",
+        "outgoingLight = mix( outgoingLight, selfIllumAlbedo * uSelfIllumTint, clamp( diffuseColor.a, 0.0, 1.0 ) );\ndiffuseColor.a = opacity;\n#include <opaque_fragment>",
+      );
+  };
+  m.customProgramCacheKey = () => `${key.call(m)}+propselfillum`;
+  return m;
+}
+
+/**
+ * All static props as one mesh, lit through their vertex colours: `light` is the map's light per vertex (linear RGB,
+ * crates/core/src/prop_light.rs: VRAD's baked prop lighting, else the ambient cube and lights at the prop), as Source
+ * lights them. Without it (and for a vertex the map has no light for, -1) the stand-in shading above.
+ */
+export function propsMesh(
   pm: ReturnType<Core["propsMesh"]>,
   mats: THREE.Material[],
   skyMats: THREE.Material[] | null,
-): { mesh: THREE.Mesh; sky: THREE.Mesh | null; moving: Map<number, THREE.Mesh> } {
+  light: Float32Array | null,
+): { mesh: THREE.Mesh; sky: THREE.Mesh | null; moving: Map<number, THREE.Mesh>; setLit(on: boolean): THREE.BufferAttribute | THREE.InterleavedBufferAttribute } {
   const n = pm.vertices.length / 8;
   const colors = new Float32Array(n * 3);
+  const standIn = new Float32Array(n);
   for (let i = 0; i < n; i++) {
     const o = i * 8;
     const d = Math.max(0, pm.vertices[o + 3] * PROP_LIGHT.x + pm.vertices[o + 4] * PROP_LIGHT.y + pm.vertices[o + 5] * PROP_LIGHT.z);
-    const s = 0.5 + 0.5 * d;
-    colors[i * 3] = colors[i * 3 + 1] = colors[i * 3 + 2] = s;
+    const s = (standIn[i] = 0.5 + 0.5 * d);
+    if (light && light[i * 3] >= 0) colors.set(light.subarray(i * 3, i * 3 + 3), i * 3);
+    else colors[i * 3] = colors[i * 3 + 1] = colors[i * 3 + 2] = s;
   }
   const buf = new THREE.InterleavedBuffer(pm.vertices, 8);
   const geo = new THREE.BufferGeometry();
@@ -310,7 +420,7 @@ function propsMesh(
   geo.setAttribute("normal", new THREE.InterleavedBufferAttribute(buf, 3, 3));
   geo.setAttribute("uv", new THREE.InterleavedBufferAttribute(buf, 2, 6));
   geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-  geo.setAttribute("fullbrightShade", new THREE.BufferAttribute(Float32Array.from({ length: n }, (_, i) => colors[i * 3]), 1));
+  geo.setAttribute("fullbrightShade", new THREE.BufferAttribute(standIn, 1));
   geo.setIndex(new THREE.BufferAttribute(pm.indices, 1));
   // 3D skybox props (`skyMats` given): their own mesh on the same buffers, drawn by the skybox pass.
   let sky: THREE.Mesh | null = null;
@@ -345,7 +455,22 @@ function propsMesh(
     }
     m.geometry.addGroup(g.firstIndex, g.indexCount, g.material);
   }
-  return { mesh, sky, moving };
+  // "Prop lighting" off: the stand-in shading as the colours, built the first time it's asked for (3 bytes a vertex).
+  // Returns the colours now drawn. (These geometries, not the meshes' current ones: Potato swaps its own in.)
+  const lit = geo.getAttribute("color");
+  const geometries = [geo, sky?.geometry, ...[...moving.values()].map((m) => m.geometry)];
+  let plain: THREE.BufferAttribute | null = null;
+  const setLit = (on: boolean) => {
+    if (!light || (on && !plain)) return lit;
+    if (!plain) {
+      const bytes = new Uint8Array(n * 3);
+      for (let i = 0; i < n; i++) bytes[i * 3] = bytes[i * 3 + 1] = bytes[i * 3 + 2] = Math.round(standIn[i] * 255);
+      plain = new THREE.BufferAttribute(bytes, 3, true);
+    }
+    for (const g of geometries) g?.setAttribute("color", on ? lit : plain);
+    return on ? lit : plain;
+  };
+  return { mesh, sky, moving, setLit };
 }
 
 // --- Sky -------------------------------------------------------------------------------------
@@ -499,40 +624,6 @@ export const SKY3D_LAYER = 1;
 /** Draw order of the skybox pass hook: after the sky background (-1000), before the sky faces (-999). */
 const SKY3D_RENDER_ORDER = -999.5;
 
-type SkyFogUniforms = { uSkyFogColor: { value: THREE.Vector3 }; uSkyFogRange: { value: THREE.Vector3 } };
-
-/**
- * Adds the sky_camera's fog to a skybox material (keeps any existing onBeforeCompile). Source's fog (SDK 2013
- * `CSkyboxView::Enable3dSkyboxFog`): linear in view depth from fogstart / scale to fogend / scale (skybox units), capped
- * at fogmaxdensity, blended in gamma space like Source's LDR path (after the output colour conversion, like the
- * water fog). Additive materials fog towards black.
- */
-function withSkyFog<M extends THREE.Material>(m: M, u: SkyFogUniforms): M {
-  const additive = m.blending === THREE.AdditiveBlending;
-  const prev = m.onBeforeCompile;
-  const prevKey = m.customProgramCacheKey;
-  m.onBeforeCompile = (shader, renderer) => {
-    prev.call(m, shader, renderer);
-    Object.assign(shader.uniforms, u);
-    shader.vertexShader = shader.vertexShader
-      .replace("#include <common>", "#include <common>\nvarying float vSkyFogDepth;")
-      .replace("#include <project_vertex>", "#include <project_vertex>\n  vSkyFogDepth = - mvPosition.z;");
-    const outputLinear = outputsLinear(renderer);
-    const color = additive ? "vec3( 0.0 )" : outputLinear ? "sRGBTransferOETF(vec4(uSkyFogColor, 1.0)).rgb" : "uSkyFogColor";
-    const source = outputLinear ? "sRGBTransferOETF(gl_FragColor).rgb" : "gl_FragColor.rgb";
-    const mixed = `mix( ${source}, ${color}, clamp( min( uSkyFogRange.z, ( vSkyFogDepth - uSkyFogRange.x ) / max( uSkyFogRange.y - uSkyFogRange.x, 1e-3 ) ), 0.0, 1.0 ) )`;
-    const fogged = outputLinear ? `sRGBTransferEOTF(vec4(${mixed}, 1.0)).rgb` : mixed;
-    shader.fragmentShader = shader.fragmentShader
-      .replace("#include <common>", "#include <common>\nuniform vec3 uSkyFogColor;\nuniform vec3 uSkyFogRange;\nvarying float vSkyFogDepth;")
-      .replace(
-        "#include <fog_fragment>",
-        `gl_FragColor.rgb = ${fogged};\n#include <fog_fragment>`,
-      );
-  };
-  m.customProgramCacheKey = () => `${prevKey.call(m)}+skyfog${additive ? "-add" : ""}`;
-  return m;
-}
-
 /** Draw calls of the skybox pass (one per mesh group). */
 function sky3dDraws(root: THREE.Object3D): number {
   let n = 0;
@@ -542,8 +633,6 @@ function sky3dDraws(root: THREE.Object3D): number {
   });
   return n;
 }
-
-const srgbToLinear = (c: number) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
 
 /**
  * Source's 3D skybox (SDK 2013 `CViewRender` / `CSkyboxView`): the sky_camera's miniature (`sky3dRoot`, skybox set
@@ -561,7 +650,8 @@ function sky3dPass(
   root: THREE.Object3D,
   sky3dRoot: THREE.Group,
   cam: SkyCamera,
-  fog: SkyFogUniforms | null,
+  /** The sky_camera's fog (depth-fog.ts; distances already in skybox units). */
+  fog: DepthFogUniforms | null,
   state: { enabled: boolean },
   /** Called with the skybox camera before its pass and the main camera after (the water fog's per-camera uniforms). */
   onCamera: (camera: THREE.Camera) => void,
@@ -580,7 +670,6 @@ function sky3dPass(
   const fwd = new THREE.Vector3();
   const inv = new THREE.Matrix4();
   const origin = new THREE.Vector3(...cam.origin);
-  const dir = new THREE.Vector3(...cam.fog.dir).normalize();
   let busy = false;
   hook.onBeforeRender = (renderer, scene, camera) => {
     if (!state.enabled || busy || (scene as THREE.Scene).overrideMaterial || !(camera as THREE.PerspectiveCamera).isPerspectiveCamera) return;
@@ -594,18 +683,8 @@ function sky3dPass(
     skyCam.updateMatrixWorld();
     skyCam.projectionMatrix.copy(camera.projectionMatrix);
     skyCam.projectionMatrixInverse.copy(camera.projectionMatrixInverse);
-    if (fog) {
-      // fogblend: mix by the view direction against fogdir (GetSkyboxFogColor).
-      let c = cam.fog.color;
-      if (cam.fog.blend) {
-        camera.getWorldDirection(fwd).transformDirection(inv);
-        const t = 0.5 * fwd.dot(dir) + 0.5;
-        c = [0, 1, 2].map((k) => cam.fog.color[k] * t + cam.fog.color2[k] * (1 - t)) as [number, number, number];
-      }
-      // The mix happens in output space: sRGB on the canvas, linear into render targets.
-      const linear = renderer.getRenderTarget() !== null || renderer.outputColorSpace !== THREE.SRGBColorSpace;
-      fog.uSkyFogColor.value.set(...(c.map((v) => (linear ? srgbToLinear(v / 255) : v / 255)) as [number, number, number]));
-    }
+    // fogblend: mix by the view direction against fogdir (GetSkyboxFogColor).
+    if (fog) depthFogColor(cam.fog, camera.getWorldDirection(fwd).transformDirection(inv), fog.uDepthFogColor.value);
     const autoClear = renderer.autoClear;
     renderer.autoClear = false;
     try {
@@ -624,24 +703,28 @@ function sky3dPass(
 // ---------------------------------------------------------------------------------------------
 
 /**
- * `bsp` (the loaded map file) identifies the map's hosted stock-content manifest (content/index.ts). `content`: the
- * loading screen's download progress, skip and "play without textures" (PrepareContentOptions).
+ * `bsp` (the loaded map file) identifies the map's hosted stock-content manifest (content/index.ts); `mapSha256`: its
+ * sha256, if the caller has it already (it is hashed here otherwise). `content`: the loading screen's download
+ * progress, skip and "play without textures" (PrepareContentOptions).
  */
 export async function buildWorld(
   core: Core,
   renderer: THREE.WebGLRenderer,
-  opts: { bsp?: Uint8Array; content?: Omit<PrepareContentOptions, "bsp" | "mapSha256"> } = {},
+  opts: { bsp?: Uint8Array; mapSha256?: string; content?: Omit<PrepareContentOptions, "bsp" | "mapSha256"> } = {},
 ): Promise<WorldView> {
   const t0 = performance.now();
   // Resolve stock materials from hosted content before building: pakfile → hosted → fallback.
-  const content = await prepareMapContent(core, { ...opts.content, bsp: opts.bsp }).catch((e) => {
+  const mapSha = opts.mapSha256 ?? (opts.bsp ? await sha256Hex(opts.bsp) : "");
+  const content = await prepareMapContent(core, { ...opts.content, bsp: opts.bsp, mapSha256: mapSha || undefined }).catch((e) => {
     console.warn("game content:", e);
     return { sky: null, extra: [] as string[], propMaterials: [] as string[] };
   });
   const texturePaths = core.texturePaths();
   // Keep original alpha masks for cutouts/translucent materials; generic opaque packs cannot replace them safely.
-  const alphaTextures = new Set(core.materials().filter((material) => material.flags & (MAT_ALPHATEST | MAT_TRANSLUCENT)).map((material) => material.texture));
-  const overrides = await prepareTextureOverrides(renderer, texturePaths.filter((_, index) => !alphaTextures.has(index)), opts.bsp ? await sha256Hex(opts.bsp) : "");
+  // ($selfillum keeps its mask in the alpha too.)
+  const selfIllum = core.materialSelfIllum();
+  const alphaTextures = new Set(core.materials().filter((material, i) => material.flags & (MAT_ALPHATEST | MAT_TRANSLUCENT) || selfIllum[i]).map((material) => material.texture));
+  const overrides = await prepareTextureOverrides(renderer, texturePaths.filter((_, index) => !alphaTextures.has(index)), mapSha);
   const { vertices, indices, stride, groups, materials } = core.mesh();
   const support: TextureSupport = {
     // `?nos3tc` forces the RGBA decode path (for testing the fallback).
@@ -671,13 +754,27 @@ export async function buildWorld(
       return p ? textureFromPayload(p, support) : null;
     },
   });
+  // The map's own fog (env_fog_controller, depth-fog.ts) over everything in the main view but the sky, as in CS:S.
+  // `?fog=0` leaves it out (before / after comparisons).
+  const mapFog = appLocation().searchParams.get("fog") === "0" ? null : core.worldFog();
+  const worldFog = mapFog?.enable && mapFog.end > mapFog.start && mapFog.maxDensity > 0 ? depthFogUniforms(mapFog.start, mapFog.end, Math.min(1, mapFog.maxDensity)) : null;
   /** Materials (parallel to `materials`) and the sky. */
   const buildMaterials = () => {
     const descs = core.materials();
+    // A `$basetexture` the material system makes itself (vmt.ts builtInTextureColor) has no VTF, so the core calls the
+    // material missing: it is that solid colour times `$color`. `?builtintex=0` keeps the stand-in (comparisons).
+    if (appLocation().searchParams.get("builtintex") !== "0")
+      descs.forEach((d, i) => {
+        // (One-texture shaders only: an UnlitTwoTexture's look is mostly its second texture.)
+        if (d.kind !== MaterialKind.Missing || !(d.flags & MAT_HAS_VMT) || !["unlitgeneric", "vertexlitgeneric", "lightmappedgeneric"].includes(d.shader)) return;
+        const name = i < materials.length ? materials[i].name : (content.extra[i - materials.length] ?? content.propMaterials[i - materials.length - content.extra.length]);
+        const solid = name ? builtInTextureColor(loadVmt(vmtPath(name), (p) => core.contentRead(p))) : null;
+        if (solid) descs[i] = { ...d, kind: MaterialKind.Flat, color: [d.color[0] * solid[0], d.color[1] * solid[1], d.color[2] * solid[2]] };
+      });
     const extras = core.materialExtras();
     // Decode each texture once, with alpha-capable DXT1 if any material using it needs alpha.
     const needAlpha = new Set<number>();
-    for (const d of descs) if (d.texture >= 0 && d.flags & (MAT_ALPHATEST | MAT_TRANSLUCENT)) needAlpha.add(d.texture);
+    descs.forEach((d, i) => { if (d.texture >= 0 && (d.flags & (MAT_ALPHATEST | MAT_TRANSLUCENT) || d.shader === "decalmodulate" || selfIllum[i])) needAlpha.add(d.texture); });
     const textures = new Map<string, THREE.Texture | null>();
     /** Base texture `i` as decoded from the map's VTF (no texture pack replacement): its path for flipbook frames. */
     const framesOf = (i: number): { path: string; needAlpha: boolean } | undefined => {
@@ -693,6 +790,20 @@ export async function buildWorld(
         const p = core.texture(i, support.s3tc, needAlpha.has(i));
         if (!p) console.warn("texture decode failed:", core.lastError());
         textures.set(key, p ? textureFromPayload(p, support, colorSpace) : null);
+      }
+      return textures.get(key)!;
+    };
+    /**
+     * Base texture `i` with whatever alpha it holds, for a surface that only blends because its brush fades. A DXT1
+     * texture of an opaque material is uploaded without its punch-through alpha; Direct3D samples it either way.
+     */
+    const alphaTexture = (i: number): THREE.Texture | null => {
+      const key = `${i}:alpha`;
+      if (!textures.has(key)) {
+        const plain = texture(i);
+        const replaced = !!texturePaths[i] && !!overrides.get(tryTexturePath(texturePaths[i]!) ?? "");
+        const p = needAlpha.has(i) || replaced || !plain ? null : core.texture(i, support.s3tc, true);
+        textures.set(key, p && (p.format === TextureFormat.DXT1A || !support.s3tc) ? textureFromPayload(p, support) : plain);
       }
       return textures.get(key)!;
     };
@@ -726,22 +837,37 @@ export async function buildWorld(
     const hasBeneath = descs.some((d, i) => d.kind === MaterialKind.Water && water[i]?.aboveWater === false);
     const hasWater = core.waterVolumes().length > 0;
     const fogged = <M extends THREE.Material>(m: M): M => (hasWater ? withWaterFog(m) : m);
-    /** World material `i`; `fog` wraps built-in materials (the water fog, or the 3D skybox's fog). */
-    const worldMaterial = (i: number, fog: <M extends THREE.Material>(m: M) => M): THREE.Material => {
+    /**
+     * World material `i`. `waterFog`: the water volumes' fog (built-in materials; the water and glass shaders carry
+     * their own). `haze`: the view's linear fog, the world's or the 3D skybox's (depth-fog.ts), over all of them.
+     * Every call makes a new material (an imposter's is shared unless `own`). `blended`: for a faded brush, whose
+     * texture alpha now counts (`alphaTexture`).
+     */
+    const worldMaterial = (i: number, waterFog: boolean, haze: DepthFogUniforms | null, own = false, blended = false): THREE.Material => {
+      const fog = <M extends THREE.Material>(m: M): M => {
+        const w = waterFog ? fogged(m) : m;
+        return haze ? withDepthFog(w, haze) : w;
+      };
+      const hazed = <M extends THREE.Material>(m: M): M => (haze ? withDepthFog(m, haze) : m);
       const info = materials[i];
       const desc = descs[i];
-      if (desc?.kind === MaterialKind.Water) return waterSurfaceMaterial(desc, water[i], { doubleSided: !hasBeneath && water[i]?.aboveWater !== false });
-      if (desc?.kind === MaterialKind.Glass) return glassMaterial(desc);
+      if (desc?.kind === MaterialKind.Water) return hazed(waterSurfaceMaterial(desc, water[i], { doubleSided: !hasBeneath && water[i]?.aboveWater !== false }));
+      if (desc?.kind === MaterialKind.Glass) return hazed(glassMaterial(desc));
       if (desc?.kind === MaterialKind.Flat) return fog(flatMaterial(desc, lightMap, lightMapIntensity));
-      const imp = imposterAt(i);
-      if (imp) return imp.kind === "window" && !imp.params.nofog ? fog(imp.material) : imp.material;
-      const map = desc && desc.texture >= 0 ? texture(desc.texture) : null;
+      // `own` (brush-fades.ts): an instance of its own, for a surface with its own opacity.
+      const imp = own && imposterAt(i) ? imposters.material(info.name, desc.shader) : imposterAt(i);
+      // (One material per imposter, shared by the main view and the skybox: it keeps the first fog it was given.)
+      if (imp) return imp.kind === "window" && !imp.params.nofog && !imp.material.userData.fogged ? ((imp.material.userData.fogged = true), fog(imp.material)) : imp.material;
+      const map = desc && desc.texture >= 0 ? (blended ? alphaTexture(desc.texture) : texture(desc.texture)) : null;
       if (!map) return fog(sourceFlags(fallbackMaterial(info, lightMap, lightMapIntensity, support), desc));
       const m = texturedMaterial(desc, map, lightMap, lightMapIntensity);
       const ex = extras[i];
       const map2 = ex && ex.texture2 >= 0 ? texture(ex.texture2) : null;
       const detail = ex && ex.detail >= 0 ? texture(ex.detail, THREE.NoColorSpace) : null;
       addSecondaryMaps(m as THREE.MeshBasicMaterial, map2, detail, ex);
+      // `?selfillum=0` lights them like any surface (before / after comparisons).
+      const glow = selfIllum[i];
+      if (glow && !(desc.flags & MAT_UNLIT) && appLocation().searchParams.get("selfillum") !== "0") withSelfIllum(m as THREE.MeshBasicMaterial, glow);
       // Potato swaps in its own flat materials. Water/glass/unlit/blended surfaces keep their dedicated paths.
       if (sun && desc.shader === "lightmappedgeneric" && !(desc.flags & MAT_UNLIT) && !map2 && !appLocation().searchParams.has("nonormals")) {
         const normal = embeddedNormal(info.name);
@@ -752,7 +878,7 @@ export async function buildWorld(
       scrolls.attach(m, info.name, framesOf(desc.texture));
       return fog(m);
     };
-    const mats = materials.map((_, i) => worldMaterial(i, fogged));
+    const mats = materials.map((_, i) => worldMaterial(i, true, worldFog));
     // Sky faces follow the mesh materials (see prepareMapContent); need at least the four sides.
     const skyCount = content.sky ? 6 : 0;
     const extraCount = content.extra.length;
@@ -763,18 +889,40 @@ export async function buildWorld(
     const sky = skyCube ? skyCube.mesh : skyFaces.length && skyFaces.slice(0, 4).every(Boolean) ? skyBox(skyFaces) : skyDome();
     if (hasWater && sky.name === "skybox") for (const m of sky.material as THREE.Material[]) withWaterFog(m, { sky: true });
     // Static prop materials follow the sky faces.
-    const propMaterialAt = (k: number, fog: <M extends THREE.Material>(m: M) => M): THREE.Material => {
+    const propMaterialAt = (k: number, waterFog: boolean, haze: DepthFogUniforms | null): THREE.Material => {
       const desc = descs[materials.length + extraCount + k];
       const map = desc && desc.texture >= 0 ? texture(desc.texture) : null;
-      const m = sourceFlags(propMaterial(desc, map, content.propMaterials[k]), desc);
+      const m = sourceFlags(propMaterial(desc, map, content.propMaterials[k], appLocation().searchParams.get("propunlit") === "0"), desc);
+      const glow = selfIllum[materials.length + extraCount + k];
+      if (glow && map && desc && !(desc.flags & MAT_UNLIT) && m instanceof THREE.MeshBasicMaterial && m.vertexColors && appLocation().searchParams.get("selfillum") !== "0" && appLocation().searchParams.get("propunlit") !== "0") withPropSelfIllum(m, glow);
       if (m instanceof THREE.MeshBasicMaterial && desc && !(desc.flags & MAT_UNLIT)) withMaterialDetail(m, overrides.materials.get(tryTexturePath(texturePaths[desc.texture] ?? "") ?? ""), 0.9, texturePaths[desc.texture] ?? "");
       if (m instanceof THREE.MeshBasicMaterial && desc) withShowcaseAlbedo(m, texturePaths[desc.texture] ?? "");
       if (m instanceof THREE.MeshBasicMaterial) scrolls.attach(m, content.propMaterials[k], desc && desc.texture >= 0 ? framesOf(desc.texture) : undefined);
-      return m instanceof THREE.ShaderMaterial ? m : fog(m);
+      const w = m instanceof THREE.ShaderMaterial || !waterFog ? m : fogged(m);
+      return haze ? withDepthFog(w, haze) : w;
     };
-    const propMats = content.propMaterials.map((_, k) => propMaterialAt(k, fogged));
+    const propMats = content.propMaterials.map((_, k) => propMaterialAt(k, true, worldFog));
+    // Overlays and decals (map-dressing.ts): their materials follow the mesh materials among the extras. Only what's
+    // there: a material without its texture (or of a kind no decal is drawn with) leaves its dressing out.
+    const dressingDescAt = new Map<string, number>();
+    content.extra.forEach((n, k) => { if (!dressingDescAt.has(n)) dressingDescAt.set(n, materials.length + k); });
+    const dressingDesc = (name: string): MaterialDesc | undefined => descs[dressingDescAt.get(name) ?? -1];
+    const dressingMaterialAt = (name: string, waterFog: boolean, haze: DepthFogUniforms | null): THREE.Material | null => {
+      const desc = dressingDesc(name);
+      if (!desc || desc.kind !== MaterialKind.Textured || desc.texture < 0) return null;
+      const map = texture(desc.texture);
+      if (!map) return null;
+      if (desc.shader === "decalmodulate") {
+        const m = withDressingFade(withDecalBias(markGammaBlend(decalModulateMaterial(map, desc.alpha))));
+        return haze ? withDepthFog(m, haze) : m;
+      }
+      const m = withDressingFade(withDecalBias(texturedMaterial(desc, map, lightMap, lightMapIntensity)));
+      scrolls.attach(m, name, framesOf(desc.texture));
+      const w = waterFog ? fogged(m) : m;
+      return haze ? withDepthFog(w, haze) : w;
+    };
     const missing = descs.slice(0, materials.length).filter((d, i) => d.kind === MaterialKind.Missing && !imposterAt(i)).length;
-    return { mats, sky, skyCube, propMats, textures, missing, worldMaterial, propMaterialAt, descs, texture, water, hasBeneath, skyCount, extraCount, skyFaces, imposterAt };
+    return { mats, sky, skyCube, propMats, textures, missing, worldMaterial, propMaterialAt, dressingMaterialAt, dressingDesc, descs, texture, water, hasBeneath, skyCount, extraCount, skyFaces, imposterAt };
   };
 
   const built = buildMaterials();
@@ -804,6 +952,25 @@ export async function buildWorld(
     skyHook.call(built.sky, r, sc, camera, geo, mat, group);
     if (imposters.stats.cubes) imposters.update(root);
     updateWaterUniforms(volumes, camera);
+    // fogblend: mix by the view direction against fogdir (GetFogColor).
+    if (worldFog && mapFog) depthFogColor(mapFog, camera.getWorldDirection(fogForward).transformDirection(fogInverse.copy(root.matrixWorld).invert()), worldFog.uDepthFogColor.value);
+    modelLight.frame(sc);
+  };
+
+  let potatoOn = false;
+  let detailsOn = true;
+  let fadeTime = 0;
+  const fadeEye = new THREE.Vector3();
+  const fadeForward = new THREE.Vector3();
+  // (Declared before the meshes: Potato and the setting reach them through this.)
+  const applyDetails = () => {
+    for (const m of [...(dressing?.main ?? []), ...(dressing?.sky ?? []), ...(glows ? [glows.root] : []), ...(beams ? [beams.mesh] : [])]) m.visible = detailsOn && !potatoOn;
+  };
+  const fogForward = new THREE.Vector3();
+  const fogInverse = new THREE.Matrix4();
+  let fogOn = true;
+  const applyFog = () => {
+    if (worldFog && mapFog) worldFog.uDepthFogRange.value.z = fogOn && !potatoOn ? Math.min(1, mapFog.maxDensity) : 0;
   };
 
   const interleaved = new THREE.InterleavedBuffer(vertices, stride);
@@ -827,36 +994,28 @@ export async function buildWorld(
   const sky3d = params.get("sky3d") === "0" ? null : core.skyCamera();
   const sky3dRoot = new THREE.Group();
   sky3dRoot.name = "sky3d";
-  const fog: SkyFogUniforms | null =
+  const fog: DepthFogUniforms | null =
     sky3d?.fog.enable && sky3d.fog.end > sky3d.fog.start && params.get("sky3dfog") !== "0"
-      ? {
-          uSkyFogColor: { value: new THREE.Vector3(1, 1, 1) },
-          uSkyFogRange: { value: new THREE.Vector3(sky3d.fog.start / sky3d.scale, sky3d.fog.end / sky3d.scale, sky3d.fog.maxDensity) },
-        }
+      ? depthFogUniforms(sky3d.fog.start / sky3d.scale, sky3d.fog.end / sky3d.scale, sky3d.fog.maxDensity)
       : null;
-  // Fogged skybox variants of the materials it uses (water and glass shaders unfogged); else the main materials.
+  // The skybox's own materials for what it uses: the sky_camera's fog instead of the world's (and of the water
+  // volumes'), and apart from the main view's so the flashlight never reaches the miniature.
   const skyVariants = (base: THREE.Material[], used: Iterable<number>, make: (i: number) => THREE.Material): THREE.Material[] => {
-    if (!fog) {
-      const out = base.slice();
-      for (const i of used) {
-        out[i] = base[i].clone();
-        // clone() omits shader hooks; keep secondary maps/fog while isolating the miniature from the flashlight.
-        out[i].onBeforeCompile = base[i].onBeforeCompile;
-        out[i].customProgramCacheKey = base[i].customProgramCacheKey;
-      }
-      return out;
-    }
     const out = base.slice();
-    for (const i of used) out[i] = base[i] instanceof THREE.ShaderMaterial ? base[i] : make(i);
+    for (const i of used) out[i] = make(i);
     return out;
   };
   const skyMats = skyVariants(
     built.mats,
     new Set(groups.filter((g) => sky3d && g.sky3d).map((g) => g.material)),
-    (i) => built.worldMaterial(i, (m) => withSkyFog(m, fog!)),
+    (i) => built.worldMaterial(i, !fog, fog),
   );
 
+  // Brush entities' render keys and the classes CS:S never draws (brush-render.ts, brush-visibility.ts).
+  // `?renderkeys=0` draws them as before (before / after comparisons).
+  const renderKeysOn = params.get("renderkeys") !== "0";
   const hiddenModels = hiddenTriggerModels(core.entities());
+  if (renderKeysOn) for (const model of undrawnClassModels(core.entities())) hiddenModels.add(model);
   const models = new Map<number, THREE.Mesh>();
   const skyWorld = new Map<number, THREE.Mesh>();
   /** The main view's brush model meshes (potato mode swaps their geometry and materials). */
@@ -899,6 +1058,106 @@ export async function buildWorld(
   };
   for (const mesh of worldMeshes) cullMesh(mesh);
 
+  // Brushes that aren't drawn plainly (brush-fades.ts): func_areaportalwindow's window brushes by the eye's distance,
+  // materials whose proxies drive `$alpha`, and the entities' own render keys. `?fades=0` draws the first two as plain
+  // brushes (before / after comparisons).
+  const fades = new BrushFades();
+  /** rendercolor by brush model, with the materials it applies to (Potato paints them too). */
+  const tints = new Map<number, { tint: readonly [number, number, number]; materials: ReadonlySet<number> }>();
+  {
+    const fadesOn = params.get("fades") !== "0";
+    const entities = core.entities();
+    const windows = fadesOn ? areaportalWindows(entities) : new Map<number, never>();
+    // The first entity of each brush model whose keys change how it draws. Not the ones the map changes while it runs
+    // (the core doesn't carry that), a window's brush (the window entity draws it), or the per-frame fades.
+    const renders = new Map<number, { keys: RenderKeys; index: number }>();
+    if (renderKeysOn) {
+      const changing = dynamicRenderEntities(core.entityPairs());
+      const seen = new Set<number>();
+      entities.forEach((e, index) => {
+        const model = Number(/^\*([1-9]\d*)$/.exec(e.model ?? "")?.[1] ?? 0);
+        if (!model || seen.has(model)) return;
+        seen.add(model);
+        if (changing.has(index) || windows.has(model) || e.classname?.toLowerCase() === "func_breakable_surf") return;
+        const keys = renderKeys(e);
+        if (fxIsFrameFade(keys)) return;
+        if (keys.mode === RENDER_NONE || keys.color || fxIsTimed(keys) || (keys.mode !== 0 && keys.amount < 255)) renders.set(model, { keys, index });
+      });
+    }
+    const programs = new Map<number, AlphaProgram | null>();
+    const vmts = new Map<number, ReturnType<typeof loadVmt>>();
+    const vmtAt = (i: number) => {
+      if (!vmts.has(i)) vmts.set(i, loadVmt(vmtPath(materials[i].name), (p) => core.contentRead(p)));
+      return vmts.get(i)!;
+    };
+    const programAt = (i: number): AlphaProgram | null => {
+      if (!programs.has(i)) programs.set(i, fadesOn ? alphaProgram(vmtAt(i)) : null);
+      return programs.get(i)!;
+    };
+    // Unblended tinted copies, shared by every brush with that material and colour.
+    const tinted = new Map<string, THREE.Material>();
+    const make = (i: number, tint: readonly [number, number, number] | null, blended: boolean): THREE.Material => {
+      const key = `${i}|${tint?.join(",")}`;
+      const shared = blended ? undefined : tinted.get(key);
+      if (shared) return shared;
+      const m = built.worldMaterial(i, true, worldFog, true, blended);
+      if (tint) setMaterialTint(m, tint);
+      // Once a surface blends, its texture's alpha is part of its opacity, as in Source's pixel shaders, unless the
+      // alpha is a mask for something else (vmt.ts baseAlphaIsMask). Materials that declare their alpha as coverage
+      // (`$translucent`, `$alphatest`) are drawn with it as they always were; a `$selfillum` one already takes its
+      // opacity alone (withSelfIllum).
+      const d = built.descs[i];
+      const vmt = blended && m instanceof THREE.MeshBasicMaterial && m.map && d && !(d.flags & (MAT_TRANSLUCENT | MAT_ALPHATEST)) ? vmtAt(i) : null;
+      const selfLit = !!selfIllum[i] && !(d.flags & MAT_UNLIT) && params.get("selfillum") !== "0";
+      if (vmt && !selfLit && baseAlphaIsMask(vmt)) withoutTextureAlpha(m as THREE.MeshBasicMaterial);
+      if (!blended) tinted.set(key, m);
+      return m;
+    };
+    const white = (c: readonly number[]) => c[0] === 1 && c[1] === 1 && c[2] === 1;
+    const usedBy = new Map<number, Set<number>>();
+    for (const g of groups) {
+      if (hiddenModels.has(g.model) || (sky3d && g.sky3d)) continue;
+      let used = usedBy.get(g.model);
+      if (!used) usedBy.set(g.model, (used = new Set()));
+      used.add(g.material);
+    }
+    const point = new THREE.Vector3();
+    for (const [model, used] of usedBy) {
+      const mesh = models.get(model);
+      const window = windows.get(model) ?? null;
+      const chains = new Map<number, AlphaProgram>();
+      for (const i of used) {
+        const program = programAt(i);
+        // (The world's own faces have no entity to measure from: material-alpha.ts.)
+        if (program && (model !== 0 || !program.perEntity)) chains.set(i, program);
+      }
+      const render = model !== 0 ? renders.get(model) : undefined;
+      if (!mesh || mesh.material !== built.mats || (!window && !chains.size && !render)) continue;
+      // Where the entity's colour and blend go (see BrushFade.renderable).
+      const renderable = new Set<number>();
+      if (render) for (const i of used) { const d = built.descs[i]; if (d && d.alpha === 1 && white(d.color) && !programAt(i)) renderable.add(i); }
+      if (render?.keys.color && render.keys.mode !== RENDER_NONE) tints.set(model, { tint: render.keys.color, materials: renderable });
+      // The model's bounds in its own space, from the faces it draws.
+      const box = new THREE.Box3();
+      if (model !== 0) for (const g of groups) if (g.model === model) for (let k = g.firstIndex; k < g.firstIndex + g.indexCount; k++) box.expandByPoint(point.fromArray(vertices, indices[k] * stride));
+      mesh.material = built.mats.slice();
+      fades.add(mesh, model, [...used], box, { window, programs: chains, render: render?.keys ?? null, renderable, index: render?.index ?? 0 }, make);
+    }
+    if (fades.size) {
+      // The faded surfaces' materials on a mesh that draws nothing, so everything that walks the world's materials
+      // (program warm-up, Fullbright, disposal) finds them whichever ones the brushes wear at the time.
+      const geo = new THREE.BufferGeometry();
+      for (const [name, attribute] of Object.entries({ position, normal, uv, uv1 })) geo.setAttribute(name, attribute);
+      geo.setIndex(index);
+      geo.setDrawRange(0, 0);
+      const holder = new THREE.Mesh(geo, fades.materials);
+      holder.name = "brush-fade-materials";
+      holder.visible = false;
+      holder.frustumCulled = false;
+      root.add(holder);
+    }
+  }
+
   // Sky faces: brush entity ones ride on their model's mesh (moved by `update`).
   const skyMeshes = skyFaceMeshes(core.skyMesh() ?? { vertices: new Float32Array(0), indices: new Uint32Array(0), groups: [] });
   for (const [model, m] of skyMeshes) {
@@ -917,7 +1176,10 @@ export async function buildWorld(
 
   // Static props (one mesh, Source space, under the Z-up root).
   let propTris = 0;
-  let props: { pm: ReturnType<Core["propsMesh"]>; meshes: THREE.Mesh[] } | null = null;
+  let props: { pm: ReturnType<Core["propsMesh"]>; meshes: THREE.Mesh[]; setLit: ReturnType<typeof propsMesh>["setLit"] } | null = null;
+  let propsLit = true;
+  /** Potato's prop colours again, after "Prop lighting" changed (set once Potato is built). */
+  let repaintPotatoProps: (() => void) | null = null;
   const instanceModels = new Set<number>();
   let animProps: AnimatedProps | null = null;
   if (built.propMats.length) {
@@ -927,10 +1189,14 @@ export async function buildWorld(
         ? skyVariants(
             built.propMats,
             new Set(pm.groups.filter((g) => g.sky3d).map((g) => g.material)),
-            (k) => built.propMaterialAt(k, (m) => withSkyFog(m, fog!)),
+            (k) => built.propMaterialAt(k, !fog, fog),
           )
         : null;
-      const { mesh, sky, moving } = propsMesh(pm, built.propMats, skyPropMats);
+      // `?proplight=0` keeps the stand-in shading (before / after comparisons).
+      const propLight = params.get("proplight") === "0" ? null : core.propsLighting(pm.vertices.length / 8);
+      const lift = !lm.hdr && params.get("proplift") !== "0";
+      if (propLight && lift) for (let i = 0; i < propLight.length; i++) if (propLight[i] >= 0) propLight[i] = ldrLightmapLook(propLight[i]);
+      const { mesh, sky, moving, setLit } = propsMesh(pm, built.propMats, skyPropMats, propLight);
       root.add(mesh);
       if (sky) sky3dRoot.add(sky);
       for (const [entity, m] of moving) {
@@ -938,7 +1204,7 @@ export async function buildWorld(
         root.add(m);
       }
       propTris = pm.indices.length / 3;
-      props = { pm, meshes: [mesh, ...moving.values()] };
+      props = { pm, meshes: [mesh, ...moving.values()], setLit };
       for (const m of props.meshes) cullMesh(m);
       // Animated prop_dynamics (map-props.ts): posed models in place of their frozen groups. `?animprops=0` keeps them
       // frozen (before / after comparisons).
@@ -950,6 +1216,13 @@ export async function buildWorld(
           // The map, for the random animators' seeds: every entity's class, name and origin.
           mapSeed: hashSeed(core.entities().map((e) => `${e.classname ?? ""}|${e.targetname ?? ""}|${e.origin ?? ""}`).join("\n")),
           fallbacks: moving,
+          light: propLight
+            ? (x, y, z, out) => {
+                if (!core.lightCube(x, y, z, out)) return false;
+                if (lift) for (let i = 0; i < 18; i++) out[i] = ldrLightmapLook(out[i]);
+                return true;
+              }
+            : undefined,
           materials: built.propMats,
           materialNames: content.propMaterials,
           parent: root,
@@ -963,7 +1236,7 @@ export async function buildWorld(
     const desc = index < 0 ? undefined : built.descs[materials.length + index];
     return desc && desc.texture >= 0 ? built.texture(desc.texture) : null;
   };
-  const explosions = opts.bsp && await sha256Hex(opts.bsp) === CRASH_BSP_SHA ? crashExplosions(core.entities(), effectTexture, path => {
+  const explosions = mapSha === CRASH_BSP_SHA ? crashExplosions(core.entities(), effectTexture, path => {
     const payload = core.texturePath(`materials/${path}.vtf`, support.s3tc, true);
     return payload ? textureFromPayload(payload, support, THREE.NoColorSpace) : null;
   }) : null;
@@ -979,10 +1252,64 @@ export async function buildWorld(
   const smokeVolumes = mapSmoke(core.entities().map((e) => (/^env_smokestack$/i.test(e.classname ?? "") ? {} : e)), brushBounds(opts.bsp), effectTexture);
   if (smokeVolumes) root.add(smokeVolumes.root);
 
+  // Overlays and infodecals (map-dressing.ts), on the faces they lie on. Built after content: a decal's size is its
+  // material's texture size. `?details=0` leaves them out (comparisons).
+  const detailsBuilt = params.get("details") !== "0";
+  const dressingData = detailsBuilt ? core.dressingMesh() : null;
+  const dressingNames = detailsBuilt ? core.dressingMaterials() : [];
+  const dressingCache = new Map<string, THREE.Material | null>();
+  const dressing = dressingData
+    ? dressingMeshes(
+        dressingData,
+        (g, inSky) => {
+          const key = `${g.material}:${inSky}`;
+          if (!dressingCache.has(key)) dressingCache.set(key, built.dressingMaterialAt(dressingNames[g.material] ?? "", !inSky || !fog, inSky ? fog : worldFog));
+          return dressingCache.get(key)!;
+        },
+        !!sky3d,
+      )
+    : null;
+  for (const m of dressing?.main ?? []) {
+    root.add(m);
+    // By cell like the world, so a map's off-screen decals cost no draw call.
+    if (cullOn) culler.add(m, true);
+  }
+  for (const m of dressing?.sky ?? []) sky3dRoot.add(m);
+  // Sprites and light glows (map-glows.ts) whose material is loaded.
+  const glowInfo = (name: string): GlowMaterialInfo | null => {
+    const desc = built.dressingDesc(name);
+    const map = desc && desc.kind === MaterialKind.Textured && desc.texture >= 0 ? built.texture(desc.texture) : null;
+    if (!desc || !map) return null;
+    const path = texturePaths[desc.texture] ?? "";
+    const vmt = loadVmt(vmtPath(name), (p) => core.contentRead(p));
+    return {
+      map,
+      frames: path ? Math.max(1, core.textureFrames(path)) : 1,
+      frame: (i) => {
+        const payload = path ? core.texturePath(path, support.s3tc, true, i) : null;
+        return payload ? textureFromPayload(payload, support) : null;
+      },
+      orientation: vmt?.params.$spriteorientation?.trim().toLowerCase() ?? "vp_parallel",
+      additive: (desc.flags & MAT_ADDITIVE) !== 0,
+      translucent: (desc.flags & MAT_TRANSLUCENT) !== 0,
+      alphaTest: (desc.flags & MAT_ALPHATEST) !== 0,
+    };
+  };
+  const glows = detailsBuilt ? mapGlows(core.dressingGlows(), dressingNames, glowInfo, worldFog, (eye, first, count) => core.dressingGlowVisibility(eye.x, eye.y, eye.z, first, count)) : null;
+  if (glows) root.add(glows.root);
+  // Spotlight beams (map-beams.ts).
+  const beams = detailsBuilt ? mapBeams(core.dressingGlows(), glowInfo("sprites/glow_test02")?.map ?? null, worldFog) : null;
+  if (beams) root.add(beams.mesh);
+
   const flashlight = new Flashlight();
   const fullbright = new Fullbright();
   const container = new THREE.Group();
   container.add(built.sky, root);
+  // The players, ghosts and viewmodels drawn with this world take its fog and light (model-light.ts).
+  const modelLight = new ModelLight(worldFog, container, root, (x, y, z, out) => core.lightCube(x, y, z, out));
+  let modelLighting: ModelLighting = "off";
+  let fullbrightOn = false;
+  const applyModelLighting = () => modelLight.setMode(potatoOn || fullbrightOn ? "off" : modelLighting);
   // Maps with HDR lighting get CS:S's HDR look (graphics/source-hdr.ts); this also marks the world root.
   container.userData.lightmapHdr = lm.hdr;
   const localLights = authoredLocalLights(core.entities());
@@ -1013,7 +1340,6 @@ export async function buildWorld(
   // Potato mode (potato.ts): its geometry and materials are built the first time it's turned on, then swapped in and
   // out live (the normal ones stay as they are).
   let potato: { set(on: boolean): void } | null = null;
-  let potatoOn = false;
   const buildPotato = (): { set(on: boolean): void } => {
     const t = performance.now();
     const { descs, water } = built;
@@ -1040,7 +1366,9 @@ export async function buildWorld(
     // Per-vertex colours of the merged draws (vertices belong to one face, so to one material).
     const vc = new Float32Array(nVerts * 3);
     for (const g of groups) {
-      const c = colors[g.material];
+      // (rendercolor takes the place of the material's colour, which is white where it applies.)
+      const t = tints.get(g.model);
+      const c = t?.materials.has(g.material) ? colors[g.material].map((v, k) => (k < 3 ? v * t.tint[k] : v)) : colors[g.material];
       for (let k = g.firstIndex; k < g.firstIndex + g.indexCount; k++) {
         const v = indices[k] * 3;
         vc[v] = c[0];
@@ -1073,7 +1401,7 @@ export async function buildWorld(
       if (imp?.kind === "wireframe") return { key: `w${i}`, material: () => imp.material };
       if (imp?.kind === "window") {
         const c = colors[i];
-        return imp.params.alpha < 1 || imp.params.fade
+        return imp.params.alpha < 1
           ? { key: `i${i}`, material: () => tint(new THREE.Color(c[0], c[1], c[2]), imp.params.alpha * 0.5, THREE.FrontSide) }
           : { key: "unlit", material: merged(false, THREE.FrontSide) };
       }
@@ -1112,21 +1440,27 @@ export async function buildWorld(
     }
     // Static props: flat (shading times the material's colour), opaque ones in one draw.
     if (props) {
-      const { pm, meshes } = props;
+      const { pm, meshes, setLit } = props;
       const base = materials.length + built.extraCount;
       const propColors = content.propMaterials.map((_, k) => (descs[base + k] ? flat(descs[base + k]) : ([0.45, 0.45, 0.45, 1] as [number, number, number, number])));
-      const shade = (meshes[0].geometry.getAttribute("color") as THREE.BufferAttribute).array as Float32Array;
-      const pc = new Float32Array(shade.length);
-      for (const g of [...pm.groups, ...pm.dynamicGroups]) {
-        const c = propColors[g.material];
-        for (let k = g.firstIndex; k < g.firstIndex + g.indexCount; k++) {
-          const v = pm.indices[k] * 3;
-          pc[v] = shade[v] * c[0];
-          pc[v + 1] = shade[v + 1] * c[1];
-          pc[v + 2] = shade[v + 2] * c[2];
-        }
-      }
+      const pc = new Float32Array((pm.vertices.length / 8) * 3);
       const propAttr = new THREE.BufferAttribute(pc, 3);
+      // The colours the props are drawn with now (the map's light, or the stand-in: "Prop lighting").
+      (repaintPotatoProps = () => {
+        const color = setLit(propsLit);
+        for (const g of [...pm.groups, ...pm.dynamicGroups]) {
+          const c = propColors[g.material];
+          // (UnlitGeneric takes no light: propMaterial.)
+          const unlit = ((descs[base + g.material]?.flags ?? 0) & MAT_UNLIT) !== 0;
+          for (let k = g.firstIndex; k < g.firstIndex + g.indexCount; k++) {
+            const i = pm.indices[k];
+            pc[i * 3] = (unlit ? 1 : color.getX(i)) * c[0];
+            pc[i * 3 + 1] = (unlit ? 1 : color.getY(i)) * c[1];
+            pc[i * 3 + 2] = (unlit ? 1 : color.getZ(i)) * c[2];
+          }
+        }
+        propAttr.needsUpdate = true;
+      })();
       const propSlot = (k: number): PotatoSlot => {
         const desc = descs[base + k];
         const name = content.propMaterials[k];
@@ -1139,7 +1473,7 @@ export async function buildWorld(
             key: `pa${k}`,
             material: () => {
               // Textured (foliage): the potato vertex colours carry the average colour too, so divide it back out.
-              const m = propMaterial(desc, map, name) as THREE.MeshBasicMaterial;
+              const m = propMaterial(desc, map, name, true) as THREE.MeshBasicMaterial;
               const c = propColors[k];
               m.color.multiply(new THREE.Color(1 / Math.max(c[0], 0.02), 1 / Math.max(c[1], 0.02), 1 / Math.max(c[2], 0.02)));
               return m;
@@ -1186,6 +1520,7 @@ export async function buildWorld(
         if (sky3dState) sky3dState.enabled = !on;
         if (trails) trails.root.visible = !on;
         if (smokeVolumes) smokeVolumes.root.visible = !on;
+        applyDetails();
       },
     };
   };
@@ -1204,56 +1539,86 @@ export async function buildWorld(
       (scrolls.size ? ` ${scrolls.size} scrolling materials,` : "") +
       (scrolls.animatedCount ? ` ${scrolls.animatedCount} flipbook materials,` : "") +
       (animProps ? ` ${animProps.count} animated props,` : "") +
+      (fades.size ? ` ${fades.size} brushes with fades or render keys (${fades.moving} changing, ${fades.undrawn} not drawn),` : "") +
       (smokeVolumes ? ` ${smokeVolumes.count} smoke volumes,` : "") +
+      (dressing?.draws ? ` dressing ${dressing.triangles} tris / ${dressing.draws} draws,` : "") +
+      (glows ? ` ${glows.sprites} sprites, ${glows.lightGlows} light glows / ${glows.draws} draws,` : "") +
+      (beams ? ` ${beams.count} spotlight beams,` : "") +
       (sky3dState && sky3d ? ` 3D skybox (scale ${sky3d.scale}${fog ? ", fog" : ""}) ≤${sky3dDraws(sky3dRoot)} draws,` : "") +
+      (worldFog && mapFog ? ` fog ${mapFog.start}-${mapFog.end} x${mapFog.maxDensity},` : "") +
       ` lightmap ${lm.width}x${lm.height}${styles?.faces ? ` (+light styles on ${styles.faces} faces)` : ""}, built in ${(performance.now() - t0).toFixed(0)} ms`,
   );
 
   flashlight.apply(container);
   fullbright.apply(container);
+
+  // The brush and prop meshes move only in `update` (which recomposes one whose transform changed), the rest of the
+  // world never: three needn't recompose each one's matrix every frame.
+  const still = (o: THREE.Object3D) => {
+    o.updateMatrix();
+    o.matrixAutoUpdate = false;
+  };
+  still(root);
+  still(sky3dRoot);
+  for (const m of [...models.values(), ...skyWorld.values(), ...skyMeshes.values()]) still(m);
+  if (props) still(props.meshes[0]);
+  /** Where each mesh was last put ([x, y, z, pitch, yaw, roll]): an unchanged one is left as it is. */
+  const placed = new WeakMap<THREE.Object3D, number[]>();
+  const D = Math.PI / 180;
+  const place = (t: BrushTransform, model: number) => {
+    let mesh = models.get(model);
+    if (t[7] !== undefined) {
+      const source = models.get(t[7]);
+      if (source && (!mesh || mesh.userData.instanceSource !== t[7])) {
+        mesh?.removeFromParent();
+        mesh = source.clone();
+        mesh.userData = { ...mesh.userData, instanceSource: t[7] };
+        models.set(model, mesh);
+        instanceModels.add(model);
+        root.add(mesh);
+      }
+    }
+    if (!mesh) return;
+    const at = placed.get(mesh);
+    if (!at || at[0] !== t[0] || at[1] !== t[1] || at[2] !== t[2] || at[3] !== t[3] || at[4] !== t[4] || at[5] !== t[5]) {
+      mesh.position.set(t[0], t[1], t[2]);
+      // Source AngleMatrix = Rz(yaw) * Ry(pitch) * Rx(roll) in the Z-up space of `root`.
+      mesh.rotation.set(t[5] * D, t[3] * D, t[4] * D, "ZYX");
+      mesh.updateMatrix();
+      if (at) for (let k = 0; k < 6; k++) at[k] = t[k];
+      else placed.set(mesh, t.slice(0, 6));
+    }
+    // Drawn or not as the core says (`brush_states`: visible and not removed): toggled func_wall_toggle, disabled
+    // func_brush, broken or killed entities, point_template copies not (yet / again) in the world. In the main view
+    // and the 3D skybox (miku_v2's equalizer). bhop_monster_jam's `bw` wall disappears when its button breaks it
+    // and comes back with its template 14 s later.
+    // (A brush faded out entirely stays hidden: brush-fades.ts.)
+    if (t.length > 6) { mesh.userData.stateShown = t[6] !== 0; mesh.visible = t[6] !== 0 && !mesh.userData.fadeHidden; mesh.userData.giDisabled = t[6] === 0; }
+  };
+
   return {
     root: container,
     texturePacks: overrides.packs,
     skyFaces: [...skyMeshes.values()],
     sky3d: sky3dState,
     update(transforms, visualTime = 0, effectStates, propAnims) {
+      fadeTime = visualTime;
+      modelLight.setTime(visualTime);
       setWaterVisualTime(visualTime);
       scrolls.update(visualTime);
       localLights.update(transforms, effectStates, visualTime);
-      const D = Math.PI / 180;
       for (const model of instanceModels) {
         if (transforms.has(model)) continue;
         models.get(model)?.removeFromParent();
         models.delete(model);
         instanceModels.delete(model);
       }
-      for (const [model, t] of transforms) {
-        let mesh = models.get(model);
-        if (t[7] !== undefined) {
-          const source = models.get(t[7]);
-          if (source && (!mesh || mesh.userData.instanceSource !== t[7])) {
-            mesh?.removeFromParent();
-            mesh = source.clone();
-            mesh.userData = { ...mesh.userData, instanceSource: t[7] };
-            models.set(model, mesh);
-            instanceModels.add(model);
-            root.add(mesh);
-          }
-        }
-        if (!mesh) continue;
-        mesh.position.set(t[0], t[1], t[2]);
-        // Source AngleMatrix = Rz(yaw) * Ry(pitch) * Rx(roll) in the Z-up space of `root`.
-        mesh.rotation.set(t[5] * D, t[3] * D, t[4] * D, "ZYX");
-        // Drawn or not as the core says (`brush_states`: visible and not removed): toggled func_wall_toggle, disabled
-        // func_brush, broken or killed entities, point_template copies not (yet / again) in the world. In the main view
-        // and the 3D skybox (miku_v2's equalizer). bhop_monster_jam's `bw` wall disappears when its button breaks it
-        // and comes back with its template 14 s later.
-        if (t.length > 6) { mesh.visible = t[6] !== 0; mesh.userData.giDisabled = t[6] === 0; }
-      }
+      transforms.forEach(place);
       trails?.update(transforms, visualTime, effectStates);
       if (trails && potatoOn) trails.root.visible = false;
       smoke?.update(transforms, visualTime, effectStates);
       smokeVolumes?.update(visualTime, transforms, effectStates);
+      glows?.update(transforms, visualTime);
       // After the transforms: animated props follow their frozen group's place.
       animProps?.update(visualTime, propAnims);
       explosions?.update(transforms, visualTime, propAnims);
@@ -1274,9 +1639,37 @@ export async function buildWorld(
       trails.update(at.transforms, time, at.states);
     },
     setFlashlight(on) { flashlight.set(on); },
-    setFullbright(on) { fullbright.set(on); },
+    setFullbright(on) {
+      fullbright.set(on);
+      fullbrightOn = on;
+      applyModelLighting();
+    },
+    setFog(on) {
+      fogOn = on;
+      applyFog();
+    },
+    setPropLighting(on) {
+      if (on === propsLit) return;
+      propsLit = on;
+      props?.setLit(on);
+      animProps?.setLit(on);
+      repaintPotatoProps?.();
+    },
+    setDetails(on) {
+      detailsOn = on;
+      applyDetails();
+    },
+    setModelLighting(mode) {
+      modelLighting = mode;
+      applyModelLighting();
+    },
+    lightEye(roots, camera, exposure) { modelLight.eye(roots, camera, exposure); },
     cull(camera) {
       culler.cull(camera);
+      // Distance fades from the view (not a water reflection's mirrored one, nor a shadow pass).
+      if (fades.size && (camera as THREE.PerspectiveCamera).isPerspectiveCamera && !camera.userData.mirror) fades.update(root.worldToLocal(camera.getWorldPosition(fadeEye)), camera.getWorldDirection(fadeForward).transformDirection(fogInverse.copy(root.matrixWorld).invert()), fadeTime, potatoOn);
+      // Glow visibility from the view (not a water reflection's mirrored one).
+      if (glows && detailsOn && !potatoOn && (camera as THREE.PerspectiveCamera).isPerspectiveCamera && !camera.userData.mirror) glows.observe(camera);
       explosions?.sort(camera);
       animProps?.setViewer(camera.getWorldPosition(viewerPos));
     },
@@ -1287,6 +1680,8 @@ export async function buildWorld(
       if (!potato) culler.uncull();
       (potato ??= buildPotato()).set(on);
       animProps?.setEnabled(!on);
+      applyFog();
+      applyModelLighting();
       flashlight.apply(container);
       fullbright.apply(container);
     },

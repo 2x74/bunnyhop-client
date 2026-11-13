@@ -4,7 +4,7 @@
 // native application.
 //
 // The stream does not have to be physical — SSJ only ever reads what it is handed — but it does
-// have to reach every branch: ground chains longer than BHOP_FRAMES, the jump-from-start reset,
+// have to reach every branch: ground chains longer than BHOP_FRAMES, hops in a start zone,
 // ladders, noclip, teleports, the double jump-event guard, and keyless air ticks.
 import { writeFileSync } from "node:fs";
 import { SsjTracker, type SsjMode } from "../../web/src/ssj/stats";

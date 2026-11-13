@@ -6,7 +6,8 @@
 //   gloves      the open right hand in the glove (viewmodel/gloves/fp.ts geometry, knit follows your colourway)
 //   hat         the hat itself (player/bunny/hats.ts)
 //   colourway   the bunny in it; ghost colour: your ghost bunny in it
-//   trail       a ribbon of a few hops in its colour (player/trail.ts, the in-game trail)
+//   trail       a ribbon of a few hops in its colour (player/trail.ts, the in-game trail); a trail shape the same, in
+//               that shape and the trail colour you have on
 //   title       a small brass nameplate with the title on it (gold for the rank-held ones)
 //   badge       the achievement's token as a medal (its ring colour and glyph, ui/badges.ts)
 //   frame       a little player card in the frame; background: a little player card on that background
@@ -33,6 +34,8 @@ export interface PreviewSpec {
   hat?: string;
   /** ghost / trail / frame / card / plaque accent. */
   color?: string;
+  /** trail: its shape ("shape-*" cosmetic id; absent = the ribbon). */
+  shape?: string;
   /** ghost / trail: the second colour of a two-tone item (the ghost's rim glow, the trail's tail). */
   color2?: string;
   /** bunny: a secret colourway not earned yet, drawn as a flat silhouette (no colours; ui/loadout-view.ts). */
@@ -52,11 +55,16 @@ export interface Equipped {
   hilt?: string | null;
   outfit?: string | null;
   body?: string | null;
+  /** The trail colour ("trail-*") and shape ("shape-*") on now: a new shape shows in your colour, a new colour in your shape. */
+  trail?: { color: string; color2?: string } | null;
+  shape?: string | null;
 }
 
 export const DEFAULT_PREVIEW_KNIFE = "knife-carrot";
 export const DEFAULT_PREVIEW_FINISH = "fin-garden";
 export const DEFAULT_PREVIEW_OUTFIT = "outfit-cream";
+/** trail-gold's colour: what a trail shape is shown in when no trail colour is given. */
+export const DEFAULT_PREVIEW_TRAIL = "#ffc23d";
 const BRASS = "#d9a441";
 const GOLD = "#ffd45e";
 
@@ -97,10 +105,16 @@ export function previewOf(item: PreviewItem, eq: Equipped = {}): PreviewSpec | n
       return { kind: "bunny", key: `bunny:${c.id}:${body}`, outfit: c.id, body };
     }
     case "ghost":
-    case "trail":
+    case "trail": {
       if (!c.color) return null;
+      const shape = c.slot === "trail" && eq.shape && eq.shape !== "shape-ribbon" ? { shape: eq.shape } : null;
       // Two-tone items (CosmeticDef.color2: the ghost's rim glow, the trail's tail) carry both.
-      return c.color2 ? { kind: c.slot, key: `${c.slot}:${c.color}:${c.color2}`, color: c.color, color2: c.color2 } : { kind: c.slot, key: `${c.slot}:${c.color}`, color: c.color };
+      return { kind: c.slot, key: `${c.slot}:${c.color}${c.color2 ? `:${c.color2}` : ""}${shape ? `:${shape.shape}` : ""}`, color: c.color, ...(c.color2 ? { color2: c.color2 } : {}), ...shape };
+    }
+    case "shape": {
+      const t = eq.trail ?? { color: DEFAULT_PREVIEW_TRAIL };
+      return { kind: "trail", key: `trail:${t.color}${t.color2 ? `:${t.color2}` : ""}:${c.id}`, color: t.color, ...(t.color2 ? { color2: t.color2 } : {}), shape: c.id };
+    }
     case "title": {
       const color = c.rarity === 5 ? GOLD : BRASS;
       return { kind: "plaque", key: `plaque:${c.name}:${color}`, label: c.name, color };
