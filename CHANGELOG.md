@@ -17,6 +17,9 @@ are kept. On a Mac this is the first update since v0.9.0, so it also brings ever
   doorway at 40 seconds shows the next room, and the black floors clear as you fall towards them. Surfaces that maps
   fade by distance or pulse over time now do so: the platforms on the badges maps that only appear up close, combine
   shields, pulsing boosters on bhop_avantasia.
+- Brushes that maps hide, make see-through, tint, blink or show as holograms now draw that way, like in CS:S: glass
+  you can see through, coloured blocks, bhop_vacban's blinking walls, and the invisible blocks on bhop_union.
+- bhop_angst's hanging loops are white again, as in CS:S.
 - Jump stats and the JHUD keep counting while you hop in the start zone. The count starts over once you let go of
   jump and stand still, as on CS:S servers.
 - While you spectate someone in a server, the speed graph shows their speed.
