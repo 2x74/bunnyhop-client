@@ -253,7 +253,7 @@ function build(s: Screen | undefined): HTMLElement | null {
       return h("section.panel.panel-wide.panel-stats", null, header("Stats", tabs), statsScreen({ tabsHost: tabs, play: () => ((S.mapsFocus = null), push("maps")) }));
     }
     case "servers":
-      return h("section.panel.panel-wide", null, header("Play online"), serverBrowser({ onSolo: () => push("maps"), map: S.actions?.map ?? null }));
+      return h("section.panel.panel-wide", null, header("Play online"), serverBrowser({ onSolo: () => push("maps"), map: S.actions?.map ?? null, profile: (id) => openProfile(id) }));
     case "support": {
       prewarmLoadoutSoon();
       // Its tabs sit in the header too (ui/support.ts fills the slot), like the profile's.

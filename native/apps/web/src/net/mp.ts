@@ -288,6 +288,7 @@ export class Multiplayer {
       rtv: () => this.conn.send({ t: "rtv" }),
       leave: () => this.leave(),
       scoreboard: () => this.board.show(true),
+      self: () => this.roster().find((p) => p.slot === this.you) ?? null,
     });
   }
 

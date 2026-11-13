@@ -160,7 +160,6 @@ body.menu-open #mp-menu, body.menu-open #mp-scoreboard, body.menu-open #mp-specb
 .srv-bar { display: block; height: 0.3rem; margin-top: 0.3rem; border-radius: 1rem; background: var(--raise-2); overflow: hidden; }
 .srv-bar i { display: block; height: 100%; background: var(--gain); border-radius: inherit; }
 .srv-bar.full i { background: var(--loss); }
-.srv-ping.good { color: var(--gain); } .srv-ping.ok { color: #ffd84d; } .srv-ping.bad { color: var(--loss); }
 .srv-actions { text-align: right; white-space: nowrap; }
 .srv-foot { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; }
 .srv-empty { padding: 1.4rem; text-align: center; color: var(--dim); }

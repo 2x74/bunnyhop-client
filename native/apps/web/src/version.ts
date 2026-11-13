@@ -70,9 +70,11 @@ export const UPCOMING: ChangelogEntry = {
   version: "0.0.41",
   date: "2026-11-12",
   kind: "minor",
-  title: "Play online first, faster maps, timed jumps and map lighting",
+  title: "Play online first, map lighting and details, timed jumps and faster loads",
   notes: [
     "The main menu has two buttons now, Play online and Play solo, and Play online shows how many people are playing. Your run is timed on your own machine, so ping doesn't matter: the Play online screen says so above the server list.",
+    "Play online shows who is in each server, with their picture, name and badges, and a picture of the map it's on. Click a name for their profile or rest on it for their card. Each server says where it is; ping is a small number now, since your run is timed on your machine.",
+    "Two new servers in Europe: EU Easy and EU Hard. The two in US East are now called NA Easy and NA Hard. Servers with people in them are listed first, then the ones nearer you.",
     "Scroll jumps, jump, crouch and turn keys now land on the tick you pressed them, like the mouse and strafe keys already did. At 60 Hz a scroll jump can reach every landing tick instead of 3 in 5, and presses made during a stutter keep their own ticks.",
     "Maps load faster. bhop_lol_plaza and other maps built from many separate parts no longer sit on the loading screen for seconds, a map's textures download alongside the map, and your PB and WR ghosts are prepared in the background, so a ghost can appear a second after the map is ready.",
     "Maps use less memory once loaded, and checking a finished run no longer loads the map a second time. On devices with little memory, a very big map says it may not load before it downloads.",
@@ -105,7 +107,7 @@ export const UPCOMING: ChangelogEntry = {
     "Phones and narrow windows: the main menu scrolls, Play online shows a Join button for each server, and tab rows that don't fit fade at the edge to show they scroll.",
     "\"R to go again\" and the tutorial's key hints are readable on bright maps. Unlocks that arrive while a menu is open wait until you're back in the game.",
     "Runs upload faster and maps start a little sooner far from the US East coast. The game page downloads about 0.4 MB less before it starts.",
-    "Custom CSS: the voice list (#voice-hud), the end-of-run card (#hud-endcard) and the unlock plates (#nt-cels) now stay the same between updates.",
+    "Custom CSS: the voice list (#voice-hud), the end-of-run card (#hud-endcard) and the unlock plates (#nt-cels) now stay the same between updates, and the servers on Play online have stable hooks ([data-part=\"server\"] and its parts).",
   ],
 };
 

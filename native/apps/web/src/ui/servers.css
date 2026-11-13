@@ -1,5 +1,6 @@
 /* Server browser (ui/servers.ts): the base table is net/net.css; this is the AIRTIME pass. The row is the button: its
-   Join label is quiet until the row is hovered or focused, then it's the one amber thing. No boxes. */
+   Join label is quiet until the row is hovered or focused, then it's the one amber thing. No boxes.
+   A row carries a picture of its map on the left and, under its line, everyone who is in it. */
 .srv-table th { font-family: var(--font-text); font-size: var(--fs-xs); font-weight: 600; color: var(--cream-3); }
 .srv-table td { border-top-color: var(--ink-3); }
 .srv-table tr.srv-row:hover td, .srv-table tr.srv-row:focus-within td { background: var(--ink-2); }
@@ -13,10 +14,6 @@
 .srv-bar i { transform-origin: left center; }
 .srv-table tbody.fresh .srv-bar i { animation: srv-bar-in 0.4s 0.12s var(--ease-glide) both; }
 @keyframes srv-bar-in { from { transform: scaleX(0); } }
-.srv-row.skeleton td { border-top-color: var(--ink-3); }
-.srv-row.skeleton .srv-name b, .srv-row.skeleton .srv-name small { width: 12rem; border-radius: var(--r-1); background: var(--ink-2); animation: mb-pulse 1.4s ease-in-out infinite; }
-.srv-row.skeleton .srv-name small { width: 16rem; margin-top: 0.3rem; }
-.srv-row.skeleton { cursor: default; pointer-events: none; }
 .srv-status { margin: 0.8rem 0.6rem; }
 /* Above the list: why the Ping column is no reason to stay out (servers.ts PING_NOTE). */
 .srv-ping-note { margin: 0 0.6rem 0.7rem; font-family: var(--font-text); font-size: var(--fs-sm); color: var(--text); }
@@ -31,20 +28,132 @@
 .srv-foot { margin-top: 1.6rem; padding: 0 0.6rem; justify-content: flex-start; }
 .srv-solo { padding-left: 0; color: var(--cream-2); }
 @media (prefers-reduced-motion: reduce) { .srv-table tbody.fresh .srv-bar i { animation: none; } }
-/* Phones: each server is two lines, its name with Join beside it, then its map and players. As a table the Players
-   column was cut off and the Join column hidden (only a tap on the row joined, and nothing said so). There is no hover
-   on a phone, so Join is always the amber button. */
+
+/* The list itself. Every row and the heading share one grid of eight tracks, so everything in a row sits on the
+   same lines as the labels above it:
+     picture | server (two tracks) | map | players | time left | region | join
+   A row's head is two lines everywhere: the first (1.5rem) has the server's name, the map, the count, the time, the
+   region and Join on one baseline; the second (1.25rem) has the tiers, the players bar and the ping. The picture is
+   exactly as tall as those two lines. Under the head, the players sit on the same tracks (subgrid): a name starts
+   under Server, half way along Server, under Map, under Players or under Region, in every row.
+   Type: first line fs-md cream, second line fs-xs cream-3 (the Settings rows' name and hint), player names fs-sm. */
+.servers {
+  --srv-l1: 1.5rem;
+  --srv-l2: 1.25rem;
+  --srv-pic-h: calc(var(--srv-l1) + var(--srv-l2));
+  --srv-gap: 1rem;
+  --srv-cols: calc(var(--srv-pic-h) * 16 / 9) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.15fr) 8.5rem 4.6rem 5.6rem 6rem;
+}
+.servers .srv-table, .servers .srv-table thead, .servers .srv-table tbody { display: block; }
+.servers .srv-table tr { display: grid; grid-template-columns: var(--srv-cols); column-gap: var(--srv-gap); align-items: start; padding: 0 0.6rem; }
+.servers .srv-table :is(th, td) { display: block; min-width: 0; padding: 0; border: 0; }
+.servers .srv-table thead tr { padding-bottom: 0.45rem; }
+.servers .srv-table thead th { line-height: 1.2; }
+.servers .srv-table thead th:nth-child(2) { grid-column: span 2; }
+.servers .srv-table tr.srv-row { grid-template-areas: "art name name map players left region join" ". who who who who who who who"; row-gap: 0.55rem; padding-top: 0.75rem; padding-bottom: 0.75rem; border-top: 1px solid var(--ink-3); }
+.servers .srv-table tr.srv-row:hover, .servers .srv-table tr.srv-row:focus-within { background: var(--ink-2); }
+.servers .srv-table tr.srv-row:hover td, .servers .srv-table tr.srv-row:focus-within td { background: none; }
+/* The players under a row aren't part of its button (a name opens a profile), so the row and its Join stay quiet
+   while the pointer is over them. Not on phones, where Join is always lit. */
+@media (min-width: 40.01rem) {
+  .servers .srv-table tr.srv-row:has(.srv-who:hover):not(:focus-within) { background: none; }
+  .servers .srv-row:has(.srv-who:hover) .srv-join:not(:disabled):not(:focus-visible) { background: transparent; color: var(--cream-3); box-shadow: none; }
+  /* An empty room is its head alone (no second grid row, so no gap under it). */
+  .servers .srv-table tr.srv-row.bare { grid-template-areas: "art name name map players left region join"; }
+}
+.servers .srv-art { grid-area: art; }
+.servers .srv-name { grid-area: name; }
+.servers .srv-mapcell { grid-area: map; }
+.servers .srv-players { grid-area: players; min-width: 0; }
+.servers .srv-left { grid-area: left; }
+.servers .srv-region { grid-area: region; }
+.servers .srv-actions { grid-area: join; }
+.servers .srv-who { grid-area: who; cursor: default; }
+.servers .srv-who[hidden] { display: none; }
+
+/* The head's first line: one size, one line height, so every cell's text is on the same baseline. */
+.servers .srv-name b, .servers .srv-map, .servers .srv-mapcell > .dim, .servers .srv-players > span:first-child, .servers .srv-left, .servers .srv-region > span { display: block; height: var(--srv-l1); font-size: var(--fs-md); line-height: var(--srv-l1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.servers .srv-name b { font-weight: 700; }
+.servers .srv-map { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+.servers .srv-map .srv-mapname { min-width: 0; font-weight: 650; overflow: hidden; text-overflow: ellipsis; }
+.servers .srv-map .badge { flex: none; line-height: 1.2; }
+.servers .srv-players .dim { color: var(--cream-3); }
+.servers .srv-left, .servers .srv-players > span:first-child { font-variant-numeric: tabular-nums; }
+.servers .srv-table td.srv-actions { display: flex; align-items: center; justify-content: flex-end; height: var(--srv-l1); }
+.servers .srv-join { flex: none; }
+/* The head's second line: the tiers, the bar, the ping. */
+.servers .srv-name small, .servers .srv-region .srv-ping { display: block; height: var(--srv-l2); font-family: var(--font-text); font-size: var(--fs-xs); line-height: var(--srv-l2); color: var(--cream-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.servers .srv-bar { height: 0.25rem; margin-top: calc((var(--srv-l2) - 0.25rem) / 2); }
+.servers .srv-here { margin-left: 0.4rem; vertical-align: 0.08em; }
+
+/* The map's picture: its card render from the map index (ui/thumbs.ts), on a tone step like Home's record rows, as
+   tall as the head's two lines. A map without one shows its colour and initials. */
+.srv-thumb { display: block; width: 100%; height: var(--srv-pic-h); aspect-ratio: auto; border-radius: var(--r-1); background-color: var(--ink-2); box-shadow: 0 0.4rem 1rem -0.6rem rgba(0, 0, 0, 0.7); }
+.srv-thumb::after { display: none; }
+.srv-thumb .card-initials { font-size: 0.95rem; }
+.srv-row.offline .srv-thumb { filter: grayscale(1); }
+
+/* Who is here, on the row's own tracks. Wide: five places a line (two under Server, one under Map, one under
+   Players and Time left, one under Region and Join). Narrower: four, one under each of Server, Map, Players, Region. */
+.servers .srv-table td.srv-who { display: grid; grid-template-columns: subgrid; row-gap: 0.25rem; }
+.servers .srv-table td.srv-who[hidden] { display: none; }
+.servers .srv-people { display: contents; }
+@media (min-width: 68.01rem) {
+  .servers .srv-people > :nth-child(5n + 4), .servers .srv-people > :nth-child(5n) { grid-column: span 2; }
+}
+@media (min-width: 40.01rem) and (max-width: 68rem) {
+  .servers .srv-people > :nth-child(4n + 1), .servers .srv-people > :nth-child(4n + 3), .servers .srv-people > :nth-child(4n) { grid-column: span 2; }
+}
+/* A player: a fixed box for the picture, the name, the badges. Every entry has the same box, the same gaps and the
+   same line, whatever the player wears: a supporter's decorated avatar is scaled down so the ornament stays about
+   inside the box (it used to hang half an avatar outside it), names use the list's own font, and badges are one size. A long name is
+   cut with an ellipsis inside its own place. */
+.srv-p { display: flex; align-items: center; gap: 0.45rem; min-width: 0; height: 1.5rem; color: var(--cream); text-decoration: none; cursor: pointer; }
+.srv-p:hover, .srv-p:focus-visible { text-decoration: none; outline: none; }
+.srv-avbox { flex: none; display: grid; place-items: center; width: 1.5rem; height: 1.5rem; }
+.srv-avbox .srv-av { display: grid; place-items: center; width: 1.5rem; height: 1.5rem; border-radius: 50%; object-fit: cover; font-size: 0.72rem; }
+.srv-avbox .av-deco { width: 1.5rem; height: 1.5rem; transform: scale(0.75); }
+.srv-pname { min-width: 0; font-size: var(--fs-sm); font-weight: 600; line-height: 1.5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.srv-p:hover .srv-pname, .srv-p:focus-visible .srv-pname { text-decoration: underline; text-underline-offset: 0.18em; }
+.srv-p .nm-marks { flex: none; gap: 0.25rem; vertical-align: 0; font-size: var(--fs-sm); }
+.srv-p .nm-marks > *, .srv-p .nm-marks .nm-creator .nm-icon { width: 0.9rem; height: 0.9rem; filter: none; }
+.srv-more { justify-self: start; height: 1.5rem; padding: 0; border: 0; background: none; font-family: var(--font-text); font-size: var(--fs-sm); line-height: 1.5rem; color: var(--cream-3); white-space: nowrap; }
+button.srv-more { color: var(--amber); font-weight: 650; cursor: pointer; }
+button.srv-more:hover, button.srv-more:focus-visible { color: var(--amber-hi); text-decoration: underline; text-underline-offset: 0.2em; outline: none; }
+/* Under the list while every room is empty (servers-who.ts ALL_EMPTY). */
+.srv-quiet { margin: 0.2rem 0.6rem 0; font-family: var(--font-text); font-size: var(--fs-sm); color: var(--cream-2); }
+.srv-quiet[hidden] { display: none; }
+
+/* Loading: the rows' own shape, empty. */
+.srv-row.skeleton { cursor: default; pointer-events: none; }
+.srv-row.skeleton .srv-thumb { animation: mb-pulse 1.4s ease-in-out infinite; box-shadow: none; }
+.servers .srv-row.skeleton .srv-name b, .servers .srv-row.skeleton .srv-name small { width: 12rem; max-width: 100%; height: 0.8rem; margin: 0.35rem 0; border-radius: var(--r-1); background: var(--ink-2); animation: mb-pulse 1.4s ease-in-out infinite; }
+.servers .srv-row.skeleton .srv-name small { width: 9rem; height: 0.6rem; margin: 0.3rem 0 0.35rem; }
+@media (prefers-reduced-motion: reduce) { .srv-row.skeleton .srv-thumb { animation: none; } }
+
+/* Narrower windows: tighter columns, and Server wide enough for one player's place under it. */
+@media (max-width: 68rem) {
+  .servers { --srv-gap: 0.8rem; --srv-cols: calc(var(--srv-pic-h) * 16 / 9) minmax(0, 0.55fr) minmax(0, 0.55fr) minmax(0, 1fr) 6.6rem 4.2rem 4.8rem 5.4rem; }
+}
+
+/* Phones: a server is its name with Join beside it, then the picture with the map and region beside it and the count
+   at the right (the same two lines as the picture's height), then who is there in two columns. Time left and the ping
+   go (ping doesn't matter and the line above says so). There is no hover on a phone, so Join is always the amber
+   button. */
 @media (max-width: 40rem) {
-  .srv-table, .srv-table tbody { display: block; }
-  .srv-table thead { display: none; }
-  .srv-table tr.srv-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name join" "map players"; align-items: center; gap: 0.55rem 0.9rem; padding: 0.8rem 0.6rem; border-top: 1px solid var(--ink-3); }
-  .srv-table tr.srv-row td { display: block; min-width: 0; padding: 0; border: 0; }
-  .srv-table tr.srv-row td.srv-left, .srv-table tr.srv-row td[class*="srv-ping"] { display: none; }
-  .srv-table tr.srv-row:hover td, .srv-table tr.srv-row:focus-within td { background: none; }
-  .srv-table td.srv-name { grid-area: name; }
-  .srv-table tr.srv-row td:nth-child(2) { grid-area: map; }
-  .srv-table td.srv-players { grid-area: players; min-width: 5.5rem; text-align: right; }
-  .srv-table td.srv-actions { grid-area: join; }
-  .srv-map { flex-wrap: wrap; }
+  .servers .srv-table thead { display: none; }
+  .servers .srv-table tr.srv-row, .servers .srv-table tr.srv-row.bare { grid-template-columns: calc(var(--srv-pic-h) * 16 / 9) minmax(0, 1fr) 4.6rem; grid-template-areas: "name name join" "art map players" "art region players" "who who who"; gap: 0 0.8rem; padding-top: 0.8rem; padding-bottom: 0.8rem; }
+  .servers .srv-table tr.srv-row:hover, .servers .srv-table tr.srv-row:focus-within { background: none; }
+  .servers .srv-table td.srv-left { display: none; }
+  .servers .srv-name { margin-bottom: 0.55rem; }
+  .servers .srv-art { grid-row: 2 / span 2; }
+  .servers .srv-players { grid-row: 2 / span 2; text-align: right; }
+  .servers .srv-table td.srv-actions { justify-self: end; height: auto; grid-row: 1; align-self: center; margin-bottom: 0.55rem; }
+  /* The region takes the second line beside the picture, in plain text. */
+  .servers .srv-region > span { height: var(--srv-l2); font-family: var(--font-text); font-size: var(--fs-sm); line-height: var(--srv-l2); }
+  .servers .srv-region .srv-ping { display: none; }
+  .servers .srv-table td.srv-who { display: block; margin-top: 0.6rem; }
+  .servers .srv-table td.srv-who[hidden] { display: none; }
+  .servers .srv-people { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.25rem 0.8rem; }
   .srv-join:not(:disabled) { background: var(--amber); color: var(--amber-ink); box-shadow: inset 0 -3px 0 var(--amber-deep); }
 }

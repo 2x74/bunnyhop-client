@@ -751,6 +751,19 @@ export interface ServerListing {
   timeLeftMs: number | null;
   /** Map the room is switching to right now, if any. */
   changing: string | null;
+  /**
+   * Everyone in the room, first to join first, each as the room's scoreboard shows them to the others (`players` has the
+   * count). Absent from an offline room and from older APIs: the row then has just its count.
+   */
+  who?: ListingPerson[];
+}
+
+/** A player in ServerListing.who (apps/api/src/rooms/who.ts): only what differs from a plain player is there. */
+export interface ListingPerson extends PlayerMarks {
+  id: string;
+  name: string;
+  /** Their public picture; absent: the default bunny their id picks. */
+  avatarUrl?: string;
 }
 
 /** A private lobby as an invite shows it (GET /lobbies/:id, POST /lobbies; apps/api/src/rooms/room.ts LobbyInfo). */
