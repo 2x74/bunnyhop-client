@@ -12,11 +12,13 @@
 // the website, and so are brushes whose keys the map changes while it runs (bh_dynamic_render_entities).
 #include <nlohmann/json.hpp>
 #include <algorithm>
+#include <cctype>
 #include <array>
 #include <cmath>
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 
 namespace native_render {
@@ -80,7 +82,7 @@ inline long long atoi_of(std::string_view text) {
     return digits ? (negative ? -value : value) : 0;
 }
 
-inline int byte(long long n) {
+inline int clamp_byte(long long n) {
     return int(std::clamp(n, 0LL, 255LL));
 }
 }  // namespace render_detail
@@ -90,7 +92,7 @@ inline RenderKeys render_keys(const nlohmann::json &entity) {
     using namespace render_detail;
     RenderKeys out;
     out.mode = int(atoi_of(key(entity, "rendermode").value_or("")) & 0xff);
-    if (const auto amount = key(entity, "renderamt")) out.amount = byte(atoi_of(*amount));
+    if (const auto amount = key(entity, "renderamt")) out.amount = clamp_byte(atoi_of(*amount));
     out.fx = int(atoi_of(key(entity, "renderfx").value_or("")) & 0xff);
     // UTIL_StringToColor32 reads numbers into a colour that starts at 0 0 0; a key with no numbers is black.
     if (const auto color = key(entity, "rendercolor")) {
@@ -103,7 +105,7 @@ inline RenderKeys render_keys(const nlohmann::json &entity) {
             const auto token =
                     std::string_view(*color).substr(at, end == std::string::npos ? std::string::npos : end - at);
             if (token.empty()) break;
-            rgb[found++] = byte(atoi_of(token));
+            rgb[found++] = clamp_byte(atoi_of(token));
             at = end == std::string::npos ? color->size() : end;
         }
         if (rgb != std::array<int, 3>{255, 255, 255})
@@ -204,7 +206,7 @@ inline int fx_blend(const RenderKeys &k, const FxInputs &in) {
             blend = k.mode == 0 ? 255 : a;
     }
     // The engine keeps it in an int (truncated towards zero), clamped.
-    return byte((long long)std::trunc(blend));
+    return clamp_byte((long long)std::trunc(blend));
 }
 
 // Uniform 0..1 from two integers (material-alpha.ts hash01, the bridge's material_alpha.rs hash01).

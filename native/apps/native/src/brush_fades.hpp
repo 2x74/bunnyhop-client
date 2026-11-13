@@ -17,6 +17,8 @@
 #include "brush_render.hpp"
 #include <nlohmann/json.hpp>
 #include <algorithm>
+#include <cctype>
+#include <cstdlib>
 #include <array>
 #include <cmath>
 #include <cstdint>
