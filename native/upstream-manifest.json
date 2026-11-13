@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "repository": "https://github.com/2x74/bunnyhop",
-  "commit": "f71566ca290a8f1f4fee23fa5435a331002eb5a2",
+  "commit": "9e58625232d824949357b62c6f88b2546af602ca",
   "areas": [
     "crates/core",
     "crates/vendor",
@@ -19,7 +19,7 @@
     "native-core.patch": "a28f4d9a98de1ea1f6a8ccb0754851f6f86d7b7e5d7d95ff453c3080c857f52c",
     "native-web.patch": "c6aea317e674ee17f956dea956339c253551ec3e8c912b062ac8d178c9507cfe"
   },
-  "sourceTreeSha256": "5a3bad9dc3d5edaef4c1d069461bb47fec88d3d3d96dd82ebabe7ed836a1b7e9",
+  "sourceTreeSha256": "8b3a197dca4cc82bca9ef838eccbe73847502af3acfdac83b4912415f48cb3f1",
   "sources": {
     "apps/web/src/about/about.css": "1a89ee791a663ae8e00840bf284cca40c5dfd3d1786e7808ac57a2fce6a88742",
     "apps/web/src/about/changelog-page.ts": "bfbe95c9fcb55ff795edc5aab6fc52081c9ed401f160cdf0f3af91d96fa9f1c7",
@@ -992,7 +992,7 @@
     "apps/web/src/upload-store.ts": "0b534fe38dae238c3b09393576c4f0efb32f36562436dff9aa783f0cd382d7e5",
     "apps/web/src/uploads.ts": "33060ed9f868667e08c01ceb828a8621f805c6f69b12c4f8f1f168a75e063926",
     "apps/web/src/verifier.ts": "c9665fd3b3c0c782e13c5d9faae49737ecd93081c87bca0fd0bdb3c5c684c976",
-    "apps/web/src/version.ts": "95b81f27717be3c3914ba7793a230ae0b319b290151c9f369736badb928c51f2",
+    "apps/web/src/version.ts": "671671afa44950140bb3c644a03736534ce61691ec49cc0bbbade5c5e7ab249d",
     "apps/web/src/video-grade.ts": "1185315b5990ea8d155596ba092e9fd60113c43adf1ad64fcfb03368ddc6c558",
     "apps/web/src/video-settings.ts": "60db218f25f6327dcbdfc08207f71c5cda2a624bdf68286ef64358bb00c7f7ab",
     "apps/web/src/viewer/arms.ts": "13dbb10c27e9491783e051dbc879065047d8512dca648c90b6a46515786261b0",
@@ -2302,7 +2302,7 @@
     "apps/web/src/upload-store.ts": "0b534fe38dae238c3b09393576c4f0efb32f36562436dff9aa783f0cd382d7e5",
     "apps/web/src/uploads.ts": "33060ed9f868667e08c01ceb828a8621f805c6f69b12c4f8f1f168a75e063926",
     "apps/web/src/verifier.ts": "c9665fd3b3c0c782e13c5d9faae49737ecd93081c87bca0fd0bdb3c5c684c976",
-    "apps/web/src/version.ts": "95b81f27717be3c3914ba7793a230ae0b319b290151c9f369736badb928c51f2",
+    "apps/web/src/version.ts": "671671afa44950140bb3c644a03736534ce61691ec49cc0bbbade5c5e7ab249d",
     "apps/web/src/video-grade.ts": "1185315b5990ea8d155596ba092e9fd60113c43adf1ad64fcfb03368ddc6c558",
     "apps/web/src/video-settings.ts": "60db218f25f6327dcbdfc08207f71c5cda2a624bdf68286ef64358bb00c7f7ab",
     "apps/web/src/viewer/arms.ts": "13dbb10c27e9491783e051dbc879065047d8512dca648c90b6a46515786261b0",
