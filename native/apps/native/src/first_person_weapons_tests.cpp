@@ -2,7 +2,8 @@
 // and time is showing: a switch lowers the old weapon out while the new one draws, resets and hidden frames never
 // lower anything, the quiet inspect is yours only, an attack blends an inspect out, the gun's grip eases when quiet,
 // a shot kicks the viewmodel FOV and a hard landing dips the hands; gun clips crossfade, rapid shots build recoil up,
-// an interrupted silencer change shows what the core put back, and a reset leaves nothing of what came before.
+// an interrupted silencer change shows what the core put back, a reset leaves nothing of what came before, and
+// switch spam never draws more layers than there is room for or a pose sized for another model.
 #include "first_person_weapons.hpp"
 #include <cassert>
 #include <cstdio>
@@ -31,12 +32,15 @@ struct Library {
         for (size_t f = 0; f < frames; f++) {
             const float t = frames > 1 ? float(duration * double(f) / double(frames - 1)) : 0;
             const float frame[12] = {1, 0, 0, id, 0, 1, 0, t, 0, 0, 1, z};
-            data.insert(data.end(), frame, frame + 12);
+            for (size_t bone = 0; bone < entry.bones; bone++)
+                data.insert(data.end(), frame, frame + 12);
         }
     }
 
-    Library() {
-        knife.bones = gun.bones = 1;
+    // Real knives and guns have different bone counts; most tests use one bone for both.
+    explicit Library(size_t knife_bones = 1, size_t gun_bones = 1) {
+        knife.bones = knife_bones;
+        gun.bones = gun_bones;
         clip(knife, "idle", 0, knife_idle);
         clip(knife, "draw", .5, knife_draw);
         clip(knife, "slash1", .4, knife_slash);
@@ -100,7 +104,8 @@ struct Harness {
     uint32_t weapon = native_vm::knife_weapon_id;
     bool silenced = false;
 
-    explicit Harness(native_vm::FirstPersonConfig setup = config()) {
+    explicit Harness(native_vm::FirstPersonConfig setup = config(), size_t knife_bones = 1, size_t gun_bones = 1)
+        : library(knife_bones, gun_bones) {
         weapons = std::make_unique<native_vm::FirstPersonWeapons>(std::move(setup), library.data);
     }
 
@@ -192,6 +197,41 @@ void test_fast_switches_lower_both_weapons() {
     assert(out.layers[1].gun && out.layers[2].gun && clip_id(out.layers[2]) == gun_draw);
     h.run(.5);
     assert(h.step().count == 1);
+}
+
+// Spamming switches between a knife and guns with different bone counts, with shots, reloads, inspects, hidden frames
+// and resets mixed in: never more layers than the output holds, and every layer's pose fits its own model (the bone
+// upload reads entry bones x 12 floats from it).
+void test_switch_spam_keeps_every_pose_its_own_size() {
+    constexpr size_t knife_bones = 2, gun_bones = 3, frames = 20000;
+    Harness h(config_with_recoil(), knife_bones, gun_bones);
+    uint32_t random = 0x9e3779b9u;
+    const auto roll = [&random](uint32_t sides) {
+        random ^= random << 13;
+        random ^= random >> 17;
+        random ^= random << 5;
+        return random % sides;
+    };
+    constexpr std::array<uint32_t, 3> weapons = {native_vm::knife_weapon_id, usp_id, m4a1_id};
+    size_t most_layers = 0;
+    for (size_t frame = 0; frame < frames; frame++) {
+        if (roll(5) < 2) h.weapon = weapons[roll(3)];
+        if (roll(20) == 0) h.weapons->press_inspect(roll(2) == 0, true);
+        if (roll(100) == 0) h.seconds += .3;
+        if (roll(400) == 0) h.weapons->reset();
+        if (roll(10) == 0) h.silenced = !h.silenced;
+        const uint32_t flags = roll(30) == 0 ? native_vm::reload_started_flag : 0;
+        const auto &out = h.step(roll(8) == 0, flags);
+        assert(out.count <= out.layers.size());
+        most_layers = std::max(most_layers, out.count);
+        for (size_t i = 0; i < out.count; i++) {
+            const auto &layer = out.layers[i];
+            assert(layer.entry && layer.pose);
+            assert(layer.pose->size() == layer.entry->bones * native_vm::floats_per_bone);
+        }
+    }
+    // The spam reached the knife and a gun both lowering under a third weapon's draw.
+    assert(most_layers == 3);
 }
 
 // Gun to knife: the gun plays its holster from where it was, then is gone.
@@ -464,6 +504,7 @@ int main() {
     test_knife_lowers_while_the_gun_draws();
     test_gun_holsters_from_where_it_was();
     test_fast_switches_lower_both_weapons();
+    test_switch_spam_keeps_every_pose_its_own_size();
     test_resets_and_hidden_frames_never_lower();
     test_quiet_inspect_is_yours_only();
     test_attack_blends_the_inspect_out();
