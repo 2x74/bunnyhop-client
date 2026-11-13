@@ -9,14 +9,14 @@
 namespace {
 constexpr float tolerance = 1e-5f;
 
-bool near(float a, float b) {
+bool close_to(float a, float b) {
     return std::abs(a - b) < tolerance;
 }
 
 void expect_light(const std::array<float, 18> &cube, native_render::ModelLightMode mode, std::array<float, 3> web) {
     const auto light = native_render::model_light_of(cube, mode, 1);
     for (int k = 0; k < 3; k++) {
-        if (near(light[k], web[k])) continue;
+        if (close_to(light[k], web[k])) continue;
         std::fprintf(stderr, "model light %d: %f, web %f\n", k, light[k], web[k]);
         assert(false);
     }
@@ -46,9 +46,9 @@ void test_ldr_look() {
 void test_fog_color() {
     const float color[3] = {200, 100, 50}, color2[3] = {0, 50, 100}, dir[3] = {0, 0, 2}, forward[3] = {.6f, 0, .8f};
     const auto fog = native_render::fog_view_color(color, color2, dir, true, forward);
-    assert(near(fog[0], .70588235f) && near(fog[1], .37254902f) && near(fog[2], .21568627f));
+    assert(close_to(fog[0], .70588235f) && close_to(fog[1], .37254902f) && close_to(fog[2], .21568627f));
     const auto plain = native_render::fog_view_color(color, color2, dir, false, forward);
-    assert(near(plain[0], 200.f / 255) && near(plain[2], 50.f / 255));
+    assert(close_to(plain[0], 200.f / 255) && close_to(plain[2], 50.f / 255));
 }
 }  // namespace
 
