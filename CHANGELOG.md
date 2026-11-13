@@ -10,10 +10,12 @@ are kept.
 - Maps draw their own fog, as in CS:S. Turn it off with Settings → Graphics → Map fog.
 - Hands, weapons and bunnies take the map's light, so they no longer glow in dark maps. Settings → Graphics → Model
   lighting: Off, Subtle or Full. Props are lit by the map too; Settings → Graphics → Prop lighting keeps them bright.
-- Maps show their overlays and decals (arrows, signs, credits, stains), and self-lit textures glow like in CS:S.
-  Settings → Graphics → Map details turns the overlays and decals off.
+- Maps show more of what their mappers put in them: overlays and decals (arrows, signs, credits, stains), sprites,
+  light glows, spotlight beams and self-lit textures, drawn like in CS:S. Settings → Graphics → Map details turns the
+  overlays, decals, glows and beams off.
 - The voice list is part of the HUD layout: move it, resize it or hide it with Edit layout. Layout codes from the
-  website's v0.0.41 import here, and older codes still work.
+  website's v0.0.41 import here, and older codes still work. A piece dragged to the edge of the screen stops there
+  instead of going off it.
 - Trails have shapes: Twin, Dashes, Comet, Seeds, Petals and Clover, picked in the Loadout's Trail shape tab. Any
   shape goes with any trail colour.
 - Seven colourways carry their set's pattern on your bunny: Dev Grid, Draftsman, Fluorescent, Meadow, Geode, High
@@ -27,7 +29,6 @@ are kept.
 
 Not in the desktop client yet, coming in a later update:
 
-- Light glows, sprite glows and spotlight beams.
 - Keys held while you click back into the game don't move you until you press them again.
 - Still missing from v0.9.1: bonus tracks in other styles, the strafe trainer in every style, the new notices,
   supporter name colours and effects in the game, the LIVE mark and choosing your microphone.
