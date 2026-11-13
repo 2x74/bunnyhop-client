@@ -3,7 +3,7 @@
 ## v0.9.2 — Native
 
 Matches website v0.0.41. Update from Settings → Updates: press Update, then Restart. Your settings, replays and maps
-are kept.
+are kept. On a Mac this is the first update since v0.9.0, so it also brings everything in v0.9.1 below.
 
 - Scroll jumps land on the tick you scrolled in, like the mouse and strafe keys already did. Before, a wheel notch went
   into the frame's first tick, so at 60 Hz a scroll jump could miss landings. Your existing runs don't change.
@@ -21,6 +21,8 @@ are kept.
 - Seven colourways carry their set's pattern on your bunny: Dev Grid, Draftsman, Fluorescent, Meadow, Geode, High
   Roller and Lapis.
 - Halo, Aurora, Capybara, Maxwell and Silver Wreath are bigger and easier to see on other players.
+- Thornback and Thistle have new garden looks. Six gun camos are restyled: Woodland, Flagstone (was Desert), Snowfield,
+  Fireflies (was Night Woodland), Graphite and Carbon.
 - Learn to bhop: lessons show only your speed and your keys.
 - "1 jump" and "1 strafe" under the timer. "R to go again" is easier to read on bright maps, and the strafe trainer
   steps aside while the end card is up.
