@@ -29,6 +29,7 @@
 #include "map_light.hpp"
 #include "model_light.hpp"
 #include "texture_motion.hpp"
+#include "brush_fades.hpp"
 #include <span>
 #include "nlohmann/json.hpp"
 #include <filesystem>
@@ -53,6 +54,7 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <numeric>
 #include <stdexcept>
 #include <string>
@@ -444,6 +446,8 @@ class Renderer {
     std::unordered_map<int32_t, std::pair<uint32_t, uint32_t>> textureSizes;
     std::unordered_map<int32_t, std::array<float, 3>> textureAverages;
     std::vector<BhGroup> groups, skyGroups;
+    // Window brushes and $alpha-driven materials, faded from the eye each frame (brush_fades.hpp).
+    native_render::BrushFades brushFades;
     std::vector<BhPropGroup> propGroups;
     RuntimePropCopies propCopies;
     std::unique_ptr<CrashExplosions> crashExplosions;
@@ -1146,6 +1150,7 @@ class Renderer {
         worldSeconds = worldTime >= 0 ? worldTime : seconds;
         worldTime = -1;
         textureMotion.update(worldSeconds);
+        update_brush_fades(eye);
         refresh_prop_transforms();
         propCopies.refresh(core);
         if (mapPropMeshes) {
@@ -1267,6 +1272,8 @@ class Renderer {
                 bh_prop_transform(core, entity, &cached.value);
             else if (!prop && model)
                 bh_model_transform(core, model, &cached.value);
+            // A brush entity faded out entirely isn't drawn (brush_fades.hpp).
+            if (!prop && model && brushFades.hidden(model)) cached.value.visible = 0;
             cached.scene = sceneNumber;
         }
         return cached.value;
@@ -1395,14 +1402,20 @@ class Renderer {
             std::optional<GLuint> boundVao;
             for (const auto &d : draws) {
                 const auto &m = d.material < materials.size() ? materials[d.material] : materials.front();
-                if (transparent(m) != (pass != 0) || (reflection && m.kind == 2)) continue;
+                const auto *fade = surface_fade(d);
+                if ((transparent(m) || fade) != (pass != 0) || (reflection && m.kind == 2)) continue;
                 const auto &transform = scene_transform(d.prop, d.entity, d.model);
                 if (!transform.visible) continue;
                 const auto model = scene_model(d.prop, d.entity, d.model);
                 gl.UniformMatrix4fv(materialUniforms.model, 1, GL_FALSE, model.data());
-                if (boundMaterial != std::pair(d.material, d.prop)) {
+                if (boundMaterial != std::pair(d.material, d.prop) || fade) {
                     bind_material(d.material, d.prop);
                     boundMaterial = std::pair(d.material, d.prop);
+                }
+                // A faded surface draws at its own alpha; the next draw binds its material afresh.
+                if (fade) {
+                    gl.Uniform1f(materialUniforms.opacity, fade->alpha);
+                    boundMaterial.reset();
                 }
                 bind_skinning(materialUniforms.skinned, materialUniforms.boneBase, d.skinned, skinnedBound);
                 bind_prop_cube(d, cubeBound);
@@ -2158,6 +2171,96 @@ public:
             record_group_bounds(item.first_index, item.first_index, item.index_count, verts, nv, 10, indices, ni);
             co_yield "resource";
         }
+        prepare_brush_fades();
+    }
+
+    // The brushes that fade: each func_areaportalwindow's target, and every brush wearing a material whose proxies
+    // drive $alpha (the world's own faces only for chains that need no entity). Water and glass keep their own looks.
+    void prepare_brush_fades() {
+        brushFades = {};
+        size_t count = 0;
+        const char *raw = bh_entities_json(core, &count);
+        const auto windows = raw && count ? native_render::areaportal_windows(nlohmann::json::parse(raw, raw + count))
+                                          : std::unordered_map<uint32_t, native_render::FadeWindow>{};
+        std::map<uint32_t, std::vector<uint32_t>> used;
+        std::unordered_map<uint32_t, native_render::Bounds> boxes;
+        for (const auto &g : groups) {
+            if (g.sky3d) continue;
+            auto &materialsOfModel = used[g.model];
+            if (std::find(materialsOfModel.begin(), materialsOfModel.end(), g.material) == materialsOfModel.end())
+                materialsOfModel.push_back(g.material);
+            const auto &bounds = groupBounds.at(g.first_index);
+            auto [box, first] = boxes.try_emplace(g.model, bounds);
+            for (int k = 0; !first && k < 3; k++) {
+                box->second.lo[k] = std::min(box->second.lo[k], bounds.lo[k]);
+                box->second.hi[k] = std::max(box->second.hi[k], bounds.hi[k]);
+            }
+        }
+        for (const auto &[model, used_materials] : used)
+            add_brush_fade(model, used_materials, boxes[model], windows);
+    }
+
+    void add_brush_fade(
+            uint32_t model,
+            const std::vector<uint32_t> &used_materials,
+            const native_render::Bounds &box,
+            const std::unordered_map<uint32_t, native_render::FadeWindow> &windows
+    ) {
+        const auto window = windows.find(model);
+        std::vector<native_render::BrushFades::Surface> surfaces;
+        for (const uint32_t material : used_materials) {
+            if (material >= materials.size() || materials[material].kind == 2 || materials[material].kind == 3)
+                continue;
+            BhAlphaProgram chain{};
+            const bool runs = bh_material_alpha(core, material, &chain) && (model != 0 || !chain.per_entity);
+            if (window == windows.end() && !runs) continue;
+            native_render::BrushFades::Surface surface;
+            surface.material = material;
+            surface.base = materials[material].alpha;
+            if (runs) {
+                surface.vars.resize(chain.vars);
+                surface.chain = bh_material_alpha_vars(core, material, surface.vars.data(), surface.vars.size());
+            }
+            surfaces.push_back(std::move(surface));
+        }
+        const bool whole = surfaces.size() == used_materials.size();
+        const auto fade_window = window == windows.end() ? std::nullopt : std::optional(window->second);
+        brushFades.add(model, box, fade_window, std::move(surfaces), whole);
+    }
+
+    // This frame's fades from the main view's eye (not a water reflection's, nor the sun's).
+    void update_brush_fades(const float eye[3]) {
+        if (!brushFades.size()) return;
+        brushFades.update(
+                {eye[0], eye[1], eye[2]},
+                worldSeconds,
+                graphics.potato,
+                [this](uint32_t model) {
+                    BhTransform t{};
+                    t.visible = 1;
+                    bh_model_transform(core, model, &t);
+                    return native::model_matrix(t);
+                },
+                [this](uint32_t material,
+                       std::vector<double> &vars,
+                       double distance,
+                       double time,
+                       uint32_t seed,
+                       uint32_t &noise) {
+                    double alpha = 1;
+                    bh_material_alpha_run(
+                            core, material, vars.data(), vars.size(), distance, time, seed, &noise, &alpha
+                    );
+                    return alpha;
+                }
+        );
+    }
+
+    // A world surface's fade this frame when it draws blended at its own alpha; Potato only hides whole brushes.
+    const native_render::SurfaceFade *surface_fade(const native_render::SceneDraw &d) const {
+        if (d.prop || graphics.potato) return nullptr;
+        const auto *fade = brushFades.surface(d.model, d.material);
+        return fade && !fade->plain ? fade : nullptr;
     }
 
     ResourceLoading prepare_props() {

@@ -413,6 +413,29 @@ typedef struct BhMaterialWireframe {
 } BhMaterialWireframe;
 
 const BhMaterialWireframe *bh_material_wireframes(BhContext *ctx, size_t *count);
+
+/* Proxies that drive a material's $alpha (PlayerProximity, Sine, EntityRandom, GaussianNoise and the math between
+ * them): bh_material_alpha says whether material `material` has such a chain (1) and how many variables it keeps.
+ * Each brush entity keeps its own variables (start them with bh_material_alpha_vars) and runs the chain once a frame
+ * with bh_material_alpha_run: `distance` from the entity's middle to the player's, map time, the entity's model as
+ * `seed`, and `noise` counting its noise draws this frame (0 at the start of each frame, shared by its materials). */
+typedef struct BhAlphaProgram {
+    uint32_t vars, per_entity;
+} BhAlphaProgram;
+
+int bh_material_alpha(BhContext *ctx, uint32_t material, BhAlphaProgram *out);
+int bh_material_alpha_vars(BhContext *ctx, uint32_t material, double *vars, size_t count);
+int bh_material_alpha_run(
+        BhContext *ctx,
+        uint32_t material,
+        double *vars,
+        size_t count,
+        double distance,
+        double time,
+        uint32_t seed,
+        uint32_t *noise,
+        double *alpha
+);
 /* Water geometry JSON: volumes [minx,miny,minz,maxx,maxy,maxz] and convex plane lists [nx,ny,nz,d]. */
 const char *bh_water_json(BhContext *ctx, size_t *byte_count);
 /* Read/decode Source content with pakfile precedence; buffers last until next request of same kind. */
