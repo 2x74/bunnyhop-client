@@ -1015,11 +1015,8 @@ int run(const native::Options &opt) {
         if (action.restart && core) {
             if (tutorial_runner.lesson) tutorial_runner.lesson->stop();
             tutorial_runner.demo = false;
-            // A race's style becomes your pick, as on the website (its races change style like the style picker).
-            if (!action.style.empty()) {
-                selected_style = action.style;
-                remember_style();
-            }
+            // A race's style is for the race only: it doesn't replace the style you picked for the next launch.
+            if (!action.style.empty()) selected_style = action.style;
             active_track = action.track;
             if (action.canonical_start) {
                 restart_at.reset();

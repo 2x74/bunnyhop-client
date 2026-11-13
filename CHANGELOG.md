@@ -22,7 +22,6 @@ are kept. On a Mac this is the first update since v0.9.0, so it also brings ever
 - While you spectate someone in a server, the speed graph shows their speed.
 - The Loadout no longer flickers when you move over items: the picture stays until the next one is ready, and items
   you have already looked at show at once.
-- A race that switches your style keeps it as your style afterwards, as on the website.
 - The voice list is part of the HUD layout: move it, resize it or hide it with Edit layout. Layout codes from the
   website's v0.0.41 import here, and older codes still work. A piece dragged to the edge of the screen stops there
   instead of going off it.
