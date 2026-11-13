@@ -9,6 +9,8 @@ namespace {
 // The website editor's grid and snap distance, in CSS pixels.
 constexpr float grid_css_px = 8;
 constexpr float snap_css_px = 8;
+// The room the website's HUD and editor keep between an element and the screen's edge (hud/layout.ts EDGE_PAD).
+constexpr float edge_pad_css_px = 2;
 constexpr float handle_px = 12;
 constexpr double scale_step = .05;
 constexpr float nudge_px = 1;
@@ -254,6 +256,7 @@ void HudLayoutEditor::move(float x, float y, bool free, const NativeHud &hud) {
         vertical_guide_ = snapped.vertical_guide;
         horizontal_guide_ = snapped.horizontal_guide;
     }
+    box = keep_on_screen(box, float(width_), float(height_), grid_px_ * edge_pad_css_px / grid_css_px);
     place_box(drag.id, box, drag.start_scale, hud, false);
 }
 
@@ -308,6 +311,7 @@ void HudLayoutEditor::nudge(float dx, float dy, const NativeHud &hud) {
     if (box.width <= 0) return;
     box.x += dx;
     box.y += dy;
+    box = keep_on_screen(box, float(width_), float(height_), grid_px_ * edge_pad_css_px / grid_css_px);
     const auto &place = hud.preferences().layout[hud_index(selected_)];
     place_box(selected_, box, place ? place->scale : 1., hud, true);
 }

@@ -3,6 +3,7 @@
 #include "hud_trainer.hpp"
 #include "crosshair_shape.hpp"
 #include "hud_editor_layout.hpp"
+#include "hud_layout.hpp"
 #include "hud_result.hpp"
 #include "toasts.hpp"
 #include "room_modes.hpp"
@@ -1226,6 +1227,45 @@ void test_layout_editor_math() {
         assert(ids.insert(element.id).second && native::hud_index(element.id) != 0);
 }
 
+// Every piece of the layout editor reaches every edge and corner: a box dropped flush against the screen's edges (where
+// the editor's keep-on-screen rule stops it) is stored as a place that draws exactly there. The Practice label too,
+// at the bottom of the screen below the keys: native has no rule that moves a placed label above the crosshair.
+void test_every_piece_reaches_every_edge() {
+    constexpr float width = 1920, height = 1080, pad = 2, tolerance = .5f;
+    const auto defaults = native::default_hud_layout_web();
+    for (const auto &element : native::hud_editor_elements) {
+        const auto size = native::hud_element_size(element.id);
+        for (int row = 0; row < 3; ++row) {
+            for (int column = 0; column < 3; ++column) {
+                const float x = pad + float(column) / 2 * (width - 2 * pad - size[0]);
+                const float y = pad + float(row) / 2 * (height - 2 * pad - size[1]);
+                const auto box = native::keep_on_screen({x, y, size[0], size[1]}, width, height, pad);
+                assert(box.x == x && box.y == y);
+                const auto entry = native::hud_place_from_box(box, width, height, true, 1);
+                auto place = native::web_hud_place(entry, defaults, element.id);
+                place.placed = true;
+                const auto shown = place.rect(width, height, size[0], size[1]);
+                assert(std::abs(shown.x - box.x) < tolerance && std::abs(shown.y - box.y) < tolerance);
+            }
+        }
+    }
+    // Dragged past an edge, a box stops flush against it.
+    const auto pushed = native::keep_on_screen({-300, 2000, 190, 18}, width, height, pad);
+    assert(pushed.x == pad && pushed.y == height - pad - 18);
+    // The Practice label stored at the bottom centre shows there, at any HUD scale.
+    const auto practice_size = native::hud_element_size("practice");
+    const native::HudRect bottom{
+            (width - practice_size[0]) / 2, height - pad - practice_size[1], practice_size[0], practice_size[1]
+    };
+    const auto entry = native::hud_place_from_box(bottom, width, height, true, 1);
+    const auto place = native::web_hud_place(entry, defaults, "practice");
+    assert(place.placed);
+    for (const float hud_scale : {.5f, 1.f, 1.75f}) {
+        const auto shown = place.rect(width / hud_scale, height / hud_scale, practice_size[0], practice_size[1]);
+        assert(shown.y * hud_scale > height * .9f);
+    }
+}
+
 int main() {
     test_web_settings_schema();
     test_defaults_and_saved_settings();
@@ -1248,6 +1288,7 @@ int main() {
     test_key_flash_stops_at_restart();
     test_crosshair_pixels();
     test_layout_codes();
+    test_every_piece_reaches_every_edge();
     test_layout_editor_math();
     std::cout << "HUD: 8 scenario groups, all layout IDs, three trainer styles, defaults and saved settings\n";
     using native::parse_hud_theme;

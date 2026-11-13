@@ -99,6 +99,14 @@ inline HudSnap snap_box(HudRect box, float screen_width, float screen_height, fl
     return result;
 }
 
+// The website editor's keep-on-screen rule (hud/layout.ts dragBox): a dragged box stops `pad` in from each edge, flush
+// against it, so the place it stores is the place that shows; one bigger than the screen keeps its top-left corner.
+inline HudRect keep_on_screen(HudRect box, float screen_width, float screen_height, float pad) {
+    box.x = std::max(pad, std::min(screen_width - pad - box.width, box.x));
+    box.y = std::max(pad, std::min(screen_height - pad - box.height, box.y));
+    return box;
+}
+
 // Native presets, tuned for the native HUD's element sizes, as a settings patch. Classic centred is the built-in
 // layout (v0.5.1's places): the website's default entries, which hud_layout.hpp reads as "at the native place".
 inline Json hud_preset(std::string_view id, const Json &settings = default_settings()) {
