@@ -1015,7 +1015,11 @@ int run(const native::Options &opt) {
         if (action.restart && core) {
             if (tutorial_runner.lesson) tutorial_runner.lesson->stop();
             tutorial_runner.demo = false;
-            if (!action.style.empty()) selected_style = action.style;
+            // A race's style becomes your pick, as on the website (its races change style like the style picker).
+            if (!action.style.empty()) {
+                selected_style = action.style;
+                remember_style();
+            }
             active_track = action.track;
             if (action.canonical_start) {
                 restart_at.reset();
@@ -3440,6 +3444,7 @@ int run(const native::Options &opt) {
         }
         if (spectator != observed_spectator) {
             native::announce_watching(chat, room, observed_spectator, spectator, input_timeline.binds(), epoch_ms());
+            hud.clear_speed_graph();
             if (spectator) {
                 bh_record_end(core.get());
                 recorder.clear(true);
@@ -4008,6 +4013,8 @@ int run(const native::Options &opt) {
                     state.player.view_offset_z = target->frame.view_offset_z;
                     state.player.grounded = !!(target->frame.flags & 2);
                     state.player.crouched = !!(target->frame.flags & 1);
+                    // The speed graph draws the watched player's speed, a bar per tick of theirs, as on the website.
+                    hud.tick(state.player);
                     camera_input.set_angles(target->frame.pitch, target->frame.yaw);
                     renderer->set_cosmetics(target->outfit, target->loadout);
                     renderer->set_player_glow(target->playerGlow);

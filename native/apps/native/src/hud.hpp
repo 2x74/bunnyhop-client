@@ -812,6 +812,9 @@ public:
         delta_good = good;
     }
 
+    // Watching someone else starts the speed graph over on their speed (tick() then takes their frames).
+    void clear_speed_graph() { speed_history.clear(); }
+
     void tick(const BhState &s) {
         if (!speed_history.empty()
             && (s.tick < speed_history.back().first || s.tick > speed_history.back().first + 100))
