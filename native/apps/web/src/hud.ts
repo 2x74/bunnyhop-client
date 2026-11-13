@@ -28,7 +28,7 @@ import type { MovementReading } from "./movement-stats";
 import type { LjReport } from "./movement-stats/stats";
 import { LjView, fjtNodes, offsetNodes, startPreNodes } from "./movement-stats/view";
 import { KeysOverlay, PREVIEW_BITS } from "./hud/keys";
-import { HUD_ELEMENTS, hudPoints, keepOnScreen, placeStyle, remFraction, type HudElId, type HudLayout } from "./hud/layout";
+import { EDGE_PAD, HUD_ELEMENTS, hudPoints, keepOnScreen, placeStyle, remFraction, type HudElId, type HudLayout } from "./hud/layout";
 import { spectatorLines } from "./net/spectators";
 import { EVENT_RESPAWNED, formatTime, type RunStatus, type TickCmd } from "./timer";
 import { h } from "./ui/dom";
@@ -396,7 +396,7 @@ export class Hud {
     this.editor = new HudEditor({
       root: this.root,
       els: this.els,
-      preview: (id, place) => this.placeAll({ ...this.p.hud.layout, [id]: place }),
+      preview: (id, place, at) => this.placeAll({ ...this.p.hud.layout, [id]: place }, at && { id, ...at }),
       setEditing: (on) => this.setEditing(on),
     });
     this.p = prefs.get();
@@ -416,7 +416,7 @@ export class Hud {
    * Positions every element for `layout` at the HUD scale (hud/layout.ts hudPoints: the gaps grow with the scale too),
    * then keeps them on screen (fit). Layout changes only, never per frame.
    */
-  private placeAll(layout: HudLayout): void {
+  private placeAll(layout: HudLayout, held?: { id: HudElId; left: number; top: number }): void {
     const at = hudPoints(layout, this.p.hud.scale, remFraction(innerWidth, innerHeight));
     for (const { id } of HUD_ELEMENTS) {
       const el = this.els[id];
@@ -426,6 +426,14 @@ export class Hud {
       el.style.top = st.top;
       el.style.translate = st.translate;
       el.style.setProperty("--s", String(p.s));
+    }
+    // The element being dragged in the layout editor sits exactly where the pointer holds it (CSS px), whatever its
+    // place works out to on the way; the others are laid out around the place it would take.
+    if (held) {
+      const el = this.els[held.id];
+      el.style.left = `${held.left}px`;
+      el.style.top = `${held.top}px`;
+      el.style.translate = "none";
     }
     this.fit();
   }
@@ -444,7 +452,7 @@ export class Hud {
       const r = el.getBoundingClientRect();
       if (!r.width && !r.height) continue; // not shown (off, or no HUD on screen)
       const old = this.shift.get(el) ?? { dx: 0, dy: 0 };
-      const n = keepOnScreen({ left: r.left - old.dx, top: r.top - old.dy, width: r.width, height: r.height }, vw, vh, 2);
+      const n = keepOnScreen({ left: r.left - old.dx, top: r.top - old.dy, width: r.width, height: r.height }, vw, vh, EDGE_PAD);
       if (n.dx !== old.dx || n.dy !== old.dy) moves.push([el, n]);
     }
     for (const [el, n] of moves) {

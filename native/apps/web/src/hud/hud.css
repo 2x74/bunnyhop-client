@@ -186,7 +186,9 @@ body.hud-editing .fdock, body.hud-editing #music-now, body.hud-editing #audio-bt
 #hud .hud-handle { display: none; }
 #hud.editing .hud-el { pointer-events: auto; cursor: move; touch-action: none; outline: 1px dashed rgba(255, 255, 255, 0.45); outline-offset: 0.25rem; min-width: 1.2rem; min-height: 0.8rem; user-select: none; }
 #hud.editing .hud-el:hover { outline-color: rgba(255, 255, 255, 0.85); }
-#hud.editing .hud-el.sel { outline: 2px solid var(--accent); }
+/* The selected piece is drawn over the others: one that another piece covers can be grabbed once it's picked (its row
+   in the element list, or Tab). */
+#hud.editing .hud-el.sel { outline: 2px solid var(--accent); z-index: 7; }
 /* A switched-off element stays out of the way until you pick it (its row in the element list, or Tab). */
 #hud.editing .hud-el.off.sel { display: block; opacity: 0.45; }
 #hud.editing .hud-el::before { content: attr(data-label); position: absolute; left: -0.25rem; bottom: calc(100% + 0.35rem); font: 600 11px/1.3 var(--font); letter-spacing: 0.02em; color: #fff; background: rgba(0, 0, 0, 0.72); padding: 1px 6px; border-radius: 3px; text-shadow: none; pointer-events: none; opacity: 0; }
