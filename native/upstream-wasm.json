@@ -1,9 +1,9 @@
 {
   "schema": 1,
-  "status": "unpublished",
-  "commit": "f71566ca290a8f1f4fee23fa5435a331002eb5a2",
+  "status": "published",
+  "commit": "9e58625232d824949357b62c6f88b2546af602ca",
   "toolchain": "1.99.1",
-  "url": "",
+  "url": "https://bunnyhop.lol/assets/bunnyhop_core-Fjcvc_EQ.wasm",
   "sha256": "7819855d9081a80ead8b7cf3d86bb3db7eed94381041b43f8aff5af99c6b8585",
   "bytes": 1719382,
   "physics": 28,
