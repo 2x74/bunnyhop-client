@@ -3,7 +3,10 @@
 ## v0.9.2 — Native
 
 Matches website v0.0.41. Update from Settings → Updates: press Update, then Restart. Your settings, replays and maps
-are kept. On a Mac this is the first update since v0.9.0, so it also brings everything in v0.9.1 below.
+are kept.
+
+This update is for Windows and Linux. The macOS build follows: GitHub again had no Mac build machines free today, and
+we don't ship a Mac package that wasn't built and checked there. Mac players stay on v0.9.0 until then.
 
 - Scroll jumps land on the tick you scrolled in, like the mouse and strafe keys already did. Before, a wheel notch went
   into the frame's first tick, so at 60 Hz a scroll jump could miss landings. Your existing runs don't change.
