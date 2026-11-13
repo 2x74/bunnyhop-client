@@ -36,6 +36,7 @@ inline nlohmann::json default_graphics_settings() {
             {"graphicsMapFog", true},
             {"graphicsModelLighting", "subtle"},
             {"graphicsPropLighting", true},
+            {"graphicsMapDetails", true},
             {"graphicsResolutionScale", 1.},
             {"graphicsAspect", "native"},
             {"graphicsAspectFit", "stretch"},
@@ -178,7 +179,7 @@ struct GraphicsSettings {
     bool bloom = true, material_response = true, flashlight = false, tags_players = true, tags_through_walls = false;
     bool water_reflections = true;
     // The map's own fog, its light on props, and how far its light reaches the models (model_light.hpp).
-    bool map_fog = true, prop_lighting = true;
+    bool map_fog = true, prop_lighting = true, map_details = true;
     enum class ModelLighting { off, subtle, full } model_lighting = ModelLighting::subtle;
     enum class Background { live, still, off } background = Background::live;
     LookSettings look;
@@ -209,6 +210,7 @@ struct GraphicsSettings {
         result.sky_exposure = values.at("graphicsSkyExposure");
         result.map_fog = values.at("graphicsMapFog");
         result.prop_lighting = values.at("graphicsPropLighting");
+        result.map_details = values.at("graphicsMapDetails");
         const auto &model_lighting = values.at("graphicsModelLighting");
         result.model_lighting = model_lighting == "off"    ? ModelLighting::off
                                 : model_lighting == "full" ? ModelLighting::full

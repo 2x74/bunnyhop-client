@@ -62,7 +62,7 @@ mod adonly_tests;
 #[cfg(test)]
 mod autostrafe_v28_tests;
 pub use assets::{BhAttackReport, BhFloorWeapon, BhWeaponReport};
-pub use assets::{BhMaterialExtra, BhPropGroup, BhSkyInfo, BhWorldFog};
+pub use assets::{BhDressingGroup, BhMaterialExtra, BhMaterialLook, BhPropGroup, BhSkyInfo, BhWorldFog};
 pub use look::{BhLookSample, BhLookSampleV2};
 pub use practice::{
     bh_practice_from_replay,
@@ -397,7 +397,7 @@ impl Map {
             content::cached_physics_content(path)
         };
         check()?;
-        let mesh = mesh::build(&bsp);
+        let mut mesh = mesh::build(&bsp);
         let mut names = mesh
             .materials
             .iter()
@@ -477,6 +477,7 @@ impl Map {
         for material in assets::crash_particle_materials(&map_sha256) {
             material_index(&material);
         }
+        let dressing_materials = mesh.dressing.materials.iter().map(&mut material_index).collect::<Vec<_>>();
         let materials = loop {
             check()?;
             let m = materials::resolve(&fs, &names);
@@ -484,6 +485,30 @@ impl Map {
                 break m;
             }
         };
+        // Decals take their size from their materials' textures, which are here now.
+        mesh.dressing.build(&|name| bunnyhop_core::dressing::decal_size(&fs, name));
+        let dressing_groups = mesh
+            .dressing
+            .groups
+            .iter()
+            .map(|g| BhDressingGroup {
+                material: dressing_materials[g.material as usize],
+                first_index: g.first_index,
+                index_count: g.index_count,
+                kind: g.kind,
+                order: g.order,
+                sky3d: u32::from(g.sky3d),
+            })
+            .collect::<Vec<_>>();
+        let material_looks = materials
+            .descs
+            .iter()
+            .map(|m| BhMaterialLook {
+                decal_modulate: u32::from(m.shader.eq_ignore_ascii_case("decalmodulate")),
+                selfillum: u32::from(m.selfillum.is_some()),
+                selfillum_tint: m.selfillum.unwrap_or([0.0; 3]),
+            })
+            .collect::<Vec<_>>();
         let mut prop_groups = props
             .groups
             .iter()
@@ -549,6 +574,8 @@ impl Map {
             floor: Vec::new(),
             props,
             prop_light,
+            dressing_groups,
+            material_looks,
             prop_groups,
             water: CString::new(
                 serde_json::json!({"volumes":mesh.water,"planes":mesh.water_planes}).to_string(),
@@ -1482,6 +1509,10 @@ buffer!(bh_prop_vertices, f32, assets.props.vertices);
 buffer!(bh_prop_indices, u32, assets.props.indices);
 buffer!(bh_prop_groups, BhPropGroup, assets.prop_groups);
 buffer!(bh_prop_light, f32, assets.prop_light);
+buffer!(bh_dressing_vertices, f32, mesh.dressing.vertices);
+buffer!(bh_dressing_indices, u32, mesh.dressing.indices);
+buffer!(bh_dressing_groups, BhDressingGroup, assets.dressing_groups);
+buffer!(bh_material_looks, BhMaterialLook, assets.material_looks);
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bh_sky_info(ctx: *mut BhContext, out: *mut BhSkyInfo) -> c_int {
     unsafe {

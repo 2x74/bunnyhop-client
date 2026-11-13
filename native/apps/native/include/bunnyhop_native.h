@@ -303,6 +303,24 @@ const uint32_t *bh_sky_indices(const BhContext *ctx, size_t *index_count);
 const BhGroup *bh_sky_groups(const BhContext *ctx, size_t *group_count);
 int bh_sky_info(BhContext *ctx, BhSkyInfo *out);
 const char *bh_sky_name(BhContext *ctx, size_t *byte_count);
+
+/* An overlay or infodecal group; material indexes bh_materials. kind 0 = overlay, 1 = decal, in draw order. */
+typedef struct BhDressingGroup {
+    uint32_t material, first_index, index_count, kind, order, sky3d;
+} BhDressingGroup;
+
+/* Parallel to bh_materials: Source's DecalModulate blend, and $selfillum with its tint (mask in the base alpha). */
+typedef struct BhMaterialLook {
+    uint32_t decal_modulate, selfillum;
+    float selfillum_tint[3];
+} BhMaterialLook;
+
+/* Overlays and infodecals: 15 floats a vertex (position, normal, uv, lightmap uv, fade origin, fade min and max
+ * distance squared), u32 indices, and their groups. */
+const float *bh_dressing_vertices(const BhContext *ctx, size_t *float_count);
+const uint32_t *bh_dressing_indices(const BhContext *ctx, size_t *index_count);
+const BhDressingGroup *bh_dressing_groups(const BhContext *ctx, size_t *group_count);
+const BhMaterialLook *bh_material_looks(const BhContext *ctx, size_t *count);
 /* 0 when the map has no world fog, it is off, or the map switches fog while running. */
 int bh_world_fog(BhContext *ctx, BhWorldFog *out);
 /* The map's light at a point: linear RGB for +x, -x, +y, -y, +z, -z into out[18]; 0 where there is none. */

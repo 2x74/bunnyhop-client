@@ -459,6 +459,10 @@ class Renderer {
     bool hasWorldFog = false;
     GLuint propLightBuffer = 0;
     native_render::PropCubes propCubes;
+    // The map's overlays and infodecals (core dressing.rs), and the material looks they and $selfillum need.
+    Geometry dressingMesh;
+    std::vector<BhDressingGroup> dressingGroups;
+    std::vector<BhMaterialLook> materialLooks;
     NativeMapEffects mapEffects;
     std::unique_ptr<NativePresentation> presentation;
     std::unique_ptr<ActorWarmup> actorWarmup;
@@ -895,6 +899,7 @@ class Renderer {
         GLint detailBlend = -1, tint = -1, opacity = -1, cutoff = -1, unlit = -1, props = -1, kind = -1;
         GLint aboveWater = -1, captureReady = -1, waterFogEnd = -1, additive = -1;
         GLint baseOffset = -1, skinned = -1, boneBase = -1, propCubeOn = -1, propCube = -1;
+        GLint dressing = -1, decalModulate = -1, selfIllum = -1, selfIllumTint = -1;
 
         void read(Gl &gl, GLuint program) {
             const std::pair<GLint *, const char *> uniforms[] = {
@@ -920,6 +925,10 @@ class Renderer {
                     {&boneBase, "boneBase"},
                     {&propCubeOn, "propCubeOn"},
                     {&propCube, "propCube"},
+                    {&dressing, "dressing"},
+                    {&decalModulate, "decalModulate"},
+                    {&selfIllum, "selfIllum"},
+                    {&selfIllumTint, "selfIllumTint"},
             };
             for (const auto &[location, name] : uniforms)
                 *location = gl.GetUniformLocation(program, name);
@@ -968,6 +977,11 @@ class Renderer {
             gl.Uniform1f(materialUniforms.waterFogEnd, std::max(1.f, e.fog_end));
         }
         gl.Uniform1i(materialUniforms.additive, (m.flags & 8) != 0);
+        const BhMaterialLook plain{};
+        const auto &look = index < materialLooks.size() ? materialLooks[index] : plain;
+        gl.Uniform1i(materialUniforms.decalModulate, look.decal_modulate != 0);
+        gl.Uniform1i(materialUniforms.selfIllum, look.selfillum != 0);
+        if (look.selfillum) gl.Uniform3fv(materialUniforms.selfIllumTint, 1, look.selfillum_tint);
         const bool doubleSided = m.kind == 2 ? native_render::water_face_double_sided(waterBeneathFaces, e.above_water)
                                              : (m.flags & 4) != 0;
         if (doubleSided)
@@ -1079,8 +1093,9 @@ class Renderer {
 
     // Moving textures and animated map props (texture_motion.hpp, map_prop_meshes.hpp), on the world's visual time.
     static constexpr GLint map_prop_bone_unit = 12;
-    // The prop mesh's light per vertex (world_vertex propLight).
-    static constexpr GLuint prop_light_location = 7;
+    // The prop mesh's light per vertex (world_vertex propLight), and the dressing's fade attributes.
+    static constexpr GLuint prop_light_location = 7, fade_origin_location = 8, fade_range_location = 9;
+    static constexpr int dressing_vertex_floats = 15;
     native_render::TextureMotion textureMotion;
     std::unique_ptr<MapPropMeshes> mapPropMeshes;
     double worldTime = -1, worldSeconds = 0;
@@ -1354,12 +1369,16 @@ class Renderer {
             const double sortBefore = frameProfile.sort;
             phaseStart = profile_now();
             if (pass) {
+                if (skinnedBound) gl.Uniform1i(materialUniforms.skinned, 0);
+                skinnedBound = false;
+                draw_dressing(false, sky);
                 if (!sky && !reflection && waterPlan.refract && visibleWater) {
                     capture_refraction();
                     sceneCaptured = true;
                 }
                 gl.Enable(GL_BLEND);
                 gl.DepthMask(GL_FALSE);
+                draw_dressing(true, sky);
                 auto sortStart = profile_now();
                 sceneDrawList.back_to_front();
                 profile_elapsed(frameProfile.sort, sortStart);
@@ -2205,6 +2224,69 @@ public:
 
     bool world_fog_on() const { return hasWorldFog && graphics.map_fog && !graphics.potato; }
 
+    // Overlays and infodecals: the world's vertex layout (position, normal, uv, lightmap uv), then the fade origin and
+    // the fade distances squared.
+    void prepare_dressing() {
+        size_t looks = 0, groups = 0, floats = 0, count = 0;
+        const auto *rawLooks = bh_material_looks(core, &looks);
+        if (rawLooks && looks) materialLooks.assign(rawLooks, rawLooks + looks);
+        const auto *rawGroups = bh_dressing_groups(core, &groups);
+        const float *vertices = bh_dressing_vertices(core, &floats);
+        const uint32_t *indices = bh_dressing_indices(core, &count);
+        dressingMesh = geometry(vertices, floats, dressing_vertex_floats, indices, count);
+        if (!dressingMesh.vao) return;
+        if (rawGroups && groups) dressingGroups.assign(rawGroups, rawGroups + groups);
+        gl.BindVertexArray(dressingMesh.vao);
+        gl.BindBuffer(GL_ARRAY_BUFFER, dressingMesh.vbo);
+        const auto attribute = [&](GLuint location, GLint size, size_t offset) {
+            gl.EnableVertexAttribArray(location);
+            gl.VertexAttribPointer(
+                    location,
+                    size,
+                    GL_FLOAT,
+                    GL_FALSE,
+                    dressing_vertex_floats * sizeof(float),
+                    reinterpret_cast<void *>(offset * sizeof(float))
+            );
+        };
+        attribute(3, 2, 8);
+        attribute(fade_origin_location, 3, 10);
+        attribute(fade_range_location, 2, 13);
+        gl.BindVertexArray(0);
+    }
+
+    bool details_on() const { return graphics.map_details && !graphics.potato && !dressingGroups.empty(); }
+
+    // Overlays and decals draw with the world (web map-dressing.ts): the opaque ones after its opaque surfaces, the
+    // blended ones before its blended ones, a little in front of their faces and without writing depth.
+    void draw_dressing(bool blended, bool sky) {
+        if (!details_on()) return;
+        const auto identity = native::model_matrix(BhTransform{{0, 0, 0}, {0, 0, 0}, 1});
+        gl.UniformMatrix4fv(materialUniforms.model, 1, GL_FALSE, identity.data());
+        gl.Uniform1i(materialUniforms.dressing, 1);
+        gl.BindVertexArray(dressingMesh.vao);
+        gl.DepthMask(GL_FALSE);
+        for (const auto &group : dressingGroups) {
+            if (bool(group.sky3d) != sky || group.material >= materials.size()) continue;
+            const auto &material = materials[group.material];
+            const bool modulate = group.material < materialLooks.size() && materialLooks[group.material].decal_modulate;
+            if ((transparent(material) || modulate) != blended || material.texture < 0) continue;
+            bind_material(group.material, false);
+            gl.Enable(GL_POLYGON_OFFSET_FILL);
+            gl.PolygonOffset(-1, -4);
+            if (modulate) gl.BlendFunc(GL_DST_COLOR, GL_SRC_COLOR);
+            gl.DrawElements(
+                    GL_TRIANGLES,
+                    GLsizei(group.index_count),
+                    GL_UNSIGNED_INT,
+                    reinterpret_cast<void *>(uintptr_t(group.first_index) * sizeof(uint32_t))
+            );
+        }
+        gl.Disable(GL_POLYGON_OFFSET_FILL);
+        gl.Uniform1i(materialUniforms.dressing, 0);
+        gl.DepthMask(blended ? GL_FALSE : GL_TRUE);
+    }
+
     // The map's world fog, and its light on static props as a vertex attribute of the prop mesh.
     void prepare_map_light() {
         hasWorldFog = bh_world_fog(core, &worldFog) != 0;
@@ -2415,6 +2497,7 @@ public:
             co_yield "prop geometry";
         prepare_sky();
         prepare_map_light();
+        prepare_dressing();
         co_yield "lightmap";
         auto textures = prepare_textures();
         while (!textures.step())
@@ -2514,6 +2597,7 @@ public:
         mapPropMeshes.reset();
         destroy(worldMesh);
         destroy(propMesh);
+        destroy(dressingMesh);
         if (propLightBuffer) gl.DeleteBuffers(1, &propLightBuffer);
         destroy(skyMesh);
         if (!ownedTextures.empty()) gl.DeleteTextures(ownedTextures.size(), ownedTextures.data());
