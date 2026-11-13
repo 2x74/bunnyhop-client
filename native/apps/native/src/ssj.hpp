@@ -65,7 +65,7 @@ struct SsjTick {
     bool jumped = false;
     /** Only start prespeed uses this flag; jump chains carry on through teleports. */
     bool teleported = false;
-    /** Stood in a start zone before the tick: a jump from there starts the count over. */
+    /** Stood in a start zone before the tick (the start prespeed readout; the jump count ignores it). */
     bool in_start = false;
     /** Practice noclip: like the plugins' MOVETYPE_NOCLIP, nothing is sampled. */
     bool noclip = false;
@@ -74,7 +74,7 @@ struct SsjTick {
 };
 
 struct SsjReport {
-    /** Jump number in the chain (1 = the first after standing, or the last taken off in a start zone). */
+    /** Jump number in the chain (1 = the first jump after standing). */
     unsigned jump = 0;
     /** Horizontal speed at take-off, rounded down (u/s). */
     int speed = 0;
@@ -166,7 +166,6 @@ public:
         if (pre.grounded) {
             if (ground_ticks_++ > bhop_frames) clear_chain();
             if ((cmd.buttons & ssj_in_jump) && ground_ticks_ == 1) {
-                if (t.in_start) clear_chain();
                 sample(pre, cmd);
                 ground_ticks_ = 0;
             }
