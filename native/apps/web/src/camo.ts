@@ -15,8 +15,9 @@ export type CamoKind = "solid" | "blobs" | "digital" | "stripes" | "splat" | "st
 /** Shader code of each kind (viewmodel/guns/camo.ts GUN_CAMO). Append only. */
 export const CAMO_KIND_CODE: Readonly<Record<CamoKind, number>> = { solid: 0, blobs: 1, digital: 2, stripes: 3, splat: 4, stamps: 5, veins: 6, carbon: 7, check: 8, grid: 9, ribbons: 10, facets: 11, argyle: 12 };
 
-export type CamoStamp = "carrot" | "paw" | "daisy" | "sprinkle";
-export const CAMO_STAMP_CODE: Readonly<Record<CamoStamp, number>> = { carrot: 0, paw: 1, daisy: 2, sprinkle: 3 };
+export type CamoStamp = "carrot" | "paw" | "daisy" | "sprinkle" | "leaf" | "tracks" | "firefly";
+/** Shader code of each stamp (viewmodel/guns/camo.ts CAMO_STAMP). Append only. */
+export const CAMO_STAMP_CODE: Readonly<Record<CamoStamp, number>> = { carrot: 0, paw: 1, daisy: 2, sprinkle: 3, leaf: 4, tracks: 5, firefly: 6 };
 
 /**
  * How the coated parts shade: "coat" a matte paint (polymer), "metal" satin steel, "gloss" a lacquer (dark steel's
@@ -49,17 +50,23 @@ const S = (kind: CamoKind, colors: [number, number, number, number], scale: numb
 export const CAMO_STYLE: Readonly<Record<string, CamoStyle>> = {
   // --- Solids and two-tones (solid: upper, lower, magazine).
   "camo-field": S("solid", [0x6b6f4a, 0xb9a77c, 0x55593a, 0], 1),
-  "camo-graphite": S("solid", [0x2e3036, 0x1d1f23, 0x26282d, 0], 1, "gloss"),
+  // Graphite (v0.0.41: lighter and metallic, a pencil lead's silver grey; it was a gloss near-black like Carbon).
+  "camo-graphite": S("solid", [0x7b818b, 0x454a52, 0x5e636c, 0], 1, "metal"),
   "camo-split": S("solid", [0xeae2cf, 0x24252a, 0x24252a, 0], 1),
   // --- Classic camos in the game's palette.
+  // Woodland (v0.0.41: it was army blobs): the woodland floor, fallen leaves in olive and brown over moss.
+  "camo-woodland": S("stamps", [0x4f6b3a, 0xa3ab52, 0xc9843a, 0x3d552e], 1.5, "coat", [0.9, 0.7, 0, 0], "leaf"),
   // blobs: base, large blobs, second blobs, small dark strokes; p = thresholds of the three (higher = less), stretch.
-  "camo-woodland": S("blobs", [0x5f7a45, 0x7a5a3a, 0x2f4a2a, 0x1c1d1a], 3.2, "coat", [0.53, 0.56, 0.62, 0.72]),
-  "camo-desert": S("blobs", [0xd8c49a, 0xb98f5e, 0x8e6e48, 0xe9dcbc], 4.2, "coat", [0.5, 0.6, 0.68, 0.62]),
-  "camo-night": S("blobs", [0x2a3346, 0x1b2130, 0x3d4a63, 0x0f1219], 3.0, "coat", [0.52, 0.58, 0.62, 0.72]),
+  // Flagstone (v0.0.41: it was Desert, sand blobs): a crazy-paved garden path, sandstone flags with dark joints.
+  // facets: three face tones and the line between faces; p[0] the line's half width (0 = a hairline, Geode's).
+  "camo-desert": S("facets", [0xe0cda2, 0xc9ae7e, 0xb0906a, 0x5e4c36], 1.7, "coat", [0.085, 0, 0, 0]),
+  // Fireflies (v0.0.41: it was Night Woodland, navy blobs): a garden after dark, fireflies glowing over the leaves.
+  "camo-night": S("stamps", [0x18203a, 0xfff3a6, 0xb9dd4e, 0x24345a], 1.15, "coat", [0.5, 1, 0, 0], "firefly"),
   "camo-whiteout": S("blobs", [0xf4f6fb, 0xdfe5f2, 0xb8c8ff, 0xffffff], 3.6, "gloss", [0.5, 0.6, 0.66, 0.6]),
   // digital: as blobs, on square pixels of p[3] units.
   "camo-urban": S("digital", [0x8c9096, 0x5d6168, 0xc4c7cc, 0x2c2f34], 3.0, "coat", [0.53, 0.58, 0.64, 0.42]),
-  "camo-snow": S("digital", [0xeef1f5, 0xc9d1dc, 0x9aa8bb, 0x6b7a90], 3.0, "coat", [0.5, 0.6, 0.68, 0.42]),
+  // Snowfield (v0.0.41: it was white digital): a bunny's tracks across fresh snow, soft drifts under them.
+  "camo-snow": S("stamps", [0xf3f6fa, 0x8fa5c4, 0x8fa5c4, 0xdfe7f1], 1.9, "coat", [0.85, 0.9, 0, 0], "tracks"),
   // stripes: base, stripe, second stripe; p = warp, slant, width, axis (0 bands across the gun, 1 lines along it).
   "camo-reeds": S("stripes", [0x8a9a5b, 0x4f6b38, 0xc9c48a, 0], 1.6, "coat", [1.4, 0.35, 0.34, 0]),
   "camo-crab": S("stripes", [0xf08a4b, 0x7a1f1a, 0xfff1e0, 0], 1.5, "coat", [1.8, 0.55, 0.3, 0]),
@@ -76,7 +83,8 @@ export const CAMO_STYLE: Readonly<Record<string, CamoStyle>> = {
   "camo-picnic": S("check", [0xfff5ec, 0xf08a8a, 0xc83a3a, 0], 0.9, "coat", [0, 0, 0, 0]),
   "camo-finish-line": S("check", [0xf4f4f6, 0, 0x16171b, 0], 0.8, "gloss", [1, 0, 0, 0]),
   // carbon: two weave colours, a fibre sheen.
-  "camo-carbon": S("carbon", [0x1a1c20, 0x3a3e46, 0x5a606a, 0], 0.32, "gloss"),
+  // (v0.0.41: Carbon's weave is bigger and its sheen brighter, so it reads as a weave in the hand, not as plain black.)
+  "camo-carbon": S("carbon", [0x101216, 0x474d58, 0xa9b6c9, 0], 0.5, "gloss"),
   "camo-gold-weave": S("carbon", [0x2a2214, 0xb8902e, 0xffd45e, 0], 0.32, "metal"),
   // grid: base, minor lines, major lines, filled squares; p = major every n, minor strength, squares, line width.
   "camo-devgrid": S("grid", [0x4d5054, 0x6b6e73, 0xe8862a, 0xe8862a], 0.5, "coat", [4, 0.8, 0.05, 0.05]),

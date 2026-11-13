@@ -9,7 +9,7 @@ window) and WebView2 on Windows. The menu bundle refuses the web game entry poin
 repository root.
 On Windows, the menu shows a still of the map behind it.
 
-The vendored game sources come from web `release-0.0.41` at `6d3e1762`, physics 28, timer rules 5. Historical
+The vendored game sources come from web `release-0.0.41` at `089d1d90`, physics 28, timer rules 5. Historical
 physics 1–27 remain available for replays. Physics 28 changes only Auto-strafe (the key from this command's yaw to the
 next, the sim's view one tick behind the mouse: `crates/native-bridge/src/styles.rs`). The exact source and verifier hashes live in `upstream-manifest.json`
 and `upstream-wasm.json`.

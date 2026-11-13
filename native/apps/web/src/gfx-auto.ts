@@ -6,7 +6,7 @@ import { applyGraphicsPreset, graphicsPreset, prefs, type GraphicsPreset } from 
 // exists (antialiasing is fixed at creation), untouched graphics settings go to the Lowest preset, and the player is
 // told once why and how to get the GPU back.
 //
-// The same first load can also start a weaker GPU lower (DEVICE_CLASS_PRESETS, off until the owner turns it on):
+// The same first load also starts a weaker GPU lower (DEVICE_CLASS_PRESETS, on since v0.0.41):
 // integrated graphics or a 4 GB device on Medium (no MSAA, no water reflections), clearly weak mobile and Chromebook GPUs
 // or a 2 GB device on Low. Discrete cards, Apple silicon and anything not recognised stay on High. Only untouched
 // defaults on a browser's first visit change; saved settings never do.
@@ -14,7 +14,7 @@ import { applyGraphicsPreset, graphicsPreset, prefs, type GraphicsPreset } from 
 const KEY = "bunnyhop:gfx-detect";
 
 /** First-load preset by GPU class and device memory (firstLoadPreset). Off: only software rendering is tuned. */
-export const DEVICE_CLASS_PRESETS = false;
+export const DEVICE_CLASS_PRESETS = true;
 
 export type GpuClass = "software" | "weak" | "integrated" | "capable" | "unknown";
 

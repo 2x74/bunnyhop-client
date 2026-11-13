@@ -20,7 +20,7 @@ import type { V3 } from "../../player/bunny/rig";
 import type { VmAction } from "../procedural";
 import { edgeWeight, fixed, type KnifeCtx } from "./ctx";
 import { handFrame, holdKnife, SLIM_THUMB, straightHold } from "./hold";
-import { KMAT, PART, type HoldSpec, type KnifeDef, type KnifeState } from "./types";
+import { KMAT, PART, type HoldSpec, type KMat, type KnifeDef, type KnifeState } from "./types";
 
 export const X: V3 = [1, 0, 0], Y: V3 = [0, 1, 0];
 export const STEEL = fixed(0xc9d3da, KMAT.polished), STEEL_DARK = fixed(0x96a3ad, KMAT.polished), BEVEL = fixed(0xf1f5f8, KMAT.polished), FULLER = fixed(0xa7b3bc, KMAT.polished);
@@ -45,6 +45,25 @@ export interface BayonetBladeSpec {
   clip: number;
   rows: number;
   paint?: { steel?: Paint; spine?: Paint; bevel?: Paint; fuller?: Paint };
+  /**
+   * A paint per row instead (s: 0 guard .. 1 tip, row: its number), for blades that aren't one metal: a gradient
+   * along the blade, veins across it. Absent / null: `paint`.
+   */
+  paintAt?(face: BladeFace, s: number, row: number): Paint | null;
+}
+export type BladeFace = "steel" | "spine" | "bevel" | "fuller";
+
+/** A colour run along a blade for paintAt: `stops` (sRGB, evenly spaced, guard to tip) blended at s, one paint a row. */
+export function ramp(stops: readonly number[], mat: KMat): (s: number) => Paint {
+  const STEPS = 48;
+  const paints: Paint[] = [];
+  for (let i = 0; i <= STEPS; i++) {
+    const f = (i / STEPS) * (stops.length - 1), j = Math.min(stops.length - 2, Math.floor(f)), t = f - j;
+    let c = 0;
+    for (const sh of [16, 8, 0]) c |= Math.round(((stops[j] >> sh) & 255) * (1 - t) + ((stops[j + 1] >> sh) & 255) * t) << sh;
+    paints.push(fixed(c, mat));
+  }
+  return (s) => paints[Math.round(clamp(s, 0, 1) * STEPS)];
 }
 
 /** The finish's along-coordinate u at s (aspect-preserving; see the header): a table per spec. */
@@ -94,13 +113,13 @@ export function bayonetBlade(k: KnifeCtx, sp: BayonetBladeSpec): (s: number) => 
   for (let j = half.length - 1; j >= 0; j--) for (let d = 0; d < (half[j].crease ? 2 : 1); d++) cols.push({ c: half[j].c, side: -1, p: half[j] });
   // Face paint between column k and k+1: the edge bevel (touching the apex), the spine (chamfers and top), the fuller,
   // the flat.
-  const facePaint = cols.map((cc, kk) => {
+  const face = cols.map((cc, kk): BladeFace => {
     const nx = cols[(kk + 1) % cols.length];
-    if (cc.side === 0 || nx.side === 0) return P.bevel;
+    if (cc.side === 0 || nx.side === 0) return "bevel";
     const lo = Math.min(cc.c, nx.c);
-    if (lo >= 0.86 - 1e-6) return P.spine;
-    if (fp && lo >= f0 - 1e-6 && lo < f1 - 1e-6) return P.fuller;
-    return P.steel;
+    if (lo >= 0.86 - 1e-6) return "spine";
+    if (fp && lo >= f0 - 1e-6 && lo < f1 - 1e-6) return "fuller";
+    return "steel";
   });
   const n = fp ? sp.rows : Math.max(8, Math.round(sp.rows * 0.6));
   const rows: V3[][] = [];
@@ -139,7 +158,7 @@ export function bayonetBlade(k: KnifeCtx, sp: BayonetBladeSpec): (s: number) => 
   // Normals face out by side (+x / -x faces, the edge apex down, the spine top up): the row centroid sits toward the
   // heavy spine, which would turn the fuller's lower wall inside out.
   const outRef = cols.map((cc): V3 => (cc.side === 0 ? [0, -1, 0] : [cc.side, cc.c >= 0.99 ? 0.6 : 0, 0]));
-  k.surface(rows, { paint: (_i, kk) => facePaint[kk], part: PART.blade, fin: (i, kk) => fins[i][kk], capStart: null, capEnd: null, out: (_i, kk) => outRef[kk] });
+  k.surface(rows, { paint: (i, kk) => sp.paintAt?.(face[kk], i / n, i) ?? P[face[kk]], part: PART.blade, fin: (i, kk) => fins[i][kk], capStart: null, capEnd: null, out: (_i, kk) => outRef[kk] });
   return along;
 }
 

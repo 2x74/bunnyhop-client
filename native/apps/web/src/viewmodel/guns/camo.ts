@@ -94,6 +94,27 @@ vec2 camoStampOf(vec2 q, float h, float ss) {
   float midM = 1.0 - smoothstep(-ss, ss, mid);
   float pet = (1.0 - smoothstep(-ss, ss, petals)) * (1.0 - midM);
   return vec2(pet, midM);
+#elif CAMO_STAMP == 4
+  // Leaf: a pointed oval at any angle with its midrib left bare, in one of the two colours.
+  float c = cos(h * 6.2831), s = sin(h * 6.2831);
+  q = mat2(c, s, -s, c) * q;
+  float lens = length(vec2(q.x, abs(q.y) + 0.2)) - 0.36;
+  float rib = smoothstep(0.012 - ss, 0.012 + ss, abs(q.y)) + step(0.24, abs(q.x));
+  float m = (1.0 - smoothstep(-ss, ss, lens)) * min(1.0, rib);
+  return fract(h * 7.0) > 0.5 ? vec2(m, 0.0) : vec2(0.0, m);
+#elif CAMO_STAMP == 5
+  // Tracks: one hop of a rabbit, the two long hind feet landing ahead of the two small front paws, heading up and a
+  // little to either side.
+  float c = cos(h * 0.9 - 0.45), s = sin(h * 0.9 - 0.45);
+  q = mat2(c, s, -s, c) * q;
+  float hind = min(length((q - vec2(-0.15, 0.13)) * vec2(1.0, 0.42)), length((q - vec2(0.15, 0.13)) * vec2(1.0, 0.42))) - 0.075;
+  float fore = min(length(q - vec2(-0.04, -0.17)), length(q - vec2(0.06, -0.32))) - 0.062;
+  return vec2(1.0 - smoothstep(-ss, ss, min(hind, fore)), 0.0);
+#elif CAMO_STAMP == 6
+  // Firefly: a bright point in a soft glow.
+  float r = length(q);
+  float core = 1.0 - smoothstep(0.05 - ss, 0.05 + ss, r);
+  return vec2(core, (1.0 - core) * 0.75 * (1.0 - smoothstep(0.04, 0.2 + 0.08 * h, r)));
 #else
   // Sprinkle: a short rounded bar at any angle.
   float an = h * 6.2831;
@@ -248,13 +269,15 @@ vec3 gunCamoColor() {
   float sp = step(1.0 - uCamoP.w, camoHash(g)) * (1.0 - smoothstep(0.08, 0.2, length(fract(vCamoP * 2.5) - 0.5)));
   return mix(c, c3, sp);
 #elif GUN_CAMO == 11
-  // Facets: crystal faces in three tones, a bright line where two meet.
+  // Facets: crystal faces (or paving flags) in three tones, a line where two meet.
   vec3 v = camoCells(camoFlat(vCamoP, vCamoN) / uCamoScale);
   vec3 c = v.z < 0.45 ? mix(c0, c1, v.z / 0.45) : v.z < 0.8 ? mix(c1, c2, (v.z - 0.45) / 0.35) : c2;
   c *= 0.85 + 0.3 * v.x;
   float e = v.y - v.x;
   float aw = fwidth(e);
-  return mix(c, c3, 1.0 - smoothstep(0.04 - aw, 0.04 + aw, e));
+  // (uCamoP.x: the line's half width; 0 = Geode's hairline.)
+  float ew = uCamoP.x > 0.0 ? uCamoP.x : 0.04;
+  return mix(c, c3, 1.0 - smoothstep(ew - aw, ew + aw, e));
 #else
   // Argyle: diamonds in two colours, thin crossing lines through their middles.
   vec2 uv = camoFlat(vCamoP, vCamoN) / uCamoScale;
