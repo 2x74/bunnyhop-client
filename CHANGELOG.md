@@ -13,6 +13,16 @@ are kept. On a Mac this is the first update since v0.9.0, so it also brings ever
 - Maps show more of what their mappers put in them: overlays and decals (arrows, signs, credits, stains), sprites,
   light glows, spotlight beams and self-lit textures, drawn like in CS:S. Settings → Graphics → Map details turns the
   overlays, decals, glows and beams off.
+- Windows and doorways that maps close off from a distance open up as you approach, like in CS:S. On bhop_angst the
+  doorway at 40 seconds shows the next room, and the black floors clear as you fall towards them. Surfaces that maps
+  fade by distance or pulse over time now do so: the platforms on the badges maps that only appear up close, combine
+  shields, pulsing boosters on bhop_avantasia.
+- Jump stats and the JHUD keep counting while you hop in the start zone. The count starts over once you let go of
+  jump and stand still, as on CS:S servers.
+- While you spectate someone in a server, the speed graph shows their speed.
+- The Loadout no longer flickers when you move over items: the picture stays until the next one is ready, and items
+  you have already looked at show at once.
+- A race that switches your style keeps it as your style afterwards, as on the website.
 - The voice list is part of the HUD layout: move it, resize it or hide it with Edit layout. Layout codes from the
   website's v0.0.41 import here, and older codes still work. A piece dragged to the edge of the screen stops there
   instead of going off it.
