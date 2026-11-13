@@ -23,7 +23,7 @@ are kept.
 - "1 jump" and "1 strafe" under the timer. "R to go again" is easier to read on bright maps, and the strafe trainer
   steps aside while the end card is up.
 - The menu matches the website: Play online and Play solo on the home screen, the plain pause menu tabs, the new Ranks
-  explanation, the and the rest of v0.0.41's menu changes.
+  explanation and the rest of v0.0.41's menu changes.
 
 Not in the desktop client yet, coming in a later update:
 
