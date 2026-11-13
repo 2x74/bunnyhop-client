@@ -907,7 +907,7 @@ class Renderer {
         GLint detailBlend = -1, tint = -1, opacity = -1, cutoff = -1, unlit = -1, props = -1, kind = -1;
         GLint aboveWater = -1, captureReady = -1, waterFogEnd = -1, additive = -1;
         GLint baseOffset = -1, skinned = -1, boneBase = -1, propCubeOn = -1, propCube = -1;
-        GLint dressing = -1, decalModulate = -1, selfIllum = -1, selfIllumTint = -1;
+        GLint dressing = -1, decalModulate = -1, selfIllum = -1, selfIllumTint = -1, alphaMask = -1;
 
         void read(Gl &gl, GLuint program) {
             const std::pair<GLint *, const char *> uniforms[] = {
@@ -937,6 +937,7 @@ class Renderer {
                     {&decalModulate, "decalModulate"},
                     {&selfIllum, "selfIllum"},
                     {&selfIllumTint, "selfIllumTint"},
+                    {&alphaMask, "alphaMask"},
             };
             for (const auto &[location, name] : uniforms)
                 *location = gl.GetUniformLocation(program, name);
@@ -988,8 +989,11 @@ class Renderer {
         const BhMaterialLook plain{};
         const auto &look = index < materialLooks.size() ? materialLooks[index] : plain;
         gl.Uniform1i(materialUniforms.decalModulate, look.decal_modulate != 0);
-        gl.Uniform1i(materialUniforms.selfIllum, look.selfillum != 0);
-        if (look.selfillum) gl.Uniform3fv(materialUniforms.selfIllumTint, 1, look.selfillum_tint);
+        // UnlitGeneric drops $selfillum (SDK vertexlitgeneric_dx9_helper.cpp), as the website.
+        const bool selfLit = look.selfillum && !(m.flags & 16);
+        gl.Uniform1i(materialUniforms.selfIllum, selfLit);
+        if (selfLit) gl.Uniform3fv(materialUniforms.selfIllumTint, 1, look.selfillum_tint);
+        gl.Uniform1i(materialUniforms.alphaMask, 0);
         const bool doubleSided = m.kind == 2 ? native_render::water_face_double_sided(waterBeneathFaces, e.above_water)
                                              : (m.flags & 4) != 0;
         if (doubleSided)
@@ -1403,7 +1407,8 @@ class Renderer {
             for (const auto &d : draws) {
                 const auto &m = d.material < materials.size() ? materials[d.material] : materials.front();
                 const auto *fade = surface_fade(d);
-                if ((transparent(m) || fade) != (pass != 0) || (reflection && m.kind == 2)) continue;
+                const bool blends = fade_blends(fade);
+                if ((transparent(m) || blends) != (pass != 0) || (reflection && m.kind == 2)) continue;
                 const auto &transform = scene_transform(d.prop, d.entity, d.model);
                 if (!transform.visible) continue;
                 const auto model = scene_model(d.prop, d.entity, d.model);
@@ -1412,9 +1417,11 @@ class Renderer {
                     bind_material(d.material, d.prop);
                     boundMaterial = std::pair(d.material, d.prop);
                 }
-                // A faded surface draws at its own alpha; the next draw binds its material afresh.
+                // A faded or tinted surface draws at its own alpha and colour; the next draw binds its material afresh.
                 if (fade) {
-                    gl.Uniform1f(materialUniforms.opacity, fade->alpha);
+                    if (blends) gl.Uniform1f(materialUniforms.opacity, fade->alpha);
+                    if (blends && fade->mask) gl.Uniform1i(materialUniforms.alphaMask, 1);
+                    if (fade->tint) gl.Uniform3fv(materialUniforms.tint, 1, fade->tint->data());
                     boundMaterial.reset();
                 }
                 bind_skinning(materialUniforms.skinned, materialUniforms.boneBase, d.skinned, skinnedBound);
@@ -2158,6 +2165,7 @@ public:
         if (!nv || !ni || !ng || !rawGroups) throw std::runtime_error("Map has no drawable native mesh");
         if (rawMaterials && nm) materials.assign(rawMaterials, rawMaterials + nm);
         if (materials.empty()) materials.push_back({-1, 1, 0, 1, .5f, {1, 1, 1}});
+        resolve_builtin_textures();
         if (rawExtras && ne) extras.assign(rawExtras, rawExtras + ne);
         groups.assign(rawGroups, rawGroups + ng);
         hasWaterMaterials =
@@ -2171,21 +2179,28 @@ public:
             record_group_bounds(item.first_index, item.first_index, item.index_count, verts, nv, 10, indices, ni);
             co_yield "resource";
         }
-        prepare_brush_fades();
     }
 
-    // The brushes that fade: each func_areaportalwindow's target, and every brush wearing a material whose proxies
-    // drive $alpha (the world's own faces only for chains that need no entity). Water and glass keep their own looks.
+    // The brushes not drawn plainly (brush_fades.hpp): each func_areaportalwindow's target, every brush wearing a
+    // material whose proxies drive $alpha (the world's own faces only for chains that need no entity), the brush
+    // entities' render keys, and the classes CS:S never draws. Water and glass keep their own looks.
     void prepare_brush_fades() {
         brushFades = {};
         size_t count = 0;
         const char *raw = bh_entities_json(core, &count);
-        const auto windows = raw && count ? native_render::areaportal_windows(nlohmann::json::parse(raw, raw + count))
-                                          : std::unordered_map<uint32_t, native_render::FadeWindow>{};
+        const auto entities = raw && count ? nlohmann::json::parse(raw, raw + count) : nlohmann::json::array();
+        const auto windows = native_render::areaportal_windows(entities);
+        size_t changingCount = 0;
+        const uint32_t *changing = bh_dynamic_render_entities(core, &changingCount);
+        const std::unordered_set<uint32_t> changingSet(changing, changing ? changing + changingCount : changing);
+        const auto renders = native_render::brush_renders(entities, changingSet, windows);
+        const auto undrawn = native_render::undrawn_class_models(entities);
+        for (const uint32_t model : undrawn)
+            brushFades.hide(model);
         std::map<uint32_t, std::vector<uint32_t>> used;
         std::unordered_map<uint32_t, native_render::Bounds> boxes;
         for (const auto &g : groups) {
-            if (g.sky3d) continue;
+            if (g.sky3d || undrawn.contains(g.model)) continue;
             auto &materialsOfModel = used[g.model];
             if (std::find(materialsOfModel.begin(), materialsOfModel.end(), g.material) == materialsOfModel.end())
                 materialsOfModel.push_back(g.material);
@@ -2196,43 +2211,66 @@ public:
                 box->second.hi[k] = std::max(box->second.hi[k], bounds.hi[k]);
             }
         }
-        for (const auto &[model, used_materials] : used)
-            add_brush_fade(model, used_materials, boxes[model], windows);
+        for (const auto &[model, used_materials] : used) {
+            native_render::BrushSpec spec;
+            if (const auto window = windows.find(model); window != windows.end()) spec.window = window->second;
+            if (const auto render = renders.find(model); model && render != renders.end()) {
+                spec.render = render->second.keys;
+                spec.index = render->second.index;
+            }
+            add_brush_fade(model, used_materials, boxes[model], spec);
+        }
     }
 
+    // One brush model's surfaces that can take an opacity: their $alpha chains, whether the entity's render keys apply
+    // (no chain, a VMT $color and $alpha of 1), and whether their texture alpha is a mask once they blend.
     void add_brush_fade(
             uint32_t model,
             const std::vector<uint32_t> &used_materials,
             const native_render::Bounds &box,
-            const std::unordered_map<uint32_t, native_render::FadeWindow> &windows
+            const native_render::BrushSpec &spec
     ) {
-        const auto window = windows.find(model);
+        static constexpr uint32_t coverage = 1 | 2, unlit = 16;
         std::vector<native_render::BrushFades::Surface> surfaces;
+        bool anyChain = false;
         for (const uint32_t material : used_materials) {
             if (material >= materials.size() || materials[material].kind == 2 || materials[material].kind == 3)
                 continue;
+            const auto &m = materials[material];
             BhAlphaProgram chain{};
-            const bool runs = bh_material_alpha(core, material, &chain) && (model != 0 || !chain.per_entity);
-            if (window == windows.end() && !runs) continue;
+            const bool hasChain = bh_material_alpha(core, material, &chain);
+            const bool runs = hasChain && (model != 0 || !chain.per_entity);
             native_render::BrushFades::Surface surface;
             surface.material = material;
-            surface.base = materials[material].alpha;
+            surface.base = m.alpha;
             if (runs) {
                 surface.vars.resize(chain.vars);
                 surface.chain = bh_material_alpha_vars(core, material, surface.vars.data(), surface.vars.size());
+                anyChain |= surface.chain;
             }
+            surface.keyed =
+                    spec.render && !hasChain && m.alpha == 1 && m.color[0] == 1 && m.color[1] == 1 && m.color[2] == 1;
+            BhMaterialBlend blend{};
+            bh_material_blend(core, material, &blend);
+            const bool selfLit =
+                    material < materialLooks.size() && materialLooks[material].selfillum && !(m.flags & unlit);
+            surface.mask = blend.base_alpha_mask && !(m.flags & coverage) && !selfLit;
             surfaces.push_back(std::move(surface));
         }
-        const bool whole = surfaces.size() == used_materials.size();
-        const auto fade_window = window == windows.end() ? std::nullopt : std::optional(window->second);
-        brushFades.add(model, box, fade_window, std::move(surfaces), whole);
+        if (!spec.window && !anyChain && !spec.render) return;
+        brushFades.add(model, box, spec, std::move(surfaces), used_materials.size());
     }
 
     // This frame's fades from the main view's eye (not a water reflection's, nor the sun's).
     void update_brush_fades(const float eye[3]) {
         if (!brushFades.size()) return;
+        const float yaw = float(lastYaw * native::radians), pitch = float(lastPitch * native::radians);
+        const native_render::Vec3 forward = {
+                std::cos(pitch) * std::cos(yaw), std::cos(pitch) * std::sin(yaw), -std::sin(pitch)
+        };
         brushFades.update(
                 {eye[0], eye[1], eye[2]},
+                forward,
                 worldSeconds,
                 graphics.potato,
                 [this](uint32_t model) {
@@ -2256,11 +2294,28 @@ public:
         );
     }
 
-    // A world surface's fade this frame when it draws blended at its own alpha; Potato only hides whole brushes.
+    // A world surface's fade or tint this frame (brush_fades.hpp); nothing for one drawn as the map draws it.
     const native_render::SurfaceFade *surface_fade(const native_render::SceneDraw &d) const {
-        if (d.prop || graphics.potato) return nullptr;
+        if (d.prop) return nullptr;
         const auto *fade = brushFades.surface(d.model, d.material);
-        return fade && !fade->plain ? fade : nullptr;
+        return fade && (!fade->plain || fade->tint) ? fade : nullptr;
+    }
+
+    // Potato draws a see-through brush flat and opaque, tinted; otherwise below full strength it blends.
+    bool fade_blends(const native_render::SurfaceFade *fade) const { return fade && !fade->plain && !graphics.potato; }
+
+    // A built-in `$basetexture "white"` with no VTF (bhop_angst's hanging loops): solid white times $color, as the
+    // material system draws it, instead of the missing-material stand-in.
+    void resolve_builtin_textures() {
+        static constexpr uint32_t missing = 1, flat = 4;
+        for (uint32_t i = 0; i < materials.size(); i++) {
+            if (materials[i].kind != missing) continue;
+            BhMaterialBlend blend{};
+            if (bh_material_blend(core, i, &blend) && blend.builtin_white) {
+                materials[i].kind = flat;
+                materials[i].texture = -1;
+            }
+        }
     }
 
     ResourceLoading prepare_props() {
@@ -2715,6 +2770,7 @@ public:
         prepare_sky();
         prepare_map_light();
         prepare_dressing();
+        prepare_brush_fades();
         co_yield "lightmap";
         auto textures = prepare_textures();
         while (!textures.step())

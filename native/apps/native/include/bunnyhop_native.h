@@ -436,6 +436,17 @@ int bh_material_alpha_run(
         uint32_t *noise,
         double *alpha
 );
+
+/* What blending a brush and the built-in textures need, per material: base_alpha_mask, the base texture's alpha is a
+ * mask for something else (no part of the opacity once the surface blends); builtin_white, a `$basetexture "white"`
+ * with no VTF on a one-texture shader, solid white times $color. */
+typedef struct BhMaterialBlend {
+    uint32_t base_alpha_mask, builtin_white;
+} BhMaterialBlend;
+
+int bh_material_blend(BhContext *ctx, uint32_t material, BhMaterialBlend *out);
+/* Indices into bh_entities_json of the entities whose render keys the map changes while it runs, ascending. */
+const uint32_t *bh_dynamic_render_entities(BhContext *ctx, size_t *count);
 /* Water geometry JSON: volumes [minx,miny,minz,maxx,maxy,maxz] and convex plane lists [nx,ny,nz,d]. */
 const char *bh_water_json(BhContext *ctx, size_t *byte_count);
 /* Read/decode Source content with pakfile precedence; buffers last until next request of same kind. */

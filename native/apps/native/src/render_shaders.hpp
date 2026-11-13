@@ -226,7 +226,7 @@ uniform int kind;uniform bool unlit,props,hasSecondary,hasDetail,aboveWater,skyP
 uniform bool flashlight;uniform vec3 flashDirection;
 uniform vec3 skyFogColor;uniform vec3 skyFogRange;
 uniform vec3 worldFogColor;uniform vec3 worldFogRange;uniform bool propLighting;
-uniform bool dressing,decalModulate,selfIllum;uniform vec3 selfIllumTint;
+uniform bool dressing,decalModulate,selfIllum,alphaMask;uniform vec3 selfIllumTint;
 out vec4 color;
 )" + sun_light_shader
            + water_surface_shader + R"(
@@ -244,6 +244,8 @@ void main(){
  if(hasSecondary&&!potato)base=mix(base,texture(secondaryTexture,uv),clamp(blend,0.,1.));
  if(hasDetail)base.rgb*=mix(vec3(1),texture(detailTexture,uv*detailScale).rgb*2.,detailBlend);
  base*=vec4(tint,opacity);if(base.a<cutoff)discard;
+ // A blended brush whose texture alpha is a mask (brush_fades.hpp): only its opacity blends it.
+ if(alphaMask)base.a=opacity;
  if(dressing){if(dressFade<=0.)discard;base.a*=dressFade;}
  vec3 standIn=vec3(.5+.5*max(dot(n,normalize(vec3(.35,.45,.82))),0.));
  vec3 propShade=propLighting&&propLit.r>=0.?propLit:standIn;
@@ -255,7 +257,7 @@ void main(){
  if(sunActive&&!unlit&&!potato&&!fullbright&&!skyPass&&kind<2&&base.a>.99)lit=sunLight(lit,base.rgb,n*(gl_FrontFacing?1.:-1.));
  float alpha=base.a;
  // $selfillum (web render.ts withSelfIllum): the base alpha is a mask where the texture times the tint shows unlit.
- if(selfIllum&&!potato){lit=mix(lit,base.rgb*selfIllumTint,clamp(base.a,0.,1.));alpha=1.;}
+ if(selfIllum&&!potato){lit=mix(lit,base.rgb*selfIllumTint,clamp(base.a,0.,1.));alpha=opacity;}
  vec3 col=encode(lit);
  // Source's DecalModulate: the blend doubles what's under it, so mid-grey leaves it, and alpha fades towards that grey.
  if(decalModulate){col=mix(vec3(.5),encode(base.rgb),clamp(base.a,0.,1.));alpha=1.;}

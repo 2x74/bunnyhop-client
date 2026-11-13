@@ -1,5 +1,5 @@
 #pragma once
-// Brush models whose opacity changes while you play, as in CS:S (the website's brush-fades.ts):
+// Brush models that aren't simply drawn with the map's materials, as in CS:S (the website's brush-fades.ts):
 //
 // func_areaportalwindow (SDK 2013 c_func_areaportalwindow.cpp): the window entity draws its target's brush model
 //   itself, blended by the eye's distance to the brush's box: TranslucencyLimit up to FadeStartDist (0: the brush
@@ -7,22 +7,24 @@
 //   distance (bhop_angst's doorway at 40 s).
 // Materials whose proxies drive $alpha (the bridge's material_alpha.rs), run for each brush entity wearing one. The
 //   world's own faces only run chains that need no entity (a Sine pulse).
+// The entity's render keys (brush_render.hpp): not drawn at all (rendermode 10, a blend of 0), blended by renderamt or
+//   a renderfx, tinted by rendercolor. A window brush is drawn by the window entity, so its own keys don't count.
 //
 // A surface below full strength draws blended without writing depth; at full strength it draws as the map's plain
-// material. A brush entity whose every surface is at zero isn't drawn. Render only.
-//
-// Each surface's alpha and each brush's hidden flag are this frame's result. A brush's own render keys (rendermode,
-// renderamt, rendercolor) can multiply into the same state in update().
+// material, tinted if its brush is. Render only.
 #include "native_math.hpp"
 #include "render_math.hpp"
+#include "brush_render.hpp"
 #include <nlohmann/json.hpp>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <functional>
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace native_render {
@@ -95,10 +97,56 @@ inline std::unordered_map<uint32_t, FadeWindow> areaportal_windows(const nlohman
     return out;
 }
 
-// One surface's state this frame: below full strength it draws blended at `alpha`; `plain` draws as the map does.
+// The first entity of each brush model whose keys change how it draws (render.ts): not one the map changes while it
+// runs (`changing`, entity indices), a window's brush (the window entity draws it), a func_breakable_surf, or a
+// FadeSlow / FadeFast. `index` is the entity's place in the list.
+struct BrushRender {
+    RenderKeys keys;
+    double index = 0;
+};
+
+inline std::unordered_map<uint32_t, BrushRender> brush_renders(
+        const nlohmann::json &entities,
+        const std::unordered_set<uint32_t> &changing,
+        const std::unordered_map<uint32_t, FadeWindow> &windows
+) {
+    std::unordered_map<uint32_t, BrushRender> out;
+    std::unordered_set<uint32_t> seen;
+    if (!entities.is_array()) return out;
+    for (size_t index = 0; index < entities.size(); index++) {
+        const auto &e = entities[index];
+        if (!e.is_object()) continue;
+        const auto model_key = e.value("model", "");
+        if (model_key.size() < 2 || model_key[0] != '*' || model_key[1] == '0'
+            || !std::all_of(model_key.begin() + 1, model_key.end(), [](char c) { return c >= '0' && c <= '9'; }))
+            continue;
+        const auto model = uint32_t(std::stoul(model_key.substr(1)));
+        if (!seen.insert(model).second) continue;
+        if (changing.contains(uint32_t(index)) || windows.contains(model)
+            || fade_detail::lower(e.value("classname", "")) == "func_breakable_surf")
+            continue;
+        const auto keys = render_keys(e);
+        if (fx_is_frame_fade(keys)) continue;
+        if (keys.mode == render_none || keys.color || fx_is_timed(keys) || (keys.mode != 0 && keys.amount < 255))
+            out.emplace(model, BrushRender{keys, double(index)});
+    }
+    return out;
+}
+
+// One surface's state this frame: below full strength it draws blended at `alpha` (`plain` draws as the map does),
+// tinted by `tint` when its brush has a rendercolor. `mask`: its texture's alpha is a mask, no part of the blend.
 struct SurfaceFade {
     float alpha = 1;
-    bool plain = true;
+    bool plain = true, mask = false;
+    std::optional<std::array<float, 3>> tint;
+};
+
+// What a brush model has beyond its materials: a window, and its entity's render keys when they change how it draws.
+struct BrushSpec {
+    std::optional<FadeWindow> window;
+    std::optional<RenderKeys> render;
+    // De-syncs the timed effects between entities (the entity's place in the map's entity list).
+    double index = 0;
 };
 
 class BrushFades {
@@ -115,39 +163,75 @@ public:
         float base = 1;
         bool chain = false;
         std::vector<double> vars;
+        // The entity's render keys apply (no $alpha chain, a VMT $color and $alpha of 1).
+        bool keyed = false;
+        // The texture's alpha is a mask (the bridge's base_alpha_mask), so it doesn't blend.
+        bool mask = false;
+        // Set by add(): it can draw below full strength.
+        bool fades = false;
         SurfaceFade fade;
     };
 
-    // `surfaces`: the materials of `model` that fade (by `window`, their own chain or both). `whole`: they are every
-    // material the model draws, so at zero the model isn't drawn at all.
+    // Model `model` (box in its own space) as `spec` says. `candidates`: its materials that can take an opacity;
+    // `used_count`: every material it draws, so a brush whose every surface fades isn't drawn at zero.
     void
-    add(uint32_t model,
-        const Bounds &box,
-        std::optional<FadeWindow> window,
-        std::vector<Surface> surfaces,
-        bool whole) {
-        if (surfaces.empty()) return;
-        for (size_t i = 0; i < surfaces.size(); i++)
-            lookup_.emplace(key(model, surfaces[i].material), Where{brushes_.size(), i});
-        if (model) models_.emplace(model, brushes_.size());
-        brushes_.push_back({model, box, window, std::move(surfaces), whole && model != 0, false});
+    add(uint32_t model, const Bounds &box, const BrushSpec &spec, std::vector<Surface> candidates, size_t used_count) {
+        Brush brush;
+        brush.model = model;
+        brush.box = box;
+        brush.window = spec.window;
+        brush.index = spec.index;
+        if (spec.render) brush.timed = fx_is_timed(*spec.render);
+        if (spec.render && brush.timed) brush.render = spec.render;
+        if (spec.render && !brush.timed) brush.blend = fx_blend(*spec.render, {}) / 255.;
+        if (spec.render && (spec.render->mode == render_none || (!brush.timed && brush.blend <= 0))) {
+            // Never drawn, whatever it is made of.
+            brush.undrawn = brush.hidden = true;
+            push(std::move(brush));
+            return;
+        }
+        for (auto &s : candidates) {
+            const auto tint = s.keyed ? spec.render->color : std::nullopt;
+            s.fades = spec.window || s.chain || (s.keyed && (brush.timed || brush.blend < 1));
+            if (!s.fades && !tint) continue;
+            s.fade = {1, true, s.mask, tint};
+            brush.surfaces.push_back(std::move(s));
+        }
+        if (brush.surfaces.empty()) return;
+        brush.whole = model != 0 && brush.surfaces.size() == used_count;
+        push(std::move(brush));
+    }
+
+    // A brush CS:S never draws (brush_render.hpp undrawn_class_models).
+    void hide(uint32_t model) {
+        Brush brush;
+        brush.model = model;
+        brush.undrawn = brush.hidden = true;
+        push(std::move(brush));
     }
 
     size_t size() const { return brushes_.size(); }
 
-    // Sets every fade for a view from `eye` at map time `time`. In Potato a brush is simply there or not.
-    void update(const Vec3 &eye, double time, bool potato, const ModelMatrix &matrix_of, const Chain &run) {
+    // Sets every fade for a view from `eye` looking along `forward` at map time `time`. In Potato a distance fade
+    // switches at half strength.
+    void
+    update(const Vec3 &eye,
+           const Vec3 &forward,
+           double time,
+           bool potato,
+           const ModelMatrix &matrix_of,
+           const Chain &run) {
         for (auto &brush : brushes_)
-            update_brush(brush, eye, time, potato, matrix_of, run);
+            if (!brush.undrawn) update_brush(brush, eye, forward, time, potato, matrix_of, run);
     }
 
-    // This frame's state of `material` on `model`, if it fades.
+    // This frame's state of `material` on `model`, if it fades or is tinted.
     const SurfaceFade *surface(uint32_t model, uint32_t material) const {
         const auto at = lookup_.find(key(model, material));
         return at == lookup_.end() ? nullptr : &brushes_[at->second.brush].surfaces[at->second.surface].fade;
     }
 
-    // Whether `model` has faded out entirely this frame.
+    // Whether `model` isn't drawn this frame.
     bool hidden(uint32_t model) const {
         const auto at = models_.find(model);
         return at != models_.end() && brushes_[at->second].hidden;
@@ -156,18 +240,30 @@ public:
 private:
     // Height of the eye above the middle of a standing player (64 - 62 / 2): PlayerProximity measures from the middle.
     static constexpr float eye_above_centre = 33;
+    // Noise changes this often (GaussianNoise and the renderfx flicker draw a new number every frame).
+    static constexpr double noise_hz = 100;
 
     struct Brush {
         uint32_t model = 0;
         Bounds box;
         std::optional<FadeWindow> window;
+        // The keys of a brush whose blend a renderfx moves; a fixed blend is `blend`.
+        std::optional<RenderKeys> render;
+        double index = 0, blend = 1;
         std::vector<Surface> surfaces;
-        bool whole = false, hidden = false;
+        bool timed = false, whole = false, hidden = false, undrawn = false;
     };
 
     struct Where {
         size_t brush, surface;
     };
+
+    void push(Brush brush) {
+        for (size_t i = 0; i < brush.surfaces.size(); i++)
+            lookup_.emplace(key(brush.model, brush.surfaces[i].material), Where{brushes_.size(), i});
+        if (brush.model) models_.emplace(brush.model, brushes_.size());
+        brushes_.push_back(std::move(brush));
+    }
 
     static uint64_t key(uint32_t model, uint32_t material) { return (uint64_t(model) << 32) | material; }
 
@@ -190,14 +286,43 @@ private:
         return out;
     }
 
+    // A timed renderfx's blend this frame. Distort and Hologram draw from the brush's noise.
+    static double timed_blend(
+            const Brush &brush,
+            const native::Matrix &m,
+            const Vec3 &eye,
+            const Vec3 &forward,
+            double time,
+            uint32_t &noise
+    ) {
+        const auto &keys = *brush.render;
+        FxInputs in;
+        in.time = time;
+        in.index = brush.index;
+        in.depth = (m[12] - eye[0]) * forward[0] + (m[13] - eye[1]) * forward[1] + (m[14] - eye[2]) * forward[2];
+        if (keys.fx == 15 || keys.fx == 16) {
+            const auto tick = int64_t(std::floor(time * noise_hz));
+            in.jitter = int(std::floor(hash01(brush.model, tick * 64 + noise++) * 64)) - 32;
+        }
+        return fx_blend(keys, in) / 255.;
+    }
+
     void update_brush(
-            Brush &brush, const Vec3 &eye, double time, bool potato, const ModelMatrix &matrix_of, const Chain &run
+            Brush &brush,
+            const Vec3 &eye,
+            const Vec3 &forward,
+            double time,
+            bool potato,
+            const ModelMatrix &matrix_of,
+            const Chain &run
     ) {
         const auto matrix = brush.model ? matrix_of(brush.model) : native::Matrix{};
-        double blend = 1, distance = 0;
+        uint32_t noise = 0;
+        const double blend = brush.render ? timed_blend(brush, matrix, eye, forward, time, noise) : brush.blend;
+        double window = 1, distance = 0;
         if (brush.window) {
             const auto &w = *brush.window;
-            blend = window_blend(box_distance(brush.box, to_local(matrix, eye)), w.start, w.end, w.limit);
+            window = window_blend(box_distance(brush.box, to_local(matrix, eye)), w.start, w.end, w.limit);
         }
         if (brush.model) {
             Vec3 centre{};
@@ -206,15 +331,22 @@ private:
             const auto world = transform_point(matrix, centre);
             distance = std::hypot(world[0] - eye[0], world[1] - eye[1], world[2] - (eye[2] - eye_above_centre));
         }
-        uint32_t noise = 0;
-        double most = 0;
+        double most = 0, most_faded = 0;
         for (auto &s : brush.surfaces) {
-            const double own = s.chain ? run(s.material, s.vars, distance, time, brush.model, noise) : s.base;
-            const double alpha = own * blend;
+            const double faded =
+                    (s.chain ? run(s.material, s.vars, distance, time, brush.model, noise) : s.base) * window;
+            const double alpha = faded * (s.keyed ? blend : 1);
             most = std::max(most, alpha);
-            s.fade = {float(alpha), blend >= 1 && (!s.chain || (alpha >= 1 && s.base >= 1))};
+            most_faded = std::max(most_faded, faded);
+            s.fade.alpha = float(alpha);
+            s.fade.plain =
+                    !s.fades || (window >= 1 && (!s.keyed || blend >= 1) && (!s.chain || (alpha >= 1 && s.base >= 1)));
         }
-        brush.hidden = brush.whole && (potato ? most < .5 : most <= 0);
+        // The window entity, and an entity with a blend of its own, draw the whole brush or none of it. In Potato a
+        // distance fade switches at half strength; a brush the map made see-through stays, drawn flat.
+        brush.hidden = blend <= 0
+                       || (potato ? window < .5 || (brush.whole && most_faded < .5)
+                                  : window <= 0 || (brush.whole && most <= 0));
     }
 
     std::vector<Brush> brushes_;
