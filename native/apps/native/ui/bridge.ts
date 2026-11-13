@@ -86,6 +86,7 @@ export type MenuMessage =
       packedLoadout: string;
       ghostId?: string;
       trailId?: string;
+      shapeId?: string;
       playerGlow?: import("../../web/src/player/glow-config").PlayerGlow | null;
       /** The saved knife pool (progression.ts KnifePool) and its pick, which the game moves on (knife_pool.hpp). */
       knifePool?: import("../../web/src/progression").KnifePool | null;

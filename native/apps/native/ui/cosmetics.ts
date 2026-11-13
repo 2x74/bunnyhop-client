@@ -35,6 +35,7 @@ function localChoice(base: CosmeticChoice): CosmeticChoice {
     outfit: getOutfit(),
     ghost: getGhostCosmetics().ghostId,
     trail: getGhostCosmetics().trailId,
+    shape: getGhostCosmetics().shapeId,
     knifePool: getKnifePool(),
   };
 }
@@ -160,6 +161,7 @@ function sendCosmetics(): void {
     packedLoadout: packLoadout(getLoadout()),
     ghostId: getGhostCosmetics().ghostId,
     trailId: getGhostCosmetics().trailId,
+    shapeId: getGhostCosmetics().shapeId,
     playerGlow: getPlayerGlow(),
     knifePool,
     knifePick: storedKnifePick(),

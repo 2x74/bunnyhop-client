@@ -8,6 +8,7 @@
 #include "water_capture.hpp"
 #include "texture_bleed.hpp"
 #include "ghost_trails.hpp"
+#include "trail_shapes.hpp"
 #include "graphics_settings.hpp"
 #include "runner_view.hpp"
 #include "paint.hpp"
@@ -1442,6 +1443,9 @@ class Renderer {
     std::array<bool, 4> routeAvailable{true, true, true, true};
     std::array<float, 3> ghostRouteColor{1, .761f, .239f};
     std::array<std::array<float, 3>, 2> trailColors{{{1, .761f, .239f}, {1, .761f, .239f}}};
+    // The trail's shape (the Loadout's Trail shape); the ribbon is drawn as it always was.
+    native_render::TrailShape trailShape = native_render::TrailShape::ribbon;
+    native_render::TrailShapes trailShapes;
 
     struct QueuedShot {
         BhAttackReport report;
@@ -1661,6 +1665,10 @@ class Renderer {
         if (path.source != native_render::GhostSource::pb) {
             colors.fill(native_render::ghost_source_color(path.source));
         }
+        if (trailShape != native_render::TrailShape::ribbon) {
+            draw_shaped_trail(points, colors, actor.opacity, eye);
+            return;
+        }
         for (size_t i = 1; i < points.size(); ++i) {
             const float progress = float(i) / float(points.size() - 1);
             const auto &point = points[i];
@@ -1668,6 +1676,22 @@ class Renderer {
             const auto color = native_render::trail_color(colors, progress, actor.opacity, distance);
             presentation->ribbon(points[i - 1], point, 2.5f * (.15f + .85f * progress), color, eye);
         }
+    }
+
+    // The website's ghost trail width and opacity (ghost.ts: half width 2.5, opacity x 1.2).
+    void draw_shaped_trail(
+            std::span<const native_render::Vec3> points,
+            const std::array<std::array<float, 3>, 2> &colors,
+            float opacity,
+            const float eye[3]
+    ) {
+        constexpr float trail_half_width = 2.5f, trail_opacity_boost = 1.2f;
+        const native_render::TrailShapes::Colors tones{colors[0], colors[1]};
+        const float shown = std::min(1.f, opacity * trail_opacity_boost);
+        const auto emit = [this](const native_render::TrailQuad &quad) {
+            presentation->quad(quad.corners, {quad.color[0], quad.color[1], quad.color[2], 1}, 0, quad.alpha);
+        };
+        trailShapes.build(trailShape, points, eye, tones, shown, trail_half_width, ghostTrails.phase(), emit);
     }
 
     int selected_route_slot() const {
@@ -1975,7 +1999,8 @@ public:
         if (viewmodel) viewmodel->glow_visibility(show, firstPerson);
     }
 
-    void set_ghost_cosmetics(const std::string &ghostId, const std::string &trailId) {
+    void set_ghost_cosmetics(const std::string &ghostId, const std::string &trailId, const std::string &shapeId) {
+        trailShape = native_render::trail_shape_of(shapeId);
         if (viewmodel) {
             viewmodel->ghost_cosmetics(ghostId);
             trailColors = viewmodel->cosmetic_colors(trailId);

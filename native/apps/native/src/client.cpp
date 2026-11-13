@@ -342,7 +342,7 @@ int run(const native::Options &opt) {
         }
     };
     std::string selected_style = opt.style, active_style = opt.style, outfit, packed_loadout,
-                ghost_cosmetic = "ghost-default", trail_cosmetic = "trail-none";
+                ghost_cosmetic = "ghost-default", trail_cosmetic = "trail-none", shape_cosmetic = "shape-ribbon";
     // The style the player last picked starts the next launch too (saved_style.hpp); --style wins for that launch.
     const auto style_path = cache / "style.json";
     if (persist_window && !opt.style_set) try {
@@ -1083,7 +1083,7 @@ int run(const native::Options &opt) {
         reset();
         apply_preferences();
         renderer->set_cosmetics(outfit, held_knife.loadout());
-        renderer->set_ghost_cosmetics(ghost_cosmetic, trail_cosmetic);
+        renderer->set_ghost_cosmetics(ghost_cosmetic, trail_cosmetic, shape_cosmetic);
         apply_room_mode(room_modes.map_loaded(map_id, room.spectator_target.has_value(), epoch_ms()));
     };
     auto request_map = [&](const std::string &id) {
@@ -3085,12 +3085,13 @@ int run(const native::Options &opt) {
                         );
                         ghost_cosmetic = message.value("ghostId", ghost_cosmetic);
                         trail_cosmetic = message.value("trailId", trail_cosmetic);
-                        if (ghost_cosmetic.size() > 64 || trail_cosmetic.size() > 64)
+                        shape_cosmetic = message.value("shapeId", shape_cosmetic);
+                        if (ghost_cosmetic.size() > 64 || trail_cosmetic.size() > 64 || shape_cosmetic.size() > 64)
                             throw std::runtime_error("Invalid ghost cosmetic");
                         if (renderer) {
                             renderer->set_player_glow(player_glow);
                             renderer->set_cosmetics(outfit, held_knife.loadout());
-                            renderer->set_ghost_cosmetics(ghost_cosmetic, trail_cosmetic);
+                            renderer->set_ghost_cosmetics(ghost_cosmetic, trail_cosmetic, shape_cosmetic);
                         }
                     } else if (type == "roomEvent") {
                         apply_room_event(message);

@@ -14,6 +14,8 @@ are kept.
   Settings → Graphics → Map details turns the overlays and decals off.
 - The voice list is part of the HUD layout: move it, resize it or hide it with Edit layout. Layout codes from the
   website's v0.0.41 import here, and older codes still work.
+- Trails have shapes: Twin, Dashes, Comet, Seeds, Petals and Clover, picked in the Loadout's Trail shape tab. Any
+  shape goes with any trail colour.
 - Seven colourways carry their set's pattern on your bunny: Dev Grid, Draftsman, Fluorescent, Meadow, Geode, High
   Roller and Lapis.
 - Halo, Aurora, Capybara, Maxwell and Silver Wreath are bigger and easier to see on other players.
@@ -21,11 +23,10 @@ are kept.
 - "1 jump" and "1 strafe" under the timer. "R to go again" is easier to read on bright maps, and the strafe trainer
   steps aside while the end card is up.
 - The menu matches the website: Play online and Play solo on the home screen, the plain pause menu tabs, the new Ranks
-  explanation, the Trail shape tab and the rest of v0.0.41's menu changes.
+  explanation, the and the rest of v0.0.41's menu changes.
 
 Not in the desktop client yet, coming in a later update:
 
-- Trail shapes in the game. You can pick one in the Loadout; the game still draws the ribbon.
 - Light glows, sprite glows and spotlight beams.
 - Keys held while you click back into the game don't move you until you press them again.
 - Still missing from v0.9.1: bonus tracks in other styles, the strafe trainer in every style, the new notices,
