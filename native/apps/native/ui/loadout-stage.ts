@@ -1,10 +1,11 @@
 // Browser-safe palette/shape previews for the native menu. The equipped model is rendered by the native game.
 // This canvas intentionally uses only the 2D context; importing a model or Three here breaks the menu boundary.
 import { VisiblePreviews } from "./visible-previews";
+import { StageFrames } from "./stage-frames";
 import authored from "./authored-previews.json";
 import { COSMETICS, cosmetic } from "../../web/src/progression";
 import { packLoadout, type CosmeticLoadout } from "../../web/src/loadout";
-import { requestPreview, cancelPreview, nativePreviewAvailable } from "./loadout-preview";
+import { requestPreview, cancelPreview, nativePreviewAvailable, type PreviewRequest } from "./loadout-preview";
 import type { PreviewSpec } from "../../web/src/notify/item-preview";
 import type { PlayerGlow } from "../../web/src/player/glow-config";
 export type StageView = "fp" | "close" | "bunny" | "ghost" | "gun" | "gunside";
@@ -25,6 +26,7 @@ export const THUMB_W = 384,
   THUMB_H = 240;
 const CLOSE_UP_ZOOM = 1.3;
 const thumbs = new Map<string, HTMLCanvasElement>();
+const stageFrames = new StageFrames();
 let lastGunIndex = 6;
 const color = (id: string | undefined | null, fallback: string) => cosmetic(id)?.color ?? fallback;
 const name = (id: string | undefined | null, fallback: string) => cosmetic(id)?.name ?? fallback;
@@ -146,6 +148,10 @@ export class LoadoutStage {
   readonly canvas = document.createElement("canvas");
   onView: ((view: StageView) => void) | null = null;
   private received = 0;
+  // Once the host's picture is up, it stays until the next one is ready: the 2D stand-in in between read as a flash
+  // on every hover.
+  private hostShown = false;
+  private wanted = "";
   private animateUntil = 0;
   private yaw = 0;
   private pitch = 0;
@@ -238,7 +244,7 @@ export class LoadoutStage {
     this.canvas.setAttribute("aria-label", label);
     // Close-up (web loadout-view.ts, the hands' categories): the same sample, framed closer.
     const zoom = this.viewMode === "close" && !character ? CLOSE_UP_ZOOM : 1;
-    paint(this.canvas, spec, true, zoom);
+    if (!this.hostShown) paint(this.canvas, spec, true, zoom);
   }
   private drag: { id: number; x: number; y: number } | null = null;
   private down = (e: PointerEvent) => {
@@ -267,50 +273,70 @@ export class LoadoutStage {
     else this.pitch = Math.max(-45, Math.min(45, this.pitch + (e.key === "ArrowUp" ? -5 : 5)));
     this.renderNative();
   };
+  private stageRequest(): PreviewRequest {
+    return {
+      loadout: packLoadout(this.shown),
+      outfit: this.look.outfit ?? "outfit-cream",
+      ghost: this.look.ghost ?? "ghost-gold",
+      trail: this.look.trail ?? "trail-gold",
+      playerGlow: this.look.playerGlow ?? null,
+      view: this.viewMode,
+      weapon: [2, 3, 7, 8, 9, 14, 17, 22][this.gunIndex],
+      yaw: this.yaw,
+      pitch: this.pitch,
+      inspect: this.inspectCount,
+      held: this.held,
+      ...stageRenderSize(this.canvas),
+    };
+  }
+  // A picture that doesn't move: no inspect playing, not held, not being turned.
+  private still(): boolean {
+    return !this.held && !this.drag && performance.now() >= this.animateUntil;
+  }
   private renderNative(): void {
     if (this.disposed || !nativePreviewAvailable() || !this.canvas.isConnected || document.hidden) return;
+    const request = this.stageRequest();
+    const key = JSON.stringify(request);
+    const still = this.still();
+    this.wanted = key;
+    const kept = still ? stageFrames.get(key) : undefined;
+    if (kept) {
+      this.showHostFrame(kept, ++this.received, key);
+      return;
+    }
     if (this.request) {
       this.active = true;
       return;
     }
     this.active = false;
-    const id = requestPreview(
-      {
-        loadout: packLoadout(this.shown),
-        outfit: this.look.outfit ?? "outfit-cream",
-        ghost: this.look.ghost ?? "ghost-gold",
-        trail: this.look.trail ?? "trail-gold",
-        playerGlow: this.look.playerGlow ?? null,
-        view: this.viewMode,
-        weapon: [2, 3, 7, 8, 9, 14, 17, 22][this.gunIndex],
-        yaw: this.yaw,
-        pitch: this.pitch,
-        inspect: this.inspectCount,
-        held: this.held,
-        ...stageRenderSize(this.canvas),
-      },
-      (png) => {
-        this.request = 0;
-        if (this.disposed) return;
-        if (png) {
-          const received = ++this.received;
-          const image = new Image();
-          image.onload = () => {
-            if (this.disposed || received !== this.received) return;
-            this.canvas.width = image.naturalWidth;
-            this.canvas.height = image.naturalHeight;
-            this.canvas.getContext("2d")?.drawImage(image, 0, 0);
-            this.host.dataset.nativeStatic = "false";
-            this.host.dataset.nativeInteractive = "true";
-          };
-          image.src = png;
-        }
-        if (this.active || this.held || performance.now() < this.animateUntil) {
-          this.frame = window.setTimeout(() => this.renderNative(), 66);
-        }
-      },
-    );
-    this.request = id;
+    this.request = requestPreview(request, (png) => {
+      this.request = 0;
+      if (this.disposed) return;
+      if (png) {
+        if (still) stageFrames.keep(key, png);
+        if (key === this.wanted) this.showHostFrame(png, ++this.received, key);
+      }
+      if (this.active || this.held || performance.now() < this.animateUntil) {
+        this.frame = window.setTimeout(() => this.renderNative(), 66);
+      }
+    });
+  }
+  private showHostFrame(png: string, received: number, key: string): void {
+    const image = new Image();
+    image.onload = () => {
+      if (this.disposed || received !== this.received || key !== this.wanted) return;
+      // Setting a canvas's size clears and reallocates it, so only when the picture's size changed.
+      if (this.canvas.width !== image.naturalWidth) this.canvas.width = image.naturalWidth;
+      if (this.canvas.height !== image.naturalHeight) this.canvas.height = image.naturalHeight;
+      const ctx = this.canvas.getContext("2d");
+      ctx?.clearRect(0, 0, this.canvas.width, this.canvas.height);
+      ctx?.drawImage(image, 0, 0);
+      paintRevisions.set(this.canvas, (paintRevisions.get(this.canvas) ?? 0) + 1);
+      this.hostShown = true;
+      this.host.dataset.nativeStatic = "false";
+      this.host.dataset.nativeInteractive = "true";
+    };
+    image.src = png;
   }
   inspect(): void {
     this.animateUntil = performance.now() + 8000;
