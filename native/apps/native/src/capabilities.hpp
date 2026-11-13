@@ -5,11 +5,11 @@
 #include <string_view>
 
 namespace native {
-inline constexpr std::array<std::string_view, 25> web_hud_elements = {
-        "speed",      "timer",     "split",         "track",     "stage",         "stats",     "sync",
-        "keys",       "ghostKeys", "graph",         "jumpStats", "map",           "pb",        "fps",
-        "chat",       "ammo",      "strafeTrainer", "startPre",  "strafeOffsets", "firstJump", "longJump",
-        "spectators", "practice",  "jhud",          "ghostSpeed"
+inline constexpr std::array<std::string_view, 26> web_hud_elements = {
+        "speed",      "timer",     "split",         "track",      "stage",         "stats",     "sync",
+        "keys",       "ghostKeys", "graph",         "jumpStats",  "map",           "pb",        "fps",
+        "chat",       "ammo",      "strafeTrainer", "startPre",   "strafeOffsets", "firstJump", "longJump",
+        "spectators", "practice",  "jhud",          "ghostSpeed", "voice"
 };
 
 inline void append_capabilities(Json &result, const Json &entries) {

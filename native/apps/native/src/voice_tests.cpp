@@ -466,19 +466,24 @@ void test_player_leaving_stops_their_voice() {
 void test_talker_list_clears_the_key_row_and_chat() {
     const HudGeometry geometry(1920, 1080, 100);
     const float list = 4 * voice_hud::row_height_px;
-    const float free_top = voice_hud::list_top(geometry, list, {});
-    assert(free_top == geometry.height - voice_hud::bottom_gap_px - list);
+    const float left = voice_hud::left_px, width = voice_hud::row_width_px;
+    const float bottom = geometry.height - voice_hud::bottom_gap_px;
+    const auto top = [&](std::span<const HudRect> avoid) {
+        return voice_hud::list_top(geometry, left, bottom, width, list, avoid);
+    };
+    const float free_top = top({});
+    assert(free_top == bottom - list);
     const float s = geometry.scale;
     const HudRect keys{26 * s, (geometry.height - 65) * s, 380 * s, 27 * s};
     const std::array<HudRect, 1> only_keys{keys};
-    const float over_keys = voice_hud::list_top(geometry, list, only_keys);
+    const float over_keys = top(only_keys);
     assert(over_keys + list <= geometry.height - 65);
     const HudRect chat{20 * s, (geometry.height - 65 - 150) * s, 500 * s, 140 * s};
     const std::array<HudRect, 2> keys_and_chat{keys, chat};
-    const float over_both = voice_hud::list_top(geometry, list, keys_and_chat);
+    const float over_both = top(keys_and_chat);
     assert(over_both + list <= geometry.height - 65 - 150);
     const std::array<HudRect, 1> elsewhere{HudRect{900 * s, (geometry.height - 65) * s, 300 * s, 27 * s}};
-    assert(voice_hud::list_top(geometry, list, elsewhere) == free_top);
+    assert(top(elsewhere) == free_top);
 }
 
 }  // namespace

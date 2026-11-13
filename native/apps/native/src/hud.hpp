@@ -858,6 +858,20 @@ public:
 
     void overlay_rect(float x, float y, float w, float h, std::array<float, 4> color) { rect(x, y, w, h, color); }
 
+    // The voice list's place (the website's "voice" element): the top left of its box in HUD units and its scale, or
+    // nothing when it's switched off. The list draws through the overlay calls, so the element state is reset after.
+    std::optional<std::array<float, 3>> voice_list_place(float x, float y) {
+        const auto at = place("voice", x, y);
+        const bool shown = element_visible;
+        const float placed_scale = element_scale;
+        element_visible = true;
+        element_scale = 1;
+        pivot_x = pivot_y = 0;
+        clear_element_style();
+        if (!shown) return std::nullopt;
+        return std::array<float, 3>{at[0], at[1], placed_scale};
+    }
+
     // How wide overlay_text draws `value` (bitmap-font text is exact; shaped text is rasterized once to measure).
     float overlay_text_width(std::string_view value, float size) { return text_width(value, size); }
 

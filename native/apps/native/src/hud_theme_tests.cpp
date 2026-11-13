@@ -239,7 +239,7 @@ void test_defaults_and_saved_settings() {
     assert(defaults["crosshairColor"] == "#4dff6a" && defaults["crosshairGap"] == 4);
     assert(defaults["fpsLimit"] == 1000);
     assert(defaults["hudLayoutWeb"]["fps"]["on"] == false);
-    assert(defaults["hudLayoutWeb"].size() == 25);
+    assert(defaults["hudLayoutWeb"].size() == 26);
     assert(defaults["hudLayoutWeb"]["jhud"]["on"] == false && defaults["hudLayoutWeb"]["ghostSpeed"]["on"] == false);
     assert(defaults["ghostOpacity"] == .55 && defaults["strafeTrainerSmoothing"] == 8);
     assert(defaults["strafeTrainerHints"] == false);
@@ -1081,13 +1081,18 @@ void test_crosshair_pixels() {
 // Layout codes made by the website's encodeLayout (hud/layout.ts): its Classic layout, and one with a moved timer,
 // the FPS counter on and a minimal keys overlay.
 constexpr const char *web_classic_code =
-        "bhl1.CYcAAPXEMocAAPdoMocC0PdULYcAAPPkK4cAAPmOMocAAPiUMgcAAPq6MoQAAAR-MgQDUgR-KAYAlv7UMgQAAP2oMoAAeACgMoL_"
-        "iACgMgAAeAHCMoYAePgwMoj_dP8kMgEAAAiYOQf9EvXEMgQAAPrsKwQAAPvwKwQAAPjGMoMAeP2oMoQAAAFAMgQAAP2oMgcC0PXELQFkB____"
-        "5qjsg";
+        "bhl1.CocAAPXEMocAAPdoMocC0PdULYcAAPPkK4cAAPmOMocAAPiUMgcAAPq6MoQAAAR-MgQDUgR-KAYAlv7UMgQAAP2oMoAAeACgMoL"
+        "_iACgMgAAeAHCMoYAePgwMoj_dP8kMgEAAAiYOQf9EvXEMgQAAPrsKwQAAPvwKwQAAPjGMoMAeP2oMoQAAAFAMgQAAP2oMgcC0PXELYY"
+        "AeP7UMgFkB____5qjsg";
 constexpr const char *web_custom_code =
-        "bhl1.CYcAAPXEMoEE0gH0RocC0PdULYcAAPPkK4cAAPmOMocAAPiUMgcAAPq6MoQAAAR-MgQDUgR-KAYAlv7UMgQAAP2oMoAAeACgMoL_"
-        "iACgMoAAeAHCMoYAePgwMoj_dP8kMgEAAAiYOQf9EvXEMgQAAPrsKwQAAPvwKwQAAPjGMoMAeP2oMoQAAAFAMgQAAP2oMgcC0PXELQI8Bf-2P"
-        "Zqjsg";
+        "bhl1.CocAAPXEMoEE0gH0RocC0PdULYcAAPPkK4cAAPmOMocAAPiUMgcAAPq6MoQAAAR-MgQDUgR-KAYAlv7UMgQAAP2oMoAAeACgMoL"
+        "_iACgMoAAeAHCMoYAePgwMoj_dP8kMgEAAAiYOQf9EvXEMgQAAPrsKwQAAPvwKwQAAPjGMoMAeP2oMoQAAAFAMgQAAP2oMgcC0PXELYY"
+        "AeP7UMgI8Bf-2PZqjsg";
+// The same custom layout from before the voice list was an element (version 9).
+constexpr const char *web_version_9_code =
+        "bhl1.CYcAAPXEMoEE0gH0RocC0PdULYcAAPPkK4cAAPmOMocAAPiUMgcAAPq6MoQAAAR-MgQDUgR-KAYAlv7UMgQAAP2oMoAAeACgMoL"
+        "_iACgMoAAeAHCMoYAePgwMoj_dP8kMgEAAAiYOQf9EvXEMgQAAPrsKwQAAPvwKwQAAPjGMoMAeP2oMoQAAAFAMgQAAP2oMgcC0PXELQI"
+        "8Bf-2PZqjsg";
 // A code from before the JHUD and Speed vs ghost (the same custom layout, version 8).
 constexpr const char *web_version_8_code =
         "bhl1.CIcAAPXEMoEE0gH0RocC0PdULYcAAPPkK4cAAPmOMocAAPiUMgcAAPq6MoQAAAR-MgQDUgR-KAYAlv7UMgQAAP2oMoAAeACgMoL_"
@@ -1099,6 +1104,7 @@ void test_new_elements_in_old_layouts() {
     auto layout = native::default_settings().at("hudLayoutWeb");
     layout.erase("jhud");
     layout.erase("ghostSpeed");
+    layout.erase("voice");
     native::save_settings(file, {{"hudLayoutWeb", layout}});
     const auto settings = native::load_settings(file);
     std::filesystem::remove(file);
@@ -1179,6 +1185,9 @@ void test_layout_codes() {
     assert(older && older->at("hudLayoutWeb").at("timer") == custom->at("hudLayoutWeb").at("timer"));
     assert(older->at("hudLayoutWeb").at("jhud") == defaults.at("hudLayoutWeb").at("jhud"));
     assert(older->at("hudLayoutWeb").at("ghostSpeed") == defaults.at("hudLayoutWeb").at("ghostSpeed"));
+    const auto version_9 = native::decode_hud_layout(web_version_9_code);
+    assert(version_9 && version_9->at("hudLayoutWeb").at("timer") == custom->at("hudLayoutWeb").at("timer"));
+    assert(version_9->at("hudLayoutWeb").at("voice") == defaults.at("hudLayoutWeb").at("voice"));
     assert(!native::decode_hud_layout("bhl1.???") && !native::decode_hud_layout("bhl2.CIcA"));
     assert(!native::decode_hud_layout("bhl1.CA"));
 }

@@ -14,7 +14,7 @@ struct HudEditorElement {
     bool web;
 };
 
-inline constexpr std::array<HudEditorElement, 28> hud_editor_elements = {{
+inline constexpr std::array<HudEditorElement, 29> hud_editor_elements = {{
         {"map", "Map / style", true},
         {"fps", "FPS", true},
         {"pb", "Personal best", true},
@@ -43,6 +43,7 @@ inline constexpr std::array<HudEditorElement, 28> hud_editor_elements = {{
         {"practice", "Practice", true},
         {"jhud", "JHUD", true},
         {"ghostSpeed", "Speed vs ghost", true},
+        {"voice", "Voice list", true},
 }};
 
 // Website elements whose switch is also a setting of its own (the menu keeps the two in step the same way).
@@ -118,6 +119,7 @@ inline Json hud_preset(std::string_view id, const Json &settings = default_setti
         set("stage", 4, -.1, .135, .85);
         status(4, .1, .135);
         set("ghostSpeed", 4, .1, .09, .85);
+        set("voice", 6, .012, -.2, .9);
         set("split", 4, 0, .195, .8);
         set("jumpStats", 4, 0, .27, .9);
         set("jhud", 4, 0, -.06, .85);
@@ -129,6 +131,7 @@ inline Json hud_preset(std::string_view id, const Json &settings = default_setti
     } else if (id == "streamer") {
         set("speed", 7, 0, -.15, 1.25);
         set("ghostSpeed", 7, .12, -.15, 1.05);
+        set("voice", 0, .015, .07);
         set("timer", 7, 0, -.075, 1.2);
         set("stats", 7, 0, -.02);
         set("sync", 7, 0, -.045);

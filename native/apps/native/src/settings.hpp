@@ -68,7 +68,8 @@ inline Json default_hud_layout_web() {
             {"spectators", place(true, 3, .012, -.06)},
             {"practice", place(true, 4, 0, .032)},
             {"jhud", place(false, 4, 0, -.06)},
-            {"ghostSpeed", place(false, 7, .072, -.262, .9)}};
+            {"ghostSpeed", place(false, 7, .072, -.262, .9)},
+            {"voice", place(true, 6, .012, -.03)}};
 }
 
 // Revision of the viewmodel defaults (viewmodel/defaults.ts VIEWMODEL_REV): 3 is v0.0.29's wider framing, with the
@@ -408,7 +409,7 @@ inline const std::set<std::string> hud_elements = {
         "strafeTrainer", "splits",   "speedGraph",    "keys",      "health",    "notice",     "replay",   "split",
         "track",         "stage",    "stats",         "sync",      "ghostKeys", "graph",      "pb",       "chat",
         "ammo",          "startPre", "strafeOffsets", "firstJump", "longJump",  "spectators", "practice", "jhud",
-        "ghostSpeed"
+        "ghostSpeed",    "voice"
 };
 
 inline bool valid_bind_code(const std::string &code) {
