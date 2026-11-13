@@ -19,6 +19,8 @@ mod flight;
 mod map_props;
 #[path = "hard_maps_tests.rs"]
 mod hard_maps;
+#[path = "material_overrides_tests.rs"]
+mod material_overrides;
 
 struct Fixture(PathBuf);
 impl Fixture {
