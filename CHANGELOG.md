@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.9.2 — Native
+
+Matches website v0.0.41. Update from Settings → Updates: press Update, then Restart. Your settings, replays and maps
+are kept.
+
+- Scroll jumps land on the tick you scrolled in, like the mouse and strafe keys already did. Before, a wheel notch went
+  into the frame's first tick, so at 60 Hz a scroll jump could miss landings. Your existing runs don't change.
+- Maps draw their own fog, as in CS:S. Turn it off with Settings → Graphics → Map fog.
+- Hands, weapons and bunnies take the map's light, so they no longer glow in dark maps. Settings → Graphics → Model
+  lighting: Off, Subtle or Full. Props are lit by the map too; Settings → Graphics → Prop lighting keeps them bright.
+- Maps show their overlays and decals (arrows, signs, credits, stains), and self-lit textures glow like in CS:S.
+  Settings → Graphics → Map details turns the overlays and decals off.
+- The voice list is part of the HUD layout: move it, resize it or hide it with Edit layout. Layout codes from the
+  website's v0.0.41 import here, and older codes still work.
+- Seven colourways carry their set's pattern on your bunny: Dev Grid, Draftsman, Fluorescent, Meadow, Geode, High
+  Roller and Lapis.
+- Halo, Aurora, Capybara, Maxwell and Silver Wreath are bigger and easier to see on other players.
+- Learn to bhop: lessons show only your speed and your keys.
+- "1 jump" and "1 strafe" under the timer. "R to go again" is easier to read on bright maps, and the strafe trainer
+  steps aside while the end card is up.
+- The menu matches the website: Play online and Play solo on the home screen, the plain pause menu tabs, the new Ranks
+  explanation, the Trail shape tab and the rest of v0.0.41's menu changes.
+
+Not in the desktop client yet, coming in a later update:
+
+- Trail shapes in the game. You can pick one in the Loadout; the game still draws the ribbon.
+- Light glows, sprite glows and spotlight beams.
+- Keys held while you click back into the game don't move you until you press them again.
+- Still missing from v0.9.1: bonus tracks in other styles, the strafe trainer in every style, the new notices,
+  supporter name colours and effects in the game, the LIVE mark and choosing your microphone.
+
 ## v0.9.1 — Native
 
 Voice chat and the new Auto-strafe timing from website v0.0.40, plus fixes for v0.9.0. Update from Settings →
