@@ -787,8 +787,9 @@ int run(const native::Options &opt) {
                              canonical
                      );
         curr = restart.state;
-        if (tutorial_runner.lesson && tutorial_runner.lesson->is_active())
-            tutorial_runner.restart(core.get(), active_style, curr);
+        const bool in_lesson = tutorial_runner.lesson && tutorial_runner.lesson->is_active();
+        if (in_lesson) tutorial_runner.restart(core.get(), active_style, curr);
+        hud.set_lesson(in_lesson && tutorial_runner.lesson->lesson_id() != "final");
         // The knife pool moves on before the attempt starts, so the whole run holds one knife.
         if (held_knife.advance(next_knife_event) && menu && menu_ready) menu->evaluate_js(held_knife.menu_script());
         next_knife_event = native::KnifePoolEvent::restart;

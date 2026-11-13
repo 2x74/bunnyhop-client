@@ -858,6 +858,9 @@ public:
 
     void overlay_rect(float x, float y, float w, float h, std::array<float, 4> color) { rect(x, y, w, h, color); }
 
+    // A tutorial lesson is running (not the final course).
+    void set_lesson(bool active) { lesson_ = active; }
+
     // The voice list's place (the website's "voice" element): the top left of its box in HUD units and its scale, or
     // nothing when it's switched off. The list draws through the overlay calls, so the element state is reset after.
     std::optional<std::array<float, 3>> voice_list_place(float x, float y) {
@@ -1541,9 +1544,10 @@ else{color=vec4(ink.rgb,ink.a*(uv.x<-1.?1.:texture(font,uv).a));}})"
             const bool practising = practice && practice->active;
             draw_map_line(map, style, run.track);
             draw_fps_and_pb(fps);
-            draw_timer(run, practising);
+            // A tutorial lesson keeps the speed and the keys: no timer, run stats or splits (website v0.0.41).
+            if (!lesson_) draw_timer(run, practising);
             draw_speed(s.player.tick, speed, run, style, practising);
-            draw_run_stats(run, style);
+            if (!lesson_) draw_run_stats(run, style);
             draw_jump_stats(jump_stats, jump_stats_gain);
             draw_jhud();
             draw_ghost_speed();
@@ -1554,7 +1558,7 @@ else{color=vec4(ink.rgb,ink.a*(uv.x<-1.?1.:texture(font,uv).a));}})"
                 const auto [x, y] = place("notice", frame_width_ / 2, notice_top);
                 text(x, y, std::string_view(notice).substr(0, max_notice_bytes), 15, amber, true);
             }
-            draw_splits();
+            if (!lesson_) draw_splits();
             draw_board_place();
             draw_speed_graph();
             element_visible = true;
@@ -1900,16 +1904,20 @@ private:
     void draw_run_stats(const BhRunState &run, std::string_view style) {
         const auto [x, y] = place("runStats", frame_width_ / 2, frame_height_ - run_stats_from_bottom);
         native::HudLabel<160> label;
+        // "1 jump", "1 strafe", as the website writes them.
+        const char *jumps = run.jumps == 1 ? "jump" : "jumps", *strafes = run.strafes == 1 ? "strafe" : "strafes";
         if (native::scroll_style(std::string(style)) && prefs_.perf_hud)
             label.format(
-                    "%u jumps  %u strafes  %.1f%% sync  %s",
+                    "%u %s  %u %s  %.1f%% sync  %s",
                     run.jumps,
+                    jumps,
                     run.strafes,
+                    strafes,
                     run.sync_percent,
                     native::perf_text(run).bytes.data()
             );
         else
-            label.format("%u jumps  %u strafes  %.1f%% sync", run.jumps, run.strafes, run.sync_percent);
+            label.format("%u %s  %u %s  %.1f%% sync", run.jumps, jumps, run.strafes, strafes, run.sync_percent);
         text(x, y, label.view(), 13, dim, true);
     }
 
@@ -1923,6 +1931,8 @@ private:
         if (newline != std::string_view::npos)
             text(x, y + jump_stats_line_gap, stats.substr(newline + 1), 12, color, true);
     }
+
+    bool lesson_ = false;
 
     // These two are off until the player turns them on, even in a layout that doesn't list them.
     bool personal_element_on(std::string_view id) const {

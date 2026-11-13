@@ -259,7 +259,8 @@ void draw_result(Hud &hud, int width, int height, float percent, const HudResult
     }
     const float hint_alpha = std::clamp((age - hint_delay_seconds) / hint_fade_seconds, 0.f, 1.f);
     if (hint_alpha > 0 && !result.restart_hint.empty()) {
-        const NameColor hint_color = {1, 1, 1, .62f * hint_alpha};
+        // Readable on bright skies (the website's v0.0.41 contrast fix: 90% white over the HUD's text shadow).
+        const NameColor hint_color = {1, 1, 1, .9f * hint_alpha};
         hud.overlay_text(x, card_top + card_height + 10, result.restart_hint.view(), 13, hint_color, true);
     }
     hud.overlay_end(width, height);
