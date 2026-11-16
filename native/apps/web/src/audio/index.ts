@@ -30,6 +30,9 @@ import { registerChatCommand } from "../chat-commands";
 import { mapSoundContent } from "../content/sounds";
 import type { Core } from "../core";
 import { MapSounds } from "./map-sounds";
+import { KeySounds, PerfectSounds } from "./keysounds";
+import { PERFECT_SOUND_SETS, perfectSoundId, perfSoundArg, type PerfectSoundSet } from "./perfect-policy";
+import { KEY_SOUND_SETS, keySoundId, keySoundsArg, type KeySoundSet } from "./keysound-policy";
 
 export type { SfxId } from "./catalog";
 export { viewmodelEvents } from "./events";
@@ -37,6 +40,12 @@ export { viewmodelEvents } from "./events";
 export const engine = new AudioEngine();
 export const music = new MusicPlayer(engine);
 export const classic = new ClassicSounds(engine);
+const KEYSOUNDS_ARGS = `[on|off|${KEY_SOUND_SETS.map(([s]) => s).join("|")}]`;
+/** Key sounds (keysounds.ts): main.ts feeds your presses, the replay viewer and spectating the watched player's. */
+export const keySounds = new KeySounds(engine);
+/** The perfect jump sound (keysounds.ts): session.ts feeds your ticks, the replay viewer its run's perfect jumps. */
+export const perfectSounds = new PerfectSounds(engine);
+const PERFSOUND_ARGS = `[on|off|${PERFECT_SOUND_SETS.map(([s]) => s).join("|")}]`;
 
 const trackers = new Set<MoveSounds>();
 let chrome: AudioChrome | null = null;
@@ -161,6 +170,41 @@ export function initAudio(): void {
       let off = false;
       prefs.update((p) => (off = p.audio.mute.map = !p.audio.mute.map));
       ctx.reply(off ? "Map sounds off." : "Map sounds on.");
+    },
+  });
+  // !keysounds, like the bhop servers' key sound toggles: on / off, or a sound by name (which turns them on).
+  registerChatCommand({
+    name: "keysounds",
+    aliases: ["keysound"],
+    args: KEYSOUNDS_ARGS,
+    help: "key sounds on / off",
+    about: "a short sound as a strafe key goes down (Settings → Audio → Key sounds).",
+    group: "more",
+    where: "both",
+    run: (ctx, arg) => {
+      const next = keySoundsArg(arg, prefs.get().audio.keySounds);
+      if (!next) return void ctx.reply(`Usage: !keysounds ${KEYSOUNDS_ARGS}`);
+      prefs.update((p) => Object.assign(p.audio.keySounds, next));
+      if (next.enabled) keySounds.play(keySoundId(next.set));
+      ctx.reply(next.enabled ? `Key sounds on: ${keySetName(next.set)}.` : "Key sounds off.");
+    },
+  });
+  // !perfsound: the perfect jump sound, the same way.
+  registerChatCommand({
+    name: "perfsound",
+    aliases: ["perfectsound", "perfsounds"],
+    args: PERFSOUND_ARGS,
+    help: "perfect jump sound on / off",
+    about: "a sound on each perfect jump in EZ Scroll and Legit Scroll (Settings → Audio → Perfect jump sound).",
+    group: "more",
+    where: "both",
+    run: (ctx, arg) => {
+      const a = prefs.get().audio;
+      const next = perfSoundArg(arg, { enabled: a.perfectTick, set: a.perfectSound.set });
+      if (!next) return void ctx.reply(`Usage: !perfsound ${PERFSOUND_ARGS}`);
+      prefs.update((p) => ((p.audio.perfectTick = next.enabled), (p.audio.perfectSound.set = next.set)));
+      if (next.enabled) perfectSounds.play(perfectSoundId(next.set));
+      ctx.reply(next.enabled ? `Perfect jump sound on: ${perfSetName(next.set)}. It plays in EZ Scroll and Legit Scroll.` : "Perfect jump sound off.");
     },
   });
   // Notifications (notify/index.ts) play their sound as the reward lands; fanfares pull the music down under them.
@@ -313,6 +357,12 @@ export function rankGroupImproved(uid: string, groupIndex: number): boolean {
     return false;
   }
 }
+
+/** A key sound set's name as Settings shows it. */
+export const keySetName = (s: KeySoundSet): string => KEY_SOUND_SETS.find(([k]) => k === s)?.[1] ?? KEY_SOUND_SETS[0][1];
+
+/** A perfect jump sound set's name as Settings shows it. */
+export const perfSetName = (s: PerfectSoundSet): string => PERFECT_SOUND_SETS.find(([k]) => k === s)?.[1] ?? PERFECT_SOUND_SETS[0][1];
 
 /** Credits for the Controls screen. */
 export function audioCredits(): string[] {

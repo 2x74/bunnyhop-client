@@ -18,33 +18,52 @@ import * as THREE from "three";
 import { add, Builder, cr, frame, norm, ring, scale, smoothstep, sub, type Paint, type Wt } from "./builder";
 import { rig, type V3 } from "./rig";
 
-const headWeight = (): Wt => [[rig().bone("Head1"), 1]];
+export const headWeight = (): Wt => [[rig().bone("Head1"), 1]];
 
 /**
  * A hair face: the player's colour at a tone (0.5 = the colour, lower toward the roots / underside, higher a sheen),
- * stored linear in partColor.r. code -10 still, -9 / -11 the swinging ponytails (hat-fx.ts).
+ * stored linear in partColor.r. code -10 still, -9 / -11 the swinging ponytails (hat-fx.ts), -12 a sprung lock
+ * (hair-fx.ts). `hi` (partColor.g): how much of the player's highlight colour the face takes, 0 none .. 1 all of it
+ * (nothing shows until a highlight is picked). `loose` (partColor.b): a sprung lock's looseness.
  */
-const toneHex = (t: number) => new THREE.Color().setRGB(t, t, t, THREE.LinearSRGBColorSpace).getHex();
-const hair = (tone: number, code = -10): Paint => ({ code, color: toneHex(Math.max(0, Math.min(1, tone))) });
+const c01 = (x: number) => Math.max(0, Math.min(1, x));
+export const hair = (tone: number, code = -10, hi = 0, loose = 0): Paint => ({ code, color: new THREE.Color().setRGB(c01(tone), c01(hi), c01(loose), THREE.LinearSRGBColorSpace).getHex() });
 /** Tones: the base, a shade for locks that sit under others, a light for the ones on top. */
-const HAIR = { base: 0.5, shade: 0.44, light: 0.555 } as const;
+export const HAIR = { base: 0.5, shade: 0.44, light: 0.555 } as const;
+/**
+ * Highlights (v0.0.42): a lock's share of the highlight colour at t (0 root .. 1 tip) and x (-1..1 across it), written
+ * per vertex (Builder.green), so it has soft edges. The roots stay the base colour, like grown-out dye.
+ *   tip     the lock's last part
+ *   soft    a lighter touch on the very end
+ *   whole   all of the lock from a little way off the root (a spike, a small lock)
+ *   strand  a strand of it (at x, w wide) from near the root, widening into the whole end
+ */
+export type Hi = (t: number, x: number) => number;
+const bump = (x: number, at: number, w: number) => Math.max(0, 1 - ((x - at) / w) ** 2);
+export const HI = {
+  tip: ((t) => smoothstep(0.5, 0.86, t)) as Hi,
+  soft: ((t) => 0.7 * smoothstep(0.6, 0.95, t)) as Hi,
+  whole: ((t) => smoothstep(0.08, 0.34, t)) as Hi,
+  strand: (at: number, w = 0.42): Hi => (t, x) => Math.max(smoothstep(0.08, 0.34, t) * Math.min(1, 1.25 * bump(x, at, w)), 0.85 * smoothstep(0.62, 0.95, t)),
+};
+export { bump as hiBump };
 /** Scrunchies in the colourway's accent (Paint code 1, like the ears' panels). */
 const TIE: Paint = { code: 1 };
 
 /** The face (mesh.ts) and the hood (mesh.ts): centres and radii; -y is the face side. */
-const FACE_C: V3 = [0, -0.55, 68.7];
-const FACE_R: V3 = [4.05, 4.35, 4.85];
-const HOOD_C: V3 = [0, 0.55, 69.35];
-const HOOD_R: V3 = [5.55, 6.05, 6.0];
+export const FACE_C: V3 = [0, -0.55, 68.7];
+export const FACE_R: V3 = [4.05, 4.35, 4.85];
+export const HOOD_C: V3 = [0, 0.55, 69.35];
+export const HOOD_R: V3 = [5.55, 6.05, 6.0];
 
 /** A point on the face, `off` out from it: lon 0 = straight ahead (+ toward the bunny's left, +x), lat 0 = the visor. */
-function facePoint(lon: number, lat: number, off: number): V3 {
+export function facePoint(lon: number, lat: number, off: number): V3 {
   const d: V3 = [Math.sin(lon) * Math.cos(lat), -Math.cos(lon) * Math.cos(lat), Math.sin(lat)];
   return [FACE_C[0] + d[0] * (FACE_R[0] + off), FACE_C[1] + d[1] * (FACE_R[1] + off), FACE_C[2] + d[2] * (FACE_R[2] + off)];
 }
 
 /** A point on the hood's rim (mesh.ts: the hood opens 0.98 rad round its forward axis); th 0 = the top, + toward +x. */
-function rimPoint(th: number, inset = 0): V3 {
+export function rimPoint(th: number, inset = 0): V3 {
   const [t, u, v] = frame(norm([0, -1, -0.12]), [0, 0, 1]);
   const a = 0.98 - inset;
   const d = add(scale(t, Math.cos(a)), add(scale(u, Math.sin(a) * Math.cos(th)), scale(v, Math.sin(a) * Math.sin(th))));
@@ -52,7 +71,7 @@ function rimPoint(th: number, inset = 0): V3 {
 }
 
 /** A point on the hood's surface `off` out from it, from a direction (normalised onto the ellipsoid). */
-function hoodPoint(dir: V3, off: number): { p: V3; n: V3 } {
+export function hoodPoint(dir: V3, off: number): { p: V3; n: V3 } {
   const k = 1 / Math.hypot(dir[0] / HOOD_R[0], dir[1] / HOOD_R[1], dir[2] / HOOD_R[2]);
   const s: V3 = add(HOOD_C, scale(dir, k));
   const n = norm([(s[0] - HOOD_C[0]) / HOOD_R[0] ** 2, (s[1] - HOOD_C[1]) / HOOD_R[1] ** 2, (s[2] - HOOD_C[2]) / HOOD_R[2] ** 2]);
@@ -60,7 +79,7 @@ function hoodPoint(dir: V3, off: number): { p: V3; n: V3 } {
 }
 
 /** Catmull-Rom through control points, n samples. */
-function curve(ctrl: V3[], n: number): V3[] {
+export function curve(ctrl: V3[], n: number): V3[] {
   const P = [ctrl[0], ...ctrl, ctrl[ctrl.length - 1]];
   const out: V3[] = [];
   for (let s = 0; s < n; s++) {
@@ -76,7 +95,7 @@ function curve(ctrl: V3[], n: number): V3[] {
  * A lock of hair along a path: a lens-shaped section `width` across (toward `across`) and `thick` deep, both functions
  * of t = 0 (root) .. 1 (tip), closed at both ends. tone(t, under): the tone along it, `under` for the side facing `in`.
  */
-function lock(b: Builder, path: V3[], width: (t: number) => number, thick: (t: number) => number, across: V3, tone: (t: number, under: number) => Paint, W: Wt, inward: V3 | null = null): void {
+function lock(b: Builder, path: V3[], width: (t: number) => number, thick: (t: number) => number, across: V3, tone: (t: number, under: number) => Paint, W: Wt, inward: V3 | null = null, hi: Hi | null = null): void {
   const n = path.length, K = 16;
   const frames = path.map((p, i) => {
     const d = norm(sub(path[Math.min(n - 1, i + 1)], path[Math.max(0, i - 1)]));
@@ -93,7 +112,29 @@ function lock(b: Builder, path: V3[], width: (t: number) => number, thick: (t: n
     const v = frames[i][2], a = ((k + 0.5) / K) * Math.PI * 2;
     return smoothstep(-0.3, 0.8, Math.sin(a) * (v[0] * inward[0] + v[1] * inward[1] + v[2] * inward[2]));
   };
+  // The highlight's share, per vertex (so a streak has soft edges): where the vertex sits along the lock and across it.
+  if (hi)
+    b.green = (p) => {
+      const [i, f] = nearestOn(path, p);
+      const j = Math.min(n - 1, i + 1), t = (i + f) / (n - 1);
+      const c = add(path[i], scale(sub(path[j], path[i]), f)), u = frames[f < 0.5 ? i : j][1], d = sub(p, c);
+      return hi(t, (d[0] * u[0] + d[1] * u[1] + d[2] * u[2]) / Math.max(0.05, width(t)));
+    };
   b.surface(rows, { paint: (i, k) => tone(i / (n - 2), under(i, k)), weight: () => W, capStart: tone(0, 0), capEnd: tone(1, 0) });
+  b.green = null;
+}
+
+/** The segment of a path nearest a point, and how far along it (0..1). */
+export function nearestOn(path: V3[], p: V3): [number, number] {
+  let best = Infinity, at = 0, f = 0;
+  for (let i = 0; i + 1 < path.length; i++) {
+    const ab = sub(path[i + 1], path[i]), l2 = ab[0] ** 2 + ab[1] ** 2 + ab[2] ** 2 || 1;
+    const u = Math.max(0, Math.min(1, ((p[0] - path[i][0]) * ab[0] + (p[1] - path[i][1]) * ab[1] + (p[2] - path[i][2]) * ab[2]) / l2));
+    const q = add(path[i], scale(ab, u));
+    const d = Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+    if (d < best) (best = d), (at = i), (f = u);
+  }
+  return [at, f];
 }
 
 /** Tone along a lock: darker at the root, the lock's own tone along it, lighter toward the tip; the underside shaded. */
@@ -102,16 +143,7 @@ const lockTone = (base: number, code = -10) => (t: number, under: number): Paint
 
 /** The fringe under the hood rim (hood up): an underlayer and wide locks falling onto the top of the visor. */
 function fringeHood(b: Builder, W: Wt): void {
-  // The underlayer: hair over the upper face from under the rim to just above the visor, so no face shows between locks.
-  const LON = 1.12, K = 28, R = 10;
-  const edge = (lon: number) => 0.5 + 0.14 * (lon / LON) ** 2;
-  const under = Array.from({ length: R + 1 }, (_, i) =>
-    Array.from({ length: K + 1 }, (_, k) => {
-      const lon = -LON + (2 * LON * k) / K;
-      return facePoint(lon, 1.2 + (edge(lon) - 1.2) * (i / R), 0.3);
-    }),
-  );
-  b.surface(under, { closed: false, paint: () => hair(HAIR.shade), weight: () => W, out: (i, k) => sub(under[i][k], FACE_C) });
+  fringeUnder(b, W);
   // Locks: [rim angle (rad), sideways sweep at the tip (rad of face longitude), lat of the tip, width, tone].
   const LOCKS: [number, number, number, number, number][] = [
     [-0.92, -0.05, 0.5, 1.0, HAIR.shade],
@@ -122,14 +154,29 @@ function fringeHood(b: Builder, W: Wt): void {
     [0.62, 0.1, 0.42, 1.1, HAIR.base],
     [0.92, 0.06, 0.52, 1.0, HAIR.shade],
   ];
-  for (const [th, sweep, tipLat, w, tone] of LOCKS) {
+  LOCKS.forEach(([th, sweep, tipLat, w, tone], j) => {
     const top = rimPoint(th, 0);
     const lon = Math.atan2(top[0] - FACE_C[0], -(top[1] - FACE_C[1])) * 0.92;
     const root = facePoint(lon, 1.12 - 0.12 * Math.abs(th), 0.3);
     const mid = facePoint(lon + sweep * 0.45, (tipLat + 1.0) / 2 + 0.04, 0.48);
     const tip = facePoint(lon + sweep, tipLat, 0.42);
-    lock(b, curve([root, mid, tip], 14), (t) => w * Math.sqrt(Math.max(0, 1 - t ** 3)) * (1 - 0.15 * t), (t) => 0.26 * (1 - 0.4 * t), [Math.cos(lon), Math.sin(lon), 0], lockTone(tone), W, scale(norm(sub(mid, FACE_C)), -1));
-  }
+    // Highlights: the two locks either side of the middle streaked, the outer pair tipped.
+    const hi = j === 2 || j === 4 ? HI.strand(j === 2 ? 0.2 : -0.2, 0.5) : j === 0 || j === 6 ? HI.tip : null;
+    lock(b, curve([root, mid, tip], 14), (t) => w * Math.sqrt(Math.max(0, 1 - t ** 3)) * (1 - 0.15 * t), (t) => 0.26 * (1 - 0.4 * t), [Math.cos(lon), Math.sin(lon), 0], lockTone(tone), W, scale(norm(sub(mid, FACE_C)), -1), hi);
+  });
+}
+
+/** The fringe's underlayer (hood up): hair over the upper face from under the rim to just above the visor, so no face shows between locks. */
+export function fringeUnder(b: Builder, W: Wt): void {
+  const LON = 1.12, K = 28, R = 10;
+  const edge = (lon: number) => 0.5 + 0.14 * (lon / LON) ** 2;
+  const under = Array.from({ length: R + 1 }, (_, i) =>
+    Array.from({ length: K + 1 }, (_, k) => {
+      const lon = -LON + (2 * LON * k) / K;
+      return facePoint(lon, 1.2 + (edge(lon) - 1.2) * (i / R), 0.3);
+    }),
+  );
+  b.surface(under, { closed: false, paint: () => hair(HAIR.shade), weight: () => W, out: (i, k) => sub(under[i][k], FACE_C) });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -149,6 +196,12 @@ const capPoint = (lon: number, s: number, extra = 0): V3 => {
 
 /** The parting (face longitude, toward the bunny's left) the bangs fall away from. */
 const PART = 0.32;
+/**
+ * Highlight streaks through the cap and the curtain under it: a few strands round the sides and back (longitudes, rad;
+ * none over the forehead, where the bangs carry their own), each a strand or two of the cap's 72 wide.
+ */
+const STREAKS: [number, number][] = [[1.75, 0.1], [2.5, 0.12], [3.3, 0.09], [3.95, 0.12], [4.5, 0.1]];
+const capStreak = (lon: number) => Math.max(0, ...STREAKS.map(([at, w]) => Math.min(1, 1.3 * bump(Math.atan2(Math.sin(lon - at), Math.cos(lon - at)), 0, w))));
 
 /** The cap of hair over the head, its edge rolled under at the hairline, short locks along the sides and the nape. */
 function cap(b: Builder, W: Wt, nape: boolean): void {
@@ -164,6 +217,12 @@ function cap(b: Builder, W: Wt, nape: boolean): void {
     const lon = (k / K) * Math.PI * 2;
     return facePoint(lon, hairline(lon) + 0.03, 0.08);
   }));
+  // Highlight streaks (per vertex): by longitude, from a third of the way down from the crown.
+  const lonLat = (p: V3): [number, number] => [Math.atan2(p[0] - FACE_C[0], -(p[1] - FACE_C[1])), Math.asin(Math.max(-1, Math.min(1, (p[2] - FACE_C[2]) / (FACE_R[2] + 0.6))))];
+  b.green = (p) => {
+    const [lon, lat] = lonLat(p);
+    return capStreak(lon) * smoothstep(0.3, 0.62, (Math.PI / 2 - lat) / Math.max(0.2, Math.PI / 2 - hairline(lon)));
+  };
   b.surface(rows, {
     closed: true,
     // Strands in alternating tones, darker toward the edge (it's in the cap's shadow) and along the parting.
@@ -176,6 +235,7 @@ function cap(b: Builder, W: Wt, nape: boolean): void {
     weight: () => W,
     out: (i, k) => sub(rows[i][k], FACE_C),
   });
+  b.green = null;
   // The hair falling below the hairline at the sides and back: one continuous curtain (no stepped locks) from under
   // the cap, hanging a little off the head as it narrows, its edge cut into soft points. With a ponytail the back is
   // pulled up into the tie, so the curtain is short there.
@@ -202,6 +262,12 @@ function cap(b: Builder, W: Wt, nape: boolean): void {
       return facePoint(lon, lat, capOff(lon, 0.85) - 0.12 + 0.18 * f + 0.9 * hang * hang + 0.012 * Math.sin(lon * 23) * f);
     }));
   }
+  // Highlights: the cap's streaks run on down it, and its points take a touch.
+  b.green = (p) => {
+    const [l0, lat] = lonLat(p), lon = l0 < 0 ? l0 + Math.PI * 2 : l0;
+    const top = hairline(lon) + 0.3;
+    return Math.max(capStreak(lon), 0.7 * smoothstep(0.6, 1, (top - lat) / Math.max(0.05, top - edgeLat(lon))));
+  };
   b.surface(curtain, {
     closed: false,
     paint: (i, k) => {
@@ -212,6 +278,7 @@ function cap(b: Builder, W: Wt, nape: boolean): void {
     weight: () => W,
     out: (i, k) => sub(curtain[i][k], FACE_C),
   });
+  b.green = null;
   // Its inside (seen from below / behind the visor's ends), a shade darker.
   const inside = curtain.map((row) => row.map((q) => add(q, scale(norm(sub(q, FACE_C)), -0.08))));
   b.surface(inside, { closed: false, paint: () => hair(HAIR.shade - 0.06), weight: () => W, out: (i, k) => sub(FACE_C, inside[i][k]) });
@@ -234,8 +301,10 @@ function bangs(b: Builder, W: Wt): void {
     [-0.12, 0.39, 0.9, HAIR.light, 0.75],
     [0.16, 0.33, 0.85, HAIR.base, 0.55],
   ];
-  for (const [lonT, latT, w, tone, sweep] of LOCKS) {
+  LOCKS.forEach(([lonT, latT, w, tone, sweep], j) => {
     const side = lonT < PART ? -1 : 1;
+    // Highlights: the two face-framing locks beside the visor, and one lock of the fringe each side of the parting.
+    const hi = j < 2 ? HI.whole : j === 5 || j === 6 ? HI.strand(j === 5 ? 0.25 : -0.25, 0.5) : null;
     // From the parting the lock lifts a little over the cap, falls, and curls out at its tip. Swept locks start nearer
     // the parting and travel across; the others start above where they end.
     const lonR = PART + (lonT - PART) * (1 - sweep) * 0.8 + side * 0.08;
@@ -246,8 +315,8 @@ function bangs(b: Builder, W: Wt): void {
     const curl = facePoint(lonT + side * 0.1, latT - 0.03, 0.8);
     const path = curve([root, crest, fall, tip, curl], 20);
     const across: V3 = [Math.cos(lonT), Math.sin(lonT), 0];
-    lock(b, path, (t) => w * (0.7 + 0.4 * Math.sin(Math.PI * Math.min(1, t * 1.3))) * Math.sqrt(Math.max(0, 1 - t ** 4)) + 0.03, (t) => 0.34 * (1 - 0.55 * t) + 0.04, across, lockTone(tone), W, scale(norm(sub(fall, FACE_C)), -1));
-  }
+    lock(b, path, (t) => w * (0.7 + 0.4 * Math.sin(Math.PI * Math.min(1, t * 1.3))) * Math.sqrt(Math.max(0, 1 - t ** 4)) + 0.03, (t) => 0.34 * (1 - 0.55 * t) + 0.04, across, lockTone(tone), W, scale(norm(sub(fall, FACE_C)), -1), hi);
+  });
 }
 
 /** A scrunchie: a ruffled ring round `axis` at c, in the colourway's accent. */
@@ -266,7 +335,10 @@ function bun(b: Builder, c: V3, n: V3, R: number, W: Wt, twist: number): void {
   const [, u, v] = frame(n, [1, 0, 0]);
   const ball = b.ellipsoidRows(c, [R, R, R], n, u, 28, 16);
   // Lit from the top: the crown a shade lighter than the foot.
+  // Highlights: the bun's top (the hair wound up last is the ends), fading out down its sides.
+  b.green = (p) => 1 - smoothstep(0.2, 0.52, Math.acos(Math.max(-1, Math.min(1, ((p[0] - c[0]) * n[0] + (p[1] - c[1]) * n[1] + (p[2] - c[2]) * n[2]) / R))) / Math.PI);
   b.surface(ball, { paint: (i) => hair(HAIR.base + 0.08 * (1 - i / 16) - 0.08 * (i / 16)), weight: () => W, out: (i, k) => sub(ball[i][k], c) });
+  b.green = null;
   // The wound lock: a spiral from the foot to the crown, mostly sunk into the ball so it shows as soft grooves.
   const turns = 2.4, S = 110;
   const wind = Array.from({ length: S }, (_, s): V3 => {
@@ -275,7 +347,7 @@ function bun(b: Builder, c: V3, n: V3, R: number, W: Wt, twist: number): void {
     const az = twist * f * turns * Math.PI * 2;
     return add(c, scale(add(scale(n, Math.cos(a)), add(scale(u, Math.sin(a) * Math.cos(az)), scale(v, Math.sin(a) * Math.sin(az)))), R * 0.92));
   });
-  lock(b, wind, (t) => 0.42 * (1 - 0.5 * t), () => 0.2, n, () => hair(HAIR.shade), W);
+  lock(b, wind, (t) => 0.42 * (1 - 0.5 * t), () => 0.2, n, () => hair(HAIR.shade), W, null, (t) => smoothstep(0.45, 0.8, t));
   scrunchie(b, add(c, scale(n, -R * 0.8)), n, R * 0.62, W, 0.28);
 }
 
@@ -287,17 +359,18 @@ function tail(b: Builder, W: Wt, root: V3, n: V3, main: V3[], code: number, scal
   const pts = tailLine(root, n, main);
   const body = (t: number) => scale1 * (1.15 * Math.sqrt(Math.max(0, 1 - t ** 2.2)) * (1 + 0.45 * Math.sin(Math.PI * Math.min(1, t * 1.8))) + 0.05);
   const inward = scale(n, -1);
-  lock(b, curve(pts, 24), body, (t) => body(t) * 0.82, [1, 0, 0], lockTone(HAIR.base, code), W, inward);
-  for (const [dx, dy, dz, tone] of [[-0.7, -0.15, 0.25, HAIR.shade], [0.7, -0.05, 0.1, HAIR.light], [0.1, 0.6, -0.4, HAIR.light], [-0.15, -0.6, -0.8, HAIR.shade]] as const) {
+  // Highlights: the tail's last part, and two of its outer locks streaked from the tie.
+  lock(b, curve(pts, 24), body, (t) => body(t) * 0.82, [1, 0, 0], lockTone(HAIR.base, code), W, inward, HI.tip);
+  for (const [dx, dy, dz, tone, streak] of [[-0.7, -0.15, 0.25, HAIR.shade, 0], [0.7, -0.05, 0.1, HAIR.light, 1], [0.1, 0.6, -0.4, HAIR.light, 1], [-0.15, -0.6, -0.8, HAIR.shade, 0]] as const) {
     const path = pts.map((p, i): V3 => add(p, scale([dx, dy, dz], scale1 * Math.min(1, i / 3) * (0.6 + 0.4 * (i / 5)))));
     path[path.length - 1] = add(path[path.length - 1], [dx * 0.7, 0, -0.3 + dz * 0.5]);
-    lock(b, curve(path, 24), (t) => scale1 * (0.7 * Math.sqrt(Math.max(0, 1 - t ** 2)) + 0.05), (t) => scale1 * (0.5 * Math.sqrt(Math.max(0, 1 - t ** 2)) + 0.05), [1, 0, 0], lockTone(tone, code), W, inward);
+    lock(b, curve(path, 24), (t) => scale1 * (0.7 * Math.sqrt(Math.max(0, 1 - t ** 2)) + 0.05), (t) => scale1 * (0.5 * Math.sqrt(Math.max(0, 1 - t ** 2)) + 0.05), [1, 0, 0], lockTone(tone, code), W, inward, streak ? HI.whole : HI.tip);
   }
   scrunchie(b, root, n, 1.05 * scale1, W);
 }
 
 /** The geometry; with `face` set, the first `face` vertices (the fringe) are marked as face parts (hat-fit.ts). */
-function finish(b: Builder, face: number | null): THREE.BufferGeometry {
+export function finish(b: Builder, face: number | null): THREE.BufferGeometry {
   const g = b.geometry();
   const n = g.getAttribute("position").count;
   g.setAttribute("headwear", new THREE.Float32BufferAttribute(Float32Array.from({ length: n }, (_, i) => (face !== null && i < face ? 2 : 1)), 1));

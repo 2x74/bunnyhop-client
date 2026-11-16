@@ -121,13 +121,18 @@ export class Builder {
    * partColor for their colour, so the glove builders bake a soft occlusion into it (gloves/fp.ts emit, gloves/glsl.ts).
    */
   tint: ((p: V3) => number) | null = null;
+  /**
+   * Replaces partColor.g of the vertices emitted while set (from the bind-pose position): hair faces keep their share of
+   * the highlight colour there (wigs.ts hair()), and a value per vertex, not per face, gives a streak a soft edge.
+   */
+  green: ((p: V3) => number) | null = null;
 
   private vert(p: V3, n: V3, paint: Paint, w: Wt, fe?: Fin): void {
     this.P.push(p[0], p[1], p[2]);
     this.N.push(n[0], n[1], n[2]);
     this.col.set(paint.color ?? 0xffffff);
     const t = this.tint ? this.tint(p) : 1;
-    this.C.push(this.col.r * t, this.col.g * t, this.col.b * t);
+    this.C.push(this.col.r * t, this.green ? Math.max(0, Math.min(1, this.green(p))) : this.col.g * t, this.col.b * t);
     this.A.push(paint.code);
     if (paint.camo || this.Z) {
       if (!this.Z) {

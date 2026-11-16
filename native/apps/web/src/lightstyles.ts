@@ -280,9 +280,18 @@ export interface LightStyleAtlas {
   readonly switchable: number;
   /**
    * Re-adds the pages of the styles whose lights the core turned on or off since the last call (`states`: the core's
-   * `effect_states`). Returns the atlas rectangles that changed (upload those again).
+   * `effect_states`). Returns the atlas rectangles that changed (upload those again) and the styles that did.
    */
-  update(states: ReadonlyMap<number, boolean> | undefined): AtlasRect[];
+  update(states: ReadonlyMap<number, boolean> | undefined): { rects: AtlasRect[]; styles: number[] };
+  /**
+   * How far `style` is above its spawn value now (0 when it is at or below it): what model lighting adds of that
+   * style's lights (core `set_light_style`). Models keep their spawn light otherwise, as before.
+   */
+  above(style: number): number;
+  /** How far `style` is above its spawn value while its lights are on: what models in reach of it wait for. */
+  full(style: number): number;
+  /** The switchable styles. */
+  readonly styles: number[];
 }
 
 /** Texels `x`..`x + w`, `y`..`y + h` of the atlas. */
@@ -467,14 +476,18 @@ export function lightStyleAtlas(lm: Lightmap, bsp: Uint8Array, ents?: readonly R
   if (!live.length) return { result, atlas: null };
   const byStyle = new Map<number, Block[]>();
   for (const b of live) for (const s of b.it.styles) if (switchable.has(s)) byStyle.set(s, [...(byStyle.get(s) ?? []), b]);
+  const spawn = new Map([...switchable.keys()].map((s) => [s, styleValue(values, s)]));
   return {
     result,
     atlas: {
       switchable: live.length,
+      above: (style) => Math.max(0, styleValue(values, style) - (spawn.get(style) ?? styleValue(values, style))),
+      full: (style) => Math.max(0, (switchable.get(style)?.on ?? 0) - (spawn.get(style) ?? 0)),
+      styles: [...switchable.keys()],
       update(states) {
-        if (!states) return [];
+        if (!states) return { rects: [], styles: [] };
         const changed = followLightStates(switchable, states, values);
-        if (!changed.length) return [];
+        if (!changed.length) return { rects: [], styles: [] };
         const blocks = new Set<Block>();
         for (const s of changed) for (const b of byStyle.get(s) ?? []) blocks.add(b);
         // Upload rectangles: neighbouring blocks on one shelf (they share its top) go up together, so a style's
@@ -490,7 +503,7 @@ export function lightStyleAtlas(lm: Lightmap, bsp: Uint8Array, ents?: readonly R
             r.h = Math.max(r.h, h);
           } else rects.push({ x: b.x, y: b.y, w, h });
         }
-        return rects;
+        return { rects, styles: changed };
       },
     },
   };

@@ -56,7 +56,7 @@ const BHOP_SPEED = 290;
 const STRAFE_YAW = 22;
 /** Facing: three quarters to the camera, turned toward the question on the right (Source yaw, degrees). */
 const BASE_YAW = -58;
-const TAG_Z = 78;
+const TAG_Z = 82;
 /** Where the head is (feet up, units), for looking at things. */
 const HEAD_Z = 66;
 const D2R = Math.PI / 180;
@@ -547,7 +547,7 @@ export function bunnyStage(host: HTMLElement, o: { potato?: boolean } = {}): Bun
     shadow.position.set(x, 0, -y);
     shadow.scale.setScalar(1 - Math.min(0.6, z / 110));
     (shadow.material as THREE.MeshBasicMaterial).opacity = launchT >= 0 ? Math.max(0, 0.4 - launchT) : 0.4 * (1 - Math.min(1, z / 160));
-    tagZ = damp(tagZ, t < crouchUntil ? 64 : TAG_Z, 12, dt);
+    tagZ = damp(tagZ, t < crouchUntil ? 68 : TAG_Z, 12, dt);
     tagPos.set(x, Math.max(0, z) + tagZ * (1 + sq), -y);
     tag.place(tagPos, camera.position, tagText.name && launchT < 0 ? clamp((80 - z) / 20, 0, 1) : 0);
     tag.sprite.scale.multiplyScalar(1.35);

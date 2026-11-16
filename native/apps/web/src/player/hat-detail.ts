@@ -1,7 +1,8 @@
 // Hat materials by graphics look (the Supporter hats and the rank crowns, player/bunny/hats.ts, crown.ts): shading
 // only, the geometry and fits are untouched. A hat's faces carry fixed colours; this tags each vertex with a material
 // picked by its colour (the hats' own palettes, below) in the `headwear` attribute (1 + material / 8: still > 0.5, the
-// flag the head fit reads), and the solid material shades it on Source and up:
+// flag the head fit reads; a face part, fitted to the faceplate on Plush and Bun-E, is 2 + material / 8), and the solid
+// material shades it on Source and up:
 //
 //   metal    crowns, coins, the visor's gold: a view-locked studio reflection tinted by the colour, a crisp glint
 //   lacquer  enamel and plastic (propeller, visor shade, circlet band): the colour under a glossy coat
@@ -32,8 +33,11 @@ const BY_COLOUR: [number, number][] = [
   [0x231b52, HAT_MAT.lacquer], [0x342a78, HAT_MAT.lacquer], [0x4d3fa6, HAT_MAT.lacquer], [0x8f72ff, HAT_MAT.lacquer], [0x150f33, HAT_MAT.lacquer],
   // Lucky Coins: gold.
   [0xffcf4a, HAT_MAT.metal], [0xc9921f, HAT_MAT.metal], [0xffe08a, HAT_MAT.metal], [0xa8761a, HAT_MAT.metal],
-  // Dealer's Visor: plastic band and shade, gold trim.
-  [0x111216, HAT_MAT.lacquer], [0xe0b13a, HAT_MAT.metal], [0x1e9a5a, HAT_MAT.lacquer], [0x167a47, HAT_MAT.lacquer], [0x5fd896, HAT_MAT.lacquer],
+  // Dealer's Visor: plastic band, gold trim; the shade is green celluloid, glossy and lit through (v0.0.42; it was
+  // plastic like the band).
+  [0x111216, HAT_MAT.lacquer], [0xe0b13a, HAT_MAT.metal], [0x1e9a5a, HAT_MAT.gem], [0x167a47, HAT_MAT.gem], [0x5fd896, HAT_MAT.gem],
+  // Starfish: wet, under a glossy coat (v0.0.42; it had no material).
+  [0xff7f6e, HAT_MAT.lacquer], [0xe25c4c, HAT_MAT.lacquer], [0xffd8cc, HAT_MAT.lacquer],
   // Propeller cap: plastic.
   // (Its yellow is the gold crown's exact colour: it reads as metal, which suits the cap's hub too.)
   ...[0xec2342, 0x128ad1, 0x21ae70, 0x086dab, 0xffe6a0, 0x7657cd].map((c): [number, number] => [c, HAT_MAT.lacquer]),
@@ -42,6 +46,27 @@ const BY_COLOUR: [number, number][] = [
   [0xe6b54a, HAT_MAT.metal],
   // Capybara, Maxwell: fur.
   ...[0xa97848, 0xb88955, 0xc99c68, 0x805232, 0x161820, 0x1d202a, 0x12141b, 0x2a262c, 0xf0f3f8, 0xdad5cd].map((c): [number, number] => [c, HAT_MAT.fur]),
+  // Back items (bunny/backs.ts; the shading is the same, they're shaded like headwear). The accent parts carry a tag
+  // colour that only picks the material: the cape and the pinwheel's sail are cloth and paper, the balloon and the jet
+  // pack's bands glossy.
+  [0xfffffe, HAT_MAT.fabric], [0xfffffd, HAT_MAT.lacquer],
+  // Wind-up Key: brass (its faces, bright chamfers, dark walls) on a leather patch (the straps' leather, below).
+  [0xe2ae48, HAT_MAT.metal], [0xf6d57a, HAT_MAT.metal], [0x94661f, HAT_MAT.metal],
+  [0xd9a642, HAT_MAT.metal], [0x9c7428, HAT_MAT.metal], [0x8a6a2a, HAT_MAT.metal],
+  // Jet Pack: steel, gunmetal (and its shadowed plate), webbing; the stripe and dial are enamel (ivory, with the oni
+  // mask's above).
+  [0xc9ced6, HAT_MAT.metal], [0x3a3f48, HAT_MAT.metal], [0x23262d, HAT_MAT.metal],
+  ...[0xc9a36b, 0xd4b47c, 0xa98552, 0x8e6b3e, 0x5b4330, 0x7a5536, 0x2a2d33].map((c): [number, number] => [c, HAT_MAT.fabric]),
+  [0xd2b25a, HAT_MAT.metal],
+  // Sheathed Blade: the oni mask's lacquer and gold (above), a dark grip wrap and cord; Pinwheel: paper, a glossy pin.
+  [0x1d1a24, HAT_MAT.fabric], [0x3b1d4a, HAT_MAT.fabric], [0xf4f1ea, HAT_MAT.fabric], [0xffd052, HAT_MAT.lacquer],
+  // Cape: its ivory lining (in shade), binding and collar (the ivory itself is the oni mask's tooth colour: its
+  // lacquer reading suits satin).
+  [0xcdbfa6, HAT_MAT.fabric],
+  // Balloon: its string, the eyes printed on it.
+  [0xf2efe6, HAT_MAT.fabric], [0xffd84a, HAT_MAT.lacquer],
+  // Wings: soft feathers.
+  ...[0xf4f4ee, 0xeef0e8, 0xe2e6e0, 0xcfd6d4].map((c): [number, number] => [c, HAT_MAT.fabric]),
 ];
 const TABLE = BY_COLOUR.map(([hex, m]) => {
   const c = new THREE.Color(hex);
@@ -72,6 +97,7 @@ export function ensureHeadwear(geo: THREE.BufferGeometry): void {
 /** Fragment declarations (solid material; needs the hat-fx pars for vFx, and uCosTier). */
 export const HAT_DETAIL_FRAGMENT_PARS = /* glsl */ `
 varying float vHw;
+varying float vHair;
 // A small studio seen in glossy hat parts, fixed to the view (Rv: view-space reflection): bright sky with a strip,
 // a hot horizon, a dark band under it, a dim warm floor.
 vec3 hatStudio(vec3 Rv, float rough) {
@@ -84,9 +110,13 @@ vec3 hatStudio(vec3 Rv, float rough) {
 
 /** Fragment (solid material), after the hat fx: `col` shaded per hat material on Source and up. */
 export const HAT_DETAIL_FRAGMENT_SOLID = /* glsl */ `
-  float hm = floor((vHw - 1.0) * 8.0 + 0.5);
+  // A face part (hat-fit.ts HatFit.face) carries 2 + material / 8: the same materials, one up. (Until v0.0.42 a face
+  // part was 2 flat, which read as material 8 and fell through to the gem branch below: the wigs' fringe on Plush and
+  // Bun-E shone like glass. Hair has its own shading, hair-fx.ts.)
+  float hw = vHw > 1.95 ? vHw - 1.0 : vHw;
+  float hm = floor((hw - 1.0) * 8.0 + 0.5);
   // Plain hat faces, and the Lucky Coins (gold faces on the Gem Orbit fx; the gems keep their crystal shading).
-  if (vHw > 1.05 && uCosTier > 1.5 && (vFx < 0.5 || (vFx == 1.0 && hm < 1.5))) {
+  if (hw > 1.05 && vHair < 0.5 && uCosTier > 1.5 && (vFx < 0.5 || (vFx == 1.0 && hm < 1.5))) {
     vec3 hR = reflect(-V, n);
     vec3 hRv = (viewMatrix * vec4(hR, 0.0)).xyz;
     float hnv = max(dot(n, V), 0.0), hfc = pow(1.0 - hnv, 5.0);

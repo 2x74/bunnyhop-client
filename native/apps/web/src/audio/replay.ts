@@ -8,13 +8,16 @@ import { replayAudioTicks, replayAudioWindTick } from "./replay-timing";
 // (variants and pitch jitter come from a seeded PRNG).
 
 import { EVENT_JUMPED, EVENT_LANDED, EVENT_TELEPORTED } from "../core";
-import { F_CROUCHED, F_GROUNDED, F_JUMPED, F_LANDED, F_RESTARTED, F_TELEPORTED, STATUS_FINISHED, STATUS_IDLE, STATUS_RUNNING, type RunData } from "../viewer/player";
+import { F_CROUCHED, F_GROUNDED, F_JUMPED, F_LADDER, F_LANDED, F_RESTARTED, F_TELEPORTED, STATUS_FINISHED, STATUS_IDLE, STATUS_RUNNING, type RunData } from "../viewer/player";
 import { prefs } from "../ui/settings";
 import { SFX, type SfxId } from "./catalog";
 import { loadAsset } from "./engine";
 import { musicPath, manifest, type MusicEntry } from "./assets";
 import { MoveSounds, windFor, type SoundSink } from "./movement";
-import { classic, engine, PlayerAudio, runSounds, spatialSink, tracker } from "./index";
+import { classic, engine, keySounds, perfectSounds, PlayerAudio, runSounds, spatialSink, tracker } from "./index";
+import { perfectStyle, PerfectStreak } from "./perfect-policy";
+import { replayStyle } from "../replay";
+import { strafeKeys, styleDef, type StrafeKeys } from "../styles";
 
 const eventsOf = (f: number) => (f & F_JUMPED ? EVENT_JUMPED : 0) | (f & F_LANDED ? EVENT_LANDED : 0) | (f & F_TELEPORTED ? EVENT_TELEPORTED : 0);
 
@@ -35,11 +38,17 @@ function feed(d: RunData, k: number, moves: MoveSounds, run: (id: SfxId) => void
 
 const speed3 = (d: RunData, k: number) => Math.hypot(d.vel[k * 3], d.vel[k * 3 + 1], d.vel[k * 3 + 2]);
 
-/** Live playback in the replay viewer: positional movement sounds (the listener is the viewer camera) + wind. */
+/** Live playback in the replay viewer: positional movement sounds (the listener is the viewer camera), wind, the run's
+ * key sounds (its recorded buttons: the keys that went down each tick) and perfect jump sounds (the re-simulated timer's
+ * perfect jumps, RunData.perfectTick, with their streak). */
 export class ReplayAudio {
   private moves = tracker(spatialSink);
   private wind = new PlayerAudio();
   private last = -1;
+  private keysOf: RunData | null = null;
+  private strafe: StrafeKeys = "ad";
+  private scroll = false;
+  private streak = new PerfectStreak();
 
   /** Per viewer frame. Sounds play only while playing at up to 2× (faster is a blur); seeks re-prime silently. */
   frame(d: RunData | null, t: number, playing: boolean, speed: number): void {
@@ -49,13 +58,32 @@ export class ReplayAudio {
       this.wind.frame(0, true, false);
       this.last = tick;
       this.moves.reset();
+      this.streak.reset();
       return;
     }
     if (this.last < 0 || tick < this.last || tick - this.last > 40 || speed > 2.01) {
       this.moves.reset();
+      this.streak.reset();
       this.last = tick;
     }
-    for (let k = this.last + 1; k <= tick; k++) feed(d, k, this.moves, (id) => (id === "finish" ? runSounds.finish("normal") : engine.play(id)));
+    if (d !== this.keysOf) {
+      const style = replayStyle(d.replay.header);
+      this.keysOf = d;
+      this.strafe = strafeKeys(styleDef(style));
+      this.scroll = perfectStyle(style);
+      this.streak.reset();
+    }
+    for (let k = this.last + 1; k <= tick; k++) {
+      feed(d, k, this.moves, (id) => (id === "finish" ? runSounds.finish("normal") : engine.play(id)));
+      const f = d.flags[k];
+      if (k > 1 && !(f & F_RESTARTED)) keySounds.edges(d.buttons[k - 1], d.buttons[k], this.strafe);
+      if (this.scroll) {
+        const hop = d.perfectTick[k] === k ? true : f & F_JUMPED ? false : null;
+        const broken = d.status[k] !== STATUS_RUNNING || !!(f & (F_RESTARTED | F_TELEPORTED | F_LADDER));
+        const n = this.streak.tick(hop, (f & F_GROUNDED) !== 0, d.interval, broken);
+        if (n) perfectSounds.perfect(n);
+      }
+    }
     this.last = tick;
     this.wind.frame(speed3(d, tick), (d.flags[tick] & F_GROUNDED) !== 0, true);
   }
@@ -63,6 +91,7 @@ export class ReplayAudio {
   stop(): void {
     this.wind.frame(0, true, false);
     this.moves.reset();
+    this.streak.reset();
     this.last = -1;
   }
 }

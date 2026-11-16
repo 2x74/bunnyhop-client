@@ -12,6 +12,7 @@
 //   Bunny         Your bunny (ui/bunny-preview.ts) in its colourway and hat, holding your knife: turns slowly, drag
 //                 to turn it.
 //   Ghost         Your PB ghost hopping a small circle with its trail.
+//   Hop           Your bunny hopping on the spot with its hop effect (drag to turn it).
 //
 // Thumbnails: requestThumb() queues a render (a knife in a finish, your fist in a pair of gloves, or for colourways,
 // ghosts, trails and hats the same little model the unlock card shows: notify/item3d-scenes.ts); a few are drawn
@@ -48,6 +49,7 @@ import { parallelCompile } from "../graphics/warm-programs";
 import { bunnyParts } from "../player/bunny/prebuild-parts";
 import { hasBunnyGeometry } from "../player/bunny/mesh";
 import { hasHatGeometry } from "../player/bunny/hats";
+import { hasBackGeometry } from "../player/bunny/backs";
 import { loadoutFor } from "../loadout";
 import { menuIdleAllowed, onMenuMapStart } from "./menu-work";
 import { loadThumb, saveThumb } from "./thumb-store";
@@ -56,11 +58,13 @@ import { CamoStage } from "./camo-stage";
 import { softwareContext } from "../gfx-auto";
 import { sharedRenderer } from "../shared-gl";
 
-/** First person and close-up (hands), your bunny, your ghost; a gun in first person or from the side (Gun camo). */
-export type StageView = "fp" | "close" | "bunny" | "ghost" | "gun" | "gunside";
+/** First person and close-up (hands), your bunny, your ghost, your bunny hopping (hop effects); a gun in first person or from the side (Gun camo). */
+export type StageView = "fp" | "close" | "bunny" | "ghost" | "hop" | "gun" | "gunside";
+/** The views ui/bunny-preview.ts draws. */
+const bunnyView = (v: StageView) => v === "bunny" || v === "ghost" || v === "hop";
 const gunView = (v: StageView) => v === "gun" || v === "gunside";
 /** What the bunny views dress the bunny in (the knife, gloves and hat come from the loadout). */
-export type StageLook = Pick<BunnyLook, "outfit" | "ghost" | "trail" | "shape" | "veil" | "playerGlow" | "previewGlow">;
+export type StageLook = Pick<BunnyLook, "outfit" | "ghost" | "trail" | "shape" | "veil" | "playerGlow" | "previewGlow" | "facing">;
 
 /** Thumbnail size in device pixels (16:10). */
 export const THUMB_W = 384;
@@ -122,7 +126,7 @@ if (typeof document !== "undefined")
 function bunnyReady(outfit: string | null | undefined, l: CosmeticLoadout): boolean {
   try {
     const p = bunnyParts(outfit, l);
-    return hasBunnyGeometry(p.key) && (!p.hat || hasHatGeometry(p.hat));
+    return hasBunnyGeometry(p.key) && (!p.hat || hasHatGeometry(p.hat)) && (!p.back || hasBackGeometry(p.back.key));
   } catch {
     return true;
   }
@@ -420,7 +424,7 @@ export class LoadoutStage {
   }
 
   private bunnyLook(): BunnyLook {
-    return { mode: this.viewMode === "ghost" ? "ghost" : "solid", ...this.look, loadout: this.shown };
+    return { mode: this.viewMode === "ghost" ? "ghost" : this.viewMode === "hop" ? "hop" : "solid", ...this.look, loadout: this.shown };
   }
 
   setView(v: StageView): void {
@@ -433,7 +437,7 @@ export class LoadoutStage {
       this.guns.setLoadout(this.shown, this.look.outfit);
       if (v === "gunside") this.guns.spinV = 2.2;
     }
-    if (v === "bunny" || v === "ghost") {
+    if (bunnyView(v)) {
       if (this.bunny) this.showBunny();
       else (this.bunny = new BunnyScene(this.bunnyLook())), this.bunny.setTint(...this.tintNow);
     }
@@ -443,7 +447,7 @@ export class LoadoutStage {
 
   /** Plays the knife's inspect (first person; from the close-up it switches back first; not in the bunny views). */
   inspect(): void {
-    if (this.disposed || this.viewMode === "bunny" || this.viewMode === "ghost") return;
+    if (this.disposed || bunnyView(this.viewMode)) return;
     if (gunView(this.viewMode)) {
       if (this.viewMode !== "gun") this.setView("gun");
       this.guns?.inspect();
@@ -470,7 +474,7 @@ export class LoadoutStage {
   /** A small confirm when something is equipped: a draw for a knife, an inspect for a finish or a hilt, a spin up close. */
   flourish(kind: string): void {
     if (this.disposed || this.reduced) return;
-    if (this.viewMode === "bunny" || this.viewMode === "ghost") {
+    if (bunnyView(this.viewMode)) {
       this.bunny?.flourish();
       this.kick();
       return;
@@ -807,7 +811,7 @@ export class LoadoutStage {
     const cam = this.itemCam;
     const fov = THREE.MathUtils.degToRad(cam.fov / 2);
     // A tile is wider than the card's square: the standing bunny can come closer.
-    const fill = spec.kind === "bunny" || spec.kind === "ghost" ? 1.3 : spec.kind === "trail" ? 1.7 : spec.kind === "gun" ? 1.4 : h.fill;
+    const fill = spec.kind === "bunny" || spec.kind === "ghost" ? 1.3 : spec.kind === "trail" ? 1.7 : spec.kind === "gun" ? 1.4 : spec.kind === "hop" ? 1.05 : h.fill;
     cam.position.set(0, 0, (s.radius / Math.sin(fov)) * (0.98 / fill));
     cam.lookAt(0, 0, 0);
     cam.near = cam.position.z * 0.05;
@@ -1103,7 +1107,7 @@ export class LoadoutStage {
       d.x = e.clientX;
       d.y = e.clientY;
       this.dragVel.move(e.timeStamp, e.clientX, e.clientY);
-      if (this.viewMode === "bunny") this.bunny?.drag(dx, this.w);
+      if (this.viewMode === "bunny" || this.viewMode === "hop") this.bunny?.drag(dx, this.w);
       else if (this.viewMode === "ghost" || this.viewMode === "gun") return;
       else if (this.viewMode === "gunside") {
         if (this.guns) this.guns.spin += dx * (4.2 / Math.max(240, this.w));

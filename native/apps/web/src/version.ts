@@ -71,7 +71,22 @@ export const UPCOMING: ChangelogEntry = {
   date: "2026-11-13",
   kind: "minor",
   title: "Next update",
-  notes: [],
+  notes: [
+    "The strafe trainer has two new looks. Gauge is a dial: the needle lies flat on the left when you aren't turning, stands straight up when you turn at the best rate for your speed, and tips to the right when you turn too fast. On a mistimed strafe switch it flicks flat for a moment: to the left when the key came too early, to the right when it came late. Arc is a thin version of the same dial with the percentage under it. Pick either under Settings → HUD → Strafe trainer. Thanks to weedgotmefunky33 for the idea and huai for the feedback.",
+    "Key sounds: an optional click when you press a strafe key, so you can hear your strafe rhythm. Left and right sound slightly different. There are four sounds (Thock, Click, Wood and Blip), a volume of its own, and a choice of strafe keys only or all movement keys. It is off by default: Settings → Audio → Key sounds, or !keysounds.",
+    "When you spectate someone in a server you now see their keys, strafe trainer, jump stats and start speed, with whichever of those you have turned on for yourself. Thanks to weedgotmefunky33 for the suggestion.",
+    "Practice attempts keep a replay on your device. A practice run that reaches the end is kept by itself, and !keepreplay or Keep this attempt in the pause menu's Replays tab keeps one that doesn't. Watch them from the same tab, and Practice from here works in them. An attempt that used noclip can't be kept. Thanks to max for the suggestion.",
+    "Once a run has been going for 5 minutes, the restart keys need a short hold, so a slip of the finger can't throw away a long run. Change the minutes or turn it off with Settings → Keys → Hold after. Thanks to oiwa for the report.",
+    "Maps that finish through a teleport now get millisecond times like every other map; before, their times always ended in 0. That is bhop_disco, bhop_addict_v2, ahop_coast and about 150 more. Runs already on those boards were re-timed from their replays and are up to 10 ms faster. No world record changed hands. Thanks to hena for the report.",
+    "Lights that a map switches on and off now work. The mine on bhop_mine is dark until you land on its first block and then lights up, as in CS:S, and your hands, weapon and other bunnies go dark and light up with the room. 22 maps have lights like this, bhop_extan and bhop_mist_4 among them; flickering lights flicker, and the lights-out button on bhop_kitsune works. Thanks to PonyTrap for the report.",
+    "bhop_bistro_6 and bhop_bistro_7: brushing the edge of the gravity lift could leave your gravity reversed, so you floated along the ceiling past the end. Fixed. New runs on these two maps need this version of the game. Thanks to tyzi for the report.",
+    "29 new maps. From your requests: bhop_blockstrafe, bhop_verity and bhop_weld. And 26 more that many of you will know: bhop_brick_roblox, bhop_dumb_blocks, bhop_dumb_blocks_2, bhop_dumb_blocks_4, bhop_dumb_blocks_5, bhop_0zirk, bhop_idontknow, bhop_neon_vibes_v2, bhop_i_dropped_my_heckin_pop-tarts, bhop_dice, bhop_eco, bhop_springland, bhop_clarify, bhop_helios_i, bhop_avery, bhop_cotton_candy, bhop_outback_shore, bhop_namaste_roblox, bhop_spearmint_css, bhop_frenzy, bhop_vastum_desertum, bhop_tide, bhop_soulscape, bhop_way_back_when, bhop_waryhm and bhop_doms. bhop_weld, bhop_0zirk, bhop_frenzy, bhop_soulscape and bhop_way_back_when are T2; the rest are T1.",
+    "Servers: when a map's vote can no longer offer Extend, the server says once that typing extend in chat still works. When 60% of the players have asked, the map gets 15 more minutes, as often as you like.",
+    "Profiles show how many world records you hold in each style, next to that style's rank. Rest the pointer on the card's WRs to see which styles count towards it: records in Auto-strafe, Low Gravity and Segmented have their own boards and don't.",
+    "Push to talk is listed under Settings → Keys as well as under Audio, and unbind and unbindall in the console now clear it too. Thanks to PewPewPwnLazer for the report.",
+    "!turnspeed shows or sets how fast your turn keys turn. Settings → Keys → Turn speed now says what to aim for: a prestrafe on the ground is fastest at about 120 degrees a second.",
+    "Desktop app: if your version is too old for voice chat, the game now says to update the app instead of saying the microphone is blocked.",
+  ],
 };
 
 /** Newest first. */

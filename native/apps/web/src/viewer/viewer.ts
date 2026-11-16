@@ -186,7 +186,7 @@ export class ReplayViewer implements ExportSource {
    * the rest of the visit; MP4 export keeps its own camera setting (default chase, export.ts).
    */
   readonly rig = Object.assign(new CameraRig(), { mode: "eye" as CamMode });
-  readonly model = new PlayerModel({ style: "solid", playerGlow: null });
+  readonly model = new PlayerModel({ style: "solid", playerGlow: null, hops: "others" });
   compare: Compare | null = null;
   /** What render() animates: the viewer's model / compare ghost, or fresh copies during an export. */
   private playerShadow: PlayerShadowProxy;
@@ -1640,7 +1640,7 @@ export class ReplayViewer implements ExportSource {
     // Fresh player model / ghost for the render, so no animation state carries over from viewing (the exporter
     // seeds Math.random first, so their construction is deterministic too).
     this.model.root.visible = false;
-    this.drawModel = new PlayerModel({ style: "solid", playerGlow: this.look.glow, outfit: this.look.outfit, loadout: this.look.loadout });
+    this.drawModel = new PlayerModel({ style: "solid", playerGlow: this.look.glow, outfit: this.look.outfit, loadout: this.look.loadout, hops: "others" });
     this.drawModel.root.userData.h2hPrimary = true;
     this.playerShadow.bind(this.drawModel.root);
     this.drawModel.setNearFade(...CHASE_NEAR_FADE);

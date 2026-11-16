@@ -8,7 +8,7 @@
 // default: their colourway in one of a few poses (picked from their id), pre-rendered into the site
 // (public-site/avatars/default/<outfit>-<n>.webp, tools/avatar/render-defaults.ts).
 
-import { cosmetic, DEFAULT_COSMETICS, hairLengthOf, type CosmeticSlot } from "../progression";
+import { CAPE_ITEM, CAPE_LENGTH, capeHexOf, capeLengthOf, ROBE_ITEM, robePatternOf, cosmetic, DEFAULT_COSMETICS, hairLengthOf, highlightHexOf, type CosmeticSlot } from "../progression";
 
 export type AvatarPose =
   | "holdup" | "idle" | "showoff" | "hop" | "strafe" | "crouch" | "lookup" | "swing" | "run"
@@ -75,6 +75,26 @@ export interface AvatarSpec {
   /** A wig's colour ("#rrggbb") and the ponytail's length (a percent, HAIR_LENGTH), checked like the saved cosmetics; absent = the defaults. */
   hairColor?: string;
   hairLength?: number;
+  /** A wig's highlight colour ("#rrggbb" on the highlight grid) and the Kitsune Mask over the face, checked like the saved cosmetics; absent = none / pushed up. */
+  hairHighlight?: string;
+  maskOn?: true;
+  /** progression.ts "back-*" id (v0.0.42); absent = nothing on the back (older avatars). */
+  back?: string;
+  /**
+   * The Cape's length (a percent, CAPE_LENGTH) and colours ("#rrggbb" on the cape's grid, capeHexOf), only with the Cape
+   * on the back, checked like the saved cosmetics; absent = the defaults.
+   */
+  capeLength?: number;
+  capeColor?: string;
+  capeLining?: string;
+  /**
+   * The Robe's pattern (1 .. 4), whether it is tied and its colours ("#rrggbb" on the cape's grid), only with the Robe
+   * on the back, checked like the saved cosmetics; absent = plain, open, the colourway's colours.
+   */
+  robePattern?: number;
+  robeTied?: true;
+  robeColor?: string;
+  robePrint?: string;
   hand: AvatarHand;
   /** progression.ts "knife-*" / "fin-*" / "glove-*" ids. */
   knife: string;
@@ -157,6 +177,24 @@ export function cleanAvatar(raw: unknown): AvatarSpec {
     hat: r.hat === null || r.hat === undefined ? null : item("hat", r.hat, "") || null,
     ...(typeof r.hairColor === "string" && HEX.test(r.hairColor.toLowerCase()) ? { hairColor: r.hairColor.toLowerCase() } : {}),
     ...(hairLengthOf(r.hairLength) !== null ? { hairLength: hairLengthOf(r.hairLength)! } : {}),
+    ...(highlightHexOf(r.hairHighlight) ? { hairHighlight: highlightHexOf(r.hairHighlight)! } : {}),
+    ...(r.maskOn === true ? { maskOn: true as const } : {}),
+    ...(item("back", r.back, "") ? { back: item("back", r.back, "") } : {}),
+    ...(item("back", r.back, "") === CAPE_ITEM
+      ? {
+          ...(capeLengthOf(r.capeLength) !== null && capeLengthOf(r.capeLength) !== CAPE_LENGTH.default ? { capeLength: capeLengthOf(r.capeLength)! } : {}),
+          ...(typeof r.capeColor === "string" && capeHexOf(r.capeColor) ? { capeColor: capeHexOf(r.capeColor)! } : {}),
+          ...(typeof r.capeLining === "string" && capeHexOf(r.capeLining) ? { capeLining: capeHexOf(r.capeLining)! } : {}),
+        }
+      : {}),
+    ...(item("back", r.back, "") === ROBE_ITEM
+      ? {
+          ...(robePatternOf(r.robePattern) !== null ? { robePattern: robePatternOf(r.robePattern)! } : {}),
+          ...(r.robeTied === true ? { robeTied: true as const } : {}),
+          ...(typeof r.robeColor === "string" && capeHexOf(r.robeColor) ? { robeColor: capeHexOf(r.robeColor)! } : {}),
+          ...(typeof r.robePrint === "string" && capeHexOf(r.robePrint) ? { robePrint: capeHexOf(r.robePrint)! } : {}),
+        }
+      : {}),
     hand: pick(r.hand, ["knife", "gun", "none"] as const, "knife"),
     knife: item("knife", r.knife, DEFAULT_COSMETICS.knife!),
     finish: item("finish", r.finish, DEFAULT_COSMETICS.finish!),
@@ -174,13 +212,23 @@ export function cleanAvatar(raw: unknown): AvatarSpec {
 }
 
 /** The cosmetics an avatar wears, as a POST /me/cosmetics-shaped object (for progression.ts cosmeticsProblem). */
-export function avatarCosmetics(s: AvatarSpec): Record<string, string | number | null> {
+export function avatarCosmetics(s: AvatarSpec): Record<string, string | number | boolean | null> {
   return {
     outfit: s.outfit,
     body: s.body,
     hat: s.hat,
     ...(s.hairColor ? { hairColor: s.hairColor } : {}),
     ...(s.hairLength !== undefined ? { hairLength: s.hairLength } : {}),
+    ...(s.hairHighlight ? { hairHighlight: s.hairHighlight } : {}),
+    ...(s.maskOn ? { maskOn: true } : {}),
+    ...(s.back ? { back: s.back } : {}),
+    ...(s.capeLength !== undefined ? { capeLength: s.capeLength } : {}),
+    ...(s.capeColor ? { capeColor: s.capeColor } : {}),
+    ...(s.capeLining ? { capeLining: s.capeLining } : {}),
+    ...(s.robePattern !== undefined ? { robePattern: s.robePattern } : {}),
+    ...(s.robeTied ? { robeTied: true } : {}),
+    ...(s.robeColor ? { robeColor: s.robeColor } : {}),
+    ...(s.robePrint ? { robePrint: s.robePrint } : {}),
     // A hidden knife (gun or empty hand) still names one; the default is always owned.
     knife: s.hand === "knife" ? s.knife : DEFAULT_COSMETICS.knife!,
     finish: s.hand === "knife" ? s.finish : DEFAULT_COSMETICS.finish!,
@@ -217,8 +265,10 @@ export function unpackAvatar(s: string | null | undefined): AvatarSpec | null {
  *   2  v0.0.29: the 1.15x head with the softer face, garment / glove / knife / hat materials at the Enhanced tiers,
  *      Space Buns / Ponytail / Half Oni Mask, the metal finishes; hands kept clear of the bigger hood; framing fitted
  *      to the ears and hats
+ *   3  v0.0.42: the model pass (a jaw and chin, the 1.2x head and the 1.28x bare head under a wig, the lowered hood
+ *      as a pouch with hanging ears, sloped shoulders, the upright posture in the knife poses)
  */
-export const AVATAR_RENDER_VERSION = 2;
+export const AVATAR_RENDER_VERSION = 3;
 
 /** A stored render version (users.bunny_avatar "r", a POST's `render`): 1..AVATAR_RENDER_VERSION, else 1. */
 export const renderVersionOf = (v: unknown): number =>

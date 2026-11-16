@@ -23,6 +23,9 @@ import { HAT_FX_FRAGMENT_GHOST, HAT_FX_FRAGMENT_PARS, HAT_FX_FRAGMENT_SOLID, HAT
 import { FABRIC_FRAGMENT_PARS, FABRIC_VERTEX_MAIN, FABRIC_VERTEX_PARS, garmentPatternUniforms, type GarmentPatternUniforms } from "./fabric";
 import { PLAYER_LOOK_UNIFORMS, type PlayerLookUniforms } from "./look-tier";
 import { HAT_DETAIL_FRAGMENT_PARS, HAT_DETAIL_FRAGMENT_SOLID } from "./hat-detail";
+import { BACK_FX_FRAGMENT_GHOST, BACK_FX_FRAGMENT_PARS, BACK_FX_FRAGMENT_SOLID, BACK_FX_VERTEX_NORMAL, BACK_FX_VERTEX_PARS, BACK_FX_VERTEX_POSITION, BACK_FX_VERTEX_SKINNED } from "./back-fx";
+import { HAIR_FX_FRAGMENT_PARS, HAIR_FX_FRAGMENT_SOLID, HAIR_FX_VERTEX_COLOUR, HAIR_FX_VERTEX_NORMAL, HAIR_FX_VERTEX_PARS, HAIR_FX_VERTEX_POSITION } from "./hair-fx";
+import { ROBE_FX_FRAGMENT_PARS, ROBE_FX_FRAGMENT_SOLID, ROBE_FX_VERTEX_NORMAL, ROBE_FX_VERTEX_PARS, ROBE_FX_VERTEX_POSITION, ROBE_FX_VERTEX_SKINNED } from "./robe-fx";
 import { DEPTH_FOG_FRAGMENT_PARS, DEPTH_FOG_OFF, DEPTH_FOG_VERTEX_MAIN, DEPTH_FOG_VERTEX_PARS, depthFogFragment, type DepthFogUniforms } from "../depth-fog";
 import { finishUniforms, FRAGMENT_IS_BLADE, FRAGMENT_PARS, GLOVE_FRAGMENT_ALBEDO, GLOVE_FRAGMENT_LIGHT, HILT_FRAGMENT_ALBEDO, HILT_FRAGMENT_LIGHT, lookDefines, NO_LOOK, VERTEX_MAIN, VERTEX_PARS, type FinishUniforms, type MaterialLook } from "../viewmodel/finishes/shader";
 
@@ -71,8 +74,28 @@ export interface PlayerUniforms extends FinishUniforms, PlayerLookUniforms, Dept
   /** The same for headwear's face parts (headwear attribute 2; bunny/hat-fit.ts HatFit.face). */
   uHeadwearFaceScale: THREE.IUniform<THREE.Vector3>;
   uHeadwearFaceOffset: THREE.IUniform<THREE.Vector3>;
+  /** A back item's motion (back-fx.ts backUniform, backUniformTip) and its pivots and axis (bind space, BackRig). */
+  uBack: THREE.IUniform<THREE.Vector4>;
+  uBackTip: THREE.IUniform<THREE.Vector4>;
+  uBackMid: THREE.IUniform<THREE.Vector4>;
+  /** A cape that reaches below the hips (back-fx.ts BackRig.hang): x on, y the height it hangs from, z the ground. */
+  uCape: THREE.IUniform<THREE.Vector4>;
+  /** The Cape's tones (back-fx.ts capeTones, linear: outside, trim, lining, clasp), for faces with a role (backfx.w). */
+  uCapeTones: THREE.IUniform<THREE.Color[]>;
+  uBackPivot: THREE.IUniform<THREE.Vector3>;
+  uBackPivot2: THREE.IUniform<THREE.Vector3>;
+  uBackAxis: THREE.IUniform<THREE.Vector3>;
+  /** The Robe (robe-fx.ts): each sleeve's swing (sleeveUniform), and [its pattern, how far its sleeves hang, 0, 0]. */
+  uRobeL: THREE.IUniform<THREE.Vector4>;
+  uRobeR: THREE.IUniform<THREE.Vector4>;
+  uRobe: THREE.IUniform<THREE.Vector4>;
   /** A wig's hair colour (linear; loadout.hairColor), for hair faces (hat-fx.ts codes -9..-11). */
   uHairColor: THREE.IUniform<THREE.Color>;
+  /** The hair highlight colour (linear; loadout.hairHighlight), w 1 when one is picked (hair-fx.ts). */
+  uHairHi: THREE.IUniform<THREE.Vector4>;
+  /** Sprung hair (hair-fx.ts advanceHair): the loose spring (xyz) and the length factor (w); the stiff spring (xyz). */
+  uHairSway: THREE.IUniform<THREE.Vector4>;
+  uHairFlex: THREE.IUniform<THREE.Vector4>;
   /**
    * The map's light on this model (model-light.ts), as the offset from the studio light: the shaded colour is
    * multiplied by 1 + uMapLight, so 0 (the default: previews, the Loadout, Model lighting off) is the look as it was.
@@ -88,6 +111,20 @@ export function playerUniforms(): PlayerUniforms {
     uHeadwearFaceScale: { value: new THREE.Vector3(1, 1, 1) },
     uHeadwearFaceOffset: { value: new THREE.Vector3() },
     uHairColor: { value: new THREE.Color(HAIR_DEFAULT) },
+    uBack: { value: new THREE.Vector4() },
+    uBackTip: { value: new THREE.Vector4() },
+    uBackMid: { value: new THREE.Vector4() },
+    uCape: { value: new THREE.Vector4() },
+    uCapeTones: { value: Array.from({ length: 4 }, () => new THREE.Color(0xffffff)) },
+    uBackPivot: { value: new THREE.Vector3() },
+    uBackPivot2: { value: new THREE.Vector3() },
+    uBackAxis: { value: new THREE.Vector3(0, 1, 0) },
+    uHairHi: { value: new THREE.Vector4() },
+    uHairSway: { value: new THREE.Vector4(0, 0, 0, 1) },
+    uHairFlex: { value: new THREE.Vector4() },
+    uRobeL: { value: new THREE.Vector4() },
+    uRobeR: { value: new THREE.Vector4() },
+    uRobe: { value: new THREE.Vector4(0, 1, 0, 0) },
     uAccent: { value: new THREE.Color(0xffb43a) },
     uGhost: { value: new THREE.Color(0xffc542) },
     uGhostRim: { value: new THREE.Color(0xffc542) },
@@ -129,20 +166,34 @@ ${DEPTH_FOG_VERTEX_PARS}
 ${VERTEX_PARS}
 ${FABRIC_VERTEX_PARS}
 ${HAT_FX_VERTEX_PARS}
+${BACK_FX_VERTEX_PARS}
+${HAIR_FX_VERTEX_PARS}
+${ROBE_FX_VERTEX_PARS}
 varying float vHw;
 #include <common>
 #include <skinning_pars_vertex>
 void main() {
   #include <beginnormal_vertex>
 ${HAT_FX_VERTEX_NORMAL}
-  if (headwear > .5) objectNormal = normalize(objectNormal / (headwear > 1.5 ? uHeadwearFaceScale : uHeadwearScale));
+${BACK_FX_VERTEX_NORMAL}
+${HAIR_FX_VERTEX_NORMAL}
+${ROBE_FX_VERTEX_NORMAL}
+  // (A back item carries hat materials in headwear, but no head fit: backfx > 0.)
+  if (headwear > .5 && backfx.x < .5) objectNormal = normalize(objectNormal / (headwear > 1.5 ? uHeadwearFaceScale : uHeadwearScale));
   #include <skinbase_vertex>
   #include <skinnormal_vertex>
   #include <begin_vertex>
 ${HAT_FX_VERTEX_POSITION}
-  if (headwear > 1.5) transformed = transformed * uHeadwearFaceScale + uHeadwearFaceOffset;
-  else if (headwear > .5) transformed = transformed * uHeadwearScale + uHeadwearOffset;
+${BACK_FX_VERTEX_POSITION}
+${HAIR_FX_VERTEX_POSITION}
+${ROBE_FX_VERTEX_POSITION}
+  if (backfx.x < .5) {
+    if (headwear > 1.5) transformed = transformed * uHeadwearFaceScale + uHeadwearFaceOffset;
+    else if (headwear > .5) transformed = transformed * uHeadwearScale + uHeadwearOffset;
+  }
   #include <skinning_vertex>
+${BACK_FX_VERTEX_SKINNED}
+${ROBE_FX_VERTEX_SKINNED}
   #include <project_vertex>
   vFabricPos = position;
   vHw = headwear; // hat material (player/hat-detail.ts)
@@ -157,8 +208,10 @@ ${HAT_FX_VERTEX_POSITION}
   // of the lowered hood (mesh.ts), in the outfit's own colour.
   if (accent > 2.5 && accent < 10.5) vColor *= 1.0 - 2.0 * max(0.0, accent - floor(accent + 0.5));
   // Hair (hat-fx.ts codes -9..-11): the player's hair colour, at the face's tone (partColor.r: 0.5 = the colour itself,
-  // under = shade toward the roots / underside, over = a sheen on top).
-  if (fxHair()) vColor = fxHairTone(uHairColor, partColor.r);
+  // under = shade toward the roots / underside, over = a sheen on top), with the highlight colour's share (hair-fx.ts).
+${HAIR_FX_VERTEX_COLOUR}
+  // The Cape's faces take its owner's colours by their role (back-fx.ts capeTones).
+  if (backfx.w > 0.5) vColor = uCapeTones[int(backfx.w - 0.5)];
   vGlow = accent > 1.5 && accent < 2.5 ? 1.0 : 0.0;
 ${FABRIC_VERTEX_MAIN}
 ${VERTEX_MAIN}
@@ -196,6 +249,9 @@ ${FRAGMENT_PARS}
 ${FABRIC_FRAGMENT_PARS}
 ${HAT_FX_FRAGMENT_PARS}
 ${HAT_DETAIL_FRAGMENT_PARS}
+${BACK_FX_FRAGMENT_PARS}
+${HAIR_FX_FRAGMENT_PARS}
+${ROBE_FX_FRAGMENT_PARS}
 ${common}
 uniform float uGlowEdge;
 uniform float uSolidFade;
@@ -265,12 +321,15 @@ ${HILT_FRAGMENT_LIGHT}
   col = mix(col, vColor * 1.6 + 0.15, vGlow);
 ${HAT_FX_FRAGMENT_SOLID}
 ${HAT_DETAIL_FRAGMENT_SOLID}
+${BACK_FX_FRAGMENT_SOLID}
+${HAIR_FX_FRAGMENT_SOLID}
+${ROBE_FX_FRAGMENT_SOLID}
 #ifdef FINISH
   if (${FRAGMENT_IS_BLADE}) col = finishShade(n, V, L, ambient, key);
 #endif
   gl_FragColor = vec4(col, 1.0);
   // The map's light on the studio light (uMapLight). Self-lit parts keep their glow: accent strips, the lit hats.
-  gl_FragColor.rgb *= mix(vec3(1.0) + uMapLight, vec3(1.0), max(vGlow, step(3.5, vFx)));
+  gl_FragColor.rgb *= mix(vec3(1.0) + uMapLight, vec3(1.0), max(max(vGlow, step(3.5, vFx)), bkFlame() ? 1.0 : 0.0));
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
 ${depthFogFragment()}
@@ -286,6 +345,7 @@ varying float vGlow;
 varying vec3 vNormalW;
 varying vec3 vWorldPos;
 ${HAT_FX_FRAGMENT_PARS}
+${BACK_FX_FRAGMENT_PARS}
 ${common}
 ${DEPTH_FOG_FRAGMENT_PARS}
 void main() {
@@ -305,6 +365,7 @@ void main() {
   // Far away a ghost's body fills in a little (a faint shape loses its limbs otherwise).
   if (uContour > 0.0) a *= 1.0 + 0.3 * smoothstep(250.0, 650.0, length(cameraPosition - (uAxisA + uAxisB) * 0.5)) * uContour;
 ${HAT_FX_FRAGMENT_GHOST}
+${BACK_FX_FRAGMENT_GHOST}
   a = clamp(a * nearFade(), 0.0, 1.0);
 #ifdef DITHER
   if (a < bayer4(gl_FragCoord.xy) * 0.999 + 0.0005) discard;
@@ -353,6 +414,7 @@ export function solidMaterial(u: PlayerUniforms, look: MaterialLook = NO_LOOK): 
   // whatever generic attribute value another program left behind.
   (m.defaultAttributeValues as Record<string, number[]>).finishUV = [0, 0, 0, 0];
   (m.defaultAttributeValues as Record<string, number[]>).headwear = [0];
+  (m.defaultAttributeValues as Record<string, number[]>).backfx = [0, 0, 0, 0];
   return m;
 }
 
@@ -369,6 +431,7 @@ export function ghostMaterial(u: PlayerUniforms, dither: boolean): THREE.ShaderM
     defines: dither ? { DITHER: 1 } : {},
   });
   (m.defaultAttributeValues as Record<string, number[]>).headwear = [0];
+  (m.defaultAttributeValues as Record<string, number[]>).backfx = [0, 0, 0, 0];
   return m;
 }
 
@@ -377,6 +440,7 @@ export function silhouetteMaterial(u: PlayerUniforms): THREE.ShaderMaterial {
   const m = new THREE.ShaderMaterial({ uniforms: u, vertexShader: playerVertex, fragmentShader: silhouetteFragment, side: THREE.DoubleSide });
   (m.defaultAttributeValues as Record<string, number[]>).finishUV = [0, 0, 0, 0];
   (m.defaultAttributeValues as Record<string, number[]>).headwear = [0];
+  (m.defaultAttributeValues as Record<string, number[]>).backfx = [0, 0, 0, 0];
   return m;
 }
 
@@ -392,5 +456,6 @@ export function depthMaterial(u: PlayerUniforms): THREE.ShaderMaterial {
     depthWrite: true,
   });
   (m.defaultAttributeValues as Record<string, number[]>).headwear = [0];
+  (m.defaultAttributeValues as Record<string, number[]>).backfx = [0, 0, 0, 0];
   return m;
 }

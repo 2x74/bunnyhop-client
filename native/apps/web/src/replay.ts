@@ -65,7 +65,7 @@
 //                str8 packed cosmetic loadout (loadout.ts packLoadout: knife, finish, gloves, crown, the owner's hat,
 //                the bunny build and, from v0.0.29, the colourway as an 8th field that older readers never look at;
 //                from v0.0.38 the hilt skin as an 11th, absent for each knife's own hilt, and the gun camo as a
-//                12th, absent for no camo;
+//                12th, absent for no camo; from v0.0.42 the hop effect as a 13th and the back item as a 14th;
 //                v0.0.5 trailers also carried a pattern seed / wear, now ignored),
 //                so a replay or ghost shows the knife the run was played with. Same rules as the cosmetics trailer:
 //                no version bump (older decoders stop before it, including the cosmetics reader, which rewinds on

@@ -30,8 +30,12 @@ import { add, Builder, cross, frame, norm, ring, scale, sub, type Paint, type Wt
 import { crownGeometry } from "./crown";
 import { oniMask } from "./oni-mask";
 import { ponytail, ponytailDown, spaceBuns, spaceBunsDown } from "./wigs";
+import { long, longDown, spiky, spikyDown } from "./hair-styles";
+import { kitsuneMask, kitsuneMaskFace } from "./kitsune-mask";
 import { isWig } from "../../loadout";
+import { MASK_HAT } from "../../progression";
 import type { BunnyLook } from "./look";
+import { JAW_ITEMS, onJaw } from "./hat-fit";
 import { rig, type V3 } from "./rig";
 import { AURORA_C, HALO_C, HALO_N, ORBIT_C, ORBIT_R, PROPELLER_C, orbitAngle } from "../hat-fx";
 import type { CosmeticLoadout } from "../../loadout";
@@ -358,8 +362,9 @@ function luckyCoins(): THREE.BufferGeometry {
 function dealerVisor(): THREE.BufferGeometry {
   const W = headWeight();
   const b = new Builder();
-  // A dealer's eyeshade: a black band round the hood with gold piping, and a curved felt-green shade over the forehead,
-  // a lighter green at its edge.
+  // A dealer's eyeshade: a black band round the hood with gold piping and a gold slide buckle at the back, and a curved
+  // shade of green celluloid over the forehead: a real slab (v0.0.42; it was a single sheet, a green line from most
+  // angles) dipping toward its front edge, a paler bevel and gold piping along that edge, a darker underside.
   const K = 32;
   const rAt = (z: number) => Math.sqrt(Math.max(0.04, 1 - ((z - HOOD_C[2]) / HOOD_R[2]) ** 2));
   const pt = (th: number, z: number, out: number): V3 => {
@@ -368,24 +373,40 @@ function dealerVisor(): THREE.BufferGeometry {
   };
   const foot = (th: number) => 72.3 + 1.5 * (0.5 + 0.5 * Math.cos(th));
   const BAND = 0x111216, GOLD = 0xe0b13a, SHADE = 0x1e9a5a, SHADE2 = 0x167a47, EDGE = 0x5fd896;
-  const prof: [number, number][] = [[0, 0.04], [0, 0.32], [0.15, 0.36], [0.85, 0.36], [1, 0.32], [1, 0.04]];
+  const BH = 0.95;
+  const prof: [number, number][] = [[0, 0.04], [0, 0.34], [0.14, 0.4], [0.86, 0.4], [1, 0.34], [1, 0.04]];
   const band = prof.map(([f, o]) => Array.from({ length: K }, (_, j) => {
     const th = (j / K) * Math.PI * 2;
-    return pt(th, foot(th) + f * 0.75, o);
+    return pt(th, foot(th) + f * BH, o);
   }));
   b.surface(band, { closed: true, paint: (i) => fixed(i === 2 || i === 4 ? GOLD : BAND), weight: () => W, out: (i, k) => sub(band[i][k], [HOOD_C[0], HOOD_C[1], band[i][k][2]]) });
-  // The shade: from the band's front edge, out, forward and a little down, curving round the front 150 degrees.
-  const S = 13, A = (75 * Math.PI) / 180;
-  const shade: V3[][] = [0, 0.35, 0.7, 1].map((r) =>
-    Array.from({ length: S + 1 }, (_, j) => {
-      const th = -A + (2 * A * j) / S;
-      const base = pt(th, foot(th) + 0.7, 0.36);
-      const outDir: V3 = norm([Math.sin(th), -Math.cos(th), 0]);
-      const reach = 3.1 * (0.75 + 0.25 * Math.cos(th)) * r;
-      return add(base, add(scale(outDir, reach), [0, 0, -0.95 * r * r + 0.25 * r]));
-    }),
-  );
-  b.surface(shade, { closed: false, paint: (i) => fixed(i === 2 ? EDGE : i === 1 ? SHADE2 : SHADE), weight: () => W, out: () => [0, 0, 1] });
+  // The slide buckle at the back of the band (what the chase camera sees).
+  {
+    const c = pt(Math.PI, foot(Math.PI) + BH / 2, 0.46);
+    const frameRing = ring(c, [1, 0, 0], [0, 0, 1], 0.72, 0.5, 16, 4);
+    b.tube([...frameRing, frameRing[0]], 0.11, 6, [0, 1, 0], () => fixed(GOLD), () => W, false);
+    b.tube([add(c, [0, 0.02, -0.5]), add(c, [0, 0.06, 0.5])], 0.08, 6, [1, 0, 0], () => fixed(GOLD), () => W);
+  }
+  // The shade: from the band's front, out and forward, dipping toward its edge, round the front 150 degrees.
+  const S = 16, A = (75 * Math.PI) / 180, T = 0.2;
+  const R = [0, 0.3, 0.6, 0.86, 1];
+  const at = (r: number, j: number, lift: number): V3 => {
+    const th = -A + (2 * A * j) / S;
+    const base = pt(th, foot(th) + BH * 0.72, 0.38);
+    const outDir: V3 = norm([Math.sin(th), -Math.cos(th), 0]);
+    const reach = 3.5 * (0.72 + 0.28 * Math.cos(th)) * r;
+    // Thinner toward the edge; the ends of the arc taper into the band.
+    const thick = lift * T * (1 - 0.45 * r) * Math.min(1, (1 - Math.abs(th) / A) * 5 + 0.25);
+    return add(base, add(scale(outDir, reach), [0, 0, -1.25 * r * r + 0.22 * r + thick]));
+  };
+  const top = R.map((r) => Array.from({ length: S + 1 }, (_, j) => at(r, j, 1)));
+  const under = R.map((r) => Array.from({ length: S + 1 }, (_, j) => at(r, j, -1)));
+  b.surface(top, { closed: false, paint: (i) => fixed(i === 3 ? EDGE : i === 1 ? SHADE2 : SHADE), weight: () => W, out: () => [0, 0, 1] });
+  b.surface(under, { closed: false, paint: () => fixed(SHADE2), weight: () => W, out: () => [0, 0, -1] });
+  // Its front edge, closed, with the piping along it; and the two ends.
+  b.surface([top[R.length - 1], under[R.length - 1]], { closed: false, paint: () => fixed(EDGE), weight: () => W, out: (_i, k) => sub(top[R.length - 1][k], top[R.length - 2][k]) });
+  b.tube(top[R.length - 1].map((p, j) => scale(add(p, under[R.length - 1][j]), 0.5)), 0.13, 6, [0, 0, 1], () => fixed(GOLD), () => W);
+  for (const j of [0, S]) b.surface([top.map((row) => row[j]), under.map((row) => row[j])], { closed: false, paint: () => fixed(SHADE2), weight: () => W, out: () => [j === 0 ? -1 : 1, 0, 0] });
   const g = b.geometry();
   g.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 70), 60);
   return g;
@@ -730,32 +751,42 @@ function starfish(): THREE.BufferGeometry {
   // Tangent frame at the centre: e1 round the hood, e2 up it.
   const e1 = norm(cross([0, 0, 1], n0));
   const e2 = norm(cross(n0, e1));
-  const R = 3.1;
+  // (v0.0.42: plump arms with a ridge, a row of pale bumps down each instead of candy stripes, the tips lifting off
+  // the hood; a size up. Wet, under a glossy coat: hat-detail.ts.)
+  const R = 3.7;
+  const bead = (p: V3, n: V3, r: number) => b.surface(b.ellipsoidRows(p, [r, r, r * 0.8], n, e1, 8, 4, 0, Math.PI * 0.62), { paint: () => fixed(PALE), weight: () => W, closed: true });
   for (let k = 0; k < 5; k++) {
     const th = rad(90 + k * 72 + 8);
     const dir = norm(add(scale(e1, Math.cos(th)), scale(e2, Math.sin(th))));
     const rows: V3[][] = [];
-    const STEPS = 7;
+    const tops: [V3, V3, number][] = [];
+    const STEPS = 9;
     for (let i = 0; i <= STEPS; i++) {
       const t = i / STEPS;
-      // Follow the hood: step along the tangent, then pull back onto the surface (plus the arm's own lift).
+      // Follow the hood: step along the tangent, then pull back onto the surface; the last third curls up off it.
       const flat = add(centre, scale(dir, R * t));
-      const back = sub(flat, scale(n0, 0.35 * t * t * R));
+      const back = sub(flat, scale(n0, (0.35 * t * t - 0.3 * Math.max(0, t - 0.62) ** 1.5 * 3) * R));
       const n = normalAt(back);
-      const w = 0.85 * (1 - 0.8 * Math.pow(t, 1.3)) + 0.08;
-      const h = 0.55 * (1 - 0.7 * t) + 0.06;
+      const w = 1.0 * (1 - 0.82 * Math.pow(t, 1.25)) + 0.07;
+      const h = 0.78 * (1 - 0.72 * t) + 0.07;
       const across = norm(cross(n, dir));
-      const c = add(back, scale(n, h * 0.55));
-      rows.push(ring(c, across, n, w, h, 10, 2.2));
+      const c = add(back, scale(n, h * 0.5));
+      // A rounded triangle in section: flat underneath, a ridge along the top.
+      rows.push(ring(c, across, n, w, h, 12, 2).map((q, j) => (j >= 1 && j <= 5 ? add(q, scale(n, h * 0.22 * (1 - Math.abs(j - 3) / 2.5))) : q)));
+      tops.push([add(c, scale(n, h * 1.2)), n, w]);
     }
-    b.surface(rows, {
-      paint: (i, j) => fixed(j >= 2 && j <= 3 ? (i % 2 ? PALE : CORAL) : j < 5 ? CORAL : CORAL2),
-      weight: () => W,
-      capEnd: fixed(CORAL),
-    });
+    b.surface(rows, { paint: (_i, j) => fixed(j >= 1 && j <= 4 ? CORAL : CORAL2), weight: () => W, capEnd: fixed(CORAL) });
+    // Bumps down the ridge, smaller toward the tip.
+    for (const i of [2, 3, 4, 5, 6, 7]) bead(tops[i][0], tops[i][1], 0.2 * tops[i][2] + 0.07);
   }
-  // The middle: a low dome joining the arms.
-  b.surface(b.ellipsoidRows(add(centre, scale(n0, 0.25)), [1.15, 1.15, 0.55], n0, e1, 10, 5), { paint: (i) => fixed(i < 2 ? PALE : CORAL), weight: () => W, closed: true });
+  // The middle: a dome joining the arms, a ring of bumps round one in the centre.
+  const mid = add(centre, scale(n0, 0.3));
+  b.surface(b.ellipsoidRows(mid, [1.3, 1.3, 0.75], n0, e1, 12, 6), { paint: (i) => fixed(i < 4 ? CORAL : CORAL2), weight: () => W, closed: true });
+  bead(add(mid, scale(n0, 0.7)), n0, 0.26);
+  for (let k = 0; k < 5; k++) {
+    const th = rad(90 + k * 72 + 44);
+    bead(add(mid, add(scale(n0, 0.56), scale(add(scale(e1, Math.cos(th)), scale(e2, Math.sin(th))), 0.7))), n0, 0.17);
+  }
   const g = b.geometry();
   g.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 70), 60);
   return g;
@@ -815,6 +846,15 @@ const BUILD: Record<string, () => THREE.BufferGeometry> = {
   "hat-space-buns@down": spaceBunsDown,
   "hat-ponytail@down": ponytailDown,
   "hat-oni-mask": oniMask,
+  // v0.0.42 (kitsune-mask.ts): pushed up on the side of the head, or (loadout.maskOn) over the face.
+  "hat-kitsune-mask": () => kitsuneMask(),
+  "hat-kitsune-mask@bune": () => kitsuneMask(undefined, true),
+  "hat-kitsune-mask@face": () => kitsuneMaskFace(),
+  // v0.0.42 (hair-styles.ts): Spiky Hair and Long Hair, hood up and (the standard bunny) on the bare head.
+  "hat-spiky": spiky,
+  "hat-spiky@down": spikyDown,
+  "hat-long": long,
+  "hat-long@down": longDown,
   "hat-founder-crown": founderCrown,
   "hat-tophat": topHat,
   "hat-beanie": beanie,
@@ -828,9 +868,17 @@ const BUILD: Record<string, () => THREE.BufferGeometry> = {
 
 const cache = new Map<string, THREE.BufferGeometry>();
 
+/** The builder for a geometry key: a hat's own, or with "@jaw" the same carried onto the jaw (hat-fit.ts onJaw). */
+const JAW = "@jaw";
+function maker(key: string): (() => THREE.BufferGeometry) | null {
+  if (!key.endsWith(JAW)) return BUILD[key] ?? null;
+  const make = BUILD[key.slice(0, -JAW.length)];
+  return make ? () => onJaw(make()) : null;
+}
+
 /** A hat's geometry (built once each); null for an unknown id. */
 export function hatGeometry(id: string): THREE.BufferGeometry | null {
-  const make = BUILD[id];
+  const make = maker(id);
   if (!make) return null;
   let g = cache.get(id);
   if (!g) cache.set(id, (g = make()));
@@ -845,7 +893,7 @@ export const hasHatGeometry = (id: string): boolean => cache.has(id);
 
 /** A hat built elsewhere (prebuild.ts, in a worker), unless one is already there. */
 export function seedHatGeometry(id: string, g: THREE.BufferGeometry): void {
-  if (BUILD[id] && !cache.has(id)) cache.set(id, g);
+  if (maker(id) && !cache.has(id)) cache.set(id, g);
 }
 
 /**
@@ -853,8 +901,13 @@ export function seedHatGeometry(id: string, g: THREE.BufferGeometry): void {
  * for overall #1-#3, else nothing. A hat wins over the crown its wearer holds (owner call, v0.0.6).
  */
 export function headwear(l: CosmeticLoadout | null | undefined, look: BunnyLook = "bunny"): THREE.BufferGeometry | null {
-  return (l?.hat ? hatGeometry(headwearKey(l.hat, look)) : null) ?? (l?.crown ? crownGeometry(l.crown) : null);
+  return (l?.hat ? hatGeometry(headwearKey(l.hat, look, l)) : null) ?? (l?.crown ? crownGeometry(l.crown) : null);
 }
 
-/** The geometry key of a hat on a look: a wig on the standard bunny is the hood-down build ("<id>@down"). */
-export const headwearKey = (hat: string, look: BunnyLook): string => (look === "bunny" && isWig(hat) ? `${hat}@down` : hat);
+/**
+ * The geometry key of a hat on a look: a wig on the standard bunny is the hood-down build ("<id>@down"), an item on its
+ * lower face (hat-fit.ts JAW_ITEMS) the one carried onto its jaw ("<id>@jaw"); the Kitsune Mask worn over the face
+ * (`l.maskOn`) is its "@face" build on every look, and pushed up on Bun-E its "@bune" one (behind the ear cup).
+ */
+export const headwearKey = (hat: string, look: BunnyLook, l?: { maskOn?: boolean } | null): string =>
+  hat === MASK_HAT ? (l?.maskOn ? `${hat}@face` : look === "bune" ? `${hat}@bune` : hat) : look !== "bunny" ? hat : isWig(hat) ? `${hat}@down` : JAW_ITEMS.includes(hat) ? `${hat}${JAW}` : hat;

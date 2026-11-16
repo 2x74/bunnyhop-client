@@ -23,6 +23,8 @@ import { warmPrograms, drawHiddenPrograms } from "../../graphics/warm-programs";
 import type { CosmeticLoadout } from "../../loadout";
 import { hasCrownGeometry, seedCrownGeometry } from "./crown";
 import { hasHatGeometry, seedHatGeometry } from "./hats";
+import { backGeometry, hasBackGeometry, seedBackGeometry } from "./backs";
+import type { BackRig } from "../back-fx";
 import { hasBunnyGeometry, seedBunnyGeometry } from "./mesh";
 import { bunnyParts } from "./prebuild-parts";
 import { hasViewmodelGeometry, seedViewmodelGeometry, viewmodelGeometry } from "../../viewmodel/mesh";
@@ -41,7 +43,7 @@ export interface PlainGeometry {
 
 type VmReply = { id: number; vm: { knife: string; glove: GloveStyleId; geometry: PlainGeometry; tris: number | null }[]; clouds: { knife: string; p: Float32Array; grip: Uint8Array; n: number }[] };
 type GunReply = { id: number; gunKey: string; gunId: string; gun: PlainGeometry; silencer: PlainGeometry | null; hold: Omit<GunHoldData, "def"> };
-type Reply = GunReply | { id: number; key: string; body: PlainGeometry | null; hat: PlainGeometry | null; crown: PlainGeometry | null } | VmReply | { id: number; error: string };
+type Reply = GunReply | { id: number; key: string; body: PlainGeometry | null; hat: PlainGeometry | null; crown: PlainGeometry | null; back?: PlainGeometry | null; backRig?: BackRig | null } | VmReply | { id: number; error: string };
 
 function geometry(p: PlainGeometry): THREE.BufferGeometry {
   const g = new THREE.BufferGeometry();
@@ -103,6 +105,13 @@ function ensureWorker(): Worker | null {
           seedCrownGeometry(tier, geometry(r.crown));
           if (r.crown.glowNormals) seedShellGeometry(crownGeometry(tier), r.crown.glowNormals);
         }
+        const back = partsOf.get(r.id)?.back;
+        if (r.back && back) {
+          const g = geometry(r.back);
+          g.userData.backRig = r.backRig;
+          seedBackGeometry(back.key, g);
+          if (r.back.glowNormals) seedShellGeometry(backGeometry(back.id, back.fit)!, r.back.glowNormals);
+        }
       }
       partsOf.delete(r.id);
       hatOf.delete(r.id);
@@ -146,8 +155,9 @@ export function prebuildBunny(outfit: string | null | undefined, loadout: Cosmet
   const needBody = !hasBunnyGeometry(p.key) || (glow && !hasShellGeometry(bunnyGeometry(p.knife, p.glove, p.look, p.body, p.hood)));
   const needHat = !!p.hat && (!hasHatGeometry(p.hat) || (glow && !hasShellGeometry(hatGeometry(p.hat)!)));
   const needCrown = !!p.crown && (!hasCrownGeometry(p.crown) || (glow && !hasShellGeometry(crownGeometry(p.crown))));
-  if (!needBody && !needHat && !needCrown) return Promise.resolve();
-  const flight = `${p.key}|${p.hat ?? ""}|${p.crown ?? ""}|${glow}`;
+  const needBack = !!p.back && (!hasBackGeometry(p.back.key) || (glow && !hasShellGeometry(backGeometry(p.back.id, p.back.fit)!)));
+  if (!needBody && !needHat && !needCrown && !needBack) return Promise.resolve();
+  const flight = `${p.key}|${p.hat ?? ""}|${p.crown ?? ""}|${p.back?.key ?? ""}|${glow}`;
   const running = inflight.get(flight);
   if (running) return running;
   const w = ensureWorker();
@@ -167,7 +177,7 @@ export function prebuildBunny(outfit: string | null | undefined, loadout: Cosmet
     waiting.set(id, () => (clearTimeout(timer), resolve()));
   }).finally(() => inflight.delete(flight));
   inflight.set(flight, done);
-  w.postMessage({ id, outfit: outfit ?? null, loadout, body: needBody, hat: needHat, crown: needCrown, glow });
+  w.postMessage({ id, outfit: outfit ?? null, loadout, body: needBody, hat: needHat, crown: needCrown, back: needBack, glow });
   return done;
 }
 

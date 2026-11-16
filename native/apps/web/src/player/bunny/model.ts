@@ -32,6 +32,9 @@ import { setGarmentPattern } from "../fabric";
 import { BunnyProcedural } from "./procedural";
 import { BodyBank } from "./bank";
 import { LegLayer, type GroundProbe } from "./legs";
+import { Posture } from "./posture";
+import { FollowThrough } from "./follow";
+import { PoseContinuity } from "./continuity";
 import { motionScale, springRamp } from "../../viewmodel/feel";
 import { concat, EAR, EAR_DOWN, invert34, KNIFE_BONE, KNIFE_PART_BONES, knifePartBone, rig, type Rig } from "./rig";
 import { PartPoser } from "../../viewmodel/knives/tp-parts";
@@ -40,15 +43,27 @@ import { TP_CARROT } from "../../viewmodel/knives/ctx";
 import { gloveStyle, HAIR_DEFAULT, HAIR_LENGTH, type CosmeticLoadout } from "../../loadout";
 import { applyLoadoutUniforms, cosmeticsStill, NO_LOOK, sameLook, type MaterialLook } from "../../viewmodel/finishes/shader";
 import { advanceCapybara, advancePonytail, capybaraMotion, advancePropeller, ponytailMotion } from "../hat-fx";
+import { advanceHair, hairMotion, hairRests, lengthFactor, SPRUNG_HATS } from "../hair-fx";
 import { ensureBunnyLayout } from "../../viewmodel/finishes/layout";
 import { headwear } from "./hats";
 import { ensureHeadwear } from "../hat-detail";
 import { hatFit } from "./hat-fit";
+import { BACK_KIND, backFit, backGeometry, backRigOf, ponytailRest } from "./backs";
+import { advanceBack, backMotion, backUniform, backUniformMid, backUniformTip, capeTones } from "../back-fx";
+import { advanceSleeves, robeTones, sleeveMotion, sleeveUniform } from "../robe-fx";
+import { sleeveAnchor } from "./robe";
+import type { V3 } from "./rig";
+import { ROBE_ITEM } from "../../progression";
 import { lookOf, type BunnyLook } from "./look";
+import { HEAD_SHAPE } from "./head-shape";
 import { gunById } from "../../viewmodel/guns/index";
 
+/** How far below the feet a long cape may hang in the air (units). */
+const CAPE_AIR_DROP = 40;
 /** The ponytail's length over the built one (loadout.hairLength, a percent; absent = 1). */
 const ponyLength = (l: CosmeticLoadout | null | undefined): number => (l?.hairLength ?? HAIR_LENGTH.default) / 100;
+/** How far a long ponytail stands off the back over a worn pack (backs.ts ponytailRest), for uPonytail.w. */
+const ponyRest = (l: CosmeticLoadout | null | undefined, look: BunnyLook): number => (l?.hat === "hat-ponytail" ? ponytailRest(l.back, look === "bunny") : 0);
 import { bunnyHold } from "../../viewmodel/guns/meshes";
 import { GunHold } from "./gun-hold";
 import { BunnyGunFx } from "./gun-fx";
@@ -62,6 +77,7 @@ const BANK_PIVOT = new THREE.Vector3();
 /** Third-person muzzle flash size per gun class (the first-person quads, scaled for distance). */
 const FLASH_SIZE = { pistol: 1.7, smg: 1.5, rifle: 2.0, shotgun: 2.5, sniper: 2.3 } as const;
 const _pt = new THREE.Vector3();
+const _hairHi = new THREE.Color();
 
 class DirectSkeleton extends THREE.Skeleton {
   constructor(n: number) {
@@ -115,6 +131,14 @@ function swing(a: ArrayLike<number>, b: ArrayLike<number>, pivot: ArrayLike<numb
 const EAR_MB = new Float64Array(3), EAR_MD = new Float64Array(3), EAR_WB = new Float64Array(3), EAR_WD = new Float64Array(3);
 const EAR_TARGET = new Float64Array(3), EAR_BV = new Float64Array(3), EAR_BD = new Float64Array(3);
 
+/**
+ * The share of the head's vertical speed changes the ears' springs feel (v0.0.42). At 1 a bhop's bounce (the head
+ * goes from 300 u/s down to 300 up in a tick) throws each ear against its 63 degree stop for a sixth of every hop, so
+ * from behind the ears vanished at each bounce; at this they dip about 30 degrees and spring back. Sideways and
+ * fore-aft motion (turns, stops, speed) is felt in full.
+ */
+export const EAR_JOLT = 0.16;
+
 /** Bind-space directions an ear (left; mirror x) leans toward when acting: pricked straight up, laid flat back. */
 const EAR_UP = [0.08, 0.06, 1].map((v, _, a) => v / Math.hypot(...a));
 const EAR_BACK = [0.32, 0.95, -0.02].map((v, _, a) => v / Math.hypot(...a));
@@ -142,6 +166,8 @@ interface Ear {
   v: Float64Array;
   eq: Float64Array;
   wb: Float64Array;
+  /** The base's vertical speed at the last update (EAR_JOLT). */
+  bvz: number;
   hasBase: boolean;
   side: number;
 }
@@ -241,11 +267,20 @@ export class BunnyModel implements PlayerModelImpl {
   private loadout: CosmeticLoadout | null = null;
   private capyMotion = capybaraMotion();
   private ponyMotion = ponytailMotion();
+  private hairMotion = hairMotion();
   /**
    * Headwear (hats.ts headwear): the owner's hat (loadout.hat) or else the rank crown (loadout.crown: overall #1 / #2 /
    * #3), sharing the skeleton and the body's material.
    */
   private crown: THREE.SkinnedMesh | null = null;
+  /** The back item (backs.ts; loadout.back), on the same skeleton and material; moved by back-fx.ts. */
+  private back: THREE.SkinnedMesh | null = null;
+  private backMotion = backMotion();
+  /** A long cape's ground (BackRig.hang): the height under the feet it lies on while the bunny stands on something. */
+  private capeGround = 0;
+  /** The Robe's sleeves (robe-fx.ts): their springs, and where each is read from (bone, a point in its bind space). */
+  private sleeves = sleeveMotion();
+  private sleeveAt: { bones: [number, number]; at: V3 } | null = null;
   /**
    * A map-given gun in both hands (guns/meshes.ts bunnyGunGeometry, the body's material) on its own two-bone skeleton
    * (gun, magazine) that the hold writes (gun-hold.ts: the gun on the aim, both arms on it, kick / reload / draw); the
@@ -276,12 +311,23 @@ export class BunnyModel implements PlayerModelImpl {
   private vzHist: { t: number; vz: number }[] = [];
   private lastJump = -1;
   private wasGrounded = true;
+  /** A jump happened on the last update (the hop effects read it: player/hop-layer.ts). */
+  jumpedLast = false;
+  /** The visual clock (seconds): the pose's visualTime, else the updates' summed time. */
+  get clock(): number {
+    return this.time;
+  }
   private yaw = 0;
   /** Bank into turns (bank.ts). */
   private bodyBank = new BodyBank();
   /** Feet planting, jump phases, landings, idle shift, climb / swim (legs.ts). */
   private legs: LegLayer;
   private legsOn = true;
+  /** Stands the CS:S knife stoop up (posture.ts). */
+  private posture = new Posture(this.r);
+  private continuity: PoseContinuity | null = null;
+  /** The chest and arms answering jumps, bounces and landings, and the idle breath (follow.ts). */
+  private follow: FollowThrough;
   /** Per-model seed (0..1): idle shift phase, ear twitch schedule. Deterministic for the same options. */
   private seed: number;
   private head = this.r.bone("Head1");
@@ -291,13 +337,16 @@ export class BunnyModel implements PlayerModelImpl {
   private makeEars(hood: BunnyHood): Ear[] {
     return [1, -1].map((side) => {
       const bone = this.r.index(side > 0 ? "bunny.EarL" : "bunny.EarR");
-      const b = this.r.bind;
       const down = hood === "down";
-      const base = down ? [EAR_DOWN.base[0] * side, EAR_DOWN.base[1], EAR_DOWN.base[2]] : [b[bone * 12 + 3], b[bone * 12 + 7], b[bone * 12 + 11]];
+      // The standard bunny's ears are built with its head's scale (mesh.ts scaleSection), so they pivot at the scaled
+      // roots: until v0.0.42 they pivoted at the reference points, 1.9 units under the roots inside the hood, and a
+      // swinging ear slid across it. Plush, Bun-E and Tek have their own heads at the reference size.
+      const hs = !down && (this.bodyLook ?? "bunny") === "bunny" ? HEAD_SHAPE.scale : 1, hp = HEAD_SHAPE.pivot;
+      const base = down ? [EAR_DOWN.base[0] * side, EAR_DOWN.base[1], EAR_DOWN.base[2]] : [EAR.base[0] * side, EAR.base[1], EAR.base[2]].map((c, k) => hp[k] + (c - hp[k]) * hs);
       const dir0 = down ? [EAR_DOWN.dir[0] * side, EAR_DOWN.dir[1], EAR_DOWN.dir[2]] : [EAR.dir[0] * side, EAR.dir[1], EAR.dir[2]];
-      const mid = base.map((x, k) => x + dir0[k] * EAR.seg);
+      const mid = base.map((x, k) => x + dir0[k] * EAR.seg * hs);
       const carrier = down ? this.r.bone(EAR_DOWN.carrier) : this.r.bone("Head1");
-      return { bone, carrier, base, mid, dir0, p: new Float64Array(3), v: new Float64Array(3), eq: new Float64Array(3), wb: new Float64Array(3), hasBase: false, side };
+      return { bone, carrier, base, mid, dir0, p: new Float64Array(3), v: new Float64Array(3), eq: new Float64Array(3), wb: new Float64Array(3), bvz: 0, hasBase: false, side };
     });
   }
   /** The visual clock at the last ear update (the twitch schedule). */
@@ -329,12 +378,15 @@ export class BunnyModel implements PlayerModelImpl {
     this.bodyLook = lookOf(o.outfit);
     this.seed = o.seed ?? seedOf(`${o.outfit ?? ""}|${o.style ?? "solid"}|${o.color ?? ""}|${o.loadout?.hat ?? ""}`);
     this.legs = new LegLayer(this.r, this.seed);
+    this.follow = new FollowThrough(this.r, this.seed);
     this.legsOn = o.legs !== false;
 
     this.hood = hoodOf(this.bodyLook, o.loadout?.hat);
     this.ears = this.makeEars(this.hood);
     this.uniforms.uHairColor.value.setHex(o.loadout?.hairColor ?? HAIR_DEFAULT);
     this.uniforms.uPonytail.value.z = ponyLength(o.loadout);
+    this.uniforms.uPonytail.value.w = ponyRest(o.loadout, this.bodyLook);
+    this.setHairLook(o.loadout);
     const geo = bunnyGeometry(this.knife, gloveStyle(o.loadout?.glove).style, this.bodyLook, o.loadout?.body === "body-b" ? "feminine" : "classic", this.hood);
     const n = this.r.names.length;
     this.S = new Float32Array(n * 12);
@@ -452,7 +504,7 @@ export class BunnyModel implements PlayerModelImpl {
   /** The sample of posed vertices bodyBox is made of (same space), one at a time: the avatar's framing fits them. */
   bodyPoints(fn: (p: THREE.Vector3) => void): void {
     const S = this.S;
-    for (const m of [this.mesh, this.crown]) {
+    for (const m of [this.mesh, this.crown, this.back]) {
       if (!m) continue;
       const P = m.geometry.getAttribute("position"), SI = m.geometry.getAttribute("skinIndex"), HW = m.geometry.getAttribute("headwear");
       for (let i = 0; i < P.count; i += 5) {
@@ -520,6 +572,7 @@ export class BunnyModel implements PlayerModelImpl {
     if (k === this.knife) return;
     this.knife = k;
     this.applyLook(); // the knife's geometry (in the glove style), finish / glove layout on it
+    this.syncCape();
   }
 
   /** Colourway (progression "outfit-*" id). */
@@ -532,7 +585,12 @@ export class BunnyModel implements PlayerModelImpl {
     this.uniforms.uFabric.value = look === "plush" ? 1 : 0;
 
     this.applyLook(); // Tek's mesh (tek.ts) or the bunny's
+    this.ears = this.makeEars(this.hood);
     this.setCrown(this.headwear());
+    this.setBack();
+    this.uniforms.uPonytail.value.z = ponyLength(this.loadout);
+    this.uniforms.uPonytail.value.w = ponyRest(this.loadout, look);
+    this.uniforms.uHairFlex.value.w = hairRests(this.loadout?.hat, look === "bunny") ? 1 : 0;
   }
 
   /** Headwear for the loadout (hats.ts headwear): none on Tek, whose temple wings are its helmet. */
@@ -546,6 +604,7 @@ export class BunnyModel implements PlayerModelImpl {
     this.uniforms.uPalette.value.forEach((c, i) => c.set(pal[i]));
     setGarmentPattern(this.uniforms, this.colours.pattern);
     if (this.style === "solid") this.uniforms.uAccent.value.set(this.accentOverride ?? this.colours.accent);
+    this.syncCape();
   }
 
   setStyle(style: PlayerStyle, color?: THREE.ColorRepresentation, dither = this.dither): void {
@@ -555,6 +614,7 @@ export class BunnyModel implements PlayerModelImpl {
     if (style === "solid") {
       if (color !== undefined) this.accentOverride = color;
       this.uniforms.uAccent.value.set(this.accentOverride ?? this.colours.accent);
+      this.syncCape();
     } else if (color !== undefined) this.uniforms.uGhost.value.set(color);
     if (changed) this.rebuildMaterial();
     this.depthMesh.visible = style === "ghost" && !dither && !this.silhouette;
@@ -568,7 +628,19 @@ export class BunnyModel implements PlayerModelImpl {
       this.uniforms.uCapybara.value.set(0, 0, 0, 0);
       this.ponyMotion = ponytailMotion();
       this.uniforms.uPonytail.value.set(0, 0, 1, 0);
+      this.hairMotion = hairMotion();
+      this.uniforms.uHairSway.value.set(0, 0, 0, 1);
+      this.uniforms.uHairFlex.value.set(0, 0, 0, 0);
       this.uniforms.uPropellerAngle.value = 0;
+    }
+    if (this.loadout?.back !== l?.back) {
+      this.backMotion = backMotion();
+      this.uniforms.uBack.value.set(0, 0, 0, 0);
+      this.uniforms.uBackTip.value.set(0, 0, 0, 0);
+      this.uniforms.uBackMid.value.set(0, 0, 0, 0);
+      this.sleeves = sleeveMotion();
+      this.uniforms.uRobeL.value.set(0, 0, 0, 0);
+      this.uniforms.uRobeR.value.set(0, 0, 0, 0);
     }
     const camoChanged = (this.loadout?.camo ?? null) !== (l?.camo ?? null);
     this.loadout = l;
@@ -580,8 +652,35 @@ export class BunnyModel implements PlayerModelImpl {
     }
     this.uniforms.uHairColor.value.setHex(l?.hairColor ?? HAIR_DEFAULT);
     this.uniforms.uPonytail.value.z = ponyLength(l);
+    this.uniforms.uPonytail.value.w = ponyRest(l, this.bodyLook);
+    this.setHairLook(l);
     this.applyLook();
     this.setCrown(this.headwear());
+    this.setBack();
+    this.syncCape();
+  }
+
+  /** The Cape's tones (back-fx.ts capeTones): the colourway's accent and its owner's colours. */
+  private syncCape(): void {
+    const a = this.uniforms.uAccent.value;
+    // (The Robe's tones take the Cape's place while it is worn: robe-fx.ts robeTones, from the colourway's joggers.)
+    const pants = this.uniforms.uPalette.value[2];
+    const robe = this.loadout?.back === ROBE_ITEM;
+    this.uniforms.uRobe.value.x = robe ? (this.loadout?.robePattern ?? 0) : 0;
+    const t = robe ? robeTones([pants.r, pants.g, pants.b], [a.r, a.g, a.b], this.loadout?.robeColor, this.loadout?.robePrint) : capeTones([a.r, a.g, a.b], this.loadout?.capeColor, this.loadout?.capeLining);
+    this.uniforms.uCapeTones.value.forEach((c, i) => c.setRGB(t[i][0], t[i][1], t[i][2]));
+  }
+
+  /** The highlight colour and the sprung locks' length (hair-fx.ts) of a loadout. */
+  private setHairLook(l: CosmeticLoadout | null | undefined): void {
+    const hi = this.uniforms.uHairHi.value;
+    if (l?.hairHighlight === undefined) hi.set(0, 0, 0, 0);
+    else {
+      _hairHi.setHex(l.hairHighlight);
+      hi.set(_hairHi.r, _hairHi.g, _hairHi.b, 1);
+    }
+    this.uniforms.uHairSway.value.w = lengthFactor(l?.hat, l?.hairLength);
+    this.uniforms.uHairFlex.value.w = hairRests(l?.hat, this.bodyLook === "bunny") ? 1 : 0;
   }
 
   /** The gun in the right hand (a core weapon id, "glock"; viewmodel/guns), or null for the knife. */
@@ -649,6 +748,30 @@ export class BunnyModel implements PlayerModelImpl {
     this.yawG.add(m);
   }
 
+  /** The back item for the loadout, fitted to the build and the hood (backs.ts backFit). */
+  private setBack(): void {
+    const id = this.loadout?.back;
+    const geo = id ? backGeometry(id, backFit(this.bodyLook, this.loadout?.body === "body-b" ? "feminine" : "classic", this.hood, this.loadout?.hat, this.loadout?.capeLength, this.loadout?.robeTied)) : null;
+    if (this.back?.geometry === geo) return;
+    this.back?.removeFromParent();
+    this.back = null;
+    this.uniforms.uCape.value.set(0, 0, 0, 0);
+    if (!geo) return;
+    const r = backRigOf(geo);
+    if (r) this.uniforms.uBackPivot.value.fromArray(r.pivot), this.uniforms.uBackAxis.value.fromArray(r.axis), this.uniforms.uBackPivot2.value.fromArray(r.pivot2 ?? r.pivot);
+    // (z: the ground under the feet; update() lets it fall away in the air.)
+    this.capeGround = r?.hang?.[1] ?? 0;
+    if (r?.hang) this.uniforms.uCape.value.set(1, r.hang[0], r.hang[1], 0);
+    if (r?.robe) (this.uniforms.uRobe.value.y = r.robe.drop), (this.uniforms.uRobe.value.z = r.robe.radius), (this.uniforms.uRobe.value.w = r.robe.from);
+    const m = new THREE.SkinnedMesh(geo, this.mesh.material);
+    m.bindMode = THREE.DetachedBindMode;
+    m.bind(this.skeleton, new THREE.Matrix4());
+    m.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 45), 62);
+    m.renderOrder = this.mesh.renderOrder;
+    this.back = m;
+    this.yawG.add(m);
+  }
+
   private applyLook(): void {
     // Geometry per knife + glove style + look + build + hood (mesh.ts bunnyGeometry, cached). A wig lowers the hood,
     // and the ears move with it (their springs restart from rest).
@@ -683,7 +806,7 @@ export class BunnyModel implements PlayerModelImpl {
     const m = this.silhouette ? silhouetteMaterial(this.uniforms) : this.style === "solid" ? solidMaterial(this.uniforms, this.look) : ghostMaterial(this.uniforms, this.dither);
     m.forceSinglePass = true;
     this.mesh.material = m;
-    for (const extra of [this.gun, this.silencer, this.crown]) if (extra) extra.material = m;
+    for (const extra of [this.gun, this.silencer, this.crown, this.back]) if (extra) extra.material = m;
   }
 
   get currentStyle(): PlayerStyle {
@@ -860,7 +983,7 @@ export class BunnyModel implements PlayerModelImpl {
   setPlayerGlow(config: PlayerGlow | null, shown: boolean, auraEnabled = true): void { this.glow.set(config, shown, auraEnabled); }
 
   update(dt: number): void {
-    this.glow.sync([this.mesh, ...(this.crown ? [this.crown] : [])], this.style === "solid" && !this.silhouette, this.mesh.renderOrder);
+    this.glow.sync([this.mesh, ...(this.crown ? [this.crown] : []), ...(this.back ? [this.back] : [])], this.style === "solid" && !this.silhouette, this.mesh.renderOrder);
     // Glow separation on the body while its glow shows (materials.ts uGlowEdge); 0 otherwise: the plain look.
     this.uniforms.uGlowEdge.value = this.glow.drawn ? 1 : 0;
     const s = this.pose;
@@ -894,7 +1017,16 @@ export class BunnyModel implements PlayerModelImpl {
       const p = this.ponyMotion;
       const len = ponyLength(this.loadout);
       advancePonytail(p, this.vel, s.yaw, dt, snap, cosmeticsStill(), len);
-      this.uniforms.uPonytail.value.set(p.pitch, p.side, len, 0);
+      this.uniforms.uPonytail.value.set(p.pitch, p.side, len, ponyRest(this.loadout, this.bodyLook));
+    }
+    if (this.loadout?.hat && SPRUNG_HATS.includes(this.loadout.hat)) {
+      // Sprung locks (Spiky Hair, Long Hair): two springs, the same inputs as the tail's.
+      const m = this.hairMotion;
+      advanceHair(m, this.vel, s.yaw, dt, snap, cosmeticsStill());
+      const sw = this.uniforms.uHairSway.value;
+      sw.set(m.loose[0], m.loose[1], m.loose[2], sw.w);
+      const fl = this.uniforms.uHairFlex.value;
+      fl.set(m.stiff[0], m.stiff[1], m.stiff[2], fl.w);
     }
     if (this.loadout?.hat === "hat-capybara" || this.loadout?.hat === "hat-maxwell") {
       const c = this.capyMotion;
@@ -906,6 +1038,24 @@ export class BunnyModel implements PlayerModelImpl {
     this.root.position.set(px, py, pz);
 
     const jumped = s.jumped ?? this.detectJump(s, snap);
+    const backKind = this.back && this.loadout?.back ? BACK_KIND[this.loadout.back] : undefined;
+    if (backKind && backKind !== "still") {
+      // The back item's motion (back-fx.ts): speed, the eye's turn, the body's acceleration, hops.
+      const bm = this.backMotion;
+      advanceBack(bm, backKind, this.vel, s.yaw, jumped, dt, snap, cosmeticsStill(), (this.loadout?.capeLength ?? 100) / 100, !!this.loadout?.robeTied);
+      const ub = backUniform(bm, backKind, hypot2(this.vel[0], this.vel[1]));
+      this.uniforms.uBack.value.fromArray(ub);
+      this.uniforms.uBackTip.value.fromArray(backUniformTip(bm, backKind));
+      this.uniforms.uBackMid.value.fromArray(backUniformMid(bm, backKind, ub, (this.loadout?.capeLength ?? 100) / 100));
+      // A long cape lies on the ground only while there is ground under the feet: in the air it hangs free (the
+      // floor comes back up under it over the landing).
+      const cape = this.uniforms.uCape.value;
+      if (cape.x > 0.5) {
+        const want = s.grounded ? this.capeGround : this.capeGround - CAPE_AIR_DROP;
+        cape.z = snap ? want : cape.z + (want - cape.z) * (1 - Math.exp(-dt / (s.grounded ? 0.05 : 0.12)));
+      }
+    }
+    this.jumpedLast = jumped && !snap;
     const S = this.S;
     const inv = this.inv;
     const r = this.r;
@@ -929,14 +1079,23 @@ export class BunnyModel implements PlayerModelImpl {
         else if (r.parent[i] >= 0) S.copyWithin(i * 12, r.parent[i] * 12, r.parent[i] * 12 + 12);
       }
       this.yaw = anim.feetYaw;
+      // The jump sequence's snaps eased out (continuity.ts).
+      (this.continuity ??= new PoseContinuity(r.csBones * 12)).apply(S, `${anim.activity}${anim.jumps}`, dt, snap);
     } else {
       this.yaw = this.proc.update(snap ? 0 : dt, s, this.vel, snap, jumped, S);
     }
+    // Posture (posture.ts): the upper body out of the knife set's stoop, before the legs so they keep the feet under it.
+    const speed = hypot2(this.vel[0], this.vel[1]);
+    this.posture.update(dt, snap, !!this.cs, s.grounded, s.crouched, speed);
+    this.posture.apply(S, s.pitch);
+    // Follow-through (follow.ts) on top of it. Not on the acting poses (the avatar's stills, the first-visit bunny).
+    this.follow.update(dt, snap, !!this.cs, this.vel[2], s.grounded, speed, this.time);
+    if (!this.acting) this.follow.apply(S);
     // Legs (legs.ts): with this frame's bank, so planted feet stay put in the world whatever the body does. Not on the
     // avatar / loadout stage's acting poses (they pose the body by hand).
-    const bank = this.bodyBank.update(dt, s.yaw, s.grounded, hypot2(this.vel[0], this.vel[1]), s.sidemove ?? 0, !!this.cs, snap);
+    const bank = this.bodyBank.update(dt, s.yaw, s.grounded, speed, s.sidemove ?? 0, !!this.cs, snap);
     if (!this.acting && this.legsOn)
-      this.legs.apply(S, { dt, snap, grounded: s.grounded, crouched: s.crouched, vel: this.vel, pos: s.position, yaw: this.yaw, bank, bankHip: BANK_HIP, time: this.time, ladder: s.ladder, water: s.water });
+      this.legs.apply(S, { dt, snap, grounded: s.grounded, crouched: s.crouched, vel: this.vel, pos: s.position, yaw: this.yaw, bank, bankHip: BANK_HIP, time: this.time, ladder: s.ladder, water: s.water, lift: this.posture.lift });
     if (this.acting) this.applyActing(this.acting);
     // The gun in both hands (before the ears: its stance turns the chest and the head).
     if (this.gun) this.gunLayer(s, snap, dt);
@@ -952,6 +1111,7 @@ export class BunnyModel implements PlayerModelImpl {
       for (const b of this.partBonesAll) S.fill(0, b * 12, b * 12 + 12);
     }
 
+    if (backKind === "robe") this.sleeveLayer(dt, snap);
     const bm = this.skeleton.boneMatrices!;
     const n = r.names.length;
     for (let i = 0; i < n; i++) {
@@ -976,14 +1136,30 @@ export class BunnyModel implements PlayerModelImpl {
       this.silencer.material = this.mesh.material;
       this.silencer.renderOrder = this.mesh.renderOrder;
     }
-    if (this.crown) {
+    for (const extra of [this.crown, this.back]) {
+      if (!extra) continue;
       // Follows the body's material (style / finish changes) and draw order.
-      this.crown.material = this.mesh.material;
-      this.crown.renderOrder = this.mesh.renderOrder;
+      extra.material = this.mesh.material;
+      extra.renderOrder = this.mesh.renderOrder;
     }
     if (this.ticks) this.keepTick(snap);
     this.lastUpdateMs = performance.now() - t0;
   }
+
+  /** The Robe's sleeves swing from where the forearms are now (robe-fx.ts advanceSleeves), after the pose is final. */
+  private sleeveLayer(dt: number, snap: boolean): void {
+    const r = this.r, S = this.S;
+    const sa = (this.sleeveAt ??= { bones: [r.bone("L_Forearm"), r.bone("R_Forearm")], at: sleeveAnchor().at });
+    const A = this.sleeveA;
+    for (let i = 0; i < 2; i++) {
+      const o = sa.bones[i] * 12, x = i ? -sa.at[0] : sa.at[0], y = sa.at[1], z = sa.at[2];
+      for (let k = 0; k < 3; k++) A[i * 3 + k] = S[o + k * 4] * x + S[o + k * 4 + 1] * y + S[o + k * 4 + 2] * z + S[o + k * 4 + 3];
+    }
+    advanceSleeves(this.sleeves, A, this.vel, this.yaw, dt, snap, cosmeticsStill());
+    this.uniforms.uRobeL.value.fromArray(sleeveUniform(this.sleeves, 0));
+    this.uniforms.uRobeR.value.fromArray(sleeveUniform(this.sleeves, 1));
+  }
+  private sleeveA = new Float64Array(6);
 
   private keepTick(snapped: boolean): void {
     const k = this.ticks!;
@@ -1077,6 +1253,8 @@ export class BunnyModel implements PlayerModelImpl {
       if (snap || !e.hasBase) {
         for (let k = 0; k < 3; k++) (e.p[k] = target[k]), (e.v[k] = bv[k]), (e.eq[k] = target[k] + (Crel * bv[k] - (k === 2 ? G : 0)) / K);
       } else {
+        // A vertical jolt (a jump, a bhop's bounce: 300 to 600 u/s at once) carries most of the ear with the head.
+        e.v[2] += (1 - EAR_JOLT) * (bv[2] - e.bvz);
         for (let k = 0; k < 3; k++) {
           const eq = target[k] + (Crel * bv[k] - (k === 2 ? G : 0)) / K;
           springRamp(e.p, e.v, k, e.eq[k], eq, W, Z, dt);
@@ -1091,6 +1269,7 @@ export class BunnyModel implements PlayerModelImpl {
       dx /= l, dy /= l, dz /= l;
       e.p[0] = wb[0] + dx * Lp, e.p[1] = wb[1] + dy * Lp, e.p[2] = wb[2] + dz * Lp;
       for (let k = 0; k < 3; k++) e.wb[k] = wb[k];
+      e.bvz = bv[2];
       e.hasBase = true;
       // World direction -> bind space (undo yaw, then the carrier's rotation: transpose of its 3x3).
       const mx = cy * dx + sy * dy, my = -sy * dx + cy * dy, mz = dz;

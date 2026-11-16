@@ -18,6 +18,7 @@
 import * as THREE from "three";
 import { PlayerModel, type PlayerPose } from "../player/model";
 import { loadoutFor } from "../loadout";
+import { BACK_KIND } from "../player/bunny/backs";
 import { cosmetic } from "../progression";
 import { inspectSetFor } from "../viewmodel/inspects/index";
 import { knifeById } from "../viewmodel/knives/index";
@@ -284,18 +285,21 @@ export class AvatarStage {
     this.spec = spec;
     const bm = this.model.bunnyModel;
     if (!prev || prev.outfit !== spec.outfit) bm?.setOutfit(spec.outfit);
-    const look = [spec.knife, spec.finish, spec.glove, spec.hat, spec.body, spec.hand, spec.gun, spec.hairColor, spec.hairLength].join("|");
-    const prevLook = prev ? [prev.knife, prev.finish, prev.glove, prev.hat, prev.body, prev.hand, prev.gun, prev.hairColor, prev.hairLength].join("|") : "";
+    const look = [spec.knife, spec.finish, spec.glove, spec.hat, spec.body, spec.hand, spec.gun, spec.hairColor, spec.hairLength, spec.hairHighlight, spec.maskOn, spec.back, spec.capeLength, spec.capeColor, spec.capeLining, spec.robePattern, spec.robeTied, spec.robeColor, spec.robePrint].join("|");
+    const prevLook = prev ? [prev.knife, prev.finish, prev.glove, prev.hat, prev.body, prev.hand, prev.gun, prev.hairColor, prev.hairLength, prev.hairHighlight, prev.maskOn, prev.back, prev.capeLength, prev.capeColor, prev.capeLining, prev.robePattern, prev.robeTied, prev.robeColor, prev.robePrint].join("|") : "";
     if (look !== prevLook) {
-      this.model.setLoadout(loadoutFor({ knife: spec.knife, finish: spec.finish, glove: spec.glove, hat: spec.hat, body: spec.body, hairColor: spec.hairColor, hairLength: spec.hairLength }));
+      this.model.setLoadout(loadoutFor({ knife: spec.knife, finish: spec.finish, glove: spec.glove, hat: spec.hat, body: spec.body, hairColor: spec.hairColor, hairLength: spec.hairLength, hairHighlight: spec.hairHighlight, maskOn: spec.maskOn, back: spec.back, capeLength: spec.capeLength, capeColor: spec.capeColor, capeLining: spec.capeLining, robePattern: spec.robePattern, robeTied: spec.robeTied, robeColor: spec.robeColor, robePrint: spec.robePrint }));
       this.model.setGun(spec.hand === "gun" ? spec.gun : null);
       bm?.setKnifeHidden(spec.hand === "none");
     }
     // The pose depends only on what's in hand (the knife's inspect, a gun) and the pose fields: colourway, hat, finish,
     // gloves and build are restyles of the same pose (cheap: the picker's thumbnails swap them without re-posing). The
     // Ponytail is the exception: its pendulum (hat-fx.ts) is simulated with the pose, and its length changes the swing.
+    // So is a moving back item (back-fx.ts: the cape, the balloon, the key's turn).
     const pony = spec.hat === "hat-ponytail" ? `pony${spec.hairLength ?? ""}` : "";
-    const key = [spec.knife, spec.hand, spec.gun, spec.pose, spec.moment.toFixed(3), spec.tilt.toFixed(3), spec.ears.toFixed(3), spec.turn.toFixed(1), pony, this.animSource, JSON.stringify(GESTURES[spec.pose] ?? null)].join("|");
+    // (The Cape's length changes its swing.)
+    const back = spec.back && BACK_KIND[spec.back] !== "still" ? `${spec.back}${spec.capeLength ?? ""}${spec.robeTied ? "t" : ""}` : "";
+    const key = [spec.knife, spec.hand, spec.gun, spec.pose, spec.moment.toFixed(3), spec.tilt.toFixed(3), spec.ears.toFixed(3), spec.turn.toFixed(1), pony, back, this.animSource, JSON.stringify(GESTURES[spec.pose] ?? null)].join("|");
     if (key !== this.posed) {
       this.posed = key;
       this.pose(spec);

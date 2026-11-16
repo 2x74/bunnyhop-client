@@ -19,8 +19,10 @@ import { getPlayerGlow, onPlayerGlow } from "../player/cosmetics";
 import "./loadout-view.css";
 import { fixedModel } from "../player/bunny/look";
 import type { Profile } from "../api";
-import { SUPPORTER_MIN_USD, COSMETICS, cosmetic, HAIR_HATS, KNIFE_POOL_MAX, type KnifePool, crownOf, DEFAULT_COSMETICS, isUnlocked, secretCosmetic, supporterItem, type CosmeticDef } from "../progression";
-import { HAIR_DEFAULT, HAIR_LENGTH, HAIR_PRESETS, LENGTH_HATS, hairColorOf, hairHex, hairLengthOf, isWig, loadoutFor, packLoadout, type CosmeticLoadout } from "../loadout";
+import { SUPPORTER_MIN_USD, CAPE_ITEM, CAPE_LENGTH, capeHexOf, capeLengthOf, ROBE_ITEM, robePatternOf, COSMETICS, cosmetic, HAIR_HATS, MASK_HAT, highlightHexOf, KNIFE_POOL_MAX, type KnifePool, crownOf, DEFAULT_COSMETICS, isUnlocked, secretCosmetic, supporterItem, type CosmeticDef } from "../progression";
+import { colourway } from "../player/bunny/palettes";
+import { ROBE_PATTERNS } from "../player/robe-names";
+import { CAPE_LINING_DEFAULT, CAPE_PRESETS, HAIR_DEFAULT, HAIR_LENGTH, HAIR_PRESETS, HIGHLIGHT_PRESETS, LENGTH_HATS, hairColorOf, hairHex, hairLengthOf, isWig, loadoutFor, packLoadout, type CosmeticLoadout } from "../loadout";
 import { glowColorPicker } from "./glow-color-picker";
 import { getGhostCosmetics, getKnifePool, getLoadout, getOutfit, onGhostCosmetics, onHeldLoadout, onLoadout, onOutfit, setGhostCosmetics, setKnifePool, setLoadout, setOutfit } from "../player/cosmetics";
 import { previewOf } from "../notify/item-preview";
@@ -38,8 +40,15 @@ import { sfx } from "../audio";
 import { uiSound } from "../audio/ui";
 
 export type LoadoutSlot = LoadoutCategory;
-/** The worn ids per category, plus a wig's colour ("#rrggbb") and the ponytail's length (a percent); absent = the defaults. */
-export type LoadoutChoice = Record<LoadoutCategory | "body", string | null> & { hairColor?: string | null; hairLength?: number | null };
+/** The Cape's settings (progression.ts CAPE_LENGTH, capeHexOf); null / absent = the defaults. */
+export type CapeChoice = { capeLength?: number | null; capeColor?: string | null; capeLining?: string | null } & RobeChoice;
+/** The Robe's settings (progression.ts robePatternOf); null / absent = plain, open, the colourway's colours. */
+export type RobeChoice = { robePattern?: number | null; robeTied?: boolean | null; robeColor?: string | null; robePrint?: string | null };
+/**
+ * The worn ids per category, plus a wig's colour and highlight ("#rrggbb"), the hair's length (a percent), the Kitsune
+ * Mask over the face and the Cape's settings; absent = the defaults.
+ */
+export type LoadoutChoice = Record<LoadoutCategory | "body", string | null> & { hairColor?: string | null; hairLength?: number | null; hairHighlight?: string | null; maskOn?: boolean | null } & CapeChoice;
 
 /** What the view needs from whoever saves the choice (the profile's Loadout, or this device when offline). */
 export interface LoadoutModel {
@@ -58,6 +67,12 @@ export interface LoadoutModel {
   setHairColor(hex: string | null): void;
   /** The ponytail's length (a percent, HAIR_LENGTH; null = the default). */
   setHairLength(n: number | null): void;
+  /** A wig's highlight colour ("#rrggbb"; null = none). */
+  setHairHighlight(hex: string | null): void;
+  /** The Kitsune Mask over the face (true) or pushed up on the side of the head (false). */
+  setMaskOn(on: boolean): void;
+  /** The Cape's length and colours (null = the default). */
+  setCape(patch: CapeChoice): void;
   /** The knife pool (progression.ts KnifePool; null = none). */
   knifePool(): KnifePool | null;
   setKnifePool(p: KnifePool | null): void;
@@ -76,12 +91,23 @@ const pick = (c: Record<string, unknown>): LoadoutChoice => ({
   outfit: (c.outfit as string | null | undefined) ?? DEFAULT_COSMETICS.outfit,
   body: (c.body as string | null | undefined) ?? DEFAULT_COSMETICS.body,
   hat: (c.hat as string | null | undefined) ?? null,
+  back: (c.back as string | null | undefined) ?? null,
   camo: (c.camo as string | null | undefined) ?? null,
   ghost: (c.ghost as string | null | undefined) ?? DEFAULT_COSMETICS.ghost,
   trail: (c.trail as string | null | undefined) ?? DEFAULT_COSMETICS.trail,
   shape: (c.shape as string | null | undefined) ?? DEFAULT_COSMETICS.shape,
+  hop: (c.hop as string | null | undefined) ?? null,
   hairColor: (c.hairColor as string | null | undefined) ?? null,
   hairLength: hairLengthOf(c.hairLength),
+  hairHighlight: highlightHexOf(c.hairHighlight),
+  maskOn: c.maskOn === true,
+  capeLength: capeLengthOf(c.capeLength),
+  capeColor: capeHexOf(c.capeColor),
+  capeLining: capeHexOf(c.capeLining),
+  robePattern: robePatternOf(c.robePattern),
+  robeTied: c.robeTied === true ? true : null,
+  robeColor: capeHexOf(c.robeColor),
+  robePrint: capeHexOf(c.robePrint),
 });
 const emptyPool = (): KnifePool => ({ items: [], swap: "map", order: "order" });
 
@@ -98,6 +124,9 @@ export function profileModel(p: Profile, lo: Loadout, news: NewTracker): Loadout
     equip: (slot, id) => lo.equip(slot, id),
     setHairColor: (hex) => lo.apply({ hairColor: hex }),
     setHairLength: (n) => lo.apply({ hairLength: n }),
+    setHairHighlight: (hex) => lo.apply({ hairHighlight: hex }),
+    setMaskOn: (on) => lo.apply({ maskOn: on }),
+    setCape: (patch) => lo.apply(patch),
     knifePool: () => lo.choice.knifePool ?? null,
     setKnifePool: (pool) => lo.apply({ knifePool: pool && pool.items.length ? pool : null }),
     status: () => lo.status,
@@ -118,7 +147,7 @@ export function localModel(): LoadoutModel {
   const choice = (): LoadoutChoice => {
     const g = getGhostCosmetics();
     const l = getLoadout();
-    return pick({ ...(l as unknown as Record<string, string>), hairColor: l.hairColor !== undefined ? hairHex(l.hairColor) : null, hairLength: l.hairLength ?? null, outfit: getOutfit(), ghost: g.ghostId, trail: g.trailId, shape: g.shapeId });
+    return pick({ ...(l as unknown as Record<string, string>), hairColor: l.hairColor !== undefined ? hairHex(l.hairColor) : null, hairLength: l.hairLength ?? null, hairHighlight: l.hairHighlight !== undefined ? hairHex(l.hairHighlight) : null, maskOn: !!l.maskOn, capeLength: l.capeLength ?? null, capeColor: l.capeColor !== undefined ? hairHex(l.capeColor) : null, capeLining: l.capeLining !== undefined ? hairHex(l.capeLining) : null, robePattern: l.robePattern ?? null, robeTied: l.robeTied ?? null, robeColor: l.robeColor !== undefined ? hairHex(l.robeColor) : null, robePrint: l.robePrint !== undefined ? hairHex(l.robePrint) : null, outfit: getOutfit(), ghost: g.ghostId, trail: g.trailId, shape: g.shapeId });
   };
   return {
     userId: null,
@@ -130,8 +159,11 @@ export function localModel(): LoadoutModel {
     equip: (slot, id) => {
       const c = choice();
       if (slot === "outfit") setOutfit(id);
-      else if (slot === "ghost" || slot === "trail" || slot === "shape") setGhostCosmetics(slot === "ghost" ? id : c.ghost, slot === "trail" ? id : c.trail, slot === "shape" ? id : c.shape);
-      else setLoadout(loadoutFor({ ...c, [slot]: id }));
+      else if (slot === "ghost" || slot === "trail" || slot === "shape") {
+        setGhostCosmetics(slot === "ghost" ? id : c.ghost, slot === "trail" ? id : c.trail, slot === "shape" ? id : c.shape);
+        // The hop effect takes the trail's colours.
+        if (slot === "trail") setLoadout(loadoutFor({ ...c, trail: id }));
+      } else setLoadout(loadoutFor({ ...c, [slot]: id }));
       status = { kind: "saved", text: "Saved on this device" };
     },
     setHairColor: (hex) => {
@@ -140,6 +172,18 @@ export function localModel(): LoadoutModel {
     },
     setHairLength: (n) => {
       setLoadout(loadoutFor({ ...choice(), hairLength: n }));
+      status = { kind: "saved", text: "Saved on this device" };
+    },
+    setHairHighlight: (hex) => {
+      setLoadout(loadoutFor({ ...choice(), hairHighlight: hex }));
+      status = { kind: "saved", text: "Saved on this device" };
+    },
+    setMaskOn: (on) => {
+      setLoadout(loadoutFor({ ...choice(), maskOn: on }));
+      status = { kind: "saved", text: "Saved on this device" };
+    },
+    setCape: (patch) => {
+      setLoadout(loadoutFor({ ...choice(), ...patch }));
       status = { kind: "saved", text: "Saved on this device" };
     },
     knifePool: () => getKnifePool(),
@@ -171,7 +215,7 @@ let lastGunView: StageView = "gun";
 
 const NAME: Record<LoadoutCategory, string> = Object.fromEntries(LOADOUT_CATEGORIES.map((c) => [c.slot, c.label])) as Record<LoadoutCategory, string>;
 /** The caption's second line per category (what the item is). */
-const KIND: Record<LoadoutCategory, string> = { knife: "Knife", finish: "Finish", hilt: "Hilt", glove: "Gloves", camo: "Gun camo", outfit: "Colourway", hat: "Hat", ghost: "Ghost colour", trail: "Trail", shape: "Trail shape" };
+const KIND: Record<LoadoutCategory, string> = { knife: "Knife", finish: "Finish", hilt: "Hilt", glove: "Gloves", camo: "Gun camo", outfit: "Colourway", hat: "Hat", back: "Back", ghost: "Ghost colour", trail: "Trail", shape: "Trail shape", hop: "Hop effect" };
 
 export interface LoadoutViewOpts {
   playerGlow?: () => import("../player/glow-config").PlayerGlow | null;
@@ -221,6 +265,10 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
   let hairDraft: string | null = null;
   /** A ponytail length being dragged (shown on the stage; saved when the slider is let go). */
   let lengthDraft: number | null = null;
+  /** A highlight colour being tried (hovered or in the custom picker): a colour, "" for none, null = not trying one. */
+  let highlightDraft: string | null = null;
+  /** The Cape's settings being tried (a length being dragged, a colour in a picker or under the pointer). */
+  let capeDraft: CapeChoice | null = null;
   let stage: LoadoutStage | null = null;
   let revertTimer = 0;
   let applyRaf = 0;
@@ -233,6 +281,8 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
     if (preview !== null) c[slot] = slot === "camo" && veiled(cosmetic(preview)) ? null : preview || null;
     if (hairDraft) c.hairColor = hairDraft;
     if (lengthDraft !== null) c.hairLength = lengthDraft;
+    if (highlightDraft !== null) c.hairHighlight = highlightDraft || null;
+    if (capeDraft) Object.assign(c, capeDraft);
     return c;
   };
   const loadoutOf = (c: LoadoutChoice): CosmeticLoadout => loadoutFor(c, m.crown());
@@ -244,9 +294,9 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
    */
   const lookOf = (c: LoadoutChoice): StageLook => {
     const editing = o.playerGlow?.() ?? null;
-    return { playerGlow: editing ?? m.playerGlow?.() ?? null, previewGlow: !!editing, outfit: c.outfit, ghost: c.ghost, trail: c.trail, shape: c.shape, veil: veiled(cosmetic(c.outfit)) };
+    return { playerGlow: editing ?? m.playerGlow?.() ?? null, previewGlow: !!editing, outfit: c.outfit, ghost: c.ghost, trail: c.trail, shape: c.shape, veil: veiled(cosmetic(c.outfit)) || veiled(cosmetic(c.back)), facing: slot === "back" ? "back" : "front" };
   };
-  const viewFor = (s: LoadoutCategory): StageView => (stageKind(s) === "hands" ? lastHandsView : stageKind(s) === "guns" ? lastGunView : stageKind(s) === "bunny" ? "bunny" : "ghost");
+  const viewFor = (s: LoadoutCategory): StageView => (stageKind(s) === "hands" ? lastHandsView : stageKind(s) === "guns" ? lastGunView : stageKind(s) === "bunny" ? "bunny" : s === "hop" ? "hop" : "ghost");
 
   // --- stage
   const capName = h("h3.lo-cap-name");
@@ -409,10 +459,66 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
     hairCustom.title = preset ? "Choose any colour" : `Custom colour ${cur.toUpperCase()}`;
   }
   arrowNav(hairSw, "button");
+  // Highlights: under the hair colour, for the same hats. "None" first (the hair in one colour), presets, any colour.
+  const hiSw = h("div.lo-hair-sw", { role: "radiogroup", "aria-label": "Highlights" });
+  const hiDot = h("span.lo-hair-dot", { "aria-hidden": "true" });
+  let hiDialog: HTMLDialogElement | null = null;
+  const hiCustom = h("button.btn.btn-sm.lo-hair-custom", { type: "button", "aria-haspopup": "dialog", onclick: () => {
+    if (hiDialog) return hiDialog.focus();
+    hiDialog = glowColorPicker({
+      title: "Highlights",
+      intro: "Choose a colour for your hair's highlights.",
+      current: (highlightHexOf(choice().hairHighlight) ?? HIGHLIGHT_PRESETS[0].hex) as `#${string}`,
+      preview: (hex) => ((highlightDraft = hex), apply()),
+      apply: (hex) => ((highlightDraft = null), m.setHairHighlight(highlightHexOf(hex)), drawHighlight(), apply()),
+      closed: () => ((hiDialog = null), (highlightDraft = null), apply()),
+    });
+  } }, hiDot, "Custom…");
+  const hiRow = h("div.lo-model-row.lo-hair-row.lo-highlight-row", null, h("span.lo-model-label", null, "Highlights"), hiSw, hiCustom);
+  function drawHighlight(): void {
+    const shown = shownChoice().hat;
+    const wig = shown ? cosmetic(shown) : null;
+    const show = slot === "hat" && isWig(shown) && !!wig && m.owns(wig);
+    reserveRow(hiRow, show, show);
+    if (!show) return;
+    const cur = highlightHexOf(choice().hairHighlight);
+    const preset = !cur || HIGHLIGHT_PRESETS.some((p) => p.hex === cur);
+    const sw = (name: string, hex: string | null) => {
+      const on = hex === cur;
+      return h(`button.lo-hair-swatch${hex ? "" : ".lo-hair-none"}${on ? ".on" : ""}`, { type: "button", role: "radio", "aria-checked": String(on), "aria-label": name, title: name, tabindex: on ? "0" : "-1", style: hex ? `--sw:${hex}` : "",
+        onmouseenter: () => ((highlightDraft = hex ?? ""), apply()), onmouseleave: () => ((highlightDraft = null), apply()),
+        onclick: () => ((highlightDraft = null), m.setHairHighlight(hex), drawHighlight(), apply()),
+      });
+    };
+    hiSw.replaceChildren(sw("None", null), ...HIGHLIGHT_PRESETS.map((p) => sw(p.name, p.hex)));
+    hiDot.style.setProperty("--sw", cur ?? "transparent");
+    hiCustom.classList.toggle("on", !preset);
+    hiCustom.title = preset ? "Choose any colour" : `Custom colour ${cur!.toUpperCase()}`;
+  }
+  arrowNav(hiSw, "button");
+  // The Kitsune Mask's two ways to wear it: while it is on the stage and yours.
+  const maskSeg = h("div.seg.lo-modelseg", { role: "radiogroup", "aria-label": "Mask" });
+  const maskRow = h("div.lo-model-row.lo-hair-row.lo-mask-row", null, h("span.lo-model-label", null, "Mask"), maskSeg);
+  function drawMask(): void {
+    const shown = shownChoice().hat;
+    const item = shown === MASK_HAT ? cosmetic(shown) : null;
+    const show = slot === "hat" && !!item && m.owns(item);
+    reserveRow(maskRow, show, show);
+    if (!show) return;
+    const on = !!choice().maskOn;
+    maskSeg.replaceChildren(...([[false, "Pushed up"], [true, "On the face"]] as const).map(([v, label]) =>
+      h(`button${on === v ? ".on" : ""}`, { type: "button", role: "radio", "aria-checked": String(on === v), tabindex: on === v ? "0" : "-1", onclick: () => { m.setMaskOn(v); drawMask(); apply(); } }, label)));
+  }
+  maskSeg.addEventListener("keydown", (e) => {
+    if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) return;
+    e.preventDefault();
+    m.setMaskOn(!choice().maskOn);
+    drawMask(); apply(); maskSeg.querySelector<HTMLElement>('[aria-checked="true"]')?.focus();
+  });
   // Ponytail length: under the hair colour while the Ponytail is on the stage and yours. Dragging shows it on the stage;
   // letting go saves it.
   const lengthValue = h("output");
-  const lengthInput = h("input", { type: "range", min: String(HAIR_LENGTH.min), max: String(HAIR_LENGTH.max), step: "5", "aria-label": "Ponytail length",
+  const lengthInput = h("input", { type: "range", min: String(HAIR_LENGTH.min), max: String(HAIR_LENGTH.max), step: "5", "aria-label": "Hair length",
     oninput: () => ((lengthDraft = Number(lengthInput.value)), drawLength(), apply()),
     onchange: () => {
       const n = Number(lengthInput.value);
@@ -434,6 +540,142 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
     // The track's filled part (style.css input[type=range] reads --p, 0..1 along min..max).
     lengthInput.style.setProperty("--p", String((n - HAIR_LENGTH.min) / (HAIR_LENGTH.max - HAIR_LENGTH.min)));
     lengthValue.textContent = `${n}%`;
+  }
+  // The Cape (Back tab): its length and its two colours, under the grid while the Cape is on the stage (worn or
+  // hovered) and yours. Dragging the length and trying a colour show on the stage; letting go / choosing saves.
+  const capeShown = (): boolean => {
+    const c = cosmetic(CAPE_ITEM);
+    return slot === "back" && shownChoice().back === CAPE_ITEM && !!c && m.owns(c);
+  };
+  const capeLengthValue = h("output");
+  const capeLengthInput = h("input", { type: "range", min: String(CAPE_LENGTH.min), max: String(CAPE_LENGTH.max), step: String(CAPE_LENGTH.step), "aria-label": "Cape length",
+    oninput: () => ((capeDraft = { capeLength: Number(capeLengthInput.value) }), drawCape(), apply()),
+    onchange: () => {
+      const n = Number(capeLengthInput.value);
+      capeDraft = null;
+      m.setCape({ capeLength: n === CAPE_LENGTH.default ? null : n });
+      drawCape();
+      apply();
+    },
+  }) as HTMLInputElement;
+  const capeLengthRow = h("div.lo-model-row.lo-length-row.lo-cape-row", null, h("label.lo-length", null, h("span.lo-model-label", null, "Length"), capeLengthInput, capeLengthValue));
+  /** A colour row of the Cape: "Colourway" / "Ivory" (the default), the presets, and any colour. */
+  const capeColourRow = (key: "capeColor" | "capeLining", label: string, title: string, intro: string, def: { name: string; hex: () => string }) => {
+    const sw = h("div.lo-hair-sw", { role: "radiogroup", "aria-label": label });
+    const dot = h("span.lo-hair-dot", { "aria-hidden": "true" });
+    let dialog: HTMLDialogElement | null = null;
+    const set = (hex: string | null) => ((capeDraft = null), m.setCape({ [key]: hex }), drawCape(), apply());
+    const custom = h("button.btn.btn-sm.lo-hair-custom", { type: "button", "aria-haspopup": "dialog", onclick: () => {
+      if (dialog) return dialog.focus();
+      dialog = glowColorPicker({
+        title,
+        intro,
+        current: (capeHexOf(choice()[key]) ?? def.hex()) as `#${string}`,
+        preview: (hex) => ((capeDraft = { [key]: hex }), apply()),
+        apply: (hex) => set(capeHexOf(hex)),
+        closed: () => ((dialog = null), (capeDraft = null), apply()),
+      });
+    } }, dot, "Custom…");
+    const row = h(`div.lo-model-row.lo-hair-row.lo-cape-row`, null, h("span.lo-model-label", null, label), sw, custom);
+    arrowNav(sw, "button");
+    const draw = () => {
+      const cur = capeHexOf(choice()[key]);
+      const options: { name: string; hex: string; value: string | null }[] = [{ name: def.name, hex: def.hex(), value: null }, ...CAPE_PRESETS.map((p) => ({ ...p, value: p.hex }))];
+      const preset = options.some((o) => o.value === cur);
+      sw.replaceChildren(...options.map((o) => {
+        const on = o.value === cur;
+        return h(`button.lo-hair-swatch${on ? ".on" : ""}`, { type: "button", role: "radio", "aria-checked": String(on), "aria-label": o.name, title: o.name, tabindex: on || (!preset && o.value === null) ? "0" : "-1", style: `--sw:${o.hex}`,
+          onmouseenter: () => ((capeDraft = { [key]: o.value }), apply()), onmouseleave: () => ((capeDraft = null), apply()),
+          onclick: () => set(o.value),
+        });
+      }));
+      dot.style.setProperty("--sw", cur ?? def.hex());
+      custom.classList.toggle("on", !preset);
+      custom.title = preset ? "Choose any colour" : `Custom colour ${cur!.toUpperCase()}`;
+    };
+    return { row, draw };
+  };
+  const accentHex = () => `#${colourway(shownChoice().outfit).accent.toString(16).padStart(6, "0")}`;
+  const capeOuter = capeColourRow("capeColor", "Colour", "Cape colour", "Choose a colour for the outside of your cape.", { name: "Colourway", hex: accentHex });
+  const capeLining = capeColourRow("capeLining", "Lining", "Cape lining", "Choose a colour for your cape's lining and trim.", { name: "Ivory", hex: () => CAPE_LINING_DEFAULT });
+  function drawCape(): void {
+    const show = capeShown();
+    for (const row of [capeLengthRow, capeOuter.row, capeLining.row]) reserveRow(row, show, show);
+    if (!show) return;
+    const n = capeDraft?.capeLength ?? capeLengthOf(choice().capeLength) ?? CAPE_LENGTH.default;
+    capeLengthInput.value = String(n);
+    capeLengthInput.style.setProperty("--p", String((n - CAPE_LENGTH.min) / (CAPE_LENGTH.max - CAPE_LENGTH.min)));
+    capeLengthValue.textContent = `${n}%`;
+    capeOuter.draw();
+    capeLining.draw();
+  }
+  // The Robe (Back tab): open or tied, its pattern and its two colours, shown like the Cape's rows. Pointing at a
+  // choice shows it on the stage; choosing saves.
+  const robeShown = (): boolean => {
+    const c = cosmetic(ROBE_ITEM);
+    return slot === "back" && shownChoice().back === ROBE_ITEM && !!c && m.owns(c);
+  };
+  const robeSeg = <K extends "robeTied" | "robePattern">(label: string, key: K, opts: [RobeChoice[K], string][]) => {
+    const seg = h("div.seg.lo-poolseg", { role: "radiogroup", "aria-label": label });
+    const row = h("div.lo-model-row.lo-hair-row.lo-cape-row", null, h("span.lo-model-label", null, label), seg);
+    arrowNav(seg, "button");
+    const draw = () => {
+      const cur = choice()[key] ?? null;
+      seg.replaceChildren(...opts.map(([v, text]) => {
+        const on = (v ?? null) === cur;
+        return h(`button${on ? ".on" : ""}`, { type: "button", role: "radio", "aria-checked": String(on), tabindex: on ? "0" : "-1",
+          onmouseenter: () => ((capeDraft = { [key]: v }), apply()), onmouseleave: () => ((capeDraft = null), apply()),
+          onclick: () => ((capeDraft = null), m.setCape({ [key]: v }), drawRobe(), apply()),
+        }, text);
+      }));
+    };
+    return { row, draw };
+  };
+  const robeWear = robeSeg("Wear", "robeTied", [[null, "Open"], [true, "Tied"]]);
+  const robePattern = robeSeg("Pattern", "robePattern", ROBE_PATTERNS.map((name, i): [number | null, string] => [i || null, name]));
+  const robeColourRow = (key: "robeColor" | "robePrint", label: string, title: string, intro: string, def: () => string) => {
+    const sw = h("div.lo-hair-sw", { role: "radiogroup", "aria-label": label });
+    const dot = h("span.lo-hair-dot", { "aria-hidden": "true" });
+    let dialog: HTMLDialogElement | null = null;
+    const set = (hex: string | null) => ((capeDraft = null), m.setCape({ [key]: hex }), drawRobe(), apply());
+    const custom = h("button.btn.btn-sm.lo-hair-custom", { type: "button", "aria-haspopup": "dialog", onclick: () => {
+      if (dialog) return dialog.focus();
+      dialog = glowColorPicker({
+        title,
+        intro,
+        current: (capeHexOf(choice()[key]) ?? def()) as `#${string}`,
+        preview: (hex) => ((capeDraft = { [key]: hex }), apply()),
+        apply: (hex) => set(capeHexOf(hex)),
+        closed: () => ((dialog = null), (capeDraft = null), apply()),
+      });
+    } }, dot, "Custom…");
+    const row = h("div.lo-model-row.lo-hair-row.lo-cape-row", null, h("span.lo-model-label", null, label), sw, custom);
+    arrowNav(sw, "button");
+    const draw = () => {
+      const cur = capeHexOf(choice()[key]);
+      const options: { name: string; hex: string; value: string | null }[] = [{ name: "Colourway", hex: def(), value: null }, ...CAPE_PRESETS.map((p) => ({ ...p, value: p.hex }))];
+      const preset = options.some((o) => o.value === cur);
+      sw.replaceChildren(...options.map((o) => {
+        const on = o.value === cur;
+        return h(`button.lo-hair-swatch${on ? ".on" : ""}`, { type: "button", role: "radio", "aria-checked": String(on), "aria-label": o.name, title: o.name, tabindex: on || (!preset && o.value === null) ? "0" : "-1", style: `--sw:${o.hex}`,
+          onmouseenter: () => ((capeDraft = { [key]: o.value }), apply()), onmouseleave: () => ((capeDraft = null), apply()),
+          onclick: () => set(o.value),
+        });
+      }));
+      dot.style.setProperty("--sw", cur ?? def());
+      custom.classList.toggle("on", !preset);
+      custom.title = preset ? "Choose any colour" : `Custom colour ${cur!.toUpperCase()}`;
+    };
+    return { row, draw };
+  };
+  const pantsHex = () => `#${colourway(shownChoice().outfit).pants.toString(16).padStart(6, "0")}`;
+  const robeCloth = robeColourRow("robeColor", "Colour", "Robe colour", "Choose a colour for your robe.", pantsHex);
+  const robePrint = robeColourRow("robePrint", "Pattern colour", "Pattern colour", "Choose a colour for the pattern and the collar.", accentHex);
+  function drawRobe(): void {
+    const show = robeShown();
+    for (const r of [robeWear, robePattern, robeCloth, robePrint]) reserveRow(r.row, show, show);
+    if (!show) return;
+    for (const r of [robeWear, robePattern, robeCloth, robePrint]) r.draw();
   }
   // Knife pool (Knife and Finish tabs): knives with their finishes the game swaps between, each map or each restart, in
   // order or at random (player/cosmetics.ts). "Add" puts the knife and finish on the stage in it; a chip equips its
@@ -489,13 +731,17 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
   }
   // The category's own options (player model, hair, ponytail length, knife pool) sit over the grid, beside the stage,
   // so the stage keeps its place and size on every tab (they used to push it down on Hat, Knife and Finish).
-  const root = h("section.lo", { "aria-label": "Loadout" }, h("div.lo-head", null, tabs, clearIndicators, status), h("div.lo-body", null, stageHost, h("div.lo-side", null, bodyRow, poolRow, grid, glowPane, hairRow, lengthRow)));
+  const root = h("section.lo", { "aria-label": "Loadout" }, h("div.lo-head", null, tabs, clearIndicators, status), h("div.lo-body", null, stageHost, h("div.lo-side", null, bodyRow, poolRow, grid, glowPane, hairRow, hiRow, lengthRow, maskRow, capeLengthRow, capeOuter.row, capeLining.row, robeWear.row, robePattern.row, robeCloth.row, robePrint.row)));
 
   function drawTabs(): void {
     clearIndicators.disabled = !COSMETICS.some((c) => isLoadoutCategory(c.slot) && m.owns(c) && m.isNew(c.id));
     drawBody();
     drawHair();
+    drawHighlight();
     drawLength();
+    drawMask();
+    drawCape();
+    drawRobe();
     drawPool();
     tabs.replaceChildren(
       ...cats.map((s) => {
@@ -558,6 +804,18 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
     }
     const tc = cosmetic(choice().trail);
     const spec = previewOf({ cosmetic: c }, { outfit, body: choice().body, trail: tc?.color ? { color: tc.color, color2: tc.color2 } : null, shape: choice().shape });
+    // The Cape's tile shows yours: its length and colours.
+    if (spec && c.id === CAPE_ITEM && m.owns(c)) {
+      const ch = choice();
+      const cape = { length: capeLengthOf(ch.capeLength), color: capeHexOf(ch.capeColor), lining: capeHexOf(ch.capeLining) };
+      if (cape.length || cape.color || cape.lining) return { key: `i|${spec.key}|${cape.length ?? ""}|${cape.color ?? ""}|${cape.lining ?? ""}`, kind: "item", spec: { ...spec, cape } };
+    }
+    // The Robe's tile shows yours too: its pattern, colours and whether it is tied.
+    if (spec && c.id === ROBE_ITEM && m.owns(c)) {
+      const ch = choice();
+      const robe = { pattern: robePatternOf(ch.robePattern), tied: ch.robeTied === true, color: capeHexOf(ch.robeColor), print: capeHexOf(ch.robePrint) };
+      if (robe.pattern || robe.tied || robe.color || robe.print) return { key: `i|${spec.key}|${robe.pattern ?? ""}|${robe.tied ? "t" : ""}|${robe.color ?? ""}|${robe.print ?? ""}`, kind: "item", spec: { ...spec, robe } };
+    }
     if (spec && veiled(c)) return { key: `i|${spec.key}|veil`, kind: "item", spec: { ...spec, veil: true } };
     return spec ? { key: `i|${spec.key}`, kind: "item", spec } : null;
   }
@@ -685,7 +943,7 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
       tiles.push(t);
       els.push(t.el);
     };
-    if ((slot === "hat" || slot === "camo") && !o.only) add(null);
+    if ((slot === "hat" || slot === "camo" || slot === "back" || slot === "hop") && !o.only) add(null);
     sections.earned.forEach((c) => add(c));
     if (sections.supporter.length) {
       const owner = sections.supporter.some((x) => m.owns(x.c));
@@ -769,7 +1027,10 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
   function apply(): void {
     applyRaf = 0;
     if (!hairDraft) drawHair();
+    if (highlightDraft === null) drawHighlight();
     if (lengthDraft === null) drawLength();
+    drawMask();
+    if (!capeDraft) (drawCape(), drawRobe());
     drawPool();
     const c = shownChoice();
     stage?.display(loadoutOf(c), lookOf(c));
