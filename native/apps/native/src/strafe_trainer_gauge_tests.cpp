@@ -3,6 +3,7 @@
 #include "hud_trainer.hpp"
 #include "semantic_palette.hpp"
 #include <cmath>
+#include <cstring>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -264,8 +265,213 @@ void check_disc_drawing() {
     check(!native::gauge_value(preview), "a resting needle with no pace is nothing");
 }
 
-int main() {
+// The Gauge's strafe sync against the website's G1-G15 (test/strafe-trainer-gauge-sync.test.ts; findings in the
+// reference analysis): 400 u/s, push 30, Smoothing 8, after 40 ticks of A turning left at the ideal rate. Source air
+// movement at 100 tick feeds the trainer as the HUD does: the command and the velocity it ended with.
+class Air {
+    static constexpr double push = 30;
+    std::array<double, 2> velocity_ = {400, 0};
+    double yaw_ = 0;
+    int64_t tick_ = 0;
+    bool sideways_, heading_;
+
+public:
+    native::StrafeTrainer trainer;
+
+    explicit Air(bool sideways = false, bool heading = true) : sideways_(sideways), heading_(heading) {
+        for (int i = 0; i < 40; ++i)
+            step(1, 1);
+    }
+
+    // `key`: 1 A (strafe left), -1 D, 0 none; `rate`: the turn in ideal steps.
+    double step(int key, double rate, bool grounded = false, bool interrupted = false) {
+        constexpr double degrees = 180 / std::numbers::pi;
+        const double speed = std::hypot(velocity_[0], velocity_[1]);
+        yaw_ += rate * std::atan2(push, speed) * degrees;
+        const double view = sideways_ ? yaw_ + 90 : yaw_;
+        const double forward = sideways_ ? key * 450. : 0, side = sideways_ ? 0 : -key * 450.;
+        const double y = view / degrees;
+        const double wx = forward * std::cos(y) + side * std::sin(y), wy = forward * std::sin(y) - side * std::cos(y);
+        const double length = std::hypot(wx, wy);
+        if (length && !grounded) {
+            const double along = (velocity_[0] * wx + velocity_[1] * wy) / length;
+            if (along < push) {
+                velocity_[0] += wx / length * (push - along);
+                velocity_[1] += wy / length * (push - along);
+            }
+        }
+        native::TrainerSample sample;
+        sample.speed = std::hypot(velocity_[0], velocity_[1]);
+        if (heading_) sample.vel_yaw = std::atan2(velocity_[1], velocity_[0]) * degrees;
+        sample.grounded = grounded;
+        sample.interrupted = interrupted;
+        sample.tick = tick_++;
+        sample.max_speed = 250;
+        sample.air_accelerate = 1000;
+        trainer.feed({float(forward), float(side), float(view), 0}, sample);
+        return native::gauge_angle(native::gauge_value(trainer.reading));
+    }
+
+    std::vector<double> run(const std::vector<std::pair<int, double>> &script) {
+        std::vector<double> angles;
+        for (const auto &[key, rate] : script)
+            angles.push_back(step(key, rate));
+        return angles;
+    }
+};
+
+std::vector<std::pair<int, double>> repeat(int count, int key, double rate) {
+    return std::vector<std::pair<int, double>>(size_t(count), {key, rate});
+}
+
+std::vector<std::pair<int, double>>
+join(std::vector<std::pair<int, double>> a, const std::vector<std::pair<int, double>> &b) {
+    a.insert(a.end(), b.begin(), b.end());
+    return a;
+}
+
+bool near(double got, double want, double tolerance) {
+    return std::abs(got - want) < tolerance;
+}
+
+void check_gauge_sync() {
+    constexpr int A = 1, D = -1;
+    check(native::gauge_sync(400, 0, 0, 450, 0, 30) && near(*native::gauge_sync(400, 0, 0, 450, 0, 30), 100, 1e-9),
+          "sync square");
+    check(native::gauge_sync(400, 0, 0, 450, 90, 30) == 0., "sync gains nothing");
+    check(native::gauge_sync(400, 0, 0, 450, -90, 30) == 200., "sync points back");
+    check(!native::gauge_sync(400, 0, 0, 0, 0, 30), "no wish");
+    for (const double angle : Air().run(repeat(6, A, 1)))
+        check(std::abs(angle) < 1, "G1 steady");
+    Air g2;
+    for (const double angle : g2.run(join({{D, 1}}, repeat(8, D, -1))))
+        check(std::abs(angle) < 20, "G2 ideal switch");
+    check(g2.trainer.flattens.red == 0 && g2.trainer.flattens.blue == 0, "G2 no snap");
+    Air g3;
+    const auto red = g3.run(repeat(17, D, -1));
+    check(red[0] == 90 && red[1] == 90 && near(red[2], 75.6, 2) && near(red[3], 63.6, 2) && std::abs(red[16]) < 10,
+          "G3");
+    check(g3.trainer.flattens.red == 1 && g3.trainer.flattens.blue == 0, "G3 one red");
+    Air g4;
+    const auto blue = g4.run(join(repeat(2, D, 1), repeat(8, D, -1)));
+    check(std::abs(blue[0]) < 1 && blue[1] == -90 && blue[2] == -90 && near(blue[3], -75.7, 2), "G4");
+    check(g4.trainer.flattens.red == 0 && g4.trainer.flattens.blue == 1, "G4 one blue");
+    const auto g5 = Air().run(join(repeat(3, D, 1), repeat(8, D, -1)));
+    check(g5[1] == -90 && g5[2] == -90 && g5[3] == -90 && g5[4] == -90 && g5[5] > -80, "G5");
+    const auto g6 = Air().run(join({{A, -1}}, repeat(8, D, -1)));
+    check(g6[0] == -90 && g6[1] == 90 && g6[2] == 90, "G6");
+    const auto g7 = Air().run(join(repeat(3, 0, -1), repeat(8, D, -1)));
+    check(near(g7[0], -14.6, 1) && near(g7[1], -26.6, 1) && near(g7[2], -36.7, 1) && g7[3] == 90 && g7[4] == 90, "G7");
+    Air g8;
+    std::vector<std::pair<int, double>> sixty;
+    for (int i = 0; i < 6; ++i)
+        sixty = join(sixty, {{A, 0}, {A, 2}});
+    for (const double angle : g8.run(sixty))
+        check(std::abs(angle) < 20, "G8 60 fps mouse");
+    check(g8.trainer.flattens.red == 0 && g8.trainer.flattens.blue == 0, "G8 no snap");
+    Air g9;
+    const auto flick = g9.run(join({{A, 2.6}}, repeat(6, A, 1)));
+    check(near(flick[0], 14.1, 1) && g9.trainer.flattens.red + g9.trainer.flattens.blue == 0, "G9");
+    const auto g10 = Air().run(repeat(30, A, 0));
+    const auto g10_old = Air(false, false).run(repeat(30, A, 0));
+    for (size_t i = 0; i < g10.size(); ++i)
+        check(near(g10[i], g10_old[i], 1), "G10 the same curve as without sync");
+    check(near(g10[0], -14.6, 1) && near(g10[1], -26.6, 1) && near(g10[2], -36.7, 1), "G10");
+    const auto sideways_red = Air(true).run(repeat(4, D, -1));
+    check(sideways_red[0] == 90 && sideways_red[1] == 90 && near(sideways_red[2], 75.6, 2), "G12 red");
+    const auto sideways_blue = Air(true).run(join(repeat(2, D, 1), repeat(2, D, -1)));
+    check(sideways_blue[1] == -90 && sideways_blue[2] == -90 && near(sideways_blue[3], -75.7, 2), "G12 blue");
+    const auto no_keys = Air().run(repeat(20, 0, 1)), no_keys_old = Air(false, false).run(repeat(20, 0, 1));
+    for (size_t i = 0; i < no_keys.size(); ++i)
+        check(near(no_keys[i], no_keys_old[i], 1), "G13 no keys");
+    Air g13;
+    const double up = g13.step(A, 1);
+    check(g13.step(A, 1, true) == up && g13.step(A, 1, true) < up - 5, "G13 ground");
+    g13.run(repeat(20, A, 1));
+    check(g13.step(A, 1, false, true) == -90 && g13.trainer.flattens.red + g13.trainer.flattens.blue == 0,
+          "G13 teleport");
+    for (const auto &script : {repeat(8, D, -1), join(repeat(2, D, 1), repeat(6, D, -1))}) {
+        Air old(false, false);
+        for (const double angle : old.run(script))
+            check(std::abs(angle) < 25, "G14 without the heading");
+        check(old.trainer.flattens.red + old.trainer.flattens.blue == 0, "G14 no flattens");
+    }
+}
+
+// G15: the bhop_bfur Autohop WR's trainer feed (the website's test/fixtures/gauge/bfur-wr.bin): about 21 flattens, 8
+// red and 13 blue, and about 5% of strafing air ticks flat.
+void check_wr(const char *path) {
+    std::FILE *file = std::fopen(path, "rb");
+    check(file != nullptr, "G15 fixture");
+    std::vector<unsigned char> bytes;
+    for (int c; (c = std::fgetc(file)) != EOF;)
+        bytes.push_back((unsigned char)c);
+    std::fclose(file);
+    const auto u32 = [&](size_t o) {
+        uint32_t v;
+        std::memcpy(&v, &bytes[o], 4);
+        return v;
+    };
+    const auto f32 = [&](size_t o) {
+        float v;
+        std::memcpy(&v, &bytes[o], 4);
+        return v;
+    };
+    const auto i16 = [&](size_t o) {
+        int16_t v;
+        std::memcpy(&v, &bytes[o], 2);
+        return v;
+    };
+    const uint32_t count = u32(0);
+    const float dt = f32(4), max_speed = f32(8), accelerate = f32(12);
+    native::StrafeTrainer trainer;
+    int events = 0, red_events = 0, last_kind = 0;
+    int64_t last_tick = -100;
+    unsigned air = 0, flat = 0;
+    for (uint32_t i = 0; i < count; ++i) {
+        const size_t o = 16 + size_t(i) * 17;
+        const float yaw = f32(o), vx = f32(o + 4), vy = f32(o + 8);
+        const int16_t forward = i16(o + 12), side = i16(o + 14);
+        const unsigned flags = bytes[o + 16];
+        const double speed = std::hypot(double(vx), double(vy));
+        native::TrainerSample sample;
+        sample.speed = double(float(speed));
+        sample.vel_yaw = std::atan2(double(vy), double(vx)) * 180 / std::numbers::pi;
+        sample.grounded = flags & 1;
+        sample.on_ladder = flags & 2;
+        sample.jumped = flags & 4;
+        sample.interrupted = flags & 8;
+        sample.tick = int64_t(i) + 1;
+        sample.dt = dt;
+        sample.max_speed = max_speed;
+        sample.air_accelerate = accelerate;
+        const auto before = trainer.flattens;
+        trainer.feed({float(forward), float(side), yaw, 0}, sample);
+        const int kind = trainer.flattens.red > before.red ? 1 : trainer.flattens.blue > before.blue ? 2 : 0;
+        if (kind) {
+            // Snaps closer together than gauge_flat_ticks are one flatten (the analysis counts them so).
+            if (!(int64_t(i) - last_tick <= native::gauge_flat_ticks && kind == last_kind)) {
+                ++events;
+                red_events += kind == 1;
+            }
+            last_tick = i;
+            last_kind = kind;
+        }
+        if (!(flags & 3) && speed >= 100 && (side || forward)) {
+            ++air;
+            flat += std::abs(native::gauge_angle(native::gauge_value(trainer.reading))) >= 80;
+        }
+    }
+    check(std::abs(events - 21) <= 2 && std::abs(red_events - 8) <= 2 && std::abs(events - red_events - 13) <= 2,
+          "G15 flattens: " + std::to_string(events) + " (" + std::to_string(red_events) + " red)");
+    const double share = double(flat) / air;
+    check(share > .02 && share < .08, "G15 flat share " + std::to_string(share));
+}
+
+int main(int argc, char **argv) {
     check_needle_filter();
+    check_gauge_sync();
+    if (argc > 1) check_wr(argv[1]);
     check_disc_drawing();
     check_angles();
     check_hints();

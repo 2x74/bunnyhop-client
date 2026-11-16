@@ -281,7 +281,8 @@ inline void feed_strafe_trainer(
              interrupted || bool(state.events & 9),
              bool(state.events & jump),
              gain.delta,
-             gain.best}
+             gain.best,
+             std::atan2(double(state.velocity[1]), double(state.velocity[0])) * 180 / ssj_detail::pi}
     );
     feedback.strafe_reading = feedback.strafe_trainer.reading;
 }
