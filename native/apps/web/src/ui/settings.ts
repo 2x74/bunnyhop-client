@@ -21,6 +21,8 @@ import { DEFAULT_LANDING_PREFS, normalizeLandingPrefs, type LandingPrefs } from 
 import type { GhostRouteMode, GhostRouteSource } from "../ghost-route-data";
 import type { AutoRestartAction, AutoRestartWhen } from "../auto-restart";
 import { COLOR_BLIND_MODES, type ColorBlindMode } from "../palette";
+import type { KeySoundKeys, KeySoundSet } from "../audio/keysound-policy";
+import type { PerfectSoundSet, StreakLength } from "../audio/perfect-policy";
 
 export type Action =
   | "forward"
@@ -130,7 +132,12 @@ export interface AudioPrefs {
   announcer: AnnouncerPrefs;
   perfHud: boolean;
   perfectIndicator: boolean;
+  /**
+   * Perfect jump sound (Settings → Audio → Perfect jump sound, snd_perfecttick): EZ Scroll and Legit Scroll play
+   * `perfectSound` on a perfect jump. Off by default. (The name is the old quiet tick's, which it replaced: 0.0.42.)
+   */
   perfectTick: boolean;
+  perfectSound: PerfectSoundPrefs;
   music: number;
   sfx: number;
   ui: number;
@@ -159,6 +166,30 @@ export interface AudioPrefs {
   ghosts: boolean;
   /** Silence everything while the tab is in the background. */
   muteInBackground: boolean;
+  /** A short sound as a key goes down (audio/keysounds.ts); off by default. */
+  keySounds: KeySoundPrefs;
+}
+
+/**
+ * Key sounds: `set` (keysound-policy.ts KEY_SOUND_SETS), `volume` (their own level, under the master volume only),
+ * `keys`: the style's strafe keys, or every movement key including jump and duck.
+ */
+/**
+ * The perfect jump sound: `set` (perfect-policy.ts), its own `volume`, the pitch rising with a `streak`, and how far it
+ * rises before it holds (`length`: STREAK_TOP).
+ */
+export interface PerfectSoundPrefs {
+  set: PerfectSoundSet;
+  volume: number;
+  streak: boolean;
+  length: StreakLength;
+}
+
+export interface KeySoundPrefs {
+  enabled: boolean;
+  set: KeySoundSet;
+  volume: number;
+  keys: KeySoundKeys;
 }
 
 export interface Prefs {
@@ -289,8 +320,15 @@ export interface Prefs {
    * shots, for you only (net/players.ts).
    */
   showPlayers: boolean;
+  /**
+   * Other players' hop effects (player/hop-fx.ts, v0.0.42): the bursts at their feet on servers, on ghosts and in
+   * replays. Off draws none (nothing is spawned). Your own in third person and the Loadout always show.
+   */
+  showHopFx: boolean;
   /** A supporter's own glow on their first-person hands and knife (0.0.21; the glow panel's "In first person"). */
   firstPersonGlow: boolean;
+  /** The Robe's sleeves on your first-person arms while you wear it (v0.0.42; viewmodel/robe-sleeves.ts). */
+  firstPersonRobe: boolean;
   /** Trigger and clip overlays (!showtriggers, !showclips, the !triggers menu; triggers/). Drawn only, never part of a run. */
   triggers: TriggerPrefs;
   /**
@@ -594,6 +632,7 @@ export const DEFAULT_PREFS: Prefs = {
   audio: {
     announcer: { enabled: false, finish: true, movement: true, local: true, server: true, volume: 0.8, pb: "perfect", wr: "godlike", speed: "godlike", highSpeed: "holyshit", streak: "perfect", lj: "perfect", speedThreshold: 1500, highSpeedThreshold: 2500, streakThreshold: 3, ljThreshold: 250 },
     perfHud: true, perfectIndicator: true, perfectTick: false,
+    perfectSound: { set: "ping", volume: 0.6, streak: true, length: "long" },
     music: 0.5,
     sfx: 0.8,
     ui: 0.6,
@@ -610,6 +649,7 @@ export const DEFAULT_PREFS: Prefs = {
     others: true,
     ghosts: false,
     muteInBackground: true,
+    keySounds: { enabled: false, set: "thock", volume: 0.6, keys: "strafe" },
   },
   showGhost: true,
   ghost: { pb: true, wr: true, custom: true, opacity: 0.55, trail: true, route: false, routeOnly: false, routeSource: "auto", compare: "auto", routeMode: "jumps", nearFade: true, tag: true },
@@ -621,7 +661,9 @@ export const DEFAULT_PREFS: Prefs = {
   voice: { enabled: true, volume: 0.8, key: "KeyX", device: "" },
   showPlayerGlow: true,
   showPlayers: true,
+  showHopFx: true,
   firstPersonGlow: true,
+  firstPersonRobe: true,
   mapLooks: {},
   graphics: { preset: "source", waterReflections: true, mapFog: true, mapDetails: true, modelLighting: "subtle", propLighting: true, bloom: true, mapProfiles: false, ambienceShowcase: false, lightingProfile: "map", skyMode: "map", skyPackId: null, skyRotation: 0, skyExposure: 0, lightingSource: "map", directContribution: 1, ambientContribution: 1, clouds: false, cloudQuality: "low", cloudCoverage: .45, cloudDensity: 1, contactShading: false, atmosphere: false, sunShafts: false, materialResponse: true, volumetric: false, spatialAA: true, localLights: false, localQuality: "medium", localBudget: 1, localStrength: .2, dynamicGI: false, tracedGI: false, giQuality: "low", giStrength: .25, giRange: 256, dynamicShadows: false, shadowQuality: "medium", shadowDistance: 1024, shadowStrength: .18, resolutionScale: 1, antialias: true, aspect: "native", aspectFit: "stretch", pixelated: false, anisotropy: 8, brightness: 1, gamma: 1, vibrance: 1, fullbright: false, menuBackground: "live", fullscreen: true, potato: false, flashlight: false, fpsLimit: 1000, uncapped: false, lowLatency: false, menuFps: 0 },
   viewmodel: { show: true, ...VIEWMODEL_POS, bob: VIEWMODEL_BOB, sway: 1, hand: "right", inspect: "tricks", landSettle: false, speedFov: false, rev: VIEWMODEL_REV },

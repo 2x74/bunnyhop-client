@@ -557,11 +557,24 @@ export interface RankHistory {
   peak: { rank: number; day: string } | null;
 }
 
-export type CosmeticChoice = Record<"background" | "frame" | "title" | "ghost" | "trail" | "shape" | "outfit" | "knife" | "finish" | "glove" | "hilt" | "hat" | "body" | "camo", string | null> & {
+export type CosmeticChoice = Record<"background" | "frame" | "title" | "ghost" | "trail" | "shape" | "outfit" | "knife" | "finish" | "glove" | "hilt" | "hat" | "body" | "camo" | "back" | "hop", string | null> & {
   /** A wig's hair colour ("#rrggbb"), kept for players who own one; absent = the default. */
   hairColor?: string | null;
   /** The ponytail's length (a whole percent, progression.ts HAIR_LENGTH), kept for wig owners; absent = 100. */
   hairLength?: number | null;
+  /** A wig's highlight colour ("#rrggbb" on the highlight grid, progression.ts highlightHexOf), kept for wig owners; absent = none. */
+  hairHighlight?: string | null;
+  /** The Kitsune Mask over the face instead of pushed up on the side of the head; absent = pushed up. */
+  maskOn?: boolean | null;
+  /** The Cape's length (a percent, progression.ts CAPE_LENGTH) and colours ("#rrggbb"), kept for its owners; absent = the defaults. */
+  capeLength?: number | null;
+  capeColor?: string | null;
+  capeLining?: string | null;
+  /** The Robe's pattern (1 .. 4), whether it is tied, and its colours ("#rrggbb"), kept for its owners; absent = the defaults. */
+  robePattern?: number | null;
+  robeTied?: boolean | null;
+  robeColor?: string | null;
+  robePrint?: string | null;
   /** Knives (with their finishes) the game swaps between (progression.ts KnifePool); absent = none. */
   knifePool?: import("./progression").KnifePool | null;
   /** The overall Number One's title colour ("#rrggbb", ranking.ts shownRankColor); absent = the title's own. */

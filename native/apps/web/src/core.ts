@@ -533,6 +533,7 @@ interface Exports {
   sky_camera?: () => number;
   world_fog?: () => number;
   light_cube?: (x: number, y: number, z: number) => number;
+  set_light_style?: (style: number, value: number, full: number) => void;
   dressing_materials?: () => number;
   dressing_build?: () => number;
   dressing_vertices_ptr?: () => number;
@@ -800,10 +801,22 @@ export class Core {
    * that reach it) into `out`: six linear RGB colours for +x, -x, +y, -y, +z, -z. False (and `out` untouched) where
    * there is none: a map drawn fullbright or without ambient data, a point in solid, a wasm build without the export.
    */
-  lightCube(x: number, y: number, z: number, out: Float32Array): boolean {
-    if ((this.x.light_cube?.(x, y, z) ?? 0) < 18) return false;
-    out.set(this.f32(this.x.scratch_f32_ptr(), 18));
+  lightCube(x: number, y: number, z: number, out: Float32Array, full?: Float32Array): boolean {
+    const len = this.x.light_cube?.(x, y, z) ?? 0;
+    if (len < 18) return false;
+    const data = this.f32(this.x.scratch_f32_ptr(), len);
+    out.set(data.subarray(0, 18));
+    // The cube with every switchable light on (core lighting.rs `cubes`), else the same light.
+    full?.set(len >= 36 ? data.subarray(18, 36) : data.subarray(0, 18));
     return true;
+  }
+
+  /**
+   * `lightCube` adds light style `style`'s lights by `value` (above their spawn value; lightstyles.ts `above`), and
+   * by `full` in its all-on cube (lightstyles.ts `full`).
+   */
+  setLightStyle(style: number, value: number, full: number): void {
+    this.x.set_light_style?.(style, value, full);
   }
 
   /**

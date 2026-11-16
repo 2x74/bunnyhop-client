@@ -37,11 +37,22 @@ const LUMA = [0.2126, 0.7152, 0.0722];
  * from the studio light (0 = unchanged): what the player materials' uMapLight takes. `exposure`: the HDR look's
  * current exposure for models drawn after it (the viewmodels); the ones in the scene get it with the scene.
  */
-export function modelLightOf(cube: ArrayLike<number>, mode: Exclude<ModelLighting, "off">, exposure: number, out: THREE.Vector3): THREE.Vector3 {
-  const { floor, tint } = MODEL_LIGHTING[mode];
+export function modelLightOf(cube: ArrayLike<number>, mode: Exclude<ModelLighting, "off">, exposure: number, out: THREE.Vector3, full?: ArrayLike<number>): THREE.Vector3 {
+  const { tint } = MODEL_LIGHTING[mode];
+  let { floor } = MODEL_LIGHTING[mode];
   const avg = [0, 0, 0];
   for (let i = 0; i < 18; i++) avg[i % 3] += (cube[i] * exposure) / 6;
   const luma = avg[0] * LUMA[0] + avg[1] * LUMA[1] + avg[2] * LUMA[2];
+  let waits = false;
+  if (full) for (let i = 0; i < 18 && !waits; i++) waits = full[i] !== cube[i];
+  if (waits) {
+    // Where light waits on a switch (a section a trigger lights, still dark), the floor gives way by the part that
+    // waits: the model is as dark as the room, and as lit as the room once the lights come on.
+    const all = [0, 0, 0];
+    for (let i = 0; i < 18; i++) all[i % 3] += (full![i] * exposure) / 6;
+    const lumaFull = all[0] * LUMA[0] + all[1] * LUMA[1] + all[2] * LUMA[2];
+    if (lumaFull > luma && lumaFull > 1e-5) floor *= Math.max(0, luma) / lumaFull;
+  }
   // Brightness follows the eye more than the light: the square root, capped at the studio light.
   const level = Math.min(1, Math.max(floor, Math.sqrt(Math.max(0, luma) / FULL_LIGHT)));
   const c = [1, 1, 1];
@@ -112,6 +123,7 @@ export class ModelLight {
   private exposure = 1;
   private eyeAt = new THREE.Vector3();
   private cube = new Float32Array(18);
+  private full = new Float32Array(18);
   private at = new THREE.Vector3();
   private inverse = new THREE.Matrix4();
 
@@ -124,7 +136,7 @@ export class ModelLight {
     private fog: DepthFogUniforms | null,
     private world: THREE.Object3D,
     private sourceRoot: THREE.Object3D,
-    private sample: (x: number, y: number, z: number, out: Float32Array) => boolean,
+    private sample: (x: number, y: number, z: number, out: Float32Array, full: Float32Array) => boolean,
   ) {}
 
   /** Off, or how far the map's light reaches into the models' own (Potato and Fullbright pass "off"). */
@@ -133,6 +145,13 @@ export class ModelLight {
     this.mode = mode;
     // The new mode's light at once, not eased from the old one.
     for (const m of this.models.values()) m.sampled = -Infinity;
+  }
+
+  /** The map's light changed (a switchable light went on or off): every model takes its new light at once, as the
+   * walls do. */
+  relight(): void {
+    for (const m of this.models.values()) m.sampled = -Infinity;
+    this.settled = false;
   }
 
   /** The world's clock (visual seconds): what the easing runs on, so a paused view holds and an export repeats. */
@@ -178,7 +197,7 @@ export class ModelLight {
       m.light.set(0, 0, 0);
     } else {
       if (cut || this.time - m.sampled >= SAMPLE_EVERY) {
-        if (this.sample(p.x, p.y, p.z + lift, this.cube)) modelLightOf(this.cube, this.mode, m.eye ? this.exposure : 1, m.target);
+        if (this.sample(p.x, p.y, p.z + lift, this.cube, this.full)) modelLightOf(this.cube, this.mode, m.eye ? this.exposure : 1, m.target, this.full);
         if (m.sampled === -Infinity || cut) m.light.copy(m.target);
         m.sampled = this.time;
       }

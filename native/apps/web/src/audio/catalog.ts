@@ -100,7 +100,17 @@ export type SfxId =
   | "gun_silencer_twist"
   | "gun_silencer_seat"
   | "gun_silencer_crack"
-  | "gun_silencer_off";
+  | "gun_silencer_off"
+  // key sounds (audio/keysounds.ts)
+  | "key_thock"
+  | "key_click"
+  | "key_wood"
+  | "key_blip"
+  // perfect jump sounds (audio/keysounds.ts PerfectSounds)
+  | "perfect_ping"
+  | "perfect_marimba"
+  | "perfect_chime"
+  | "perfect_pop";
 
 export interface SfxDef {
   bus: BusId;
@@ -229,6 +239,19 @@ export const SFX: Record<SfxId, SfxDef> = {
   gun_silencer_seat: d("sfx", 0.42, 1, 0.03, 0.08),
   gun_silencer_crack: d("sfx", 0.42, 1, 0.03, 0.08),
   gun_silencer_off: d("sfx", 0.38, 1, 0.03, 0.08),
+  // Key sounds (tools/audio/key-sounds.ts): played by audio/keysounds.ts on its own voices and level straight into the
+  // master (the bus here is nominal). Gains put each set's loudest 20 ms (K-weighted) at -20 dB, about the menus' click,
+  // at 100% key sound volume; no jitter: the left / right pitch is the cue.
+  key_thock: d("sfx", 0.64, 1),
+  key_click: d("sfx", 0.74, 1),
+  key_wood: d("sfx", 0.49, 1),
+  key_blip: d("sfx", 0.39, 1),
+  // Perfect jump sounds (tools/audio/key-sounds.ts --perf): played like the key sounds, on their own level. 3 dB over the
+  // key sounds (-17 dB at 100%), so the confirmation sits above them and the footsteps; the streak steps the pitch.
+  perfect_ping: d("sfx", 0.3, 1),
+  perfect_marimba: d("sfx", 0.39, 1),
+  perfect_chime: d("sfx", 0.38, 1),
+  perfect_pop: d("sfx", 0.46, 1),
 };
 
 export const SFX_IDS = Object.keys(SFX) as SfxId[];

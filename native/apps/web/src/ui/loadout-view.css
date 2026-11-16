@@ -28,6 +28,7 @@
 .lo-stage[data-view="close"] { background: radial-gradient(50% 60% at 50% 48%, rgba(220, 230, 255, 0.09), transparent 70%), linear-gradient(180deg, #161a24, #0c0f15); }
 /* Your bunny: a warm pool of light it stands in. Your ghost: a cooler night it hops through. */
 .lo-stage[data-view="bunny"] { background: radial-gradient(38% 30% at 50% 86%, rgba(255, 214, 160, 0.11), transparent 70%), radial-gradient(70% 60% at 50% 50%, rgba(255, 236, 214, 0.06), transparent 75%), linear-gradient(180deg, #181c27, #0e1118); }
+.lo-stage[data-view="hop"] { background: radial-gradient(46% 30% at 50% 80%, rgba(255, 226, 180, 0.1), transparent 72%), linear-gradient(180deg, #171b26, #0d1017); }
 .lo-stage[data-view="ghost"] { background: radial-gradient(60% 50% at 50% 70%, rgba(170, 200, 255, 0.08), transparent 72%), linear-gradient(180deg, #141824, #0b0e15); }
 .lo-stage.dragging { cursor: grabbing; }
 .lo-stage[data-rar="0"], .lo-stage[data-rar="1"] { --rar-a: 0.4; }
@@ -173,6 +174,9 @@ body.potato .lo-rim { display: none; }
 .lo-side > .lo-grid, .lo-side > .lo-glow-pane { flex: 1; }
 .lo-side > .lo-model-row { padding: 0 0.35rem 12px; flex-wrap: wrap; row-gap: 8px; }
 .lo-side > .lo-hair-row, .lo-side > .lo-length-row { padding: 12px 0.35rem 0; border-top: 1px solid var(--line); }
+.lo-side > .lo-highlight-row { border-top: 0; padding-top: 8px; }
+/* The Cape's three rows (length, colour, lining) read as one group: one rule above them. */
+.lo-side > .lo-cape-row:not([hidden]) ~ .lo-cape-row { border-top: 0; padding-top: 10px; }
 
 /* The bunny build is independent of the equipped colourway and accessories. */
 .lo-model-row { display: flex; align-items: center; gap: 12px; padding: 0 0 14px; }
@@ -199,6 +203,8 @@ body.potato .lo-rim { display: none; }
 .lo-hair-swatch { width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; background: var(--sw); cursor: pointer; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14); }
 .lo-hair-swatch.on { box-shadow: 0 0 0 2px var(--bg, #0b0d12), 0 0 0 4px var(--accent); }
 .lo-hair-swatch:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--bg, #0b0d12), 0 0 0 4px var(--text); }
+/* "None" among the highlight swatches: an empty ring with a stroke through it. */
+.lo-hair-none { background: linear-gradient(to top right, transparent 46%, var(--muted, #9aa3b2) 46% 54%, transparent 54%); box-shadow: inset 0 0 0 1.5px var(--muted, #9aa3b2); }
 .lo-hair-custom { display: inline-flex; align-items: center; gap: 6px; }
 .lo-hair-custom.on { border-color: var(--accent); }
 /* Ponytail length (the Ponytail on the stage): a slider like the glow Intensity one, its value after it. */

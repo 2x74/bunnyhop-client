@@ -97,12 +97,31 @@ export function gaugePace(r: TrainerReading): number | null {
   return r.gauge > 0 || r.pace !== null ? r.gauge : null;
 }
 /**
- * The Gauge's needle eases towards each tick's pace with this half-life in ticks per Smoothing tick: Smoothing 8 (the
- * default) is a 4-tick half-life, 40 ms at 100 tick. It holds through a strafe switch (ticks turning against the keys)
- * and the single ground tick of a hop for at most GAUGE_HOLD ticks, so the needle doesn't dip between strafes.
+ * The Gauge's needle eases towards each tick's sync pace (gaugeSync) with this half-life in ticks per Smoothing tick:
+ * Smoothing 8 (the default) is a 4-tick half-life, 40 ms at 100 tick. A bad strafe switch snaps it flat for GAUGE_FLAT
+ * ticks: flat red on the switch tick when the new wish points back against the velocity (sync pace >= GAUGE_RED: the key
+ * came with or after the mouse), flat blue on a tick turning against the keys that gains nothing (<= GAUGE_BLUE: the key
+ * came two or more ticks before the mouse). The single ground tick of a hop holds it for at most GAUGE_HOLD ticks, and
+ * so do ticks turning against the keys while the sync pace is unknown (no velocity heading yet: StrafeTrainer.feedGauge).
  */
 export const GAUGE_HALF_LIFE = 0.5;
 export const GAUGE_HOLD = 8;
+export const GAUGE_RED = 190;
+export const GAUGE_BLUE = 10;
+export const GAUGE_FLAT = 2;
+/**
+ * The sync pace of a tick: 100 x (1 - v.w / push), 0..PACE_MAX, with `v` the velocity the tick started with (length,
+ * heading in degrees) and `w` this command's unit wish (the core's: forward x view forward + side x view right). 100 is a
+ * wish square to the velocity, the steady strafe's; 0 or less gains nothing; PACE_MAX or more loses speed. Null: no wish.
+ */
+export function gaugeSync(speed: number, velYaw: number, forward: number, side: number, yaw: number, push: number): number | null {
+  const y = yaw * Math.PI / 180, vy = velYaw * Math.PI / 180;
+  const wx = forward * Math.cos(y) + side * Math.sin(y), wy = forward * Math.sin(y) - side * Math.cos(y);
+  const len = Math.hypot(wx, wy);
+  if (!(len > 0) || !(push > 0)) return null;
+  const dot = speed * (Math.cos(vy) * wx + Math.sin(vy) * wy) / len;
+  return Math.max(0, Math.min(PACE_MAX, 100 * (1 - dot / push)));
+}
 /** Share of the gap to this tick's pace the Gauge's needle closes per tick, for a Smoothing of `smoothing` ticks. */
 export function gaugeEase(smoothing: number): number {
   return 1 - 0.5 ** (1 / Math.max(0.5, Math.round(smoothing) * GAUGE_HALF_LIFE));
@@ -187,6 +206,13 @@ export class StrafeTrainer {
   private groundTicks = 0;
   private needle = 0;
   private needleHeld = 0;
+  /** Ticks left in a Gauge flatten. */
+  private needleFlat = 0;
+  /** The velocity the last tick ended with (the Gauge's sync pace), and the last strafe turn (its switch ticks). */
+  private lastVel: { speed: number; yaw: number } | null = null;
+  private lastTurn = 0;
+  /** Gauge snaps so far (red / blue): tools and tests count them. */
+  flattens = { red: 0, blue: 0 };
 
   reset(): void {
     this.yaw = NaN;
@@ -200,6 +226,9 @@ export class StrafeTrainer {
     this.groundTicks = 0;
     this.needle = 0;
     this.needleHeld = 0;
+    this.needleFlat = 0;
+    this.lastVel = null;
+    this.lastTurn = 0;
     this.reading = { cue: "ready", pace: null, side: 0 };
   }
 
@@ -317,30 +346,54 @@ export class StrafeTrainer {
   }
 
   /**
-   * The Gauge look's needle: eases towards this tick's pace (gaugeEase), towards 0 when there is nothing to judge, and
-   * holds through ticks that turn against the keys (a strafe switch) and the one ground tick of a hop.
+   * The Gauge look's needle: eases towards this tick's sync pace (gaugeSync), towards 0 when there is nothing to judge,
+   * holds through the one ground tick of a hop, and snaps flat on a bad strafe switch (GAUGE_RED / GAUGE_BLUE). Without
+   * the last tick's velocity (the first tick, or a feed with no heading) it judges the turn ratio and holds through ticks
+   * turning against the keys instead.
    */
   private feedGauge(cmd: TickCmd, s: TrainerSample, previousYaw: number, continuous: boolean): void {
+    const speed = s.barSpeed ?? s.speed;
+    const lastVel = this.lastVel;
+    this.lastVel = s.velYaw !== undefined && Number.isFinite(s.velYaw) && Number.isFinite(speed) ? { speed, yaw: s.velYaw } : null;
     if (![s.speed, s.dt, s.maxSpeed, s.airAccelerate, cmd.yaw, cmd.side, cmd.forward].every(Number.isFinite)
       || s.dt <= 0 || s.interrupted || !continuous || !Number.isFinite(previousYaw)) {
-      this.needle = this.needleHeld = 0;
+      this.needle = this.needleHeld = this.needleFlat = this.lastTurn = 0;
       this.reading.gauge = 0;
       return;
     }
-    const speed = s.barSpeed ?? s.speed;
     const push = Math.min(30, s.maxSpeed, s.airAccelerate * s.maxSpeed * s.dt);
     const active = !s.grounded && !s.onLadder && speed >= 100 && !!(cmd.side || cmd.forward) && push > 0;
     const delta = judgedTurn(cmd.yaw, previousYaw, s.turnYaw);
     const turn = -strafeTurn(cmd.forward, cmd.side, cmd.yaw, s.velYaw);
     const against = !!turn && Math.abs(delta) > 0.001 && Math.sign(delta) === turn;
-    let target: number | null = active
-      ? against ? null : Math.min(PACE_MAX, 100 * Math.abs(delta) / (Math.atan2(push, speed) * 180 / Math.PI))
-      : this.groundTicks === 1 ? null : 0;
+    const switched = !!turn && !!this.lastTurn && turn !== this.lastTurn;
+    if (turn) this.lastTurn = turn;
+    const q = active && lastVel ? gaugeSync(lastVel.speed, lastVel.yaw, cmd.forward, cmd.side, cmd.yaw, push) : null;
+    let target: number | null;
+    if (q !== null && switched && q >= GAUGE_RED) return this.flatten(PACE_MAX, "red");
+    if (q !== null && against && q <= GAUGE_BLUE) return this.flatten(0, "blue");
+    if (this.needleFlat > 0) {
+      this.needleFlat--;
+      this.reading.gauge = this.needle;
+      return;
+    }
+    if (q !== null) target = q;
+    else if (active) target = against ? null : Math.min(PACE_MAX, 100 * Math.abs(delta) / (Math.atan2(push, speed) * 180 / Math.PI));
+    else target = this.groundTicks === 1 ? null : 0;
     if (target === null) {
       if (++this.needleHeld > GAUGE_HOLD) target = 0;
     } else this.needleHeld = 0;
     if (target !== null) this.needle += (target - this.needle) * gaugeEase(this.smoothing);
     this.reading.gauge = this.needle < 0.05 ? 0 : this.needle;
+  }
+
+  /** A Gauge flatten: the needle at `at` for GAUGE_FLAT ticks (this one included); a new one replaces a running one. */
+  private flatten(at: number, kind: "red" | "blue"): void {
+    this.needle = at;
+    this.needleFlat = GAUGE_FLAT - 1;
+    this.needleHeld = 0;
+    this.flattens[kind]++;
+    this.reading.gauge = at;
   }
 }
 

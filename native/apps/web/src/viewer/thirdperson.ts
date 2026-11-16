@@ -24,7 +24,7 @@ export class ThirdPerson {
   private lastClip = 0;
   private inspectHeld = false;
   private spec: SpectatorCamera;
-  private model = new PlayerModel({ style: "solid" });
+  private model = new PlayerModel({ style: "solid", hops: "own" });
   private core: Core;
   /** Posed at least once (its skin and animations load on the first update), and whether the pose is behind now. */
   private posed = false;

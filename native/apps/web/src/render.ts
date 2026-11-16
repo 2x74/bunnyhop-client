@@ -1309,7 +1309,9 @@ export async function buildWorld(
   const container = new THREE.Group();
   container.add(built.sky, root);
   // The players, ghosts and viewmodels drawn with this world take its fog and light (model-light.ts).
-  const modelLight = new ModelLight(worldFog, container, root, (x, y, z, out) => core.lightCube(x, y, z, out));
+  // Models wait on the switchable lights that reach them too (lightstyles.ts `full`; ModelLight's floor).
+  for (const style of lightStyles?.atlas?.styles ?? []) core.setLightStyle(style, lightStyles!.atlas!.above(style), lightStyles!.atlas!.full(style));
+  const modelLight = new ModelLight(worldFog, container, root, (x, y, z, out, full) => core.lightCube(x, y, z, out, full));
   let modelLighting: ModelLighting = "off";
   let fullbrightOn = false;
   const applyModelLighting = () => modelLight.setMode(potatoOn || fullbrightOn ? "off" : modelLighting);
@@ -1610,9 +1612,16 @@ export async function buildWorld(
       setWaterVisualTime(visualTime);
       scrolls.update(visualTime);
       if (lightStyles?.atlas) {
-        // Only the changed shelves go up again; the whole atlas is many MB on the bigger maps.
-        for (const r of lightStyles.atlas.update(effectStates)) {
+        const changed = lightStyles.atlas.update(effectStates);
+        // Only the changed blocks go up again; the whole atlas is many MB on the bigger maps.
+        for (const r of changed.rects) {
           renderer.copyTextureToTexture(lightMapSource, lightMap, new THREE.Box2(new THREE.Vector2(r.x, r.y), new THREE.Vector2(r.x + r.w, r.y + r.h)), new THREE.Vector2(r.x, r.y));
+        }
+        // Models (hands, bunnies, animated props) take the switched lights too (core light_cube).
+        for (const style of changed.styles) core.setLightStyle(style, lightStyles.atlas.above(style), lightStyles.atlas.full(style));
+        if (changed.styles.length) {
+          modelLight.relight();
+          animProps?.relight();
         }
       }
       localLights.update(transforms, effectStates, visualTime);

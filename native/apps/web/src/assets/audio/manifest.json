@@ -835,6 +835,78 @@
       "loop": false,
       "loopStart": 0,
       "loopEnd": 0
+    },
+    "key_thock": {
+      "variants": 1,
+      "durations": [
+        0.084
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "key_click": {
+      "variants": 1,
+      "durations": [
+        0.028
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "key_wood": {
+      "variants": 1,
+      "durations": [
+        0.046
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "key_blip": {
+      "variants": 1,
+      "durations": [
+        0.042
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "perfect_ping": {
+      "variants": 1,
+      "durations": [
+        0.138
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "perfect_marimba": {
+      "variants": 1,
+      "durations": [
+        0.13
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "perfect_chime": {
+      "variants": 1,
+      "durations": [
+        0.137
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
+    },
+    "perfect_pop": {
+      "variants": 1,
+      "durations": [
+        0.053
+      ],
+      "loop": false,
+      "loopStart": 0,
+      "loopEnd": 0
     }
   },
   "music": [

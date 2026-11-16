@@ -13,9 +13,15 @@ import { cleanLoadout, DEFAULT_LOADOUT, gloveStyle, hiltSkin, loadoutFor } from 
 import { achievement } from "../progression";
 import { colourway, paletteOf } from "../player/bunny/palettes";
 import { hatGeometry, headwearKey } from "../player/bunny/hats";
+import { backFit, backGeometry, backRigOf } from "../player/bunny/backs";
+import { capeTones } from "../player/back-fx";
+import { robeTones } from "../player/robe-fx";
+import { ROBE_ITEM } from "../progression";
 import { playerUniforms, silhouetteMaterial, solidMaterial, type PlayerUniforms } from "../player/materials";
 import { PlayerModel } from "../player/model";
 import { laidShape, Trail, trailShapeOf } from "../player/trail";
+import { hopFxOf, linearRgb } from "../player/hop-fx";
+import { HopLayer } from "../player/hop-layer";
 import { applyLoadoutUniforms, specOf } from "../viewmodel/finishes/shader";
 import { carrot } from "../viewmodel/knives/carrot";
 import { knifeById } from "../viewmodel/knives/index";
@@ -23,7 +29,7 @@ import { KnifeShowcase } from "../viewmodel/knives/showcase";
 import { viewmodelGeometry } from "../viewmodel/mesh";
 import { vmRig } from "../viewmodel/rig";
 import { badgeToken } from "../ui/badges";
-import type { PreviewSpec } from "./item-preview";
+import { DEFAULT_PREVIEW_TRAIL, HERO, type PreviewSpec } from "./item-preview";
 import { gunById } from "../viewmodel/guns/index";
 import { gunModelGeometry } from "../viewmodel/guns/meshes";
 import { gunMaterial } from "../viewmodel/guns/material";
@@ -187,6 +193,41 @@ function hatScene(spec: PreviewSpec): ItemScene {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Back items
+
+function backScene(spec: PreviewSpec): ItemScene {
+  // As the standard bunny wears it with the hood up, seen from behind; the accent parts in your colourway.
+  const geo = spec.back ? backGeometry(spec.back, backFit("bunny", "classic", "up", null, spec.cape?.length, spec.robe?.tied)) : null;
+  if (!geo) throw new Error(`no back item ${spec.back}`);
+  const { scene, pivot } = base();
+  const u = playerUniforms();
+  u.uAccent.value.set(colourway(spec.outfit).accent);
+  const r = backRigOf(geo);
+  if (r) u.uBackPivot.value.fromArray(r.pivot), u.uBackAxis.value.fromArray(r.axis), u.uBackPivot2.value.fromArray(r.pivot2 ?? r.pivot);
+  // At rest (back-fx.ts backUniform): only the jet pack's pilot flame reads it.
+  u.uBack.value.set(0, 0, 0, spec.back === "back-jetpack" ? 0.2 : 0);
+  // The Cape in its owner's colours (default: the colourway's accent, ivory).
+  const tone = (hex: string | null | undefined) => (hex ? parseInt(hex.slice(1), 16) : null);
+  const acc: [number, number, number] = [u.uAccent.value.r, u.uAccent.value.g, u.uAccent.value.b];
+  if (spec.back === ROBE_ITEM) {
+    // The Robe in its owner's pattern and colours (default: the colourway's joggers colour, its accent).
+    const pants = new THREE.Color(colourway(spec.outfit).pants);
+    robeTones([pants.r, pants.g, pants.b], acc, tone(spec.robe?.color), tone(spec.robe?.print)).forEach((t, i) => u.uCapeTones.value[i].setRGB(t[0], t[1], t[2]));
+    u.uRobe.value.x = spec.robe?.pattern ?? 0;
+  } else capeTones(acc, tone(spec.cape?.color), tone(spec.cape?.lining)).forEach((t, i) => u.uCapeTones.value[i].setRGB(t[0], t[1], t[2]));
+  geo.computeBoundingBox();
+  const mesh = new THREE.Mesh(geo, spec.veil ? silhouetteMaterial(u) : solidMaterial(u));
+  mesh.frustumCulled = false;
+  // Bunny model space (z up, the back toward +y) -> three (y up, the back toward the camera).
+  const holder = new THREE.Group();
+  holder.rotation.set(-Math.PI / 2, 0, Math.PI, "YXZ");
+  mesh.position.copy(geo.boundingBox!.getCenter(new THREE.Vector3())).multiplyScalar(-1);
+  holder.add(mesh);
+  pivot.add(holder);
+  return { scene, pivot, radius: geo.boundingBox!.getSize(new THREE.Vector3()).length() / 2, dispose: disposers(scene) };
+}
+
+// ---------------------------------------------------------------------------------------------
 // The bunny (colourways) and its ghost (ghost colours)
 
 function bunnyScene(spec: PreviewSpec, ghost: boolean): ItemScene {
@@ -279,6 +320,63 @@ function trailScene(spec: PreviewSpec): ItemScene {
       trail.dispose();
       head.geometry.dispose();
       (head.material as THREE.Material).dispose();
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Hop effect: its burst over a faint floor disc, once a second. A still (a tile) shows it at its own best moment, from
+// its own angle and framed to its own size (HopFxDef.still).
+
+const HOP_PERIOD = 1.05;
+
+function hopScene(spec: PreviewSpec): ItemScene {
+  const { scene, pivot } = base();
+  const def = hopFxOf(spec.hop);
+  const st = def?.still ?? { at: 0.12, frame: 24, rise: 10, tilt: HERO.hop.tilt, head: 0 };
+  // The stage tilts every hop effect's pivot alike (HERO.hop: tilt, then yaw): the rest of this one's tilt is in a group
+  // under it, about the same axis (the yaw undone round it), so standing pieces stay upright on screen.
+  const tilt = new THREE.Group();
+  const yaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), HERO.hop.yaw);
+  tilt.quaternion.copy(yaw).invert().multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), st.tilt - HERO.hop.tilt)).multiply(yaw);
+  pivot.add(tilt);
+  const layer = new HopLayer(tilt, true);
+  const slot = layer.claim()!;
+  // The picture is centred `rise` over the floor and reaches `frame` from there.
+  const floor = new THREE.Mesh(new THREE.CircleGeometry(st.frame * 1.35, 48).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.045, depthWrite: false }));
+  floor.position.y = -st.rise;
+  tilt.add(floor);
+  const tint = linearRgb(spec.color ?? DEFAULT_PREVIEW_TRAIL), tint2 = linearRgb(spec.color2 ?? spec.color ?? DEFAULT_PREVIEW_TRAIL);
+  // The way the hop was going (pieces kicked behind, prints toes forward): a nominal speed that way.
+  const head = (st.head * Math.PI) / 180;
+  let clock = -1, next = 0;
+  const burst = (t: number) => {
+    if (!def) return;
+    layer.setClock(slot, t);
+    layer.burst(def, { x: 0, y: -st.rise, z: 0, vx: Math.cos(head) * 2, vz: Math.sin(head) * 2, t, slot, quality: 1, motion: 1, tint, tint2, alpha: 1, reach: null, slope: null });
+    // (Nothing draws this layer between a tile's bursts: the frame cap is for scenes.)
+    layer.drawn();
+  };
+  return {
+    scene,
+    pivot,
+    radius: st.frame,
+    frame(dt) {
+      if (clock < 0) {
+        burst(0);
+        clock = st.at;
+        next = HOP_PERIOD;
+      } else clock += dt;
+      while (clock >= next) {
+        burst(next);
+        next += HOP_PERIOD;
+      }
+      layer.setClock(slot, clock);
+    },
+    dispose: () => {
+      layer.dispose();
+      floor.geometry.dispose();
+      (floor.material as THREE.Material).dispose();
     },
   };
 }
@@ -565,12 +663,16 @@ export async function buildItemScene(spec: PreviewSpec): Promise<ItemScene> {
       return gunScene(spec);
     case "hat":
       return hatScene(spec);
+    case "back":
+      return backScene(spec);
     case "bunny":
       return bunnyScene(spec, false);
     case "ghost":
       return bunnyScene(spec, true);
     case "trail":
       return trailScene(spec);
+    case "hop":
+      return hopScene(spec);
     case "plaque":
       return plaqueScene(spec);
     case "medal":

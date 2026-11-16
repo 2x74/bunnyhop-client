@@ -7,6 +7,7 @@
 // Presentation only: guns/presenter.ts drives it from the core's weapon reports.
 
 import * as THREE from "three";
+import { RobeSleeves } from "../robe-sleeves";
 import { playerUniforms, type PlayerUniforms } from "../../player/materials";
 import { colourway, paletteOf } from "../../player/bunny/palettes";
 import { getLoadout, getOutfit, onLoadout, onOutfit } from "../../player/cosmetics";
@@ -61,6 +62,8 @@ export class GunViewmodel {
   debugHide: "R" | "L" | "RL" | null = null;
 
   private root = new THREE.Group();
+  /** The Robe's sleeves over the arms while it is worn (../robe-sleeves.ts): nothing otherwise. */
+  private robe!: RobeSleeves;
   private skeleton: DirectSkeleton;
   private rig = gunRig();
   private S: Float32Array;
@@ -116,6 +119,7 @@ export class GunViewmodel {
     this.mesh.name = "gun-viewmodel";
     this.mesh.visible = false;
     this.root.add(this.mesh);
+    this.robe = new RobeSleeves(this.root, this.skeleton, this.uniforms);
     this.root.matrixAutoUpdate = false;
     this.scene.add(this.root);
     // Source viewmodel space (x forward, y left, z up) -> three camera space (-z forward, x right, y up).
@@ -147,6 +151,7 @@ export class GunViewmodel {
     const pal = paletteOf(c);
     this.uniforms.uPalette.value.forEach((col, i) => col.set(pal[i]));
     this.uniforms.uAccent.value.set(c.accent);
+    this.robe.tones();
   }
 
   /**
@@ -308,6 +313,7 @@ export class GunViewmodel {
     this.piv[1] = W[o + 4] * g[0] + W[o + 5] * g[1] + W[o + 6] * g[2] + W[o + 7];
     this.piv[2] = W[o + 8] * g[0] + W[o + 9] * g[1] + W[o + 10] * g[2] + W[o + 11];
     this.motion.update(dt, def, input, this.piv);
+    if (this.robe.worn && input) this.robe.update(dt, input, Math.min(1.5, vp.sway) * (this.soft ? 0.45 : 1), vp.hand === "left");
     if (this.fxImpl) this.fxImpl.grounded = input ? input.grounded : true;
     concat(this.Vf, 0, this.motion.M, 0, this.V, 0);
     this.skin();
@@ -374,6 +380,7 @@ export class GunViewmodel {
   /** Draws the gun viewmodel over the frame just rendered with `world` (depth cleared first). */
   render(renderer: THREE.WebGLRenderer, world: THREE.PerspectiveCamera): void {
     if (!this.visible || !this.def) return;
+    this.robe.set(this.loadout, prefs.get().firstPersonRobe);
     const potato = prefs.get().graphics.potato;
     if (potato !== this.cheap) {
       this.cheap = potato;
@@ -422,6 +429,7 @@ export class GunViewmodel {
 
   dispose(): void {
     for (const u of this.unsub) u();
+    this.robe.dispose();
     if (this.kept) for (const m of this.kept.values()) m.dispose();
     else (this.mesh.material as THREE.Material).dispose();
     this.skeleton.dispose();

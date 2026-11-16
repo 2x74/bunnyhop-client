@@ -5,9 +5,11 @@
 //   finish      your knife wearing the new finish (the carrot when you hold none)
 //   gloves      the open right hand in the glove (viewmodel/gloves/fp.ts geometry, knit follows your colourway)
 //   hat         the hat itself (player/bunny/hats.ts)
+//   back        the back item itself, seen from behind, its accent parts in your colourway (player/bunny/backs.ts)
 //   colourway   the bunny in it; ghost colour: your ghost bunny in it
 //   trail       a ribbon of a few hops in its colour (player/trail.ts, the in-game trail); a trail shape the same, in
 //               that shape and the trail colour you have on
+//   hop effect  its burst over a small floor, again and again, in the trail colour you have on
 //   title       a small brass nameplate with the title on it (gold for the rank-held ones)
 //   badge       the achievement's token as a medal (its ring colour and glyph, ui/badges.ts)
 //   frame       a little player card in the frame; background: a little player card on that background
@@ -15,7 +17,7 @@
 import { fixedModel } from "../player/bunny/look";
 import type { AchievementDef, CosmeticDef, Ring } from "../progression";
 
-export type PreviewKind = "knife" | "glove" | "hat" | "bunny" | "ghost" | "trail" | "plaque" | "medal" | "frame" | "card" | "gun";
+export type PreviewKind = "knife" | "glove" | "hat" | "back" | "bunny" | "ghost" | "trail" | "plaque" | "medal" | "frame" | "card" | "gun" | "hop";
 
 export interface PreviewSpec {
   kind: PreviewKind;
@@ -32,10 +34,18 @@ export interface PreviewSpec {
   camo?: string;
   body?: string;
   hat?: string;
+  /** back: the back item's cosmetic id (with `outfit` for its accent parts). */
+  back?: string;
+  /** back, the Cape: its owner's length (a percent) and colours ("#rrggbb"); absent = the default cape. */
+  cape?: { length?: number | null; color?: string | null; lining?: string | null };
+  /** back, the Robe: its owner's pattern (1 .. 4), whether it is tied, and its colours ("#rrggbb"); absent = the default robe. */
+  robe?: { pattern?: number | null; tied?: boolean; color?: string | null; print?: string | null };
   /** ghost / trail / frame / card / plaque accent. */
   color?: string;
   /** trail: its shape ("shape-*" cosmetic id; absent = the ribbon). */
   shape?: string;
+  /** hop: the hop effect ("hop-*" cosmetic id), in `color` / `color2` (your trail's) where it takes a tint. */
+  hop?: string;
   /** ghost / trail: the second colour of a two-tone item (the ghost's rim glow, the trail's tail). */
   color2?: string;
   /** bunny: a secret colourway not earned yet, drawn as a flat silhouette (no colours; ui/loadout-view.ts). */
@@ -98,6 +108,8 @@ export function previewOf(item: PreviewItem, eq: Equipped = {}): PreviewSpec | n
       return { kind: "hat", key: `hat:${c.id}`, hat: c.id };
     case "camo":
       return { kind: "gun", key: `gun:${c.id}`, camo: c.id };
+    case "back":
+      return { kind: "back", key: `back:${c.id}:${outfit}`, back: c.id, outfit };
     case "body":
       return { kind: "bunny", key: `bunny:${outfit}:${c.id}`, outfit, body: c.id };
     case "outfit": {
@@ -114,6 +126,10 @@ export function previewOf(item: PreviewItem, eq: Equipped = {}): PreviewSpec | n
     case "shape": {
       const t = eq.trail ?? { color: DEFAULT_PREVIEW_TRAIL };
       return { kind: "trail", key: `trail:${t.color}${t.color2 ? `:${t.color2}` : ""}:${c.id}`, color: t.color, ...(t.color2 ? { color2: t.color2 } : {}), shape: c.id };
+    }
+    case "hop": {
+      const t = eq.trail ?? { color: DEFAULT_PREVIEW_TRAIL };
+      return { kind: "hop", key: `hop:${c.id}:${t.color}${t.color2 ? `:${t.color2}` : ""}`, hop: c.id, color: t.color, ...(t.color2 ? { color2: t.color2 } : {}) };
     }
     case "title": {
       const color = c.rarity === 5 ? GOLD : BRASS;
@@ -138,6 +154,7 @@ export const HERO: Record<PreviewKind, { yaw: number; tilt: number; fill: number
   knife: { yaw: -0.5, tilt: 0.18, fill: 1 },
   glove: { yaw: 0.1, tilt: 0.2, fill: 0.9 },
   hat: { yaw: -0.55, tilt: 0.32, fill: 0.78 },
+  back: { yaw: -0.5, tilt: 0.2, fill: 0.86 },
   bunny: { yaw: -0.5, tilt: 0.12, fill: 0.95 },
   ghost: { yaw: -0.5, tilt: 0.12, fill: 0.95 },
   trail: { yaw: -0.35, tilt: 0.16, fill: 0.92 },
@@ -146,6 +163,7 @@ export const HERO: Record<PreviewKind, { yaw: number; tilt: number; fill: number
   frame: { yaw: -0.45, tilt: 0.12, fill: 0.74 },
   card: { yaw: -0.45, tilt: 0.12, fill: 0.74 },
   gun: { yaw: -0.3, tilt: 0.16, fill: 1.05 },
+  hop: { yaw: -0.3, tilt: 0.65, fill: 0.95 },
 };
 
 /**

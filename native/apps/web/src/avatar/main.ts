@@ -12,12 +12,15 @@
 // (until the pointer leaves), clicking wears it. Thumbnails are drawn by a second, offscreen AvatarStage and cached.
 
 import { api, ApiError, type User } from "../api";
-import { COSMETICS, cosmetic, type CosmeticDef } from "../progression";
-import { FINISH_STYLE, GLOVE_STYLE, HAIR_DEFAULT, HAIR_LENGTH, HAIR_PRESETS, LENGTH_HATS, hairColorOf, hairHex, isWig } from "../loadout";
+import { CAPE_ITEM, CAPE_LENGTH, capeHexOf, ROBE_ITEM, robePatternOf, COSMETICS, cosmetic, MASK_HAT, type CosmeticDef } from "../progression";
+import { ROBE_PATTERNS } from "../player/robe-names";
+import { colourway } from "../player/bunny/palettes";
+import { CAPE_LINING_DEFAULT, CAPE_PRESETS, FINISH_STYLE, GLOVE_STYLE, HAIR_DEFAULT, HAIR_LENGTH, HAIR_PRESETS, HIGHLIGHT_PRESETS, LENGTH_HATS, hairColorOf, hairHex, isWig } from "../loadout";
 import { glowColorPicker } from "../ui/glow-color-picker";
 import { KNIVES } from "../viewmodel/knives/index";
 import { GUNS } from "../viewmodel/guns/index";
 import { isHat } from "../player/bunny/hats";
+import { isBack } from "../player/bunny/backs";
 import { AvatarStage, GESTURES, paintBackdrop, type Focus, type MapShots } from "./stage";
 import { avatarWebpBase64, mapIndex, playerAnims, settleOnAnims } from "./refresh";
 import { getLoadout, getOutfit } from "../player/cosmetics";
@@ -38,6 +41,7 @@ const ofSlot = (slot: CosmeticDef["slot"]) => COSMETICS.filter((c) => c.slot ===
 interface Options {
   outfits: CosmeticDef[];
   hats: CosmeticDef[];
+  backs: CosmeticDef[];
   knives: CosmeticDef[];
   finishes: CosmeticDef[];
   gloves: CosmeticDef[];
@@ -46,6 +50,7 @@ function options(): Options {
   return {
     outfits: ofSlot("outfit"),
     hats: ofSlot("hat").filter((c) => isHat(c.id)),
+    backs: ofSlot("back").filter((c) => isBack(c.id)),
     knives: KNIVES.map((k) => cosmetic(k.cosmeticId)).filter((c): c is CosmeticDef => owns(c)),
     finishes: ofSlot("finish").filter((c) => FINISH_STYLE[c.id]),
     gloves: ofSlot("glove").filter((c) => GLOVE_STYLE[c.id]),
@@ -63,6 +68,18 @@ function ownedOnly(s: AvatarSpec): AvatarSpec {
     // Hair settings only with a wig you own on (the server checks them like the hat).
     hairColor: s.hat && isWig(s.hat) && ok(s.hat) ? s.hairColor : undefined,
     hairLength: s.hat && isWig(s.hat) && ok(s.hat) ? s.hairLength : undefined,
+    hairHighlight: s.hat && isWig(s.hat) && ok(s.hat) ? s.hairHighlight : undefined,
+    maskOn: s.hat === MASK_HAT && ok(s.hat) ? s.maskOn : undefined,
+    back: s.back && ok(s.back) ? s.back : undefined,
+    // The Cape's settings only with the Cape you own on (the server checks them like the back item).
+    capeLength: s.back === CAPE_ITEM && ok(s.back) ? s.capeLength : undefined,
+    capeColor: s.back === CAPE_ITEM && ok(s.back) ? s.capeColor : undefined,
+    capeLining: s.back === CAPE_ITEM && ok(s.back) ? s.capeLining : undefined,
+    // The Robe's the same.
+    robePattern: s.back === ROBE_ITEM && ok(s.back) ? s.robePattern : undefined,
+    robeTied: s.back === ROBE_ITEM && ok(s.back) ? s.robeTied : undefined,
+    robeColor: s.back === ROBE_ITEM && ok(s.back) ? s.robeColor : undefined,
+    robePrint: s.back === ROBE_ITEM && ok(s.back) ? s.robePrint : undefined,
     knife: ok(s.knife) ? s.knife : d.knife,
     finish: ok(s.finish) ? s.finish : d.finish,
     glove: ok(s.glove) ? s.glove : d.glove,
@@ -180,18 +197,20 @@ function thumbImg(s: AvatarSpec, cls: string, focus?: Focus): HTMLImageElement {
   return img;
 }
 
-type Slot = "outfit" | "hat" | "knife" | "finish" | "glove";
+type Slot = "outfit" | "hat" | "back" | "knife" | "finish" | "glove";
 /** How each slot's choices are shown: the bunny as you've made it, wearing the choice, posed and framed to show it. */
 const THUMB: Record<Slot, (id: string) => AvatarSpec> = {
   outfit: (id) => cleanAvatar({ ...spec, outfit: id, pose: "idle", moment: 0.5, tilt: 0.2, ears: 0.5, turn: -15, frame: "close", zoom: 1, bg: "clear" }),
   hat: (id) => cleanAvatar({ ...spec, hat: id || null, pose: "idle", moment: 0.5, tilt: 0, ears: 0.4, turn: -15, frame: "face", zoom: 1.08, bg: "clear" }),
+  // Turned to show its back.
+  back: (id) => cleanAvatar({ ...spec, back: id || undefined, pose: "idle", moment: 0.5, tilt: 0, ears: 0.4, turn: 150, frame: "full", zoom: 0.84, bg: "clear" }),
   knife: (id) => cleanAvatar({ ...spec, knife: id, hand: "knife", pose: "holdup", moment: 0.3, tilt: 0, ears: 0.4, turn: -30, bg: "clear" }),
   finish: (id) => cleanAvatar({ ...spec, finish: id, hand: "knife", pose: "holdup", moment: 0.3, tilt: 0, ears: 0.4, turn: -30, bg: "clear" }),
   glove: (id) => cleanAvatar({ ...spec, glove: id, hand: "none", pose: "wave", moment: 0.3, tilt: 0, ears: 0.4, turn: -30, bg: "clear" }),
 };
 /** Knives, finishes and gloves are framed on the hand (AvatarStage Focus); the rest on the bunny. */
 const FOCUS: Partial<Record<Slot, Focus>> = { knife: "hand", finish: "hand", glove: "glove" };
-const SLOT_NAME: Record<Slot, string> = { outfit: "Colourway", hat: "Headwear", knife: "Knife", finish: "Finish", glove: "Gloves" };
+const SLOT_NAME: Record<Slot, string> = { outfit: "Colourway", hat: "Headwear", back: "Back", knife: "Knife", finish: "Finish", glove: "Gloves" };
 
 /** Waits for a stage's bunny to switch to the CS:S animations (when the player content is there), then poses it. */
 async function settle(st: AvatarStage): Promise<void> {
@@ -297,11 +316,11 @@ function slider(label: string, value: number, min: number, max: number, step: nu
 let picking: Slot | null = null;
 
 function choicesOf(slot: Slot, o: Options): { id: string; name: string }[] {
-  const list = slot === "outfit" ? o.outfits : slot === "hat" ? o.hats : slot === "knife" ? o.knives : slot === "finish" ? o.finishes : o.gloves;
+  const list = slot === "outfit" ? o.outfits : slot === "hat" ? o.hats : slot === "back" ? o.backs : slot === "knife" ? o.knives : slot === "finish" ? o.finishes : o.gloves;
   const items = list.map((c) => ({ id: c.id, name: c.id === "fin-garden" ? "Plain" : c.name }));
-  return slot === "hat" ? [{ id: "", name: "None" }, ...items] : items;
+  return slot === "hat" || slot === "back" ? [{ id: "", name: "None" }, ...items] : items;
 }
-const currentOf = (slot: Slot): string => (slot === "hat" ? spec.hat ?? "" : spec[slot]);
+const currentOf = (slot: Slot): string => (slot === "hat" ? spec.hat ?? "" : slot === "back" ? spec.back ?? "" : spec[slot]);
 
 function openPicker(slot: Slot): void {
   picking = slot;
@@ -322,7 +341,7 @@ function renderPicker(slot: Slot): void {
   const items = choicesOf(slot, options());
   const cur = currentOf(slot);
   const patch = (id: string): Partial<AvatarSpec> =>
-    slot === "hat" ? { hat: id || null } : slot === "outfit" ? { outfit: id, bg: spec.bg.startsWith("outfit:") ? defaultBg(id) : spec.bg } : slot === "glove" ? { glove: id } : { [slot]: id, hand: "knife" };
+    slot === "hat" ? { hat: id || null } : slot === "back" ? { back: id || undefined } : slot === "outfit" ? { outfit: id, bg: spec.bg.startsWith("outfit:") ? defaultBg(id) : spec.bg } : slot === "glove" ? { glove: id } : { [slot]: id, hand: "knife" };
   const grid = el(
     "div",
     { class: "av-grid", role: "listbox", "aria-label": SLOT_NAME[slot], onpointerleave: () => setPreview(null) },
@@ -363,6 +382,12 @@ function renderPicker(slot: Slot): void {
 let hairDialog: HTMLDialogElement | null = null;
 function hairControls(): HTMLElement[] {
   const hat = spec.hat;
+  // The Kitsune Mask's two ways to wear it.
+  if (hat === MASK_HAT && owns(cosmetic(hat)))
+    return [
+      el("h3", {}, "Mask", el("span", { class: "av-cur" }, spec.maskOn ? "On the face" : "Pushed up")),
+      el("div", { class: "av-hair" }, ...([[false, "Pushed up"], [true, "On the face"]] as const).map(([v, label]) => el("button", { type: "button", class: "av-link", "aria-pressed": String(!!spec.maskOn === v), onclick: () => setSpec({ maskOn: v || undefined }) }, label))),
+    ];
   if (!hat || !isWig(hat) || !owns(cosmetic(hat))) return [];
   const cur = hairHex(hairColorOf(spec.hairColor) ?? HAIR_DEFAULT);
   const preset = HAIR_PRESETS.find((p) => p.hex === cur);
@@ -404,11 +429,72 @@ function hairControls(): HTMLElement[] {
       custom,
     ),
   ];
+  // Highlights: none, the Loadout's presets (loadout.ts HIGHLIGHT_PRESETS).
+  out.push(
+    el("h3", {}, "Highlights", el("span", { class: "av-cur" }, HIGHLIGHT_PRESETS.find((p) => p.hex === spec.hairHighlight)?.name ?? (spec.hairHighlight ? spec.hairHighlight.toUpperCase() : "None"))),
+    el(
+      "div",
+      { class: "av-hair" },
+      swatches(
+        HIGHLIGHT_PRESETS.map((p) => ({ id: p.hex, name: p.name, color: p.hex })),
+        spec.hairHighlight ?? "",
+        (hex) => setSpec({ hairHighlight: hex === spec.hairHighlight ? undefined : hex }),
+        (hex) => setPreview(hex ? { hairHighlight: hex } : null),
+      ),
+      el("button", { type: "button", class: "av-link", "aria-pressed": String(!spec.hairHighlight), onclick: () => setSpec({ hairHighlight: undefined }) }, "None"),
+    ),
+  );
   if (LENGTH_HATS.includes(hat)) {
     const n = spec.hairLength ?? HAIR_LENGTH.default;
     out.push(slider("Length", n, HAIR_LENGTH.min, HAIR_LENGTH.max, 5, (v) => setSpec({ hairLength: v === HAIR_LENGTH.default ? undefined : v }, { quiet: true })));
   }
   return out;
+}
+
+// The Cape (on the back and yours): its length and its two colours, as the Loadout's. The defaults stay out of the spec.
+const capeDialogs: Partial<Record<"capeColor" | "capeLining", HTMLDialogElement>> = {};
+function capeControls(): HTMLElement[] {
+  if (spec.back !== CAPE_ITEM || !owns(cosmetic(CAPE_ITEM))) return [];
+  const colour = (key: "capeColor" | "capeLining", label: string, title: string, intro: string, def: { name: string; hex: string }): HTMLElement[] => {
+    const cur = spec[key] ?? null;
+    const options = [{ id: "", name: def.name, color: def.hex }, ...CAPE_PRESETS.map((p) => ({ id: p.hex, name: p.name, color: p.hex }))];
+    const preset = options.find((o) => o.id === (cur ?? ""));
+    const set = (hex: string | null) => setSpec({ [key]: hex ? capeHexOf(hex) ?? undefined : undefined });
+    const custom = el(
+      "button",
+      {
+        type: "button",
+        class: "av-link av-hair-custom",
+        "aria-haspopup": "dialog",
+        "aria-pressed": String(!preset),
+        title: preset ? "Choose any colour" : `Custom colour ${cur!.toUpperCase()}`,
+        onclick: () => {
+          if (capeDialogs[key]) return capeDialogs[key]!.focus();
+          capeDialogs[key] = glowColorPicker({
+            title,
+            intro,
+            current: (cur ?? def.hex) as `#${string}`,
+            preview: (hex) => setPreview({ [key]: hex }),
+            apply: (hex) => ((preview = null), set(hex)),
+            closed: () => (delete capeDialogs[key], setPreview(null)),
+          });
+        },
+      },
+      el("span", { class: "av-hair-dot", style: `--sw:${cur ?? def.hex}`, "aria-hidden": "true" }),
+      "Custom…",
+    );
+    return [
+      el("h3", {}, label, el("span", { class: "av-cur" }, preset?.name ?? cur!.toUpperCase())),
+      el("div", { class: "av-hair" }, swatches(options, preset ? preset.id : "\u0000", (hex) => set(hex || null), (hex) => setPreview(hex === null ? null : { [key]: hex || undefined })), custom),
+    ];
+  };
+  const n = spec.capeLength ?? CAPE_LENGTH.default;
+  const accent = `#${colourway(spec.outfit).accent.toString(16).padStart(6, "0")}`;
+  return [
+    ...colour("capeColor", "Cape", "Cape colour", "Choose a colour for the outside of your cape.", { name: "Colourway", hex: accent }),
+    ...colour("capeLining", "Cape lining", "Cape lining", "Choose a colour for your cape's lining and trim.", { name: "Ivory", hex: CAPE_LINING_DEFAULT }),
+    slider("Cape length", n, CAPE_LENGTH.min, CAPE_LENGTH.max, CAPE_LENGTH.step, (v) => setSpec({ capeLength: v === CAPE_LENGTH.default ? undefined : v }, { quiet: true })),
+  ];
 }
 
 /** A row that opens a slot's picker: what you wear there, as a thumbnail and a name. */
@@ -472,8 +558,10 @@ function renderControls(): void {
     section(
       "Look",
       null,
-      el("div", { class: "av-picks" }, pickRow("outfit", o), pickRow("hat", o), spec.hand === "knife" ? pickRow("knife", o) : null, spec.hand === "knife" ? pickRow("finish", o) : null, pickRow("glove", o)),
+      el("div", { class: "av-picks" }, pickRow("outfit", o), pickRow("hat", o), pickRow("back", o), spec.hand === "knife" ? pickRow("knife", o) : null, spec.hand === "knife" ? pickRow("finish", o) : null, pickRow("glove", o)),
       ...hairControls(),
+      ...capeControls(),
+      ...robeControls(),
       el("h3", {}, "Build", el("span", { class: "av-cur" }, name(spec.body) ?? "")),
       list(
         [
@@ -623,17 +711,85 @@ $("av-discord-box").addEventListener("change", async (e) => {
 });
 
 // ---------------------------------------------------------------------------------------------
+// The Robe (on the back and yours): open or tied, its pattern and its two colours, as the Loadout's.
+const robeDialogs: Partial<Record<"robeColor" | "robePrint", HTMLDialogElement>> = {};
+function robeControls(): HTMLElement[] {
+  if (spec.back !== ROBE_ITEM || !owns(cosmetic(ROBE_ITEM))) return [];
+  const colour = (key: "robeColor" | "robePrint", label: string, title: string, intro: string, def: string): HTMLElement[] => {
+    const cur = spec[key] ?? null;
+    const options = [{ id: "", name: "Colourway", color: def }, ...CAPE_PRESETS.map((p) => ({ id: p.hex, name: p.name, color: p.hex }))];
+    const preset = options.find((o) => o.id === (cur ?? ""));
+    const set = (hex: string | null) => setSpec({ [key]: hex ? capeHexOf(hex) ?? undefined : undefined });
+    const custom = el(
+      "button",
+      {
+        type: "button",
+        class: "av-link av-hair-custom",
+        "aria-haspopup": "dialog",
+        "aria-pressed": String(!preset),
+        title: preset ? "Choose any colour" : `Custom colour ${cur!.toUpperCase()}`,
+        onclick: () => {
+          if (robeDialogs[key]) return robeDialogs[key]!.focus();
+          robeDialogs[key] = glowColorPicker({
+            title,
+            intro,
+            current: (cur ?? def) as `#${string}`,
+            preview: (hex) => setPreview({ [key]: hex }),
+            apply: (hex) => ((preview = null), set(hex)),
+            closed: () => (delete robeDialogs[key], setPreview(null)),
+          });
+        },
+      },
+      el("span", { class: "av-hair-dot", style: `--sw:${cur ?? def}`, "aria-hidden": "true" }),
+      "Custom…",
+    );
+    return [
+      el("h3", {}, label, el("span", { class: "av-cur" }, preset?.name ?? cur!.toUpperCase())),
+      el("div", { class: "av-hair" }, swatches(options, preset ? preset.id : "\u0000", (hex) => set(hex || null), (hex) => setPreview(hex === null ? null : { [key]: hex || undefined })), custom),
+    ];
+  };
+  const way = colourway(spec.outfit), hex = (n: number) => `#${n.toString(16).padStart(6, "0")}`;
+  const pattern = spec.robePattern ?? 0;
+  return [
+    el("h3", {}, "Robe", el("span", { class: "av-cur" }, spec.robeTied ? "Tied" : "Open")),
+    list([{ id: "open", name: "Open" }, { id: "tied", name: "Tied" }], spec.robeTied ? "tied" : "open", (id) => setSpec({ robeTied: id === "tied" ? true : undefined }), "av-row4"),
+    el("h3", {}, "Robe pattern", el("span", { class: "av-cur" }, ROBE_PATTERNS[pattern])),
+    list(ROBE_PATTERNS.map((name, i) => ({ id: String(i), name })), String(pattern), (id) => setSpec({ robePattern: robePatternOf(Number(id)) ?? undefined }), "av-row4"),
+    ...colour("robeColor", "Robe colour", "Robe colour", "Choose a colour for your robe.", hex(way.pants)),
+    ...colour("robePrint", "Robe pattern colour", "Pattern colour", "Choose a colour for the pattern and the collar.", hex(way.accent)),
+  ];
+}
+
 // Start
 
 /** What a loadout puts on the avatar (the default pose stays). */
-const wearing = (l: { outfit?: string | null; knife?: string | null; finish?: string | null; glove?: string | null; hat?: string | null; body?: string | null; hairColor?: string | number | null; hairLength?: number | null }): Partial<AvatarSpec> => {
+const wearing = (l: { outfit?: string | null; knife?: string | null; finish?: string | null; glove?: string | null; hat?: string | null; back?: string | null; body?: string | null; hairColor?: string | number | null; hairLength?: number | null; hairHighlight?: string | number | null; maskOn?: boolean | null; capeLength?: number | null; capeColor?: string | number | null; capeLining?: string | number | null; robePattern?: number | null; robeTied?: boolean | null; robeColor?: string | number | null; robePrint?: string | number | null }): Partial<AvatarSpec> => {
   const p: Partial<AvatarSpec> = {};
   for (const k of ["outfit", "knife", "finish", "glove", "body"] as const) if (l[k]) p[k] = l[k]!;
   p.hat = l.hat ?? null;
+  p.back = l.back ?? undefined;
   // Your hair as you wear it (the Hair controls under Look change it for the avatar only).
   const hair = hairColorOf(l.hairColor);
   if (hair !== null) p.hairColor = hairHex(hair);
   if (l.hairLength) p.hairLength = l.hairLength;
+  const hi = hairColorOf(l.hairHighlight);
+  if (hi !== null) p.hairHighlight = hairHex(hi);
+  if (l.maskOn) p.maskOn = true;
+  // Your cape as you wear it.
+  if (l.back === CAPE_ITEM) {
+    if (l.capeLength) p.capeLength = l.capeLength;
+    const outer = capeHexOf(l.capeColor), lining = capeHexOf(l.capeLining);
+    if (outer) p.capeColor = outer;
+    if (lining) p.capeLining = lining;
+  }
+  // Your robe as you wear it.
+  if (l.back === ROBE_ITEM) {
+    const pattern = robePatternOf(l.robePattern), cloth = capeHexOf(l.robeColor), print = capeHexOf(l.robePrint);
+    if (pattern !== null) p.robePattern = pattern;
+    if (l.robeTied) p.robeTied = true;
+    if (cloth) p.robeColor = cloth;
+    if (print) p.robePrint = print;
+  }
   if (p.outfit) p.bg = defaultBg(p.outfit);
   return p;
 };

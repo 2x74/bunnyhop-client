@@ -75,7 +75,7 @@ import "./viewmodel/settings"; // Settings -> Viewmodel
 import "./ui/account-settings"; // Settings -> Account (name, sign-in, replay the intro)
 import { initCustomCss } from "./custom-css";
 import "./custom-css/section"; // Settings -> Custom CSS
-import { initAudio, PlayerAudio, runSounds, setListenerFromCamera, startMapSounds } from "./audio";
+import { initAudio, keySounds, PlayerAudio, runSounds, setListenerFromCamera, startMapSounds } from "./audio";
 import { AutoRestart } from "./auto-restart";
 import { buildSurfaces } from "./audio/surfaces";
 import { registerAudioSettings } from "./audio/settings-section";
@@ -108,6 +108,7 @@ import { startPlaytime } from "./playtime";
 import { mapTime } from "./map-time";
 import { deviceIdSettled } from "./device";
 import { setCosmeticsStill } from "./viewmodel/finishes/shader";
+import { hopQuality } from "./player/hop-layer";
 import { setCosmeticsTier, tierOf } from "./viewmodel/finishes/detail";
 import { lookTierOf, setPlayerLookTier } from "./player/look-tier";
 import { PotatoHint } from "./potato-hint";
@@ -242,6 +243,7 @@ prefs.watch((p) => {
   resize();
   if (applyPalette(p.colorBlind)) run?.view.recolor(); // colour-blind palette (palette.ts): CSS variables, then the zones
   setCosmeticsStill(p.graphics.potato); // animated finishes and hats hold still in Potato mode
+  hopQuality.count = p.graphics.potato ? 0.5 : 1; // hop effects: half the particles in Potato mode (player/hop-layer.ts)
   setCosmeticsTier(tierOf(p.graphics)); // glove + knife hardware detail per look (viewmodel/finishes/detail.ts)
   setPlayerLookTier(lookTierOf(p.graphics)); // garment detail on the bunnies and the sleeves (player/look-tier.ts)
   document.body.classList.toggle("potato", p.graphics.potato); // and the HUD drops its blurs (hud.css)
@@ -1081,6 +1083,12 @@ function toggleJumpHold(): void {
   input.setJumpToggle(true);
 }
 input.onJumpToggle = (on) => session.hud.setJumpHeld(on);
+// Key sounds (audio/keysounds.ts): from the keydown itself. Not while the keys don't move you (spectating, a replay,
+// freecam); the replay viewer and spectating play the watched player's own presses instead.
+input.onMovePress = (bits) => {
+  if (replayViewer.active || mp?.isSpectating || freecam.active) return;
+  keySounds.press(bits, session.timer.options.strafeKeys ?? "ad");
+};
 /** Bound actions that do nothing while freecam is on (main.ts onAction). */
 const FREECAM_BLOCKED = new Set<string>(["attack", "attack2", "inspect", "setStart", "clearStart", "thirdPerson", "practice", "noclip", "cpSave", "cpTeleport", "cpPrev", "cpNext", "giveUsp", "giveGlock", "gunMenu", "turnLeft", "turnRight", "turnFast"]);
 /** R / M / B. With Settings → Keys → Hold to restart on, or a timed run past Hold after, they fire after a short hold (restart-guard.ts). */

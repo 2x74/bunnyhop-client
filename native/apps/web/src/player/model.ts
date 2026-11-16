@@ -20,8 +20,11 @@ import { getPlayerGlow, onPlayerGlow } from "./cosmetics";
 import * as THREE from "three";
 import { playerUniforms, type PlayerUniforms } from "./materials";
 import { BunnyModel } from "./bunny/model";
-import { getHeldLoadout, getOutfit, onHeldLoadout, onOutfit } from "./cosmetics";
-import type { CosmeticLoadout } from "../loadout";
+import { getGhostCosmetics, getHeldLoadout, getOutfit, onGhostCosmetics, onHeldLoadout, onOutfit } from "./cosmetics";
+import { HOP_TRAIL_DEFAULT, type CosmeticLoadout } from "../loadout";
+import { cosmetic } from "../progression";
+import { hopFxOf } from "./hop-fx";
+import { HopEmitter } from "./hop-layer";
 import { followLoadout, knifeOf } from "../viewmodel/equip";
 import { equippedKnife, onKnife } from "../viewmodel/knives/equipped";
 import type { KnifeDef } from "../viewmodel/knives/types";
@@ -76,6 +79,12 @@ export interface PlayerModelOptions {
    * set and `knife` isn't, the knife comes from it too.
    */
   loadout?: CosmeticLoadout | null;
+  /**
+   * Hop effects (player/hop-fx.ts): the loadout's hop effect bursts at the feet on every hop while the model is drawn in a
+   * scene. "own": always (your bunny in third person, the Loadout's stage); "others": while Settings -> Hop effects is on
+   * (other players, ghosts, replays). Absent: none (menus, labs, avatars).
+   */
+  hops?: "own" | "others";
 }
 
 /** What every implementation provides; the facade forwards to it. */
@@ -110,6 +119,9 @@ export class PlayerModel {
   private updated = false;
   private disposed = false;
   private unsub: (() => void)[] = [];
+  private hop: HopEmitter | null = null;
+  private lastPose: PlayerPose | null = null;
+  private lastDt = 0;
 
   constructor(o: PlayerModelOptions = {}) {
     this.o = { ...o };
@@ -129,9 +141,17 @@ export class PlayerModel {
     );
     this.unsub.push(
       onHeldLoadout((l) => {
-        if (this.o.loadout === undefined) this.impl.setLoadout(l);
+        if (this.o.loadout === undefined) {
+          this.impl.setLoadout(l);
+          this.syncHop();
+        }
       }),
     );
+    if (o.hops) {
+      this.hop = new HopEmitter();
+      this.syncHop();
+      this.unsub.push(onGhostCosmetics(() => this.syncHop()));
+    }
     this.unsub.push(
       onKnife((k) => {
         if (this.o.knife === undefined && this.o.loadout === undefined) this.impl.setKnife(k);
@@ -172,6 +192,17 @@ export class PlayerModel {
     this.o.loadout = l;
     this.impl.setLoadout(l === undefined ? getHeldLoadout() : l);
     this.impl.setKnife(this.knifeChoice());
+    this.syncHop();
+  }
+
+  /** The hop effect from the loadout, in the colours of its trail (your own trail while following your loadout). */
+  private syncHop(): void {
+    if (!this.hop) return;
+    const own = this.o.loadout === undefined;
+    const l = own ? getHeldLoadout() : this.o.loadout;
+    const trail = cosmetic(own ? getGhostCosmetics().trailId : (l?.hopTrail ?? HOP_TRAIL_DEFAULT)) ?? cosmetic(HOP_TRAIL_DEFAULT);
+    const c = trail?.color ?? "#ffc23d";
+    this.hop.set(hopFxOf(l?.hop), c, trail?.color2 ?? c);
   }
 
   /** Bunny colourway ("outfit-*" id); undefined = follow the one you equipped. */
@@ -218,6 +249,7 @@ export class PlayerModel {
   /** The ground under the bunny's feet (Source z at x, y; null = none near) for planting on slopes; null: flat. */
   setGroundProbe(p: ((x: number, y: number, z: number) => number | null) | null): void {
     this.impl.setGroundProbe(p);
+    if (this.hop) this.hop.probe = p;
   }
 
   /** The bunny's gun muzzle in three.js world space as of the last update (false: no gun drawn, or another model). */
@@ -287,11 +319,13 @@ export class PlayerModel {
   }
 
   setState(pose: PlayerPose): void {
+    this.lastPose = pose;
     this.impl.setState(pose);
   }
 
   snap(): void {
     this.impl.snap();
+    this.hop?.reset();
   }
 
   /**
@@ -319,6 +353,8 @@ export class PlayerModel {
     this.impl.root.position.copy(this.root.position);
     this.impl.present(a, hold);
     this.place();
+    // The bursts are shown at the same moment between the two ticks (they'd step at the tick rate otherwise).
+    this.hop?.show(this.impl.clock - (1 - a) * this.lastDt);
   }
 
   update(dt: number): void {
@@ -328,10 +364,18 @@ export class PlayerModel {
     }
     this.impl.update(dt);
     this.place();
+    const hop = this.hop, pose = this.lastPose;
+    this.lastDt = dt;
+    if (hop?.on && pose) {
+      const impl = this.impl;
+      hop.alpha = impl.currentStyle === "ghost" ? (this.opacity ?? 1) : 1;
+      hop.update(impl, pose, this.root, impl.jumpedLast && (this.o.hops === "own" || prefs.get().showHopFx));
+    }
   }
 
   dispose(): void {
     this.disposed = true;
+    this.hop?.dispose();
     for (const u of this.unsub) u();
     this.unsub = [];
     this.impl.dispose();

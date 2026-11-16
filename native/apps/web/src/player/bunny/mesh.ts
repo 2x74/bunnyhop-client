@@ -21,14 +21,14 @@ import { buildTpGlove } from "../../viewmodel/gloves/tp";
 import type { GloveStyleId } from "../../loadout";
 import { tekHead, tekJacket, tekShoeWing } from "./tek";
 import type { BunnyLook } from "./look";
-import { HEAD_SHAPE } from "./head-shape";
+import { FACE, HEAD_SHAPE, headScale, jawShape } from "./head-shape";
 import { around, GARMENT, gfin, gplain, NO_SEAM as NO_SEAM_Y } from "../fabric";
 
 /** Palette slots (accent code 3 + slot), see palettes.ts. */
 export const SLOT = { hoodie: 0, trim: 1, pants: 2, pantsTrim: 3, shoe: 4, face: 5, glove: 6, detail: 7 } as const;
 const S = (slot: number): Paint => ({ code: 3 + slot });
 const HOODIE = S(SLOT.hoodie), TRIM = S(SLOT.trim), PANTS = S(SLOT.pants), PANTS_TRIM = S(SLOT.pantsTrim);
-const SHOE = S(SLOT.shoe), FACE = S(SLOT.face), GLOVE = S(SLOT.glove), DETAIL = S(SLOT.detail);
+const SHOE = S(SLOT.shoe), FACE_P = S(SLOT.face), GLOVE = S(SLOT.glove), DETAIL = S(SLOT.detail);
 const ACCENT: Paint = { code: 1 };
 const GLOW: Paint = { code: 2 };
 /** Visor band: the face slot's tint of the accent (palette slot 7 "detail" is used for laces / aglets). */
@@ -56,10 +56,12 @@ const TORSO: [number, number, number, number, number][] = [
   [49, 8.95, 6.0, 1.7, 2.4],
   [52.5, 9.45, 6.1, 1.9, 2.5],
   [55.5, 9.45, 6.0, 2.0, 2.6],
-  [58.5, 9.0, 5.7, 2.15, 2.6],
-  [61, 8.0, 5.1, 2.3, 2.5],
-  [62.9, 6.6, 4.5, 2.4, 2.3],
-  [64.1, 4.8, 3.7, 2.45, 2.2],
+  [58.5, 9.1, 5.7, 2.15, 2.5],
+  // The shoulder line: a slope from the neck out to the sleeves (it fell away inside them, so each sleeve's top stood
+  // up off the body like a pauldron).
+  [61, 8.6, 5.15, 2.3, 2.3],
+  [62.9, 7.3, 4.55, 2.4, 2.15],
+  [64.1, 5.1, 3.75, 2.45, 2.1],
   [64.8, 3.2, 3.0, 2.45, 2.0],
 ];
 
@@ -72,6 +74,12 @@ const FEMININE_TORSO = TORSO.map((row, i) => {
   return [row[0], row[1] * width, row[2] * depth, row[3], row[4]] as [number, number, number, number, number];
 });
 
+/** The torso profile a look and build use (Plush is rounder; Model B and Bun-E the shaped hoodie). */
+export function torsoProfile(look: BunnyLook, body: BunnyBody): typeof TORSO {
+  if (look === "plush") return TORSO.map(([z, a, b, c]) => [z, a * 1.035, b * 1.06, c, 2.0] as [number, number, number, number, number]);
+  return look === "bune" || (look === "bunny" && body === "feminine") ? FEMININE_TORSO : TORSO;
+}
+
 function torsoAt(z: number, profile = TORSO): { a: number; b: number; c: number; e: number } {
   const zs = profile.map((r) => r[0]);
   let i = 0;
@@ -82,7 +90,7 @@ function torsoAt(z: number, profile = TORSO): { a: number; b: number; c: number;
 }
 
 /** Point on the torso surface at height z, angle th (0 = +X/left, pi/2 = +Y/back, -pi/2 = front), pushed out by off. */
-function torsoPointFor(z: number, th: number, off = 0, profile = TORSO): V3 {
+export function torsoPointFor(z: number, th: number, off = 0, profile = TORSO): V3 {
   const { a, b, c, e } = torsoAt(z, profile);
   const ca = Math.cos(th), sa = Math.sin(th);
   const x = Math.sign(ca) * Math.pow(Math.abs(ca), 2 / e) * (a + off);
@@ -91,7 +99,7 @@ function torsoPointFor(z: number, th: number, off = 0, profile = TORSO): V3 {
 }
 
 /** Front (side = -1) or back (+1) surface point at (x, z), offset outward along the approximate normal. */
-function torsoFacePointFor(x: number, z: number, side: number, off: number, profile = TORSO): [V3, V3] {
+export function torsoFacePointFor(x: number, z: number, side: number, off: number, profile = TORSO): [V3, V3] {
   const { a, b, c, e } = torsoAt(z, profile);
   const t = clamp(Math.abs(x) / a, 0, 0.995);
   const y = Math.pow(1 - Math.pow(t, e), 1 / e) * b;
@@ -103,6 +111,17 @@ function torsoFacePointFor(x: number, z: number, side: number, off: number, prof
   return [add(p, scale(n, off)), n];
 }
 
+/** The neck's half width and half depth as built (after the head's scale). */
+export const NECK = [2.6, 2.5];
+
+/**
+ * The lowered hood on the upper back (bind space): from z `top` down by `drop`, `w` either side of the middle at its
+ * top (half that at its crown), standing at most `depth` off the hoodie. With EAR_DOWN (rig.ts: the ears hang from
+ * (+-3.1, 9.1, 62.4) down to about z 53.4, out to x +-7.8, within 2 units of the back) this is what a back item shares
+ * the upper back with while a wig is on.
+ */
+export const HOOD_POUCH = { top: 64.3, drop: 7.9, w: 6.1, depth: 2.85 };
+
 /** The hood: up (the bunny's own look), or down round the neck while a wig is on (the standard bunny only). */
 export type BunnyHood = "up" | "down";
 
@@ -111,7 +130,7 @@ export function buildBunnyGeometry(knife?: KnifeDef | null, glove: GloveStyleId 
   const hoodDown = look === "bunny" && hood === "down";
   const plush = look === "plush", bune = look === "bune";
   const feminine = bune || body === "feminine";
-  const profile = plush ? TORSO.map(([z, a, b, c, e]) => [z, a * 1.035, b * 1.06, c, 2.0] as [number, number, number, number, number]) : feminine ? FEMININE_TORSO : TORSO;
+  const profile = torsoProfile(look, body);
   const torsoPoint = (z: number, th: number, off = 0) => torsoPointFor(z, th, off, profile);
   const torsoFacePoint = (x: number, z: number, side: number, off: number) => torsoFacePointFor(x, z, side, off, profile);
   const tek = look === "tek";
@@ -304,8 +323,9 @@ export function buildBunnyGeometry(knife?: KnifeDef | null, glove: GloveStyleId 
     const L1 = len(sub(el, sh));
     const st: [number, number, number][] = [
       // s, radius, paint (0 hoodie, 1 trim)
-      [-2.6, 2.3, 0],
-      [-1.6, 3.15, 0],
+      [-3.6, 1.9, 0],
+      [-2.6, 2.65, 0],
+      [-1.4, 3.1, 0],
       [0.2, 3.3, 0],
       [3, 3.15, 0],
       [6.5, 2.95, 0],
@@ -321,16 +341,18 @@ export function buildBunnyGeometry(knife?: KnifeDef | null, glove: GloveStyleId 
       [L1 + 10.8, 2.72, 1],
       [L1 + 11.3, 2.35, 1],
     ];
-    const pos = (s: number): V3 => (s <= L1 ? add(sh, scale(d1, s)) : add(el, scale(d2, s - L1)));
+    // Above the joint the sleeve turns in toward the neck (a set-in shoulder) instead of running on up the arm's line.
+    const capDir = norm([Math.sign(sh[0]), 0, -0.3]);
+    const capT = (s: number) => smoothstep(1.2, -3.6, s);
+    const pos = (s: number): V3 => (s < 0 ? add(sh, scale(norm(lerp3(d1, capDir, 0.75)), s)) : s <= L1 ? add(sh, scale(d1, s)) : add(el, scale(d2, s - L1)));
     const K = 16;
     // Rings start on the underside (the underarm seam).
     const phase = side === "L" ? -Math.PI / 2 : Math.PI / 2;
     const rows = st.map(([s, rad]) => {
       const t = clamp((s - (L1 - 2)) / 4, 0, 1);
-      const dir = norm(lerp3(d1, d2, t));
+      const dir = norm(lerp3(lerp3(d1, capDir, capT(s)), d2, t));
       const [, u, v] = frame(dir, Y);
-      // Shoulder cap rises a little above the joint.
-      const c = add(pos(s), s < 1 ? [0, 0, 0.6 * (1 - Math.abs(s + 0.6) / 2)] : [0, 0, 0]);
+      const c = pos(s);
       // Narrow the shoulder silhouette while blending back to the unchanged wrist/glove attachment.
       if (feminine) c[0] -= Math.sign(sh[0]) * 0.48 * (1 - smoothstep(0, L1 + 6, s));
       const fit = plush ? 1.06 : feminine ? 0.82 + 0.18 * smoothstep(L1 + 3, L1 + 11.3, s) : 1;
@@ -382,19 +404,19 @@ export function buildBunnyGeometry(knife?: KnifeDef | null, glove: GloveStyleId 
     } else {
     // --- Neck, face, visor (built at the old size, then scaled with the rest of the head: head-shape.ts)
     const faceStart = b.vertexCount;
-    const faceC: V3 = [0, -0.55, 68.7];
-    const faceR: V3 = [4.05, 4.35, 4.85];
+    const faceC = FACE.c, faceR = FACE.r;
     const headW = (p: V3): Wt => hat(p[2], [[62.8, spine4], [64.6, neck], [66.6, head]]);
     {
-      const rows = [62.2, 64, 65.8].map((z) => ring([0, 2.0 - (z - 62.2) * 0.4, z], X, Y, 2.6, 2.5, 12));
+      // The neck: slimmer than the jaw (2.6 x 2.5 once the head is scaled: the lowered hood's collar closes onto that).
+      const rows = [62.2, 64, 65.8].map((z) => ring([0, 2.0 - (z - 62.2) * 0.4, z], X, Y, NECK[0] / headScale(hoodDown), NECK[1] / headScale(hoodDown), 12));
       // The face: soft dark cloth (fabric.ts face), in the hood's shadow toward its edges and down the neck.
-      b.surface(rows, { paint: () => FACE, weight: (p) => headW(p), fin: () => gplain(GARMENT.face, 0.5) });
-      const fr = b.ellipsoidRows(faceC, faceR, Z, X, 22, 12);
-      // A gently tapered lower face; keep the upper face and hood attachment unchanged.
-      if (feminine) for (const row of fr) for (const p of row) p[0] *= 1 - 0.10 * smoothstep(69, 64, p[2]);
+      b.surface(rows, { paint: () => FACE_P, weight: (p) => headW(p), fin: () => gplain(GARMENT.face, 0.5) });
+      // The ellipsoid above eye level; below it the jaw (head-shape.ts jawShape). Its shading keeps the ellipsoid's
+      // coordinates (x: height across the face, -1 chin .. 1 brow, for its soft gradient: fabric.ts face).
+      const fe = b.ellipsoidRows(faceC, faceR, Z, X, 22, 14);
+      const fr = fe.map((row) => row.map((p) => jawShape(p, feminine)));
       const faceAO = (p: V3) => 0.55 * smoothstep(0.55, 0.05, -(p[1] - faceC[1]) / faceR[1]);
-      // x: height across the face (-1 chin .. 1 brow) for its soft gradient (fabric.ts face).
-      b.surface(fr, { paint: () => FACE, weight: (p) => headW(p), fin: (i, k) => gfin(GARMENT.face, (fr[i][k % 22][2] - faceC[2]) / faceR[2], NO_SEAM_Y, faceAO(fr[i][k % 22])) });
+      b.surface(fr, { paint: () => FACE_P, weight: (p) => headW(p), fin: (i, k) => gfin(GARMENT.face, (fe[i][k % 22][2] - faceC[2]) / faceR[2], NO_SEAM_Y, faceAO(fe[i][k % 22])) });
       // Visor: a wraparound band proud of the face at eye level, with a thin lip above and below.
       // A slim band, set a touch low, its ends lifting a little: a gentle smile line across the face.
       const lats = [0.02, 0.065, 0.245, 0.29];
@@ -443,7 +465,7 @@ export function buildBunnyGeometry(knife?: KnifeDef | null, glove: GloveStyleId 
       const nose = b.ellipsoidRows([0, faceC[1] - faceR[1] + 0.05, faceC[2] - 1.15], [feminine ? 0.46 : 0.52, 0.4, feminine ? 0.38 : 0.42], Y, X, 10, 6);
       b.surface(nose, { paint: () => ACCENT, weight: () => [[head, 1]], fin: () => PRINT_FIN });
     }
-    b.scaleSection(faceStart, HEAD_SHAPE.pivot, HEAD_SHAPE.scale);
+    b.scaleSection(faceStart, HEAD_SHAPE.pivot, headScale(hoodDown));
 
     // --- Ears: flattened, with an accent inner panel; two bones each for floppy secondary motion. Up (on the hood):
     // swept back from the top of the head. Down (on the lowered hood, hoodDown): hanging down the upper back, the
@@ -517,14 +539,15 @@ export function buildBunnyGeometry(knife?: KnifeDef | null, glove: GloveStyleId 
       // its crown, and the ears coming off it (rig.ts EAR_DOWN; the animator carries them on the spine).
       const K = 48;
       const back = (th: number) => Math.max(0, Math.sin(th));
-      const neckAt = (z: number, th: number, off: number): V3 => [(2.6 + off) * Math.cos(th), 2.0 - (z - 62.2) * 0.4 + (2.5 + off) * Math.sin(th), z];
+      const neckAt = (z: number, th: number, off: number): V3 => [(NECK[0] + off) * Math.cos(th), 2.0 - (z - 62.2) * 0.4 + (NECK[1] + off) * Math.sin(th), z];
       const collar: V3[][] = [0, 1, 2, 3, 4].map((i) =>
         Array.from({ length: K }, (_, k) => {
           const th = (k / K) * Math.PI * 2, bk = back(th), fr = Math.max(0, -Math.sin(th));
           const roll = 0.32 + 0.5 * bk - 0.08 * fr;
-          const zIn = 64.25 + 1.5 * bk, zTop = 64.85 + 1.75 * bk - 0.2 * fr;
-          if (i === 0) return torsoPoint(63.3 + 0.35 * bk, th, 0.02);
-          if (i === 1) return torsoPoint(63.9 + 0.5 * bk, th, roll);
+          // Lower under the chin (the neck shows there), higher behind where the hood gathers.
+          const zIn = 64.25 + 1.5 * bk - 0.75 * fr, zTop = 64.85 + 1.75 * bk - 0.95 * fr;
+          if (i === 0) return torsoPoint(63.3 + 0.35 * bk - 0.4 * fr, th, 0.02);
+          if (i === 1) return torsoPoint(63.9 + 0.5 * bk - 0.6 * fr, th, roll);
           if (i === 4) return neckAt(zIn, th, 0.04);
           if (i === 3) return neckAt(zIn + 0.3 + 0.3 * bk, th, 0.36 + 0.2 * bk);
           // The top of the roll: between the hoodie's opening and the neck, lifted.
@@ -544,49 +567,30 @@ export function buildBunnyGeometry(knife?: KnifeDef | null, glove: GloveStyleId 
         // Fleece, darker in the fold down to the neck.
         fin: (i) => gplain(GARMENT.fleece, [0.1, 0, 0, 0.25, 0.5][i]),
       });
-      // The hood: rows from its lip (v 0) down to its crown (v 1), across from side to side (u -1..1), standing off the
-      // back by depth. The lip stands well off the back so the opening reads; folds gather toward the crown.
-      const POCKET = { top: 63.7, drop: 8.8, w: 5.7 };
-      const pz = (v: number) => POCKET.top - POCKET.drop * v;
-      const pw = (v: number) => POCKET.w * (1 - 0.52 * Math.pow(v, 1.5));
+      // The hood, fallen back: a soft pouch lying on the upper back, from under the collar's roll (v 0) to its crown
+      // (v 1), across from side to side (u -1..1), standing off the back by depth. Closed and fullest a little above
+      // its middle (it was an open pocket with a trim hoop round the lip, which stood off the neck like a basket's
+      // rim), soft folds gathering toward the crown.
+      const POUCH = HOOD_POUCH;
+      const pz = (v: number) => POUCH.top - POUCH.drop * v;
+      const pw = (v: number) => POUCH.w * (1 - 0.5 * Math.pow(v, 1.6));
       const depth = (u: number, v: number) => {
-        const dv = 0.45 + 2.75 * Math.max(0, 1 - ((v - 0.28) / 0.8) ** 2);
-        const fold = 0.38 * smoothstep(0.2, 0.85, v) * Math.cos(u * Math.PI * 2.2 + 0.4) + 0.16 * Math.cos(u * Math.PI * 4.1 - 0.7) * smoothstep(0.35, 1, v);
-        return Math.max(0, dv * Math.pow(Math.max(0, 1 - u * u), 0.55) + fold * (1 - u * u));
+        const dv = 0.5 + 2.35 * Math.pow(Math.sin(Math.PI * clamp((v + 0.14) / 1.14, 0, 1)), 1.2);
+        const fold = 0.3 * smoothstep(0.25, 0.9, v) * Math.cos(u * Math.PI * 2.2 + 0.4) + 0.13 * Math.cos(u * Math.PI * 4.1 - 0.7) * smoothstep(0.4, 1, v);
+        return Math.max(0, dv * Math.pow(Math.max(0, 1 - u * u), 0.5) + fold * (1 - u * u));
       };
       const pocketPt = (u: number, v: number, extra = 0): [V3, V3] => {
         const [p, n] = torsoFacePoint(u * pw(v), pz(v), 1, 0);
         return [add(p, scale(n, depth(u, v) + extra)), n];
       };
-      const PU = 28, PV = 14;
+      const PU = 24, PV = 12;
       const us = Array.from({ length: PU + 1 }, (_, k) => -1 + (2 * k) / PU);
       const outer = Array.from({ length: PV + 1 }, (_, i) => us.map((u) => pocketPt(u, i / PV)[0]));
       // Closed at the crown: the last row drawn into a rounded point against the back.
       outer.push(us.map((u) => pocketPt(u * 0.35, 1.04, -depth(u * 0.35, 1.04) + 0.05)[0]));
-      b.surface(outer, { closed: false, paint: () => HOODIE, weight: (q) => torsoW(q), out: (i, k) => pocketPt(us[k], Math.min(1, i / PV))[1], fin: (i) => gplain(GARMENT.fleece, 0.3 * smoothstep(0.6, 1.05, i / PV)) });
-      // The lining: the inside of the hood's upper part, facing the body, seen through the opening.
-      const LV = 5;
-      const lining = Array.from({ length: LV + 1 }, (_, i) => us.map((u) => {
-        const v = (i / LV) * 0.42;
-        const d = depth(u, v);
-        const [p, n] = torsoFacePoint(u * pw(v), pz(v), 1, 0);
-        return add(p, scale(n, Math.max(0.05, d - 0.16)));
-      }));
-      b.surface(lining, { closed: false, paint: () => TRIM, weight: (q) => torsoW(q), out: (i, k) => scale(pocketPt(us[k], (i / LV) * 0.42)[1], -1), fin: (i) => gplain(GARMENT.fleece, 0.15 + 0.3 * (i / LV)) });
-      // The shadow inside: the back of the hoodie within the opening, under the lip.
-      // The hoodie's own colour in shadow (materials.ts: a palette code's fraction darkens it).
-      const SHADE: Paint = { code: 3 + SLOT.hoodie + 0.38 };
-      const floor = Array.from({ length: LV + 1 }, (_, i) => us.map((u) => {
-        const v = (i / LV) * 0.4;
-        const [p, n] = torsoFacePoint(u * pw(v) * 0.96, pz(v) + 0.1, 1, 0.05);
-        return p;
-      }));
-      b.surface(floor, { closed: false, paint: () => SHADE, weight: (q) => torsoW(q), out: (i, k) => torsoFacePoint(us[k] * pw((i / LV) * 0.4), pz((i / LV) * 0.4), 1, 0)[1], fin: () => gplain(GARMENT.fleece, 0.45) });
-      // The lip: a trim roll round the opening, its ends tucked under the collar.
-      const lip = us.map((u) => add(pocketPt(u, 0, -0.05)[0], [0, 0, 0.12]));
-      b.tube(lip, (j) => 0.42 - 0.12 * Math.abs(us[Math.min(PU, j)]), 8, X, () => TRIM, (q) => torsoW(q), true, () => FLEECE_FIN);
-      // The hood's centre seam, from the lip down to the crown.
-      const seam = Array.from({ length: 11 }, (_, j) => pocketPt(0, 0.08 + (j / 10) * 0.9, 0.05)[0]);
+      b.surface(outer, { closed: false, paint: () => HOODIE, weight: (q) => torsoW(q), out: (i, k) => pocketPt(us[k], Math.min(1, i / PV))[1], fin: (i) => gplain(GARMENT.fleece, 0.22 * smoothstep(0.25, 0, i / PV) + 0.3 * smoothstep(0.6, 1.05, i / PV)) });
+      // The hood's centre seam, from under the collar down to the crown.
+      const seam = Array.from({ length: 11 }, (_, j) => pocketPt(0, 0.06 + (j / 10) * 0.92, 0.05)[0]);
       b.tube(seam, 0.13, 6, X, () => TRIM, (q) => torsoW(q), true, () => FLEECE_FIN);
       const spine4w: Wt = [[spine4, 1]];
       for (const side of ["L", "R"] as const) ear(side, true, () => spine4w);

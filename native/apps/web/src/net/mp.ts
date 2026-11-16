@@ -28,7 +28,7 @@ import { bindLabel, prefs, type Action } from "../ui/settings";
 import { formatTime } from "../timer";
 import { IN_WEAPON_COMMAND_MASK } from "../weapon-rules";
 import { ATTACK_STAB } from "../viewmodel/events";
-import { styleLabel, type StyleId } from "../styles";
+import { strafeKeys, styleDef, styleLabel, type StyleId } from "../styles";
 import { copyRunStart, playerRunOn } from "../copy-start-request";
 import { tierLabel } from "../tiers";
 import { trackName } from "../zones";
@@ -41,7 +41,7 @@ import { copyLobbyInvite, lobbyInviteUrl } from "./lobby";
 import { allowLeave, resumePlay } from "../play-lock";
 import { spectateSlot } from "../social/spectate";
 import { spectatorsOf } from "./spectators";
-import { InputFeed, InputRecorder, jhudOf, shownSsj } from "./spectate-input";
+import { buttonsOf, InputFeed, InputRecorder, jhudOf, shownSsj } from "./spectate-input";
 import { ssjChat } from "../ssj";
 import {
   CLOSE,
@@ -56,6 +56,7 @@ import {
   SF_JUMPED,
   SF_TELEPORT,
   SF_INSPECT_SHIFT,
+  IS_RESET,
   styleAt,
   styleIndex,
   TIMER_FINISHED,
@@ -76,7 +77,7 @@ import {
 import { RoomConnection, type RoomStatus } from "./room";
 import { RaceUi } from "./race";
 import type { GunImpacts } from "../viewmodel/guns/impacts";
-import { announce, sfx } from "../audio";
+import { announce, keySounds, sfx } from "../audio";
 import { celebrateRun, openCustomise, runRewards } from "../ui/unlocks";
 import type { StaffRole } from "../progression";
 import { staffBadgeOf, type PlayerMarks } from "../creators";
@@ -172,6 +173,8 @@ export class Multiplayer {
   /** Your HUD feed for your spectators (sent while someone watches), and the watched player's while you spectate. */
   private inputs = new InputRecorder();
   private watchFeed = new InputFeed();
+  /** The watched player's buttons on the last tick played (their key sounds: the keys that go down); -1 before one. */
+  private watchButtons = -1;
 
   /**
    * The knife and finish you hold (the knife pool's pick) when the room shows another one for you: the room checks the
@@ -432,8 +435,15 @@ export class Multiplayer {
     hud.setWatching(live);
     document.body.classList.toggle("mp-spec-inputs", live);
     const upTo = live ? this.players.renderTick(slot, now) : null;
-    if (upTo === null) return;
-    this.watchFeed.take(Math.floor(upTo), (t, s) => hud.watchedTick(t, s), (r) => {
+    if (upTo === null) return void (this.watchButtons = -1);
+    const p = this.players.players.get(slot);
+    const strafe = strafeKeys(styleDef(styleAt(p?.meta?.style ?? -1) ?? p?.info.style ?? ""));
+    this.watchFeed.take(Math.floor(upTo), (t, s) => {
+      hud.watchedTick(t, s);
+      const b = buttonsOf(t.keys);
+      if (this.watchButtons >= 0 && !(t.state & IS_RESET)) keySounds.edges(this.watchButtons, b, strafe);
+      this.watchButtons = b;
+    }, (r) => {
       if (r.kind === IR_START_PRE) return hud.setStartPre(r.speed);
       const ssj = shownSsj(r, prefs.get().hud.ssj.mode);
       if (ssj) {
@@ -448,6 +458,7 @@ export class Multiplayer {
   /** Stop playing a watched player's feed (a new target starts from nothing). */
   private endWatchFeed(): void {
     this.watchFeed.reset();
+    this.watchButtons = -1;
     this.o.session.hud.setWatching(false);
     document.body.classList.remove("mp-spec-inputs");
   }
