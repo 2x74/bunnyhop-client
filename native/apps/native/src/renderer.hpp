@@ -2041,6 +2041,10 @@ public:
         if (viewmodel) viewmodel->hop_visibility(others);
     }
 
+    void set_first_person_robe_visible(bool show) {
+        if (viewmodel) viewmodel->first_person_robe_visibility(show);
+    }
+
     void set_ghost_cosmetics(const std::string &ghostId, const std::string &trailId, const std::string &shapeId) {
         trailShape = native_render::trail_shape_of(shapeId);
         if (viewmodel) {

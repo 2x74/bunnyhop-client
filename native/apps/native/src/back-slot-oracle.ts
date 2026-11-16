@@ -1,6 +1,7 @@
 // The website's back items (player/back-fx.ts, player/robe-fx.ts, loadout.ts) over a fixed movement stream and a set of
 // packed options; back_slot_tests.cpp replays the same and must land on the same uniforms, tones and options.
 import { writeFile } from "node:fs/promises";
+import { Object3D, Skeleton } from "three";
 import {
   advanceBack,
   backMotion,
@@ -11,6 +12,8 @@ import {
   type BackKind,
 } from "../../web/src/player/back-fx";
 import { advanceSleeves, robeTones, sleeveMotion, sleeveUniform } from "../../web/src/player/robe-fx";
+import { RobeSleeves } from "../../web/src/viewmodel/robe-sleeves";
+import { playerUniforms } from "../../web/src/player/materials";
 import { packCape, packRobe, unpackCape, unpackRobe, type CosmeticLoadout } from "../../web/src/loadout";
 
 interface Step {
@@ -68,6 +71,16 @@ steps.forEach((step, i) => {
   sleeveUniforms.push([...sleeveUniform(sleeves, 0), ...sleeveUniform(sleeves, 1)]);
 });
 
+// The first-person sleeves' lag: the class keeps its springs private, so it is stepped through its uniforms.
+const fpUniforms = playerUniforms();
+const fp = new RobeSleeves(new Object3D(), new Skeleton([]), fpUniforms);
+(fp as unknown as { mesh: object }).mesh = {};
+const fpSleeveUniforms: number[][] = [];
+steps.forEach((step, i) => {
+  fp.update(step.dt, { velocity: step.velocity, yaw: step.yaw }, i < 500 ? 1 : 0.45, i > 600);
+  fpSleeveUniforms.push(fpUniforms.uRobeL.value.toArray());
+});
+
 const accent: [number, number, number] = [0.8, 0.12, 0.05];
 const pants: [number, number, number] = [0.03, 0.035, 0.04];
 const picks: (number | null)[] = [null, 0x000000, 0xffffff, 0x3a7bd5, 0xf0f0f0, 0x101010, 0xc81e1e];
@@ -97,4 +110,7 @@ const fields = [
 ];
 const options = fields.map(({ field, robe }) => ({ field, robe, value: robe ? unpackRobe(field) : unpackCape(field) }));
 
-await writeFile(process.argv[2], JSON.stringify({ steps, runs, sleeveUniforms, accent, pants, tones, options }));
+await writeFile(
+  process.argv[2],
+  JSON.stringify({ steps, runs, sleeveUniforms, fpSleeveUniforms, accent, pants, tones, options }),
+);

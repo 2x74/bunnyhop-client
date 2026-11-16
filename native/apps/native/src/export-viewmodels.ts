@@ -26,6 +26,7 @@ import { ensureHeadwear } from "../../web/src/player/hat-detail";
 import { BACK_KIND, backGeometry, backKey, backRigOf, type BackFit } from "../../web/src/player/bunny/backs";
 import type { BackRig } from "../../web/src/player/back-fx";
 import { sleeveAnchor } from "../../web/src/player/bunny/robe";
+import { fpRobeGeometry, fpRobeUniform } from "../../web/src/viewmodel/robe-sleeves";
 import { bakeGunAO } from "../../web/src/viewmodel/guns/ao";
 import { writePlayerMaterials } from "./export-player-materials";
 import { writeHopEffects } from "./export-hop-effects";
@@ -548,6 +549,8 @@ for (const id of Object.keys(BACK_KIND))
     backRigs[name] = rig;
     geometry(name, g.clone());
   }
+// The Robe's sleeves on the first-person forearms (viewmodel/robe-sleeves.ts), drawn only while it is worn.
+geometry("fprobe", fpRobeGeometry().clone());
 const hatFits = Object.fromEntries(
   BODY_LOOKS.map((look) => [look, Object.fromEntries(["", ...HAT_IDS].map((id) => [id, hatFit(look, id || null)]))]),
 );
@@ -674,7 +677,13 @@ await writeFile(
     outfitPatterns: outfitPatterns(),
     hats: hatMeshes,
     hatFits,
-    backs: { kinds: BACK_KIND, capeLengths: NATIVE_CAPE_LENGTHS, rigs: backRigs, sleeveAnchor: sleeveAnchor().at },
+    backs: {
+      kinds: BACK_KIND,
+      capeLengths: NATIVE_CAPE_LENGTHS,
+      rigs: backRigs,
+      sleeveAnchor: sleeveAnchor().at,
+      firstPersonRobe: fpRobeUniform(0),
+    },
     hair: { hats: HAIR_HATS, lengthHats: LENGTH_HATS, length: HAIR_LENGTH, defaultColor: HAIR_DEFAULT },
     gloves: GLOVE_STYLE,
     inspects: Object.fromEntries(

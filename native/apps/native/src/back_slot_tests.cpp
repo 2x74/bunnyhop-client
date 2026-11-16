@@ -69,6 +69,22 @@ double check_sleeves(const json &oracle) {
     return worst;
 }
 
+double check_first_person(const json &oracle) {
+    double worst = 0;
+    const auto &steps = oracle.at("steps");
+    native_back::FirstPersonSleeves sleeves;
+    for (size_t i = 0; i < steps.size(); ++i) {
+        const auto step = step_from(steps[i], native_back::Kind::robe, 1, false);
+        sleeves.update(step.dt, step.velocity, step.yaw_degrees, i < 500 ? 1 : .45, i > 600);
+        // (The website's uniform starts as a fresh Vector4, (0, 0, 0, 1), until the first step.)
+        if (i == 0) continue;
+        const auto got = sleeves.uniform();
+        for (size_t k = 0; k < 4; ++k)
+            worst = std::max(worst, std::abs(got[k] - oracle["fpSleeveUniforms"][i][k].get<double>()));
+    }
+    return worst;
+}
+
 std::optional<uint32_t> pick(const json &value) {
     if (value.is_null()) return std::nullopt;
     return value.get<uint32_t>();
@@ -139,7 +155,10 @@ int main(int argc, char **argv) {
     const auto oracle = json::parse(file);
     constexpr double motion_tolerance = 2e-5, tone_tolerance = 2e-6;
     const double runs = check_runs(oracle), sleeves = check_sleeves(oracle), tones = check_tones(oracle);
-    std::cout << "worst: motion " << runs << ", sleeves " << sleeves << ", tones " << tones << "\n";
+    const double first_person = check_first_person(oracle);
+    std::cout << "worst: motion " << runs << ", sleeves " << sleeves << ", first person " << first_person << ", tones "
+              << tones << "\n";
+    assert(first_person < motion_tolerance);
     assert(runs < motion_tolerance);
     assert(sleeves < motion_tolerance);
     assert(tones < tone_tolerance);

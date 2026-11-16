@@ -206,6 +206,11 @@ class NativeViewmodel {
     std::filesystem::path hopAssetRoot;
     // Settings: other players' hop effects (yours always show), and the Potato and reduced-motion scales.
     bool showOtherHops = true;
+    // The Robe's first-person sleeves: the setting, the mesh and their lag.
+    inline static const std::string first_person_robe = "fprobe";
+    bool showFirstPersonRobe = true;
+    native_back::FirstPersonSleeves firstPersonSleeves;
+    double firstPersonSleevesAt = -1;
 
     // The two-handed third-person gun hold (gun_hold.hpp): per gun data, and per actor its pose state and where its
     // muzzle was last drawn (world space), for the flash and tracer of its next shot.
@@ -1464,6 +1469,9 @@ public:
         if (hopLayer) hopLayer->draw(view_projection, eye);
     }
 
+    // Settings -> First person -> Robe sleeves (cl_firstpersonrobe).
+    void first_person_robe_visibility(bool show) { showFirstPersonRobe = show; }
+
     // A seek or a map change: every burst goes.
     void clear_hop_effects() {
         for (auto &[id, hop] : actorHops)
@@ -2130,6 +2138,7 @@ public:
         input.attack_mode = mode;
         input.presentation_event = presentationEvent;
         const auto &out = firstPerson->frame(input, inspectCueQueue);
+        step_first_person_robe(snapshot, seconds);
         if (shot && active > 1) gunFlashStarted = seconds;
         gl.Enable(GL_DEPTH_TEST);
         gl.DepthMask(GL_TRUE);
@@ -2259,8 +2268,52 @@ private:
             mesh(part);
         if (showGlow && firstPersonGlow && localGlow && localGlow->enabled)
             draw_glow(layer.entry->meshes, handsProgram, localGlow->aura, .2f);
+        if (first_person_robe_worn()) draw_first_person_robe(projection, model, seconds, options);
         gl.FrontFace(GL_CCW);
         if (flash) draw_muzzle_flash(projection, view, seconds);
+    }
+
+    // The Robe's sleeves on the forearms (viewmodel/robe-sleeves.ts): one more mesh on the hands' skeleton, in the solid
+    // material, only while the Robe is worn and Settings -> First person -> Robe sleeves is on.
+    bool first_person_robe_worn() const {
+        return showFirstPersonRobe && equipped.back.kind == native_back::Kind::robe && meshes.count(first_person_robe);
+    }
+
+    void draw_first_person_robe(
+            const native::Matrix &projection, const native::Matrix &model, double seconds, BindOptions options
+    ) {
+        const float eye[3] = {};
+        options.material = PlayerMaterial::solid;
+        options.glow = nullptr;
+        const auto &program = bind(equipped, projection, model, eye, seconds, options);
+        world_light_uniforms(program, eye_light_key, worldLook.eye.data(), seconds, worldLook.exposure, true);
+        const auto &uniform = metadata.at("backs").at("firstPersonRobe");
+        const float robe[4] = {
+                float(equipped.back.options.robe_pattern),
+                uniform.at(1).get<float>(),
+                uniform.at(2).get<float>(),
+                uniform.at(3).get<float>()
+        };
+        gl.Uniform4fv(program.robe, 1, robe);
+        const auto lag = firstPersonSleeves.uniform();
+        gl.Uniform4fv(program.robeLeft, 1, lag.data());
+        gl.Uniform4fv(program.robeRight, 1, lag.data());
+        mesh(first_person_robe);
+    }
+
+    // The sleeves' lag behind the view's turns and strafes, once per drawn frame.
+    void step_first_person_robe(const BhSnapshot &snapshot, double seconds) {
+        if (!first_person_robe_worn()) {
+            firstPersonSleeves = {};
+            return;
+        }
+        const double dt = firstPersonSleevesAt < 0 || seconds < firstPersonSleevesAt ? 0 : seconds - firstPersonSleevesAt;
+        firstPersonSleevesAt = seconds;
+        const auto &v = snapshot.player.velocity;
+        constexpr double sway_cap = 1.5;
+        firstPersonSleeves.update(
+                dt, {v[0], v[1], v[2]}, viewYaw, std::min(double(swayScale), sway_cap) * motionScale, leftHand
+        );
     }
 
     // The shot's muzzle flash at the muzzle of the gun just drawn (its silencer's tip while it's on).

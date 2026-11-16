@@ -698,4 +698,58 @@ inline Vec4 sleeve_uniform(const SleeveMotion &s, size_t side) {
     return {float(s.q[side * 8]), float(s.q[side * 8 + 1]), float(s.q[side * 8 + 4]), float(s.q[side * 8 + 5])};
 }
 
+// viewmodel/robe-sleeves.ts RobeSleeves.update: the first-person drops' lag, in viewmodel space (x forward, y left).
+struct FirstPersonSleeves {
+    std::array<double, 8> q{};
+    double yaw = 0;
+    bool started = false;
+
+    // `scale`: the viewmodel's sway setting and reduced motion (0 = still); `mirror`: the left-handed view.
+    void update(double dt, const std::array<double, 3> &velocity, double yaw_degrees, double scale, bool mirror) {
+        constexpr double hz = 2.3, zeta = .5, tip_hz = 1.8, tip_zeta = .38, strafe = .11, strafe_speed = 500;
+        constexpr double wind = .1, wind_speed = 900, turn = .00045, limit = .2, turn_limit_degrees = 400;
+        const double h = std::clamp(dt, 0., .1);
+        const double now = yaw_degrees * pi / 180;
+        double dyaw = now - yaw;
+        dyaw = std::atan2(std::sin(dyaw), std::cos(dyaw));
+        yaw = now;
+        if (!started || h <= 0) {
+            started = true;
+            return;
+        }
+        const double cy = std::cos(now), sy = std::sin(now);
+        const double forward = cy * velocity[0] + sy * velocity[1], left = -sy * velocity[0] + cy * velocity[1];
+        double tx = -wind * (1 - std::exp(-std::max(0., forward) / wind_speed));
+        double ty = -strafe * std::tanh(left / strafe_speed)
+                    - turn * std::clamp(dyaw / h * (180 / pi), -turn_limit_degrees, turn_limit_degrees);
+        if (mirror) ty = -ty;
+        tx *= scale;
+        ty *= scale;
+        const int steps = std::max(1, int(std::ceil(h / (1. / 120))));
+        const double dh = h / steps;
+        const double w0 = 2 * pi * hz, k = w0 * w0, c = 2 * zeta * w0;
+        const double w1 = 2 * pi * tip_hz, kt = w1 * w1, ct = 2 * tip_zeta * w1;
+        for (int i = 0; i < steps; i++) {
+            q[2] += (k * (tx - q[0]) - c * q[2]) * dh;
+            q[3] += (k * (ty - q[1]) - c * q[3]) * dh;
+            q[0] += q[2] * dh;
+            q[1] += q[3] * dh;
+            q[6] += (kt * (q[0] - q[4]) - ct * q[6]) * dh;
+            q[7] += (kt * (q[1] - q[5]) - ct * q[7]) * dh;
+            q[4] += q[6] * dh;
+            q[5] += q[7] * dh;
+            for (const size_t o : {size_t(0), size_t(4)}) {
+                const double m = std::hypot(q[o], q[o + 1]);
+                if (m <= limit) continue;
+                q[o] *= limit / m;
+                q[o + 1] *= limit / m;
+                q[o + 2] *= .5;
+                q[o + 3] *= .5;
+            }
+        }
+    }
+
+    Vec4 uniform() const { return {float(q[0]), float(q[1]), float(q[4]), float(q[5])}; }
+};
+
 }  // namespace native_back
