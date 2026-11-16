@@ -142,6 +142,14 @@ inline Json default_settings() {
             {"muteInBackground", true},
             {"classicSounds", false},
             {"perfectTick", false},
+            {"audioKeySoundsEnabled", false},
+            {"audioKeySoundsSet", "thock"},
+            {"audioKeySoundsVolume", .6},
+            {"audioKeySoundsKeys", "strafe"},
+            {"audioPerfectSoundSet", "ping"},
+            {"audioPerfectSoundVolume", .6},
+            {"audioPerfectSoundStreak", true},
+            {"audioPerfectSoundLength", "long"},
             {"announcer", default_announcer()},
             {"footsteps", true},
             {"weaponSounds", true},
@@ -401,7 +409,15 @@ inline Json hud_capabilities() {
              "landfix",
              "autoRestartWhen",
              "autoRestartAction",
-             "holdRestartAfter"}
+             "holdRestartAfter",
+             "audioKeySoundsEnabled",
+             "audioKeySoundsSet",
+             "audioKeySoundsVolume",
+             "audioKeySoundsKeys",
+             "audioPerfectSoundSet",
+             "audioPerfectSoundVolume",
+             "audioPerfectSoundStreak",
+             "audioPerfectSoundLength"}
     );
 }
 
@@ -579,6 +595,15 @@ inline Json patch_settings(const Json &current, const Json &patch, bool switch_l
         } else if (key == "viewmodelInspect") {
             if (!v.is_string() || (v != "tricks" && v != "quiet"))
                 throw std::runtime_error("Inspect style must be tricks or quiet");
+        } else if (key == "audioKeySoundsSet" || key == "audioKeySoundsKeys" || key == "audioPerfectSoundSet"
+                   || key == "audioPerfectSoundLength") {
+            const auto choices = key == "audioKeySoundsSet"    ? std::set<std::string>{"thock", "click", "wood", "blip"}
+                                 : key == "audioKeySoundsKeys" ? std::set<std::string>{"strafe", "movement"}
+                                 : key == "audioPerfectSoundSet"
+                                         ? std::set<std::string>{"ping", "marimba", "chime", "pop"}
+                                         : std::set<std::string>{"short", "long"};
+            if (!v.is_string() || !choices.contains(v.get<std::string>()))
+                throw std::runtime_error("Unknown setting choice: " + key);
         } else if (key == "triggersStyle" || key == "audioMusicMode") {
             const auto choices = key == "triggersStyle" ? std::set<std::string>{"filled", "outline", "bottom"}
                                                         : std::set<std::string>{"always", "menus", "off"};
@@ -666,7 +691,7 @@ inline Json patch_settings(const Json &current, const Json &patch, bool switch_l
                 throw std::runtime_error("Crosshair thickness must be .5–10");
             if ((key == "volume" || key == "sfxVolume" || key == "musicVolume" || key == "uiVolume"
                  || key == "ambienceVolume" || key == "mapVolume" || key == "voiceVolume" || key == "crosshairAlpha"
-                 || key == "ghostOpacity")
+                 || key == "ghostOpacity" || key == "audioKeySoundsVolume" || key == "audioPerfectSoundVolume")
                 && (n < 0 || n > 1))
                 throw std::runtime_error("Volume must be 0–1");
             if (key == "yawSpeed" && (n < 60 || n > 720)) throw std::runtime_error("Yaw speed must be 60–720");

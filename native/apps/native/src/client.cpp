@@ -1776,7 +1776,7 @@ int run(const native::Options &opt) {
                 if (!wheel) input.null_presses.edge(code, input_timeline.binds().of(code), down);
                 input_timeline.key(held_codes, code, down, wheel, stamp, SDL_GetTicksNS());
                 input.held = 0;
-                uint32_t wheel_bits = 0;
+                uint32_t wheel_bits = 0, pressed_bits = 0;
                 const auto bindings = input_timeline.binds().snapshot();
                 for (const auto &binding : *bindings) {
                     const auto bit = binding.bit;
@@ -1796,10 +1796,14 @@ int run(const native::Options &opt) {
                             wheel_bits |= bit;
                         else if (held)
                             input.held |= bit;
+                        if (matching && down && !repeat && !wheel) pressed_bits |= bit;
                     } else if (matching && down && !repeat)
                         act(binding.action, wheel);
                 }
                 if (wheel_bits) input_timeline.pulse(input, wheel_bits, stamp, SDL_GetTicksNS());
+                // Key sounds play from the press itself, not the next tick, and only while you're the one moving.
+                if (pressed_bits && core && !viewer.active && !room.spectator_target && !free_cameras.freecam.active())
+                    audio.key_press(pressed_bits, active_style);
                 input.held |= command_hold_bits();
                 if (renderer)
                     native_render::surface_tool_key(
@@ -2765,7 +2769,11 @@ int run(const native::Options &opt) {
                             || !std::isfinite(gain) || gain < 0 || gain > 1 || !std::isfinite(rate) || rate < .25
                             || rate > 4)
                             throw std::runtime_error("Invalid interface sound");
-                        audio.play(id, float(gain), rate);
+                        // Settings' previews of the key and perfect jump sounds, at their own volumes.
+                        if (id.starts_with("key_") || id.starts_with("perfect_"))
+                            audio.play_feedback(id, rate);
+                        else
+                            audio.play(id, float(gain), rate);
                     } else if (type == "gauntlet") {
                         gauntlet_action(message);
                     } else if (type == "restart" && core && !download.valid()) {
