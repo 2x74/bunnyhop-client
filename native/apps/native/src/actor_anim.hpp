@@ -7,6 +7,7 @@
 #include "actor_legs.hpp"
 #include "actor_ticks.hpp"
 #include "actor_springs.hpp"
+#include "actor_posture.hpp"
 #include "actor_animation_metadata.hpp"
 #include <vector>
 #include <array>
@@ -521,8 +522,14 @@ struct Ear {
     bool hang = false;
     // The tip proxy, its velocity, the spring's rest point at the last update (a ramp from it) and the carried base.
     std::array<double, 3> base{}, mid{}, dir{}, p{}, v{}, eq{}, wb{};
+    // The base's vertical speed at the last update (ear_jolt_share).
+    double bvz = 0;
     bool has = false;
 };
+
+// The share of the head's vertical speed changes the ears' springs feel (web model.ts EAR_JOLT): at a bhop's bounce
+// they dip about 30 degrees instead of slamming against their stop. Sideways and fore-aft motion is felt in full.
+constexpr double ear_jolt_share = .16;
 
 inline void
 swing(const std::array<double, 3> &a,
@@ -571,13 +578,15 @@ struct State {
     std::array<Ear, 2> ears;
     V bind;
     int head = -1, upperSpine = -1;
-    bool hoodDown = false;
+    bool hoodDown = false, bunnyHead = true;
     const Data &d;
     Pose bs;
     double now = 0, cycle = 0, feetYaw = 0, goalFeetYaw = 0, bodyYaw = 0, gaitYaw = 0, eyeYaw = 0, eyePitch = 0,
            maxSpeed = 0, speed = 0, vx = 0, vy = 0, groundTime = 0, jumpStart = 0, lastTurnTime = 0, fireCycle = 0,
            last = -1;
     int seq = -1, parity = 0, prevParity = 0, fireSeq = -1;
+    // Jumps started (the continuity layer's restart key, with the activity).
+    int jumps = 0;
     std::string activity = "ACT_IDLE";
     bool jumping = false, firstJump = false, feetInit = false;
     // fire() since the last update: its gesture starts on this frame at cycle 0, not a frame's worth in.
@@ -596,6 +605,11 @@ struct State {
     Transition main, idle, run;
     std::array<Blend, 4> layers;
     std::optional<native_gestures::Rig> gestureRig;
+    // The upper body over the animation (actor_posture.hpp).
+    UpperBody upperBody;
+    Posture posture;
+    FollowThrough follow;
+    PoseContinuity continuity;
     int px, py, pYaw, pPitch;
 
     enum SequenceKind : size_t { standing, walking, running, crouch_idle, crouch_walking, sequence_kind_count };
@@ -627,33 +641,40 @@ struct State {
         ears[0].side = 1;
         ears[1].side = -1;
         if (d.rig.contains("bind")) bind = d.rig["bind"].get<V>();
-        place_ears(false);
+        upperBody = UpperBody(d.names, d.rigParents, d.csBones);
+        place_ears(false, true);
     }
 
     // The ears' pivots (player/bunny/model.ts makeEars): on the head, or with the hood down hanging from the upper
-    // spine (rig.ts EAR_DOWN).
-    void place_ears(bool down) {
-        constexpr std::array<double, 3> up_dir = {.27, .36, .893}, down_base = {2.3, 9.9, 60.2},
-                                        down_dir = {.3, .62, -.72};
-        constexpr double segment = 4.4;
+    // spine (rig.ts EAR_DOWN). The standard bunny's head is built bigger about the top of the neck (head-shape.ts
+    // HEAD_SHAPE), so its ears pivot at the scaled roots; Plush, Bun-E and Tek keep the reference head.
+    void place_ears(bool down, bool scaled_head) {
+        constexpr std::array<double, 3> up_dir = {.27, .36, .893}, down_base = {3.1, 9.1, 62.4},
+                                        down_dir = {.34, .1, -.935}, head_pivot = {0, 1.2, 64.2};
+        constexpr double segment = 4.4, head_scale = 1.2;
         hoodDown = down;
+        bunnyHead = scaled_head;
+        const double scale = !down && scaled_head ? head_scale : 1;
         for (auto &e : ears) {
             if (e.bone < 0 || bind.size() < size_t(e.bone + 1) * 12) continue;
             e.hang = down;
             e.carrier = down ? upperSpine : head;
             e.dir = down ? down_dir : up_dir;
             e.dir[0] *= e.side;
-            for (int k = 0; k < 3; k++)
-                e.base[k] = down ? down_base[size_t(k)] : bind[size_t(e.bone) * 12 + size_t(k) * 4 + 3];
+            for (size_t k = 0; k < 3; k++) {
+                const double root = bind[size_t(e.bone) * 12 + k * 4 + 3];
+                e.base[k] = down ? down_base[k] : head_pivot[k] + (root - head_pivot[k]) * scale;
+            }
             if (down) e.base[0] *= e.side;
-            for (int k = 0; k < 3; k++)
-                e.mid[k] = e.base[k] + e.dir[k] * segment;
+            for (size_t k = 0; k < 3; k++)
+                e.mid[k] = e.base[k] + e.dir[k] * segment * scale;
             e.has = false;
         }
     }
 
-    void hood(bool down) {
-        if (down != hoodDown) place_ears(down);
+    // `scaled_head`: the standard bunny (not Plush, Bun-E or Tek).
+    void hood(bool down, bool scaled_head = true) {
+        if (down != hoodDown || scaled_head != bunnyHead) place_ears(down, scaled_head);
     }
 
     void reset(double time) {
@@ -691,6 +712,7 @@ struct State {
     void set_seed(double value) {
         seed = value;
         legs.set_seed(value);
+        follow.set_seed(value);
     }
 
     double movement() const { return speed <= .5 ? 1 : maxSpeed < .001 ? .01 : clamp(speed / maxSpeed, .01, 10); }
@@ -745,6 +767,7 @@ struct State {
                 firstJump = false;
                 if (activity == "ACT_HOP") parity++;
                 cycle = 0;
+                jumps++;
             }
             if (now - jumpStart > .2 && s.grounded && groundTime >= .025) {
                 jumping = false;
@@ -942,6 +965,7 @@ struct State {
                 e.p[k] = wb[k] + direction[k] * 6.5;
                 e.wb[k] = wb[k];
             }
+            e.bvz = bv[2];
             e.has = true;
             double mx = cy * dx + sy * dy, my = -sy * dx + cy * dy;
             std::array<double, 3> bd = {
@@ -984,6 +1008,8 @@ struct State {
             }
             return;
         }
+        // A vertical jolt (a jump, a bhop's bounce: 300 to 600 u/s at once) carries most of the ear with the head.
+        e.v[2] += (1 - ear_jolt_share) * (bv[2] - e.bvz);
         for (size_t k = 0; k < 3; k++) {
             const double eq = rest(k);
             spring_ramp(e.p[k], e.v[k], e.eq[k], eq, omega, zeta, dt);
@@ -1039,6 +1065,7 @@ struct State {
         update(dt, input, resetNow, seconds);
         apply();
         skin(out);
+        upper_body(s, dt, seconds, resetNow, out, acting != nullptr);
         // The bank and legs come after the body animation, so planted feet stay put in the world whatever the body
         // does. Not on acting poses (avatar pictures and the onboarding scenes pose the body by hand).
         bank = bodyBank.update(
@@ -1066,6 +1093,19 @@ struct State {
 
 private:
     V framePose;
+
+    // The jump sequence's snaps eased out, the posture and the follow-through (actor_posture.hpp), then the bunny's own
+    // bones (the knife, the ears until earPose) follow their turned parents again.
+    void upper_body(const Input &s, double dt, double seconds, bool snap, V &out, bool acting) {
+        const double horizontal = std::hypot(s.velocity[0], s.velocity[1]);
+        continuity.apply(out, size_t(d.csBones) * 12, activity, jumps, dt, snap);
+        posture.update(dt, snap, true, s.grounded, s.ducking, horizontal);
+        posture.apply(out, d.bind, upperBody, s.pitch);
+        follow.update(dt, snap, true, s.velocity[2], s.grounded, horizontal, seconds);
+        if (!acting) follow.apply(out, d.bind, upperBody, motion);
+        for (size_t i = size_t(d.csBones); i < d.map.size(); i++)
+            if (d.rigParents[i] >= 0) std::copy_n(out.data() + d.rigParents[i] * 12, 12, out.data() + i * 12);
+    }
 
     // The CS:S skeleton through the rig's inverse binds; the bunny's own bones follow their parents.
     void skin(V &out) {
@@ -1099,6 +1139,7 @@ private:
         in.ladder = s.ladder;
         in.water = s.water;
         in.motion = motion;
+        in.lift = posture.lift;
         return in;
     }
 };
