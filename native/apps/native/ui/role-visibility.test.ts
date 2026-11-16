@@ -43,8 +43,10 @@ test("recorded and remote staff loadouts render for observers, with no holder fi
     "Gun camo",
     "Colourway",
     "Hat",
+    "Back",
     "Ghost",
     "Trail",
     "Trail shape",
+    "Hop effect",
   ]);
 });

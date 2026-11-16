@@ -407,11 +407,19 @@ void test_spectator_inputs() {
     assert(played == 1);  // slot 2's block isn't the watched player's
 }
 
+// Real packs with the v0.0.42 fields, as the website packs them (ui/room-loadout.test.ts pins the same bytes).
+const std::array<std::string, 4> website_packs = {
+        "2;knife-carrot;fin-garden;glove-knit;;hat-ponytail;;;2fa59a;150;;;hop-ring:sky;back-balloon;;-z",
+        "2;knife-carrot;fin-garden;glove-knit;;;;;;;;;;back-cape;dgN8b___",
+        "2;knife-carrot;fin-garden;glove-knit;;hat-kitsune-mask;;;;;;;;back-robe;cb8dhTX_;f",
+        "2;knife-karrotbit;fin-dewweb;glove-garden-tulip;3;hat-ponytail;body-b;;f29bbf;260;hilt-oak;camo-carrot-patch;"
+        "hop-crystals:rose;back-cape;ewN8b48d;-z",
+};
+
 // The menu's pack of a roster loadout (ui/room-loadout.ts) is drawn as sent, new fields and all; a pack past 200 bytes
 // is dropped, as the website's readers drop it; without one the loadout object is packed here as before.
-void test_loadout_packs() {
+void test_loadout_pack(const std::string &pack) {
     const auto room = std::make_unique<native::RoomState>();
-    const std::string pack = "2;knife-carrot;fin-garden;glove-knit;3;;;;;;;;hop-crystals:highroller;back-cape;ew4dlGPX";
     auto welcome = easy_welcome();
     welcome["players"] = J::array(
             {{{"slot", 0}, {"name", "me"}},
@@ -436,9 +444,20 @@ void test_loadout_packs() {
         loadouts[actor.id] = actor.loadout;
     assert(loadouts["1"] == pack);
     assert(loadouts["2"].starts_with("2;knife-leek;"));
+    // A patch carries the new pack through unchanged too, and one past the limit is dropped, not cut.
+    room->event(envelope(
+            {{"t", "player"}, {"slot", 2}, {"patch", {{"loadout", {{"knife", "knife-carrot"}}}, {"pack", pack}}}}
+    ));
     room->event(envelope({{"t", "player"}, {"slot", 1}, {"patch", {{"pack", std::string(201, 'x')}}}}));
-    for (const auto &actor : room->actors(1.02))
+    for (const auto &actor : room->actors(1.02)) {
         if (actor.id == "1") assert(actor.loadout.empty());
+        if (actor.id == "2") assert(actor.loadout == pack);
+    }
+}
+
+void test_loadout_packs() {
+    for (const auto &pack : website_packs)
+        test_loadout_pack(pack);
 }
 
 int main() {

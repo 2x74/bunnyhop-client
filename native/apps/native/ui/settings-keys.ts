@@ -113,6 +113,8 @@ export const REQUESTED_KEYS: readonly RequestedKey[] = [
   render("ghost.routeMode", choice("jumps", "path")),
   render("ghost.routeOnly", boolean),
   render("tags.players", boolean),
+  render("showHopFx", boolean),
+  render("firstPersonRobe", boolean),
   render("tags.throughWalls", boolean),
   render("graphics.potato", boolean),
   render("graphics.antialias", boolean),

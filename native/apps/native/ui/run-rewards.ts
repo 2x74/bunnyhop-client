@@ -46,6 +46,8 @@ const SLOT_NAMES: Record<CosmeticSlot, string> = {
   camo: "gun camo",
   hat: "hat",
   body: "player model",
+  back: "back item",
+  hop: "hop effect",
 };
 
 const encoder = new TextEncoder();

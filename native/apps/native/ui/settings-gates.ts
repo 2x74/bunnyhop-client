@@ -199,6 +199,8 @@ const ROWS: Record<string, Gate> = {
   "ghost/Players and name tags/Ghost tags": needs("ghostTag"),
   "ghost/Players and name tags/Player glow": needs("showPlayerGlow"),
   "ghost/Players and name tags/First-person glow": needs("firstPersonGlow"),
+  "ghost/Players and name tags/Robe sleeves in first person": needs("firstPersonRobe"),
+  "ghost/Players and name tags/Hop effects": needs("showHopFx"),
   "ghost/Players and name tags/Show other players": excluded(
     "Native hides other players for the session with !hide; there's no saved setting for it yet.",
   ),
