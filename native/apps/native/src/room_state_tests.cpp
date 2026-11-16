@@ -7,6 +7,7 @@
 #include <array>
 #include <functional>
 #include <set>
+#include <map>
 #include <string>
 using J = nlohmann::json;
 
@@ -406,7 +407,42 @@ void test_spectator_inputs() {
     assert(played == 1);  // slot 2's block isn't the watched player's
 }
 
+// The menu's pack of a roster loadout (ui/room-loadout.ts) is drawn as sent, new fields and all; a pack past 200 bytes
+// is dropped, as the website's readers drop it; without one the loadout object is packed here as before.
+void test_loadout_packs() {
+    const auto room = std::make_unique<native::RoomState>();
+    const std::string pack = "2;knife-carrot;fin-garden;glove-knit;3;;;;;;;;hop-crystals:highroller;back-cape;ew4dlGPX";
+    auto welcome = easy_welcome();
+    welcome["players"] = J::array(
+            {{{"slot", 0}, {"name", "me"}},
+             {{"slot", 1}, {"name", "caped"}, {"loadout", {{"knife", "knife-carrot"}}}, {"pack", pack}},
+             {{"slot", 2}, {"name", "older"}, {"loadout", {{"knife", "knife-leek"}}}}}
+    );
+    room->event(envelope(welcome));
+    feed(*room, J::array({sample(100, 0)}), 1);
+    room->snapshot(
+            {{"generation", 1},
+             {"id", "test"},
+             {"snapshot",
+              {{"blocks",
+                J::array(
+                        {{{"slot", 1}, {"samples", J::array({sample(1, 0)})}},
+                         {{"slot", 2}, {"samples", J::array({sample(1, 0)})}}}
+                )}}}},
+            1
+    );
+    std::map<std::string, std::string> loadouts;
+    for (const auto &actor : room->actors(1.01))
+        loadouts[actor.id] = actor.loadout;
+    assert(loadouts["1"] == pack);
+    assert(loadouts["2"].starts_with("2;knife-leek;"));
+    room->event(envelope({{"t", "player"}, {"slot", 1}, {"patch", {{"pack", std::string(201, 'x')}}}}));
+    for (const auto &actor : room->actors(1.02))
+        if (actor.id == "1") assert(actor.loadout.empty());
+}
+
 int main() {
+    test_loadout_packs();
     test_spectator_inputs();
     test_leaving_ends_spectating_them();
     test_closing_a_replay_returns_to_the_room_map();

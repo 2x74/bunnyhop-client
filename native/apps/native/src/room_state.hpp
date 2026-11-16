@@ -124,7 +124,13 @@ class RoomState {
         if (p.contains("outfit"))
             peer.actor.outfit =
                     json_value(p, "outfit", nlohmann::json()).is_string() ? p.at("outfit").get<std::string>() : "";
-        if (p.contains("loadout")) {
+        // The menu sends the website's own pack of the loadout (ui/room-loadout.ts): every field the website draws,
+        // byte for byte. Older menus send only the object, packed here as before.
+        constexpr size_t max_pack_bytes = 200;
+        if (p.contains("pack") && p["pack"].is_string()) {
+            peer.actor.loadout = p["pack"].get<std::string>();
+            if (peer.actor.loadout.size() > max_pack_bytes) peer.actor.loadout.clear();
+        } else if (p.contains("loadout")) {
             if (p["loadout"].is_object()) {
                 const auto &l = p["loadout"];
                 auto text = [&](const char *key, std::string fallback = {}) {
@@ -147,7 +153,7 @@ class RoomState {
                         peer.actor.loadout.push_back(hex[(color >> shift) & 15]);
                 }
                 peer.actor.loadout += ";" + number("hairLength") + ";" + text("hilt") + ";" + text("camo");
-                if (peer.actor.loadout.size() > 200) peer.actor.loadout.clear();
+                if (peer.actor.loadout.size() > max_pack_bytes) peer.actor.loadout.clear();
             } else
                 peer.actor.loadout.clear();
         }

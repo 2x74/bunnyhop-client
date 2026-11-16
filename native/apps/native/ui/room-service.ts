@@ -29,6 +29,7 @@ import type { RoomHandlers, RoomStatus } from "../../web/src/net/room";
 import type { MenuMessage } from "./bridge";
 import { VoiceRelay } from "./voice-relay";
 import { poseInput, snapshotInputsValid } from "./room-input";
+import { withLoadoutPacks } from "./room-loadout";
 /**
  * (0.0.36) The attempt turned into practice or back: the room patches your roster's `practice`, and the others see a
  * practice tag instead of a time. Older rooms drop it.
@@ -760,7 +761,7 @@ export class NativeRoomService {
     this.view.chat = this.view.chat.slice(-100);
     for (const line of lines) this.sendLine(line);
     this.event({
-      ...message,
+      ...withLoadoutPacks(message),
       ...(message.t === "welcome" || message.t === "race" || message.t === "roomRace" || message.t === "change"
         ? { nativeClockOffsetMs: (this.transport?.serverNow?.() ?? Date.now()) - Date.now() }
         : {}),
