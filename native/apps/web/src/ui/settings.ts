@@ -516,23 +516,25 @@ export const MOUSE_NAMES = 2;
 
 /**
  * Strafe trainer looks: the original thin gauge, a thick bar with coloured zones, a thin zoned line with a marker, a track
- * filled from the edge opposite the turn, a half dial whose needle stands up at 100%.
+ * filled from the edge opposite the turn, a filled blue-white-red half dial whose needle stands up at 100%, and the
+ * same dial drawn as a thin zoned arc.
  */
-export type TrainerStyle = "classic" | "detailed" | "minimal" | "bar" | "gauge";
+export type TrainerStyle = "classic" | "detailed" | "minimal" | "bar" | "gauge" | "arc";
 export interface TrainerPrefs {
   color: string;
   hints: boolean;
   style: TrainerStyle;
-  /** 100% in the middle and the marker moves the way you turn; off: 0% at the left end, 200% at the right. The Bar look always goes by the turn; the Gauge never mirrors. */
+  /** 100% in the middle and the marker moves the way you turn; off: 0% at the left end, 200% at the right. The Bar look always goes by the turn; the Gauge and Arc never mirror. */
   follow: boolean;
   /** Ticks averaged into the reading (1 = none). */
   smoothing: number;
   /** ± % around 100 that counts as on pace (green); amber reaches three times as far. The Bar look's bands: hud/strafe-trainer.ts barBand. */
   zone: number;
-  /** Gauge thickness, a multiple of the style's own. */
+  /** Gauge thickness, a multiple of the style's own (the Gauge look: its needle's width). */
   height: number;
   /** The trainer fades while the pace is under this % (0 = never). */
   dimBelow: number;
+  /** The number under the trainer. Picking the Gauge look turns it off, leaving it turns it back on (settings-panel.ts). */
   showPace: boolean;
   /** A tick on each jump, pitched by that jump's zone. */
   sound: boolean;
@@ -546,15 +548,23 @@ const TRAINER_PRESETS: Record<TrainerPreset, Pick<TrainerPrefs, "style" | "follo
   strict: { style: "minimal", follow: true, smoothing: 3, zone: 5, hints: false, showPace: true },
 };
 /** Looks that keep themselves through a preset (its tolerance and smoothing still apply) and have no Follow the turn. */
-const OWN_LOOKS: ReadonlySet<TrainerStyle> = new Set(["bar", "gauge"]);
-/** The Bar and Gauge looks stay through a preset: its presets are about the tolerance and smoothing, which they use like the others. */
+const OWN_LOOKS: ReadonlySet<TrainerStyle> = new Set(["bar", "gauge", "arc"]);
+/**
+ * The Bar, Gauge and Arc looks stay through a preset: its presets are about the tolerance and smoothing, which they use
+ * like the others. The Gauge keeps the player's Percentage too (off unless they turned it on).
+ */
 export function applyTrainerPreset(t: TrainerPrefs, preset: TrainerPreset): void {
-  const style = OWN_LOOKS.has(t.style) ? t.style : TRAINER_PRESETS[preset].style;
-  Object.assign(t, TRAINER_PRESETS[preset], { style });
+  const own = OWN_LOOKS.has(t.style);
+  Object.assign(t, TRAINER_PRESETS[preset], { style: own ? t.style : TRAINER_PRESETS[preset].style, showPace: t.style === "gauge" ? t.showPace : TRAINER_PRESETS[preset].showPace });
 }
-/** The preset `t` matches, if any. The Bar and Gauge looks have no use for a preset's look or Follow the turn. */
+/** A look picked in Settings: the Gauge starts without its number, and leaving it brings the number back. */
+export function pickTrainerStyle(t: TrainerPrefs, style: TrainerStyle): void {
+  if (style !== t.style && (style === "gauge" || t.style === "gauge")) t.showPace = style !== "gauge";
+  t.style = style;
+}
+/** The preset `t` matches, if any. Those looks have no use for a preset's look or Follow the turn (nor the Gauge for its Percentage). */
 export function trainerPreset(t: TrainerPrefs): TrainerPreset | null {
-  const ignored = (f: string) => OWN_LOOKS.has(t.style) && (f === "style" || f === "follow");
+  const ignored = (f: string) => (OWN_LOOKS.has(t.style) && (f === "style" || f === "follow")) || (t.style === "gauge" && f === "showPace");
   return (Object.keys(TRAINER_PRESETS) as TrainerPreset[]).find((k) => Object.entries(TRAINER_PRESETS[k]).every(([f, v]) => ignored(f) || t[f as keyof TrainerPrefs] === v)) ?? null;
 }
 

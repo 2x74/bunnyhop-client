@@ -615,6 +615,22 @@ pub(crate) const EVENT_CLOCK_V23: &[EventClock] = event_clock![
 /// landed 5 commands late and the lift fell 80 u/s short.
 pub(crate) const EVENT_CLOCK_V24: &[EventClock] = event_clock!["bhop_4tele" 0x24e842ac,];
 
+/// The same clock from physics v29, on these builds. Their gravity lift is a trigger_multiple whose OnStartTouch sets the
+/// player's gravity to -1 and OnEndTouch back to 1, both with no delay (bhop_bistro_7 `*2`, bhop_bistro_6 `*7`). With the
+/// player clock lead, OnStartTouch's output lands 5 commands after the touch but EndTouch's at the end of the frame on the
+/// server clock, so a touch of 1 to 4 ticks (grazing the shaft's edge) ran "gravity 1" before "gravity -1" and left the
+/// player floating up to the ceiling until they re-entered the lift or restarted. On eventqueuefix servers, where these
+/// maps' times and zones come from, both land on the next command in touch order.
+pub(crate) const EVENT_CLOCK_V29: &[EventClock] = event_clock![
+    "bhop_bistro_6" 0xfccd7e4e,
+    "bhop_bistro_7" 0x863ea0a0,
+];
+
+/// The map's entry in `EVENT_CLOCK_V29`, if `fingerprint` (`entity_fingerprint`) is one of those builds.
+pub(crate) fn event_clock_v29(fingerprint: u32) -> Option<&'static EventClock> {
+    EVENT_CLOCK_V29.iter().find(|m| m.fingerprint == fingerprint)
+}
+
 /// The map's entry in `EVENT_CLOCK_V24`, if `fingerprint` (`entity_fingerprint`) is one of those builds.
 pub(crate) fn event_clock_v24(fingerprint: u32) -> Option<&'static EventClock> {
     EVENT_CLOCK_V24.iter().find(|m| m.fingerprint == fingerprint)

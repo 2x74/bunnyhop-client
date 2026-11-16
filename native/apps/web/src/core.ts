@@ -381,7 +381,7 @@ export const PHYSICS_V16 = 16;
 /** RNGFix parity: uphill / downhill inclines, edge bugs, trigger jumping and telehops as on RNGFix servers. */
 export const PHYSICS_V17 = 17;
 /** The physics version new runs are played and recorded with. */
-export const PHYSICS_VERSION = 28;
+export const PHYSICS_VERSION = 29;
 /** Climbable surface properties used by bhop_synthetic_fix. */
 export const PHYSICS_V18 = 18;
 /** Scoped entity makers and known velocity-script equivalents. */
@@ -403,6 +403,8 @@ export const PHYSICS_V26 = 26;
 export const PHYSICS_V27 = 27;
 /** Auto-strafe reads its key from the next command's yaw (a -1 key offset; styles.ts AUTOSTRAFE_LEAD_FROM). Movement is v27's. */
 export const PHYSICS_V28 = 28;
+/** Per-map only (map_fixes.rs EVENT_CLOCK_V29): bhop_bistro_6 and bhop_bistro_7 run player outputs on EventQueueFix's clock, so a short touch of the gravity lift can't leave the player floating. Every other map plays as v28. */
+export const PHYSICS_V29 = 29;
 /** Versions this code knows (the wasm build must support them too, see Core.setSettings). */
 export const isPhysicsVersion = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= PHYSICS_V1 && (v as number) <= PHYSICS_VERSION;
 

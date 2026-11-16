@@ -1,5 +1,5 @@
 import { h } from "../ui/dom";
-import { barBand, barEdge, barFill, GAUGE_BOX, GAUGE_NEEDLE, GAUGE_R, gaugeAngle, gaugeArc, gaugeCue, gaugePace, PACE_MAX, trainerPosition, trainerZone, type TrainerReading, type TrainerCue } from "./strafe-trainer";
+import { arcPace, barBand, barEdge, barFill, DISC_BOX, DISC_HUB, DISC_NEEDLE_BASE, DISC_R, discNeedle, GAUGE_BOX, GAUGE_NEEDLE, GAUGE_R, gaugeAngle, gaugeArc, gaugeCue, gaugePace, PACE_MAX, trainerPosition, trainerZone, type TrainerReading, type TrainerCue } from "./strafe-trainer";
 import type { TrainerPrefs } from "../ui/settings";
 import "./strafe-trainer.css";
 
@@ -15,6 +15,8 @@ function svg<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string,
   return el;
 }
 const HALF = gaugeArc(GAUGE_R, -90, 90);
+/** Each view's Gauge needle gets its own id: the light edge under the face is a <use> of it. */
+let dials = 0;
 
 /** One element for every style (data-style switches the look in CSS); the rail spans 0 to PACE_MAX %. */
 export class StrafeTrainerView {
@@ -22,7 +24,7 @@ export class StrafeTrainerView {
   private cue = h("span.st-cue", null, LABELS.ready);
   private marker = h("i.st-marker");
   private fill = h("i.st-fill");
-  // The Gauge look's dial (hidden in the others): zone arcs, the centre mark, the needle on its own rotation.
+  // The Arc look's dial (hidden in the others): zone arcs, the centre mark, the needle on its own rotation.
   private arcs = { ok: svg("path", { class: "st-dial-ok" }), good: svg("path", { class: "st-dial-good" }) };
   private needle = svg("g", { class: "st-needle" },
     svg("line", { class: "st-needle-shade", x1: 0, y1: 0, x2: 0, y2: -GAUGE_NEEDLE }),
@@ -33,16 +35,37 @@ export class StrafeTrainerView {
     svg("line", { class: "st-dial-mark", x1: 0, y1: -GAUGE_R + 8, x2: 0, y2: -GAUGE_R - 6 }),
     this.needle, svg("circle", { class: "st-hub", r: 3 }),
   );
-  /** Set in place every tick the angle changes: no string, no layout. */
-  private turn = this.dial.createSVGTransform();
+  // The Gauge look's filled dial: the face (a CSS gradient behind the SVG), the green line, the needle and its hub.
+  // Under the face, a light edge of the needle and hub that only shows where they leave the face (over a dark map):
+  // a <use> of the needle, so it turns with the needle's one transform.
+  private pointer = svg("path", { class: "st-pointer", d: discNeedle() });
+  private needleId = `st-needle-${++dials}`;
+  private disc = svg("svg", { class: "st-disc", viewBox: DISC_BOX.join(" "), "aria-hidden": "true" },
+    svg("line", { class: "st-disc-mark", x1: 0, y1: 0, x2: 0, y2: -DISC_R }),
+    svg("g", { class: "st-needle", id: this.needleId }, this.pointer),
+    svg("circle", { class: "st-pivot", r: DISC_HUB }),
+  );
+  private face = h("div.st-face", { "aria-hidden": "true" },
+    svg("svg", { class: "st-disc-edge", viewBox: DISC_BOX.join(" ") },
+      svg("use", { href: `#${this.needleId}` }),
+      svg("circle", { r: DISC_HUB }),
+    ),
+    h("i.st-face-fill"), this.disc);
+  /** Each look's needle turn, set in place when the angle changes: no string, no layout. */
+  private arcTurn = this.dial.createSVGTransform();
+  private discTurn = this.disc.createSVGTransform();
+  private turn = this.arcTurn;
   readonly el = h("div.st-trainer", { "data-cue": "ready", "data-style": "classic", "aria-label": "Strafe trainer", title: "100% is the target mouse turn per simulation tick. Bar colour: red loses speed, white holds it, orange/green/blue gain more. Works in every style." },
     h("div.st-rail", { "aria-hidden": "true" }, h("span.st-band"), h("i.st-target"), this.marker, this.fill),
     this.dial,
+    this.face,
     h("div.st-reading", null, this.number, this.cue),
   );
   constructor() {
-    this.needle.transform.baseVal.appendItem(this.turn);
-    this.turn.setRotate(-90, 0, 0);
+    this.needle.transform.baseVal.appendItem(this.arcTurn);
+    this.disc.querySelector<SVGGElement>(".st-needle")!.transform.baseVal.appendItem(this.discTurn);
+    this.arcTurn.setRotate(-90, 0, 0);
+    this.discTurn.setRotate(-90, 0, 0);
   }
   private p: Pick<TrainerPrefs, "style" | "follow" | "zone" | "dimBelow"> = { style: "classic", follow: false, zone: 10, dimBelow: 0 };
   configure(p: TrainerPrefs): void {
@@ -60,6 +83,10 @@ export class StrafeTrainerView {
     const good = (Math.min(100, p.zone) / 100) * 90, ok = (Math.min(100, p.zone * 3) / 100) * 90;
     this.arcs.ok.setAttribute("d", gaugeArc(GAUGE_R, -ok, ok));
     this.arcs.good.setAttribute("d", gaugeArc(GAUGE_R, -good, good));
+    // Height widens the Gauge's needle.
+    this.pointer.setAttribute("d", discNeedle(DISC_NEEDLE_BASE * p.height));
+    this.turn = p.style === "gauge" ? this.discTurn : this.arcTurn;
+    this.lastAngle = NaN;
     this.dirty = true;
   }
   private dirty = true;
@@ -79,14 +106,14 @@ export class StrafeTrainerView {
     const all = this.dirty;
     this.dirty = false;
     const isBar = this.p.style === "bar";
-    const isGauge = this.p.style === "gauge";
-    const live = isGauge ? gaugePace(r) : r.pace;
+    const isGauge = this.p.style === "gauge" || this.p.style === "arc";
+    const live = this.p.style === "gauge" ? gaugePace(r) : this.p.style === "arc" ? arcPace(r) : r.pace;
     const pace = live === null ? null : Math.round(live);
     const barPace = r.bar ?? r.pace;
     const cue = isBar
       ? r.gain == null || barPace === null ? "ready"
         : Math.abs(barPace - 100) <= 10 ? "good" : barPace < 100 ? "slow" : "fast"
-      : isGauge ? gaugeCue(r, this.p.zone) : r.cue;
+      : isGauge ? gaugeCue(r, this.p.zone, live) : r.cue;
     const paceChanged = all || pace !== this.lastPace;
     if (all || cue !== this.lastCue) {
       this.lastCue = cue;

@@ -79,7 +79,7 @@ const ANNOUNCED = ["pb", "wr", "speed", "highSpeed", "streak", "lj"] as const;
 const BUSES = ["music", "sfx", "ui", "ambience", "map"] as const;
 /** The trainer, keys overlay, jump stats, JHUD and longjump settings (Settings → HUD). */
 const hudDetail: Cvar[] = [
-  pick("hud_trainer_style", "Strafe trainer look: classic, detailed, minimal, bar or gauge.", ["classic", "detailed", "minimal", "bar", "gauge"] as const, (p) => p.hud.strafeTrainer.style, (p, v) => (p.hud.strafeTrainer.style = v)),
+  pick("hud_trainer_style", "Strafe trainer look: classic, detailed, minimal, bar, gauge or arc.", ["classic", "detailed", "minimal", "bar", "gauge", "arc"] as const, (p) => p.hud.strafeTrainer.style, (p, v) => (p.hud.strafeTrainer.style = v)),
   col("hud_trainer_color", "Strafe trainer colour.", (p) => p.hud.strafeTrainer.color, (p, v) => (p.hud.strafeTrainer.color = v)),
   sw("hud_trainer_follow", "100% in the middle, moving the way you turn.", (p) => p.hud.strafeTrainer.follow, (p, v) => (p.hud.strafeTrainer.follow = v)),
   num("hud_trainer_smoothing", "Ticks averaged into the trainer, 1 to 20.", [1, 20], (p) => p.hud.strafeTrainer.smoothing, (p, v) => (p.hud.strafeTrainer.smoothing = v), { int: true }),

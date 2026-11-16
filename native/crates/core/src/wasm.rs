@@ -1039,6 +1039,32 @@ pub extern "C" fn timing_path() -> usize {
 }
 #[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
 pub extern "C" fn timing_path_ptr() -> *const f64 { with(|c| c.timing_f64.as_ptr()) }
+/// The trigger_teleport whose Touch moved the player in the last step's touch pass (`game/timing_teleport.rs`), into
+/// timing_f64 (read with timing_path_ptr): [status (0 none, 1 measured, 2 not measured), phase in [0, 1] (NaN unless
+/// measured), trigger entity index (-1 if none), byte length of the reason in scratch_str (why it isn't measured),
+/// 1 if measured on the straight move instead of the accepted path]. Returns the f64 count.
+#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+pub extern "C" fn timing_teleport() -> usize {
+    with(|c| {
+        c.timing_f64.clear();
+        c.scratch_str.clear();
+        let t = c.game.as_ref().and_then(|g| g.timing_teleport());
+        match t {
+            None => c.timing_f64.extend_from_slice(&[0.0, f64::NAN, -1.0, 0.0, 0.0]),
+            Some(t) => {
+                match t.phase {
+                    Ok(p) => c.timing_f64.extend_from_slice(&[1.0, p]),
+                    Err(reason) => {
+                        c.timing_f64.extend_from_slice(&[2.0, f64::NAN]);
+                        c.scratch_str.push_str(reason);
+                    }
+                }
+                c.timing_f64.extend_from_slice(&[t.trigger as f64, c.scratch_str.len() as f64, f64::from(u8::from(t.chord))]);
+            }
+        }
+        c.timing_f64.len()
+    })
+}
 #[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
 pub extern "C" fn timing_path_reason() -> usize {
     with(|c| {

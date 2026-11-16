@@ -12,7 +12,7 @@ export type TrainerCue = "ready" | "keys" | "direction" | "slow" | "good" | "fas
  * its edge after a strafe switch and fades when the strafing stops. Absent when 0; previews and the layout editor leave
  * it out too, and the Bar look then shows `pace` and `side`.
  */
-export interface TrainerReading { cue: TrainerCue; pace: number | null; side: number; bar?: number; barSide?: number; gain?: number | null }
+export interface TrainerReading { cue: TrainerCue; pace: number | null; side: number; bar?: number; barSide?: number; gain?: number | null; gauge?: number }
 export interface TrainerSample {
   /** Exact core observation (absent / NaN on older WASM or unjudgeable ticks). */
   airSpeedGain?: number;
@@ -85,19 +85,34 @@ export function barBand(gain: number | null | undefined): BarBand {
 }
 
 /**
- * The Gauge look reads the Bar's average: it sinks back to the left between strafes and climbs after a switch, so the
+ * The Arc look reads the Bar's average: it sinks back to the left between strafes and climbs after a switch, so the
  * needle sweeps instead of jumping. Previews and the layout editor leave `bar` out and show `pace`.
  */
-export function gaugePace(r: TrainerReading): number | null {
+export function arcPace(r: TrainerReading): number | null {
   return r.bar ?? r.pace;
+}
+/** The Gauge look reads its own needle filter (StrafeTrainer.feedGauge); previews and the layout editor show `pace`. */
+export function gaugePace(r: TrainerReading): number | null {
+  if (r.gauge === undefined) return r.pace;
+  return r.gauge > 0 || r.pace !== null ? r.gauge : null;
+}
+/**
+ * The Gauge's needle eases towards each tick's pace with this half-life in ticks per Smoothing tick: Smoothing 8 (the
+ * default) is a 4-tick half-life, 40 ms at 100 tick. It holds through a strafe switch (ticks turning against the keys)
+ * and the single ground tick of a hop for at most GAUGE_HOLD ticks, so the needle doesn't dip between strafes.
+ */
+export const GAUGE_HALF_LIFE = 0.5;
+export const GAUGE_HOLD = 8;
+/** Share of the gap to this tick's pace the Gauge's needle closes per tick, for a Smoothing of `smoothing` ticks. */
+export function gaugeEase(smoothing: number): number {
+  return 1 - 0.5 ** (1 / Math.max(0.5, Math.round(smoothing) * GAUGE_HALF_LIFE));
 }
 /** The needle in degrees from straight up, positive to the right: 0% (or nothing) lies flat left, 100% stands up, PACE_MAX lies flat right. */
 export function gaugeAngle(pace: number | null): number {
   return pace !== null && pace > 0 ? (Math.min(PACE_MAX, pace) / PACE_MAX * 2 - 1) * 90 : -90;
 }
-/** The Gauge's cue: its own pace against the on-pace zone; with no live pace, the reading's (keys, direction, ready). */
-export function gaugeCue(r: TrainerReading, zone: number): TrainerCue {
-  const pace = gaugePace(r);
+/** The Gauge and Arc cue: `pace` (the look's own) against the on-pace zone; with no live pace, the reading's (keys, direction, ready). */
+export function gaugeCue(r: TrainerReading, zone: number, pace: number | null): TrainerCue {
   if (r.pace === null || pace === null) return r.cue;
   return trainerZone(pace, zone) === "good" ? "good" : pace < 100 ? "slow" : "fast";
 }
@@ -108,6 +123,22 @@ export function gaugeCue(r: TrainerReading, zone: number): TrainerCue {
 export const GAUGE_R = 44;
 export const GAUGE_NEEDLE = 40;
 export const GAUGE_BOX = [-50, -51, 100, 56] as const;
+/**
+ * The Gauge look's filled dial in the same units: the face is a half disc of radius DISC_R (its colours by angle are in
+ * strafe-trainer.css: blue flat left, white straight up, red flat right), the hub a circle of
+ * DISC_HUB on the pivot, and the needle the wedge discNeedle() draws pointing straight up.
+ */
+export const DISC_R = 48;
+export const DISC_HUB = 6.2;
+export const DISC_BOX = [-50, -50, 100, 57] as const;
+/** The needle: DISC_NEEDLE_BASE half-wide at the pivot, narrowing to a tip rounded on DISC_NEEDLE_TIP at DISC_NEEDLE. */
+export const DISC_NEEDLE = 46.5;
+export const DISC_NEEDLE_BASE = 6.2;
+export const DISC_NEEDLE_TIP = 0.4;
+export function discNeedle(base = DISC_NEEDLE_BASE): string {
+  const y = -(DISC_NEEDLE - DISC_NEEDLE_TIP);
+  return `M${-base} 0L${-DISC_NEEDLE_TIP} ${y}A${DISC_NEEDLE_TIP} ${DISC_NEEDLE_TIP} 0 0 1 ${DISC_NEEDLE_TIP} ${y}L${base} 0Z`;
+}
 /** The arc on radius `r` from `from` to `to` degrees (from straight up, positive to the right), as an SVG path. */
 export function gaugeArc(r: number, from: number, to: number): string {
   const at = (a: number) => `${+(r * Math.sin(a * Math.PI / 180)).toFixed(3)} ${+(-r * Math.cos(a * Math.PI / 180)).toFixed(3)}`;
@@ -154,6 +185,8 @@ export class StrafeTrainer {
   private barSum = 0;
   private barSide = 0;
   private groundTicks = 0;
+  private needle = 0;
+  private needleHeld = 0;
 
   reset(): void {
     this.yaw = NaN;
@@ -165,6 +198,8 @@ export class StrafeTrainer {
     this.lastJump = null;
     this.clearBar();
     this.groundTicks = 0;
+    this.needle = 0;
+    this.needleHeld = 0;
     this.reading = { cue: "ready", pace: null, side: 0 };
   }
 
@@ -200,6 +235,7 @@ export class StrafeTrainer {
     const continuous = this.tick + 1 === s.tick;
     this.feedPace(cmd, s);
     this.feedBar(cmd, s, yaw, continuous);
+    this.feedGauge(cmd, s, yaw, continuous);
   }
 
   /** The original three looks' reading and jump statistics are deliberately unchanged. */
@@ -278,6 +314,33 @@ export class StrafeTrainer {
       this.reading.bar = bar;
       this.reading.barSide = this.barSide;
     }
+  }
+
+  /**
+   * The Gauge look's needle: eases towards this tick's pace (gaugeEase), towards 0 when there is nothing to judge, and
+   * holds through ticks that turn against the keys (a strafe switch) and the one ground tick of a hop.
+   */
+  private feedGauge(cmd: TickCmd, s: TrainerSample, previousYaw: number, continuous: boolean): void {
+    if (![s.speed, s.dt, s.maxSpeed, s.airAccelerate, cmd.yaw, cmd.side, cmd.forward].every(Number.isFinite)
+      || s.dt <= 0 || s.interrupted || !continuous || !Number.isFinite(previousYaw)) {
+      this.needle = this.needleHeld = 0;
+      this.reading.gauge = 0;
+      return;
+    }
+    const speed = s.barSpeed ?? s.speed;
+    const push = Math.min(30, s.maxSpeed, s.airAccelerate * s.maxSpeed * s.dt);
+    const active = !s.grounded && !s.onLadder && speed >= 100 && !!(cmd.side || cmd.forward) && push > 0;
+    const delta = judgedTurn(cmd.yaw, previousYaw, s.turnYaw);
+    const turn = -strafeTurn(cmd.forward, cmd.side, cmd.yaw, s.velYaw);
+    const against = !!turn && Math.abs(delta) > 0.001 && Math.sign(delta) === turn;
+    let target: number | null = active
+      ? against ? null : Math.min(PACE_MAX, 100 * Math.abs(delta) / (Math.atan2(push, speed) * 180 / Math.PI))
+      : this.groundTicks === 1 ? null : 0;
+    if (target === null) {
+      if (++this.needleHeld > GAUGE_HOLD) target = 0;
+    } else this.needleHeld = 0;
+    if (target !== null) this.needle += (target - this.needle) * gaugeEase(this.smoothing);
+    this.reading.gauge = this.needle < 0.05 ? 0 : this.needle;
   }
 }
 

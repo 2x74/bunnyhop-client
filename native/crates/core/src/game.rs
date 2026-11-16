@@ -41,6 +41,9 @@ pub use overlay::{
 };
 // The client's landing spot aid (read-only like the overlays; see the module docs).
 mod landing;
+// Run timing of teleport finishes (observation only; see the module docs).
+mod timing_teleport;
+pub use timing_teleport::TeleportTouch;
 pub use landing::{LandingPiece, LandingPrediction, LANDING_GROUND, LANDING_NONE, LANDING_TELEPORT};
 
 use crate::entities::{Entity, EntityList, Output, name_matches};
@@ -192,7 +195,7 @@ pub const PHYSICS_V16: u32 = 16;
 /// slope or a ledge no longer depends on where inside a tick the player meets it.
 pub const PHYSICS_V17: u32 = 17;
 /// The version new recordings use.
-pub const PHYSICS_LATEST: u32 = PHYSICS_V28;
+pub const PHYSICS_LATEST: u32 = PHYSICS_V29;
 /// v18: ladder surface properties, preserving historical replay behavior.
 pub const PHYSICS_V18: u32 = 18;
 /// v19: scoped map mechanics (template instances and explicit velocity scripts). No new movement fix bits.
@@ -240,6 +243,10 @@ pub const PHYSICS_V27: u32 = 27;
 /// v28: the web style filter's Auto-strafe rule only (its key from the next command's yaw, apps/web/src/styles.ts). The
 /// core plays v28 exactly as v27. No new fix bits.
 pub const PHYSICS_V28: u32 = 28;
+/// v29: per-map changes only (`game/map_fixes.rs` `EVENT_CLOCK_V29`): bhop_bistro_6 and bhop_bistro_7 run player-activated
+/// outputs on EventQueueFix's clock, as v23 does for the kz_ maps, so a short touch of their gravity lift can't leave the
+/// player at gravity -1. Every other map plays exactly as on v28. No new fix bits.
+pub const PHYSICS_V29: u32 = 29;
 /// Command bit 25: stock ground jump, without the 1.5-unit landfix lift (physics 27+ only).
 /// The state is carried on every command, so replay seeking and mid-run toggles need no side channel.
 pub const IN_NO_LANDFIX: u32 = 1 << 25;
@@ -484,6 +491,16 @@ pub fn map_event_clock_v24_for(entities: &[Entity]) -> Option<&'static str> {
     map_fixes::event_clock_v24(map_fixes::entity_fingerprint(entities)).map(|m| m.map)
 }
 
+/// The map a parsed entity lump matches in `game/map_fixes.rs` `EVENT_CLOCK_V29` (tests, tools).
+pub fn map_event_clock_v29_for(entities: &[Entity]) -> Option<&'static str> {
+    map_fixes::event_clock_v29(map_fixes::entity_fingerprint(entities)).map(|m| m.map)
+}
+
+/// The fingerprints `EVENT_CLOCK_V29` pins, by map (tests, tools).
+pub fn map_event_clock_v29_table() -> Vec<(&'static str, u32)> {
+    map_fixes::EVENT_CLOCK_V29.iter().map(|m| (m.map, m.fingerprint)).collect()
+}
+
 /// The fingerprints `EVENT_CLOCK_V23` pins, by map (tests: every entry matches its BSP).
 pub fn map_event_clock_v23_table() -> Vec<(&'static str, u32)> {
     map_fixes::EVENT_CLOCK_V23.iter().map(|m| (m.map, m.fingerprint)).collect()
@@ -550,7 +567,7 @@ pub fn physics_fixes(version: u32) -> Option<u32> {
         PHYSICS_V15 => Some(PHYSICS_FIX_V15),
         PHYSICS_V16 => Some(PHYSICS_FIX_V16),
         PHYSICS_V17 => Some(PHYSICS_FIX_V17),
-        PHYSICS_V18 | PHYSICS_V19 | PHYSICS_V20 | PHYSICS_V21 | PHYSICS_V22 | PHYSICS_V23 | PHYSICS_V24 | PHYSICS_V25 | PHYSICS_V26 | PHYSICS_V27 | PHYSICS_V28 => Some(PHYSICS_FIX_ALL),
+        PHYSICS_V18 | PHYSICS_V19 | PHYSICS_V20 | PHYSICS_V21 | PHYSICS_V22 | PHYSICS_V23 | PHYSICS_V24 | PHYSICS_V25 | PHYSICS_V26 | PHYSICS_V27 | PHYSICS_V28 | PHYSICS_V29 => Some(PHYSICS_FIX_ALL),
         v if v & !PHYSICS_DIAG_FIXES == PHYSICS_DIAG && v & PHYSICS_DIAG_FIXES & !PHYSICS_FIX_ALL == 0 => Some(v & PHYSICS_DIAG_FIXES),
         _ => None,
     }
@@ -1395,6 +1412,10 @@ pub struct Game {
     pub observe_edge_landings: bool,
     pub edge_landing_observed: Option<movement::EdgeLandingKind>,
     pub timing_path: Option<movement::accepted_path::AcceptedPath>,
+    /// Observation (`observe_timing`): the trigger_teleport that moved the player this tick (`timing_teleport.rs`).
+    timing_teleport: Option<TeleportTouch>,
+    /// Observation (`observe_timing`): where this tick's movement step started and ended (`timing_teleport.rs`).
+    timing_move: Option<([f32; 3], [f32; 3])>,
     world: CollisionWorld,
     props: PropCollision,
     /// What `props` is built from (static props + entity props), for `rebuild_props`.
@@ -1542,6 +1563,8 @@ pub struct Game {
     map_event_clock: bool,
     /// v24: `map_fixes::EVENT_CLOCK_V24`.
     map_event_clock_v24: bool,
+    /// v29: `map_fixes::EVENT_CLOCK_V29`.
+    map_event_clock_v29: bool,
     /// v23: the entity fingerprint, kept for `map_fixes::teleport_target_v23`.
     map_fingerprint: u32,
     /// Exact reviewed build in map_fixes::LOGIC_CASE_V23: from physics v23 its logic_case and target rewrites run.
@@ -1668,6 +1691,7 @@ impl Game {
         let map_fingerprint = map_fixes::entity_fingerprint(&entities);
         let map_event_clock = map_fixes::event_clock_v23(map_fingerprint).is_some();
         let map_event_clock_v24 = map_fixes::event_clock_v24(map_fingerprint).is_some();
+        let map_event_clock_v29 = map_fixes::event_clock_v29(map_fingerprint).is_some();
         let map_logic_case = map_fixes::logic_case_v23(&entities).is_some();
         let cs_deleted_props = map_fixes::cs_deleted_props_v24(&entities, map_fingerprint);
         let end_touch_outputs = map_fixes::end_touch_outputs_v24(&entities, map_fingerprint);
@@ -1712,6 +1736,8 @@ impl Game {
             observe_edge_landings: false,
             edge_landing_observed: None,
             timing_path: None,
+            timing_teleport: None,
+            timing_move: None,
             initial_ents: Vec::new(),
             solid: Vec::new(),
             dyn_solid: Vec::new(),
@@ -1791,6 +1817,7 @@ impl Game {
             map_parented_doors_v24,
             map_event_clock,
             map_event_clock_v24,
+            map_event_clock_v29,
             map_fingerprint,
             map_logic_case,
             cs_deleted_props,
@@ -1880,6 +1907,7 @@ impl Game {
     /// Restart the map: entity state, event queue and player.
     pub fn reset(&mut self) {
         self.timing_path = None;
+        self.timing_teleport = None;
         self.jumpstats_valid = false;
         self.air_speed_gain = None;
         self.categorized_ground_jump = None;
@@ -2034,6 +2062,7 @@ impl Game {
             self.player_class.clone_from(class);
         }
         self.timing_path = None;
+        self.timing_teleport = None;
         self.touch_origin = [f32::NAN; 3];
         self.touch_crouched = false;
         self.arms = weapons::Arms::default();
@@ -2225,6 +2254,8 @@ impl Game {
     }
 
     pub fn step(&mut self, cmd: Cmd) -> Result<(), String> {
+        self.timing_teleport = None;
+        self.timing_move = None;
         // Infinite flights (physics v24, game/flight.rs): a flight tick replaces the rest; a landing steps on below.
         self.extra.landing = None;
         if (self.extra.flying || cmd.buttons & IN_FLIGHT != 0) && self.flight_step(cmd) {
@@ -2397,6 +2428,9 @@ impl Game {
             }
             self.contacts.extend(result.contacts.iter().filter_map(|c| c.hit));
             self.last_move_origin = result.state.position;
+            if self.observe_timing {
+                self.timing_move = Some((self.state.position, result.state.position));
+            }
             wall_hit = result.contacts.iter().any(|c| c.normal[2].abs() < 0.7);
             air_move = result.air_move_velocity.map(|v| (v, result.move_collided));
             move_config = config;
@@ -2658,6 +2692,9 @@ impl Game {
                 return 0;
             }
             if self.map_event_clock_v24 && (PHYSICS_V24..=PHYSICS_LATEST).contains(&self.settings.physics_version) {
+                return 0;
+            }
+            if self.map_event_clock_v29 && (PHYSICS_V29..=PHYSICS_LATEST).contains(&self.settings.physics_version) {
                 return 0;
             }
             // TIME_TO_TICKS(sv_clockcorrection_msecs 60 ms), minus the command being run.
@@ -3029,6 +3066,12 @@ impl Game {
             }
             "use" => {
                 // CBaseEntity::InputUse -> Use(activator, caller, USE_TOGGLE).
+                self.use_entity(i, usable::UseType::Toggle, activator);
+                return;
+            }
+            // CEventAction sends `Use` for an output with no input name (bhop_mine's "light1,,,0,-1"). Only lights take
+            // it here: their state is presentation only, and every other class keeps ignoring it as before.
+            "" if matches!(self.ents[i].class.as_str(), "light" | "light_spot") => {
                 self.use_entity(i, usable::UseType::Toggle, activator);
                 return;
             }
@@ -3742,7 +3785,12 @@ impl Game {
                     // waits for re-entry. No continuous Touch or end-touch mode is admitted.
                     if self.ents[i].class == "trigger_momentum_teleport" && linked { continue; }
                     // v17: RNGFix counts the teleports a trigger_teleport's Touch makes (`Hook_TriggerTeleportTouchPost`).
-                    if self.teleport_through(i) && self.ents[i].class == "trigger_teleport" && self.settings.physics_fixes() & PHYSICS_FIX_TELEHOP != 0 {
+                    let moved = self.teleport_through(i);
+                    if moved {
+                        let main = !new_only && self.in_touch;
+                        self.note_teleport_touch(i, position, hull, linked, main);
+                    }
+                    if moved && self.ents[i].class == "trigger_teleport" && self.settings.physics_fixes() & PHYSICS_FIX_TELEHOP != 0 {
                         self.events |= EVENT_MAP_TELEPORT;
                     }
                 }
@@ -4470,6 +4518,7 @@ impl Game {
         self.restart_point = s.restart_point;
         self.restart_names.clone_from(&s.restart_names);
         self.timing_path = None;
+        self.timing_teleport = None;
         self.touch_origin = s.touch_origin;
         self.touch_crouched = s.touch_crouched;
         self.last_move_origin = s.last_move_origin;

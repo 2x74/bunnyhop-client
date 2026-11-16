@@ -1,11 +1,11 @@
 {
   "schema": 1,
-  "status": "published",
-  "commit": "a502742d7f24a6963b2aa931af253f59989b617e",
+  "status": "unpublished",
+  "commit": "69ee821596f26722495ca0686df9b826e2bae1cf",
   "toolchain": "1.99.1",
-  "url": "https://bunnyhop.lol/assets/bunnyhop_core-Fjcvc_EQ.wasm",
-  "sha256": "7819855d9081a80ead8b7cf3d86bb3db7eed94381041b43f8aff5af99c6b8585",
-  "bytes": 1719382,
-  "physics": 28,
+  "url": "",
+  "sha256": "7aa5bd2ca83a0251fa6c31ae6f7ab69f911ca21b0491b3ab94809155535b9b75",
+  "bytes": 1727649,
+  "physics": 29,
   "rules": 5
 }
