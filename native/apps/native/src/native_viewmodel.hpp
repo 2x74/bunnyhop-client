@@ -21,6 +21,9 @@ class NativeViewmodel {
         GLuint vao = 0, vbo = 0, ebo = 0;
         size_t vertices = 0, offset = 0, indices = 0, indexOffset = 0, glowOffset = 0;
         GLuint glowVbo = 0;
+        // Sprung hair's lock pivots (hair-fx.ts hairRoot), four floats a vertex in their own buffer.
+        std::optional<size_t> hairRootOffset;
+        GLuint hairRootVbo = 0;
         bool borrowed = false;
     };
 
@@ -49,6 +52,13 @@ class NativeViewmodel {
         std::array<float, 3> accent{}, hairColor{};
         // The ponytail's length over the built one (loadout.hairLength / 100).
         float hairLength = 1;
+        // The 16th packed field (hair_motion.hpp unpack_head): the mask over the face, or a wig's highlight (linear,
+        // a = 1 when one is picked).
+        bool maskOn = false;
+        std::array<float, 4> hairHighlight{};
+        // Spiky Hair and Long Hair: sprung locks, their length factor, and whether they rest over the lowered hood.
+        bool sprungHair = false;
+        float sprungLength = 1, hairRests = 0;
         HeadwearFit fit;
     };
 
@@ -73,6 +83,9 @@ class NativeViewmodel {
     using PlayerProgram = native_render::PlayerProgram;
     using PlayerMaterial = native_render::PlayerMaterial;
     static constexpr size_t vertex_floats = 26;
+    // Attribute locations outside the vertex layout (export-player-materials.ts): sprung hair's pivots, and the back
+    // items' motion data.
+    static constexpr GLuint hair_root_location = 10, back_effect_location = 11;
     // The metals' scene reflection sampler: a black cube on its own unit, read only when a look turns reflections on.
     static constexpr GLint reflection_unit = 9;
     GLuint bonesTexture = 0, identityBonesTexture = 0, reflectionCube = 0;
@@ -164,6 +177,7 @@ class NativeViewmodel {
         unsigned inspectLoops = 0;
         native_render::AccessoryMotion accessory;
         native_render::PonytailMotion ponytail;
+        native_render::HairMotion hair;
     };
 
     std::unordered_map<std::string, ActorAction> actorActions;
@@ -206,22 +220,42 @@ class NativeViewmodel {
         return std::find(list.begin(), list.end(), id) != list.end();
     }
 
-    // Packed loadout fields 8 and 9 (loadout.ts packLoadout): a wig's colour as six hex digits, the ponytail's length
-    // as a whole percent. Both only count for the hats that take them.
+    // Packed loadout fields 8, 9 and 15 (loadout.ts packLoadout): a wig's colour as six hex digits, its length as a
+    // whole percent, and the hat's own option (a highlight, or the mask over the face). Each counts only for the hats
+    // that take it.
     void read_hair(const std::vector<std::string> &fields, Look &out) const {
         const auto &hair = metadata.at("hair");
         linearColor(hair.at("defaultColor").get<uint32_t>(), out.hairColor.data());
+        const auto head = native_render::unpack_head(fields.size() > 15 ? fields[15] : std::string());
+        out.maskOn = head.mask_on;
         if (out.hat.empty() || !listed(hair.at("hats"), out.hat)) return;
+        if (head.has_highlight) {
+            linearColor(head.highlight, out.hairHighlight.data());
+            out.hairHighlight[3] = 1;
+        }
         const auto &color = fields.size() > 8 ? fields[8] : std::string();
         if (color.size() == 6 && color.find_first_not_of("0123456789abcdefABCDEF") == std::string::npos)
             linearColor(uint32_t(std::stoul(color, nullptr, 16)), out.hairColor.data());
-        const auto &length = fields.size() > 9 ? fields[9] : std::string();
-        if (!listed(hair.at("lengthHats"), out.hat) || length.empty() || length.size() > 3
-            || length.find_first_not_of("0123456789") != std::string::npos)
-            return;
+        read_hair_length(fields.size() > 9 ? fields[9] : std::string(), out);
+    }
+
+    // The ponytail draws the percent over 100; sprung styles (Spiky Hair, Long Hair) map it onto their own range.
+    void read_hair_length(const std::string &length, Look &out) const {
+        const auto &hair = metadata.at("hair");
+        out.sprungHair = hair.contains("sprung") && listed(hair.at("sprung"), out.hat);
+        int percent = 100;
         const auto &limits = hair.at("length");
-        const int percent = std::clamp(std::stoi(length), limits.at("min").get<int>(), limits.at("max").get<int>());
+        if (listed(hair.at("lengthHats"), out.hat) && !length.empty() && length.size() <= 3
+            && length.find_first_not_of("0123456789") == std::string::npos)
+            percent = std::clamp(std::stoi(length), limits.at("min").get<int>(), limits.at("max").get<int>());
         out.hairLength = float(percent) / 100;
+        out.sprungLength = out.hairLength;
+        const auto ranges = hair.find("ranges");
+        if (ranges == hair.end() || !ranges->contains(out.hat)) return;
+        const auto &range = ranges->at(out.hat);
+        out.sprungLength = float(native_render::hair_length_factor(
+                percent, range.at("min").get<double>(), range.at("max").get<double>(), true
+        ));
     }
 
     static std::array<float, 3> vector3(const nlohmann::json &value) {
@@ -247,7 +281,14 @@ class NativeViewmodel {
         if (!out.hat.empty()) {
             const auto &byLook = metadata.at("hats").at(out.hat);
             if (byLook.contains(out.bodyLook)) out.hatMesh = byLook.at(out.bodyLook);
+            // The second way to wear it (the Kitsune Mask over the face).
+            const auto faces = metadata.find("hatFaces");
+            if (out.maskOn && faces != metadata.end() && faces->contains(out.hat)
+                && faces->at(out.hat).contains(out.bodyLook))
+                out.hatMesh = faces->at(out.hat).at(out.bodyLook);
             out.hoodDown = out.bodyLook == "bunny" && listed(metadata.at("hair").at("hats"), out.hat);
+            // Sprung locks rest over the lowered hood on the standard bunny only (hair-fx.ts hairRests).
+            out.hairRests = out.sprungHair && out.bodyLook == "bunny" ? 1 : 0;
         } else if (out.crown)
             out.hatMesh = "crown:" + std::to_string(out.crown);
         const auto &fits = metadata.at("hatFits").at(out.bodyLook);
@@ -407,6 +448,9 @@ class NativeViewmodel {
         p.propellerAngle = at("uPropellerAngle");
         p.capybara = at("uCapybara");
         p.ponytail = at("uPonytail");
+        p.hairHighlight = at("uHairHi");
+        p.hairSway = at("uHairSway");
+        p.hairFlex = at("uHairFlex");
         p.finEnvOn = at("uFinEnvOn");
         p.cosEnvOn = at("uCosEnvOn");
         p.playerEnvOn = at("uPlayerEnvOn");
@@ -545,6 +589,13 @@ class NativeViewmodel {
             gl.GenBuffers(1, &m.glowVbo);
             gl.BindBuffer(GL_ARRAY_BUFFER, m.glowVbo);
             gl.BufferData(GL_ARRAY_BUFFER, m.vertices * 3 * sizeof(float), data.data() + m.glowOffset, GL_STATIC_DRAW);
+            if (m.hairRootOffset) {
+                gl.GenBuffers(1, &m.hairRootVbo);
+                gl.BindBuffer(GL_ARRAY_BUFFER, m.hairRootVbo);
+                gl.BufferData(
+                        GL_ARRAY_BUFFER, m.vertices * 4 * sizeof(float), data.data() + *m.hairRootOffset, GL_STATIC_DRAW
+                );
+            }
             if (m.indices) {
                 gl.GenBuffers(1, &m.ebo);
                 gl.BindBuffer(GL_ELEMENT_ARRAY_BUFFER, m.ebo);
@@ -571,6 +622,11 @@ class NativeViewmodel {
             gl.BindBuffer(GL_ARRAY_BUFFER, m.glowVbo);
             gl.EnableVertexAttribArray(7);
             gl.VertexAttribPointer(7, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), nullptr);
+            if (m.hairRootVbo) {
+                gl.BindBuffer(GL_ARRAY_BUFFER, m.hairRootVbo);
+                gl.EnableVertexAttribArray(hair_root_location);
+                gl.VertexAttribPointer(hair_root_location, 4, GL_FLOAT, GL_FALSE, 4 * sizeof(float), nullptr);
+            }
             if (m.indices) gl.BindBuffer(GL_ELEMENT_ARRAY_BUFFER, m.ebo);
         }
     }
@@ -581,6 +637,10 @@ class NativeViewmodel {
         if (at == meshes.end()) return;
         const auto &m = at->second;
         gl.BindVertexArray(m.vao);
+        // The attributes most meshes don't carry read zero, as the website's defaults (materials.ts backfx). The
+        // current value is context state, not the VAO's, so it is set at each draw.
+        if (!m.hairRootVbo) gl.VertexAttrib4f(hair_root_location, 0, 0, 0, 0);
+        gl.VertexAttrib4f(back_effect_location, 0, 0, 0, 0);
         if (instances > 1) {
             if (m.indices)
                 gl.DrawElementsInstanced(GL_TRIANGLES, m.indices, GL_UNSIGNED_INT, nullptr, instances);
@@ -753,6 +813,8 @@ class NativeViewmodel {
         native_render::advance_ponytail(
                 state.ponytail, actor.frame.velocity, actor.frame.yaw, dt, pulses.snapped || dt <= 0, look.hairLength
         );
+        if (look.sprungHair)
+            native_render::advance_hair(state.hair, actor.frame.velocity, actor.frame.yaw, dt, pulses.snapped);
         gun_layer(actor, pulses, dt, feetYaw, acting);
         gl.ActiveTexture(GL_TEXTURE0);
         gl.BindTexture(GL_TEXTURE_2D, bonesTexture);
@@ -847,6 +909,10 @@ class NativeViewmodel {
         gl.Uniform3fv(p.headwearFaceOffset, 1, look.fit.faceOffset.data());
         const float ponytail[4] = {0, 0, look.hairLength, 0};
         gl.Uniform4fv(p.ponytail, 1, ponytail);
+        gl.Uniform4fv(p.hairHighlight, 1, look.hairHighlight.data());
+        const float sway[4] = {0, 0, 0, look.sprungLength}, flex[4] = {0, 0, 0, look.hairRests};
+        gl.Uniform4fv(p.hairSway, 1, sway);
+        gl.Uniform4fv(p.hairFlex, 1, flex);
     }
 
     void bind_glow(const PlayerProgram &p, const native_render::Glow *glow, float opacity) {
@@ -934,6 +1000,10 @@ public:
             m.glowOffset = raw.at("glowOffset").get<size_t>() / 4;
             m.indices = raw.value("indices", size_t(0));
             m.indexOffset = raw.value("indexOffset", size_t(0)) / 4;
+            if (raw.contains("hairRootOffset")) {
+                m.hairRootOffset = raw.at("hairRootOffset").get<size_t>() / 4;
+                if (*m.hairRootOffset + m.vertices * 4 > data.size()) throw std::runtime_error("Invalid hair range");
+            }
             if (m.glowOffset + m.vertices * 3 > data.size() || !m.vertices || m.vertices > 4000000
                 || m.offset + m.vertices * vertex_floats > data.size() || m.indexOffset + m.indices > data.size())
                 throw std::runtime_error("Invalid native mesh range");
@@ -1009,6 +1079,7 @@ public:
                 continue;
             }
             if (m.glowVbo) gl.DeleteBuffers(1, &m.glowVbo);
+            if (m.hairRootVbo) gl.DeleteBuffers(1, &m.hairRootVbo);
             if (m.ebo) gl.DeleteBuffers(1, &m.ebo);
             if (m.vbo) gl.DeleteBuffers(1, &m.vbo);
             if (m.vao) gl.DeleteVertexArrays(1, &m.vao);
@@ -1033,7 +1104,7 @@ public:
 
         struct Buffers {
             std::string name;
-            GLuint vertices, glow, indices;
+            GLuint vertices, glow, indices, hairRoots;
         };
 
         std::vector<Buffers> meshes;
@@ -1068,7 +1139,7 @@ public:
             const auto at = meshes.find(name);
             if (at == meshes.end()) continue;
             const auto &mesh = at->second;
-            result.meshes.push_back({name, mesh.vbo, mesh.glowVbo, mesh.ebo});
+            result.meshes.push_back({name, mesh.vbo, mesh.glowVbo, mesh.ebo, mesh.hairRootVbo});
         }
         return result;
     }
@@ -1099,6 +1170,7 @@ public:
             auto &mesh = at->second;
             mesh.vbo = buffers.vertices;
             mesh.glowVbo = buffers.glow;
+            mesh.hairRootVbo = buffers.hairRoots;
             mesh.ebo = buffers.indices;
             mesh.borrowed = true;
         }
@@ -1671,7 +1743,7 @@ public:
                 input.water = int(actor.waterLevel);
                 input.sidemove = actor.sidemove;
                 input.jumped = actor.jumped;
-                state.hood(l.hoodDown);
+                state.hood(l.hoodDown, l.bodyLook == "bunny");
                 state.set_seed(actor_seed(actor, l));
                 state.motion = motionScale;
                 state.pose(input, seconds, pulses.snapped, pulses.swing, pose, acting);
@@ -1718,6 +1790,13 @@ public:
         const auto &tail = actorActions[actor.id].ponytail;
         const float ponytail[4] = {float(tail.pitch), float(tail.side), l.hairLength, 0};
         gl.Uniform4fv(actorProgram.ponytail, 1, ponytail);
+        if (l.sprungHair) {
+            const auto &hair = actorActions[actor.id].hair;
+            const float sway[4] = {float(hair.loose[0]), float(hair.loose[1]), float(hair.loose[2]), l.sprungLength};
+            const float flex[4] = {float(hair.stiff[0]), float(hair.stiff[1]), float(hair.stiff[2]), l.hairRests};
+            gl.Uniform4fv(actorProgram.hairSway, 1, sway);
+            gl.Uniform4fv(actorProgram.hairFlex, 1, flex);
+        }
         world_body_uniforms(actorProgram, origin.data());
         constexpr float chest_units = 40;
         const float chest[3] = {origin[0], origin[1], origin[2] + chest_units};

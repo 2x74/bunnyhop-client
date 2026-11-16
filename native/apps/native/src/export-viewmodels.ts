@@ -14,6 +14,7 @@ import { COLOURWAYS } from "../../web/src/player/bunny/palettes";
 import { garmentPatternUniforms, setGarmentPattern } from "../../web/src/player/fabric";
 import { hatGeometry, headwearKey } from "../../web/src/player/bunny/hats";
 import { hatFit } from "../../web/src/player/bunny/hat-fit";
+import { HAIR_RANGE, SPRUNG_HATS } from "../../web/src/player/hair-fx";
 import { ensureHeadwear } from "../../web/src/player/hat-detail";
 import { bakeGunAO } from "../../web/src/viewmodel/guns/ao";
 import { writePlayerMaterials } from "./export-player-materials";
@@ -95,6 +96,21 @@ const putUnique = (v: Float32Array) => {
   blobs.set(key, offset);
   return offset;
 };
+/**
+ * A four-float attribute the vertex layout doesn't carry (the sprung hair's pivots), in its own buffer: one entry per
+ * indexed vertex. Vertices that differ only in it would have been merged, so the first source vertex of each wins.
+ */
+function perVertex(attribute: THREE.BufferAttribute, indices: Uint32Array, count: number): Float32Array {
+  const out = new Float32Array(count * 4),
+    seen = new Uint8Array(count);
+  for (let i = 0; i < indices.length; i++) {
+    const at = indices[i];
+    if (seen[at]) continue;
+    seen[at] = 1;
+    for (let k = 0; k < 4; k++) out[at * 4 + k] = attribute.array[i * attribute.itemSize + k] ?? 0;
+  }
+  return out;
+}
 function geometry(name: string, g: any) {
   const p = g.getAttribute("position"),
     n = g.getAttribute("normal"),
@@ -104,7 +120,8 @@ function geometry(name: string, g: any) {
     weights = g.getAttribute("skinWeight"),
     finish = g.getAttribute("finishUV"),
     headwear = g.getAttribute("headwear"),
-    gunCamo = g.getAttribute("gunCamo");
+    gunCamo = g.getAttribute("gunCamo"),
+    hairRoot = g.getAttribute("hairRoot");
   // Body meshes are weapon-free: selected TP weapons render as separate parts.
   if (name.startsWith("body:")) {
     const knifeBone = bunnyRig().index("bunny.Knife");
@@ -177,6 +194,7 @@ function geometry(name: string, g: any) {
     vertices: unique.length / STRIDE,
     indexOffset: putUnique(new Float32Array(indices.buffer)),
     indices: indices.length,
+    ...(hairRoot ? { hairRootOffset: putUnique(perVertex(hairRoot, indices, unique.length / STRIDE)) } : {}),
   };
   g.dispose();
 }
@@ -473,14 +491,21 @@ for (const tier of [1, 2, 3] as const) headwearMesh(`crown:${tier}`, crownGeomet
 const HAT_IDS = COSMETICS.filter((c) => c.slot === "hat").map((c) => c.id);
 const BODY_LOOKS = ["bunny", "tek", "plush", "bune"] as const;
 const hatMeshes: Record<string, Record<string, string>> = {};
+// The hats with a second way to wear them (the Kitsune Mask over the face: hats.ts headwearKey with maskOn).
+const hatFaceMeshes: Record<string, Record<string, string>> = {};
+const headwearOf = (key: string) => {
+  const g = hatGeometry(key);
+  if (g && !meshes[key]) headwearMesh(key, g);
+  return g ? key : null;
+};
 for (const id of HAT_IDS) {
   hatMeshes[id] = {};
   for (const look of BODY_LOOKS) {
-    const key = headwearKey(id, look);
-    const g = hatGeometry(key);
-    if (!g) continue;
-    if (!meshes[key]) headwearMesh(key, g);
-    hatMeshes[id][look] = key;
+    const key = headwearOf(headwearKey(id, look));
+    if (key) hatMeshes[id][look] = key;
+    const faceKey = headwearKey(id, look, { maskOn: true });
+    if (faceKey === key || !headwearOf(faceKey)) continue;
+    (hatFaceMeshes[id] ??= {})[look] = faceKey;
   }
 }
 const hatFits = Object.fromEntries(
@@ -608,8 +633,16 @@ await writeFile(
     outfits: COLOURWAYS,
     outfitPatterns: outfitPatterns(),
     hats: hatMeshes,
+    hatFaces: hatFaceMeshes,
     hatFits,
-    hair: { hats: HAIR_HATS, lengthHats: LENGTH_HATS, length: HAIR_LENGTH, defaultColor: HAIR_DEFAULT },
+    hair: {
+      hats: HAIR_HATS,
+      lengthHats: LENGTH_HATS,
+      length: HAIR_LENGTH,
+      defaultColor: HAIR_DEFAULT,
+      sprung: SPRUNG_HATS,
+      ranges: HAIR_RANGE,
+    },
     gloves: GLOVE_STYLE,
     inspects: Object.fromEntries(
       KNIVES.map((def) => [
