@@ -5,6 +5,7 @@
 #include "third_person_events.hpp"
 #include "first_person_weapons.hpp"
 #include "model_light.hpp"
+#include "back_slot.hpp"
 #include <charconv>
 #include <optional>
 #include <span>
@@ -17,10 +18,18 @@ class NativeViewmodel {
     using Clip = native_vm::PoseClip;
     using Entry = native_vm::PoseEntry;
 
+    // Four-float attributes only some meshes carry (export-viewmodels.ts EXTRA_ATTRIBUTES), each in a buffer of its
+    // own: a back item's motion code (backfx) and a sprung lock's root (hairRoot). Every other mesh reads zeros.
+    static constexpr std::array<const char *, 2> extra_attributes = {"backfx", "hairRoot"};
+    static constexpr std::array<GLuint, 2> extra_locations = {10, 11};
+    static constexpr size_t no_extra = SIZE_MAX;
+
     struct Mesh {
         GLuint vao = 0, vbo = 0, ebo = 0;
         size_t vertices = 0, offset = 0, indices = 0, indexOffset = 0, glowOffset = 0;
         GLuint glowVbo = 0;
+        std::array<size_t, 2> extraOffsets{no_extra, no_extra};
+        std::array<GLuint, 2> extraVbos{};
         bool borrowed = false;
     };
 
@@ -50,6 +59,7 @@ class NativeViewmodel {
         // The ponytail's length over the built one (loadout.hairLength / 100).
         float hairLength = 1;
         HeadwearFit fit;
+        native_back::Worn back;
     };
 
     struct CachedLook {
@@ -106,7 +116,7 @@ class NativeViewmodel {
         std::string id, outfit, loadout;
         uint32_t weapon = 0;
         bool silenced = false, emptyHand = false, used = false;
-        std::array<std::string, 5> names;
+        std::array<std::string, 6> names;
         size_t count = 0;
     };
 
@@ -139,6 +149,7 @@ class NativeViewmodel {
         parts->names[parts->count++] = "body:" + body + ":" + (body == "bunny" ? look.body : "classic") + ":"
                                        + look.glove + (look.hoodDown ? ":down" : "");
         if (!look.hatMesh.empty()) parts->names[parts->count++] = look.hatMesh;
+        if (!look.back.mesh.empty()) parts->names[parts->count++] = look.back.mesh;
         const auto &gun = weapons[std::min(size_t(actor.frame.weapon), weapons.size() - 1)];
         if (actor.emptyHand) return {parts->names.data(), parts->count};
         parts->names[parts->count++] = gun.empty() || gun == "knife" ? "tpknife:" + look.knife : "tpgun:" + gun;
@@ -154,6 +165,16 @@ class NativeViewmodel {
     nlohmann::json tpInspects;
     std::unordered_map<std::string, native_tp::PartPose> tpParts;
 
+    // A worn back item's motion on one player (web model.ts update and sleeveLayer).
+    struct BackState {
+        std::string mesh;
+        native_back::Motion motion;
+        native_back::SleeveMotion sleeves;
+        native_back::Uniforms uniforms;
+        std::array<float, 4> cape{};
+        std::array<float, 4> robe_left{}, robe_right{};
+    };
+
     struct ActorAction {
         native_tp::Combo gesture;
         double last = -1;
@@ -164,6 +185,7 @@ class NativeViewmodel {
         unsigned inspectLoops = 0;
         native_render::AccessoryMotion accessory;
         native_render::PonytailMotion ponytail;
+        BackState back;
     };
 
     std::unordered_map<std::string, ActorAction> actorActions;
@@ -262,6 +284,65 @@ class NativeViewmodel {
         }
     }
 
+    // Packed loadout fields 13 and 14 (loadout.ts packLoadout): the back item and its options. An item this build
+    // doesn't have is not drawn.
+    void read_back(const std::vector<std::string> &fields, Look &out) const {
+        constexpr size_t back_field = 13, options_field = 14;
+        if (fields.size() <= back_field || fields[0] != "2") return;
+        const auto &backs = metadata.at("backs");
+        const auto &id = fields[back_field];
+        const auto kind = backs.at("kinds").find(id);
+        if (kind == backs.at("kinds").end()) return;
+        auto &back = out.back;
+        back.id = id;
+        back.kind = native_back::kind_named(kind->get<std::string>());
+        const auto &options = fields.size() > options_field ? fields[options_field] : std::string();
+        back.options = id == native_back::robe_item ? native_back::unpack_robe(options) : native_back::unpack_cape(options);
+        const auto &lengths = backs.at("capeLengths");
+        const int step = lengths.size() > 1 ? lengths[1].get<int>() - lengths[0].get<int>() : 5;
+        const auto fit = native_back::fit_for(
+                out.bodyLook, out.body == "feminine", out.hoodDown, out.hat == "hat-ponytail"
+        );
+        const int drawn = native_back::drawn_cape_length(back.options.cape_length, step);
+        back.mesh = native_back::mesh_key(id, fit, drawn, back.options.robe_tied);
+        const auto rig = backs.at("rigs").find(back.mesh);
+        if (rig == backs.at("rigs").end() || !meshes.count(back.mesh)) {
+            back = {};
+            return;
+        }
+        read_back_rig(*rig, back);
+        if (out.hat == "hat-ponytail") back.ponytail_rest = native_back::ponytail_rest(id, out.bodyLook == "bunny");
+        read_back_tones(out);
+    }
+
+    static void read_back_rig(const nlohmann::json &rig, native_back::Worn &back) {
+        back.pivot = vector3(rig.at("pivot"));
+        back.axis = vector3(rig.at("axis"));
+        back.pivot2 = rig.contains("pivot2") ? vector3(rig.at("pivot2")) : back.pivot;
+        if (rig.contains("hang")) back.cape = {1, rig["hang"][0].get<float>(), rig["hang"][1].get<float>(), 0};
+        if (rig.contains("robe")) {
+            const auto &robe = rig.at("robe");
+            back.robe = {float(back.options.robe_pattern),
+                         robe.at("drop").get<float>(),
+                         robe.at("radius").get<float>(),
+                         robe.at("from").get<float>()};
+        }
+    }
+
+    static void read_back_tones(Look &out) {
+        auto &back = out.back;
+        constexpr size_t pants_slot = 2;
+        const native_back::Rgb accent = out.accent;
+        const native_back::Rgb pants = {
+                out.palette[pants_slot * 3], out.palette[pants_slot * 3 + 1], out.palette[pants_slot * 3 + 2]
+        };
+        const auto tones = back.kind == native_back::Kind::robe
+                                   ? native_back::robe_tones(pants, accent, back.options.outer, back.options.lining)
+                                   : native_back::cape_tones(accent, back.options.outer, back.options.lining);
+        for (size_t role = 0; role < 4; ++role)
+            std::copy(tones[role].begin(), tones[role].end(), back.tones.begin() + long(role * 3));
+    }
+
     const Look &look(const std::string &outfit, const std::string &packed) {
         for (const auto &cached : lookCache) {
             if (cached.used && cached.outfit == outfit && cached.packed == packed) return cached.look;
@@ -336,6 +417,7 @@ class NativeViewmodel {
         for (size_t slot = 0; slot < 5; ++slot)
             linearColor(glove.at(gloveSlots[slot]), out.gloveColors.data() + slot * 3);
         fit_headwear(out);
+        read_back(f, out);
         cached.look = std::move(out);
         return cached.look;
     }
@@ -445,6 +527,17 @@ class NativeViewmodel {
         p.camoP = at("uCamoP");
         p.camoScale = at("uCamoScale");
         p.camoTp = at("uCamoTp");
+        p.back = at("uBack");
+        p.backTip = at("uBackTip");
+        p.backMid = at("uBackMid");
+        p.cape = at("uCape");
+        p.backPivot = at("uBackPivot");
+        p.backPivot2 = at("uBackPivot2");
+        p.backAxis = at("uBackAxis");
+        p.capeTones = at("uCapeTones");
+        p.robeLeft = at("uRobeL");
+        p.robeRight = at("uRobeR");
+        p.robe = at("uRobe");
         return p;
     }
 
@@ -545,6 +638,17 @@ class NativeViewmodel {
             gl.GenBuffers(1, &m.glowVbo);
             gl.BindBuffer(GL_ARRAY_BUFFER, m.glowVbo);
             gl.BufferData(GL_ARRAY_BUFFER, m.vertices * 3 * sizeof(float), data.data() + m.glowOffset, GL_STATIC_DRAW);
+            for (size_t e = 0; e < extra_attributes.size(); ++e) {
+                if (m.extraOffsets[e] == no_extra) continue;
+                gl.GenBuffers(1, &m.extraVbos[e]);
+                gl.BindBuffer(GL_ARRAY_BUFFER, m.extraVbos[e]);
+                gl.BufferData(
+                        GL_ARRAY_BUFFER,
+                        m.vertices * 4 * sizeof(float),
+                        data.data() + m.extraOffsets[e],
+                        GL_STATIC_DRAW
+                );
+            }
             if (m.indices) {
                 gl.GenBuffers(1, &m.ebo);
                 gl.BindBuffer(GL_ELEMENT_ARRAY_BUFFER, m.ebo);
@@ -571,6 +675,12 @@ class NativeViewmodel {
             gl.BindBuffer(GL_ARRAY_BUFFER, m.glowVbo);
             gl.EnableVertexAttribArray(7);
             gl.VertexAttribPointer(7, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), nullptr);
+            for (size_t e = 0; e < extra_attributes.size(); ++e) {
+                if (!m.extraVbos[e]) continue;
+                gl.BindBuffer(GL_ARRAY_BUFFER, m.extraVbos[e]);
+                gl.EnableVertexAttribArray(extra_locations[e]);
+                gl.VertexAttribPointer(extra_locations[e], 4, GL_FLOAT, GL_FALSE, 4 * sizeof(float), nullptr);
+            }
             if (m.indices) gl.BindBuffer(GL_ELEMENT_ARRAY_BUFFER, m.ebo);
         }
     }
@@ -581,6 +691,10 @@ class NativeViewmodel {
         if (at == meshes.end()) return;
         const auto &m = at->second;
         gl.BindVertexArray(m.vao);
+        // A disabled array reads the current value, which defaults to (0, 0, 0, 1): a w of 1 would recolour the body as
+        // the Cape's outside.
+        for (size_t e = 0; e < extra_attributes.size(); ++e)
+            if (!m.extraVbos[e]) gl.VertexAttrib4f(extra_locations[e], 0, 0, 0, 0);
         if (instances > 1) {
             if (m.indices)
                 gl.DrawElementsInstanced(GL_TRIANGLES, m.indices, GL_UNSIGNED_INT, nullptr, instances);
@@ -753,6 +867,7 @@ class NativeViewmodel {
         native_render::advance_ponytail(
                 state.ponytail, actor.frame.velocity, actor.frame.yaw, dt, pulses.snapped || dt <= 0, look.hairLength
         );
+        advance_back(state.back, actor, look.back, dt, pulses.snapped || dt <= 0, feetYaw);
         gun_layer(actor, pulses, dt, feetYaw, acting);
         gl.ActiveTexture(GL_TEXTURE0);
         gl.BindTexture(GL_TEXTURE_2D, bonesTexture);
@@ -762,6 +877,88 @@ class NativeViewmodel {
             actorAnimationStates.clear();
             actorHolds.clear();
         }
+    }
+
+    // Seconds the ground under a long cape takes to come back on a landing, and to fall away in the air (model.ts).
+    static constexpr double cape_ground_seconds = .05, cape_air_seconds = .12;
+    static constexpr float cape_air_drop_units = 40;
+
+    void advance_back(
+            BackState &state,
+            const native_render::Actor &actor,
+            const native_back::Worn &worn,
+            double dt,
+            bool snap,
+            float feetYaw
+    ) {
+        if (worn.kind == native_back::Kind::none) return;
+        if (state.mesh != worn.mesh) {
+            state = {};
+            state.mesh = worn.mesh;
+            snap = true;
+        }
+        const auto &v = actor.frame.velocity;
+        const double speed = std::hypot(v[0], v[1]);
+        native_back::Step step;
+        step.kind = worn.kind;
+        step.velocity = {v[0], v[1], v[2]};
+        step.yaw_degrees = actor.frame.yaw;
+        step.dt = dt;
+        step.jumped = actor.jumped;
+        step.snap = snap;
+        step.still = cosmeticsTier == 0;
+        step.cape_length = worn.cape_length_scale();
+        step.tied = worn.options.robe_tied;
+        native_back::advance(state.motion, step);
+        state.uniforms = native_back::uniforms(state.motion, worn.kind, speed, step.cape_length);
+        state.cape = worn.cape;
+        if (worn.cape[0] > .5f) {
+            const bool grounded = actor.frame.flags & 2;
+            const float ground = worn.cape[2], want = grounded ? ground : ground - cape_air_drop_units;
+            const double seconds = grounded ? cape_ground_seconds : cape_air_seconds;
+            state.cape[2] = snap ? want : state.cape[2] + (want - state.cape[2]) * float(1 - std::exp(-dt / seconds));
+        }
+        if (worn.kind == native_back::Kind::robe) advance_sleeves(state, actor, dt, snap, feetYaw);
+    }
+
+    // The sleeves swing from where the forearms are now (model.ts sleeveLayer), after the pose is final.
+    void advance_sleeves(BackState &state, const native_render::Actor &actor, double dt, bool snap, float feetYaw) {
+        const auto &anchor = metadata.at("backs").at("sleeveAnchor");
+        const std::array<int, 2> bones = {actor_bone("L_Forearm"), actor_bone("R_Forearm")};
+        std::array<double, 6> anchors{};
+        for (size_t side = 0; side < 2; ++side) {
+            if (bones[side] < 0 || size_t(bones[side] + 1) * 12 > pose.size()) return;
+            const float *skin = pose.data() + size_t(bones[side]) * 12;
+            const double x = side ? -anchor[0].get<double>() : anchor[0].get<double>();
+            const double y = anchor[1].get<double>(), z = anchor[2].get<double>();
+            for (size_t k = 0; k < 3; ++k)
+                anchors[side * 3 + k] = skin[k * 4] * x + skin[k * 4 + 1] * y + skin[k * 4 + 2] * z + skin[k * 4 + 3];
+        }
+        const auto &v = actor.frame.velocity;
+        native_back::advance_sleeves(
+                state.sleeves, anchors, {v[0], v[1], v[2]}, feetYaw, dt, snap, cosmeticsTier == 0
+        );
+        state.robe_left = native_back::sleeve_uniform(state.sleeves, 0);
+        state.robe_right = native_back::sleeve_uniform(state.sleeves, 1);
+    }
+
+    void back_motion_uniforms(const PlayerProgram &p, const BackState *state) {
+        static const BackState rest;
+        const auto &shown = state ? *state : rest;
+        gl.Uniform4fv(p.back, 1, shown.uniforms.back.data());
+        gl.Uniform4fv(p.backTip, 1, shown.uniforms.tip.data());
+        gl.Uniform4fv(p.backMid, 1, shown.uniforms.mid.data());
+        gl.Uniform4fv(p.cape, 1, shown.cape.data());
+        gl.Uniform4fv(p.robeLeft, 1, shown.robe_left.data());
+        gl.Uniform4fv(p.robeRight, 1, shown.robe_right.data());
+    }
+
+    void back_look_uniforms(const PlayerProgram &p, const native_back::Worn &back) {
+        gl.Uniform3fv(p.backPivot, 1, back.pivot.data());
+        gl.Uniform3fv(p.backPivot2, 1, back.pivot2.data());
+        gl.Uniform3fv(p.backAxis, 1, back.axis.data());
+        gl.Uniform3fv(p.capeTones, 4, back.tones.data());
+        gl.Uniform4fv(p.robe, 1, back.robe.data());
     }
 
     static void linearColor(uint32_t hex, float *out) {
@@ -845,8 +1042,10 @@ class NativeViewmodel {
         gl.Uniform3fv(p.headwearOffset, 1, look.fit.offset.data());
         gl.Uniform3fv(p.headwearFaceScale, 1, look.fit.faceScale.data());
         gl.Uniform3fv(p.headwearFaceOffset, 1, look.fit.faceOffset.data());
-        const float ponytail[4] = {0, 0, look.hairLength, 0};
+        const float ponytail[4] = {0, 0, look.hairLength, look.back.ponytail_rest};
         gl.Uniform4fv(p.ponytail, 1, ponytail);
+        back_look_uniforms(p, look.back);
+        back_motion_uniforms(p, nullptr);
     }
 
     void bind_glow(const PlayerProgram &p, const native_render::Glow *glow, float opacity) {
@@ -934,6 +1133,13 @@ public:
             m.glowOffset = raw.at("glowOffset").get<size_t>() / 4;
             m.indices = raw.value("indices", size_t(0));
             m.indexOffset = raw.value("indexOffset", size_t(0)) / 4;
+            if (raw.contains("extras"))
+                for (size_t e = 0; e < extra_attributes.size(); ++e)
+                    if (raw["extras"].contains(extra_attributes[e])) {
+                        m.extraOffsets[e] = raw["extras"][extra_attributes[e]].get<size_t>() / 4;
+                        if (m.extraOffsets[e] + m.vertices * 4 > data.size())
+                            throw std::runtime_error("Invalid native mesh range");
+                    }
             if (m.glowOffset + m.vertices * 3 > data.size() || !m.vertices || m.vertices > 4000000
                 || m.offset + m.vertices * vertex_floats > data.size() || m.indexOffset + m.indices > data.size())
                 throw std::runtime_error("Invalid native mesh range");
@@ -1009,6 +1215,8 @@ public:
                 continue;
             }
             if (m.glowVbo) gl.DeleteBuffers(1, &m.glowVbo);
+            for (auto &extra : m.extraVbos)
+                if (extra) gl.DeleteBuffers(1, &extra);
             if (m.ebo) gl.DeleteBuffers(1, &m.ebo);
             if (m.vbo) gl.DeleteBuffers(1, &m.vbo);
             if (m.vao) gl.DeleteVertexArrays(1, &m.vao);
@@ -1034,6 +1242,7 @@ public:
         struct Buffers {
             std::string name;
             GLuint vertices, glow, indices;
+            std::array<GLuint, 2> extras;
         };
 
         std::vector<Buffers> meshes;
@@ -1068,7 +1277,7 @@ public:
             const auto at = meshes.find(name);
             if (at == meshes.end()) continue;
             const auto &mesh = at->second;
-            result.meshes.push_back({name, mesh.vbo, mesh.glowVbo, mesh.ebo});
+            result.meshes.push_back({name, mesh.vbo, mesh.glowVbo, mesh.ebo, mesh.extraVbos});
         }
         return result;
     }
@@ -1100,6 +1309,7 @@ public:
             mesh.vbo = buffers.vertices;
             mesh.glowVbo = buffers.glow;
             mesh.ebo = buffers.indices;
+            mesh.extraVbos = buffers.extras;
             mesh.borrowed = true;
         }
     }
@@ -1213,7 +1423,7 @@ public:
             draw_knife_sample(width, height, kind == "hilt", seconds);
         } else if (kind == "gunside") {
             draw_gun_side(width, height, weapon, seconds);
-        } else if (kind == "actor" || kind == "hat" || kind == "ghost") {
+        } else if (kind == "actor" || kind == "hat" || kind == "ghost" || kind == "back") {
             native_render::Actor actor;
             actor.id = "asset-preview";
             actor.opacity = kind == "ghost" ? .55f : 1.f;
@@ -1227,10 +1437,19 @@ public:
             actor.inspect = previewAction == "inspect" && seconds == 0 ? 1 : 0;
             actor.attack = previewAction == "fire" && seconds == 0 ? 1 : 0;
             actor.frame.view_offset_z = 64;
+            // "back": from behind and a little to the left, where a back item shows.
             const float eye[3] = {
-                    kind == "hat" ? 35.f : 105.f, kind == "hat" ? -52.f : -160.f, kind == "hat" ? 87.f : 82.f
+                    kind == "hat"    ? 35.f
+                    : kind == "back" ? -150.f
+                                     : 105.f,
+                    kind == "hat"    ? -52.f
+                    : kind == "back" ? 75.f
+                                     : -160.f,
+                    kind == "hat" ? 87.f : 82.f
             };
-            const auto vp = native::camera_matrix(eye, 120, 9, float(width) / height);
+            constexpr float radians_to_degrees = 57.29578f;
+            const float yaw = kind == "back" ? std::atan2(-eye[1], -eye[0]) * radians_to_degrees : 120.f;
+            const auto vp = native::camera_matrix(eye, yaw, 9, float(width) / height);
             draw_actor(actor, vp, eye, seconds);
         } else {
             const PreviewScope still(previewing);
@@ -1716,8 +1935,9 @@ public:
         gl.Uniform4fv(actorProgram.capybara, 1, capy);
         gl.Uniform1f(actorProgram.propellerAngle, float(motion.angle));
         const auto &tail = actorActions[actor.id].ponytail;
-        const float ponytail[4] = {float(tail.pitch), float(tail.side), l.hairLength, 0};
+        const float ponytail[4] = {float(tail.pitch), float(tail.side), l.hairLength, l.back.ponytail_rest};
         gl.Uniform4fv(actorProgram.ponytail, 1, ponytail);
+        if (l.back.kind != native_back::Kind::none) back_motion_uniforms(actorProgram, &actorActions[actor.id].back);
         world_body_uniforms(actorProgram, origin.data());
         constexpr float chest_units = 40;
         const float chest[3] = {origin[0], origin[1], origin[2] + chest_units};

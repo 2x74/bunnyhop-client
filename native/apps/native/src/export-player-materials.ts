@@ -29,6 +29,7 @@ const ATTRIBUTE_LOCATIONS: Record<string, number> = {
 };
 
 const VERTEX_PRELUDE = `
+#define USE_SKINNING
 layout(location=0) in vec3 position;
 layout(location=1) in vec3 normal;
 layout(location=3) in vec4 skinIndex;
@@ -66,9 +67,9 @@ const COMMON = `
 #define saturate(a) clamp(a, 0.0, 1.0)
 `;
 
-// USE_SKINNING and three.js's bone names let the cape and the robe read the legs and the hips after skinning.
+// three.js's bone names let the cape and the robe read the legs and the hips after skinning (VERTEX_PRELUDE says
+// USE_SKINNING, before their declarations).
 const SKINNING_PARS = `
-#define USE_SKINNING
 uniform sampler2D boneMatrices;
 mat4 nativeBone(float index) {
   int i = int(index + 0.5);

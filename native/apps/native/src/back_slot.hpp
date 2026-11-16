@@ -222,6 +222,30 @@ inline std::array<Rgb, 4> robe_tones(
     return {base, ink, inner, band};
 }
 
+// A worn back item as drawn: its mesh, its kind, its options and the uniforms that stay the same while it is worn.
+struct Worn {
+    std::string id, mesh;
+    Kind kind = Kind::none;
+    Options options;
+    std::array<float, 3> pivot{}, pivot2{}, axis{0, 1, 0};
+    // uCape: a long cape's [on, the height it hangs from, the ground under the feet, 0] (BackRig.hang).
+    std::array<float, 4> cape{};
+    // uRobe: [pattern, the sleeves' drop, their radius, where they start].
+    std::array<float, 4> robe{};
+    std::array<float, 12> tones{};
+    // uPonytail.w: how far a long ponytail stands further off the back over a pack (backs.ts ponytailRest).
+    float ponytail_rest = 0;
+
+    double cape_length_scale() const { return double(options.cape_length) / cape_length_min; }
+};
+
+// backs.ts PONY_REST: on the standard bunny, then on Plush and Bun-E.
+inline float ponytail_rest(std::string_view id, bool standard_bunny) {
+    if (id == "back-carrot-pack") return standard_bunny ? 2.4f : 4.3f;
+    if (id == "back-jetpack") return standard_bunny ? 2.0f : 3.9f;
+    return 0;
+}
+
 // back-fx.ts Swing: a root spring and a softer one for the free end, the wind's pull, the couplings and the limits.
 struct Swing {
     double hz, zeta, tip_hz, tip_zeta, lift, lift_speed, side_lift, k_forward, k_up, k_side, turn;

@@ -93,6 +93,7 @@ namespace native {
     X(void, DeleteBuffers, (GLsizei, const GLuint *)) \
     X(void, EnableVertexAttribArray, (GLuint)) \
     X(void, VertexAttribPointer, (GLuint, GLint, GLenum, GLboolean, GLsizei, const void *)) \
+    X(void, VertexAttrib4f, (GLuint, GLfloat, GLfloat, GLfloat, GLfloat)) \
     X(GLuint, CreateShader, (GLenum)) \
     X(void, ShaderSource, (GLuint, GLsizei, const GLchar *const *, const GLint *)) \
     X(void, CompileShader, (GLuint)) \

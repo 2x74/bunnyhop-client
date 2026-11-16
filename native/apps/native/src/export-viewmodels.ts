@@ -25,6 +25,7 @@ import { hatFit } from "../../web/src/player/bunny/hat-fit";
 import { ensureHeadwear } from "../../web/src/player/hat-detail";
 import { BACK_KIND, backGeometry, backKey, backRigOf, type BackFit } from "../../web/src/player/bunny/backs";
 import type { BackRig } from "../../web/src/player/back-fx";
+import { sleeveAnchor } from "../../web/src/player/bunny/robe";
 import { bakeGunAO } from "../../web/src/viewmodel/guns/ao";
 import { writePlayerMaterials } from "./export-player-materials";
 import { crownGeometry } from "../../web/src/player/bunny/crown";
@@ -672,7 +673,7 @@ await writeFile(
     outfitPatterns: outfitPatterns(),
     hats: hatMeshes,
     hatFits,
-    backs: { kinds: BACK_KIND, capeLengths: NATIVE_CAPE_LENGTHS, rigs: backRigs },
+    backs: { kinds: BACK_KIND, capeLengths: NATIVE_CAPE_LENGTHS, rigs: backRigs, sleeveAnchor: sleeveAnchor().at },
     hair: { hats: HAIR_HATS, lengthHats: LENGTH_HATS, length: HAIR_LENGTH, defaultColor: HAIR_DEFAULT },
     gloves: GLOVE_STYLE,
     inspects: Object.fromEntries(
