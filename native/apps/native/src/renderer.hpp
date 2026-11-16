@@ -3437,6 +3437,10 @@ public:
     ) {
         const auto kind = caster(material);
         if (kind == Caster::none || (kind == Caster::cutout) != cutouts) return;
+        // A brush drawn see-through this frame (render keys, a window or an $alpha chain) lets the light through, as
+        // the website's shadow pass leaves out transparent surfaces.
+        const auto *fade = prop ? nullptr : brushFades.surface(model, material);
+        if (fade && !fade->plain) return;
         const auto &transform = scene_transform(prop, entity, model);
         if (!transform.visible) return;
         const auto matrix = native::model_matrix(transform);
