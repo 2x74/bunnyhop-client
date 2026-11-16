@@ -72,6 +72,20 @@ const SELF_LINES: Record<Exclude<Self, null>, string> = {
   limit: "One minute at a time. Press again to keep talking.",
 };
 
+/** Desktop app versions before this one deny the microphone (bunnyhop-client 0.2.5 allowed it, audio only). */
+const DESKTOP_MIC_FROM = [0, 2, 5];
+
+/**
+ * The line for a blocked microphone: the desktop app (its user agent ends "BunnyhopClient/<version>") from before it
+ * allowed the microphone needs an update, not a site permission.
+ */
+export function blockedLine(userAgent: string): string {
+  const v = /BunnyhopClient\/(\d+)\.(\d+)\.(\d+)/.exec(userAgent)?.slice(1).map(Number);
+  if (!v) return SELF_LINES.blocked;
+  const at = DESKTOP_MIC_FROM.findIndex((n, i) => v[i] !== n);
+  return at >= 0 && v[at] < DESKTOP_MIC_FROM[at] ? "Update the desktop app to use voice chat." : SELF_LINES.blocked;
+}
+
 export class VoiceController {
   /**
    * The game's audio engine, loaded on attach (a static import would pull the audio assets into everything that shows
@@ -333,7 +347,7 @@ export class VoiceController {
   /** The line under the talker list (null clears it), for a few seconds. */
   private say(s: Self): void {
     clearTimeout(this.lineTimer);
-    this.hud?.say(s ? SELF_LINES[s] : null);
+    this.hud?.say(s ? (s === "blocked" ? blockedLine(navigator.userAgent) : SELF_LINES[s]) : null);
     if (s) this.lineTimer = window.setTimeout(() => this.hud?.say(null), 3500);
   }
 

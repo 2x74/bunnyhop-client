@@ -33,6 +33,7 @@
 // log keeps them, nobody sees them, and !help gets the staff lines from the room).
 
 import { STYLE_DEFS, styleDef, type StyleId } from "./styles";
+import { YAW_SPEED_RANGE } from "./turn-binds";
 import { chatUsage, commandHelp, commandKey, helpLines, noTopic, suggestCommand, topicHelp, unknownCommand, worksIn } from "./chat-help";
 
 export { chatUsage, commandKey, worksIn };
@@ -115,6 +116,10 @@ export interface ChatGame {
   copyStart?(arg: string, reply: (text: string) => void): void;
   /** Per-player landfix, shared with Settings and the console. */
   landfix?(enabled?: boolean): boolean;
+  /** Turn bind speed (Settings -> Keys -> Turn speed, cl_yawspeed), degrees per second: sets it when given, returns it. */
+  turnSpeed?(degPerSec?: number): number;
+  /** !keepreplay: this attempt so far kept as a practice replay on this device (session.ts keepAttempt). */
+  keepReplay?(reply: (text: string) => void): void;
 }
 
 export interface ChatCommand {
@@ -464,6 +469,25 @@ const BUILT_IN: ChatCommand[] = [
       ctx.reply(`Landfix ${enabled ? "on" : "off"}`);
     },
   },
+  {
+    name: "turnspeed",
+    aliases: ["yawspeed"],
+    args: "[°/s]",
+    help: "turn bind speed",
+    about: "how fast Turn left and Turn right turn the view, 60 to 720 degrees a second (CS:S cl_yawspeed). A change applies from your next restart.",
+    group: "run",
+    panelOnly: true,
+    where: "both",
+    run: (ctx, arg) => {
+      const [lo, hi] = YAW_SPEED_RANGE;
+      const v = arg ? Number(arg.replace(/\s*(°|deg)?(\/s)?$/i, "")) : undefined;
+      if (v !== undefined && !Number.isFinite(v)) return ctx.reply(`Usage: !turnspeed [${lo}-${hi}]`);
+      if (v !== undefined && (v < lo || v > hi)) return ctx.reply(`Turn speed goes from ${lo} to ${hi}°/s.`);
+      if (!ctx.game?.turnSpeed) return ctx.reply(NO_GAME);
+      const now = ctx.game.turnSpeed(v === undefined ? undefined : Math.round(v * 1000) / 1000);
+      ctx.reply(v === undefined ? `Turn speed ${now}°/s. !turnspeed and a number from ${lo} to ${hi} changes it.` : `Turn speed ${now}°/s from your next restart.`);
+    },
+  },
   // Practice (practice-mode/controller.ts command), bhoptimer's / KZ timers' names. Solo and in rooms. The
   // tools work in any attempt; a teleport or noclip makes it practice (practice-mode/attempt.ts).
   {
@@ -523,6 +547,19 @@ const BUILT_IN: ChatCommand[] = [
   },
   { name: "prevcp", aliases: ["prev"], help: "previous checkpoint", about: "back to the checkpoint before. The run becomes practice.", group: "practice", panelOnly: true, key: "cpPrev", where: "both", run: practice("prev") },
   { name: "nextcp", help: "next checkpoint", about: "forward to the next checkpoint. The run becomes practice.", group: "practice", panelOnly: true, key: "cpNext", where: "both", run: practice("next") },
+  {
+    name: "keepreplay",
+    aliases: ["keepattempt"],
+    help: "keep this attempt as a replay",
+    about: "keeps this attempt so far as a practice replay on this device, also one that never finishes. Watch it from Esc, Replays. Practice finishes are kept by themselves. Not after noclip.",
+    group: "practice",
+    panelOnly: true,
+    where: "both",
+    run: (ctx) => {
+      if (!ctx.game?.keepReplay) return ctx.reply(NO_GAME);
+      ctx.game.keepReplay((text) => ctx.reply(text));
+    },
+  },
   // No zone teleports: one line about what there is.
   { name: "end", aliases: ["goend"], where: "both", hidden: true, run: (ctx) => ctx.reply("No teleport to the end. !noclip gets you anywhere, and the run becomes practice.") },
   // Styles (styles.ts): !style lists them or switches by name; bhoptimer's shortcuts switch straight away.

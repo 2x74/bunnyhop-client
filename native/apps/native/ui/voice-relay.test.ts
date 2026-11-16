@@ -153,6 +153,8 @@ describe("voice console", () => {
     expect(unbindVoice(host, "unbindall", true)).toBe("Push to talk is unbound too.");
     expect(settings.binds.voiceRecord).toEqual([]);
     expect(unbindVoice(host, "unbindall", true)).toBeNull();
+    expect(unbindVoice(host, "binds_default", true)).toBeNull();
+    expect(settings.binds.voiceRecord).toEqual(["KeyX"]);
   });
 
   it("a config's unbindall clears push to talk before its own voice binds", () => {

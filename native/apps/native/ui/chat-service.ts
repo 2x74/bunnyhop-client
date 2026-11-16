@@ -267,6 +267,12 @@ export class NativeChatService {
           prefs.update((p) => (p.landfix = enabled ?? !p.landfix));
           return prefs.get().landfix;
         },
+        // The recording keeps the rate it began with (recording_input.hpp), so a change counts from the next restart.
+        turnSpeed: (degPerSec) => {
+          if (degPerSec !== undefined) prefs.update((p) => (p.yawSpeed = degPerSec));
+          return prefs.get().yawSpeed;
+        },
+        keepReplay: (reply) => reply("The desktop client doesn't keep practice replays yet."),
         key: (action) => state.settings.binds[action]?.[0] ?? null,
         copyStart: (arg, answer) => {
           void this.copyStart.command(arg, answer);

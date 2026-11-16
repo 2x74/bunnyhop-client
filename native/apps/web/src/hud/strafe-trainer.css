@@ -11,7 +11,7 @@
 .st-band { position: absolute; left: calc(50% - var(--st-good, 5%)); width: calc(2 * var(--st-good, 5%)); inset-block: 0; background: color-mix(in srgb, currentColor 65%, transparent); }
 .st-target { position: absolute; left: 50%; top: -2px; bottom: -2px; border-left: 1px solid currentColor; }
 .st-marker { position: absolute; left: 50%; top: -4px; bottom: -4px; width: 2px; background: currentColor; transform: translateX(-50%); box-shadow: 0 1px 2px #000b; }
-.st-fill { display: none; }
+.st-fill, .st-dial { display: none; }
 .st-reading { position: relative; text-align: center; line-height: 1.3; }
 .st-reading b { font-size: .9em; font-weight: 550; font-variant-numeric: tabular-nums; }
 .st-cue { position: absolute; left: calc(50% + 2.7em); top: .12em; font-size: .7em; color: color-mix(in srgb, currentColor 58%, transparent); white-space: nowrap; }
@@ -56,3 +56,18 @@
 
 /* Neutral is always white, independent of the trainer text colour setting. */
 .st-trainer[data-style="bar"][data-band="low"] .st-fill { background: #ffffff; }
+
+/* Gauge: a half dial in the zone colours with a needle from the pivot. Flat left is no turn, straight up is 100%, flat
+   right is PACE_MAX. strafe-trainer.ts has the geometry (SVG units, the pivot at 0 0); --st-h thickens the arc. */
+.st-trainer[data-style="gauge"] { width: 8.5em; }
+.st-trainer[data-style="gauge"] .st-rail { display: none; }
+.st-trainer[data-style="gauge"] .st-dial { display: block; width: 100%; height: auto; overflow: visible; fill: none; stroke-linecap: butt; }
+.st-dial-shade { stroke: #0008; stroke-width: calc(3px * var(--st-h, 1) + 2px); }
+.st-dial-bad { stroke: color-mix(in srgb, var(--st-r) 70%, transparent); stroke-width: calc(3px * var(--st-h, 1)); }
+.st-dial-ok { stroke: var(--st-o); stroke-width: calc(3px * var(--st-h, 1)); }
+.st-dial-good { stroke: var(--st-g); stroke-width: calc(3px * var(--st-h, 1)); }
+.st-dial-mark { stroke: currentColor; stroke-width: 2px; }
+.st-needle line { stroke: currentColor; stroke-width: 2.4px; stroke-linecap: round; }
+.st-needle .st-needle-shade { stroke: #000a; stroke-width: 4.4px; }
+.st-hub { fill: currentColor; stroke: #000a; stroke-width: 1px; }
+.st-trainer[data-style="gauge"] .st-reading { margin-top: -.15em; }

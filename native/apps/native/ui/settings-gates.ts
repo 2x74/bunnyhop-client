@@ -181,6 +181,8 @@ const ROWS: Record<string, Gate> = {
   "keys/Movement/Fast turn": needs("angleSpeedKey"),
   "keys/Practice/Teleport keeps speed": needs("practiceKeepVelocity"),
   "keys/Run/Hold to restart": needs("holdRestart"),
+  "keys/Run/Hold after": needs("holdRestartAfter"),
+  "keys/Run/Push to talk": needs("bind:voiceRecord"),
   "keys/Run/Auto restart": needs("autoRestartWhen"),
   "keys/Run/When it passes": needs("autoRestartWhen", "autoRestartAction"),
   "keys/Tools/Pause / menu": menuOnly,

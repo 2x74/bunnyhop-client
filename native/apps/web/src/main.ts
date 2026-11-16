@@ -778,6 +778,7 @@ practice = new Practice({
   menu: practiceMenuView(),
 });
 const practiceMode = practice;
+if (import.meta.env.DEV) Object.assign(window, { __practice: practice });
 // Gauntlet mode: the tag on this map's runs, the HUD line, pings, the next map's prefetch and the split flow.
 if (gauntletStart) startGauntletMode(gauntletStart, session);
 // A set played in order: the next map after a finish (queue-mode.ts).
@@ -1082,13 +1083,13 @@ function toggleJumpHold(): void {
 input.onJumpToggle = (on) => session.hud.setJumpHeld(on);
 /** Bound actions that do nothing while freecam is on (main.ts onAction). */
 const FREECAM_BLOCKED = new Set<string>(["attack", "attack2", "inspect", "setStart", "clearStart", "thirdPerson", "practice", "noclip", "cpSave", "cpTeleport", "cpPrev", "cpNext", "giveUsp", "giveGlock", "gunMenu", "turnLeft", "turnRight", "turnFast"]);
-/** R / M / B. With Settings → Keys → Hold to restart on, they fire after a short hold (restart-guard.ts). */
+/** R / M / B. With Settings → Keys → Hold to restart on, or a timed run past Hold after, they fire after a short hold (restart-guard.ts). */
 const restartAction = (a: GuardedAction) => {
   if (a === "restart") restart();
   else if (a === "restartMain") restart(0);
   else session.restartBonus();
 };
-const restartGuard = new RestartGuard({ input, fire: restartAction });
+const restartGuard = new RestartGuard({ input, fire: restartAction, runSeconds: () => (session.timer.status === "running" ? session.timer.time() : 0) });
 /** Settings -> Keys -> Auto restart: checked once per frame, after the ticks. */
 const autoRestart = new AutoRestart();
 /** Main menu bind (unbound by default): during a timed run it's held to leave, on the restart ring (leave-confirm.ts). */
@@ -1218,7 +1219,7 @@ input.onKey = (code) => {
   if (tutorial?.onKey(code)) return;
   // V: the run you just finished in the replay viewer.
   if (code === "KeyV" && session.lastRun && !session.editor?.active) {
-    openReplayViewer({ bytes: session.lastRun.bytes, name: "Last run" });
+    session.watchLast();
     return;
   }
   // Z toggles the zone editor only where it's allowed (dev); other keys (editor digits) pass through.

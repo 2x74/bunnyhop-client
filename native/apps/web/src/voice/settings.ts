@@ -35,9 +35,11 @@ function capture(b: HTMLButtonElement, paint: () => void): void {
   setTimeout(() => (addEventListener("keydown", key, true), addEventListener("mousedown", mouse, true)), 0);
 }
 
-/** The Voice chat group (audio/settings-section.ts puts it in the right column). */
-export function voiceGroup(ui: typeof Controls): HTMLElement {
-  const pct = { min: 0, max: 1, step: 0.05, scale: 100, unit: "%" } as const;
+/**
+ * The push to talk key's row: here and in Settings -> Keys -> Run, one pref (Prefs.voice.key). `keysLayout`: laid out
+ * like the bind rows around it (first slot, no reset).
+ */
+export function pushToTalkRow(ui: typeof Controls, keysLayout = false): HTMLElement {
   const keyBtn = h("button.bind", { type: "button" }) as HTMLButtonElement;
   const paintKey = () => {
     const k = P().voice.key;
@@ -46,6 +48,15 @@ export function voiceGroup(ui: typeof Controls): HTMLElement {
   };
   paintKey();
   keyBtn.addEventListener("click", () => capture(keyBtn, paintKey));
+  const control = keysLayout ? h("div.bind-line", null, h("div.bind-pair", null, keyBtn), h("span.bind-reset", { "aria-hidden": "true" })) : keyBtn;
+  const r = ui.row("Push to talk", control, { desc: "Hold to talk in a room. Outside rooms the key keeps its other bind.", keywords: "voice ptt push to talk key bind voicerecord +voicerecord mic microphone" });
+  if (keysLayout) r.classList.add("bind-row");
+  return r;
+}
+
+/** The Voice chat group (audio/settings-section.ts puts it in the right column). */
+export function voiceGroup(ui: typeof Controls): HTMLElement {
+  const pct = { min: 0, max: 1, step: 0.05, scale: 100, unit: "%" } as const;
 
   // Microphone list: labels only show after the browser allows the microphone.
   const pick = h("select", { "aria-label": "Microphone" }) as HTMLSelectElement;
@@ -79,7 +90,7 @@ export function voiceGroup(ui: typeof Controls): HTMLElement {
   return ui.group(
     "Voice chat",
     ui.toggle("Voice chat", () => P().voice.enabled, (v) => up((p) => (p.voice.enabled = v)), { desc: "Hear the room and talk with push to talk.", keywords: "voice chat talk microphone mic push to talk ptt voice_enable" }),
-    ui.row("Push to talk", keyBtn, { desc: "Hold to talk in a room. In solo play X stays the checkpoint teleport.", keywords: "voice ptt push to talk key bind voicerecord +voicerecord" }),
+    pushToTalkRow(ui),
     ui.range("Voice volume", () => P().voice.volume, (v) => up((p) => (p.voice.volume = v)), { ...pct, desc: "Everyone's voice. One player's is on the scoreboard.", keywords: "voice volume voice_scale loud quiet" }),
     ui.row("Microphone", pick, { keywords: "microphone mic input device headset" }),
     ui.row("Microphone level", h("div.btn-row", null, meter, test), { keywords: "microphone mic level meter test input" }),

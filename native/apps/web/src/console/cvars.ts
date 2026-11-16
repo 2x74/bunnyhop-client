@@ -5,6 +5,7 @@
 // Landfix is recorded in the command stream; the other cvars are client settings. DOM-free.
 
 import { ANGLE_SPEED_KEY_RANGE, YAW_SPEED_RANGE } from "../turn-binds";
+import { HOLD_AFTER_RANGE } from "../restart-hold";
 import { M_YAW_RANGE, SENS_RANGE, sensProblem } from "../sens-convert";
 import { HUD_ELEMENTS, HUD_SCALE, type HudElId } from "../hud/layout";
 import { COLOR_BLIND_MODES } from "../palette";
@@ -78,7 +79,7 @@ const ANNOUNCED = ["pb", "wr", "speed", "highSpeed", "streak", "lj"] as const;
 const BUSES = ["music", "sfx", "ui", "ambience", "map"] as const;
 /** The trainer, keys overlay, jump stats, JHUD and longjump settings (Settings → HUD). */
 const hudDetail: Cvar[] = [
-  pick("hud_trainer_style", "Strafe trainer look: classic, detailed, minimal or bar.", ["classic", "detailed", "minimal", "bar"] as const, (p) => p.hud.strafeTrainer.style, (p, v) => (p.hud.strafeTrainer.style = v)),
+  pick("hud_trainer_style", "Strafe trainer look: classic, detailed, minimal, bar or gauge.", ["classic", "detailed", "minimal", "bar", "gauge"] as const, (p) => p.hud.strafeTrainer.style, (p, v) => (p.hud.strafeTrainer.style = v)),
   col("hud_trainer_color", "Strafe trainer colour.", (p) => p.hud.strafeTrainer.color, (p, v) => (p.hud.strafeTrainer.color = v)),
   sw("hud_trainer_follow", "100% in the middle, moving the way you turn.", (p) => p.hud.strafeTrainer.follow, (p, v) => (p.hud.strafeTrainer.follow = v)),
   num("hud_trainer_smoothing", "Ticks averaged into the trainer, 1 to 20.", [1, 20], (p) => p.hud.strafeTrainer.smoothing, (p, v) => (p.hud.strafeTrainer.smoothing = v), { int: true }),
@@ -172,11 +173,12 @@ export const CVARS: readonly Cvar[] = [
   sw("m_timedinput", "Timestamped input: each tick takes the input made before it.", (p) => p.timedInput, (p, v) => (p.timedInput = v), ["bh_timedinput"]),
   sw("cl_inputstats", "Input diagnostics overlay.", (p) => p.inputStats, (p, v) => (p.inputStats = v), ["bh_inputstats"]),
   // ---- keys
-  num("cl_yawspeed", "+left / +right turn speed, degrees per second. From your next restart.", YAW_SPEED_RANGE, (p) => p.yawSpeed, (p, v) => (p.yawSpeed = v)),
+  num("cl_yawspeed", "+left / +right turn speed, degrees per second. From your next restart.", YAW_SPEED_RANGE, (p) => p.yawSpeed, (p, v) => (p.yawSpeed = v), { aliases: ["turnspeed"] }),
   num("cl_anglespeedkey", "Turn speed multiplier while +speed is held.", ANGLE_SPEED_KEY_RANGE, (p) => p.angleSpeedKey, (p, v) => (p.angleSpeedKey = v)),
   sw("cl_nullbinds", "Null binds: with A and D held, the last one pressed wins.", (p) => p.nullBinds, (p, v) => (p.nullBinds = v), ["bh_nullbinds"]),
   sw("cl_wrelease", "Release W on jump.", (p) => p.wRelease, (p, v) => (p.wRelease = v), ["bh_wrelease"]),
   sw("cl_holdrestart", "Restart keys need a short hold.", (p) => p.holdRestart, (p, v) => (p.holdRestart = v), ["bh_holdrestart"]),
+  num("cl_holdrestart_after", "Restart keys need the hold once a timed run is this many minutes long (0: never).", HOLD_AFTER_RANGE, (p) => p.holdRestartAfter, (p, v) => (p.holdRestartAfter = v), { int: true }),
   pick("cl_autorestart", "Restart a timed run once it's past: off, pb, wr or ghost.", ["off", "pb", "wr", "ghost"] as const, (p) => p.autoRestart.when, (p, v) => (p.autoRestart.when = v)),
   pick("cl_autorestart_action", "What auto restart does: restart or sound.", ["restart", "sound"] as const, (p) => p.autoRestart.action, (p, v) => (p.autoRestart.action = v)),
   sw("cl_cp_keepvelocity", "A checkpoint teleport keeps the speed you saved it with.", (p) => p.practice.keepVelocity, (p, v) => (p.practice.keepVelocity = v)),

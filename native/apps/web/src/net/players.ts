@@ -404,6 +404,11 @@ export class RemotePlayers {
     this.impacts.hit(end, [0, 0, 0], "concrete", { from });
   }
 
+  /** The tick of a slot's own clock shown at `now` (spectating: their HUD feed plays to it), null without data. */
+  renderTick(slot: number, now: number): number | null {
+    return this.players.get(slot)?.track.renderTick(now) ?? null;
+  }
+
   /** Interpolated state of a slot this frame (spectating). */
   stateOf(slot: number): InterpState | null {
     const p = this.players.get(slot);

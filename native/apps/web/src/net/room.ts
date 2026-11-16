@@ -6,11 +6,13 @@ import { MSG_VOICE_DOWN } from "./voice-wire";
 import {
   CLOSE,
   decodeSnapshot,
+  encodeInput,
   encodeState,
   MAX_SAMPLES,
   parseServerMsg,
   PROTOCOL_VERSION,
   type ClientMsg,
+  type NetInput,
   type NetMeta,
   type NetSample,
   type ServerMsg,
@@ -165,13 +167,13 @@ export class RoomConnection {
     if (this.pending.length > MAX_SAMPLES) this.pending.shift();
   }
 
-  /** `weapon`: the weapon id in hand (core.ts WEAPON_IDS), null = not reported. */
-  flushSamples(meta: Omit<NetMeta, "ping">, weapon: number | null = null, silenced = false): void {
+  /** `weapon`: the weapon id in hand (core.ts WEAPON_IDS), null = not reported; `input`: for a room that takes it. */
+  flushSamples(meta: Omit<NetMeta, "ping">, weapon: number | null = null, silenced = false, input: NetInput | null = null): void {
     if (!this.pending.length) return;
     const samples = this.pending;
     this.pending = [];
     if (!this.open_) return;
-    const bytes = encodeState({ ...meta, ping: Math.round(this.rtt) }, samples, weapon, silenced);
+    const bytes = encodeState({ ...meta, ping: Math.round(this.rtt) }, samples, weapon, silenced, input && encodeInput(input));
     this.ws!.send(bytes);
     this.stats.sent++;
     this.stats.sentBytes += bytes.length;

@@ -1,6 +1,7 @@
 import { videoGrade, VIDEO_LIMITS, type VideoGrade } from "../video-settings";
 import { sanitizeMapLooks, type MapLook } from "../map-look";
 import { ANGLE_SPEED_KEY_RANGE, YAW_SPEED_RANGE } from "../turn-binds";
+import { HOLD_AFTER_DEFAULT, HOLD_AFTER_RANGE } from "../restart-hold";
 import type { LightingProfileId } from "../graphics/profiles";
 import { graphicsPreset as lookPreset, MODEL_LIGHTING_MODES, type GraphicsPreset as LookPreset, type ModelLighting } from "../graphics/presets";
 import { DEFAULT_MOUSE_DPI } from "../mouse-settings";
@@ -435,6 +436,8 @@ export interface Prefs {
   landfix: boolean;
   /** Restart keys (R / B / M) need a short hold (restart-hold.ts HOLD_MS) so a stray press can't end a run (restart-guard.ts). */
   holdRestart: boolean;
+  /** With holdRestart off: minutes into a timed run from which the restart keys need the hold anyway; 0 = never (restart-hold.ts). */
+  holdRestartAfter: number;
   /** Auto restart (auto-restart.ts): once a run passes your PB / the WR / the custom ghost, restart it or play a sound. Off by default. */
   autoRestart: { when: AutoRestartWhen; action: AutoRestartAction };
   /**
@@ -511,13 +514,16 @@ export { VIEWMODEL_BOB, VIEWMODEL_POS, VIEWMODEL_REV };
 /** Prefs.mouseNames: mouse binds use Source's button names (binds.ts mouseCode; 0.0.12). */
 export const MOUSE_NAMES = 2;
 
-/** Strafe trainer looks: the original thin gauge, a thick bar with coloured zones, a thin zoned line with a marker, a track filled from the edge opposite the turn. */
-export type TrainerStyle = "classic" | "detailed" | "minimal" | "bar";
+/**
+ * Strafe trainer looks: the original thin gauge, a thick bar with coloured zones, a thin zoned line with a marker, a track
+ * filled from the edge opposite the turn, a half dial whose needle stands up at 100%.
+ */
+export type TrainerStyle = "classic" | "detailed" | "minimal" | "bar" | "gauge";
 export interface TrainerPrefs {
   color: string;
   hints: boolean;
   style: TrainerStyle;
-  /** 100% in the middle and the marker moves the way you turn; off: 0% at the left end, 200% at the right. The Bar look always goes by the turn. */
+  /** 100% in the middle and the marker moves the way you turn; off: 0% at the left end, 200% at the right. The Bar look always goes by the turn; the Gauge never mirrors. */
   follow: boolean;
   /** Ticks averaged into the reading (1 = none). */
   smoothing: number;
@@ -539,14 +545,16 @@ const TRAINER_PRESETS: Record<TrainerPreset, Pick<TrainerPrefs, "style" | "follo
   standard: { style: "classic", follow: false, smoothing: 8, zone: 10, hints: false, showPace: true },
   strict: { style: "minimal", follow: true, smoothing: 3, zone: 5, hints: false, showPace: true },
 };
-/** The Bar look stays through a preset: its presets are about the tolerance and smoothing, which it uses like the others. */
+/** Looks that keep themselves through a preset (its tolerance and smoothing still apply) and have no Follow the turn. */
+const OWN_LOOKS: ReadonlySet<TrainerStyle> = new Set(["bar", "gauge"]);
+/** The Bar and Gauge looks stay through a preset: its presets are about the tolerance and smoothing, which they use like the others. */
 export function applyTrainerPreset(t: TrainerPrefs, preset: TrainerPreset): void {
-  const style = t.style === "bar" ? t.style : TRAINER_PRESETS[preset].style;
+  const style = OWN_LOOKS.has(t.style) ? t.style : TRAINER_PRESETS[preset].style;
   Object.assign(t, TRAINER_PRESETS[preset], { style });
 }
-/** The preset `t` matches, if any. The Bar look has no use for a preset's look or Follow the turn. */
+/** The preset `t` matches, if any. The Bar and Gauge looks have no use for a preset's look or Follow the turn. */
 export function trainerPreset(t: TrainerPrefs): TrainerPreset | null {
-  const ignored = (f: string) => t.style === "bar" && (f === "style" || f === "follow");
+  const ignored = (f: string) => OWN_LOOKS.has(t.style) && (f === "style" || f === "follow");
   return (Object.keys(TRAINER_PRESETS) as TrainerPreset[]).find((k) => Object.entries(TRAINER_PRESETS[k]).every(([f, v]) => ignored(f) || t[f as keyof TrainerPrefs] === v)) ?? null;
 }
 
@@ -613,6 +621,7 @@ export const DEFAULT_PREFS: Prefs = {
   practice: { keepVelocity: true },
   landfix: true,
   holdRestart: false,
+  holdRestartAfter: HOLD_AFTER_DEFAULT,
   autoRestart: { when: "off", action: "restart" },
   mouseNames: MOUSE_NAMES,
   bonusBindRevision: 1,
@@ -656,6 +665,11 @@ function migrate(raw: Record<string, unknown>, partial = false): Record<string, 
     const v = raw[key];
     if (typeof v !== "number" || !Number.isFinite(v)) delete raw[key];
     else raw[key] = Math.max(lo, Math.min(hi, v));
+  }
+  if (raw.holdRestartAfter !== undefined) {
+    const v = raw.holdRestartAfter;
+    if (typeof v !== "number" || !Number.isFinite(v)) delete raw.holdRestartAfter;
+    else raw.holdRestartAfter = Math.max(HOLD_AFTER_RANGE[0], Math.min(HOLD_AFTER_RANGE[1], Math.round(v)));
   }
   const graphics = raw.graphics;
   if (graphics && typeof graphics === "object" && !Array.isArray(graphics)) {

@@ -33,6 +33,13 @@ export class LiveSsj {
   private pre: SsjState | null = null;
   private startPre = new StartPreTracker();
   private jhud = new JhudTracker();
+  /** Every-6th reports for a room's spectators (their "6th jump" and "Every 6th" settings), whatever this mode is. */
+  private sixths = new SsjTracker("everySixth");
+  /**
+   * A room's spectators get this player's reports (net/spectate-input.ts): every jump's (with the JHUD's JSS), every
+   * 6th jump's, and the start prespeed.
+   */
+  relay: ((r: { kind: 1 | 2; ssj: SsjReport & { jss: number | null } } | { kind: 3; speed: number | null }) => void) | null = null;
 
   constructor(private report: (r: SsjReport) => void, private reportStartPre: (speed: number | null) => void = () => {}, private reportJhud: (r: JhudReport | null) => void = () => {}) {
     prefs.watch((p) => this.tracker.setMode(p.hud.ssj.mode));
@@ -41,8 +48,10 @@ export class LiveSsj {
   /** Restart: the count starts over from `state` (the state the next tick starts from). */
   reset(state: PlayerState | null): void {
     this.tracker.reset();
+    this.sixths.reset();
     this.startPre.reset();
     this.reportStartPre(null);
+    this.relay?.({ kind: 3, speed: null });
     this.jhud.reset();
     this.reportJhud(null);
     this.pre = state;
@@ -56,6 +65,7 @@ export class LiveSsj {
   moved(state: PlayerState): void {
     this.startPre.reset();
     this.reportStartPre(null);
+    this.relay?.({ kind: 3, speed: null });
     this.pre = state;
   }
 
@@ -68,11 +78,14 @@ export class LiveSsj {
     this.pre = state;
     if (!pre) return;
     const startPre = this.startPre.tick(pre, { jumped: (events & EVENT_JUMPED) !== 0, teleported: (events & EVENT_TELEPORTED) !== 0, ...o });
-    if (startPre !== undefined) this.reportStartPre(startPre);
+    if (startPre !== undefined) this.reportStartPre(startPre), this.relay?.({ kind: 3, speed: startPre });
     const r = this.tracker.tick(pre, cmd, { jumped: (events & EVENT_JUMPED) !== 0, ...o });
     if (r) this.report(r);
     const j = this.jhud.tick(pre, cmd, { jumped: (events & EVENT_JUMPED) !== 0, ...o });
     if (j) this.reportJhud(j);
+    const six = this.sixths.tick(pre, cmd, { jumped: (events & EVENT_JUMPED) !== 0, ...o });
+    if (j && this.jhud.lastSsj) this.relay?.({ kind: 1, ssj: { ...this.jhud.lastSsj, jss: j.jss } });
+    if (six) this.relay?.({ kind: 2, ssj: { ...six, jss: null } });
   }
 }
 

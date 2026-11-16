@@ -410,8 +410,8 @@ button.pf-count:focus-visible { outline: none; box-shadow: var(--ring); border-r
 .pf-ov-row { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 2rem; align-items: start; }
 .pf-ov-row:not(:has(> :nth-child(2))) { grid-template-columns: minmax(0, 1fr); }
 .pf-rank-rows { display: flex; flex-direction: column; }
-.pf-rank-row { display: grid; grid-template-columns: minmax(0, 1fr) auto 3rem; align-items: center; gap: 0.8rem; width: 100%; min-height: 2.3rem; padding: 0.3rem 0.3rem; border: 0; border-bottom: 1px solid var(--ink-3); border-radius: 0; background: none; color: var(--cream); font: inherit; font-size: var(--fs-sm); text-align: left; cursor: pointer; font-variant-numeric: tabular-nums; transition: background var(--t-step); }
-.pf-rank-pts { color: var(--cream-2); }
+.pf-rank-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto 3rem; align-items: center; gap: 0.8rem; width: 100%; min-height: 2.3rem; padding: 0.3rem 0.3rem; border: 0; border-bottom: 1px solid var(--ink-3); border-radius: 0; background: none; color: var(--cream); font: inherit; font-size: var(--fs-sm); text-align: left; cursor: pointer; font-variant-numeric: tabular-nums; transition: background var(--t-step); }
+.pf-rank-pts, .pf-rank-wrs { color: var(--cream-2); }
 .pf-rank-pos { text-align: right; font-weight: 750; }
 .pf-rank-row:hover { background: var(--ink-2); }
 /* Rank history (ui/profile-rank-history.ts): the Stats screen's plot (stats-screen.css .st-plot), shorter, worst place bottom left. */

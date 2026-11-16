@@ -30,6 +30,7 @@ import { DEFAULT_PREFS, gameView, horizontalFovAt, keyLabel, prefs, ACTIONS, ass
 import { arrowNav, h } from "./dom";
 import * as ui from "./controls";
 import { group, range, rowDesc, segmented, select, toggle, check, color, row, button, syncSwitches, SWATCHES } from "./controls";
+import { pushToTalkRow } from "../voice/settings";
 import { DEFAULT_LANDING_COLOR, LANDING_MODES, type LandingMode } from "../landing/prefs";
 import { DEFAULT_TRIGGER_PREFS, KINDS, TRIGGER_OPACITY, TRIGGER_STYLES, TRIGGER_THICKNESS, type TriggerStyle } from "../triggers/volumes";
 import { onSettingsSections, registeredSections, type SettingsContent } from "./settings-registry";
@@ -507,13 +508,14 @@ function hudSection(ctx: Ctx): SettingsContent {
             ["detailed", "Detailed"],
             ["minimal", "Minimal"],
             ["bar", "Bar"],
-          ], { desc: "Classic is the original thin gauge. Detailed is a thick bar with coloured zones. Minimal is a thin zoned line with a marker. Bar fills from the left when you turn right and from the right when you turn left: stopping short of the middle tick is too slow, passing it is too fast. Its colour is red for speed loss, white for no change, then orange, green and blue for better gain.", keywords: "strafetrainer strafe trainer look style bar line fill momentum synchronizer" }),
-          check("Follow the turn", () => P().hud.strafeTrainer.follow, (v) => tp((t) => (t.follow = v)), { when: () => P().hud.strafeTrainer.style !== "bar", desc: "100% sits in the middle and turning faster moves the marker the way you turn. Off: 0% on the left, 200% on the right.", keywords: "strafetrainer strafe trainer centre center middle direction mirror left right" }),
+            ["gauge", "Gauge"],
+          ], { desc: "Classic is the original thin gauge. Detailed is a thick bar with coloured zones. Minimal is a thin zoned line with a marker. Bar fills from the left when you turn right and from the right when you turn left: stopping short of the middle tick is too slow, passing it is too fast. Its colour is red for speed loss, white for no change, then orange, green and blue for better gain. Gauge is a half dial whose needle lies flat on the left when you don't turn, stands straight up at 100% and tips right when you turn too fast.", keywords: "strafetrainer strafe trainer look style bar line fill momentum synchronizer gauge dial needle speedometer meter" }),
+          check("Follow the turn", () => P().hud.strafeTrainer.follow, (v) => tp((t) => (t.follow = v)), { when: () => P().hud.strafeTrainer.style !== "bar" && P().hud.strafeTrainer.style !== "gauge", desc: "100% sits in the middle and turning faster moves the marker the way you turn. Off: 0% on the left, 200% on the right.", keywords: "strafetrainer strafe trainer centre center middle direction mirror left right" }),
           range("Smoothing", () => P().hud.strafeTrainer.smoothing, (v) => tp((t) => (t.smoothing = v)), { min: 1, max: 20, step: 1, hint: "ticks", desc: "Averages pace over this many ticks. Bar colour always shows this tick's gain. 1 shows each pace tick as it is.", keywords: "strafetrainer strafe trainer smooth average jitter tickrate" }),
           range("On-pace zone", () => P().hud.strafeTrainer.zone, (v) => tp((t) => (t.zone = v)), { when: () => P().hud.strafeTrainer.style !== "bar", min: 2, max: 30, step: 1, unit: "%", desc: "How close to 100% counts as on pace. Amber reaches three times as far.", keywords: "strafetrainer strafe trainer zone width green tolerance" }),
           range("Height", () => P().hud.strafeTrainer.height, (v) => tp((t) => (t.height = v)), { min: 0.5, max: 3, step: 0.1, scale: 100, unit: "%", desc: "Thickness of the gauge. Edit layout changes the whole size.", keywords: "strafetrainer strafe trainer thick thickness bar size" }),
           range("Dim below", () => P().hud.strafeTrainer.dimBelow, (v) => tp((t) => (t.dimBelow = v)), { min: 0, max: 90, step: 5, unit: "%", desc: "The trainer fades while your pace is under this, and between strafes. 0 never fades it.", keywords: "strafetrainer strafe trainer dim fade threshold opacity" }),
-          color("Trainer colour", () => P().hud.strafeTrainer.color, (v) => tp((t) => (t.color = v)), { desc: "Colour of the marker, percentage and hints. Bar fill uses fixed gain colours. Pick a preset or any colour.", keywords: "strafetrainer strafe trainer colour color" }),
+          color("Trainer colour", () => P().hud.strafeTrainer.color, (v) => tp((t) => (t.color = v)), { desc: "Colour of the marker or needle, percentage and hints. Bar fill uses fixed gain colours. Pick a preset or any colour.", keywords: "strafetrainer strafe trainer colour color" }),
           check("Percentage", () => P().hud.strafeTrainer.showPace, (v) => tp((t) => (t.showPace = v)), { desc: "Show the pace number under the gauge. The Bar look shows your last jump's average instead of the live pace.", keywords: "strafetrainer strafe trainer number percent text" }),
           check("Turn hints", () => P().hud.strafeTrainer.hints, (v) => tp((t) => (t.hints = v)), { desc: "Show small turn more and ease turn hints beside the percentage.", keywords: "strafetrainer strafe trainer coaching feedback hints" }),
           check("Jump sound", () => P().hud.strafeTrainer.sound, (v) => tp((t) => (t.sound = v)), { desc: "A tick on every jump: high when that jump was on pace, low when it was far off.", keywords: "strafetrainer strafe trainer sound audio tick beep jump" }),
@@ -858,6 +860,12 @@ function bindReset(action: Action, label: string, refresh: () => void): HTMLElem
   return b;
 }
 
+/** Hold after's choices (minutes; 0 = off), plus a value set from the console that isn't one of them. */
+function holdAfterOptions(cur: number): [number, string][] {
+  const mins = [...new Set([1, 2, 3, 5, 10, 15, 20, 30, 45, 60, cur])].filter((m) => m > 0).sort((x, y) => x - y);
+  return [[0, "Off"], ...mins.map((m): [number, string] => [m, m === 1 ? "1 minute" : `${m} minutes`])];
+}
+
 function keysSection(ctx: Ctx): SettingsContent {
   const bindRow = (a: Action) => {
     const label = ACTIONS.find((x) => x.id === a)!.label;
@@ -894,8 +902,8 @@ function keysSection(ctx: Ctx): SettingsContent {
           // Three decimals: the replay stores it as a float32 (turn-binds.ts turnSpeedOf).
           range("Turn speed", () => P().yawSpeed, (v) => up((p) => (p.yawSpeed = Math.round(v * 1000) / 1000)), {
             min: YAW_SPEED_RANGE[0], max: YAW_SPEED_RANGE[1], step: 5, inputStep: "any", unit: "°/s",
-            desc: "How fast Turn left and Turn right turn the view. CS:S cl_yawspeed (default 210). A change applies from your next restart.",
-            keywords: "cl_yawspeed turn speed yaw rate +left +right keyboard arrow",
+            desc: "How fast Turn left and Turn right turn the view. CS:S cl_yawspeed (default 210), also !turnspeed. A change applies from your next restart. For a prestrafe, hold W, A and Turn left on the ground (or W, D and Turn right): about 120°/s gains the most speed.",
+            keywords: "cl_yawspeed turnspeed !turnspeed turn speed yaw rate +left +right keyboard arrow prestrafe pre strafe turn bind",
           }),
           range("Fast turn", () => P().angleSpeedKey, (v) => up((p) => (p.angleSpeedKey = Math.round(v * 20) / 20)), {
             min: ANGLE_SPEED_KEY_RANGE[0], max: ANGLE_SPEED_KEY_RANGE[1], step: 0.05, unit: "×",
@@ -920,9 +928,15 @@ function keysSection(ctx: Ctx): SettingsContent {
         group(
           run[0],
           ...run[1].map(bindRow),
+          pushToTalkRow(ui, true),
           toggle("Hold to restart", () => P().holdRestart, (v) => up((p) => (p.holdRestart = v)), {
             desc: "Restart, bonus and main track keys only act after a short hold (half a second); a quick tap does nothing. Off: they act on press. Chat !r / !b stay instant.",
             keywords: "hold restart reset accident accidental confirm protect long run r",
+          }),
+          select<number>("Hold after", () => P().holdRestartAfter, (v) => up((p) => (p.holdRestartAfter = v)), holdAfterOptions(P().holdRestartAfter), {
+            when: () => !P().holdRestart,
+            desc: "Once a timed run has gone this long, the restart keys need the hold anyway.",
+            keywords: "hold restart after minutes long run protect accidental threshold cl_holdrestart_after",
           }),
           select<AutoRestartWhen>("Auto restart", () => P().autoRestart.when, (v) => up((p) => (p.autoRestart.when = v)), [["off", "Off"], ["pb", "Past your PB"], ["wr", "Past the world record"], ["ghost", "Past the custom ghost"]], {
             desc: "Restarts a timed run once its time passes that one. Not in practice or during a !race.",
@@ -1289,7 +1303,7 @@ const BUILTIN: Section[] = [
   { id: "mouse", label: "Mouse & view", blurb: "", order: 10, render: mouseSection, reset: resetKeys("sensitivity", "mYaw", "mPitch", "verticalSensitivityEnabled", "verticalSensitivity", "dpi", "dpiConfirmed", "dpiHidden", "invertY", "rawInput", "spikeFilter", "timedInput", "inputStats", "fov") },
   { id: "crosshair", label: "Crosshair", blurb: "", order: 20, render: crosshairSection, reset: resetKeys("crosshair") },
   { id: "hud", label: "HUD", blurb: "", order: 30, render: hudSection, reset: resetKeys("hud", "showZones", "triggers", "landing") },
-  { id: "keys", label: "Keys", blurb: "Click a slot, then press a key. Backspace clears.", order: 40, render: keysSection, reset: resetKeys("binds", "holdRestart", "autoRestart", "practice", "landfix", "nullBinds", "wRelease", "yawSpeed", "angleSpeedKey") },
+  { id: "keys", label: "Keys", blurb: "Click a slot, then press a key. Backspace clears.", order: 40, render: keysSection, reset: resetKeys("binds", "holdRestart", "holdRestartAfter", "autoRestart", "practice", "landfix", "nullBinds", "wRelease", "yawSpeed", "angleSpeedKey") },
   { id: "ghost", label: "Ghosts & players", blurb: "", order: 50, render: ghostSection, reset: resetKeys("showGhost", "ghost", "tags", "showPlayerGlow", "showPlayers", "firstPersonGlow") },
   { id: "graphics", label: "Graphics", blurb: "", order: 60, render: graphicsSection, reset: () => void chooseGraphicsPreset("source").then(() => { resetKeys("graphics")(); }) },
   { id: "audio", label: "Audio", blurb: "", order: 70, render: audioSection, reset: resetKeys("volume") },

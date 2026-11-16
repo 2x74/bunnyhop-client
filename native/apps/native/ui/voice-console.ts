@@ -3,7 +3,7 @@
 // this menu predates voice, so these lines are answered here before it sees them, in typed lines, pastes and configs.
 // It also doesn't know push to talk is a bind, so `unbind <key>` and `unbindall` clear it here after it runs them.
 import { codeForKey, keyForCode } from "../../web/src/console/names";
-import { state, type SettingsPatch } from "./bridge";
+import { DEFAULT_BINDS, state, type SettingsPatch } from "./bridge";
 
 export interface VoiceConsoleHost {
   settings(): { voiceEnabled: boolean; voiceVolume: number; binds: Record<string, string[]> };
@@ -41,12 +41,19 @@ export function runVoiceLine(host: VoiceConsoleHost, line: string): string | nul
 }
 
 /**
- * Clears push to talk for an `unbind <key>` or `unbindall` the website's console has run. `unbindall` asks first, so
- * it counts only when `ran` (it changed the settings). Returns what to print, or null when push to talk didn't change.
+ * Clears push to talk for an `unbind <key>` or `unbindall` the website's console has run, and resets it for
+ * `binds_default`. `unbindall` asks first, so it counts only when `ran` (it changed the settings). Returns what to
+ * print, or null when there's nothing to add.
  */
 export function unbindVoice(host: VoiceConsoleHost, command: string, ran: boolean): string | null {
   const [name, key] = words(command);
   const keys = host.settings().binds.voiceRecord ?? [];
+  // binds_default puts push to talk back on its default key too (the website's console does the same).
+  if (name?.toLowerCase() === "binds_default") {
+    if (ran && (keys.length !== 1 || keys[0] !== DEFAULT_BINDS.voiceRecord[0]))
+      host.update({ binds: { voiceRecord: [...DEFAULT_BINDS.voiceRecord] } });
+    return null;
+  }
   if (!keys.length) return null;
   if (name?.toLowerCase() === "unbindall") {
     if (!ran) return null;

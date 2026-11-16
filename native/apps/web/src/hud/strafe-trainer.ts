@@ -85,6 +85,36 @@ export function barBand(gain: number | null | undefined): BarBand {
 }
 
 /**
+ * The Gauge look reads the Bar's average: it sinks back to the left between strafes and climbs after a switch, so the
+ * needle sweeps instead of jumping. Previews and the layout editor leave `bar` out and show `pace`.
+ */
+export function gaugePace(r: TrainerReading): number | null {
+  return r.bar ?? r.pace;
+}
+/** The needle in degrees from straight up, positive to the right: 0% (or nothing) lies flat left, 100% stands up, PACE_MAX lies flat right. */
+export function gaugeAngle(pace: number | null): number {
+  return pace !== null && pace > 0 ? (Math.min(PACE_MAX, pace) / PACE_MAX * 2 - 1) * 90 : -90;
+}
+/** The Gauge's cue: its own pace against the on-pace zone; with no live pace, the reading's (keys, direction, ready). */
+export function gaugeCue(r: TrainerReading, zone: number): TrainerCue {
+  const pace = gaugePace(r);
+  if (r.pace === null || pace === null) return r.cue;
+  return trainerZone(pace, zone) === "good" ? "good" : pace < 100 ? "slow" : "fast";
+}
+/**
+ * The Gauge's dial in SVG user units, the pivot at the origin and y down (native ports these numbers as they are).
+ * The view box is GAUGE_BOX; the zone arcs sit on GAUGE_R, the needle reaches GAUGE_NEEDLE.
+ */
+export const GAUGE_R = 44;
+export const GAUGE_NEEDLE = 40;
+export const GAUGE_BOX = [-50, -51, 100, 56] as const;
+/** The arc on radius `r` from `from` to `to` degrees (from straight up, positive to the right), as an SVG path. */
+export function gaugeArc(r: number, from: number, to: number): string {
+  const at = (a: number) => `${+(r * Math.sin(a * Math.PI / 180)).toFixed(3)} ${+(-r * Math.cos(a * Math.PI / 180)).toFixed(3)}`;
+  return `M${at(from)}A${r} ${r} 0 0 1 ${at(to)}`;
+}
+
+/**
  * The way the view has to turn to follow this strafe: 1 left (yaw rising), -1 right, 0 no wish. The core's wish is
  * forward * (cos yaw, sin yaw) + side * (sin yaw, -cos yaw); the velocity rotates towards whichever side of it the wish
  * lies on, which covers W/S strafes (W-Only, Sideways) and a view facing back (Backwards).

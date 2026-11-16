@@ -21,6 +21,10 @@ export function chatGame(o: { map: string; session: RunSession; practice: Practi
       prefs.update((p) => (p.landfix = enabled ?? !p.landfix));
       return prefs.get().landfix;
     },
+    turnSpeed: (degPerSec) => {
+      if (degPerSec !== undefined) prefs.update((p) => (p.yawSpeed = degPerSec));
+      return prefs.get().yawSpeed;
+    },
     key: (action) => {
       const code = prefs.get().binds[action as Action]?.[0];
       return code ? keyLabel(code) : null;
@@ -44,6 +48,7 @@ export function chatGame(o: { map: string; session: RunSession; practice: Practi
         })
         .catch(() => reply("Couldn't load the leaderboard."));
     },
+    keepReplay: (reply) => void session.keepAttempt().then(reply),
     copyStart: (arg, reply) => {
       // The board !wr reads: the track you're on, in its style.
       void boardRunFor(map, session.runStyle, session.timer.track, arg).then((r) =>

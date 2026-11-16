@@ -355,7 +355,7 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
       h(
         "div.pf-rank-rows",
         null,
-        ...ranked.map((s) => h("button.pf-rank-row", { type: "button", onclick: () => a.ranks(s.scope), title: `${styleLabel(s.scope)} rank board` }, h("span", null, styleLabel(s.scope)), h("span.pf-rank-pts", null, `${fmtPoints(s.points)} pts`), h("b.pf-rank-pos", null, `#${s.rank}`))),
+        ...ranked.map((s) => h("button.pf-rank-row", { type: "button", onclick: () => a.ranks(s.scope), title: `${styleLabel(s.scope)} rank board` }, h("span", null, styleLabel(s.scope)), h("span.pf-rank-wrs", null, s.wrs ? `${s.wrs.toLocaleString("en-US")} ${s.wrs === 1 ? "WR" : "WRs"}` : ""), h("span.pf-rank-pts", null, `${fmtPoints(s.points)} pts`), h("b.pf-rank-pos", null, `#${s.rank}`))),
       ),
     );
   }

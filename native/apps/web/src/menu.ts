@@ -38,6 +38,7 @@ import { STYLE_DEFS, STYLE_LINES, styleForTrack, styleLabel, trackStyleLocked, t
 import { chatCommands } from "./chat-commands";
 import { helpPanelGroups } from "./chat-help";
 import { trackName } from "./zones";
+import type { PracticeReplayMeta } from "./practice-mode/replays";
 import { roomHeader, serverBrowser } from "./ui/servers";
 import { onRoomPresence, roomActions, roomPresence } from "./net/presence";
 import { audioCredits, sfx, uiOpen, uiSound } from "./audio";
@@ -95,6 +96,11 @@ export interface MenuActions {
   practice?: { on: boolean; toggle: () => void } | null;
   /** Asked at each draw: clears the start point and restarts, when this attempt is on one that doesn't count (session.ts onPracticeSpawn). */
   clearStart?: () => (() => void) | null;
+  /** Asked at each draw: this map's practice replays kept on this device, newest first (practice-mode/replays.ts). */
+  practiceReplays?: () => { meta: PracticeReplayMeta; watch: () => void }[];
+  /** Asked at each draw: keeps this attempt as a practice replay (session.ts keepAttempt), or why it can't. */
+  keepAttempt?: () => { go: (() => void) | null; why: string | null };
+  onClearPracticeReplays?: () => void;
 }
 
 type Screen = "home" | "maps" | "settings" | "controls" | "pause" | "loading" | "profile" | "ranks" | "servers" | "support" | "stats" | "gauntlets" | "gauntlet";
@@ -608,8 +614,51 @@ function replaysTab(a: MenuActions, pb: ReturnType<typeof getPB>): HTMLElement {
     null,
     reel ? h("section.pp-lastrun", null, h("h3", null, "Last run"), reel) : null,
     list,
+    practiceSection(a),
     h("p.pp-foot.dim", null, "Press E in the viewer to export a video."),
   );
+}
+
+/**
+ * Practice replays (practice-mode/replays.ts): keep this attempt, and the ones kept on this map. Only on this device:
+ * never uploaded or on a board.
+ */
+function practiceSection(a: MenuActions): HTMLElement | null {
+  const keep = a.keepAttempt?.();
+  if (!keep) return null;
+  const kept = a.practiceReplays?.() ?? [];
+  const sentence = (s: string) => s[0].toUpperCase() + s.slice(1) + ".";
+  const day = new Date().toDateString();
+  const when = (at: number) => {
+    const d = new Date(at);
+    return d.toDateString() === day ? d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  };
+  const list = h(
+    "div.list-rows",
+    null,
+    listRow("Keep this attempt", keep.go, { why: keep.why ? sentence(keep.why) : undefined }),
+    ...kept.map(({ meta: m, watch }) => {
+      const sub = [
+        m.track ? trackName(m.track) : "",
+        m.time === null ? (m.at === null ? "Before the start" : `At ${formatTime(m.at)}`) : "",
+        m.teleports ? `${m.teleports} teleport${m.teleports === 1 ? "" : "s"}` : "",
+      ].filter(Boolean).join(", ");
+      return listRow(m.time === null ? "Not finished" : formatTime(m.time), watch, { sub: sub || undefined, detail: when(m.savedAt) });
+    }),
+  );
+  upDown(list);
+  let armed = false;
+  const clear = kept.length && a.onClearPracticeReplays
+    ? h("button.link-btn", {
+        type: "button",
+        onclick: (e: Event) => {
+          if (armed) return a.onClearPracticeReplays!();
+          armed = true;
+          (e.currentTarget as HTMLElement).textContent = `Click again to delete ${kept.length === 1 ? "it" : `all ${kept.length}`}`;
+        },
+      }, "Delete practice replays")
+    : null;
+  return h("section.pp-practice", null, h("h3", null, "Practice replays"), list, clear);
 }
 
 /**

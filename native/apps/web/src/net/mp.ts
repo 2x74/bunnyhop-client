@@ -41,8 +41,11 @@ import { copyLobbyInvite, lobbyInviteUrl } from "./lobby";
 import { allowLeave, resumePlay } from "../play-lock";
 import { spectateSlot } from "../social/spectate";
 import { spectatorsOf } from "./spectators";
+import { InputFeed, InputRecorder, jhudOf, shownSsj } from "./spectate-input";
+import { ssjChat } from "../ssj";
 import {
   CLOSE,
+  IR_START_PRE,
   isExtend,
   SAMPLE_TICKS,
   SEND_TICKS,
@@ -164,6 +167,11 @@ export class Multiplayer {
   /** What the room was last told about practice ({ t: "practice" }; a new connection starts as not practising). */
   private practiceSent = false;
   private practiceAt = -Infinity;
+  /** The room takes input blocks (welcome room.inputs, 0.0.42); older rooms refuse them. */
+  private roomInputs = false;
+  /** Your HUD feed for your spectators (sent while someone watches), and the watched player's while you spectate. */
+  private inputs = new InputRecorder();
+  private watchFeed = new InputFeed();
 
   /**
    * The knife and finish you hold (the knife pool's pick) when the room shows another one for you: the room checks the
@@ -184,6 +192,8 @@ export class Multiplayer {
       this.knifeTimer = window.setTimeout(() => this.sendHeldKnife(), 1500);
     });
     const hud = o.session.hud;
+    hud.tap = { tick: (cmd, state, events, t) => this.inputs.hudTick(cmd, state, events, t), reset: () => this.inputs.hudReset() };
+    o.session.jumpStatsRelay = (r) => this.inputs.report(r);
     const root = document.getElementById("hud")!;
     this.chat = new ChatBox(hud.chatEl);
     hud.els.chat.classList.remove("empty");
@@ -235,6 +245,7 @@ export class Multiplayer {
       message: (m) => this.onMessage(m),
       snapshot: (s, now) => {
         for (const b of s.blocks) if (b.slot !== this.you) this.players.feed(b.slot, b.meta, b.samples, now, b.weapon, b.silenced);
+        for (const x of s.inputs ?? []) if (x.slot === this.spectating) this.watchFeed.push(x.input, now);
       },
       status: (s, detail) => this.onStatus(s, detail),
     });
@@ -305,12 +316,16 @@ export class Multiplayer {
 
   /** `weapon`: the active weapon id this tick (core weaponReport().active), null when the core reports none. */
   afterTick(s: PlayerState, cmd: UserCmd, events: number, weapon: number | null = null, silenced = false): void {
-    if (this.spectating !== null) return;
+    if (this.spectating !== null) return void (this.inputs.on = false);
     this.weapon = weapon;
     this.silenced = silenced;
     // (A reload still waiting when the gun went away is dropped: SF_STAB with the knife would be a stab.)
     if (weapon === null || weapon < 2) this.gunReload = false;
     this.netTick++;
+    if (this.inputs.on) this.inputs.commit(this.netTick);
+    else this.inputs.clear();
+    // From the next tick on: kept while someone watches you and the room relays it (net/spectate-input.ts).
+    this.inputs.on = this.roomInputs && this.status === "open" && this.watched();
     if (events & EVENT_JUMPED) this.jumped = true;
     if (events & EVENT_TELEPORTED) this.teleported = true;
     if (this.netTick % SAMPLE_TICKS === 0) {
@@ -337,7 +352,7 @@ export class Multiplayer {
       this.syncPractice();
       const t = this.o.session.timer;
       const timer = t.status === "running" ? TIMER_RUNNING : t.status === "finished" ? TIMER_FINISHED : t.inStart ? TIMER_START : TIMER_IDLE;
-      this.conn.flushSamples({ style: styleIndex(this.o.session.runStyle), track: t.track, timer, timerTicks: t.ticks() }, this.weapon, this.silenced);
+      this.conn.flushSamples({ style: styleIndex(this.o.session.runStyle), track: t.track, timer, timerTicks: t.ticks() }, this.weapon, this.silenced, this.inputs.on ? this.inputs.take() : null);
     }
   }
 
@@ -391,6 +406,7 @@ export class Multiplayer {
         time: rt?.seconds ?? 0,
         inStart: rt?.status === TIMER_START,
       });
+      this.playWatchFeed(this.spectating, now);
     } else this.players.inEye = null;
     this.players.frame(camera, dt, now, poseBehind);
     if (now - this.uiAt > 200) {
@@ -398,6 +414,42 @@ export class Multiplayer {
       this.refreshUi(now);
     }
     return moved;
+  }
+
+  /** Someone spectates you (the roster's spec targets). */
+  private watched(): boolean {
+    for (const p of this.players.players.values()) if (p.info.spec === this.you && p.slot !== this.you) return true;
+    return false;
+  }
+
+  /**
+   * The watched player's HUD feed (net/spectate-input.ts), played into your HUD up to the tick the camera shows. A
+   * player whose client sends none (older clients, native) keeps the keys and jump readouts hidden (net.css).
+   */
+  private playWatchFeed(slot: number, now: number): void {
+    const hud = this.o.session.hud;
+    const live = this.watchFeed.live(now);
+    hud.setWatching(live);
+    document.body.classList.toggle("mp-spec-inputs", live);
+    const upTo = live ? this.players.renderTick(slot, now) : null;
+    if (upTo === null) return;
+    this.watchFeed.take(Math.floor(upTo), (t, s) => hud.watchedTick(t, s), (r) => {
+      if (r.kind === IR_START_PRE) return hud.setStartPre(r.speed);
+      const ssj = shownSsj(r, prefs.get().hud.ssj.mode);
+      if (ssj) {
+        hud.setJumpStats(ssj);
+        ssjChat(ssj);
+      }
+      const j = jhudOf(r);
+      if (j) hud.setJhud(j);
+    });
+  }
+
+  /** Stop playing a watched player's feed (a new target starts from nothing). */
+  private endWatchFeed(): void {
+    this.watchFeed.reset();
+    this.o.session.hud.setWatching(false);
+    document.body.classList.remove("mp-spec-inputs");
   }
 
   /** !freecam or the freecam bind while spectating: free look, or back in-eye from it. */
@@ -516,6 +568,7 @@ export class Multiplayer {
         // A new connection: the room knows nothing of practice yet (the next state batch says so if it is).
         this.practiceSent = false;
         this.practiceAt = -Infinity;
+        this.roomInputs = m.room.inputs === 1;
         const own = m.players.find(p => p.slot === this.you);
         if (own?.id === lastKnownMe()?.id) setPlayerGlow(own?.playerGlow ?? null);
         for (const [slot, meta] of Object.entries(m.metas)) this.players.setMeta(Number(slot), meta, now);
@@ -530,6 +583,7 @@ export class Multiplayer {
           document.body.classList.remove("mp-spectating");
           this.specBar.set(null);
           this.o.session.hud.setSpectated(null);
+          this.endWatchFeed();
         }
         if (m.map.name !== this.o.map) return this.goto(m.map.name);
         voice.welcome(m.room);
@@ -562,7 +616,7 @@ export class Multiplayer {
         if (!m.quiet) this.chat.add({ kind: "server", text: `${m.name} left${m.reason ? ` (${m.reason})` : ""}.` });
         this.players.remove(m.slot);
         voice.left(m.slot);
-        // The room drops spec targets on the one who left without a patch (rooms/room.ts leave): drop them here too.
+        // The room also patches each spectator back to spec null (0.0.42; older rooms sent no patch): drop them here too.
         for (const p of this.players.players.values()) if (p.info.spec === m.slot) p.info = { ...p.info, spec: null };
         if (this.spectating === m.slot) this.cycleSpectate(1, true);
         break;
@@ -1020,6 +1074,7 @@ export class Multiplayer {
     const was = this.spectating;
     this.spectating = slot;
     document.body.classList.add("mp-spectating");
+    this.endWatchFeed();
     // A new watch starts in-eye; switching players keeps the camera mode (CS:S does), free look included.
     if (was === null) this.setSpecMode("eye");
     this.spec?.snap();
@@ -1054,6 +1109,7 @@ export class Multiplayer {
     this.lastSample = null;
     this.specBar.set(null);
     this.o.session.hud.setSpectated(null);
+    this.endWatchFeed();
     this.o.restart(0);
     this.chat.add({ kind: "local", text: "Back in the run. N or !spec to watch again." });
   }

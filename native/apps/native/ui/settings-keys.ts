@@ -56,6 +56,7 @@ export const REQUESTED_KEYS: readonly RequestedKey[] = [
   hud("landfix", boolean),
   hud("autoRestart.when", choice("off", "pb", "wr", "ghost")),
   hud("autoRestart.action", choice("restart", "sound")),
+  hud("holdRestartAfter", number(0, 60, true)),
   hud("hud.place", choice("off", "place", "top")),
   hud("hud.edgeGlow", boolean),
   hud("hud.hiddenKeeps", choice("speedKeys", "nothing")),
