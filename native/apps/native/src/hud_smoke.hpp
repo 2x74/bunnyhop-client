@@ -314,6 +314,46 @@ inline void draw_trainer_bar_colors(NativeHud &hud, int width, int height) {
     hud.overlay_end(width, height);
 }
 
+// The five strafe trainer looks side by side, a row per reading: nothing yet, slow, on pace, fast and far too fast.
+inline void draw_trainer_looks(NativeHud &hud, int width, int height) {
+    struct Row {
+        std::optional<double> pace;
+        double gain;
+        int side;
+    };
+
+    constexpr std::array rows = {
+            Row{std::nullopt, 0, 0},
+            Row{70, .5, 1},
+            Row{100, .97, -1},
+            Row{153, .5, 1},
+            Row{190, -1, -1},
+    };
+    constexpr std::array looks = {"classic", "detailed", "gauge", "minimal", "bar"};
+    const float column_width = HudGeometry(width, height, 100).width / float(looks.size());
+    constexpr float row_height = 105;
+    const auto palette = semantic_palette("off");
+    hud.overlay_begin(width, height);
+    for (size_t column = 0; column < looks.size(); ++column) {
+        TrainerAppearance look;
+        look.style = looks[column];
+        float y = 40;
+        for (const auto &row : rows) {
+            StrafeReading reading;
+            reading.has_pace = row.pace.has_value();
+            reading.percent = row.pace.value_or(0);
+            reading.side = row.side;
+            reading.bar = row.pace;
+            reading.bar_side = row.side;
+            if (row.pace) reading.gain = row.gain;
+            if (!row.pace) reading.hint = StrafeHint::less_deadtime;
+            draw_trainer(hud, column_width * (float(column) + .5f), y, reading, look, true, palette);
+            y += row_height;
+        }
+    }
+    hud.overlay_end(width, height);
+}
+
 // A supporter's look in each name font: colours and effects in turn, and one name the font can't draw ("Сова": the
 // fonts have no Cyrillic in the HUD, so it keeps the default font).
 inline Json supporter_font_look(size_t index) {
@@ -577,6 +617,9 @@ void hud_parity_smoke(Gl &gl, NativeHud &hud, int width, int height, Save save) 
     clear();
     draw_trainer_bar_colors(hud, width, height);
     save("hud-trainer-bar-colors");
+    clear();
+    draw_trainer_looks(hud, width, height);
+    save("hud-trainer-looks");
     NativeTriggerMenu trigger_menu;
     trigger_menu.toggle();
     clear();

@@ -590,7 +590,7 @@ inline Json patch_settings(const Json &current, const Json &patch, bool switch_l
                                  : key == "ghostCompare" ? std::set<std::string>{"auto", "pb", "wr", "custom"}
                                  : key == "hudPlace"     ? std::set<std::string>{"off", "place", "top"}
                                  : key == "hudStrafeTrainerStyle"
-                                         ? std::set<std::string>{"classic", "detailed", "minimal", "bar"}
+                                         ? std::set<std::string>{"classic", "detailed", "minimal", "bar", "gauge"}
                                  : key == "autoRestartWhen" ? std::set<std::string>{"off", "pb", "wr", "ghost"}
                                                             : std::set<std::string>{"restart", "sound"};
             if (!v.is_string() || !choices.contains(v.get<std::string>()))

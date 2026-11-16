@@ -1,11 +1,17 @@
 #pragma once
 #include "movement_hud.hpp"
+#include <cmath>
+#include <numbers>
+#include <vector>
 
 namespace native {
 // The strafe trainer drawn the way the website's is (hud/strafe-trainer.css): a rail from 0% to 200% pace with 100%
 // in the middle, the pace under it and the cue beside the pace. Classic shows the on-pace band in the trainer's
 // colour; detailed and minimal colour the whole rail by zone. Bar is a dark track filled from the edge opposite the
-// turn and coloured by this tick's real gain, with the last jump's average under it. Sizes are HUD units.
+// turn and coloured by this tick's real gain, with the last jump's average under it. Gauge is a half dial whose needle
+// points at the Bar's average (or the pace). Sizes are HUD units.
+using HudPoint = std::array<float, 2>;
+
 struct TrainerLayout {
     static constexpr float width = 240;
     static constexpr float classic_rail = 3;
@@ -37,23 +43,78 @@ struct TrainerLayout {
     static constexpr uint32_t bar_neutral_rgb = 0xffffff;
 };
 
+// The Gauge's dial in the website's SVG user units (hud/strafe-trainer.ts GAUGE_*): the pivot at the origin, y down,
+// angles in degrees from straight up, positive to the right. The dial is as wide as its 8.5em box.
+struct GaugeLayout {
+    static constexpr float box_width = 127.5f;
+    static constexpr float units = box_width / 100;
+    static constexpr float view_top = -51;
+    static constexpr float view_height = 56;
+    static constexpr float radius = 44;
+    static constexpr float needle = 40;
+    static constexpr float mark_inner = 36;
+    static constexpr float mark_outer = 50;
+    static constexpr float arc_width = 3;
+    static constexpr float shade_extra = 2;
+    static constexpr float mark_width = 2;
+    static constexpr float needle_width = 2.4f;
+    static constexpr float needle_shade_width = 4.4f;
+    static constexpr float hub_radius = 3;
+    static constexpr float hub_outline = 1;
+    static constexpr float half_turn = 90;
+    static constexpr float arc_alpha_shade = 0x88 / 255.f;
+    static constexpr float needle_shade_alpha = 0xaa / 255.f;
+    // The number sits .15em higher than under the rails.
+    static constexpr float reading_lift = 2.25f;
+    static constexpr float degrees_per_segment = 3;
+    static constexpr int cap_segments = 8;
+    static constexpr int hub_segments = 24;
+    static constexpr double angle_step = .1;
+};
+
+// The Gauge's value: the Bar's average, else the live pace.
+inline std::optional<double> gauge_value(const StrafeReading &reading) {
+    return trainer_bar_value(reading);
+}
+
+// The needle in degrees: nothing or 0% lies flat left, 100% stands up, 200% lies flat right. Kept to a tenth of a
+// degree.
+inline double gauge_angle(std::optional<double> value) {
+    const double angle = value && *value > 0 ? (std::min(trainer_pace_max, *value) / trainer_pace_max * 2 - 1)
+                                                       * GaugeLayout::half_turn
+                                             : -GaugeLayout::half_turn;
+    return std::round(angle / GaugeLayout::angle_step) * GaugeLayout::angle_step;
+}
+
+// The Gauge's hint: its own value against the on-pace zone; with no live pace, the reading's.
+inline std::optional<StrafeHint> gauge_hint(const StrafeReading &reading, double zone) {
+    const auto value = gauge_value(reading);
+    if (!reading.has_pace || !value || reading.cue == TrainerCue::unsupported) return reading.hint;
+    if (std::abs(*value - trainer_target_pace) <= zone) return std::nullopt;
+    return *value < trainer_target_pace ? StrafeHint::strafe_more : StrafeHint::strafe_less;
+}
+
 inline float trainer_width(const TrainerAppearance &look) {
+    if (look.style == "gauge") return GaugeLayout::box_width;
     return look.style == "bar" ? TrainerLayout::bar_width : TrainerLayout::width;
 }
 
 inline float trainer_rail_height(const TrainerAppearance &look) {
+    if (look.style == "gauge") return GaugeLayout::view_height * GaugeLayout::units;
     if (look.style == "bar") return TrainerLayout::bar_track * look.height;
     return (look.style == "detailed" ? TrainerLayout::detailed_rail : TrainerLayout::classic_rail) * look.height;
 }
 
 // Space above the rail for the marker: it reaches past the rail, and minimal's arrow sits over it.
 inline float trainer_rail_top(const TrainerAppearance &look) {
+    if (look.style == "gauge") return 0;
     if (look.style == "bar") return TrainerLayout::bar_gap;
     if (look.style == "minimal") return TrainerLayout::minimal_marker_room;
     return look.style == "detailed" ? TrainerLayout::detailed_marker_reach : TrainerLayout::classic_marker_reach;
 }
 
 inline float trainer_reading_gap(const TrainerAppearance &look) {
+    if (look.style == "gauge") return -GaugeLayout::reading_lift;
     if (look.style == "bar") return TrainerLayout::bar_gap;
     return look.style == "detailed" ? TrainerLayout::detailed_gap : TrainerLayout::classic_gap;
 }
@@ -223,6 +284,148 @@ void draw_trainer_bar(
     hud.overlay_rect(x - .5f, top, 1, height, {0, 0, 0, TrainerLayout::bar_tick_alpha * alpha});
 }
 
+// Draws the dial's shapes in its own units around a pivot, with a pixel-wide soft edge in place of antialiasing.
+template <class Hud>
+class GaugePainter {
+    Hud &hud_;
+    HudPoint pivot_;
+    float feather_;
+
+    HudPoint at(float radius, float degrees) const {
+        const float radians = degrees * float(std::numbers::pi / 180);
+        return {pivot_[0] + radius * std::sin(radians) * GaugeLayout::units,
+                pivot_[1] - radius * std::cos(radians) * GaugeLayout::units};
+    }
+
+    static NameColor clear(NameColor color) {
+        color[3] = 0;
+        return color;
+    }
+
+public:
+    GaugePainter(Hud &hud, HudPoint pivot) : hud_(hud), pivot_(pivot), feather_(hud.overlay_pixel()) {}
+
+    // A band along radius `radius`, `width` wide, from `from` to `to` degrees, with square ends.
+    void arc(float radius, float from, float to, float width, NameColor color) {
+        if (to <= from || color[3] <= 0) return;
+        const int segments = std::max(1, int(std::ceil((to - from) / GaugeLayout::degrees_per_segment)));
+        const float soft = feather_ / GaugeLayout::units;
+        const float inset = std::min(soft / 2, width / 2);
+        const float inner = radius - width / 2 + inset, outer = radius + width / 2 - inset;
+        for (int i = 0; i < segments; ++i) {
+            const float a = from + (to - from) * float(i) / float(segments);
+            const float b = from + (to - from) * float(i + 1) / float(segments);
+            hud_.overlay_quad({at(inner, a), at(outer, a), at(outer, b), at(inner, b)}, {color, color, color, color});
+            hud_.overlay_quad(
+                    {at(outer, a), at(outer + soft, a), at(outer + soft, b), at(outer, b)},
+                    {color, clear(color), clear(color), color}
+            );
+            hud_.overlay_quad(
+                    {at(inner - soft, a), at(inner, a), at(inner, b), at(inner - soft, b)},
+                    {clear(color), color, color, clear(color)}
+            );
+        }
+    }
+
+    // A filled convex outline (points in order) with a soft rim.
+    void convex(const std::vector<HudPoint> &points, NameColor color) {
+        const size_t count = points.size();
+        HudPoint centre{};
+        for (const auto &p : points) {
+            centre[0] += p[0] / float(count);
+            centre[1] += p[1] / float(count);
+        }
+        // Each edge's outward normal, then each corner pushed out along the mean of its two edges' normals.
+        std::vector<HudPoint> normals(count), rim(count);
+        for (size_t i = 0; i < count; ++i) {
+            const auto &a = points[i], &b = points[(i + 1) % count];
+            HudPoint normal = {b[1] - a[1], a[0] - b[0]};
+            const float length = std::max(1e-6f, std::hypot(normal[0], normal[1]));
+            normal = {normal[0] / length, normal[1] / length};
+            const float outward =
+                    normal[0] * ((a[0] + b[0]) / 2 - centre[0]) + normal[1] * ((a[1] + b[1]) / 2 - centre[1]);
+            normals[i] = outward < 0 ? HudPoint{-normal[0], -normal[1]} : normal;
+        }
+        for (size_t i = 0; i < count; ++i) {
+            const auto &before = normals[(i + count - 1) % count], &after = normals[i];
+            HudPoint mean = {before[0] + after[0], before[1] + after[1]};
+            const float length = std::max(1e-6f, std::hypot(mean[0], mean[1]));
+            mean = {mean[0] / length, mean[1] / length};
+            const float reach = feather_ / std::max(.3f, mean[0] * after[0] + mean[1] * after[1]);
+            rim[i] = {points[i][0] + mean[0] * reach, points[i][1] + mean[1] * reach};
+        }
+        for (size_t i = 0; i < count; ++i) {
+            const size_t next = (i + 1) % count;
+            hud_.overlay_quad({centre, points[i], points[next], points[next]}, {color, color, color, color});
+            hud_.overlay_quad({points[i], rim[i], rim[next], points[next]}, {color, clear(color), clear(color), color});
+        }
+    }
+
+    // A line from radius `from` to radius `to` at `degrees`, `width` wide, with square or round ends.
+    void line(float from, float to, float degrees, float width, NameColor color, bool round) {
+        const float half = width / 2;
+        std::vector<HudPoint> outline;
+        const int caps = round ? GaugeLayout::cap_segments : 1;
+        for (int i = 0; i <= caps; ++i) {
+            const float turn = round ? 180 * float(i) / float(caps) : 180 * float(i);
+            outline.push_back(cap_point(to, degrees, half, -90 + turn));
+        }
+        for (int i = 0; i <= caps; ++i) {
+            const float turn = round ? 180 * float(i) / float(caps) : 180 * float(i);
+            outline.push_back(cap_point(from, degrees, half, 90 + turn));
+        }
+        convex(outline, color);
+    }
+
+    void disc(float radius, NameColor color) {
+        std::vector<HudPoint> outline;
+        for (int i = 0; i < GaugeLayout::hub_segments; ++i)
+            outline.push_back(at(radius, 360.f * float(i) / GaugeLayout::hub_segments));
+        convex(outline, color);
+    }
+
+private:
+    // A point `half` from the line's end at radius `along`, `turn` degrees round from the line's direction.
+    HudPoint cap_point(float along, float degrees, float half, float turn) const {
+        const auto end = at(along, degrees);
+        const float direction = (degrees + turn) * float(std::numbers::pi / 180);
+        return {end[0] + half * std::sin(direction) * GaugeLayout::units,
+                end[1] - half * std::cos(direction) * GaugeLayout::units};
+    }
+};
+
+// The Gauge look: shade, red, amber and green arcs on one radius, the centre mark, the needle and its hub.
+template <class Hud>
+void draw_trainer_gauge(
+        Hud &hud,
+        float x,
+        float top,
+        std::optional<double> value,
+        const TrainerAppearance &look,
+        const SemanticPalette &palette,
+        NameColor ink,
+        float alpha
+) {
+    GaugePainter<Hud> paint(hud, {x, top - GaugeLayout::view_top * GaugeLayout::units});
+    const float stroke = GaugeLayout::arc_width * look.height, end = GaugeLayout::half_turn;
+    const float good = float(std::min(trainer_target_pace, double(look.zone)) / trainer_target_pace) * end;
+    const float ok =
+            float(std::min(trainer_target_pace, double(look.zone) * trainer_ok_span) / trainer_target_pace) * end;
+    const float r = GaugeLayout::radius;
+    paint.arc(r, -end, end, stroke + GaugeLayout::shade_extra, {0, 0, 0, GaugeLayout::arc_alpha_shade * alpha});
+    paint.arc(r, -end, end, stroke, with_alpha(palette.trainer[2], TrainerLayout::bad_zone_alpha * alpha));
+    paint.arc(r, -ok, ok, stroke, with_alpha(palette.trainer[1], alpha));
+    paint.arc(r, -good, good, stroke, with_alpha(palette.trainer[0], alpha));
+    paint.line(GaugeLayout::mark_inner, GaugeLayout::mark_outer, 0, GaugeLayout::mark_width, ink, false);
+    const float angle = float(gauge_angle(value));
+    const NameColor shade = {0, 0, 0, GaugeLayout::needle_shade_alpha * alpha};
+    paint.line(0, GaugeLayout::needle, angle, GaugeLayout::needle_shade_width, shade, true);
+    paint.line(0, GaugeLayout::needle, angle, GaugeLayout::needle_width, ink, true);
+    paint.disc(GaugeLayout::hub_radius, ink);
+    const float ring = GaugeLayout::hub_outline;
+    paint.arc(GaugeLayout::hub_radius, -180, 180, ring, shade);
+}
+
 // The number under the trainer, formatted again only when the digits it shows change: the Bar's fill changes nearly
 // every tick and its number only once per jump.
 class TrainerNumberText {
@@ -254,28 +457,33 @@ void draw_trainer(
         const SemanticPalette &palette,
         TrainerNumberText &number
 ) {
-    const double pace = std::floor(reading.percent + .5);
-    const bool dimmed = look.dim_below > 0 && (!reading.has_pace || pace < look.dim_below);
+    const bool bar = look.style == "bar", gauge = look.style == "gauge";
+    const auto gauge_reading = gauge ? gauge_value(reading) : std::nullopt;
+    const bool has_pace = gauge ? gauge_reading.has_value() : reading.has_pace;
+    const double pace = std::floor((gauge && gauge_reading ? *gauge_reading : reading.percent) + .5);
+    const bool dimmed = look.dim_below > 0 && (!has_pace || pace < look.dim_below);
     const float alpha = dimmed ? TrainerLayout::dimmed_alpha : 1;
     const NameColor ink = with_alpha(look.color, alpha);
     const float top = y + trainer_rail_top(look);
-    const bool bar = look.style == "bar";
     if (bar)
         draw_trainer_bar(hud, x, top, trainer_bar_view(reading), look, palette, alpha);
+    else if (gauge)
+        draw_trainer_gauge(hud, x, top, gauge_reading, look, palette, ink, alpha);
     else
         draw_trainer_rail(hud, x, top, look, palette, ink, alpha);
-    if (!bar && reading.has_pace) {
+    if (!bar && !gauge && reading.has_pace) {
         const float position = float(trainer_position(pace, reading.side, look.follow) - .5);
         draw_trainer_marker(hud, x + position * TrainerLayout::width, top, look, ink, alpha);
     }
     const float reading_top = top + trainer_rail_height(look) + trainer_reading_gap(look);
     if (look.show_pace) {
         const std::optional<double> shown = bar                ? reading.last_jump
+                                            : gauge            ? gauge_reading
                                             : reading.has_pace ? std::optional{reading.percent}
                                                                : std::nullopt;
         hud.overlay_text(x, reading_top, number.view(shown), TrainerLayout::pace_size, ink, true);
     }
-    const auto hint = bar ? trainer_bar_hint(reading) : reading.hint;
+    const auto hint = bar ? trainer_bar_hint(reading) : gauge ? gauge_hint(reading, look.zone) : reading.hint;
     const bool unsupported = hint == StrafeHint::unsupported;
     if ((hints || unsupported) && hint)
         hud.overlay_text(

@@ -343,6 +343,31 @@ class NativeHud {
     // still samples the texture.
     void rect(float x, float y, float w, float h, Color c) { quad(x, y, w, h, -2, -2, 0, 0, c); }
 
+    // A solid four-cornered shape with a colour per corner, in element units: the Gauge's arcs and needle.
+    void solid_quad(const std::array<native::HudPoint, 4> &points, const std::array<Color, 4> &colors) {
+        if (!element_visible) return;
+        std::array<native::HudPoint, 4> placed;
+        float left = 1e9f, top = 1e9f, right = -1e9f, bottom = -1e9f;
+        for (size_t i = 0; i < points.size(); ++i) {
+            placed[i] = {element_x(points[i][0]), element_y(points[i][1])};
+            left = std::min(left, placed[i][0]);
+            right = std::max(right, placed[i][0]);
+            top = std::min(top, placed[i][1]);
+            bottom = std::max(bottom, placed[i][1]);
+        }
+        note_drawn(left, top, right - left, bottom - top);
+        if (batches.empty() || batches.back().texture != current_texture)
+            batches.push_back({current_texture, vertices.size() / 8, 0});
+        batches.back().count += 6;
+        for (const size_t i : {0, 1, 2, 0, 2, 3}) {
+            const auto &c = colors[i];
+            vertices.insert(
+                    vertices.end(),
+                    {placed[i][0] * scale, placed[i][1] * scale, -2, -2, c[0], c[1], c[2], c[3] * element_alpha}
+            );
+        }
+    }
+
     static constexpr Color text_shadow{0, 0, 0, .85f};
     // How opaque text drawn while fading is (overlay_fade): its shadow fades with it.
     float text_fade_ = 1;
@@ -860,6 +885,13 @@ public:
     }
 
     void overlay_rect(float x, float y, float w, float h, std::array<float, 4> color) { rect(x, y, w, h, color); }
+
+    void overlay_quad(const std::array<native::HudPoint, 4> &points, const std::array<Color, 4> &colors) {
+        solid_quad(points, colors);
+    }
+
+    // One screen pixel in the current element's units: how wide the Gauge's soft edges are.
+    float overlay_pixel() const { return 1 / std::max(1e-3f, scale * element_scale); }
 
     // A tutorial lesson is running (not the final course).
     void set_lesson(bool active) { lesson_ = active; }
