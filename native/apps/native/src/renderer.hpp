@@ -94,6 +94,9 @@ namespace native {
     X(void, EnableVertexAttribArray, (GLuint)) \
     X(void, VertexAttribPointer, (GLuint, GLint, GLenum, GLboolean, GLsizei, const void *)) \
     X(void, VertexAttrib4f, (GLuint, GLfloat, GLfloat, GLfloat, GLfloat)) \
+    X(void, VertexAttribDivisor, (GLuint, GLuint)) \
+    X(void, BufferSubData, (GLenum, GLintptr, GLsizeiptr, const void *)) \
+    X(void, Uniform1fv, (GLint, GLsizei, const GLfloat *)) \
     X(GLuint, CreateShader, (GLenum)) \
     X(void, ShaderSource, (GLuint, GLsizei, const GLchar *const *, const GLint *)) \
     X(void, CompileShader, (GLuint)) \
@@ -2034,6 +2037,10 @@ public:
         if (viewmodel) viewmodel->glow_visibility(show, firstPerson);
     }
 
+    void set_hop_effects_visible(bool others) {
+        if (viewmodel) viewmodel->hop_visibility(others);
+    }
+
     void set_ghost_cosmetics(const std::string &ghostId, const std::string &trailId, const std::string &shapeId) {
         trailShape = native_render::trail_shape_of(shapeId);
         if (viewmodel) {
@@ -3832,6 +3839,7 @@ public:
             if (compareActor) viewmodel->draw_actor(*compareActor, vp, eye, seconds);
             for (const auto &actor : roomActors)
                 draw_room_actor(actor, vp, eye, seconds);
+            viewmodel->draw_hop_effects(vp, eye);
             profile_elapsed(frameProfile.actorDraw, detailStart);
         }
         BhSnapshot landingState{};

@@ -6,6 +6,7 @@
 #include "first_person_weapons.hpp"
 #include "model_light.hpp"
 #include "back_slot.hpp"
+#include "hop_layer.hpp"
 #include <charconv>
 #include <optional>
 #include <span>
@@ -60,6 +61,9 @@ class NativeViewmodel {
         float hairLength = 1;
         HeadwearFit fit;
         native_back::Worn back;
+        // The hop effect (packed field 12, "hop-*[:trail]") and the trail colours it takes (linear).
+        const std::vector<native_hop::Part> *hop = nullptr;
+        std::string hopTrail;
     };
 
     struct CachedLook {
@@ -189,6 +193,19 @@ class NativeViewmodel {
     };
 
     std::unordered_map<std::string, ActorAction> actorActions;
+
+    // Hop effects: the recipes, the layer (made at the first burst), each player's emitter and its clock slot.
+    struct ActorHop {
+        native_hop::Emitter emitter;
+        int slot = -1;
+    };
+
+    std::optional<native_hop::Recipes> hopRecipes;
+    std::unique_ptr<native_hop::Layer> hopLayer;
+    std::unordered_map<std::string, ActorHop> actorHops;
+    std::filesystem::path hopAssetRoot;
+    // Settings: other players' hop effects (yours always show), and the Potato and reduced-motion scales.
+    bool showOtherHops = true;
 
     // The two-handed third-person gun hold (gun_hold.hpp): per gun data, and per actor its pose state and where its
     // muzzle was last drawn (world space), for the flash and tracer of its next shot.
@@ -343,6 +360,16 @@ class NativeViewmodel {
             std::copy(tones[role].begin(), tones[role].end(), back.tones.begin() + long(role * 3));
     }
 
+    void read_hop(const std::vector<std::string> &fields, Look &out) const {
+        constexpr size_t hop_field = 12;
+        if (!hopRecipes || fields.size() <= hop_field || fields[0] != "2") return;
+        const auto &field = fields[hop_field];
+        const auto colon = field.find(':');
+        out.hop = hopRecipes->effect(field.substr(0, colon));
+        if (!out.hop) return;
+        out.hopTrail = colon == std::string::npos ? hopRecipes->default_trail : "trail-" + field.substr(colon + 1);
+    }
+
     const Look &look(const std::string &outfit, const std::string &packed) {
         for (const auto &cached : lookCache) {
             if (cached.used && cached.outfit == outfit && cached.packed == packed) return cached.look;
@@ -418,6 +445,7 @@ class NativeViewmodel {
             linearColor(glove.at(gloveSlots[slot]), out.gloveColors.data() + slot * 3);
         fit_headwear(out);
         read_back(f, out);
+        read_hop(f, out);
         cached.look = std::move(out);
         return cached.look;
     }
@@ -839,6 +867,7 @@ class NativeViewmodel {
         auto &state = actorActions[actor.id];
         if (pulses.snapped || seconds < state.last || state.knife != look.knife || state.weapon != actor.frame.weapon)
             state = {};
+        const bool fresh = state.last < 0;
         const double dt = state.last < 0 ? 0 : std::clamp(seconds - state.last, 0., .1);
         state.last = seconds;
         state.knife = look.knife;
@@ -867,16 +896,86 @@ class NativeViewmodel {
         native_render::advance_ponytail(
                 state.ponytail, actor.frame.velocity, actor.frame.yaw, dt, pulses.snapped || dt <= 0, look.hairLength
         );
-        advance_back(state.back, actor, look.back, dt, pulses.snapped || dt <= 0, feetYaw);
+        // (Drawn again in the same frame, for a reflection or a shadow, it holds: dt is 0.)
+        advance_back(state.back, actor, look.back, dt, pulses.snapped || fresh, feetYaw);
+        hop_update(actor, look, seconds, pulses.snapped);
         gun_layer(actor, pulses, dt, feetYaw, acting);
         gl.ActiveTexture(GL_TEXTURE0);
         gl.BindTexture(GL_TEXTURE_2D, bonesTexture);
         gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, 3, pose.size() / 12, 0, GL_RGBA, GL_FLOAT, pose.data());
         if (actorActions.size() > 256) {
+            for (auto &[id, hop] : actorHops)
+                release_hop(hop);
+            actorHops.clear();
             actorActions.clear();
             actorAnimationStates.clear();
             actorHolds.clear();
         }
+    }
+
+    static bool own_hops_id(const std::string &id) {
+        return id == native_render::own_actor_id || id == "menu-preview" || id == "asset-preview";
+    }
+
+    static bool own_hops(const native_render::Actor &actor) { return own_hops_id(actor.id); }
+
+    native_hop::Rgb hop_color(const std::array<float, 3> &srgb) const {
+        return {native_render::srgb_linear(srgb[0]), native_render::srgb_linear(srgb[1]), native_render::srgb_linear(srgb[2])};
+    }
+
+    // hop-layer.ts HopEmitter.update: a burst at the takeoff when this player hops, while hop effects show for them.
+    void hop_update(const native_render::Actor &actor, const Look &look, double seconds, bool snapped) {
+        auto found = actorHops.find(actor.id);
+        if (snapped && found != actorHops.end()) release_hop(found->second);
+        if (!look.hop || !hopRecipes || (!own_hops(actor) && !showOtherHops)) return;
+        auto &hop = actorHops[actor.id];
+        if (hopLayer && hop.slot >= 0) hopLayer->set_clock(hop.slot, seconds);
+        native_hop::Pose pose;
+        const auto &frame = actor.frame;
+        for (size_t k = 0; k < 3; ++k) {
+            pose.position[k] = frame.position[k];
+            pose.velocity[k] = frame.velocity[k];
+        }
+        pose.grounded = frame.flags & 2;
+        const auto probe = [this](double x, double y, double z) {
+            return ground_below(x, y, z);
+        };
+        double back = 0;
+        const auto place = hop.emitter.takeoff(*hopRecipes, *look.hop, pose, seconds, actor.jumped, probe, back);
+        if (!place || !claim_hop(hop)) return;
+        hopLayer->set_clock(hop.slot, seconds);
+        const auto colors = own_hops(actor) ? previewTrail : cosmetic_colors(look.hopTrail);
+        native_hop::Spawn spawn;
+        spawn.x = place->x;
+        spawn.y = place->z;
+        spawn.z = -place->y;
+        spawn.vx = frame.velocity[0];
+        spawn.vz = -frame.velocity[1];
+        spawn.t = seconds - back;
+        spawn.slot = hop.slot;
+        spawn.quality = cosmeticsTier == 0 ? .5 : 1;
+        spawn.motion = motionScale < 1 ? native_hop::reduced_motion : 1;
+        spawn.tint = hop_color(colors[0]);
+        spawn.tint2 = hop_color(colors[1]);
+        spawn.alpha = ghost_source_of(actor) == native_render::GhostSource::none ? 1 : std::clamp(actor.opacity, 0.f, 1.f);
+        spawn.reach = place->reach;
+        if (place->reach) spawn.slope = std::array<double, 2>{float(place->slope[0]), float(place->slope[1])};
+        if (hopLayer->burst(*look.hop, spawn)) hop.emitter.last_burst = seconds;
+    }
+
+    bool claim_hop(ActorHop &hop) {
+        if (!hopLayer) hopLayer = std::make_unique<native_hop::Layer>(gl, *hopRecipes, hopAssetRoot);
+        if (hop.slot >= 0) return true;
+        const auto slot = hopLayer->claim();
+        if (!slot) return false;
+        hop.slot = *slot;
+        return true;
+    }
+
+    void release_hop(ActorHop &hop) {
+        if (hopLayer && hop.slot >= 0) hopLayer->release(hop.slot);
+        hop.slot = -1;
+        hop.emitter.reset();
     }
 
     // Seconds the ground under a long cape takes to come back on a landing, and to fall away in the air (model.ts).
@@ -1101,6 +1200,9 @@ public:
         , modelData(native_vm::ModelData::load(assetRoot))
         , data(modelData->vertices)
         , metadata(modelData->metadata) {
+        hopAssetRoot = assetRoot;
+        if (std::filesystem::exists(assetRoot / "hop-fx.json"))
+            hopRecipes = native_hop::Recipes::load(assetRoot / "hop-fx.json");
         if (std::filesystem::exists(assetRoot / "actor-animations.json"))
             actorAnimationData = std::make_shared<native_actor_anim::Data>(assetRoot.string());
         {
@@ -1349,6 +1451,26 @@ public:
 
     void player_glow(std::optional<native_render::Glow> value) { localGlow = std::move(value); }
 
+    // Settings -> Ghosts & players -> Hop effects: other players' bursts. Off, theirs cost nothing.
+    void hop_visibility(bool others) {
+        showOtherHops = others;
+        if (others) return;
+        for (auto &[id, hop] : actorHops)
+            if (!own_hops_id(id)) release_hop(hop);
+    }
+
+    // Every live burst, after the bunnies (the main view only: not in reflections or shadows).
+    void draw_hop_effects(const native::Matrix &view_projection, const float eye[3]) {
+        if (hopLayer) hopLayer->draw(view_projection, eye);
+    }
+
+    // A seek or a map change: every burst goes.
+    void clear_hop_effects() {
+        for (auto &[id, hop] : actorHops)
+            hop.emitter.reset();
+        if (hopLayer) hopLayer->clear();
+    }
+
     void glow_visibility(bool show, bool firstPerson) {
         showGlow = show;
         firstPersonGlow = firstPerson;
@@ -1396,6 +1518,7 @@ public:
         firstPerson->reset();
         firstPersonWeapon = 0;
         firstPersonEntry.clear();
+        clear_hop_effects();
     }
 
     native_render::InspectCueQueue &inspect_cues() { return inspectCueQueue; }
@@ -1436,6 +1559,9 @@ public:
             actor.frame.weapon = weapon;
             actor.inspect = previewAction == "inspect" && seconds == 0 ? 1 : 0;
             actor.attack = previewAction == "fire" && seconds == 0 ? 1 : 0;
+            // "hop": a hop every preview_hop_seconds, for the hop effect.
+            constexpr double preview_hop_seconds = .5, preview_frame_seconds = 1. / 60;
+            actor.jumped = previewAction == "hop" && std::fmod(seconds + 1e-6, preview_hop_seconds) < preview_frame_seconds;
             actor.frame.view_offset_z = 64;
             // "back": from behind and a little to the left, where a back item shows.
             const float eye[3] = {
@@ -1451,6 +1577,7 @@ public:
             const float yaw = kind == "back" ? std::atan2(-eye[1], -eye[0]) * radians_to_degrees : 120.f;
             const auto vp = native::camera_matrix(eye, yaw, 9, float(width) / height);
             draw_actor(actor, vp, eye, seconds);
+            draw_hop_effects(vp, eye);
         } else {
             const PreviewScope still(previewing);
             BhSnapshot state{};
@@ -1822,6 +1949,10 @@ public:
 
     // Drops an actor's animation and gesture state, so its next pose starts from scratch.
     void forget_actor(const std::string &id) {
+        if (const auto hop = actorHops.find(id); hop != actorHops.end()) {
+            release_hop(hop->second);
+            actorHops.erase(hop);
+        }
         modelLight.forget(id);
         actorAnimationStates.erase(id);
         actorActions.erase(id);

@@ -28,6 +28,7 @@ import type { BackRig } from "../../web/src/player/back-fx";
 import { sleeveAnchor } from "../../web/src/player/bunny/robe";
 import { bakeGunAO } from "../../web/src/viewmodel/guns/ao";
 import { writePlayerMaterials } from "./export-player-materials";
+import { writeHopEffects } from "./export-hop-effects";
 import { crownGeometry } from "../../web/src/player/bunny/crown";
 import { vmRig } from "../../web/src/viewmodel/rig";
 import { VmProcedural, PROC_DURATION, type VmAction } from "../../web/src/viewmodel/procedural";
@@ -742,6 +743,7 @@ await writeFile(
   }),
 );
 await writePlayerMaterials(directory);
+await writeHopEffects(directory);
 // Shader pieces older builds compiled from; the player materials above replace them.
 for (const name of [
   "cosmetic-vertex-pars",
