@@ -95,6 +95,7 @@ inline Json default_settings() {
             // Turn rates follow cl_yawspeed and cl_anglespeedkey and freeze for each recording.
             {"invertY", false},
             {"holdRestart", false},
+            {"holdRestartAfter", 5},
             {"mouseDiagnostics", false},
             {"inputBackend", "auto"},
             // Hidden: false goes back to the per-frame proration comparator (also --legacy-input). See timed_input.hpp.
@@ -399,7 +400,8 @@ inline Json hud_capabilities() {
              "wRelease",
              "landfix",
              "autoRestartWhen",
-             "autoRestartAction"}
+             "autoRestartAction",
+             "holdRestartAfter"}
     );
 }
 
@@ -688,6 +690,8 @@ inline Json patch_settings(const Json &current, const Json &patch, bool switch_l
                 throw std::runtime_error("JHUD speed colours must be a whole number 1–16");
             if (key == "hudJhudCutoff" && (n != std::floor(n) || n < 0 || n > 30))
                 throw std::runtime_error("JHUD cutoff must be a whole number 0–30");
+            if (key == "holdRestartAfter" && (n != std::floor(n) || n < 0 || n > 60))
+                throw std::runtime_error("Hold after must be a whole number of minutes 0–60");
             if (key == "fpsLimit" && (n != std::floor(n) || (n != 0 && (n < 30 || n > 1000))))
                 throw std::runtime_error("FPS limit must be 0 or 30–1000");
         }

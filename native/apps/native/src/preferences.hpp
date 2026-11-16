@@ -33,6 +33,7 @@ struct Preferences {
     bool strafe_trainer_hints;
     bool practice_keep_velocity;
     bool hold_restart;
+    int hold_restart_after_minutes;
     bool show_ghost;
     float ghost_opacity;
     bool ghost_near_fade;

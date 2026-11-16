@@ -1596,7 +1596,11 @@ int run(const native::Options &opt) {
                 if (!instant && (action == "restart" || action == "restartMain" || action == "restartBonus")) {
                     BhRunState timing{};
                     if (core) bh_run_state(core.get(), &timing);
-                    if (!restart_guard.press(action, epoch_ms(), prefs.hold_restart, timing.status == 1, wheel)) return;
+                    const double run_seconds = timing.status == 1 ? timing.seconds : 0;
+                    const bool hold = native::restart_hold_needed(
+                            prefs.hold_restart, prefs.hold_restart_after_minutes, run_seconds
+                    );
+                    if (!restart_guard.press(action, epoch_ms(), hold, timing.status == 1, wheel)) return;
                 }
                 if (action == "practice" || action == "noclip" || action == "cpSave" || action == "cpTeleport"
                     || action == "cpPrev" || action == "cpNext") {

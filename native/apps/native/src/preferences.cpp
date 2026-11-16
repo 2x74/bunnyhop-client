@@ -31,6 +31,7 @@ Preferences Preferences::from_settings(const nlohmann::json &settings) {
     preferences.strafe_trainer_hints = settings.at("strafeTrainerHints").get<bool>();
     preferences.practice_keep_velocity = settings.at("practiceKeepVelocity").get<bool>();
     preferences.hold_restart = settings.at("holdRestart").get<bool>();
+    preferences.hold_restart_after_minutes = settings.at("holdRestartAfter").get<int>();
     preferences.show_ghost = settings.value("showGhost", true);
     preferences.ghost_opacity = settings.value("ghostOpacity", .4f);
     preferences.ghost_near_fade = settings.value("ghostNearFade", true);
