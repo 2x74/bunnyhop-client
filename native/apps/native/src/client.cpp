@@ -3781,7 +3781,7 @@ int run(const native::Options &opt) {
                     practice.noclip || flight_tick
             );
             feed_reports.start_pre = std::exchange(hud.movement.start_pre_change, std::nullopt);
-            if (!viewer.active) {
+            if (!viewer.active && room_bridge.inputs.on) {
                 BhSettings feed_settings{};
                 bh_style_settings(active_style.c_str(), &feed_settings);
                 native::send_hud_feed(
