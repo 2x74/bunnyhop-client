@@ -507,3 +507,23 @@ test("room race views, clears, clocks, announcements and reconnects reach the ho
     f.service.leave();
   }
 });
+
+test("when the spectated player leaves, nobody's row still watches them", async () => {
+  const f = fixture();
+  try {
+    await f.service.join("test");
+    const start = welcome("test");
+    start.players = [
+      { slot: 0, id: "me", name: "Player", style: "autohop", spec: 3 } as never,
+      { slot: 2, id: "other", name: "Other", style: "autohop", spec: 3 } as never,
+      { slot: 3, id: "runner", name: "Runner", style: "autohop", spec: null } as never,
+      { slot: 4, id: "fourth", name: "Fourth", style: "autohop", spec: 2 } as never,
+    ];
+    f.handlers[0].message(start);
+    f.handlers[0].message({ t: "leave", slot: 3, name: "Runner" } as never);
+    const spec = Object.fromEntries(f.service.view.players.map((p) => [p.slot, p.spec]));
+    expect(spec).toEqual({ 0: null, 2: null, 4: 2 });
+  } finally {
+    f.service.leave();
+  }
+});

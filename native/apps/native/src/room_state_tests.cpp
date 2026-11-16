@@ -343,7 +343,28 @@ void test_closing_a_replay_returns_to_the_room_map() {
     assert(room->map_after_replay("bhop_blue").empty());
 }
 
+// The room drops spec targets on a player who leaves without sending patches: no row may keep watching them.
+void test_leaving_ends_spectating_them() {
+    const auto room = std::make_unique<native::RoomState>();
+    auto welcome = easy_welcome();
+    welcome["players"] = J::array(
+            {{{"slot", 0}, {"name", "me"}, {"spec", 1}},
+             {{"slot", 1}, {"name", "runner"}},
+             {{"slot", 2}, {"name", "watcher"}, {"spec", 1}},
+             {{"slot", 3}, {"name", "other"}, {"spec", 2}}}
+    );
+    room->event(envelope(welcome));
+    assert(room->spectator_target == 1u);
+    room->event(envelope({{"t", "leave"}, {"slot", 1}}));
+    refresh(*room, 1);
+    assert(!room->spectator_target);
+    const auto &board = room->display();
+    for (size_t i = 0; i < board.count; ++i)
+        assert(board.rows[i].spectator == (board.rows[i].slot == 3));
+}
+
 int main() {
+    test_leaving_ends_spectating_them();
     test_closing_a_replay_returns_to_the_room_map();
     test_vote_shows_tiers();
     test_unknown_slot_keeps_map_changes();

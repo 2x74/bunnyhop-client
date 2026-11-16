@@ -685,6 +685,11 @@ export class NativeRoomService {
       if (this.view.players.length < 64) this.view.players.push(message.player);
     } else if (message.t === "leave") {
       this.view.players = this.view.players.filter((player) => player.slot !== message.slot);
+      // The room drops spec targets on the one who left without a patch (net/mp.ts leave). Drop them here too, or
+      // your own row still says you're spectating and !r only ever tries to stop.
+      for (const player of this.view.players) {
+        if (player.spec === message.slot) player.spec = null;
+      }
       delete this.view.metas[String(message.slot)];
       if (this.view.metaAt) delete this.view.metaAt[String(message.slot)];
     } else if (message.t === "player") {

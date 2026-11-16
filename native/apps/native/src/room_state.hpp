@@ -468,6 +468,14 @@ public:
             const auto slot = e.at("slot").get<unsigned>();
             peers.erase(slot);
             if (spectator_target == slot) spectator_target.reset();
+            // The room drops spec targets on the one who left without sending patches.
+            for (auto &[other, peer] : peers) {
+                const auto spec = peer.info.find("spec");
+                if (spec == peer.info.end() || !spec->is_number_integer() || spec->get<int64_t>() != int64_t(slot))
+                    continue;
+                *spec = nullptr;
+                peer.spectator = false;
+            }
         } else if (type == "player") {
             auto p = e.at("patch");
             p["slot"] = e.at("slot");
