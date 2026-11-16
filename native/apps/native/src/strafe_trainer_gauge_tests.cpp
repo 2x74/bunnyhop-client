@@ -102,21 +102,25 @@ void check_angles() {
     check(std::abs(native::gauge_angle(100.04) - 0) < 1e-9, "needle angle is kept to a tenth of a degree");
 }
 
+std::optional<native::StrafeHint> arc_hint(const native::StrafeReading &reading) {
+    return native::gauge_hint(reading, 10, native::arc_value(reading));
+}
+
 void check_hints() {
     using native::StrafeHint;
-    check(native::gauge_hint(reading_at(std::nullopt), 10) == StrafeHint::less_deadtime, "no pace keeps the reading's");
-    check(!native::gauge_hint(reading_at(108), 10), "inside the zone has no hint");
-    check(native::gauge_hint(reading_at(85), 10) == StrafeHint::strafe_more, "slow turns more");
-    check(native::gauge_hint(reading_at(125), 10) == StrafeHint::strafe_less, "fast eases the turn");
+    check(arc_hint(reading_at(std::nullopt)) == StrafeHint::less_deadtime, "no pace keeps the reading's");
+    check(!arc_hint(reading_at(108)), "inside the zone has no hint");
+    check(arc_hint(reading_at(85)) == StrafeHint::strafe_more, "slow turns more");
+    check(arc_hint(reading_at(125)) == StrafeHint::strafe_less, "fast eases the turn");
     auto bar = reading_at(85);
     bar.bar = 104;
-    check(!native::gauge_hint(bar, 10), "the Bar's average decides over the pace");
+    check(!arc_hint(bar), "the Bar's average decides over the pace");
 }
 
 void check_drawing() {
     const auto palette = native::semantic_palette("off");
     native::TrainerAppearance look;
-    look.style = "gauge";
+    look.style = "arc";
     look.zone = 10;
     RecordingHud hud;
     native::draw_trainer(hud, centre_x, top, reading_at(150), look, true, palette);
@@ -141,7 +145,128 @@ void check_drawing() {
 }
 }  // namespace
 
+// The website's needle filter vectors (gauge report section 6): 100 tick, 400 u/s, sv_maxspeed 250, sv_airaccelerate
+// 1000, so 100% turns atan(30 / 400) a tick.
+class NeedleRun {
+    native::StrafeTrainer trainer_;
+    int64_t tick_ = 0;
+    float yaw_ = 0;
+
+public:
+    static constexpr double ideal_degrees = 4.289153328819758;  // atan(30 / 400)
+
+    NeedleRun() { feed(0, 450); }
+
+    // One tick turning `pace` times the ideal, holding `side` (450 is D: turning right is a falling yaw).
+    double feed(double pace, float side, bool grounded = false) {
+        yaw_ -= float(pace * ideal_degrees);
+        const native::SsjCmd command{0, side, yaw_, 0};
+        native::TrainerSample sample;
+        sample.speed = 400;
+        sample.grounded = grounded;
+        sample.tick = tick_++;
+        sample.max_speed = 250;
+        sample.air_accelerate = 1000;
+        trainer_.feed(command, sample);
+        return angle();
+    }
+
+    double angle() const { return native::gauge_angle(native::gauge_value(trainer_.reading)); }
+};
+
+void check_needle_filter() {
+    NeedleRun rest;
+    double angle = 0;
+    for (int tick = 1; tick <= 4; ++tick)
+        angle = rest.feed(1, 450);
+    check(std::abs(angle + 45) < 1e-9, "four ticks from rest at 100% reach -45 degrees");
+    for (int tick = 5; tick <= 14; ++tick)
+        angle = rest.feed(1, 450);
+    check(angle > -10, "above -10 degrees by tick 14");
+    const std::vector<std::pair<double, double>> settle = {{.5, -45}, {1, 0}, {1.5, 45}, {2, 90}, {3, 90}};
+    for (const auto &[pace, expected] : settle) {
+        NeedleRun run;
+        for (int tick = 0; tick < 200; ++tick)
+            angle = run.feed(pace, 450);
+        check(std::abs(angle - expected) < .05, "steady pace settles at " + std::to_string(expected));
+    }
+    const auto at_pace = [] {
+        NeedleRun run;
+        for (int tick = 0; tick < 40; ++tick)
+            run.feed(1, 450);
+        return run;
+    };
+    NeedleRun run = at_pace();
+    const double held = run.angle();
+    for (int tick = 0; tick < 3; ++tick)
+        check(run.feed(1, -450) == held, "a strafe switch holds the needle");
+    run = at_pace();
+    check(run.feed(0, 450, true) == held, "a hop's ground tick holds the needle");
+    check(run.feed(0, 450, true) < held - 5, "a second ground tick lets it fall");
+    run = at_pace();
+    for (int tick = 0; tick < 8; ++tick)
+        check(run.feed(1, -450) == held, "eight ticks against the keys hold");
+    check(run.feed(1, -450) < held - 5, "the ninth lets it fall");
+    run = at_pace();
+    double stopped = 0;
+    for (int tick = 1; tick <= 50; ++tick) {
+        stopped = run.feed(0, 450);
+        if (tick == 20) check(stopped <= -85, "at -85 or below within 20 ticks of stopping");
+    }
+    check(stopped == -90, "flat left by 50 ticks");
+}
+
+// The Gauge's face, needle and hub: the green line straight up, the needle's tip where the value points.
+void check_disc_drawing() {
+    native::TrainerAppearance look;
+    look.style = "gauge";
+    RecordingHud hud;
+    auto reading = reading_at(150);
+    reading.gauge = 150;
+    native::draw_trainer(hud, centre_x, top, reading, look, true, native::semantic_palette("off"));
+    const native::HudPoint disc_pivot = {centre_x, top - native::DiscLayout::view_top * native::GaugeLayout::units};
+    const auto dark = native::semantic_rgb(native::DiscLayout::needle_rgb);
+    float tip = 0, tip_angle = 0;
+    for (const auto &quad : hud.quads)
+        for (size_t i = 0; i < 4; ++i) {
+            if (!same_rgb(quad.colors[i], dark)) continue;
+            const float dx = quad.points[i][0] - disc_pivot[0], dy = disc_pivot[1] - quad.points[i][1];
+            const float reach = std::hypot(dx, dy) / native::GaugeLayout::units;
+            if (reach > tip) {
+                tip = reach;
+                tip_angle = float(std::atan2(dx, dy) * 180 / std::numbers::pi);
+            }
+        }
+    check(std::abs(tip - native::DiscLayout::needle) < .01f && std::abs(tip_angle - 45) < .5f, "needle tip at 45");
+    check(hud.texts.front() == "150%", "the number under the hub");
+    // The light edge reaches a unit past the hub's lower half, which hangs below the face.
+    float edge_below = 0;
+    for (const auto &quad : hud.quads)
+        for (size_t i = 0; i < 4; ++i)
+            if (same_rgb(quad.colors[i], {1, 1, 1, 1}) && quad.colors[i][3] > .6f)
+                edge_below = std::max(edge_below, (quad.points[i][1] - disc_pivot[1]) / native::GaugeLayout::units);
+    check(std::abs(edge_below - (native::DiscLayout::hub + native::DiscLayout::edge_width)) < .05f, "light edge");
+    const auto close = [](const native::NameColor &a, const native::NameColor &b) {
+        for (size_t i = 0; i < 4; ++i)
+            if (std::abs(a[i] - b[i]) > 1e-6f) return false;
+        return true;
+    };
+    check(close(native::disc_face_color(0), native::semantic_rgb(0xffffff)), "white straight up");
+    check(close(native::disc_face_color(-90), native::semantic_rgb(0x0a04f5)), "blue flat left");
+    check(close(native::disc_face_color(90), native::semantic_rgb(0xe00204)), "red flat right");
+    const auto between = native::disc_face_color(22.5f), white = native::semantic_rgb(0xffffff),
+               pink = native::semantic_rgb(0xec6670);
+    check(std::abs(between[1] - (white[1] + pink[1]) / 2) < 1e-6f, "halfway between stops");
+    auto preview = reading_at(120);
+    check(native::gauge_value(preview) == 120, "a preview shows the pace");
+    preview.has_pace = false;
+    preview.gauge = 0;
+    check(!native::gauge_value(preview), "a resting needle with no pace is nothing");
+}
+
 int main() {
+    check_needle_filter();
+    check_disc_drawing();
     check_angles();
     check_hints();
     check_drawing();

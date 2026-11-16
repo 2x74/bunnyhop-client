@@ -586,13 +586,14 @@ inline Json patch_settings(const Json &current, const Json &patch, bool switch_l
                 throw std::runtime_error("Unknown setting choice: " + key);
         } else if (key == "hudHiddenKeeps" || key == "hudPlace" || key == "hudStrafeTrainerStyle"
                    || key == "autoRestartWhen" || key == "autoRestartAction" || key == "ghostCompare") {
-            const auto choices = key == "hudHiddenKeeps" ? std::set<std::string>{"speedKeys", "nothing"}
-                                 : key == "ghostCompare" ? std::set<std::string>{"auto", "pb", "wr", "custom"}
-                                 : key == "hudPlace"     ? std::set<std::string>{"off", "place", "top"}
-                                 : key == "hudStrafeTrainerStyle"
-                                         ? std::set<std::string>{"classic", "detailed", "minimal", "bar", "gauge"}
-                                 : key == "autoRestartWhen" ? std::set<std::string>{"off", "pb", "wr", "ghost"}
-                                                            : std::set<std::string>{"restart", "sound"};
+            const auto choices =
+                    key == "hudHiddenKeeps" ? std::set<std::string>{"speedKeys", "nothing"}
+                    : key == "ghostCompare" ? std::set<std::string>{"auto", "pb", "wr", "custom"}
+                    : key == "hudPlace"     ? std::set<std::string>{"off", "place", "top"}
+                    : key == "hudStrafeTrainerStyle"
+                            ? std::set<std::string>{"classic", "detailed", "minimal", "bar", "gauge", "arc"}
+                    : key == "autoRestartWhen" ? std::set<std::string>{"off", "pb", "wr", "ghost"}
+                                               : std::set<std::string>{"restart", "sound"};
             if (!v.is_string() || !choices.contains(v.get<std::string>()))
                 throw std::runtime_error("Unknown setting choice: " + key);
         } else if (key == "hudKeysPressed" || key == "hudKeysIdle" || key == "hudStrafeTrainerColor"

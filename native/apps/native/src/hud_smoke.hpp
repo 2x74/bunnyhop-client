@@ -314,7 +314,8 @@ inline void draw_trainer_bar_colors(NativeHud &hud, int width, int height) {
     hud.overlay_end(width, height);
 }
 
-// The five strafe trainer looks side by side, a row per reading: nothing yet, slow, on pace, fast and far too fast.
+// The six strafe trainer looks side by side, a row per reading: nothing yet, 50%, 100%, 150% and 200%, the
+// website's trainer-gauge-shots states.
 inline void draw_trainer_looks(NativeHud &hud, int width, int height) {
     struct Row {
         std::optional<double> pace;
@@ -324,12 +325,12 @@ inline void draw_trainer_looks(NativeHud &hud, int width, int height) {
 
     constexpr std::array rows = {
             Row{std::nullopt, 0, 0},
-            Row{70, .5, 1},
+            Row{50, .5, 1},
             Row{100, .97, -1},
-            Row{153, .5, 1},
-            Row{190, -1, -1},
+            Row{150, .5, 1},
+            Row{200, -1, -1},
     };
-    constexpr std::array looks = {"classic", "detailed", "gauge", "minimal", "bar"};
+    constexpr std::array looks = {"classic", "detailed", "minimal", "bar", "arc", "gauge"};
     const float column_width = HudGeometry(width, height, 100).width / float(looks.size());
     constexpr float row_height = 105;
     const auto palette = semantic_palette("off");
@@ -347,6 +348,7 @@ inline void draw_trainer_looks(NativeHud &hud, int width, int height) {
             reading.bar_side = row.side;
             if (row.pace) reading.gain = row.gain;
             if (!row.pace) reading.hint = StrafeHint::less_deadtime;
+            reading.gauge = row.pace.value_or(0);
             draw_trainer(hud, column_width * (float(column) + .5f), y, reading, look, true, palette);
             y += row_height;
         }

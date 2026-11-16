@@ -14,6 +14,18 @@ inline constexpr double trainer_pace_max = 200;
 inline constexpr double trainer_target_pace = 100;
 inline constexpr double trainer_min_speed = 100;
 inline constexpr double trainer_turn_deadzone_degrees = .001;
+// The Gauge's needle eases towards each tick's pace with this half-life in ticks per Smoothing tick (Smoothing 8, the
+// default, is a 4-tick half-life), holds through a strafe switch and a hop's ground tick for at most gauge_hold_ticks,
+// and rests below gauge_floor. The website's hud/strafe-trainer.ts GAUGE_*.
+inline constexpr double gauge_half_life = .5;
+inline constexpr unsigned gauge_hold_ticks = 8;
+inline constexpr double gauge_floor = .05;
+
+// Share of the gap to this tick's pace the needle closes per tick (gaugeEase).
+inline double gauge_ease(unsigned smoothing) {
+    return 1 - std::pow(.5, 1 / std::max(.5, double(smoothing) * gauge_half_life));
+}
+
 inline constexpr unsigned trainer_landing_min_ticks = 5;
 inline constexpr unsigned trainer_ok_span = 3;
 inline constexpr unsigned trainer_max_smoothing = 50;
@@ -60,6 +72,8 @@ struct StrafeReading {
     std::optional<double> last_jump;
     // This tick's gain as a share of the best possible, the Bar's colour. Empty when it can't be judged.
     std::optional<double> gain;
+    // The Gauge look's needle (0 when it rests). Empty in previews, where the Gauge shows the pace.
+    std::optional<double> gauge;
 };
 
 struct TrainerSample {
@@ -172,6 +186,8 @@ class StrafeTrainer {
     double bar_sum_ = 0;
     int bar_side_ = 0;
     unsigned ground_ticks_ = 0;
+    double needle_ = 0;
+    unsigned needle_held_ = 0;
 
     void clear() {
         size_ = 0;
@@ -313,6 +329,36 @@ class StrafeTrainer {
         reading.bar_side = bar_side_;
     }
 
+    // The Gauge's needle: towards this tick's pace, towards 0 with nothing to judge, held through ticks turning
+    // against the keys (a strafe switch) and the one ground tick of a hop.
+    void feed_gauge(const SsjCmd &command, const TrainerSample &sample, double previous_yaw, bool continuous) {
+        if (!samples_finite(command, sample) || !std::isfinite(command.forward) || sample.interrupted || !continuous
+            || !std::isfinite(previous_yaw) || !supported_style(sample.style)) {
+            needle_ = 0;
+            needle_held_ = 0;
+            reading.gauge = 0;
+            return;
+        }
+        const double push = air_push(sample);
+        const bool active = !sample.grounded && !sample.on_ladder && sample.speed >= trainer_min_speed
+                            && (command.side != 0 || command.forward != 0) && push > 0;
+        const double turn = turn_degrees(command.yaw, previous_yaw);
+        const int key_side = (command.side > 0) - (command.side < 0);
+        const bool against =
+                key_side && std::abs(turn) > trainer_turn_deadzone_degrees && ((turn > 0) - (turn < 0)) == key_side;
+        std::optional<double> target;
+        if (active && !against)
+            target = raw_pace(turn, push, sample.speed);
+        else if (!active && ground_ticks_ != 1)
+            target = 0;
+        if (target)
+            needle_held_ = 0;
+        else if (++needle_held_ > gauge_hold_ticks)
+            target = 0;
+        if (target) needle_ += (*target - needle_) * gauge_ease(smoothing_);
+        reading.gauge = needle_ < gauge_floor ? 0 : needle_;
+    }
+
 public:
     static constexpr unsigned max_smoothing = trainer_max_smoothing;
     static constexpr uint32_t left_bit = ssj_in_moveleft, right_bit = ssj_in_moveright;
@@ -345,6 +391,7 @@ public:
         ground_ticks_ = sample.grounded ? ground_ticks_ + 1 : 0;
         feed_pace(command, sample, previous_yaw, continuous);
         feed_bar(command, sample, previous_yaw, continuous);
+        feed_gauge(command, sample, previous_yaw, continuous);
         reading.last_jump = last_jump_;
     }
 };
