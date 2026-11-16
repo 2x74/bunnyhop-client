@@ -1,10 +1,12 @@
-//! Timing policy 1, ported from apps/web/src/run-timing.ts. Use f64 operations in
-//! the same order as JavaScript, quantise phases, then round the score once.
+//! Timing policy 2, ported from apps/web/src/run-timing.ts and timer.ts. Use f64
+//! operations in the same order as JavaScript, quantise phases, then round the
+//! score once. Policy 2 times a finish by a trigger_teleport into the end zone
+//! where the player first touched that trigger.
 use super::{BhState, BhTimingSegmentV2, BhZone};
 use bunnyhop_core::Game;
 use serde_json::{Value, json};
 
-pub const POLICY: u32 = 1;
+pub const POLICY: u32 = 2;
 pub const FRACTION_UNITS: u32 = 1_000_000;
 const TIMER_HALF_WIDTH: f64 = 16.0;
 const TIMER_HEIGHT: f64 = 62.0;
@@ -199,9 +201,9 @@ pub fn measure(
     } else {
         state.crouched != 0
     };
-    let teleported = state.events
-        & (bunnyhop_core::game::EVENT_TELEPORTED | bunnyhop_core::game::EVENT_RESPAWNED)
-        != 0;
+    let moved_events = state.events
+        & (bunnyhop_core::game::EVENT_TELEPORTED | bunnyhop_core::game::EVENT_RESPAWNED);
+    let teleported = moved_events != 0;
     if !entry {
         if zones
             .iter()
@@ -222,7 +224,17 @@ pub fn measure(
             teleported
         })
     {
-        return Crossing::boundary(FRACTION_UNITS);
+        // A trigger_teleport in this tick's touch pass sent the player in: where they first touched it. Any
+        // other teleport or a respawn finishes at the tick's end.
+        let by_trigger = touch && moved_events == bunnyhop_core::game::EVENT_TELEPORTED;
+        let touched = by_trigger.then(|| game.and_then(Game::timing_teleport)).flatten();
+        return match touched.map(|t| (t.phase, t.chord)) {
+            Some((Ok(phase), chord)) => Crossing {
+                fraction: quantize_phase(phase),
+                method: if chord { "teleport-chord" } else { "teleport" },
+            },
+            _ => Crossing::boundary(FRACTION_UNITS),
+        };
     }
     let mut segments = [BhTimingSegmentV2::default(); MAX_SEGMENTS];
     let path = game

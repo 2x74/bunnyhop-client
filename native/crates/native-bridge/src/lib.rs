@@ -60,6 +60,8 @@ mod run;
 mod run_timing;
 #[cfg(test)]
 mod run_timing_tests;
+#[cfg(test)]
+mod teleport_timing_tests;
 mod styles;
 #[cfg(test)]
 mod backwards_tests;
