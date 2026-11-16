@@ -46,8 +46,7 @@ struct Recorder {
 
     void ribbon(
             const native_render::Vec3 &, const native_render::Vec3 &, float, const std::array<float, 4> &, const float *
-    ) {
-    }
+    ) {}
 };
 
 void check(bool value, const std::string &label) {

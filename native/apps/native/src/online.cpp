@@ -414,9 +414,8 @@ struct MapTransfer {
                 if (file_matches(destination, object.sha, object.size)) continue;
                 if (!source) {
                     const auto route = "/content/" + object.sha;
-                    source = asset(
-                            cache, object.sha, route, object.size, cancel, transfer, offline, fetch, &downloaded
-                    );
+                    source =
+                            asset(cache, object.sha, route, object.size, cancel, transfer, offline, fetch, &downloaded);
                 }
                 if (std::filesystem::file_size(*source) != object.size)
                     throw std::runtime_error("Content size mismatch");

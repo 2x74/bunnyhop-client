@@ -192,16 +192,14 @@ int main() {
     many_files["materials/many/copy.vtf"] = many_files["materials/many/7.vtf"];
     const auto many_manifest = encode({{"mapSha256", sha}, {"files", many_files}});
     std::atomic_int content_requests = 0;
-    native::DownloadFetch many_fetch = [&](const std::string &route,
-                                           size_t,
-                                           const std::atomic_bool *,
-                                           const native::LoadProgressCallback &) {
-        if (route == "/api/maps/bhop_test") return detail;
-        if (route == "/content-manifests/" + sha + ".json") return many_manifest;
-        if (route == "/api/bsp/" + sha + ".bsp") return bsp;
-        ++content_requests;
-        return objects.at(route.substr(std::string("/content/").size()));
-    };
+    native::DownloadFetch many_fetch =
+            [&](const std::string &route, size_t, const std::atomic_bool *, const native::LoadProgressCallback &) {
+                if (route == "/api/maps/bhop_test") return detail;
+                if (route == "/content-manifests/" + sha + ".json") return many_manifest;
+                if (route == "/api/bsp/" + sha + ".bsp") return bsp;
+                ++content_requests;
+                return objects.at(route.substr(std::string("/content/").size()));
+            };
     native::LoadProgress last;
     const auto many = native::download_map(
             "bhop_test", cache, [](const std::string &) {}, nullptr, {}, [&](const auto &p) { last = p; }, many_fetch
