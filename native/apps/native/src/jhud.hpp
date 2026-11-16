@@ -91,6 +91,7 @@ public:
             if (ssj_.jump == 0) clear_jss();
             return std::nullopt;
         }
+        last_ssj_ = *report;
         JhudReport result;
         result.jump = report->jump;
         result.speed = report->speed;
@@ -100,6 +101,9 @@ public:
         clear_jss();
         return result;
     }
+
+    /** The full every-jump report of the jump the last tick() returned (spectators get it, spectate_input.hpp). */
+    const SsjReport &last_ssj() const { return last_ssj_; }
 
 private:
     static constexpr double half_turn_degrees = 180;
@@ -120,6 +124,7 @@ private:
     }
 
     SsjTracker ssj_{SsjMode::every};
+    SsjReport last_ssj_;
     double yaw_ = std::numeric_limits<double>::quiet_NaN();
     double jss_sum_ = 0;
     unsigned jss_ticks_ = 0;

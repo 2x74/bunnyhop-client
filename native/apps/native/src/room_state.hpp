@@ -2,6 +2,7 @@
 #include "bunnyhop_native.h"
 #include "hud_scoreboard.hpp"
 #include "room_styles.hpp"
+#include "spectate_input.hpp"
 #include "render_shaders.hpp"
 #include <nlohmann/json.hpp>
 #include <algorithm>
@@ -496,8 +497,22 @@ public:
         return "";
     }
 
+    // The watched player's HUD feed (spectate_input.hpp), from the snapshots' EXT_INPUT for that slot.
+    spectate_input::Feed watched_feed;
+
+    void watched_inputs(const nlohmann::json &snapshot, double now) {
+        const auto inputs = snapshot.find("inputs");
+        if (!spectator_target || inputs == snapshot.end() || !inputs->is_array()) return;
+        for (const auto &entry : *inputs) {
+            if (!entry.is_object() || json_value(entry, "slot", 256u) != *spectator_target) continue;
+            if (const auto block = entry.find("input"); block != entry.end())
+                if (const auto decoded = spectate_input::from_json(*block)) watched_feed.push(*decoded, now);
+        }
+    }
+
     void snapshot(const nlohmann::json &message, double now) {
         if (closed_ || message.at("generation") != generation || message.at("id") != id) return;
+        watched_inputs(message.at("snapshot"), now);
         const auto &blocks = message.at("snapshot").at("blocks");
         if (!blocks.is_array() || blocks.size() > 64) throw std::runtime_error("Invalid room snapshot");
         for (const auto &block : blocks) {
@@ -743,6 +758,18 @@ public:
         const auto left = std::max(0., std::ceil((change["at"].get<double>() - clock_offset_ms - epoch_ms) / 1000));
         return "Changing to " + json_value(change, "map", std::string()) + " in "
                + std::to_string(int(std::min(left, 999.))) + "s";
+    }
+
+    // The room takes input blocks (its welcome's room.inputs) and someone spectates you: send your HUD feed.
+    bool inputs_wanted() const {
+        if (!room_info.is_object() || json_value(room_info, "inputs", 0) != 1 || self >= 256) return false;
+        for (const auto &[slot, peer] : peers) {
+            const auto spec = peer.info.find("spec");
+            if (slot != self && spec != peer.info.end() && spec->is_number_integer()
+                && spec->get<int64_t>() == int64_t(self))
+                return true;
+        }
+        return false;
     }
 
     std::optional<native_render::Actor> spectated(double now) {

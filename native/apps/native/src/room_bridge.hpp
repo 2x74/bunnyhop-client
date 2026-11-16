@@ -3,6 +3,7 @@
 #include "room_modes.hpp"
 #include "discord_rpc.hpp"
 #include "room_pose.hpp"
+#include "spectate_input.hpp"
 #include "voice_chat.hpp"
 #include <chrono>
 #include <functional>
@@ -58,6 +59,14 @@ public:
             const BhWeaponReport &weapon,
             const std::string &active_style
     );
+
+    // This tick's HUD feed, after publish_tick: kept while someone watches you (spectate_input.hpp).
+    void record_input(const spectate_input::Tick &tick, const spectate_input::Settings &settings) {
+        inputs.record(tick, poses_.net_tick(), settings);
+    }
+
+    spectate_input::Recorder inputs;
+
     // Once a frame, after its ticks: hands the batches that came due to the room.
     void send_poses(MenuWebView *menu, bool menu_ready, const std::string &map_id);
 

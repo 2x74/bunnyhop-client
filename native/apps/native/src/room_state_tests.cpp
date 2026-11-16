@@ -363,7 +363,51 @@ void test_leaving_ends_spectating_them() {
         assert(board.rows[i].spectator == (board.rows[i].slot == 3));
 }
 
+// A room that takes input blocks wants yours while someone spectates you; a watched player's blocks feed your HUD.
+void test_spectator_inputs() {
+    const auto room = std::make_unique<native::RoomState>();
+    auto welcome = easy_welcome();
+    welcome["players"] = J::array({{{"slot", 0}, {"name", "me"}}, {{"slot", 1}, {"name", "watcher"}, {"spec", 0}}});
+    room->event(envelope(welcome));
+    assert(!room->inputs_wanted());  // an older room: no room.inputs
+    welcome["room"]["inputs"] = 1;
+    room->event(envelope(welcome));
+    assert(room->inputs_wanted());
+    room->event(envelope({{"t", "player"}, {"slot", 1}, {"patch", {{"spec", nullptr}}}}));
+    assert(!room->inputs_wanted());
+    room->event(envelope({{"t", "player"}, {"slot", 0}, {"patch", {{"spec", 1}}}}));
+    const J tick = {
+            {"tick", 7},
+            {"keys", 1},
+            {"forward", 450},
+            {"side", 0},
+            {"gain", 0},
+            {"state", 0},
+            {"yaw", 0},
+            {"vx", 0},
+            {"vy", 0}
+    };
+    const J block = {
+            {"tickInterval", .01},
+            {"maxSpeed", 250},
+            {"airAccelerate", 1000},
+            {"ticks", J::array({tick})},
+            {"reports", J::array()}
+    };
+    const J snapshot = {
+            {"serverTime", 1},
+            {"blocks", J::array()},
+            {"inputs", J::array({{{"slot", 2}, {"input", block}}, {{"slot", 1}, {"input", block}}})}
+    };
+    room->snapshot({{"generation", 1}, {"id", "test"}, {"snapshot", snapshot}}, 10);
+    assert(room->watched_feed.live(10.5));
+    unsigned played = 0;
+    room->watched_feed.take(7, [&](const auto &, const auto &) { ++played; }, [](const auto &) {});
+    assert(played == 1);  // slot 2's block isn't the watched player's
+}
+
 int main() {
+    test_spectator_inputs();
     test_leaving_ends_spectating_them();
     test_closing_a_replay_returns_to_the_room_map();
     test_vote_shows_tiers();

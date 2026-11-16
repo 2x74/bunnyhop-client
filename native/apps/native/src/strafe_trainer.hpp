@@ -355,6 +355,8 @@ public:
 struct MovementFeedback {
     SsjTracker ssj;
     JhudTracker jhud;
+    // Every 6th jump whatever your own Jumps setting, for spectators whose setting differs (spectate_input.hpp).
+    SsjTracker ssj_sixth = every_sixth_tracker();
     std::string ssj_line;
     std::optional<float> ssj_gain;
     bool ssj_was_in_start = false, ssj_was_noclip = false;
@@ -363,8 +365,16 @@ struct MovementFeedback {
     unsigned strafe_ground_ticks = 0, history_ground_ticks = 0;
     bool incomplete_history = false;
 
+    static SsjTracker every_sixth_tracker() {
+        constexpr unsigned sixth = 6;
+        SsjTracker tracker(SsjMode::every_nth);
+        tracker.set_interval(sixth);
+        return tracker;
+    }
+
     void reset(bool in_start = false, bool noclip = false, bool incomplete = false) {
         ssj.reset();
+        ssj_sixth.reset();
         jhud.reset();
         ssj_line.clear();
         ssj_gain.reset();

@@ -40,6 +40,7 @@ double epoch_ms() {
 void HudFrame::draw() const {
     BhCmd shown{};
     bh_last_command(core, &shown);
+    if (watched_command) shown = *watched_command;
     BhWeaponReport weapon{};
     bh_weapon_report(core, &weapon);
     if (!visible) return;

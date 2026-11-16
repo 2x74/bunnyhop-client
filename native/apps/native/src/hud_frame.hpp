@@ -74,6 +74,8 @@ struct HudFrame {
     bool reduced_motion = false;
     // Who's talking in voice chat, and your line when the key did nothing.
     const voice::VoiceChat *voice_chat = nullptr;
+    // Spectating a player whose HUD feed is live: the keys row shows their command (spectate_hud.hpp).
+    const BhCmd *watched_command = nullptr;
 
     void draw() const;
 

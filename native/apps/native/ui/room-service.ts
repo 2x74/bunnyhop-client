@@ -7,6 +7,7 @@ import {
   MAX_SAMPLES,
   CLOSE,
   type ClientMsg,
+  type NetInput,
   type NetMeta,
   type MapInfo,
   type NetSample,
@@ -27,6 +28,7 @@ import { roomStyleId } from "./room-styles";
 import type { RoomHandlers, RoomStatus } from "../../web/src/net/room";
 import type { MenuMessage } from "./bridge";
 import { VoiceRelay } from "./voice-relay";
+import { poseInput, snapshotInputsValid } from "./room-input";
 /**
  * (0.0.36) The attempt turned into practice or back: the room patches your roster's `practice`, and the others see a
  * practice tag instead of a time. Older rooms drop it.
@@ -36,7 +38,7 @@ export interface RoomTransport {
   rtt?: number;
   send(message: ClientMsg | PracticeMsg): void;
   pushSample(sample: NetSample): void;
-  flushSamples(meta: Omit<NetMeta, "ping">, weapon?: number | null, silenced?: boolean): void;
+  flushSamples(meta: Omit<NetMeta, "ping">, weapon?: number | null, silenced?: boolean, input?: NetInput | null): void;
   close(code?: number): void;
   /** Voice chat (voice-relay.ts): VOICE_DOWN frames in, VOICE_UP packets out. */
   onVoice?: ((buf: ArrayBuffer) => void) | null;
@@ -134,7 +136,8 @@ export function validSnapshot(value: Snapshot): boolean {
         (!block.meta || metaValid(block.meta)) &&
         (block.weapon === undefined || uint(block.weapon, 25)) &&
         (block.silenced === undefined || typeof block.silenced === "boolean"),
-    )
+    ) &&
+    snapshotInputsValid(value.inputs)
   );
 }
 const person = (p: RosterPlayer): boolean =>
@@ -537,7 +540,9 @@ export class NativeRoomService {
     (this.view.metaAt ??= {})[you] = this.now();
     this.syncPractice();
     const weapon = uint(pose.weapon, 25) ? pose.weapon : null;
-    this.transport.flushSamples(meta, weapon, pose.silenced === true);
+    // Older rooms refuse a state message with an input block: only a room whose welcome says so gets one.
+    const input = this.view.room?.inputs === 1 ? poseInput(pose.input) : null;
+    this.transport.flushSamples(meta, weapon, pose.silenced === true, input);
     // The page timer that also drives the countdown cues can be throttled while the page is hidden.
     this.audioCountdown();
     return true;
@@ -578,7 +583,13 @@ export class NativeRoomService {
         this.view.metas[String(block.slot)] = block.meta;
         (this.view.metaAt ??= {})[String(block.slot)] = this.now();
       }
-    this.pendingSnapshot = { serverTime: snapshot.serverTime, blocks: [...blocks.values()].slice(0, 64) };
+    // Input blocks are a stream, not a state: every one goes through, the newest kept if there are too many.
+    const inputs = [...(this.pendingSnapshot?.inputs ?? []), ...(snapshot.inputs ?? [])].slice(-64);
+    this.pendingSnapshot = {
+      serverTime: snapshot.serverTime,
+      blocks: [...blocks.values()].slice(0, 64),
+      ...(inputs.length ? { inputs } : {}),
+    };
     this.flushSnapshot();
   }
   private event(event: Record<string, unknown>): void {

@@ -75,6 +75,7 @@
 #include "app_identity.hpp"
 #include "room_state.hpp"
 #include "room_bridge.hpp"
+#include "spectate_hud.hpp"
 #include "voice_load.hpp"
 #include "room_modes.hpp"
 #include "tutorial_runner.hpp"
@@ -427,6 +428,7 @@ int run(const native::Options &opt) {
     native::InputBackend input_backend(video_driver ? video_driver : "");
     native::Chat chat;
     native::RestartGuard restart_guard;
+    native::WatchedHud watched_hud;
     native::AutoRestart auto_restart;
     native::RacePicker race_picker;
     native::StartPoints start_points;
@@ -554,6 +556,7 @@ int run(const native::Options &opt) {
     if (automatic_updates) updater.check_if_due();
 
     auto reset_feedback = [&](bool incomplete_history = false, bool keep_jump_stats = false, bool moved = false) {
+        room_bridge.inputs.reset();
         if (moved) hud.jhud.moved(curr.tick);
         hud.reset_history(keep_jump_stats || moved, moved);
         ghost_compare.restart();
@@ -3446,6 +3449,7 @@ int run(const native::Options &opt) {
         if (spectator != observed_spectator) {
             native::announce_watching(chat, room, observed_spectator, spectator, input_timeline.binds(), epoch_ms());
             hud.clear_speed_graph();
+            watched_hud.restart(hud, feedback, room.watched_feed);
             if (spectator) {
                 bh_record_end(core.get());
                 recorder.clear(true);
@@ -3697,6 +3701,7 @@ int run(const native::Options &opt) {
                     recorder.diagnostics.start(started, input_timeline.queue(), input_timeline.timed());
                 }
             }
+            native::HudFeedReports feed_reports;
             {
                 // Jump stats. |prev| is the state before this tick, which is what the
                 // plugin reads in OnPlayerRunCmd, and curr.events carries the jump.
@@ -3720,8 +3725,12 @@ int run(const native::Options &opt) {
                         hud.ssj_report(*report);
                         feedback.ssj_gain = report->gain;
                     }
-                    if (const auto report = feedback.jhud.tick(pre, ssj_cmd, info))
+                    if (const auto report = feedback.jhud.tick(pre, ssj_cmd, info)) {
                         hud.jhud.show(*report, curr.tick, step_dt);
+                        feed_reports.every_jump = native::spectate_input::Jump{feedback.jhud.last_ssj(), report->jss};
+                    }
+                    if (const auto report = feedback.ssj_sixth.tick(pre, ssj_cmd, info))
+                        feed_reports.sixth_jump = native::spectate_input::Jump{*report, {}};
                 }
                 hud.jhud.expire(curr.tick);
                 if (timing.update_flags & 1) ghost_compare.restart();  // started
@@ -3771,6 +3780,21 @@ int run(const native::Options &opt) {
                     timing_before.in_start != 0,
                     practice.noclip || flight_tick
             );
+            feed_reports.start_pre = std::exchange(hud.movement.start_pre_change, std::nullopt);
+            if (!viewer.active) {
+                BhSettings feed_settings{};
+                bh_style_settings(active_style.c_str(), &feed_settings);
+                native::send_hud_feed(
+                        room_bridge,
+                        cmd,
+                        curr,
+                        native::air_speed_gain(core.get()),
+                        practice.noclip || flight_tick,
+                        feed_settings,
+                        step_dt,
+                        feed_reports
+                );
+            }
             if (const auto pitch =
                         native::trainer_jump_sound(hud.preferences(), feedback.strafe_trainer.take_landing()))
                 audio.play("count_tick", 1.6f, *pitch);
@@ -4016,6 +4040,12 @@ int run(const native::Options &opt) {
                     state.player.crouched = !!(target->frame.flags & 1);
                     // The speed graph draws the watched player's speed, a bar per tick of theirs, as on the website.
                     hud.tick(state.player);
+                    BhRunState watched_run{};
+                    std::string watched_style;
+                    room.spectator_run(watched_run, watched_style, *spectator, steady_seconds, epoch_ms());
+                    watched_hud.frame(
+                            hud, feedback, room.watched_feed, target->frame.tick, watched_style, steady_seconds
+                    );
                     camera_input.set_angles(target->frame.pitch, target->frame.yaw);
                     renderer->set_cosmetics(target->outfit, target->loadout);
                     renderer->set_player_glow(target->playerGlow);
@@ -4332,7 +4362,8 @@ int run(const native::Options &opt) {
                     menu_cursor.pointer(),
                     &numbered_menus.copy_start,
                     menu_reduced_motion,
-                    &room_bridge.voice()
+                    &room_bridge.voice(),
+                    spectator ? watched_hud.command(room.watched_feed, steady_seconds) : nullptr
             }
                     .draw();
         }
