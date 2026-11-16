@@ -1609,6 +1609,9 @@ public:
         actorHolds.erase(id);
     }
 
+    // A switchable map light went on or off: hands, weapons and bunnies take their new light at once.
+    void relight_models() { modelLight.relight(); }
+
     // Where an actor's gun muzzle was last drawn (world space), while it holds a gun.
     std::optional<std::array<float, 3>> actor_muzzle(const std::string &id) const {
         const auto found = actorHolds.find(id);

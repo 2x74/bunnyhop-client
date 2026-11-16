@@ -1671,6 +1671,35 @@ pub unsafe extern "C" fn bh_light_cube(ctx: *const BhContext, x: f32, y: f32, z:
     }
 }
 
+/// `bh_light_cube`, and the cube with every switchable light on into `full` (18 floats; the same cube when nothing is
+/// waiting on a switch). Returns 2 when some light at the point still waits on a switch, 1 when none does, 0 when
+/// there is no light (as `bh_light_cube`).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bh_light_cubes(
+    ctx: *const BhContext,
+    x: f32,
+    y: f32,
+    z: f32,
+    out: *mut f32,
+    full: *mut f32,
+) -> c_int {
+    unsafe {
+        read(ctx, 0, |c| {
+            let Some(m) = &c.map else { return 0 };
+            let Some((now, on)) = m.mesh.lighting.as_ref().and_then(|l| l.cubes([x, y, z])) else { return 0 };
+            if out.is_null() || full.is_null() {
+                return 0;
+            }
+            let waits = on.is_some_and(|on| on != now);
+            for (i, (value, lit)) in now.iter().flatten().zip(on.unwrap_or(now).iter().flatten()).enumerate() {
+                *out.add(i) = *value;
+                *full.add(i) = *lit;
+            }
+            if waits { 2 } else { 1 }
+        })
+    }
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bh_sky_name(ctx: *mut BhContext, count: *mut usize) -> *const c_char {
     let mut result = ptr::null();

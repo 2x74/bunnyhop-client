@@ -347,6 +347,9 @@ const BhMaterialLook *bh_material_looks(const BhContext *ctx, size_t *count);
 int bh_world_fog(BhContext *ctx, BhWorldFog *out);
 /* The map's light at a point: linear RGB for +x, -x, +y, -y, +z, -z into out[18]; 0 where there is none. */
 int bh_light_cube(const BhContext *ctx, float x, float y, float z, float *out);
+/* bh_light_cube plus the cube with every switchable light on (18 floats into `full`): 2 when light at the point still
+ * waits on a switch, 1 when it doesn't, 0 when there is no light. */
+int bh_light_cubes(const BhContext *ctx, float x, float y, float z, float *out, float *full);
 /* Per prop vertex (bh_prop_vertices order), the map's light as linear RGB; -1 where there is none. Empty on maps
  * drawn fullbright. */
 const float *bh_prop_light(const BhContext *ctx, size_t *float_count);

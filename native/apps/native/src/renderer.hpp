@@ -3758,6 +3758,9 @@ public:
         phaseStart = profile_now();
         if (lightmapChanged > 0) {
             if (profiling) frameProfile.atlasUpdateBytes = changedLightmap.byte_count;
+            // Models and animated props take the switched lights too (core light_cube styles).
+            if (viewmodel) viewmodel->relight_models();
+            propCubes.relight();
             gl.ActiveTexture(GL_TEXTURE1);
             gl.BindTexture(GL_TEXTURE_2D, lightmap);
             gl.TexImage2D(

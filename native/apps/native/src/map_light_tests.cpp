@@ -52,7 +52,31 @@ void test_fog_color() {
 }
 }  // namespace
 
+// Where light waits on a switch (web test/model-light.test.ts): the same cube with every light on changes nothing,
+// a dark room that a switch will light lets the floor give way, and once lit it is like any room that bright.
+void test_switched_light() {
+    using native_render::ModelLightMode;
+    const auto cube_of = [](float value) {
+        std::array<float, 18> cube{};
+        cube.fill(value);
+        return cube;
+    };
+    for (const float value : {0.f, .01f, .05f, .3f, 2.f})
+        for (const auto mode : {ModelLightMode::subtle, ModelLightMode::full}) {
+            const auto cube = cube_of(value);
+            assert(native_render::model_light_of(cube, mode, 1, &cube) == native_render::model_light_of(cube, mode, 1));
+        }
+    const auto dark = cube_of(.001f), lit = cube_of(.5f);
+    const auto waiting = native_render::model_light_of(dark, ModelLightMode::subtle, 1, &lit);
+    const auto plain = native_render::model_light_of(dark, ModelLightMode::subtle, 1);
+    assert(waiting[0] + 1 < .1f);
+    assert(std::abs(plain[0] + 1 - .6f) < 1e-6f);
+    assert(native_render::model_light_of(lit, ModelLightMode::full, 1, &lit)
+           == native_render::model_light_of(lit, ModelLightMode::full, 1));
+}
+
 int main() {
+    test_switched_light();
     test_model_light();
     test_ldr_look();
     test_fog_color();
