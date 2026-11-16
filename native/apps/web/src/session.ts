@@ -37,7 +37,7 @@ import type { AutoRestartRun, AutoRestartWhen } from "./auto-restart";
 import { currentRace } from "./net/presence";
 import { openReplayViewer } from "./viewer/request";
 import { mapTier } from "./ui/maps";
-import { announce, announcerPolicy, runSounds, sfx } from "./audio";
+import { announce, announcerPolicy, perfectSounds, runSounds } from "./audio";
 import { restartTarget, withRestartNames } from "./restart";
 import { copiedMessage, runStartPoint } from "./copy-start";
 import { checkStartPoint, clearPracticeSpawns, clearStartPoint, loadStartPoint, resolveStartPoint, savedMessage, saveStartPoint, type StartPoint } from "./start-point";
@@ -669,10 +669,12 @@ export class RunSession {
     if (update.started || update.restarted) announcerPolicy.resetAttempt();
     const measuredHop = t.measuredJumps > measured ? t.perfectJumps > perfect : null;
     const scroll = this.runStyle === "scroll" || this.runStyle === "legit";
-    const broken = this.unranked || flying || state.onLadder || !!(events & (EVENT_TELEPORTED | EVENT_RESPAWNED)) || t.status !== "running";
+    const jumpBroken = flying || state.onLadder || !!(events & (EVENT_TELEPORTED | EVENT_RESPAWNED)) || t.status !== "running";
+    const broken = this.unranked || jumpBroken;
     const cue = announcerPolicy.tick(prefs.get().audio.announcer, Math.sqrt(state.velocity[0] ** 2 + state.velocity[1] ** 2), scroll ? measuredHop : null, state.grounded, t.tickInterval, broken);
     if (cue && !broken) announce(cue);
-    if (scroll && measuredHop && !broken && prefs.get().audio.perfectTick) sfx("split", 0.12, 1.5);
+    // Perfect jump sound, on the tick that judged the jump; practice too (its jumps are timed all the same).
+    perfectSounds.tick(scroll, measuredHop, state.grounded, t.tickInterval, jumpBroken);
     if (update.started) this.runMouse.feed(mouseFromPrefs(prefs.get()), false);
     this.ssj.feed(cmd, state, events, flying ? { inStart: false, time: null, noclip: true } : ssjAt);
     if (flying) this.movementStats.reset(state);

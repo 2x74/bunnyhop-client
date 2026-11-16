@@ -4,7 +4,9 @@
 import { registerSettingsSection } from "../ui/settings-registry";
 import { DEFAULT_PREFS, keyLabel, prefs, type MusicMode, type AnnouncerLine, type Prefs } from "../ui/settings";
 import { h } from "../ui/dom";
-import { announce, announcerAvailable, classic, engine, music, nextTrack, sfx } from "./index";
+import { announce, announcerAvailable, classic, engine, keySounds, music, nextTrack, perfectSounds, sfx } from "./index";
+import { PERFECT_SOUND_SETS, perfectSoundId, STREAK_STEP, STREAK_TOP, streakRate, type PerfectSoundSet, type StreakLength } from "./perfect-policy";
+import { KEY_RATE_LEFT, KEY_RATE_RIGHT, KEY_SOUND_SETS, keySoundId, type KeySoundKeys, type KeySoundSet } from "./keysound-policy";
 import { trackName } from "./now-playing";
 import type { SfxId } from "./catalog";
 import { voiceGroup } from "../voice/settings";
@@ -47,6 +49,20 @@ export function registerAudioSettings(): void {
       };
       paint();
       const poll = window.setInterval(() => (playing.isConnected ? paint() : clearInterval(poll)), 1000);
+      // A left press then a right one, after the menu's own click.
+      const keyPreview = () => {
+        const id = keySoundId(P().audio.keySounds.set);
+        window.setTimeout(() => keySounds.play(id, KEY_RATE_LEFT), 140);
+        window.setTimeout(() => keySounds.play(id, KEY_RATE_RIGHT), 340);
+      };
+      const keysOn = () => P().audio.keySounds.enabled;
+      // A streak up to its top, quicker than real hops (one perfect jump without the rise), after the menu's own click.
+      const perfPreview = () => {
+        const s = P().audio.perfectSound;
+        const n = s.streak ? STREAK_TOP[s.length] / STREAK_STEP + 2 : 1;
+        for (let i = 1; i <= n; i++) window.setTimeout(() => perfectSounds.play(perfectSoundId(s.set), s.streak ? streakRate(i, s.length, s.set) : 1), 140 + (i - 1) * 170);
+      };
+      const perfOn = () => P().audio.perfectTick;
       const test = (label: string, ids: SfxId[]) => ui.button(label, () => ids.forEach((id, i) => window.setTimeout(() => sfx(id), i * 320)));
       return {
         columns: [
@@ -89,6 +105,55 @@ export function registerAudioSettings(): void {
                     : "Original CS:S footsteps, landings, water and knife sounds. Needs the hosted CS:S content, which isn't available here yet: our own sounds play until it is.",
                 keywords: "counter-strike source valve",
               }),
+              ui.toggle("Key sounds", keysOn, (v) => (up((p) => (p.audio.keySounds.enabled = v)), v && keyPreview()), {
+                desc: "A short sound as a strafe key goes down, so you hear your strafe rhythm. Left plays a little lower than right. !keysounds turns them on and off.",
+                keywords: "keysounds key sound click keyboard strafe rhythm press",
+              }),
+              ui.segmented<KeySoundSet>("Key sound", () => P().audio.keySounds.set, (v) => (up((p) => (p.audio.keySounds.set = v)), keyPreview()), KEY_SOUND_SETS, {
+                when: keysOn,
+                desc: "Thock is soft and low, Click crisp and light, Wood a dry tick and Blip a soft synth tone.",
+                keywords: "keysounds key sound thock click wood blip",
+              }),
+              (() => {
+                const r = ui.range("Key sound volume", () => P().audio.keySounds.volume, (v) => up((p) => (p.audio.keySounds.volume = v)), { ...pct, when: keysOn, desc: "Their own level, under the master volume.", keywords: "keysounds key sound volume loud quiet" });
+                r.querySelector("input[type=range]")?.addEventListener("change", keyPreview);
+                return r;
+              })(),
+              ui.segmented<KeySoundKeys>("Plays on", () => P().audio.keySounds.keys, (v) => up((p) => (p.audio.keySounds.keys = v)), [
+                ["strafe", "Strafe keys"],
+                ["movement", "All movement keys"],
+              ], {
+                when: keysOn,
+                desc: "Strafe keys are the ones your style strafes with: A and D, or W and S in Sideways. All movement keys adds the rest, jump and duck too.",
+                keywords: "keysounds key sound jump wasd strafe",
+              }),
+              ui.toggle("Perfect jump sound", perfOn, (v) => (up((p) => (p.audio.perfectTick = v)), v && perfPreview()), {
+                desc: "In EZ Scroll and Legit Scroll, a sound when a jump is perfect: taken on your first tick on the ground. !perfsound turns it on and off.",
+                keywords: "perfect perf hop jump scroll sound tick ding streak legit ez",
+              }),
+              ui.segmented<PerfectSoundSet>("Perfect sound", () => P().audio.perfectSound.set, (v) => (up((p) => (p.audio.perfectSound.set = v)), perfPreview()), PERFECT_SOUND_SETS, {
+                when: perfOn,
+                desc: "Ping is soft glass, Marimba a short wooden note, Chime a small bell and Pop a soft round pop.",
+                keywords: "perfect perf sound ping marimba chime pop",
+              }),
+              (() => {
+                const r = ui.range("Perfect sound volume", () => P().audio.perfectSound.volume, (v) => up((p) => (p.audio.perfectSound.volume = v)), { ...pct, when: perfOn, desc: "Its own level, under the master volume.", keywords: "perfect perf sound volume loud quiet" });
+                r.querySelector("input[type=range]")?.addEventListener("change", perfPreview);
+                return r;
+              })(),
+              ui.toggle("Rise with a streak", () => P().audio.perfectSound.streak, (v) => (up((p) => (p.audio.perfectSound.streak = v)), perfPreview()), {
+                when: perfOn,
+                desc: "Each perfect jump in a row plays a little higher, until it tops out and holds. A missed jump starts over.",
+                keywords: "perfect perf streak pitch chain kovaaks rise",
+              }),
+              ui.segmented<StreakLength>("Streak rise", () => P().audio.perfectSound.length, (v) => (up((p) => (p.audio.perfectSound.length = v)), perfPreview()), [
+                ["short", "Short"],
+                ["long", "Long"],
+              ], {
+                when: () => perfOn() && P().audio.perfectSound.streak,
+                desc: "How far it climbs: Short tops out after 9 perfect jumps, Long after 15 and a little higher. Bright sounds top out sooner.",
+                keywords: "perfect perf streak pitch top cap length",
+              }),
             ),
             voiceGroup(ui),
           ],
@@ -98,7 +163,6 @@ export function registerAudioSettings(): void {
             "Scroll feedback",
             ui.toggle("Perf% HUD", () => P().audio.perfHud, v => up(p => p.audio.perfHud = v), { desc: "Timer-measured perfect hops beside Sync% in Legit Scroll and EZ Scroll. — until an eligible hop.", keywords: "perf perfect scroll sync hud" }),
             ui.toggle("Perfect hop indicator", () => P().audio.perfectIndicator, v => up(p => p.audio.perfectIndicator = v), { desc: "Brief Perfect text after an eligible one-tick landing hop.", keywords: "perf landing scroll text" }),
-            ui.toggle("Quiet perfect hop tick", () => P().audio.perfectTick, v => up(p => p.audio.perfectTick = v), { desc: "A quiet immediate tick, independent of announcer voices.", keywords: "perf landing scroll audio cue" }),
           ),
           ui.group(
             "Announcer",

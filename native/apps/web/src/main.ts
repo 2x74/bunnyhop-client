@@ -75,7 +75,7 @@ import "./viewmodel/settings"; // Settings -> Viewmodel
 import "./ui/account-settings"; // Settings -> Account (name, sign-in, replay the intro)
 import { initCustomCss } from "./custom-css";
 import "./custom-css/section"; // Settings -> Custom CSS
-import { initAudio, PlayerAudio, runSounds, setListenerFromCamera, startMapSounds } from "./audio";
+import { initAudio, keySounds, PlayerAudio, runSounds, setListenerFromCamera, startMapSounds } from "./audio";
 import { AutoRestart } from "./auto-restart";
 import { buildSurfaces } from "./audio/surfaces";
 import { registerAudioSettings } from "./audio/settings-section";
@@ -1081,6 +1081,12 @@ function toggleJumpHold(): void {
   input.setJumpToggle(true);
 }
 input.onJumpToggle = (on) => session.hud.setJumpHeld(on);
+// Key sounds (audio/keysounds.ts): from the keydown itself. Not while the keys don't move you (spectating, a replay,
+// freecam); the replay viewer and spectating play the watched player's own presses instead.
+input.onMovePress = (bits) => {
+  if (replayViewer.active || mp?.isSpectating || freecam.active) return;
+  keySounds.press(bits, session.timer.options.strafeKeys ?? "ad");
+};
 /** Bound actions that do nothing while freecam is on (main.ts onAction). */
 const FREECAM_BLOCKED = new Set<string>(["attack", "attack2", "inspect", "setStart", "clearStart", "thirdPerson", "practice", "noclip", "cpSave", "cpTeleport", "cpPrev", "cpNext", "giveUsp", "giveGlock", "gunMenu", "turnLeft", "turnRight", "turnFast"]);
 /** R / M / B. With Settings → Keys → Hold to restart on, or a timed run past Hold after, they fire after a short hold (restart-guard.ts). */

@@ -1095,16 +1095,36 @@ pub extern "C" fn world_fog() -> usize {
 }
 
 /// The map's light at a point (`lighting.rs`: the leaf's ambient cube plus the world lights that reach it) into
-/// scratch_f32: six linear RGB colours for the directions +x, -x, +y, -y, +z, -z (18 floats). Empty where there is
+/// scratch_f32: six linear RGB colours for the directions +x, -x, +y, -y, +z, -z (18 floats), then, on a map whose
+/// switchable lights can still come on (`set_light_style`), the same with them all on (18 more). Empty where there is
 /// none: a map drawn fullbright or without ambient data, a point in solid or outside the map.
 #[unsafe(no_mangle)]
 pub extern "C" fn light_cube(x: f32, y: f32, z: f32) -> usize {
     with(|c| {
         c.scratch_f32.clear();
-        if let Some(cube) = c.mesh.as_ref().and_then(|m| m.lighting.as_ref()).and_then(|l| l.cube([x, y, z])) {
+        if let Some((cube, full)) = c.mesh.as_ref().and_then(|m| m.lighting.as_ref()).and_then(|l| l.cubes([x, y, z])) {
             c.scratch_f32.extend(cube.iter().flatten());
+            if let Some(full) = full {
+                c.scratch_f32.extend(full.iter().flatten());
+            }
         }
         c.scratch_f32.len()
+    })
+}
+
+/// Light style `style` (1 to 63) for `light_cube` (lighting.rs `style_light`, `style_full`): `value` is how far it is
+/// above its spawn value now, `full` how far above it its lights put it when on. The host follows the core's light
+/// states with it. Render-only; reset by every map load.
+#[unsafe(no_mangle)]
+pub extern "C" fn set_light_style(style: u32, value: f32, full: f32) {
+    let clean = |v: f32| if v.is_finite() { v.max(0.0) } else { 0.0 };
+    with(|c| {
+        if let Some(l) = c.mesh.as_mut().and_then(|m| m.lighting.as_mut()) {
+            if (1..64).contains(&style) {
+                l.style_light[style as usize] = clean(value);
+                l.style_full[style as usize] = clean(full);
+            }
+        }
     })
 }
 

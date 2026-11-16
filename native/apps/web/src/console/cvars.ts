@@ -14,6 +14,8 @@ import { KINDS, TRIGGER_OPACITY, TRIGGER_STYLES, TRIGGER_THICKNESS } from "../tr
 import { JHUD_BANDS } from "../ssj/jhud";
 import { PAINT_COLORS } from "../paint/prefs";
 import { LANDING_MODES } from "../landing/prefs";
+import { KEY_SOUND_SETS } from "../audio/keysound-policy";
+import { PERFECT_SOUND_SETS } from "../audio/perfect-policy";
 import { applyGraphicsPreset, DEFAULT_PREFS, graphicsPreset, PRESET_ORDER, type GraphicsPreset, type Prefs } from "../ui/settings";
 
 export type CvarValue = number | string;
@@ -121,7 +123,11 @@ const audioDetail: Cvar[] = [
   num("snd_announcer_lj_at", "Longjump line from this distance.", [200, 1000], (p) => p.audio.announcer.ljThreshold, (p, v) => (p.audio.announcer.ljThreshold = v)),
   sw("hud_perf", "Perf% beside Sync% in the scroll styles.", (p) => p.audio.perfHud, (p, v) => (p.audio.perfHud = v)),
   sw("hud_perfect", "Perfect text after a one-tick hop.", (p) => p.audio.perfectIndicator, (p, v) => (p.audio.perfectIndicator = v)),
-  sw("snd_perfecttick", "A quiet tick on a perfect hop.", (p) => p.audio.perfectTick, (p, v) => (p.audio.perfectTick = v)),
+  sw("snd_perfecttick", "A sound on each perfect jump in EZ Scroll and Legit Scroll.", (p) => p.audio.perfectTick, (p, v) => (p.audio.perfectTick = v), ["snd_perfsound"]),
+  pick("snd_perfsound_sound", `Perfect jump sound: ${PERFECT_SOUND_SETS.map(([s]) => s).join(", ")}.`, PERFECT_SOUND_SETS.map(([s]) => s), (p) => p.audio.perfectSound.set, (p, v) => (p.audio.perfectSound.set = v)),
+  num("snd_perfsound_volume", "Perfect jump sound volume, 0 to 1.", pct, (p) => p.audio.perfectSound.volume, (p, v) => (p.audio.perfectSound.volume = v)),
+  sw("snd_perfsound_streak", "The perfect jump sound rises with a streak.", (p) => p.audio.perfectSound.streak, (p, v) => (p.audio.perfectSound.streak = v)),
+  pick("snd_perfsound_streaklength", "How far the streak rises before it holds: short or long.", ["short", "long"] as const, (p) => p.audio.perfectSound.length, (p, v) => (p.audio.perfectSound.length = v)),
   ...BUSES.map((k) => sw(`snd_mute_${k}`, `Mute ${k === "sfx" ? "game sounds" : k}.`, (p) => p.audio.mute[k], (p, v) => (p.audio.mute[k] = v))),
 ];
 /** Ghost routes, trigger kinds and colours, paint, inspect, the look's extra switches. */
@@ -285,6 +291,10 @@ export const CVARS: readonly Cvar[] = [
   sw("snd_others", "Other players' sounds in servers.", (p) => p.audio.others, (p, v) => (p.audio.others = v)),
   sw("snd_ghosts", "Ghost sounds.", (p) => p.audio.ghosts, (p, v) => (p.audio.ghosts = v)),
   sw("snd_announcer", "The announcer.", (p) => p.audio.announcer.enabled, (p, v) => (p.audio.announcer.enabled = v)),
+  sw("snd_keysounds", "A short sound as a strafe key goes down.", (p) => p.audio.keySounds.enabled, (p, v) => (p.audio.keySounds.enabled = v)),
+  pick("snd_keysounds_sound", `Key sound: ${KEY_SOUND_SETS.map(([s]) => s).join(", ")}.`, KEY_SOUND_SETS.map(([s]) => s), (p) => p.audio.keySounds.set, (p, v) => (p.audio.keySounds.set = v)),
+  num("snd_keysounds_volume", "Key sound volume, 0 to 1.", pct, (p) => p.audio.keySounds.volume, (p, v) => (p.audio.keySounds.volume = v)),
+  pick("snd_keysounds_keys", "Which keys sound: strafe (the style's strafe keys) or movement (every movement key, jump and duck too).", ["strafe", "movement"] as const, (p) => p.audio.keySounds.keys, (p, v) => (p.audio.keySounds.keys = v)),
   ...hudDetail,
   ...audioDetail,
   ...otherDetail,

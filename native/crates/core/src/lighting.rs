@@ -19,7 +19,10 @@
 //!
 //! All colours are linear light (1.0 = a surface shown at its texture's brightness), like decoded lightmap samples.
 //! The HDR lumps are used when the lightmap atlas is (`lightmap.rs`), so models and walls agree. Light styles other
-//! than 0 (switchable, flickering) are left out, like in the atlas. Visibility is traced against the world's opaque
+//! than 0 (switchable, flickering) are left out of `lights` (and of the prop bake: VRAD bakes static props and the
+//! ambient cubes with style 0 only). The engine adds switchable lights to models at their style's current value;
+//! `Lighting::style_light` holds how far each style is above its spawn value (set by the host from the core's light
+//! states), and `cube` adds the `styled` lights by that, so a section a trigger lights up lights the models in it too. Visibility is traced against the world's opaque
 //! brushes only: displacements, brush entities and props don't block (the engine also ignores the last two here).
 
 use playsrc_bsp::{Bsp, Brush, BrushSide, Leaf, LumpData, Plane, TextureInfo};
@@ -114,7 +117,14 @@ const SIDE_SKY: u32 = 1 << 31;
 pub struct Lighting {
     /// Built from the HDR lumps.
     pub hdr: bool,
+    /// The style 0 world lights.
     pub lights: Vec<WorldLight>,
+    /// The world lights of light styles 1 to 63, with their style.
+    pub styled: Vec<(usize, WorldLight)>,
+    /// Per light style: its value above its spawn value (0 = as at spawn; module docs). Render-only, set by the host.
+    pub style_light: [f32; 64],
+    /// Per light style: its value when its lights are on, above its spawn value (0 for styles nothing switches).
+    pub style_full: [f32; 64],
     /// Cubes hold the direct light too (this project's own compiler; module docs): `direct` reports none.
     pub ambient_has_direct: bool,
     /// Decoded `ColorRGBExp32` to linear light for the cubes: 255 (VRAD), or 1 (own compiler).
@@ -169,13 +179,17 @@ fn cube_at(b: &[u8]) -> Cube {
     std::array::from_fn(|i| rgbexp(&b[i * 4..i * 4 + 4]))
 }
 
-/// `dworldlight_t` records: 88 bytes, or 100 in CS:GO (a shadow offset after the normal).
+/// `dworldlight_t` records of style 0: 88 bytes, or 100 in CS:GO (a shadow offset after the normal).
 fn world_lights(bytes: &[u8], csgo: bool) -> Vec<WorldLight> {
+    world_lights_with_style(bytes, csgo).into_iter().filter(|&(style, _)| style == 0).map(|(_, l)| l).collect()
+}
+
+/// Every `dworldlight_t` record with its light style (0 = static).
+fn world_lights_with_style(bytes: &[u8], csgo: bool) -> Vec<(i32, WorldLight)> {
     let (size, shift) = if csgo { (100, 12) } else { (88, 0) };
     bytes
         .chunks_exact(size)
-        .filter(|r| i32_at(r, 44 + shift) == 0) // style 0 only
-        .map(|r| WorldLight {
+        .map(|r| (i32_at(r, 44 + shift), WorldLight {
             origin: vec_at(r, 0),
             intensity: vec_at(r, 12),
             normal: vec_at(r, 24),
@@ -186,8 +200,8 @@ fn world_lights(bytes: &[u8], csgo: bool) -> Vec<WorldLight> {
             exponent: f32_at(r, 56 + shift),
             radius: f32_at(r, 60 + shift),
             attn: [f32_at(r, 64 + shift), f32_at(r, 68 + shift), f32_at(r, 72 + shift)],
-        })
-        .filter(|l| l.origin.iter().chain(&l.intensity).chain(&l.normal).all(|v| v.is_finite()))
+        }))
+        .filter(|(_, l)| l.origin.iter().chain(&l.intensity).chain(&l.normal).all(|v| v.is_finite()))
         .collect()
 }
 
@@ -241,6 +255,7 @@ impl Lighting {
         let own_compiler = mean > OWN_COMPILER_MEAN as f64;
 
         let (lights, _) = pick(WORLDLIGHTS_HDR, WORLDLIGHTS);
+        let styled = world_lights_with_style(lights, csgo).into_iter().filter(|&(style, _)| (1..64).contains(&style)).map(|(style, l)| (style as usize, l)).collect();
         let lights = world_lights(lights, csgo);
         let leaves = leaf_records
             .iter()
@@ -284,6 +299,9 @@ impl Lighting {
         Some(Self {
             hdr: ambient_hdr,
             lights,
+            styled,
+            style_light: [0.0; 64],
+            style_full: [0.0; 64],
             ambient_has_direct: own_compiler,
             ambient_scale: if own_compiler { 1.0 } else { 255.0 },
             nodes: node_records.iter().map(|n| (n.plane_index.max(0) as usize, n.children)).collect(),
@@ -476,32 +494,37 @@ impl Lighting {
         if self.ambient_has_direct {
             return Vec::new();
         }
-        let cluster = self.leaf(p).and_then(|l| self.leaves.get(l)).map_or(-1, |l| l.cluster as i32);
-        let mut out = Vec::new();
-        for (i, l) in self.lights.iter().enumerate() {
-            let brightest = l.intensity[0].max(l.intensity[1]).max(l.intensity[2]);
-            match l.kind {
-                EMIT_SKYLIGHT => {
-                    let dir = l.normal.map(|v| -v);
-                    if brightest < MIN_LIGHT || self.trace(p, [0, 1, 2].map(|k| p[k] + dir[k] * SKY_TRACE)) != Some(true) {
-                        continue;
-                    }
-                    out.push(Direct { light: i, dir, color: l.intensity });
+        let cluster = self.cluster(p);
+        self.lights.iter().enumerate().filter_map(|(i, l)| self.reach(l, 1.0, p, cluster).map(|(dir, color)| Direct { light: i, dir, color })).collect()
+    }
+
+    fn cluster(&self, p: [f32; 3]) -> i32 {
+        self.leaf(p).and_then(|l| self.leaves.get(l)).map_or(-1, |l| l.cluster as i32)
+    }
+
+    /// World light `l`, scaled by `value`, as it reaches `p` (in `cluster`): its direction and colour there, or None.
+    fn reach(&self, l: &WorldLight, value: f32, p: [f32; 3], cluster: i32) -> Option<([f32; 3], [f32; 3])> {
+        let brightest = l.intensity[0].max(l.intensity[1]).max(l.intensity[2]) * value;
+        match l.kind {
+            EMIT_SKYLIGHT => {
+                let dir = l.normal.map(|v| -v);
+                if brightest < MIN_LIGHT || self.trace(p, [0, 1, 2].map(|k| p[k] + dir[k] * SKY_TRACE)) != Some(true) {
+                    return None;
                 }
-                EMIT_POINT | EMIT_SPOTLIGHT => {
-                    let delta = [0, 1, 2].map(|k| l.origin[k] - p[k]);
-                    let dist = dot(delta, delta).sqrt();
-                    let scale = self.falloff(l, delta, dist);
-                    if brightest * scale < MIN_LIGHT || !self.sees(cluster, l.cluster) || self.trace(p, l.origin).is_some() {
-                        continue;
-                    }
-                    out.push(Direct { light: i, dir: delta.map(|v| v / dist.max(1e-6)), color: l.intensity.map(|v| v * scale) });
-                }
-                // Surface lights and the sky's ambient are already in the leaf cubes.
-                _ => {}
+                Some((dir, l.intensity.map(|v| v * value)))
             }
+            EMIT_POINT | EMIT_SPOTLIGHT => {
+                let delta = [0, 1, 2].map(|k| l.origin[k] - p[k]);
+                let dist = dot(delta, delta).sqrt();
+                let scale = self.falloff(l, delta, dist);
+                if brightest * scale < MIN_LIGHT || !self.sees(cluster, l.cluster) || self.trace(p, l.origin).is_some() {
+                    return None;
+                }
+                Some((delta.map(|v| v / dist.max(1e-6)), l.intensity.map(|v| v * (scale * value))))
+            }
+            // Surface lights and the sky's ambient are already in the leaf cubes.
+            _ => None,
         }
-        out
     }
 
     /// Distance falloff times the spotlight cone for a point `delta` away from the light (towards it), `dist` long
@@ -528,16 +551,47 @@ impl Lighting {
         scale
     }
 
-    /// Ambient plus direct light at `p` as one cube; None where the map has no ambient (see `ambient`).
+    /// Ambient plus direct light at `p` as one cube, plus the switchable lights above their spawn value
+    /// (`style_light`); None where the map has no ambient (see `ambient`).
     pub fn cube(&self, p: [f32; 3]) -> Option<Cube> {
-        let mut cube = self.ambient(p)?;
+        self.cubes(p).map(|(now, _)| now)
+    }
+
+    /// `cube`, and, on a map with switchable lights the host can still turn up (`style_full`), the cube with them all
+    /// on: how much of the light here waits on a switch (the host lets models go darker than its floor by that).
+    pub fn cubes(&self, p: [f32; 3]) -> Option<(Cube, Option<Cube>)> {
+        let mut now = self.ambient(p)?;
         for d in self.direct(p) {
-            for (face, axis) in cube.iter_mut().zip(&CUBE_DIRS) {
-                let w = dot(d.dir, *axis).max(0.0);
-                (0..3).for_each(|k| face[k] += d.color[k] * w);
+            add_light(&mut now, d.dir, d.color);
+        }
+        let switched = |s: usize| self.style_light[s] > 0.0 || self.style_full[s] > 0.0;
+        if self.ambient_has_direct || !(1..64).any(switched) {
+            return Some((now, None));
+        }
+        let mut full = now;
+        let cluster = self.cluster(p);
+        for (style, l) in &self.styled {
+            let (value, on) = (self.style_light[*style], self.style_full[*style].max(self.style_light[*style]));
+            if on <= 0.0 {
+                continue;
+            }
+            // One trace per light: `full` takes it at its on value, `now` at its share of that.
+            if let Some((dir, color)) = self.reach(l, on, p, cluster) {
+                add_light(&mut full, dir, color);
+                if value > 0.0 {
+                    add_light(&mut now, dir, color.map(|c| c * (value / on)));
+                }
             }
         }
-        Some(cube)
+        Some((now, (1..64).any(|s| self.style_full[s] > 0.0).then_some(full)))
+    }
+}
+
+/// Adds a light from direction `dir` (unit, towards the light) to the cube's facing sides.
+fn add_light(cube: &mut Cube, dir: [f32; 3], color: [f32; 3]) {
+    for (face, axis) in cube.iter_mut().zip(&CUBE_DIRS) {
+        let w = dot(dir, *axis).max(0.0);
+        (0..3).for_each(|k| face[k] += color[k] * w);
     }
 }
 
