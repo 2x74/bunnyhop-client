@@ -403,8 +403,8 @@ class Renderer {
         double lightmapRefresh = 0, lightmapUpload = 0, sky = 0, buildCull = 0, sort = 0, submit = 0, presentation = 0,
                hdrFinish = 0, waterReflection = 0;
         double floorReport = 0, floorDraw = 0, actorDraw = 0, presentationBuild = 0, presentationWaterUniforms = 0,
-               presentationSubmit = 0, viewmodel = 0, mapProps = 0;
-        uint64_t mapPropPoses = 0;
+               presentationSubmit = 0, viewmodel = 0, mapProps = 0, mapEffects = 0;
+        uint64_t mapPropPoses = 0, mapEffectParticles = 0;
         uint64_t groups = 0, survivors = 0, drawCalls = 0, triangles = 0, atlasUpdateBytes = 0, floorCount = 0;
         bool hdrAuthored = false, hdrEffective = false;
         size_t waterVolumes = 0;
@@ -1650,7 +1650,7 @@ class Renderer {
             }
         }
         draw_landing(landingMarker, *presentation, eye, landingPixelsPerUnit, right, up, semanticPalette.loss);
-        draw_map_effects(eye, seconds, right, up);
+        draw_map_effects(vp, eye, seconds, right, up);
         profile_elapsed(frameProfile.presentationBuild, presentationStart);
         presentationStart = profile_now();
         gl.UseProgram(presentation->shader());
@@ -1733,9 +1733,17 @@ class Renderer {
     }
 
     void draw_map_effects(
-            const float eye[3], double seconds, const native_render::Vec3 &right, const native_render::Vec3 &up
+            const native::Matrix &vp,
+            const float eye[3],
+            double seconds,
+            const native_render::Vec3 &right,
+            const native_render::Vec3 &up
     ) {
-        mapEffects.draw(*presentation, core, eye, seconds, right, up, effectsVisible && !graphics.potato);
+        const auto start = profile_now();
+        const auto particles =
+                mapEffects.draw(*presentation, core, vp, eye, seconds, right, up, effectsVisible && !graphics.potato);
+        profile_elapsed(frameProfile.mapEffects, start);
+        if (profiling) frameProfile.mapEffectParticles += particles;
     }
 
 public:
@@ -1966,7 +1974,9 @@ public:
                 {"hdrEffective", p.hdrEffective},
                 {"waterVolumes", p.waterVolumes},
                 {"mapPropsMs", p.mapProps},
-                {"mapPropPoses", p.mapPropPoses}};
+                {"mapPropPoses", p.mapPropPoses},
+                {"mapEffectsMs", p.mapEffects},
+                {"mapEffectParticles", p.mapEffectParticles}};
     }
 
     // After a cut the bunny runs through the run's last moments (replay_preroll.hpp), like the cameras, so its legs,

@@ -37,6 +37,11 @@ enum Phase : size_t {
     count
 };
 
+// Renderer sections summarised over every measured frame, outside the frame's own timing.
+constexpr std::array renderer_keys = {
+        "mapEffectsMs", "mapEffectParticles", "presentationBuildMs", "presentationSubmitMs", "drawSceneSubmitMs"
+};
+
 constexpr std::array<const char *, count> phase_names = {
         "pump",
         "simulation",
@@ -211,6 +216,9 @@ public:
                 frames_.push_back(std::chrono::duration<double, std::milli>(Clock::now() - start).count());
                 for (size_t phase = 0; phase < count; ++phase)
                     phases_[phase].push_back(current_[phase]);
+                const auto profile = renderer_->profile_json();
+                for (const char *key : renderer_keys)
+                    renderer_samples_[key].push_back(profile.at(key).get<double>());
             }
         }
         write(rasterized);
@@ -251,6 +259,7 @@ private:
     std::array<double, count> current_{};
     std::array<std::vector<double>, count> phases_;
     std::vector<double> frames_;
+    std::map<std::string, std::vector<double>> renderer_samples_;
 
     void require(int ok) const {
         if (!ok) throw std::runtime_error(bh_last_error(core_.get()));
@@ -490,6 +499,8 @@ private:
         };
         for (size_t phase = 0; phase < count; ++phase)
             result["phases"][phase_names[phase]] = spread(phases_[phase]);
+        for (const auto &[key, samples] : renderer_samples_)
+            result["renderer"][key] = spread(samples);
         if (gl_.GetError() != GL_NO_ERROR) throw std::runtime_error("Benchmark OpenGL error");
         std::ofstream output(spec_.output);
         output << result.dump(2) << '\n';
