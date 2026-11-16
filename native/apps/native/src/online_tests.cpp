@@ -6,6 +6,7 @@
 #include "bunnyhop_native.h"
 #include <fstream>
 #include <chrono>
+#include <map>
 
 int main() {
     auto check = [](bool value, const char *label) {
@@ -55,7 +56,8 @@ int main() {
                     // Optional groups may come as null (a value() on them used to throw type_error.306).
                     {"physics", nullptr},
                     {"optional", nullptr}});
-    int requests = 0;
+    // Content files download on several workers.
+    std::atomic_int requests = 0;
     bool offline = false, notFound = false;
     native::LoadProgress latest;
     native::DownloadFetch fetch =
@@ -103,8 +105,14 @@ int main() {
     }
     check(rejected, "404 must not use stale cache");
     notFound = false;
-    {
-        std::ofstream corrupt(cache / "objects" / fileSha);
+    offline = false;
+    std::filesystem::remove(cache / "objects" / fileSha);
+    requests = 0;
+    load();
+    check(requests == 2, "a materialized file that matches its hash should not be fetched again");
+    offline = true;
+    for (const auto &path : {cache / "objects" / fileSha, first.content_root / "materials/test.vmt"}) {
+        std::ofstream corrupt(path);
         corrupt << "bad";
     }
     rejected = false;
@@ -172,6 +180,38 @@ int main() {
         requests = 0;
         native::download_classic_sounds(first.content_root, cache, fetch);
         check(requests == 0, "a null optional group should fetch nothing");
+    }
+    // A map with more files than workers, two paths sharing one object: every file lands, each object is fetched once.
+    std::map<std::string, Bytes> objects;
+    nlohmann::json many_files = nlohmann::json::object();
+    for (int i = 0; i < 40; ++i) {
+        const Bytes body(size_t(100 + i), uint8_t(i));
+        objects[digest(body)] = body;
+        many_files["materials/many/" + std::to_string(i) + ".vtf"] = {{"sha256", digest(body)}, {"size", body.size()}};
+    }
+    many_files["materials/many/copy.vtf"] = many_files["materials/many/7.vtf"];
+    const auto many_manifest = encode({{"mapSha256", sha}, {"files", many_files}});
+    std::atomic_int content_requests = 0;
+    native::DownloadFetch many_fetch = [&](const std::string &route,
+                                           size_t,
+                                           const std::atomic_bool *,
+                                           const native::LoadProgressCallback &) {
+        if (route == "/api/maps/bhop_test") return detail;
+        if (route == "/content-manifests/" + sha + ".json") return many_manifest;
+        if (route == "/api/bsp/" + sha + ".bsp") return bsp;
+        ++content_requests;
+        return objects.at(route.substr(std::string("/content/").size()));
+    };
+    native::LoadProgress last;
+    const auto many = native::download_map(
+            "bhop_test", cache, [](const std::string &) {}, nullptr, {}, [&](const auto &p) { last = p; }, many_fetch
+    );
+    check(content_requests == 40, "each object should be fetched once");
+    check(last.filesDone == 41 && last.filesTotal == 41, "progress should count every file");
+    for (const auto &[path, info] : many_files.items()) {
+        std::ifstream file(many.content_root / native::data_location::from_utf8(path), std::ios::binary);
+        const Bytes bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        check(digest(bytes) == info.at("sha256").get<std::string>(), "materialized file differs");
     }
     return 0;
 }
