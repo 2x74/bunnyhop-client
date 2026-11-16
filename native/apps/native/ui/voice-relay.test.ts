@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import { VoiceRelay, type VoiceSocket } from "./voice-relay";
-import { runVoiceLine, takeVoiceLines, voiceConfigLines, type VoiceConsoleHost } from "./voice-console";
+import { runVoiceLine, takeVoiceLines, unbindVoice, voiceConfigLines, type VoiceConsoleHost } from "./voice-console";
 import type { MenuMessage } from "./bridge";
 
 class Socket implements VoiceSocket {
@@ -140,6 +140,28 @@ describe("voice console", () => {
     expect(runVoiceLine(host, "+voicerecord")).toContain("for keys");
     expect(runVoiceLine(host, "bind x +jump")).toBeNull();
     expect(runVoiceLine(host, "sensitivity 2")).toBeNull();
+  });
+
+  it("unbind <key> and a confirmed unbindall clear push to talk", () => {
+    expect(unbindVoice(host, "unbind v", false)).toBeNull();
+    expect(unbindVoice(host, 'unbind "x"', false)).toBe('Unbound "x" from push to talk.');
+    expect(settings.binds.voiceRecord).toEqual([]);
+    settings.binds.voiceRecord = ["KeyX"];
+    // The first unbindall only asks; the website's console changed nothing.
+    expect(unbindVoice(host, "unbindall", false)).toBeNull();
+    expect(settings.binds.voiceRecord).toEqual(["KeyX"]);
+    expect(unbindVoice(host, "unbindall", true)).toBe("Push to talk is unbound too.");
+    expect(settings.binds.voiceRecord).toEqual([]);
+    expect(unbindVoice(host, "unbindall", true)).toBeNull();
+  });
+
+  it("a config's unbindall clears push to talk before its own voice binds", () => {
+    expect(takeVoiceLines(host, "unbindall\nbind w +forward")).toBe("unbindall\nbind w +forward");
+    expect(settings.binds.voiceRecord).toEqual([]);
+    takeVoiceLines(host, 'unbindall\nbind "v" "+voicerecord"');
+    expect(settings.binds.voiceRecord).toEqual(["KeyV"]);
+    takeVoiceLines(host, "unbind v");
+    expect(settings.binds.voiceRecord).toEqual([]);
   });
 
   it("written configs carry the voice lines and exec runs them", () => {

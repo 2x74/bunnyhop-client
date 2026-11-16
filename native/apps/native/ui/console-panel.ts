@@ -7,7 +7,8 @@ import { icon } from "../../web/src/ui/icons";
 import { isTextField } from "../../web/src/input";
 import { state, send } from "./bridge";
 import { installPrefsBridge, sendNativeSettings } from "./prefs-bridge";
-import { nativeVoiceHost, runVoiceLine, takeVoiceLines, voiceConfigLines } from "./voice-console";
+import { splitCommands } from "../../web/src/console/parse";
+import { nativeVoiceHost, runVoiceLine, takeVoiceLines, unbindVoice, voiceConfigLines } from "./voice-console";
 import "./native-console.css";
 
 export interface NativeConsoleHooks {
@@ -69,6 +70,8 @@ class NativeConsole {
   private draft = "";
   private maps: string[] = [];
   private openedInGame = false;
+  /** Settings changes the website's console has made: whether a command did anything (unbindall asks first). */
+  private updates = 0;
 
   constructor() {
     this.log = h("div.ncon-log", { role: "log", "aria-live": "polite" });
@@ -103,7 +106,10 @@ class NativeConsole {
     ) as HTMLDialogElement;
     this.runner = new ConsoleRunner({
       get: () => prefs.get(),
-      update: (fn) => prefs.update(fn),
+      update: (fn) => {
+        this.updates++;
+        prefs.update(fn);
+      },
       print: (text, kind) => this.print(text, kind),
       clear: () => this.log.replaceChildren(),
       chat: (line, reply) => hooks?.chat(line, reply) ?? false,
@@ -183,8 +189,13 @@ class NativeConsole {
       /* private storage */
     }
     const voiceAnswer = runVoiceLine(voiceHost, line);
-    if (voiceAnswer === null) this.runner.run(line);
-    else this.print(voiceAnswer);
+    if (voiceAnswer !== null) return this.print(voiceAnswer);
+    for (const command of splitCommands(line)) {
+      const before = this.updates;
+      this.runner.run(command);
+      const unbound = unbindVoice(voiceHost, command, this.updates !== before);
+      if (unbound) this.print(unbound, "ok");
+    }
   }
   private recall(direction: -1 | 1): void {
     if (!this.history.length) return;
