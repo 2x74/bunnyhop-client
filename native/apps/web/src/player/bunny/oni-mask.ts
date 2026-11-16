@@ -4,11 +4,11 @@
 // dark mouth, teeth top and bottom and long upper fangs, and two ivory tusks rising from the jaw either side of the
 // mouth, up in front of the visor. A black lacquer rim gives the shell its thickness.
 //
-// Bind pose, Source space (z up, the bunny faces -y). The face is skinned head-to-neck down its lower half (mesh.ts
-// headW), so the mask uses the same weights and stays on it when the head turns.
+// Bind pose, Source space (z up, the bunny faces -y), skinned to the head bone alone: a hard mask keeps its shape when
+// the head pitches or turns (the cloth face under it blends to the neck down its lower half, mesh.ts headW).
 
 import * as THREE from "three";
-import { add, Builder, frame, hat, norm, ring, scale, sub, type Paint, type Wt } from "./builder";
+import { add, Builder, frame, norm, ring, scale, sub, type Paint, type Wt } from "./builder";
 import { rig, type V3 } from "./rig";
 
 const fixed = (color: number): Paint => ({ code: 0, color });
@@ -112,8 +112,11 @@ function cone(b: Builder, c: V3, t: V3, len: number, w: number, d: number, acros
 export function oniMask(): THREE.BufferGeometry {
   const b = new Builder();
   const r = rig();
-  const head = r.bone("Head1"), neck = r.bone("Neck1"), spine4 = r.bone("Spine4");
-  const W = (p: V3): Wt => hat(p[2], [[62.8, spine4], [64.6, neck], [66.6, head]]);
+  // Rigid on the head. (Until v0.0.42 it took the face's weights, head to neck down its lower half: lacquer that
+  // stretched like the cloth under it whenever the head pitched or turned, the grimace gaping on a look up, the jaw
+  // left behind on the neck; on Plush and Bun-E, whose faceplates are rigid, half the mask came off the plate.)
+  const head: Wt = [[r.bone("Head1"), 1]];
+  const W = (_p: V3): Wt => head;
 
   // The shell: an upper and a lower grid over the lower face, meeting along the lips (and the line running on from the
   // corners to the sides), so the mouth's edge is a clean curve rather than a staircase of cells. The relief is built

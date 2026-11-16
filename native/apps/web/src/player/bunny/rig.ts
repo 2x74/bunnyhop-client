@@ -55,9 +55,9 @@ export const EAR = {
  * ear (mirror x); the tip direction it droops to. Same lengths as EAR.
  */
 export const EAR_DOWN = {
-  base: [2.3, 9.9, 60.2] as V3,
-  dir: [0.3, 0.62, -0.72] as V3,
-  tip: [0.3, 0.06, -0.95] as V3,
+  base: [3.1, 9.1, 62.4] as V3,
+  dir: [0.34, 0.1, -0.935] as V3,
+  tip: [0.26, -0.36, -0.9] as V3,
   carrier: "Spine4",
 };
 
@@ -114,7 +114,9 @@ export function rig(): Rig {
     else concat(bind, b.parent * 12, local, 0, bind, i * 12);
   });
   const head = names.indexOf("ValveBiped.Bip01_Head1");
-  // Ear bones: identity rotation in model space, at the ear joints.
+  // Ear bones: identity rotation in model space, at the reference ear joints (EAR). The ears' skinning is written
+  // directly by the animator about its own pivots (bunny/model.ts makeEars: the standard bunny's are at its scaled head's
+  // ear roots), so these binds only name the bones.
   const ear = (side: number): [V3, V3] => {
     const base: V3 = [EAR.base[0] * side, EAR.base[1], EAR.base[2]];
     const mid: V3 = [base[0] + EAR.dir[0] * side * EAR.seg, base[1] + EAR.dir[1] * EAR.seg, base[2] + EAR.dir[2] * EAR.seg];

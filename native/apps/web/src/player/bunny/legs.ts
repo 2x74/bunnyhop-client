@@ -48,6 +48,11 @@ export const MAX_REACH = 12;
 /** Pelvis drop (units) at full landing strength, and the hard rebound's leg compression at full hardness. */
 export const LAND_DROP = 4.2;
 const REBOUND = 5;
+/**
+ * The least any touchdown out of a hop compresses the legs, as a share of REBOUND (v0.0.42): an ordinary bhop's bounce
+ * had none (hardness starts at 400 u/s), so the body turned round in the air like a ball. 1.25 units over ~0.1 s.
+ */
+export const BOUNCE = 0.25;
 /** Most the pelvis may move for landings and the idle shift (units). */
 const MAX_PELVIS = 6;
 /** Most the pelvis may drop for a foot's reach on a slope (units), and how fast that follows (1/s). */
@@ -128,6 +133,8 @@ export interface LegInput {
   /** On a ladder / water level (2+ = swimming), when the source knows; else detected from the motion. */
   ladder?: boolean;
   water?: number;
+  /** The posture's rise of the hips on the ground (units; posture.ts): the feet stay where the animation has them. */
+  lift?: number;
 }
 
 interface Foot {
@@ -280,7 +287,8 @@ export class LegLayer {
     } else {
       if (this.groundFrames === 1 && this.airTime >= MIN_AIR) {
         // Touchdown: a hard one rebounds at once (also when the player jumps straight out of it).
-        this.rebK = hardness(this.airVz) * motion;
+        // (Any touchdown out of a real hop compresses a little: BOUNCE.)
+        this.rebK = Math.max(BOUNCE, hardness(this.airVz)) * motion;
         this.rebT = 0;
       }
       if (!this.landed && stable) {
@@ -317,6 +325,8 @@ export class LegLayer {
       dy = shiftW * (0.75 * Math.sin(s.time * 1.13 + ph) + 0.25 * Math.sin(s.time * 0.47 + ph * 1.7));
       dz -= shiftW * 0.35 * Math.abs(Math.sin(s.time * 1.13 + ph));
     }
+    // (airW is this frame's: in the air the body isn't lifted off its place.)
+    dz += (s.lift ?? 0) * (1 - this.airW);
     dz = clamp(dz, -MAX_PELVIS, MAX_PELVIS);
     this.pelvisDrop = dz;
     if (dz !== 0 || dy !== 0) for (let i = 0; i < this.all; i++) (S[i * 12 + 7] += dy), (S[i * 12 + 11] += dz);

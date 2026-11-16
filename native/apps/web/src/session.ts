@@ -41,8 +41,9 @@ import { announce, announcerPolicy, perfectSounds, runSounds } from "./audio";
 import { restartTarget, withRestartNames } from "./restart";
 import { copiedMessage, runStartPoint } from "./copy-start";
 import { checkStartPoint, clearPracticeSpawns, clearStartPoint, loadStartPoint, resolveStartPoint, savedMessage, saveStartPoint, type StartPoint } from "./start-point";
-import { getHeldLoadout, getOutfit, knownOutfitUnlocks } from "./player/cosmetics";
+import { getGhostCosmetics, getHeldLoadout, getOutfit, knownOutfitUnlocks } from "./player/cosmetics";
 import { cosmetic } from "./progression";
+import { HOP_TRAIL_DEFAULT, type CosmeticLoadout } from "./loadout";
 import { withTimeout } from "./content/fetch";
 import { pitchPlay, reportRun, RunWatch, type RunPlay } from "./selfcheck";
 import { MapPhysics } from "./map-physics";
@@ -106,6 +107,17 @@ export interface SessionInit {
 function recordedOutfit(): { outfit?: string } {
   const id = getOutfit();
   return cosmetic(id)?.unlock.kind === "role" && !knownOutfitUnlocks().has(id) ? {} : { outfit: id };
+}
+
+/**
+ * The hop effect's colours for the trailer: the trail worn now (absent for Gold). Never a role-held trail: like the
+ * colourway, the API refuses one the account doesn't hold, and this browser can't tell (the burst shows in Gold then).
+ */
+function recordedHop(l: CosmeticLoadout): CosmeticLoadout {
+  if (!l.hop) return l;
+  const { hopTrail: _, ...rest } = l;
+  const id = getGhostCosmetics().trailId;
+  return id === HOP_TRAIL_DEFAULT || cosmetic(id)?.unlock.kind === "role" ? rest : { ...rest, hopTrail: id };
 }
 
 export class RunSession {
@@ -937,10 +949,10 @@ export class RunSession {
       player: this.player,
       recordedAt: Date.now(),
     });
-    // Cosmetic trailer: the knife / finish / gloves and the colourway this run was played with (replays and ghosts show
-    // them); the knife and finish are the ones held, the knife pool's pick when a pool is active (it only moves on at a
+    // Cosmetic trailer: the knife / finish / gloves, the hop effect and the colourway this run was played with (replays
+    // and ghosts show them); the knife and finish are the ones held, the knife pool's pick when a pool is active (it only moves on at a
     // map load or a restart, so it's the one held through the run).
-    replay.loadout = { ...getHeldLoadout(), ...recordedOutfit() };
+    replay.loadout = { ...recordedHop(getHeldLoadout()), ...recordedOutfit() };
     return live ? withFinalCheckpoint(replay, s) : replay;
   }
 

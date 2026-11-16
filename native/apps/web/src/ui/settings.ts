@@ -320,8 +320,15 @@ export interface Prefs {
    * shots, for you only (net/players.ts).
    */
   showPlayers: boolean;
+  /**
+   * Other players' hop effects (player/hop-fx.ts, v0.0.42): the bursts at their feet on servers, on ghosts and in
+   * replays. Off draws none (nothing is spawned). Your own in third person and the Loadout always show.
+   */
+  showHopFx: boolean;
   /** A supporter's own glow on their first-person hands and knife (0.0.21; the glow panel's "In first person"). */
   firstPersonGlow: boolean;
+  /** The Robe's sleeves on your first-person arms while you wear it (v0.0.42; viewmodel/robe-sleeves.ts). */
+  firstPersonRobe: boolean;
   /** Trigger and clip overlays (!showtriggers, !showclips, the !triggers menu; triggers/). Drawn only, never part of a run. */
   triggers: TriggerPrefs;
   /**
@@ -654,7 +661,9 @@ export const DEFAULT_PREFS: Prefs = {
   voice: { enabled: true, volume: 0.8, key: "KeyX", device: "" },
   showPlayerGlow: true,
   showPlayers: true,
+  showHopFx: true,
   firstPersonGlow: true,
+  firstPersonRobe: true,
   mapLooks: {},
   graphics: { preset: "source", waterReflections: true, mapFog: true, mapDetails: true, modelLighting: "subtle", propLighting: true, bloom: true, mapProfiles: false, ambienceShowcase: false, lightingProfile: "map", skyMode: "map", skyPackId: null, skyRotation: 0, skyExposure: 0, lightingSource: "map", directContribution: 1, ambientContribution: 1, clouds: false, cloudQuality: "low", cloudCoverage: .45, cloudDensity: 1, contactShading: false, atmosphere: false, sunShafts: false, materialResponse: true, volumetric: false, spatialAA: true, localLights: false, localQuality: "medium", localBudget: 1, localStrength: .2, dynamicGI: false, tracedGI: false, giQuality: "low", giStrength: .25, giRange: 256, dynamicShadows: false, shadowQuality: "medium", shadowDistance: 1024, shadowStrength: .18, resolutionScale: 1, antialias: true, aspect: "native", aspectFit: "stretch", pixelated: false, anisotropy: 8, brightness: 1, gamma: 1, vibrance: 1, fullbright: false, menuBackground: "live", fullscreen: true, potato: false, flashlight: false, fpsLimit: 1000, uncapped: false, lowLatency: false, menuFps: 0 },
   viewmodel: { show: true, ...VIEWMODEL_POS, bob: VIEWMODEL_BOB, sway: 1, hand: "right", inspect: "tricks", landSettle: false, speedFov: false, rev: VIEWMODEL_REV },

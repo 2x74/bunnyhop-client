@@ -2,7 +2,9 @@
 //   solid  your bunny in its colourway, holding your knife in your gloves, wearing your hat: standing, turning slowly
 //          (drag to turn it)
 //   ghost  your PB ghost in its colour, hopping a small circle with its trail behind it
-// Either one is framed to fit the stage at any aspect, centred: the bunny turns about the middle of its body.
+//   hop    your bunny hopping on the spot, turning slowly, its hop effect under it at every hop and nothing else on
+//          the floor (no ghost, no trail: they'd drown a small effect)
+// Each is framed to fit the stage at any aspect, centred: the bunny turns about the middle of its body.
 // Reduced motion: no idle turn and no hopping (one still pose), dragging still turns it.
 
 import * as THREE from "three";
@@ -13,8 +15,8 @@ import { PlayerModel, type PlayerPose } from "../player/model";
 import { laidShape, Trail, trailShapeOf } from "../player/trail";
 
 export interface BunnyLook {
-  /** "solid" = your bunny (colourway, hat, knife, gloves); "ghost" = your PB ghost (ghost + trail colours). */
-  mode: "solid" | "ghost";
+  /** "solid" = your bunny (colourway, hat, knife, gloves); "ghost" = your PB ghost (ghost + trail colours); "hop" = your bunny hopping on the spot (its hop effect). */
+  mode: "solid" | "ghost" | "hop";
   outfit: string | null;
   playerGlow?: import("../player/glow-config").PlayerGlow | null;
   previewGlow?: boolean;
@@ -26,6 +28,8 @@ export interface BunnyLook {
   loadout: CosmeticLoadout;
   /** Solid: a secret colourway not earned yet, as a flat "???" silhouette (no colours; drag to turn still works). */
   veil?: boolean;
+  /** Solid: "back" turns it round to show what's on its back (the Back tab); it still turns slowly and drags. */
+  facing?: "front" | "back";
 }
 
 const R = 42; // hop circle radius (units)
@@ -40,6 +44,10 @@ const JUMP_TOP = (JUMP * JUMP) / (2 * GRAV);
 /** Camera angles from above (degrees): your bunny nearly level, the ghost's circle from higher up. */
 const SOLID_PITCH = 8;
 const GHOST_PITCH = 20;
+/** Hop: the camera's angle from above, how far round the feet the effects reach (units), and the speed the bunny's pose says it has (the effects that face the way you go need one). */
+const HOP_PITCH = 15;
+const HOP_REACH = 36;
+const HOP_SPEED = 250;
 /** The frame's height over what's framed (a little room above the hat and under the feet). */
 const MARGIN = 1.16;
 const D2R = Math.PI / 180;
@@ -63,9 +71,10 @@ export class BunnyScene {
   private look: BunnyLook;
   private t = 0.35;
   private pts = new Float32Array(Math.ceil(TRAIL_S / STEP + 2) * 3);
-  /** Solid: the turn (degrees) and its fling. */
+  /** Solid: the turn (degrees) and its fling; `face`: the extra turn toward `facing` (eased, degrees). */
   private turn = 0;
   private turnV = 0;
+  private face = 0;
   /**
    * Solid: the posed body's box (bunny/model.ts bodyBox, model space, eased): where its middle sits off the model's
    * origin (cx, cy), how far it reaches from there, its feet and its top (hat included).
@@ -85,26 +94,37 @@ export class BunnyScene {
       new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.08, depthWrite: false }),
     );
     this.scene.add(this.floor, this.ring);
-    this.model = new PlayerModel(this.modelOptions(look));
-    this.model.setNearFade(0, 0);
-    this.model.setOpacity(look.mode === "ghost" ? 0.75 : 1);
-    this.model.bunnyModel?.setSilhouette(!!look.veil && look.mode === "solid");
+    this.model = this.makeModel(look);
     this.trail = new Trail(colorOf(look.trail, "#ffc23d"), this.pts.length / 3, color2Of(look.trail), trailShapeOf(look.shape));
     this.scene.add(this.model.root, this.trail.mesh);
     this.advance(this.reduced ? 1.2 : STEP);
   }
 
-  private modelOptions(look: BunnyLook) {
-    return look.mode === "ghost"
-      ? ({ model: "bunny", style: "ghost", color: colorOf(look.ghost, "#ffc23d"), rim: color2Of(look.ghost), loadout: look.loadout } as const)
-      : ({ model: "bunny", style: "solid", playerGlow: look.playerGlow ?? null, previewGlow: look.previewGlow, outfit: look.outfit ?? undefined, loadout: look.loadout, legs: false } as const);
+  /** The bunny for a look. Only the hopping one draws hop effects, and only it has its leg layer (the standing one turns by its yaw). */
+  private makeModel(look: BunnyLook): PlayerModel {
+    const m = new PlayerModel(
+      look.mode === "ghost"
+        ? { model: "bunny", style: "ghost", color: colorOf(look.ghost, "#ffc23d"), rim: color2Of(look.ghost), loadout: look.loadout }
+        : { model: "bunny", style: "solid", playerGlow: look.playerGlow ?? null, previewGlow: look.previewGlow, outfit: look.outfit ?? undefined, loadout: look.loadout, ...(look.mode === "hop" ? { hops: "own" as const } : { legs: false }) },
+    );
+    m.setNearFade(0, 0);
+    m.setOpacity(look.mode === "ghost" ? 0.75 : 1);
+    m.bunnyModel?.setSilhouette(!!look.veil && look.mode === "solid");
+    return m;
   }
 
   set(look: BunnyLook): void {
     const prev = this.look;
     this.look = { ...look };
-    if (look.mode !== prev.mode || look.ghost !== prev.ghost) {
-      this.model.setStyle(look.mode, look.mode === "ghost" ? colorOf(look.ghost, "#ffc23d") : undefined, undefined, look.mode === "ghost" ? color2Of(look.ghost) : undefined);
+    if ((look.mode === "hop") !== (prev.mode === "hop")) {
+      // To or from the hopping bunny: another model (its legs and its hop effects are set when it's made).
+      this.model.dispose();
+      this.model = this.makeModel(look);
+      this.scene.add(this.model.root);
+      this.body = null;
+      this.t = 0.35;
+    } else if (look.mode !== prev.mode || look.ghost !== prev.ghost) {
+      this.model.setStyle(look.mode === "ghost" ? "ghost" : "solid", look.mode === "ghost" ? colorOf(look.ghost, "#ffc23d") : undefined, undefined, look.mode === "ghost" ? color2Of(look.ghost) : undefined);
       this.model.setOpacity(look.mode === "ghost" ? 0.75 : 1);
     }
     if (look.outfit !== prev.outfit) this.model.bunnyModel?.setOutfit(look.outfit);
@@ -147,7 +167,7 @@ export class BunnyScene {
   }
 
   private standPose(): PlayerPose {
-    return { position: [0, 0, 0], velocity: [0, 0, 0], yaw: 250 + this.turn, pitch: 4, crouched: false, grounded: true };
+    return { position: [0, 0, 0], velocity: [0, 0, 0], yaw: 250 + this.turn + this.face, pitch: 4, crouched: false, grounded: true };
   }
 
   private hopPose(t: number): PlayerPose {
@@ -167,15 +187,46 @@ export class BunnyScene {
     };
   }
 
+  /** Hopping on the spot, facing the way the stand pose does; the pose's speed is along that (the bunny stays put). */
+  private spotPose(t: number): PlayerPose {
+    const ph = ((t % HOP) + HOP) % HOP;
+    const yaw = 250 + this.turn, a = yaw * D2R;
+    return {
+      position: [0, 0, Math.max(0, JUMP * ph - 0.5 * GRAV * ph * ph)],
+      velocity: [Math.cos(a) * HOP_SPEED, Math.sin(a) * HOP_SPEED, JUMP - GRAV * ph],
+      yaw,
+      pitch: 4,
+      crouched: false,
+      grounded: ph < 0.02,
+    };
+  }
+
   /** Steps the model by dt (s). */
   advance(dt: number): void {
-    if (this.look.mode === "solid") {
-      if (!this.dragging) {
-        // Inertia integrated exactly over the frame (the same turn at any frame rate).
-        const damp = Math.exp(-dt * 2.4);
-        this.turn += (this.turnV * (1 - damp)) / 2.4 + (this.reduced ? 0 : 14) * dt;
-        this.turnV *= damp;
+    if (this.look.mode !== "ghost" && !this.dragging) {
+      // Inertia integrated exactly over the frame (the same turn at any frame rate).
+      const damp = Math.exp(-dt * 2.4);
+      this.turn += (this.turnV * (1 - damp)) / 2.4 + (this.reduced ? 0 : this.look.mode === "hop" ? 9 : 14) * dt;
+      this.turnV *= damp;
+    }
+    if (this.look.mode === "hop") {
+      this.model.root.position.set(0, 0, 0);
+      if (this.reduced || dt <= 0) {
+        this.model.setState(this.reduced ? this.standPose() : this.spotPose(this.t));
+        this.model.update(1e-4);
+        return;
       }
+      for (let left = dt; left > 1e-6; left -= STEP) {
+        this.t += Math.min(STEP, left);
+        this.model.setState(this.spotPose(this.t));
+        this.model.update(Math.min(STEP, left));
+      }
+      return;
+    }
+    if (this.look.mode === "solid") {
+      // Round to the back (from three-quarters behind), or back to the front, over about half a second.
+      const want = this.look.facing === "back" ? 160 : 0;
+      this.face += (want - this.face) * (this.reduced ? 1 : 1 - Math.exp(-Math.max(dt, 1e-4) * 7));
       this.model.setState(this.standPose());
       this.model.update(Math.max(dt, 1e-4));
       this.centre(dt);
@@ -230,7 +281,10 @@ export class BunnyScene {
     const ghost = this.look.mode === "ghost";
     this.ring.visible = ghost;
     this.trail.mesh.visible = ghost;
-    if (ghost) {
+    if (this.look.mode === "hop") {
+      // The bunny at the top of a hop and the floor its effect spreads over.
+      this.frame(HOP_PITCH, HOP_REACH, 0, JUMP_TOP + 72);
+    } else if (ghost) {
       // The hop circle and the highest hop, seen from a little above.
       this.frame(GHOST_PITCH, R + 18, 0, JUMP_TOP + 80);
       // The path at fixed steps (so a shape laid per sample stays where it was laid), then the head.

@@ -7,7 +7,7 @@ import { playerGlowControls } from "./player-glow-controls";
 // One screen, no scrolling at desktop sizes; its tabs sit in the screen header (menu.ts passes the slot, as for the
 // profile): perks, gifting previews, and Top supporters.
 //
-//   ┌ the ask (or the thanks) ───────┬ Knife  Finish  Gloves  Colourway  Hat  Ghost  Trail ────────────┐
+//   ┌ the ask (or the thanks) ───────┬ Knife  Finish … Hat  Back  Ghost  Trail  Hop effect ────────────┐
 //   │ two short lines, the amount    │ the Loadout's own stage (ui/loadout-view.ts  │ the slot's item    │
 //   │ and the Support button         │ in preview mode, supporter items only: drag  │ from each set      │
 //   │ your card in each set, fanned  │ to turn; nothing is equipped or saved),      │ Your name | Your   │
@@ -62,9 +62,11 @@ export const SUPPORT_ICON = `<svg viewBox="0 0 24 24" aria-hidden="true" width="
 /** A set's look on the preview (your own knife, so the finish shows on it). */
 function setLook(id: SupporterSetId): LoadoutChoice {
   const st = SUPPORTER_SETS.find((x) => x.id === id) ?? SUPPORTER_SETS[0];
-  // The set's gun camo (progression.ts: every Supporter set has one).
+  // The set's gun camo and hop effect (progression.ts: every Supporter set has one of each).
   const camo = COSMETICS.find((c) => c.slot === "camo" && c.set === st.id)?.id ?? null;
-  return { body: getLoadout().body ?? "body-a", knife: getLoadout().knife ?? DEFAULT_COSMETICS.knife, camo, shape: DEFAULT_COSMETICS.shape, ...st.look };
+  // (No set has a back item: the Back tab's supporter items are standalone.)
+  const hop = COSMETICS.find((c) => c.slot === "hop" && c.set === st.id)?.id ?? null;
+  return { body: getLoadout().body ?? "body-a", knife: getLoadout().knife ?? DEFAULT_COSMETICS.knife, camo, hop, shape: DEFAULT_COSMETICS.shape, back: null, ...st.look };
 }
 
 /** The Loadout's model for trying the set on: every supporter item shown and clickable, nothing saved. */
@@ -85,6 +87,18 @@ export function previewModel(mine: () => boolean): LoadoutModel & { changed(): v
     },
     setHairLength: (n) => {
       choice.hairLength = n;
+      fns.forEach((f) => f());
+    },
+    setHairHighlight: (hex) => {
+      choice.hairHighlight = hex;
+      fns.forEach((f) => f());
+    },
+    setMaskOn: (on) => {
+      choice.maskOn = on;
+      fns.forEach((f) => f());
+    },
+    setCape: (patch) => {
+      Object.assign(choice, patch);
       fns.forEach((f) => f());
     },
     // Support previews items only (the pool row is hidden: previewOnly).

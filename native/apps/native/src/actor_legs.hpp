@@ -51,6 +51,9 @@ struct LegInput {
     int water = 0;
     // Reduced motion scales the idle shift, the jump phases and the rebound (1 = full).
     double motion = 1;
+    // The posture's rise of the hips on the ground (units; actor_posture.hpp): the feet stay where the animation has
+    // them.
+    double lift = 0;
 };
 
 // Landing strength 0..1 from the vertical speed before touchdown: a plain jump landed ~0.35, a drop more.
@@ -303,7 +306,10 @@ private:
         constexpr double float_out_rate = 12;
         // Touchdown: a hard one rebounds at once, also when the player jumps straight out of it.
         if (ground_frames_ == 1 && air_time_ >= min_air_seconds) {
-            rebound_strength_ = contact_hardness(air_vz_) * input.motion;
+            // Any touchdown out of a real hop compresses a little (web legs.ts BOUNCE), or a bhop's bounce turns the
+            // body round in the air like a ball.
+            constexpr double least_bounce = .25;
+            rebound_strength_ = std::max(least_bounce, contact_hardness(air_vz_)) * input.motion;
             rebound_time_ = 0;
         }
         if (!landed_ && stable(input)) {
@@ -331,6 +337,8 @@ private:
         pelvis.rebound = rebound_units * rebound_strength_ * envelope(rebound_time_, rebound_peak);
         pelvis.dz -= sink + (input.grounded ? pelvis.rebound * grounded_rebound : pelvis.rebound * airborne_rebound);
         idle_shift(input, dt, pelvis);
+        // In the air the body isn't lifted off its place (this frame's air weight).
+        pelvis.dz += input.lift * (1 - air_weight_);
         pelvis.dz = std::clamp(pelvis.dz, -max_pelvis, max_pelvis);
         pelvis_drop = pelvis.dz;
         if (pelvis.dz != 0 || pelvis.dy != 0)

@@ -140,6 +140,7 @@ const otherDetail: Cvar[] = [
   pick("cl_ghost_compare", "The ghost the split compares with: auto, pb, wr or custom.", ["auto", "pb", "wr", "custom"] as const, (p) => p.ghost.compare, (p, v) => (p.ghost.compare = v)),
   sw("cl_ghost_nearfade", "Fade a ghost when the camera is in it.", (p) => p.ghost.nearFade, (p, v) => (p.ghost.nearFade = v)),
   sw("cl_firstpersonglow", "Your glow on your hands and knife.", (p) => p.firstPersonGlow, (p, v) => (p.firstPersonGlow = v)),
+  sw("cl_firstpersonrobe", "Your Robe's sleeves on your arms in first person.", (p) => p.firstPersonRobe, (p, v) => (p.firstPersonRobe = v)),
   num("cl_triggerthickness", "Trigger line width, pixels.", TRIGGER_THICKNESS, (p) => p.triggers.thickness, (p, v) => (p.triggers.thickness = v)),
   ...KINDS.map((k) => sw(`cl_trigger_${k.id}`, `Show ${k.id} triggers.`, (p) => p.triggers.kinds[k.id], (p, v) => (p.triggers.kinds[k.id] = v))),
   ...KINDS.map((k) => col(`cl_trigger_color_${k.id}`, `Colour of ${k.id} triggers.`, (p) => p.triggers.colors[k.id], (p, v) => (p.triggers.colors[k.id] = v))),
@@ -244,6 +245,7 @@ export const CVARS: readonly Cvar[] = [
   sw("cl_nametags", "Name tags over other players.", (p) => p.tags.players, (p, v) => (p.tags.players = v)),
   sw("cl_nametags_walls", "Name tags through walls.", (p) => p.tags.throughWalls, (p, v) => (p.tags.throughWalls = v)),
   sw("cl_playerglow", "Supporter glows on players.", (p) => p.showPlayerGlow, (p, v) => (p.showPlayerGlow = v)),
+  sw("cl_hopfx", "Other players' hop effects.", (p) => p.showHopFx, (p, v) => (p.showHopFx = v)),
   // ---- graphics
   num("fps_max", "FPS limit while playing (0: none). Above your refresh rate needs r_uncapped 1.", [30, 1000], (p) => p.graphics.fpsLimit, (p, v) => (p.graphics.fpsLimit = v), { zero: true, int: true, aliases: ["maxfps"] }),
   num("fps_max_menu", "FPS limit in menus (0: the same as playing).", [10, 1000], (p) => p.graphics.menuFps, (p, v) => (p.graphics.menuFps = v), { zero: true, int: true }),

@@ -990,6 +990,8 @@ function ghostSection(): SettingsContent {
           toggle("Ghost tags", () => P().ghost.tag, g("tag"), { hint: "Name, time and live +/-", keywords: "name tag label delta ghost" }),
           toggle("Player glow", () => P().showPlayerGlow, (v) => up((p) => (p.showPlayerGlow = v)), { desc: "Show supporters’ coloured outline and aura on players and replays.", keywords: "supporter glow outline aura players" }),
           toggle("First-person glow", () => P().firstPersonGlow, (v) => up((p) => (p.firstPersonGlow = v)), { desc: "Your own supporter glow on your hands and knife.", keywords: "supporter glow first person viewmodel hands knife" }),
+          toggle("Robe sleeves in first person", () => P().firstPersonRobe, (v) => up((p) => (p.firstPersonRobe = v)), { desc: "Your Robe’s sleeves on your arms while you wear it.", keywords: "robe sleeves first person viewmodel hands arms haori back cosmetic" }),
+          toggle("Hop effects", () => P().showHopFx, (v) => up((p) => (p.showHopFx = v)), { desc: "Show other players’ hop effects on servers, ghosts and replays.", keywords: "hop effect effects burst particles jump landing cosmetic players ghosts replays" }),
           toggle("Show other players", () => P().showPlayers, (v) => up((p) => (p.showPlayers = v)), { desc: "On a server. Off hides everyone else for you. !hide does the same.", keywords: "hide players others multiplayer room server practice invisible" }),
           toggle("Player tags", () => P().tags.players, (v) => up((p) => (p.tags.players = v)), { desc: "Name and run time above other players on a server.", keywords: "name names tag tags nametag label players multiplayer room server mp_playerid" }),
           toggle("Names through walls", () => P().tags.throughWalls, (v) => up((p) => (p.tags.throughWalls = v)), {
@@ -1306,7 +1308,7 @@ const BUILTIN: Section[] = [
   { id: "crosshair", label: "Crosshair", blurb: "", order: 20, render: crosshairSection, reset: resetKeys("crosshair") },
   { id: "hud", label: "HUD", blurb: "", order: 30, render: hudSection, reset: resetKeys("hud", "showZones", "triggers", "landing") },
   { id: "keys", label: "Keys", blurb: "Click a slot, then press a key. Backspace clears.", order: 40, render: keysSection, reset: resetKeys("binds", "holdRestart", "holdRestartAfter", "autoRestart", "practice", "landfix", "nullBinds", "wRelease", "yawSpeed", "angleSpeedKey") },
-  { id: "ghost", label: "Ghosts & players", blurb: "", order: 50, render: ghostSection, reset: resetKeys("showGhost", "ghost", "tags", "showPlayerGlow", "showPlayers", "firstPersonGlow") },
+  { id: "ghost", label: "Ghosts & players", blurb: "", order: 50, render: ghostSection, reset: resetKeys("showGhost", "ghost", "tags", "showPlayerGlow", "showHopFx", "showPlayers", "firstPersonGlow") },
   { id: "graphics", label: "Graphics", blurb: "", order: 60, render: graphicsSection, reset: () => void chooseGraphicsPreset("source").then(() => { resetKeys("graphics")(); }) },
   { id: "audio", label: "Audio", blurb: "", order: 70, render: audioSection, reset: resetKeys("volume") },
 ];

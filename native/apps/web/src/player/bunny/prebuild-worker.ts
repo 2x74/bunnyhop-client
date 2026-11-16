@@ -24,11 +24,12 @@ import { knifeCloud } from "../../viewmodel/knives/hold";
 import type { GloveStyleId } from "../../loadout";
 import { crownGeometry } from "./crown";
 import { hatGeometry } from "./hats";
+import { backGeometry, backRigOf } from "./backs";
 import { bunnyGeometry } from "./mesh";
 import { bunnyParts } from "./prebuild-parts";
 import type { PlainGeometry } from "./prebuild";
 
-type InMsg = { id: number; outfit: string | null; loadout: CosmeticLoadout; body: boolean; hat: boolean; crown: boolean; glow: boolean } | { id: number; gunId: string; camo?: string | null } | { id: number; vm: [string, GloveStyleId][]; clouds: string[]; glow?: boolean };
+type InMsg = { id: number; outfit: string | null; loadout: CosmeticLoadout; body: boolean; hat: boolean; crown: boolean; back?: boolean; glow: boolean } | { id: number; gunId: string; camo?: string | null } | { id: number; vm: [string, GloveStyleId][]; clouds: string[]; glow?: boolean };
 const ctx = self as unknown as { onmessage: ((e: MessageEvent<InMsg>) => void) | null; postMessage(m: unknown, transfer: Transferable[]): void };
 
 function plain(g: THREE.BufferGeometry, transfer: Transferable[], glow = false): PlainGeometry {
@@ -100,7 +101,8 @@ ctx.onmessage = (e) => {
     const crown = m.crown && p.crown ? crownGeometry(p.crown) : null;
     if (hat) ensureHeadwear(hat);
     if (crown) ensureHeadwear(crown);
-    ctx.postMessage({ id: m.id, key: p.key, body, hat: hat && plain(hat, transfer, m.glow), crown: crown && plain(crown, transfer, m.glow) }, transfer);
+    const back = m.back && p.back ? backGeometry(p.back.id, p.back.fit) : null;
+    ctx.postMessage({ id: m.id, key: p.key, body, hat: hat && plain(hat, transfer, m.glow), crown: crown && plain(crown, transfer, m.glow), back: back && plain(back, transfer, m.glow), backRig: back && backRigOf(back) }, transfer);
   } catch (err) {
     ctx.postMessage({ id: m.id, error: String(err) }, []);
   }

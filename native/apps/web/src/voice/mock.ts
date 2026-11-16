@@ -164,7 +164,7 @@ export async function mockTags(specs: [number, number, number, string, boolean][
   const w = window as unknown as { bunnyhop?: { scene: { add(o: unknown): void }; camera: { getWorldDirection(v: unknown): { x: number; z: number }; position: { x: number; y: number; z: number } }; core: { state(): { position: number[] } } } };
   const b = w.bunnyhop;
   if (!b) return;
-  const [{ PlayerModel }, THREE, { NameTag }] = await Promise.all([import("../player/model"), import("three"), import("../player/tag")]);
+  const [{ PlayerModel }, THREE, { NameTag, TAG_STAND }] = await Promise.all([import("../player/model"), import("three"), import("../player/tag")]);
   const dir = b.camera.getWorldDirection(new THREE.Vector3());
   const yaw = (Math.atan2(-dir.z, dir.x) * 180) / Math.PI;
   const [x, y, z] = b.core.state().position;
@@ -183,7 +183,7 @@ export async function mockTags(specs: [number, number, number, string, boolean][
     const tag = new NameTag(slotColor(slot));
     tag.set(name, "", null, false, null, false, talking);
     b.scene.add(tag.sprite);
-    tags.push({ tag, at: new THREE.Vector3(px, z + 76, -py) });
+    tags.push({ tag, at: new THREE.Vector3(px, z + TAG_STAND, -py) });
   });
   let last = performance.now();
   const cam = new THREE.Vector3();

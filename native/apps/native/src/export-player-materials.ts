@@ -22,6 +22,8 @@ const ATTRIBUTE_LOCATIONS: Record<string, number> = {
   glowNormal: 7,
   headwear: 8,
   gunCamo: 9,
+  hairRoot: 10,
+  backfx: 11,
 };
 
 const VERTEX_PRELUDE = `

@@ -139,7 +139,7 @@ export class HeadToHead {
     this.gaps = [gapSeries(a.player.data, b.player.data), gapSeries(b.player.data, a.player.data)];
     this.scale = panelScale(sides);
     const o = this.other;
-    this.model = new PlayerModel({ style: "solid", playerGlow: o.look.glow, outfit: o.look.outfit, loadout: o.look.loadout });
+    this.model = new PlayerModel({ style: "solid", playerGlow: o.look.glow, outfit: o.look.outfit, loadout: o.look.loadout, hops: "others" });
     this.model.setNearFade(...CHASE_NEAR_FADE);
     this.model.root.visible = false;
     this.probeOther();

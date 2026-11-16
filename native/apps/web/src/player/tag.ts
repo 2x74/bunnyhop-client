@@ -75,6 +75,12 @@ function drawSpeaker(g: CanvasRenderingContext2D, cx: number, cy: number): void 
   g.restore();
 }
 
+/**
+ * Where a name tag sits over a player: units above the feet, standing and crouched. The bunny stands 4 units taller
+ * since v0.0.42 (its posture: player/bunny/posture.ts), so these went up with it from 76 / 58 (a ghost's sits a little higher: ghost.ts).
+ */
+export const TAG_STAND = 80, TAG_CROUCH = 62;
+
 export class NameTag {
   readonly sprite: THREE.Sprite;
   private canvas = document.createElement("canvas");

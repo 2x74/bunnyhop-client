@@ -340,9 +340,9 @@ constexpr float detail_size = 12;
 constexpr float pill_height = 22;
 constexpr float dot_size = 7;
 constexpr float badge_width = 18;
-// Above the head: the website places the tag 76 units over the feet standing, 58 crouched.
-constexpr float standing_height_units = 76;
-constexpr float crouched_height_units = 58;
+// Above the head: the website places the tag 80 units over the feet standing, 62 crouched (player/tag.ts).
+constexpr float standing_height_units = 80;
+constexpr float crouched_height_units = 62;
 }  // namespace name_tag_look
 
 // A small speaker (voice chat): the box and the cone, then one wave.

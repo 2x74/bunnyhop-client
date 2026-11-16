@@ -18,7 +18,7 @@ import { GHOST_COLORS, GHOST_CSS, type GhostKind } from "./player/colors";
 import { getGhostCosmetics, onGhostCosmetics } from "./player/cosmetics";
 import { PlayerModel, type PlayerPose } from "./player/model";
 import { onRaceRequest, type RaceRequest } from "./player/race";
-import { NameTag, TagSight, type SightTrace } from "./player/tag";
+import { NameTag, TAG_CROUCH, TAG_STAND, TagSight, type SightTrace } from "./player/tag";
 import { probeFromTrace } from "./player/bunny/legs";
 import { Trail, trailShapeOf } from "./player/trail";
 import { DEFAULT_LOADOUT, type CosmeticLoadout } from "./loadout";
@@ -136,7 +136,7 @@ export class Ghost {
     const mine = d.kind === "pb" ? getGhostCosmetics() : null;
     const color = mine?.ghost ?? GHOST_COLORS[d.kind];
     this.routeColor = color;
-    this.model = new PlayerModel({ style: "ghost", color, rim: mine?.ghost2, loadout: d.loadout ?? (d.kind === "pb" ? undefined : { ...DEFAULT_LOADOUT }) });
+    this.model = new PlayerModel({ style: "ghost", color, rim: mine?.ghost2, loadout: d.loadout ?? (d.kind === "pb" ? undefined : { ...DEFAULT_LOADOUT }), hops: "others" });
     this.trail = new Trail(mine?.trail ?? color, undefined, mine?.trail2, trailShapeOf(mine?.shapeId));
     this.tag = new NameTag(mine?.ghost ?? GHOST_CSS[d.kind]);
     if (mine)
@@ -343,7 +343,7 @@ export class Ghost {
 
     // Tag above the head; fades when the camera is right next to it.
     const root = this.model.root.position;
-    this.tagPos.set(root.x, root.y + (this.pose.crouched ? 62 : 78), root.z);
+    this.tagPos.set(root.x, root.y + (this.pose.crouched ? TAG_CROUCH + 4 : TAG_STAND + 2), root.z);
     const dist = this.tagPos.distanceTo(camera);
     // Tag text (canvas redraw + upload) refreshes at most 10x a second.
     this.tagAge += dt;
