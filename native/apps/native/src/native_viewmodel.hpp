@@ -233,6 +233,8 @@ class NativeViewmodel {
     std::unordered_map<std::string, ActorHold> actorHolds;
     std::vector<std::string> gunRigNames;
     float previewYaw = 0, previewPitch = 0;
+    // The Hop effect tab's last hop: the menu asks for frames every ~66 ms, so a hop is due whenever a new one started.
+    long previewStageHop = -1;
     float bobScale = .5f, swayScale = 1, viewYaw = 0, viewPitch = 0;
     float fov = 54, offsetX = .6f, offsetY = 1.5f, offsetZ = -.9f;
     bool leftHand = false, quietInspect = false;
@@ -1665,8 +1667,10 @@ public:
             native_render::Actor actor;
             actor.id = "menu-preview";
             // The Hop effect tab: the bunny hops on the spot with its effect.
-            constexpr double stage_hop_seconds = .8, stage_frame_seconds = 1. / 60;
-            actor.jumped = kind == "hop" && std::fmod(seconds, stage_hop_seconds) < stage_frame_seconds;
+            constexpr double stage_hop_seconds = .8;
+            const long stage_hop = long(seconds / stage_hop_seconds);
+            actor.jumped = kind == "hop" && stage_hop != previewStageHop;
+            previewStageHop = stage_hop;
             actor.opacity = kind == "ghost" ? .55f : 1.f;
             actor.source = kind == "ghost" ? native_render::GhostSource::pb : native_render::GhostSource::none;
             actor.playerGlow = localGlow;

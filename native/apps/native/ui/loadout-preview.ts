@@ -29,7 +29,7 @@ export interface PreviewRequest {
   ghost: string;
   trail?: string;
   playerGlow: PlayerGlow | null;
-  view: "fp" | "close" | "bunny" | "ghost" | "onboarding" | "gun" | "gunside" | "knife" | "hilt";
+  view: "fp" | "close" | "bunny" | "ghost" | "hop" | "onboarding" | "gun" | "gunside" | "knife" | "hilt";
   weapon?: number;
   stage?: OnboardingPose;
   yaw: number;

@@ -113,21 +113,6 @@ const putUnique = (v: Float32Array) => {
   blobs.set(key, offset);
   return offset;
 };
-/**
- * A four-float attribute the vertex layout doesn't carry (the sprung hair's pivots), in its own buffer: one entry per
- * indexed vertex. Vertices that differ only in it would have been merged, so the first source vertex of each wins.
- */
-function perVertex(attribute: THREE.BufferAttribute, indices: Uint32Array, count: number): Float32Array {
-  const out = new Float32Array(count * 4),
-    seen = new Uint8Array(count);
-  for (let i = 0; i < indices.length; i++) {
-    const at = indices[i];
-    if (seen[at]) continue;
-    seen[at] = 1;
-    for (let k = 0; k < 4; k++) out[at * 4 + k] = attribute.array[i * attribute.itemSize + k] ?? 0;
-  }
-  return out;
-}
 function geometry(name: string, g: any) {
   const p = g.getAttribute("position"),
     n = g.getAttribute("normal"),

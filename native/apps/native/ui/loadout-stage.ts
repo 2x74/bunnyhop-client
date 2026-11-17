@@ -140,9 +140,8 @@ function stageRenderSize(canvas: HTMLCanvasElement): { width: number; height: nu
   };
 }
 
-// The host draws the bunny views; the hop view is the bunny on its stand with the hop effect in the loadout.
+// The host draws the bunny views; in the hop view the bunny hops on the spot so its hop effect bursts.
 const isBunnyView = (view: StageView) => view === "bunny" || view === "ghost" || view === "hop";
-const hostView = (view: StageView): PreviewRequest["view"] => (view === "hop" ? "bunny" : view);
 // How far the stage turns the bunny to show its back (web ui/bunny-preview.ts).
 const BACK_FACING_YAW_DEGREES = 160;
 
@@ -324,7 +323,7 @@ export class LoadoutStage {
       ghost: this.look.ghost ?? "ghost-gold",
       trail: this.look.trail ?? "trail-gold",
       playerGlow: this.look.playerGlow ?? null,
-      view: hostView(this.viewMode),
+      view: this.viewMode,
       weapon: [2, 3, 7, 8, 9, 14, 17, 22][this.gunIndex],
       yaw: this.yaw + (isBunnyView(this.viewMode) && this.look.facing === "back" ? BACK_FACING_YAW_DEGREES : 0),
       pitch: this.pitch,
@@ -333,9 +332,9 @@ export class LoadoutStage {
       ...stageRenderSize(this.canvas),
     };
   }
-  // A picture that doesn't move: no inspect playing, not held, not being turned.
+  // A picture that doesn't move: no inspect playing, not held, not being turned, no hops.
   private still(): boolean {
-    return !this.held && !this.drag && performance.now() >= this.animateUntil;
+    return !this.held && !this.drag && performance.now() >= this.animateUntil && this.viewMode !== "hop";
   }
   private renderNative(): void {
     if (this.disposed || !nativePreviewAvailable() || !this.canvas.isConnected || document.hidden) return;
@@ -360,7 +359,7 @@ export class LoadoutStage {
         if (still) stageFrames.keep(key, png);
         if (key === this.wanted) this.showHostFrame(png, ++this.received, key);
       }
-      if (this.active || this.held || performance.now() < this.animateUntil) {
+      if (this.active || !this.still()) {
         this.frame = window.setTimeout(() => this.renderNative(), 66);
       }
     });
