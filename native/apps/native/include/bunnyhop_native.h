@@ -172,6 +172,8 @@ int bh_record_end(BhContext *ctx);
 int bh_record_cosmetic(BhContext *ctx, uint32_t kind);
 int bh_record_inspect(BhContext *ctx, uint32_t kind);
 int bh_record_loadout(BhContext *ctx, const char *packed_loadout);
+/* The charm and its options (web loadout.ts packLoadoutExt), written last as the BHLX trailer beside the loadout. */
+int bh_record_loadout_ext(BhContext *ctx, const char *packed_loadout_ext);
 /* Persistent clientBuild identity; call before beginning a recording. UTF-8, 1..255 bytes. */
 int bh_record_identity(BhContext *ctx, const char *client_build);
 /* Writes a new gzip .bhr from retained native commands/checkpoints. Requires an ended, valid, finished run. */

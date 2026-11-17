@@ -123,6 +123,22 @@ fn segmented_retains_abandoned_branches_timer_filter_views_events_and_restart_pa
             decoded.segments[0].position.map(f32::to_bits),
             BhState::from(&m.game).position.map(f32::to_bits)
         );
+        // A charm follows the segments trailer (replay.ts BHLX), and the segments still decode.
+        let mut charmed = data.metadata();
+        charmed.commands = data.commands.clone();
+        charmed.looks = data.looks.clone();
+        charmed.checkpoints = data.checkpoints.clone();
+        charmed.packed_loadout = Some("2;knife-carrot;fin-garden;glove-knit".into());
+        charmed.packed_loadout_ext = Some("charm-duck".into());
+        let with_charm = charmed.encode_raw().unwrap();
+        charmed.packed_loadout_ext = None;
+        let without = charmed.encode_raw().unwrap();
+        assert_eq!(&with_charm[..without.len()], &without[..]);
+        assert_eq!(&with_charm[without.len()..without.len() + 4], b"BHLX");
+        let read = replay::Decoded::parse(&with_charm).unwrap();
+        assert_eq!(read.segments.len(), decoded.segments.len());
+        let info = serde_json::from_slice::<serde_json::Value>(read.info.as_bytes()).unwrap();
+        assert_eq!(info["packedLoadoutExt"], "charm-duck");
         assert!(
             replay::Decoded::parse(&raw[..raw.len() - 1])
                 .err()

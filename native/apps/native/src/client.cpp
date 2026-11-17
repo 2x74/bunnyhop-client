@@ -342,6 +342,8 @@ int run(const native::Options &opt) {
             std::cerr << "Window bounds: " << e.what() << '\n';
         }
     };
+    // The charm and its options (loadout.ts packLoadoutExt), from the menu beside the packed loadout.
+    std::string charm_loadout;
     std::string selected_style = opt.style, active_style = opt.style, outfit, packed_loadout,
                 ghost_cosmetic = "ghost-default", trail_cosmetic = "trail-none", shape_cosmetic = "shape-ribbon";
     // The style the player last picked starts the next launch too (saved_style.hpp); --style wins for that launch.
@@ -740,7 +742,8 @@ int run(const native::Options &opt) {
                 active_style,
                 replay_player,
                 configured_turns,
-                held_knife.loadout()
+                held_knife.loadout(),
+                charm_loadout
         );
         run_history.select(map_id, active_track, active_style, double(SDL_GetTicksNS()) / run_second_ns);
     };
@@ -3094,8 +3097,8 @@ int run(const native::Options &opt) {
                         player_glow = native_render::parse_glow(message.value("playerGlow", nlohmann::json(nullptr)));
                         outfit = message.value("outfit", std::string());
                         packed_loadout = message.value("packedLoadout", std::string());
-                        const auto charm = message.value("charmLoadout", std::string());
-                        if (outfit.size() > 64 || packed_loadout.size() > 200 || charm.size() > 200)
+                        charm_loadout = message.value("charmLoadout", std::string());
+                        if (outfit.size() > 64 || packed_loadout.size() > 200 || charm_loadout.size() > 200)
                             throw std::runtime_error("Invalid cosmetic selection");
                         held_knife.update(
                                 packed_loadout,
@@ -3110,7 +3113,7 @@ int run(const native::Options &opt) {
                         if (renderer) {
                             renderer->set_player_glow(player_glow);
                             renderer->set_cosmetics(outfit, held_knife.loadout());
-                            renderer->set_charm(charm);
+                            renderer->set_charm(charm_loadout);
                             renderer->set_ghost_cosmetics(ghost_cosmetic, trail_cosmetic, shape_cosmetic);
                         }
                     } else if (type == "roomEvent") {

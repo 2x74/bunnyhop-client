@@ -70,7 +70,8 @@ void RunRecorder::begin(
         const std::string &style,
         const std::string &player,
         TurnSettings turns,
-        const std::string &loadout
+        const std::string &loadout,
+        const std::string &charm
 ) {
     replays = cache / "replays";
     replay_map = map;
@@ -79,6 +80,8 @@ void RunRecorder::begin(
     require(bh_record_begin(core, "", style.c_str(), player.c_str(), 100), core, "Starting native recording");
     require(input.begin(core, turns), core, "Setting v29 recording input");
     bh_record_loadout(core, loadout.c_str());
+    // The charm and its options (the replay's BHLX trailer, written only with one).
+    bh_record_loadout_ext(core, charm.c_str());
 }
 
 void RunRecorder::resume_segment(BhContext *core) {

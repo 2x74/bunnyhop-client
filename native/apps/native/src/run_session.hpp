@@ -46,7 +46,8 @@ struct RunRecorder {
           const std::string &style,
           const std::string &player,
           TurnSettings turns,
-          const std::string &loadout);
+          const std::string &loadout,
+          const std::string &charm = {});
     void resume_segment(BhContext *core);
     void write(BhContext *core);
     nlohmann::json finish_event(
