@@ -22,7 +22,7 @@ class NativeViewmodel {
     // Four-float attributes only some meshes carry (export-viewmodels.ts EXTRA_ATTRIBUTES), each in a buffer of its
     // own: a back item's motion code (backfx) and a sprung lock's root (hairRoot). Every other mesh reads zeros.
     static constexpr std::array<const char *, 2> extra_attributes = {"backfx", "hairRoot"};
-    static constexpr std::array<GLuint, 2> extra_locations = {10, 11};
+    static constexpr std::array<GLuint, 2> extra_locations = {11, 10};
     static constexpr size_t no_extra = SIZE_MAX;
 
     struct Mesh {

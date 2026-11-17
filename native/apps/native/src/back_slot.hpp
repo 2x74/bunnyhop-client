@@ -230,9 +230,9 @@ struct Worn {
     std::array<float, 3> pivot{}, pivot2{}, axis{0, 1, 0};
     // uCape: a long cape's [on, the height it hangs from, the ground under the feet, 0] (BackRig.hang).
     std::array<float, 4> cape{};
-    // uRobe: [pattern, the sleeves' drop, their radius, where they start].
-    std::array<float, 4> robe{};
-    std::array<float, 12> tones{};
+    // uRobe: [pattern, the sleeves' drop, their radius, where they start]. With nothing worn, the website's defaults.
+    std::array<float, 4> robe{0, 1, 0, 0};
+    std::array<float, 12> tones{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
     // uPonytail.w: how far a long ponytail stands further off the back over a pack (backs.ts ponytailRest).
     float ponytail_rest = 0;
 

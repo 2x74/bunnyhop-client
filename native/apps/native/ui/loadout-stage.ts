@@ -8,7 +8,7 @@ import { packLoadout, type CosmeticLoadout } from "../../web/src/loadout";
 import { requestPreview, cancelPreview, nativePreviewAvailable, type PreviewRequest } from "./loadout-preview";
 import type { PreviewSpec } from "../../web/src/notify/item-preview";
 import type { PlayerGlow } from "../../web/src/player/glow-config";
-export type StageView = "fp" | "close" | "bunny" | "ghost" | "hop" | "gun" | "gunside";
+export type StageView = "fp" | "close" | "bunny" | "ghost" | "gun" | "gunside";
 export interface StageLook {
   outfit?: string | null;
   ghost?: string | null;
@@ -17,8 +17,6 @@ export interface StageLook {
   veil?: boolean;
   playerGlow?: PlayerGlow | null;
   previewGlow?: boolean;
-  /** The Back tab turns the bunny round so the item shows. */
-  facing?: "front" | "back";
 }
 export type ThumbJob =
   | { key: string; kind: "knife"; knife: string; loadout: CosmeticLoadout; focus?: "hilt" }
@@ -27,7 +25,6 @@ export type ThumbJob =
 export const THUMB_W = 384,
   THUMB_H = 240;
 const CLOSE_UP_ZOOM = 1.3;
-const BACK_TURN_DEGREES = 180;
 const thumbs = new Map<string, HTMLCanvasElement>();
 const stageFrames = new StageFrames();
 let lastGunIndex = 6;
@@ -216,7 +213,7 @@ export class LoadoutStage {
     if (this.disposed) return;
     this.renderNative();
     const slot = this.canvas.closest(".lo")?.querySelector<HTMLElement>(".lo-tab.on")?.dataset.slot;
-    const character = this.viewMode === "bunny" || this.viewMode === "ghost" || this.viewMode === "hop";
+    const character = this.viewMode === "bunny" || this.viewMode === "ghost";
     let spec: PreviewSpec = {
       kind: this.viewMode === "ghost" ? "ghost" : character ? "bunny" : "knife",
       key: this.look.ghost ?? "stage",
@@ -285,7 +282,7 @@ export class LoadoutStage {
       playerGlow: this.look.playerGlow ?? null,
       view: this.viewMode,
       weapon: [2, 3, 7, 8, 9, 14, 17, 22][this.gunIndex],
-      yaw: this.yaw + (this.look.facing === "back" ? BACK_TURN_DEGREES : 0),
+      yaw: this.yaw,
       pitch: this.pitch,
       inspect: this.inspectCount,
       held: this.held,
@@ -294,7 +291,7 @@ export class LoadoutStage {
   }
   // A picture that doesn't move: no inspect playing, not held, not being turned.
   private still(): boolean {
-    return !this.held && !this.drag && performance.now() >= this.animateUntil && this.viewMode !== "hop";
+    return !this.held && !this.drag && performance.now() >= this.animateUntil;
   }
   private renderNative(): void {
     if (this.disposed || !nativePreviewAvailable() || !this.canvas.isConnected || document.hidden) return;
@@ -319,7 +316,7 @@ export class LoadoutStage {
         if (still) stageFrames.keep(key, png);
         if (key === this.wanted) this.showHostFrame(png, ++this.received, key);
       }
-      if (this.active || !this.still()) {
+      if (this.active || this.held || performance.now() < this.animateUntil) {
         this.frame = window.setTimeout(() => this.renderNative(), 66);
       }
     });

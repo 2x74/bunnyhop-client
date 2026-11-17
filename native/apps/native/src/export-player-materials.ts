@@ -24,8 +24,8 @@ const ATTRIBUTE_LOCATIONS: Record<string, number> = {
   gunCamo: 9,
   // Only back items carry backfx and only sprung hair carries hairRoot, each in a buffer of its own; every other mesh
   // reads the zero the renderer sets as their constant value.
-  backfx: 10,
-  hairRoot: 11,
+  hairRoot: 10,
+  backfx: 11,
 };
 
 const VERTEX_PRELUDE = `
