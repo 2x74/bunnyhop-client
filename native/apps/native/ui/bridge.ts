@@ -78,7 +78,8 @@ export type MenuMessage =
   | { type: "ready"; origin: string; webglContexts: number; webglAttempts: number }
   | { type: "resume" | "restart" | "quit" }
   | { type: "prefetchMap"; map: string | null; sha?: string }
-  | { type: "selectMap"; id: string; style?: StyleId; track?: number }
+  /** `remember: false`: play this map in `style` without making it the saved style (the Daily's style of the day). */
+  | { type: "selectMap"; id: string; style?: StyleId; track?: number; remember?: false }
   | { type: "style"; id: StyleId }
   | {
       type: "cosmetics";

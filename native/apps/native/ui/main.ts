@@ -248,13 +248,18 @@ function paintFinish(): void {
 }
 const nativeDaily = new NativeDaily({ line: (line) => send({ type: "daily", line }) });
 /** Play the day's map from the Daily entry, in the day's style (the host keeps it as the selected style). */
+/** The player's own style while the Daily plays in the day's: the next map goes back to it (web: the page's style). */
+let styleBeforeDaily: StyleId | null = null;
 function playDaily(day: string, map: string, style?: string, endsAt?: number): void {
-  selectMapIn(map, nativeDaily.play(day, map, style, endsAt) as StyleId);
+  styleBeforeDaily ??= state.style;
+  selectMapIn(map, nativeDaily.play(day, map, style, endsAt) as StyleId, false);
 }
 function selectMap(id: string): void {
-  selectMapIn(id, state.style);
+  const style = styleBeforeDaily ?? state.style;
+  styleBeforeDaily = null;
+  selectMapIn(id, style);
 }
-function selectMapIn(id: string, style: StyleId): void {
+function selectMapIn(id: string, style: StyleId, remember = true): void {
   pickMap(id, {
     map: () => state.map,
     leaving: [
@@ -279,7 +284,7 @@ function selectMapIn(id: string, style: StyleId): void {
       send({ type: "resume" });
     },
     // The host owns loading/error status and clears it when the download settles.
-    request: (map) => send({ type: "selectMap", id: map, style, track: 0 }),
+    request: (map) => send({ type: "selectMap", id: map, style, track: 0, ...(remember ? {} : { remember: false }) }),
     refuse: (text) => {
       notice(text);
       logToHost(`map pick refused: ${text}`);

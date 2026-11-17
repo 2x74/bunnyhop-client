@@ -606,7 +606,14 @@ test("with a Daily Challenge, Daily is on the menu and the home block plays the 
     expect(await row.isVisible()).toBe(true);
     await page.locator("#home-daily").waitFor();
     await row.click();
-    expect(await last(page)).toEqual({ type: "selectMap", id: "bhop_tasku", style: "legit", track: 0 });
+    // The day's style for this map only: the saved style stays the player's own.
+    expect(await last(page)).toEqual({
+      type: "selectMap",
+      id: "bhop_tasku",
+      style: "legit",
+      track: 0,
+      remember: false,
+    });
     expect(errors).toEqual([]);
   } finally {
     await browser.close();

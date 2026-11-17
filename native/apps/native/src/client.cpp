@@ -2840,7 +2840,8 @@ int run(const native::Options &opt) {
                             throw std::runtime_error("Gauntlets are Normal style on the main track.");
                         tutorial_runner.stopped = false;
                         selected_style = style;
-                        if (gauntlet_id.empty()) remember_style();
+                        // The Daily plays in the day's style without making it the saved one (ui/main.ts playDaily).
+                        if (gauntlet_id.empty() && message.value("remember", true)) remember_style();
                         active_track = message.value("track", 0u);
                         if (active_track > 64) throw std::runtime_error("Invalid track");
                         pending_replay.clear();
