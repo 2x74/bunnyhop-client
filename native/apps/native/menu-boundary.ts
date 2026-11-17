@@ -107,10 +107,12 @@ function adaptSettingsPanel(source: string): string {
 function adaptJumpStats(source: string): string {
   const ssj = /^registerChatCommand\(\{\n  name: "ssj",\n[\s\S]*?^\}\);$/m;
   const jhud = /^registerChatCommand\(\{\n  name: "jhud",\n[\s\S]*?^\}\);$/m;
-  if (!ssj.test(source) || !jhud.test(source)) {
-    throw new Error("Native menu: web ssj/index.ts no longer registers !ssj and !jhud as expected");
+  // !logs too: the desktop client doesn't make gain logs yet (chat-service.ts says so instead).
+  const logs = /^registerChatCommand\(\{\n  name: "logs",\n[\s\S]*?^\}\);$/m;
+  if (!ssj.test(source) || !jhud.test(source) || !logs.test(source)) {
+    throw new Error("Native menu: web ssj/index.ts no longer registers !ssj, !jhud and !logs as expected");
   }
-  return source.replace(ssj, "").replace(jhud, "");
+  return source.replace(ssj, "").replace(jhud, "").replace(logs, "");
 }
 
 async function adaptedSource(path: string): Promise<string | null> {
