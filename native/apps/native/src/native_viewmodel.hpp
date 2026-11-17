@@ -1617,9 +1617,12 @@ public:
             draw_knife_sample(width, height, kind == "hilt", seconds);
         } else if (kind == "gunside") {
             draw_gun_side(width, height, weapon, seconds);
-        } else if (kind == "bunny" || kind == "ghost") {
+        } else if (kind == "bunny" || kind == "ghost" || kind == "hop") {
             native_render::Actor actor;
             actor.id = "menu-preview";
+            // The Hop effect tab: the bunny hops on the spot with its effect.
+            constexpr double stage_hop_seconds = .8, stage_frame_seconds = 1. / 60;
+            actor.jumped = kind == "hop" && std::fmod(seconds, stage_hop_seconds) < stage_frame_seconds;
             actor.opacity = kind == "ghost" ? .55f : 1.f;
             actor.source = kind == "ghost" ? native_render::GhostSource::pb : native_render::GhostSource::none;
             actor.playerGlow = localGlow;
@@ -1635,6 +1638,7 @@ public:
             const float eye[3] = {65.f, -100.f, 74.f};
             const auto projection = native::camera_matrix(eye, 120, 9, float(width) / height);
             draw_actor(actor, projection, eye, seconds);
+            draw_hop_effects(projection, eye);
             gunFx->clear();
             constexpr unsigned segments = 64;
             constexpr float radius = 28;

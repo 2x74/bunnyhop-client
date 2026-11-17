@@ -31,8 +31,8 @@ public:
         const auto id = job.value("id", 0u);
         const auto view = job.value("view", std::string("fp"));
         if (!id
-            || (view != "fp" && view != "close" && view != "bunny" && view != "ghost" && view != "onboarding"
-                && view != "gun" && view != "gunside" && view != "knife" && view != "hilt"))
+            || (view != "fp" && view != "close" && view != "bunny" && view != "ghost" && view != "hop"
+                && view != "onboarding" && view != "gun" && view != "gunside" && view != "knife" && view != "hilt"))
             return {};
         const int w = std::clamp(job.value("width", 768), 384, 960), h = std::clamp(job.value("height", 480), 240, 600);
         const float yaw = job.value("yaw", 0.f), pitch = job.value("pitch", 0.f);
