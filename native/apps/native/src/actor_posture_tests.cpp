@@ -15,22 +15,22 @@ using native_actor_anim::Posture;
 
 constexpr double jump_speed = 301.993, gravity = 800;
 
-bool near(double a, double b, double tolerance) {
+bool close_to(double a, double b, double tolerance) {
     return std::abs(a - b) <= tolerance;
 }
 
 void posture_shares() {
     Posture p;
     p.update(0, true, true, true, false, 0);
-    assert(near(p.share, .62, 1e-12) && near(p.lift, 1.6, 1e-12));
+    assert(close_to(p.share, .62, 1e-12) && close_to(p.lift, 1.6, 1e-12));
     p.update(0, true, true, true, false, 250);
-    assert(near(p.share, .5, 1e-12) && near(p.lift, .8, 1e-12));
+    assert(close_to(p.share, .5, 1e-12) && close_to(p.lift, .8, 1e-12));
     p.update(0, true, true, false, false, 250);
-    assert(near(p.share, .42, 1e-12));
+    assert(close_to(p.share, .42, 1e-12));
     p.update(0, true, true, false, false, 800);
-    assert(near(p.share, .3, 1e-12));
+    assert(close_to(p.share, .3, 1e-12));
     p.update(0, true, true, true, true, 0);
-    assert(near(p.share, .3, 1e-12) && near(p.lift, 0, 1e-12));
+    assert(close_to(p.share, .3, 1e-12) && close_to(p.lift, 0, 1e-12));
     p.update(0, true, false, true, false, 0);
     assert(p.share == 0 && p.lift == 0);
     // Off the ground at once, back on it slowly: one ground tick in a hop barely moves it.
@@ -95,7 +95,7 @@ void follow_lift_is_not_a_jolt() {
 void follow_breathes_standing_still() {
     FollowThrough follow(.25);
     follow.update(0, true, true, 0, true, 0, 0);
-    assert(near(follow.breath, std::sin(.25 * 2 * 3.141592653589793), 1e-9));
+    assert(close_to(follow.breath, std::sin(.25 * 2 * 3.141592653589793), 1e-9));
     follow.update(.1, false, true, 0, true, 300, .1);
     follow.update(1, false, true, 0, true, 300, 1.1);
     assert(std::abs(follow.breath) < .01);
@@ -108,12 +108,12 @@ void continuity_eases_a_snap() {
     assert(continuity.weight == 0);
     std::vector<float> jumped(24, 3);
     continuity.apply(jumped, 24, "ACT_HOP", 1, 1. / 60, false);
-    assert(continuity.weight == 1 && near(jumped[5], 1, 1e-6));
+    assert(continuity.weight == 1 && close_to(jumped[5], 1, 1e-6));
     std::vector<float> half(24, 3);
     continuity.apply(half, 24, "ACT_HOP", 1, .05 - 1. / 60, false);
     std::vector<float> later(24, 3);
     continuity.apply(later, 24, "ACT_HOP", 1, 1. / 60, false);
-    assert(near(continuity.weight, .5, 1e-9) && near(later[0], 2, 1e-5));
+    assert(close_to(continuity.weight, .5, 1e-9) && close_to(later[0], 2, 1e-5));
     std::vector<float> done(24, 3);
     continuity.apply(done, 24, "ACT_HOP", 1, .06, false);
     assert(continuity.weight == 0 && done[0] == 3);

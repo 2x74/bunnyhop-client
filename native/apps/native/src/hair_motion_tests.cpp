@@ -10,13 +10,13 @@ namespace {
 constexpr double step_seconds = 1. / 120;
 constexpr double vector_tolerance = 5e-5;
 
-bool near(double a, double b, double tolerance = vector_tolerance) {
+bool close_to(double a, double b, double tolerance = vector_tolerance) {
     return std::abs(a - b) <= tolerance;
 }
 
 void expect(const std::array<double, 3> &got, const std::array<double, 3> &want, const char *what) {
     for (size_t k = 0; k < 3; k++)
-        if (!near(got[k], want[k])) {
+        if (!close_to(got[k], want[k])) {
             std::fprintf(stderr, "%s[%zu]: %.6f, want %.6f\n", what, k, got[k], want[k]);
             assert(false);
         }
@@ -63,9 +63,9 @@ void length_factors() {
     const double spiky[] = {.55, .775, 1, 1.45, 1.9}, long_hair[] = {.5, .75, 1, 1.375, 1.75};
     const double percents[] = {40, 70, 100, 200, 300};
     for (size_t i = 0; i < 5; i++) {
-        assert(near(native_render::hair_length_factor(percents[i], .55, 1.9, true), spiky[i], 1e-9));
-        assert(near(native_render::hair_length_factor(percents[i], .5, 1.75, true), long_hair[i], 1e-9));
-        assert(near(native_render::hair_length_factor(percents[i], 0, 0, false), percents[i] / 100, 1e-9));
+        assert(close_to(native_render::hair_length_factor(percents[i], .55, 1.9, true), spiky[i], 1e-9));
+        assert(close_to(native_render::hair_length_factor(percents[i], .5, 1.75, true), long_hair[i], 1e-9));
+        assert(close_to(native_render::hair_length_factor(percents[i], 0, 0, false), percents[i] / 100, 1e-9));
     }
 }
 

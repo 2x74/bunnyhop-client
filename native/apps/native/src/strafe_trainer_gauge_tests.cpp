@@ -330,13 +330,13 @@ join(std::vector<std::pair<int, double>> a, const std::vector<std::pair<int, dou
     return a;
 }
 
-bool near(double got, double want, double tolerance) {
+bool close_to(double got, double want, double tolerance) {
     return std::abs(got - want) < tolerance;
 }
 
 void check_gauge_sync() {
     constexpr int A = 1, D = -1;
-    check(native::gauge_sync(400, 0, 0, 450, 0, 30) && near(*native::gauge_sync(400, 0, 0, 450, 0, 30), 100, 1e-9),
+    check(native::gauge_sync(400, 0, 0, 450, 0, 30) && close_to(*native::gauge_sync(400, 0, 0, 450, 0, 30), 100, 1e-9),
           "sync square");
     check(native::gauge_sync(400, 0, 0, 450, 90, 30) == 0., "sync gains nothing");
     check(native::gauge_sync(400, 0, 0, 450, -90, 30) == 200., "sync points back");
@@ -349,19 +349,22 @@ void check_gauge_sync() {
     check(g2.trainer.flattens.red == 0 && g2.trainer.flattens.blue == 0, "G2 no snap");
     Air g3;
     const auto red = g3.run(repeat(17, D, -1));
-    check(red[0] == 90 && red[1] == 90 && near(red[2], 75.6, 2) && near(red[3], 63.6, 2) && std::abs(red[16]) < 10,
+    check(red[0] == 90 && red[1] == 90 && close_to(red[2], 75.6, 2) && close_to(red[3], 63.6, 2)
+                  && std::abs(red[16]) < 10,
           "G3");
     check(g3.trainer.flattens.red == 1 && g3.trainer.flattens.blue == 0, "G3 one red");
     Air g4;
     const auto blue = g4.run(join(repeat(2, D, 1), repeat(8, D, -1)));
-    check(std::abs(blue[0]) < 1 && blue[1] == -90 && blue[2] == -90 && near(blue[3], -75.7, 2), "G4");
+    check(std::abs(blue[0]) < 1 && blue[1] == -90 && blue[2] == -90 && close_to(blue[3], -75.7, 2), "G4");
     check(g4.trainer.flattens.red == 0 && g4.trainer.flattens.blue == 1, "G4 one blue");
     const auto g5 = Air().run(join(repeat(3, D, 1), repeat(8, D, -1)));
     check(g5[1] == -90 && g5[2] == -90 && g5[3] == -90 && g5[4] == -90 && g5[5] > -80, "G5");
     const auto g6 = Air().run(join({{A, -1}}, repeat(8, D, -1)));
     check(g6[0] == -90 && g6[1] == 90 && g6[2] == 90, "G6");
     const auto g7 = Air().run(join(repeat(3, 0, -1), repeat(8, D, -1)));
-    check(near(g7[0], -14.6, 1) && near(g7[1], -26.6, 1) && near(g7[2], -36.7, 1) && g7[3] == 90 && g7[4] == 90, "G7");
+    check(close_to(g7[0], -14.6, 1) && close_to(g7[1], -26.6, 1) && close_to(g7[2], -36.7, 1) && g7[3] == 90
+                  && g7[4] == 90,
+          "G7");
     Air g8;
     std::vector<std::pair<int, double>> sixty;
     for (int i = 0; i < 6; ++i)
@@ -371,19 +374,19 @@ void check_gauge_sync() {
     check(g8.trainer.flattens.red == 0 && g8.trainer.flattens.blue == 0, "G8 no snap");
     Air g9;
     const auto flick = g9.run(join({{A, 2.6}}, repeat(6, A, 1)));
-    check(near(flick[0], 14.1, 1) && g9.trainer.flattens.red + g9.trainer.flattens.blue == 0, "G9");
+    check(close_to(flick[0], 14.1, 1) && g9.trainer.flattens.red + g9.trainer.flattens.blue == 0, "G9");
     const auto g10 = Air().run(repeat(30, A, 0));
     const auto g10_old = Air(false, false).run(repeat(30, A, 0));
     for (size_t i = 0; i < g10.size(); ++i)
-        check(near(g10[i], g10_old[i], 1), "G10 the same curve as without sync");
-    check(near(g10[0], -14.6, 1) && near(g10[1], -26.6, 1) && near(g10[2], -36.7, 1), "G10");
+        check(close_to(g10[i], g10_old[i], 1), "G10 the same curve as without sync");
+    check(close_to(g10[0], -14.6, 1) && close_to(g10[1], -26.6, 1) && close_to(g10[2], -36.7, 1), "G10");
     const auto sideways_red = Air(true).run(repeat(4, D, -1));
-    check(sideways_red[0] == 90 && sideways_red[1] == 90 && near(sideways_red[2], 75.6, 2), "G12 red");
+    check(sideways_red[0] == 90 && sideways_red[1] == 90 && close_to(sideways_red[2], 75.6, 2), "G12 red");
     const auto sideways_blue = Air(true).run(join(repeat(2, D, 1), repeat(2, D, -1)));
-    check(sideways_blue[1] == -90 && sideways_blue[2] == -90 && near(sideways_blue[3], -75.7, 2), "G12 blue");
+    check(sideways_blue[1] == -90 && sideways_blue[2] == -90 && close_to(sideways_blue[3], -75.7, 2), "G12 blue");
     const auto no_keys = Air().run(repeat(20, 0, 1)), no_keys_old = Air(false, false).run(repeat(20, 0, 1));
     for (size_t i = 0; i < no_keys.size(); ++i)
-        check(near(no_keys[i], no_keys_old[i], 1), "G13 no keys");
+        check(close_to(no_keys[i], no_keys_old[i], 1), "G13 no keys");
     Air g13;
     const double up = g13.step(A, 1);
     check(g13.step(A, 1, true) == up && g13.step(A, 1, true) < up - 5, "G13 ground");

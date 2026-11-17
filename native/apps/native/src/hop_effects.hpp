@@ -367,7 +367,7 @@ settle(const Recipes &recipes, const GroundProbe &probe, const Reach &reach, dou
         const auto g = probe(px, py, z + 8);
         return g && std::abs(*g - z) <= reach_tolerance;
     };
-    double nx = 0, ny = 0, far = 0;
+    double nx = 0, ny = 0, settle_reach = 0;
     for (const double r : settle_radii) {
         double sx = 0, sy = 0;
         int held = 0;
@@ -384,12 +384,12 @@ settle(const Recipes &recipes, const GroundProbe &probe, const Reach &reach, dou
         if (!held || l < .5) continue;
         nx = sx / l;
         ny = sy / l;
-        far = r;
+        settle_reach = r;
         break;
     }
-    if (!far) return std::nullopt;
+    if (!settle_reach) return std::nullopt;
     double first = 0;
-    for (double step = 4; step <= far + hop_margin + 8; step += 4) {
+    for (double step = 4; step <= settle_reach + hop_margin + 8; step += 4) {
         if (!on(x + nx * step, y + ny * step)) continue;
         if (!first) first = step;
         if (step < hop_margin || !on(x + nx * (step - hop_margin), y + ny * (step - hop_margin))) continue;
