@@ -810,6 +810,12 @@ const gestureExport = Bun.spawnSync([process.execPath, resolve(import.meta.dir, 
 });
 if (gestureExport.exitCode) throw new Error("Third-person inspect export failed");
 
+const liveHiltExport = Bun.spawnSync([process.execPath, resolve(import.meta.dir, "export-live-hilts.ts"), directory], {
+  stdout: "inherit",
+  stderr: "inherit",
+});
+if (liveHiltExport.exitCode) throw new Error("Living hilt export failed");
+
 const avatarExport = Bun.spawnSync([process.execPath, resolve(import.meta.dir, "export-avatar.ts"), directory], {
   stdout: "inherit",
   stderr: "inherit",
