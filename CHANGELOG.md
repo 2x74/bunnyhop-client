@@ -5,6 +5,9 @@
 Matches website v0.0.43. Update from Settings → Updates: press Update, then Restart. Your settings, replays and maps
 are kept. Runs from v0.9.3 still count while you update, but v0.9.3 can't play bhop_iso or bhop_hex.
 
+This update is for Windows and Linux. The macOS build follows: GitHub had no Mac build machines free today, and we
+don't ship a Mac package that wasn't built and checked there. Mac players stay on v0.9.3 until then.
+
 - Physics 30, as on the website: Low Gravity works like on CS:S timer servers, so map boosters and gravity changes keep
   their full strength (bhop_24, bhop_kirous, bhop_gigaheish_fix, bhop_sativa and bhop_ponpon_fix can be finished in
   Low Gravity; older times stay). You're no longer reset next to the outer walls of a few large maps.
