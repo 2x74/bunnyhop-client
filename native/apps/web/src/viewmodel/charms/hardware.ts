@@ -25,14 +25,22 @@ export const BOTTOM_RISE = LOOP.R + LOOP.r - 0.01;
 /** Waxed cord: a warm undyed tan (the grip material: a fine weave in relief), its knots a shade darker. */
 export const CORD = P(0xc9ae7c, KMAT.grip), CORD_DARK = P(0xa98d5e, KMAT.grip);
 
-/** How the charm is tied to the knife (anchors.ts): a loop of cord round a part of it, the knot (the pin) at the origin. */
+/**
+ * How the charm is tied to the knife (anchors.ts), the knot (the pin) at the origin:
+ *   wrap   a loop of cord round a part of it (two turns)
+ *   ring   a small loop of cord through a hilt's own lanyard ring
+ *   hoop   a brass split ring through or round a part of the knife's hardware (the Bunnyfly's way), the cord tied on
+ *          its far side with two turns round the wire: `loop` is the ring's centre line, the pin on it
+ */
 export interface MountSpec {
-  kind: "wrap" | "ring";
+  kind: "wrap" | "ring" | "hoop";
   /** The loop round the knife: a closed line of points (the mount bone's frame: the knife's axes, the pin at the origin). */
   loop: V3[];
   /** Across the loop's plane (unit): the second turn lies beside the first along it. */
   normal: V3;
 }
+/** A hoop's wire (radius). */
+export const HOOP_R = 0.032;
 export const mountKey = (m: MountSpec | null): string => {
   if (!m) return "none";
   let h = 2166136261;
@@ -64,6 +72,18 @@ export function mount(c: CharmCtx, m: MountSpec | null): void {
   if (!m) return;
   const n = norm(m.normal);
   const L = m.loop;
+  if (m.kind === "hoop" && L.length >= 3) {
+    // The ring: a closed brass wire along the loop (its near side goes into the part it is through).
+    c.tube([...L, L[0], L[1]], HOOP_R, BRASS, CB.mount, 6, n, false);
+    // The cord tied on at the pin: two turns round the wire side by side, a small knot under them.
+    const t = norm(sub(L[1], L[L.length - 1]));
+    for (const off of [-CORD_R * 0.95, CORD_R * 0.95]) c.torus(scale(t, off), HOOP_R + CORD_R * 0.9, CORD_R, t, off < 0 ? CORD : CORD_DARK, CB.mount, 8, 4);
+    // (Outward at the pin: away from the ring's centre; the loop starts at the pin.)
+    const cen = scale(L.reduce((a, p) => add(a, p), [0, 0, 0] as V3), 1 / L.length);
+    const out = norm(scale(cen, -1));
+    c.ball(scale(out, HOOP_R * 0.6), [0.06, 0.06, 0.055], { paint: CORD_DARK, bone: CB.mount, seg: 6, rows: 3 });
+    return;
+  }
   if (L.length >= 3) {
     // Two turns side by side, each a closed tube along the loop.
     for (const off of [-CORD_R * 0.92, CORD_R * 0.92]) {

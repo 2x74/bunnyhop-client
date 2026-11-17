@@ -8,9 +8,10 @@ import { concat, invert34 } from "../../player/bunny/rig";
 import type { KnifeDef } from "../knives/types";
 import type { VmRig } from "../rig";
 import { liveCharmAnchors, liveDesign, liveMeshes } from "../hilts/live/index";
-import { charmFit, charmHang, sampleTri, setHiltCharmAnchors, type CharmFit, type CharmHang } from "./anchors";
+import { charmFit, charmHang, charmPlaces, sampleTri, setHiltCharmAnchors, type CharmFit, type CharmHang } from "./anchors";
+import { charmClamp } from "./places";
 import { PointCloud, type CloudInput, type Collider, type V3 } from "./physics";
-import { CharmRig, type CharmInput } from "./rig";
+import { CharmRig, charmOptions, type CharmInput } from "./rig";
 
 // The living hilts (v0.0.43, hilts/live) bring their own guard pieces and lanyard ring: they say where a charm goes
 // (liveCharmAnchors), and their pieces' points go with it so the cord is tied round them, not through them.
@@ -66,7 +67,10 @@ export class KnifeCharm {
 
   /** The loadout (its charm and options) and the knife in hand (null = the carrot). */
   set(l: CosmeticLoadout, knife: KnifeDef | null): void {
-    this.rig.set(l);
+    // The Cord and Size sliders inside this knife's clamps (places.ts: no reachable setting crosses the hand or knife).
+    const kid = knife?.id ?? null, o = charmOptions(l), pl = charmPlaces(kid);
+    const c = charmClamp(kid, pl.guard ? o.pommel && pl.pommel : true, o.length, o.size);
+    this.rig.set(c.cord !== o.length || c.size !== o.size ? { ...l, charmLength: c.cord, charmSize: c.size } : l);
     const hilt = l.hilt ?? null, glove = gloveStyle(l.glove).style;
     if (knife !== this.knife || hilt !== this.hilt || glove !== this.glove) {
       this.knife = knife;

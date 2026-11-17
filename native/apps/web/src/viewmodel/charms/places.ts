@@ -32,7 +32,15 @@ export interface TieSpec {
  * on the real meshes with every charm (test/charms-fit.test.ts; the QA report's table): a place is offered where a
  * charm tied there rests without entering the hand, the knife or the hilt.
  */
-const TIES: Readonly<Record<string, { guard: TieSpec; pommel?: TieSpec; guardOff?: true; pommelOff?: true }>> = {
+/**
+ * Slider clamps (percent, charms-fix 11-17): the Cord and Size the charm is drawn at on a knife, so no reachable setting
+ * puts it into the hand or the knife (the fit matrix's slider extremes). `pommel`: the same at the pommel.
+ */
+export interface CharmClamp {
+  cord?: [number, number];
+  size?: [number, number];
+}
+const TIES: Readonly<Record<string, { guard: TieSpec; pommel?: TieSpec; guardOff?: true; pommelOff?: true; clamp?: CharmClamp; pommelClamp?: CharmClamp }>> = {
   // Held in reverse: its ring end is up in the fist and its blade leaves the hand below it, in view. The cord is tied
   // round the collar at the blade's root, the knot on the side away from the claw's curve: the charm hangs free under
   // the hand, beside the blade, never across it. (Tied to the finger ring it lay on the fist: every charm leaned 53 to
@@ -41,25 +49,37 @@ const TIES: Readonly<Record<string, { guard: TieSpec; pommel?: TieSpec; guardOff
   // The owner's reference: tied round the bite handle's end by the pivot, the charm beside the handles above the fist.
   bunnyfly: { guard: { how: "neck", z: 2.3, bone: "Bfly_Bite", max: 3 } },
   // A quillon, a tsuba's edge, a leaf of the guard: tied round the part that sticks out.
-  parsnip: { guard: { how: "arm" } },
+  parsnip: { guard: { how: "arm" }, clamp: { size: [90, 140] } },
   daikon: { guard: { how: "arm", inset: 0.2 }, pommelOff: true },
   leek: { guard: { how: "arm" } },
-  thistle: { guard: { how: "arm" } },
+  thistle: { guard: { how: "arm" }, clamp: { cord: [50, 180], size: [100, 140] } },
   // A leaf tuft under the butt: a charm there hangs in the leaves.
   carrot: { guard: { how: "neck" }, pommelOff: true },
   golden: { guard: { how: "neck" }, pommelOff: true },
-  cleaver: { guard: { how: "neck" }, pommelOff: true },
+  cleaver: { guard: { how: "neck" }, pommelOff: true, clamp: { cord: [100, 200], size: [80, 120] } },
   // A collar too narrow to hang anything clear of the index finger: the cord cut across the finger at the guard
   // (every charm leaned over 50 degrees). The butt is the place.
   radish: { guard: { how: "neck" }, guardOff: true },
   whirligig: { guard: { how: "neck" }, guardOff: true },
+  // Slider clamps where the matrix's slider extremes crossed the glove or grip on the QA ties (charms-fix 11-17).
+  bayonet: { guard: { how: "neck" }, clamp: { cord: [60, 200] } },
+  candycane: { guard: { how: "neck" }, clamp: { cord: [50, 120], size: [80, 130] } },
+  sprouts: { guard: { how: "neck" }, clamp: { cord: [70, 180], size: [90, 140] } },
 };
 const DEFAULT_TIE: TieSpec = { how: "neck" };
 
 const idOf = (knifeId: string | null | undefined): string => (knifeId ?? "carrot").replace(/^knife-/, "");
 
-/** Dev (the charm lab's ?tie=): fields laid over every knife's guard tie. */
-export const tieOverride: { guard: Partial<TieSpec> | null } = { guard: null };
+/** Dev (the charm lab's ?tie=): fields laid over every knife's guard tie; `clamp` in place of every knife's clamps. */
+export const tieOverride: { guard: Partial<TieSpec> | null; clamp: CharmClamp | null } = { guard: null, clamp: null };
+
+/** The Cord and Size a charm is drawn at on a knife (and place): the slider's value inside the knife's clamps. */
+export function charmClamp(knifeId: string | null | undefined, pommel: boolean, cord: number, size: number): { cord: number; size: number } {
+  const t = TIES[idOf(knifeId)];
+  const c: CharmClamp = tieOverride.clamp ?? (pommel ? t?.pommelClamp : t?.clamp) ?? {};
+  const lim = (v: number, r?: [number, number]) => (r ? Math.min(r[1], Math.max(r[0], v)) : v);
+  return { cord: lim(cord, c.cord), size: lim(size, c.size) };
+}
 
 /** A knife's ties (anchors.ts). */
 export function tieOf(knifeId: string | null | undefined): { guard: TieSpec; pommel?: TieSpec } {
