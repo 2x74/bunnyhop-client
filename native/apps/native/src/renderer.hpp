@@ -31,6 +31,12 @@
 #include "texture_motion.hpp"
 #include "brush_fades.hpp"
 #include <span>
+// Standard headers the viewmodel's own headers use: it is included inside namespace native below.
+#include <cstring>
+#include <functional>
+#include <map>
+#include <set>
+#include <tuple>
 #include "nlohmann/json.hpp"
 #include <filesystem>
 #include <chrono>

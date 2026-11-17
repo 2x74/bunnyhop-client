@@ -6,6 +6,7 @@
 #include "nlohmann/json.hpp"
 #include <functional>
 #include <map>
+#include <memory>
 
 namespace native_charm {
 
