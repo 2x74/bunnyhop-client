@@ -156,6 +156,7 @@ void fetch_attempt(
         const LoadProgressCallback &progress,
         Response &r,
         size_t offset,
+        bool identity,
         CURLcode &result,
         long &status
 ) {
@@ -169,7 +170,7 @@ void fetch_attempt(
     curl_easy_setopt(handle, CURLOPT_PROTOCOLS_STR, "https");
     curl_easy_setopt(handle, CURLOPT_FOLLOWLOCATION, 0L);
     curl_easy_setopt(handle, CURLOPT_FAILONERROR, 1L);
-    curl_easy_setopt(handle, CURLOPT_ACCEPT_ENCODING, offset ? "identity" : "");
+    curl_easy_setopt(handle, CURLOPT_ACCEPT_ENCODING, offset || identity ? "identity" : "");
     const auto range = std::to_string(offset) + "-";
     if (offset) curl_easy_setopt(handle, CURLOPT_RANGE, range.c_str());
     curl_easy_setopt(handle, CURLOPT_CONNECTTIMEOUT, connect_timeout_seconds);
@@ -206,6 +207,7 @@ Bytes fetch(
         bool resumable = false
 ) {
     Bytes bytes;
+    bool identity = false;
     for (unsigned attempt = 0; attempt < download_attempts; ++attempt) {
         Response response{{}, limit - bytes.size(), false, {}, true};
         const DownloadPrefix prefix{bytes.size()};
@@ -213,7 +215,7 @@ Bytes fetch(
         response.total_limit = limit;
         CURLcode result = CURLE_OK;
         long status = 0;
-        fetch_attempt(url, cancel, progress, response, prefix.size, result, status);
+        fetch_attempt(url, cancel, progress, response, prefix.size, identity, result, status);
         const bool accepted = prefix.accept(status, response.range, response.bytes.size(), limit, response.identity);
         if (response.oversized && (!prefix.size || accepted))
             throw std::runtime_error("Hosted map data exceeds size budget");
@@ -226,7 +228,10 @@ Bytes fetch(
         }
         // An ignored or malformed range is discarded and retried as a full compressed download.
         const bool fallback = prefix.size && !accepted && (status == 200 || status == 206 || status == 416);
-        if (fallback || (!resumable && result != CURLE_OK)) bytes.clear();
+        // A body that doesn't decode (a broken precompressed copy) is fetched again without an encoding.
+        const bool bad_encoding = result == CURLE_BAD_CONTENT_ENCODING && !identity;
+        if (bad_encoding) identity = true;
+        if (fallback || bad_encoding || (!resumable && result != CURLE_OK)) bytes.clear();
         if (accepted && result == CURLE_OK) {
             if (prefix.size && !valid_download_range(response.range, prefix.size, received, limit))
                 throw std::runtime_error("Incomplete resumed download");
@@ -237,7 +242,7 @@ Bytes fetch(
             }
             return bytes;
         }
-        if (attempt + 1 < download_attempts && (fallback || transient_download_error(result, status))) {
+        if (attempt + 1 < download_attempts && (fallback || bad_encoding || transient_download_error(result, status))) {
             if (download_stats) download_stats->retried();
             retry_wait(attempt, cancel);
             continue;
