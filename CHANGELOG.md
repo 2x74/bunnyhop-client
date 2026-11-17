@@ -1,5 +1,44 @@
 # Changelog
 
+## v0.9.4 — Native
+
+Matches website v0.0.43. Update from Settings → Updates: press Update, then Restart. Your settings, replays and maps
+are kept. Runs from v0.9.3 still count while you update, but v0.9.3 can't play bhop_iso or bhop_hex.
+
+- Physics 30, as on the website: Low Gravity works like on CS:S timer servers, so map boosters and gravity changes keep
+  their full strength (bhop_24, bhop_kirous, bhop_gigaheish_fix, bhop_sativa and bhop_ponpon_fix can be finished in
+  Low Gravity; older times stay). You're no longer reset next to the outer walls of a few large maps.
+  bhop_4triedsame's booster pad works, and on bhop_theory_hard ducking under stage 10's clip reaches the teleport.
+- The strafe trainer works in every style, Segmented, W-Only, Sideways, Backwards, A/D-Only, Low Gravity, Infinite
+  and Auto-strafe included, and the Bar shows your gain in Low Gravity.
+- The Daily Challenge: Daily on the main menu and the day's block on the home screen play the day's map in the day's
+  style. The game shows the time left while you're on it and your place for the day under a run's result. The full
+  board and earlier days open on bunnyhop.lol.
+- Daily Challenge items: the Sunray knife finish, the First Light and Midnight Sun gun camos, the Daybreak, Noon and
+  Dusk colourways, and the Daily Medal on your back.
+- Charms: a small charm that hangs from your knife and swings as you move, with its cord length, size and swing. You
+  see other players' charms when you watch them.
+- Seven animated hilts: Watcher, Frostrune, Escapement, Forge, Deepwater, Stormfork and Bloom. They hold still with
+  reduced motion or Potato.
+- Gain logs: every 6 jumps on Normal, a line with your gain, strafes per jump and sync. In servers you see everyone's
+  good lines (85% and up) and they see yours. !logs off, !logs 90, !logs me; Settings → HUD → Jump stats.
+- Servers: a dropped connection rejoins quietly and you keep watching the same player. Vote for the next map with the
+  number row or the numpad; a number key bound to jump, a move or a turn keeps doing that while a vote is up. Extend
+  shows how many votes it still needs.
+- Your +paint marks stay on a map after a restart, until you clear them or the map changes.
+- Practice: !timescale (or !ts) slows the game from 0.1x to 1x in practice mode. It goes back to 1x when you leave
+  practice and never counts for a run.
+- Strafe offsets show their streak, as on CS:S: "Offset −1 (2)".
+- Interrupted map downloads pick up where they stopped instead of failing, and the log records each download's speed.
+- Exit game is on the main menu and the pause menu.
+
+Not in the desktop client yet:
+
+- The Daily Challenge's full board, earlier days and podium (on the website), and its offer to save a guest's time
+  from the pause menu.
+- Timescale in the pause menu and the "Practice · 0.5x" label (use !timescale).
+- From v0.9.3: practice replays, the Cape in 5% steps, key sounds for a player you watch, the Hop effect tab's hop.
+
 ## v0.9.3 — Native
 
 Matches website v0.0.42. Update from Settings → Updates: press Update, then Restart. Your settings, replays and maps
