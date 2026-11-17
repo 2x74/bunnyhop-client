@@ -154,11 +154,12 @@ export class NativeChatService {
           "slows the game down in practice mode, from 0.1 to 1. The timer shows game time. It goes back to 1 when you leave practice.",
         group: "practice",
         where: "both",
+        // Like the other practice commands, a room keeps it in its chat log ("log").
         run: (ctx, arg) => {
-          if (!arg.trim()) return void emit({ type: "chatAction", action: "timescale" });
-          const value = parseTimescale(arg);
-          if (value === null) return ctx.reply("Use !timescale 0.1 to 1, like !timescale 0.5");
-          emit({ type: "chatAction", action: "timescale", value });
+          const value = arg.trim() ? parseTimescale(arg) : undefined;
+          if (value === null) ctx.reply("Use !timescale 0.1 to 1, like !timescale 0.5");
+          else emit({ type: "chatAction", action: "timescale", ...(value === undefined ? {} : { value }) });
+          return "log";
         },
       });
       registerChatCommand({

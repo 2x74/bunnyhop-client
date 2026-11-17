@@ -300,7 +300,7 @@ LoadedJob load_job(const Spec &spec, const Job &job, Control &control) {
     BhSettings settings{};
     bh_default_settings(&settings);
     LoadedJob loaded{
-            GameSession::prepare(bsp, content, settings, detail), {}, parse_video_options(job.options), {}, {}
+            GameSession::prepare(bsp, content, settings, detail), {}, parse_video_options(job.options), {}, {}, {}
     };
     loaded.session = ReplaySession::open(loaded.map.core.get(), job.replay, loaded.options.full_recording);
     if (loaded.session.info.value("map", std::string()) != job.map)

@@ -116,7 +116,25 @@ for (const c of CASES) {
     const turn = t > 4 && t < 5 ? Math.sin((t - 4) * Math.PI) * 1.2 : 0;
     W.set(rest);
     if (turn) {
-      const m = new THREE.Matrix4().set(...(Array.from(rest.subarray(kb * 12, kb * 12 + 12)) as number[]), 0, 0, 0, 1);
+      const r = rest.subarray(kb * 12, kb * 12 + 12);
+      const m = new THREE.Matrix4().set(
+        r[0],
+        r[1],
+        r[2],
+        r[3],
+        r[4],
+        r[5],
+        r[6],
+        r[7],
+        r[8],
+        r[9],
+        r[10],
+        r[11],
+        0,
+        0,
+        0,
+        1,
+      );
       m.multiply(new THREE.Matrix4().makeRotationZ(turn));
       const e = m.elements;
       W.set([e[0], e[4], e[8], e[12], e[1], e[5], e[9], e[13], e[2], e[6], e[10], e[14]], kb * 12);

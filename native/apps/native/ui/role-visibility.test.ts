@@ -39,6 +39,7 @@ test("recorded and remote staff loadouts render for observers, with no holder fi
     "Knife",
     "Finish",
     "Hilt",
+    "Charm",
     "Gloves",
     "Gun camo",
     "Colourway",
