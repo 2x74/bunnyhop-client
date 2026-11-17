@@ -20,7 +20,8 @@ import "./loadout-view.css";
 import { fixedModel } from "../player/bunny/look";
 import type { Profile } from "../api";
 import { medalCountsOf } from "../creators";
-import { SUPPORTER_MIN_USD, CAPE_ITEM, CAPE_LENGTH, capeHexOf, capeLengthOf, heldMetals, MEDAL_ITEM, medalCode, medalMetalOf, medalOf, type MedalCounts, type MedalMetal, ROBE_ITEM, robePatternOf, COSMETICS, cosmetic, highlightHexOf, KNIFE_POOL_MAX, type KnifePool, crownOf, DEFAULT_COSMETICS, isUnlocked, secretCosmetic, supporterItem, type CosmeticDef } from "../progression";
+import { charmClamp, charmPlaces } from "../viewmodel/charms/places";
+import { CHARM_LENGTH, CHARM_SIZE, CHARM_SWING, charmLengthOf, charmSizeOf, charmSwingOf, SUPPORTER_MIN_USD, CAPE_ITEM, CAPE_LENGTH, capeHexOf, capeLengthOf, heldMetals, MEDAL_ITEM, medalCode, medalMetalOf, medalOf, type MedalCounts, type MedalMetal, ROBE_ITEM, robePatternOf, COSMETICS, cosmetic, highlightHexOf, KNIFE_POOL_MAX, type KnifePool, crownOf, DEFAULT_COSMETICS, isUnlocked, secretCosmetic, supporterItem, type CosmeticDef } from "../progression";
 import { colourway } from "../player/bunny/palettes";
 import { ROBE_PATTERNS } from "../player/robe-names";
 import { CAPE_LINING_DEFAULT, CAPE_PRESETS, HAIR_DEFAULT, HAIR_LENGTH, HAIR_PRESETS, HIGHLIGHT_PRESETS, hairColorOf, hairHex, hairLengthOf, loadoutFor, packLoadout, type CosmeticLoadout } from "../loadout";
@@ -42,7 +43,9 @@ import { uiSound } from "../audio/ui";
 
 export type LoadoutSlot = LoadoutCategory;
 /** The Cape's settings (progression.ts CAPE_LENGTH, capeHexOf); null / absent = the defaults. */
-export type CapeChoice = { capeLength?: number | null; capeColor?: string | null; capeLining?: string | null; medalMetal?: MedalMetal | null } & RobeChoice;
+export type CapeChoice = { capeLength?: number | null; capeColor?: string | null; capeLining?: string | null; medalMetal?: MedalMetal | null } & RobeChoice & CharmChoice;
+/** The charm's options (progression.ts CHARM_*; set through setCape like the back items'); null / absent = the defaults. */
+export type CharmChoice = { charmLength?: number | null; charmSize?: number | null; charmSwing?: number | null; charmPommel?: boolean | null };
 /** The Robe's settings (progression.ts robePatternOf); null / absent = plain, open, the colourway's colours. */
 export type RobeChoice = { robePattern?: number | null; robeTied?: boolean | null; robeColor?: string | null; robePrint?: string | null };
 /**
@@ -106,6 +109,10 @@ const pick = (c: Record<string, unknown>): LoadoutChoice => ({
   robeColor: capeHexOf(c.robeColor),
   robePrint: capeHexOf(c.robePrint),
   medalMetal: medalMetalOf(c.medalMetal),
+  charmLength: charmLengthOf(c.charmLength),
+  charmSize: charmSizeOf(c.charmSize),
+  charmSwing: charmSwingOf(c.charmSwing),
+  charmPommel: c.charmPommel === true ? true : null,
 });
 const emptyPool = (): KnifePool => ({ items: [], swap: "map", order: "order" });
 
@@ -315,11 +322,14 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
    */
   const lookOf = (c: LoadoutChoice): StageLook => {
     const editing = o.playerGlow?.() ?? null;
-    return { playerGlow: editing ?? m.playerGlow?.() ?? null, previewGlow: !!editing, outfit: c.outfit, ghost: c.ghost, trail: c.trail, shape: c.shape, veil: veiled(cosmetic(c.outfit)) || veiled(cosmetic(c.back)), facing: slot === "back" && c.back !== MEDAL_ITEM ? "back" : "front", focus: slot === "hat" && !glowTab ? "head" : "body" };
+    return { playerGlow: editing ?? m.playerGlow?.() ?? null, previewGlow: !!editing, outfit: c.outfit, ghost: c.ghost, trail: c.trail, shape: c.shape, veil: veiled(cosmetic(c.outfit)) || veiled(cosmetic(c.back)), facing: slot === "back" && c.back !== MEDAL_ITEM ? "back" : "front", focus: slot === "hat" && !glowTab ? "head" : "body", charm: slot === "charm" && !glowTab };
   };
-  const viewFor = (s: LoadoutCategory): StageView => (stageKind(s) === "hands" ? (s === "hilt" ? lastHiltView : lastHandsView) : stageKind(s) === "guns" ? lastGunView : stageKind(s) === "bunny" ? "bunny" : s === "hop" ? "hop" : "ghost");
+  /** The charm hangs from the knife in your hand: the knife alone on its turntable (the close-up) has none. */
+  const fpOnly = (s: LoadoutCategory): boolean => s === "charm";
+  const viewFor = (s: LoadoutCategory): StageView => (fpOnly(s) ? "fp" : stageKind(s) === "hands" ? (s === "hilt" ? lastHiltView : lastHandsView) : stageKind(s) === "guns" ? lastGunView : stageKind(s) === "bunny" ? "bunny" : s === "hop" ? "hop" : "ghost");
   /** The stage's view was chosen (its toggle, an inspect): remembered for the slot's kind. */
   const keepView = (v: StageView): void => {
+    if (fpOnly(slot)) return;
     if (v === "fp" || v === "close") slot === "hilt" ? (lastHiltView = v) : (lastHandsView = v);
     if (v === "gun" || v === "gunside") lastGunView = v;
   };
@@ -390,7 +400,7 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
 
   function drawViewSeg(): void {
     const kind = stageKind(slot);
-    viewSeg.hidden = kind !== "hands" && kind !== "guns";
+    viewSeg.hidden = (kind !== "hands" && kind !== "guns") || fpOnly(slot);
     drawGunNav();
     if (viewSeg.hidden) return viewSeg.replaceChildren();
     const cur = stage?.view ?? viewFor(slot);
@@ -608,10 +618,17 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
     } });
   }
   /** A slider that shows on the stage while it's dragged and saves when it's let go. */
-  function sliderRow(cls: string, label: string, aria: string, range: { min: number; max: number; step: number }, a: { id: LoadoutOption; cur: () => number; drag: (n: number | null) => void; set: (n: number) => void; unit?: string }): void {
+  /**
+   * `range` may depend on what is worn (a charm's Cord and Size are narrower on some knives): it is read on every
+   * draw, and a stored value outside it is shown at the nearest end without being saved again.
+   */
+  type SliderRange = { min: number; max: number; step: number };
+  function sliderRow(cls: string, label: string, aria: string, limits: SliderRange | (() => SliderRange), a: { id: LoadoutOption; cur: () => number; drag: (n: number | null) => void; set: (n: number) => void; unit?: string }): void {
     rows.push({ id: a.id, make: () => {
       const value = h("output");
       let dragging: number | null = null;
+      const rangeNow = () => (typeof limits === "function" ? limits() : limits);
+      let range = rangeNow();
       const input = h("input", { type: "range", min: String(range.min), max: String(range.max), step: String(range.step), "aria-label": aria,
         oninput: () => ((dragging = Number(input.value)), a.drag(dragging), draw(), apply()),
         onchange: () => {
@@ -624,7 +641,10 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
         },
       }) as HTMLInputElement;
       const draw = () => {
-        const n = dragging ?? a.cur();
+        range = rangeNow();
+        if (input.min !== String(range.min)) input.min = String(range.min);
+        if (input.max !== String(range.max)) input.max = String(range.max);
+        const n = Math.min(range.max, Math.max(range.min, dragging ?? a.cur()));
         if (dragging === null) input.value = String(n);
         // The track's filled part (style.css input[type=range] reads --p, 0..1 along min..max).
         input.style.setProperty("--p", String((n - range.min) / (range.max - range.min)));
@@ -786,8 +806,39 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
     pick: (v) => setCape({ medalMetal: v }),
     try: (v) => tryCape(v === undefined ? null : { medalMetal: v }),
   });
+  // The charm (Charm): the cord's length, the size, how lively it swings, and where it hangs on a knife with two
+  // places. Cord and Size are narrower on some knives and places (viewmodel/charms/places.ts charmClamp: the settings
+  // that keep the charm out of the hand): the sliders take that range, and show a stored value outside it at the
+  // nearest end, which is where the game draws it. Nothing is saved until a slider is moved.
+  const charmAtPommel = (): boolean => {
+    const c = choice();
+    const places = charmPlaces(c.knife);
+    return places.guard ? places.pommel && (capeDraft?.charmPommel !== undefined ? capeDraft.charmPommel === true : c.charmPommel === true) : true;
+  };
+  type Limits = { min: number; max: number; step: number };
+  const charmRange = (key: "cord" | "size", r: Limits) => (): Limits => {
+    const knife = choice().knife, pommel = charmAtPommel();
+    return { min: charmClamp(knife, pommel, CHARM_LENGTH.min, CHARM_SIZE.min)[key], max: charmClamp(knife, pommel, CHARM_LENGTH.max, CHARM_SIZE.max)[key], step: r.step };
+  };
+  const charmSlider = (id: LoadoutOption, key: "charmLength" | "charmSize" | "charmSwing", label: string, r: Limits & { default: number }, of: (v: unknown) => number | null, limits: Limits | (() => Limits), unit?: string) =>
+    sliderRow(".lo-cape-row.lo-charm-row", label, `Charm ${label.toLowerCase()}`, limits, {
+      id,
+      cur: () => of(choice()[key]) ?? r.default,
+      drag: (n) => (capeDraft = n === null ? null : { [key]: n }),
+      set: (n) => m.setCape({ [key]: n === r.default ? null : n }),
+      unit,
+    });
+  charmSlider("charm-cord", "charmLength", "Cord", CHARM_LENGTH, charmLengthOf, charmRange("cord", CHARM_LENGTH));
+  charmSlider("charm-size", "charmSize", "Size", CHARM_SIZE, charmSizeOf, charmRange("size", CHARM_SIZE));
+  charmSlider("charm-swing", "charmSwing", "Swing", CHARM_SWING, charmSwingOf, CHARM_SWING, "");
+  segRow<boolean | null>(".lo-cape-row.lo-charm-row", ".lo-poolseg", "Hangs from", [[null, "Guard"], [true, "Pommel"]], {
+    id: "charm-place",
+    cur: () => (choice().charmPommel === true ? true : null),
+    pick: (v) => setCape({ charmPommel: v }),
+    try: (v) => tryCape(v === undefined ? null : { charmPommel: v }),
+  });
   // In the block's order: the slot's own rows first, then the worn item's.
-  const rowOrder: LoadoutOption[] = ["model", "pool", "hair", "highlights", "hair-length", "mask", "cape-length", "cape-colour", "cape-lining", "robe-wear", "robe-pattern", "robe-colour", "robe-print", "medal-metal"];
+  const rowOrder: LoadoutOption[] = ["model", "pool", "hair", "highlights", "hair-length", "mask", "cape-length", "cape-colour", "cape-lining", "robe-wear", "robe-pattern", "robe-colour", "robe-print", "medal-metal", "charm-cord", "charm-size", "charm-swing", "charm-place"];
   rows.sort((a, b) => rowOrder.indexOf(a.id) - rowOrder.indexOf(b.id));
 
   const opts = h("div.lo-opts", { hidden: true });
@@ -1117,7 +1168,8 @@ export function loadoutView(m: LoadoutModel, o: LoadoutViewOpts = {}): HTMLEleme
       stage?.tint(null, 0.35);
       return;
     }
-    const hands = stageKind(slot) === "hands";
+    // (The Charm slot's stage is the hands too, but its caption names the charm.)
+    const hands = stageKind(slot) === "hands" && !fpOnly(slot);
     const l = loadoutOf(c);
     const focus = cosmetic(preview !== null ? preview : c[slot]);
     setText(capTitle, hands ? cosmetic(l.knife)?.name ?? "Carrot Blade" : nameOf(focus) ?? (EMPTYABLE.has(slot) ? noneLabel(slot) : ""));

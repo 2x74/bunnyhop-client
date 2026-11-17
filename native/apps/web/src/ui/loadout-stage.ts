@@ -64,7 +64,10 @@ export type StageView = "fp" | "close" | "bunny" | "ghost" | "hop" | "gun" | "gu
 const bunnyView = (v: StageView) => v === "bunny" || v === "ghost" || v === "hop";
 const gunView = (v: StageView) => v === "gun" || v === "gunside";
 /** What the bunny views dress the bunny in (the knife, gloves and hat come from the loadout). */
-export type StageLook = Pick<BunnyLook, "outfit" | "ghost" | "trail" | "shape" | "veil" | "playerGlow" | "previewGlow" | "facing" | "focus">;
+export type StageLook = Pick<BunnyLook, "outfit" | "ghost" | "trail" | "shape" | "veil" | "playerGlow" | "previewGlow" | "facing" | "focus"> & {
+  /** The Charm slot: the first-person view comes in on the hilt and the charm hanging from it (targetRect). */
+  charm?: boolean;
+};
 
 /** Thumbnail size in device pixels (16:10). */
 export const THUMB_W = 384;
@@ -844,8 +847,11 @@ export class LoadoutStage {
   // -------------------------------------------------------------------------------------------
   // Framing
 
-  /** Screen bounds (fractions of the virtual 16:9 screen) of a viewmodel's blade, the rest of its knife, its right hand. */
-  private measure(vm: Viewmodel): { blade: Rect | null; knife: Rect | null; hand: Rect | null } {
+  /**
+   * Screen bounds (fractions of the virtual 16:9 screen) of a viewmodel's blade, the rest of its knife, its right hand,
+   * and the charm hanging from the knife when one is worn (a box round its centre the size it is drawn at).
+   */
+  private measure(vm: Viewmodel): { blade: Rect | null; knife: Rect | null; hand: Rect | null; charm: Rect | null } {
     const r = this.renderer;
     const cam = vm.camera;
     cam.clearViewOffset();
@@ -880,7 +886,17 @@ export class LoadoutStage {
       }
       return Number.isFinite(x0) ? [x0, y0, x1, y1] : null;
     };
-    return { blade: bounds(s.blade), knife: bounds(s.knife), hand: bounds(s.hand) };
+    // The charm (viewmodel/charms): its centre is kept in the eye's frame; conv takes that frame to the camera's.
+    let charm: Rect | null = null;
+    const inner = vm as unknown as { charm: { worn: boolean; rig: { centre: [number, number, number] } }; conv: THREE.Matrix4 };
+    if (inner.charm.worn) {
+      v.set(...inner.charm.rig.centre).applyMatrix4(inner.conv).applyMatrix4(cam.matrixWorld).project(cam);
+      const fx = (v.x + 1) / 2, fy = (1 - v.y) / 2;
+      // (About 110 px tall on a 1080p screen at size 100: the charms' own measure.)
+      const ry = 0.06 * ((this.shown.charmSize ?? 100) / 100), rx = (ry * 9) / 16;
+      if (v.z <= 1 && Number.isFinite(fx) && Number.isFinite(fy)) charm = [fx - rx, fy - ry, fx + rx, fy + ry];
+    }
+    return { blade: bounds(s.blade), knife: bounds(s.knife), hand: bounds(s.hand), charm };
   }
 
   /** Points the viewmodel camera at `rect` (fractions of the virtual 16:9 screen) for a w x h viewport. */
@@ -894,8 +910,23 @@ export class LoadoutStage {
   private targetRect(): Rect {
     const v = prefs.get().viewmodel;
     const k = knifeOf(this.shown.knife);
-    const key = `${k.id}|${v.hand}|${v.fov}|${v.x}|${v.y}|${v.z}|${this.probe.animSource}|${this.w}x${this.h}`;
+    // The Charm slot comes in on the hilt and the charm: framed where this charm hangs on this knife and hilt.
+    const l = this.shown;
+    const charm = this.look.charm && l.charm ? `|charm:${l.charm}:${l.charmLength ?? ""}:${l.charmSize ?? ""}:${l.charmPommel ? "p" : "g"}:${l.hilt ?? ""}` : "";
+    const key = `${k.id}|${v.hand}|${v.fov}|${v.x}|${v.y}|${v.z}|${this.probe.animSource}|${this.w}x${this.h}${charm}`;
     let rect = this.boundsCache.get(key);
+    if (!rect && charm) {
+      this.probe.setKnife(vmKnife(k));
+      this.probe.setLoadout(l);
+      this.probe.seek("idle", 0);
+      // A second of stillness first: the charm comes to rest where it hangs (its cord starts out straight).
+      for (let i = 0; i < 60; i++) this.probe.update(1 / 60, still(0, 0), NO_ATTACK);
+      const m = this.measure(this.probe);
+      this.probe.seek("idle", 0);
+      const b = union(m.charm, onScreen(m.knife)) ?? union(m.knife, m.hand);
+      // Nearly twice as close as the knife's own framing: the charm is a tenth of the screen tall in game.
+      if (b) this.boundsCache.set(key, (rect = fit(pad(b, 0.5, 0.45), this.w / this.h, 0.36, [0.5, 0.52])));
+    }
     if (!rect) {
       this.probe.setKnife(vmKnife(k));
       this.probe.setLoadout(this.shown);
@@ -1055,6 +1086,8 @@ export class LoadoutStage {
     const bob = this.reduced ? 0 : Math.sin(this.t * 0.9) * 0.025;
     const q = knifeBasis().premultiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(this.tilt + bob, this.spin, 0.16, "XYZ")));
     this.show.root.quaternion.copy(q);
+    // A living hilt's idle (viewmodel/hilts/live: it holds itself still under reduced motion and Potato).
+    this.show.tick(dt);
     const cam = this.closeCam;
     cam.aspect = this.w / this.h;
     const tv = Math.tan(THREE.MathUtils.degToRad(cam.fov / 2));

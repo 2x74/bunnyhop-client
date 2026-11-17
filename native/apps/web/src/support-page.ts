@@ -36,6 +36,7 @@ export const SLOT_SECTION: Record<CosmeticSlot, SupportSection> = {
   knife: "loadout",
   finish: "loadout",
   hilt: "loadout",
+  charm: "loadout",
   glove: "loadout",
   camo: "loadout",
   outfit: "loadout",
@@ -86,12 +87,12 @@ export const supportLoadoutCount = (catalogue: readonly CosmeticDef[] = COSMETIC
 
 /**
  * What the Loadout section's stage wears when it opens: the first Supporter item of each slot it can dress (the knife
- * stays the player's own, so the finish shows on it; nothing on the back). Only where the preview starts: any item is
+ * stays the player's own, so the finish shows on it; nothing on the back, no charm on the knife). Only where the preview starts: any item is
  * a click away.
  */
 export function startLoadout(catalogue: readonly CosmeticDef[] = COSMETICS): Partial<Record<LoadoutCategory, string>> {
   const out: Partial<Record<LoadoutCategory, string>> = {};
-  for (const g of supportLoadout(catalogue)) if (g.slot !== "knife" && g.slot !== "back") out[g.slot] = g.items[0].id;
+  for (const g of supportLoadout(catalogue)) if (g.slot !== "knife" && g.slot !== "back" && g.slot !== "charm") out[g.slot] = g.items[0].id;
   return out;
 }
 

@@ -855,7 +855,7 @@ export function earnedAchievements(s: ProgressStats): string[] {
 // ---------------------------------------------------------------------------------------------
 // Cosmetics (all unlocked by playing; card editor + ghost settings)
 
-export type CosmeticSlot = "background" | "frame" | "title" | "ghost" | "trail" | "shape" | "outfit" | "knife" | "finish" | "glove" | "hilt" | "hat" | "body" | "camo" | "back" | "hop";
+export type CosmeticSlot = "background" | "frame" | "title" | "ghost" | "trail" | "shape" | "outfit" | "knife" | "finish" | "glove" | "hilt" | "hat" | "body" | "camo" | "back" | "hop" | "charm";
 
 /**
  * The first-person loadout slots (apps/web/src/loadout.ts): what you hold, what its blade is painted with, its hilt (one
@@ -1352,6 +1352,14 @@ COSMETICS.push(
   { id: "hilt-highroller", slot: "hilt", name: "High Roller", unlock: ach(SUPPORTER), color: "#0f5a3a", rarity: 4 },
   { id: "hilt-borealis", slot: "hilt", name: "Borealis", unlock: ach(SUPPORTER), color: "#3ff0a0", rarity: 4 },
   { id: "hilt-tidepool", slot: "hilt", name: "Sea Glass", unlock: ach(SUPPORTER), color: "#5fc8b8", rarity: 4 },
+  // Living hilts (v0.0.43, Supporter, standalone): pieces that move and glow in first person (viewmodel/hilts/live).
+  { id: "hilt-watcher", slot: "hilt", name: "Watcher", unlock: ach(SUPPORTER), color: "#8fb23a", rarity: 4 },
+  { id: "hilt-frostrune", slot: "hilt", name: "Frostrune", unlock: ach(SUPPORTER), color: "#5cb8ff", rarity: 4 },
+  { id: "hilt-clockwork", slot: "hilt", name: "Escapement", unlock: ach(SUPPORTER), color: "#d9a54a", rarity: 4 },
+  { id: "hilt-ember", slot: "hilt", name: "Forge", unlock: ach(SUPPORTER), color: "#ff6a1a", rarity: 4 },
+  { id: "hilt-deep", slot: "hilt", name: "Deepwater", unlock: ach(SUPPORTER), color: "#58ffc8", rarity: 4 },
+  { id: "hilt-storm", slot: "hilt", name: "Stormfork", unlock: ach(SUPPORTER), color: "#8a6cff", rarity: 4 },
+  { id: "hilt-bloom", slot: "hilt", name: "Bloom", unlock: ach(SUPPORTER), color: "#ff7a6a", rarity: 4 },
   // Role sets (ROLE_SETS): storm-navy rubber with a hi-vis lime groove and reflective silver; teal-stained wood and
   // brass; oxblood lacquer and polished silver; violet leather edged in carrot orange, gold fittings.
   { id: "hilt-lookout", slot: "hilt", name: "Lookout", unlock: role("moderator"), color: "#c8f53a", rarity: 5 },
@@ -1717,6 +1725,41 @@ COSMETICS.push(
   { id: "hop-aurora", slot: "hop", name: "Aurora", unlock: ach(SUPPORTER), color: "#3ff0a0", color2: "#9a6bff", rarity: 4, set: "borealis" },
   { id: "hop-splash", slot: "hop", name: "Splash", unlock: ach(SUPPORTER), color: "#f3ece2", color2: "#5fc8b8", rarity: 4, set: "tidepool" },
 );
+// Charms (v0.0.43; viewmodel/charms/ builds and swings them): a small thing hanging on a short cord from the knife's
+// guard (or its pommel), swinging with your movement, in first person. null = none (the default). One fixed look each,
+// no rarity. A third are earned by playing, the rest are Supporter items, standalone like the back items. Its owner sets
+// the cord's length, the size, how lively it swings and where it hangs (CHARM_LENGTH / CHARM_SIZE / CHARM_SWING,
+// CosmeticChoice.charm*). Ids are stable forever.
+COSMETICS.push(
+  // The game's carrot in small, leaves and all (First Hop: finish a map).
+  { id: "charm-carrot", slot: "charm", name: "Carrot", unlock: ach("first_finish"), color: "#ff7a1a" },
+  // The bunny's hooded head: cream hood and ears, the dark face, the amber visor with its two lit eyes.
+  { id: "charm-bun", slot: "charm", name: "Bun", unlock: lvl(5), color: "#ece5d8" },
+  // A round snail with an orange swirl shell (Jackrabbit: 10,000 jumps).
+  { id: "charm-snail", slot: "charm", name: "Snail", unlock: ach("jumps_10k"), color: "#f08a3a" },
+  // A puffed gold star that turns slowly on its cord.
+  { id: "charm-star", slot: "charm", name: "Star", unlock: lvl(25), color: "#ffc93a" },
+  // A sleepy crescent moon (Night Shift: 25 hours played).
+  { id: "charm-moon", slot: "charm", name: "Moon", unlock: ach("clock_25h"), color: "#f5e6a0" },
+  // A puffed cherry-red heart that beats now and then.
+  { id: "charm-heart", slot: "charm", name: "Heart", unlock: ach(SUPPORTER), color: "#e0283c" },
+  // A round grey-and-white cat sitting as a loaf, its tail wrapped round, the tip flicking.
+  { id: "charm-loaf", slot: "charm", name: "Loaf", unlock: ach(SUPPORTER), color: "#8a8f99" },
+  // A brass bell whose clapper swings inside it.
+  { id: "charm-bell", slot: "charm", name: "Bell", unlock: ach(SUPPORTER), color: "#e2ae48" },
+  // A small red paper lantern with a warm light inside.
+  { id: "charm-lantern", slot: "charm", name: "Lantern", unlock: ach(SUPPORTER), color: "#d8332e" },
+  // A yellow bath duck.
+  { id: "charm-duck", slot: "charm", name: "Duck", unlock: ach(SUPPORTER), color: "#ffd23a" },
+  // A round green frog that blinks.
+  { id: "charm-frog", slot: "charm", name: "Frog", unlock: ach(SUPPORTER), color: "#5cbf4a" },
+  // A red toadstool with white spots.
+  { id: "charm-toadstool", slot: "charm", name: "Toadstool", unlock: ach(SUPPORTER), color: "#d8322c" },
+  // Bun-E's head: the cream box, antenna ears, the dark visor with two amber eyes.
+  { id: "charm-bune", slot: "charm", name: "Bun-E", unlock: ach(SUPPORTER), color: "#f2e8d8" },
+  // A four-leaf clover in green enamel in a thin gold rim.
+  { id: "charm-clover", slot: "charm", name: "Clover", unlock: ach(SUPPORTER), color: "#3f9a4a" },
+);
 for (const c of COSMETICS) if (c.slot === "hop" && c.set) {
   const st = SUPPORTER_SETS.find((x) => x.id === c.set);
   if (st && !st.items.includes(c.id)) (st.items as string[]).push(c.id);
@@ -1770,6 +1813,8 @@ export const DEFAULT_COSMETICS: Record<CosmeticSlot, string | null> = {
   back: null,
   /** null = no hop effect (v0.0.42; player/hop-fx.ts). */
   hop: null,
+  /** null = no charm on the knife (v0.0.43; viewmodel/charms/). */
+  charm: null,
 };
 
 /**
@@ -1880,6 +1925,14 @@ export type CosmeticChoice = Record<CosmeticSlot, string | null> & {
   robePrint?: string | null;
   /** The Daily Medal's (MEDAL_ITEM) metal: one the player holds (absent = their best), kept only for its owners. */
   medalMetal?: MedalMetal | null;
+  /**
+   * The charm's options (CHARM_LENGTH, CHARM_SIZE, CHARM_SWING: whole numbers on their steps; absent = the default) and
+   * `charmPommel` (true = it hangs from the pommel; absent = the guard), kept for players who own a charm.
+   */
+  charmLength?: number | null;
+  charmSize?: number | null;
+  charmSwing?: number | null;
+  charmPommel?: boolean | null;
   knifePool?: KnifePool | null;
   /** The overall Number One's title colour ("#rrggbb", ranking.ts shownRankColor). Set only while #1, kept after. */
   rankColor?: string | null;
@@ -2049,6 +2102,23 @@ const ownsRobe = (level: number, achievements: readonly string[], ranks: HeldRan
   const c = cosmetic(ROBE_ITEM);
   return !!c && isUnlocked(c, level, achievements, ranks, staff);
 };
+/**
+ * The charm's options (v0.0.43; viewmodel/charms/): the cord's length and the charm's size as percents of the built
+ * ones, and how lively it swings (0 = barely, 100 = a lot; the default is calm). Steps of 10, so the three ride in 11
+ * bits of the replay's loadout continuation (loadout.ts packLoadoutExt).
+ */
+export const CHARM_LENGTH = { min: 50, max: 200, default: 100, step: 10 } as const;
+export const CHARM_SIZE = { min: 80, max: 140, default: 100, step: 10 } as const;
+export const CHARM_SWING = { min: 0, max: 100, default: 30, step: 10 } as const;
+type Range = { min: number; max: number; step: number };
+const onSteps = (r: Range, v: unknown): number | null => (typeof v === "number" && Number.isInteger(v) && v >= r.min && v <= r.max && (v - r.min) % r.step === 0 ? v : null);
+/** A saved / carried charm option (on its slider's steps, in range), else null. */
+export const charmLengthOf = (v: unknown) => onSteps(CHARM_LENGTH, v);
+export const charmSizeOf = (v: unknown) => onSteps(CHARM_SIZE, v);
+export const charmSwingOf = (v: unknown) => onSteps(CHARM_SWING, v);
+const CHARM_OPTIONS = { charmLength: [CHARM_LENGTH, charmLengthOf], charmSize: [CHARM_SIZE, charmSizeOf], charmSwing: [CHARM_SWING, charmSwingOf] } as const;
+const ownsCharm = (level: number, achievements: readonly string[], ranks: HeldRanks, staff: Holder) =>
+  COSMETICS.some((c) => c.slot === "charm" && isUnlocked(c, level, achievements, ranks, staff));
 const ownsHair = (level: number, achievements: readonly string[], ranks: HeldRanks, staff: Holder) =>
   HAIR_HATS.some((id) => {
     const c = cosmetic(id);
@@ -2092,6 +2162,13 @@ export function cleanCosmetics(raw: unknown, level: number, achievements: readon
   }
   const metal = medalMetalOf(r.medalMetal);
   if (metal && ownsMedal(level, achievements, ranks, staff)) out.medalMetal = metal;
+  if (ownsCharm(level, achievements, ranks, staff)) {
+    for (const [k, [range, of]] of Object.entries(CHARM_OPTIONS)) {
+      const v = of(r[k]);
+      if (v !== null && v !== range.default) out[k as keyof typeof CHARM_OPTIONS] = v;
+    }
+    if (r.charmPommel === true) out.charmPommel = true;
+  }
   const pool = knifePoolOf(r.knifePool, (c) => isUnlocked(c, level, achievements, ranks, staff));
   if (pool) out.knifePool = pool;
   // Kept while not #1 (it only shows on the Number One title), so it's back when the place is.
@@ -2150,6 +2227,16 @@ export function cosmeticsProblem(raw: unknown, level: number, achievements: read
       if (!ownsMedal(level, achievements, ranks, staff)) return { slot, reason: `locked (${unlockHint(cosmetic(MEDAL_ITEM)!)})` };
       continue;
     }
+    if (slot in CHARM_OPTIONS || slot === "charmPommel") {
+      if (v === null) continue;
+      if (slot === "charmPommel" && typeof v !== "boolean") return { slot, reason: "expected true or false" };
+      if (slot !== "charmPommel") {
+        const [range, of] = CHARM_OPTIONS[slot as keyof typeof CHARM_OPTIONS];
+        if (of(v) === null) return { slot, reason: `expected a multiple of ${range.step} from ${range.min} to ${range.max}` };
+      }
+      if (!ownsCharm(level, achievements, ranks, staff)) return { slot, reason: `locked (${unlockHint(COSMETICS.find((c) => c.slot === "charm")!)})` };
+      continue;
+    }
     if (slot === "rankColor") {
       if (v === null) continue;
       if (!rankColorOf(v)) return { slot, reason: "expected a colour like #ffd45e" };
@@ -2162,7 +2249,7 @@ export function cosmeticsProblem(raw: unknown, level: number, achievements: read
       continue;
     }
     if (!(slot in DEFAULT_COSMETICS)) return { slot, reason: "unknown slot" };
-    if (v === null && (slot === "title" || slot === "hat" || slot === "camo" || slot === "back" || slot === "hop")) continue;
+    if (v === null && (slot === "title" || slot === "hat" || slot === "camo" || slot === "back" || slot === "hop" || slot === "charm")) continue;
     const c = typeof v === "string" ? cosmetic(v) : null;
     // A staff item its sender doesn't hold reads exactly like an id that doesn't exist (staffItem).
     if (!c || c.slot !== slot || !listedFor(c, staff)) return { slot, reason: "unknown item" };

@@ -35,6 +35,7 @@ import { gunModelGeometry } from "../viewmodel/guns/meshes";
 import { gunMaterial } from "../viewmodel/guns/material";
 import { NO_LOOK } from "../viewmodel/finishes/shader";
 import { camoStyle } from "../camo";
+import { charmShowcase } from "../viewmodel/charms/preview";
 
 export interface ItemScene {
   readonly scene: THREE.Scene;
@@ -226,6 +227,17 @@ function backScene(spec: PreviewSpec): ItemScene {
   holder.add(mesh);
   pivot.add(holder);
   return { scene, pivot, radius: geo.boundingBox!.getSize(new THREE.Vector3()).length() / 2, dispose: disposers(scene) };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Charms: the charm alone, facing the camera (viewmodel/charms/preview.ts)
+
+function charmScene(spec: PreviewSpec): ItemScene {
+  const s = spec.charm ? charmShowcase(spec.charm, spec.outfit) : null;
+  if (!s) throw new Error(`no charm ${spec.charm}`);
+  const { scene, pivot } = base();
+  pivot.add(s.root);
+  return { scene, pivot, radius: s.radius, dispose: s.dispose };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -666,6 +678,8 @@ export async function buildItemScene(spec: PreviewSpec): Promise<ItemScene> {
       return hatScene(spec);
     case "back":
       return backScene(spec);
+    case "charm":
+      return charmScene(spec);
     case "bunny":
       return bunnyScene(spec, false);
     case "ghost":

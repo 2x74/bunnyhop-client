@@ -1,8 +1,8 @@
 diff --git a/apps/web/src/api.ts b/apps/web/src/api.ts
-index dee8bcb..4934d8b 100644
+index 4029835..b5579cb 100644
 --- a/apps/web/src/api.ts
 +++ b/apps/web/src/api.ts
-@@ -1020,11 +1020,23 @@ const countWrite = (init: RequestInit) => {
+@@ -1025,11 +1025,23 @@ const countWrite = (init: RequestInit) => {
    if (m !== "GET" && m !== "HEAD") writes++;
  };
  
@@ -28,7 +28,7 @@ index dee8bcb..4934d8b 100644
    } catch (e) {
      if (e instanceof ApiUnavailable) throw e;
      throw new ApiUnavailable();
-@@ -1033,24 +1045,26 @@ async function request(path: string, init: ApiRequestInit = {}): Promise<Respons
+@@ -1038,24 +1050,26 @@ async function request(path: string, init: ApiRequestInit = {}): Promise<Respons
    return res;
  }
  
@@ -61,7 +61,7 @@ index dee8bcb..4934d8b 100644
    if (!res.ok) {
      if (!body?.error) throw new ApiUnavailable();
      throw new ApiError(res.status, body.error, body.message ?? `HTTP ${res.status}`, body as Record<string, unknown>);
-@@ -1223,19 +1237,19 @@ export const api = {
+@@ -1228,19 +1242,19 @@ export const api = {
     * reserved, ...), 409 "taken" / "held" (body.suggestion; registered players), 429 "rename_limit". Guests asking for a
     * taken name get a numbered variant: the result has nameAdjusted. oldNameHeld: the name left behind is kept for them.
     */
@@ -87,7 +87,7 @@ index dee8bcb..4934d8b 100644
      setMe(user);
      return user;
    },
-@@ -1259,12 +1273,12 @@ export const api = {
+@@ -1264,12 +1278,12 @@ export const api = {
      return json("/me/links", { cache: "no-cache" });
    },
    /** Strict: 400 bad_links names the platform (`body.platform`) and what's wrong. */
@@ -104,7 +104,7 @@ index dee8bcb..4934d8b 100644
    },
    /** Your support (Settings → Account, the Support page). 401 without a session. */
    async mySupport(): Promise<MySupport> {
-@@ -1273,29 +1287,29 @@ export const api = {
+@@ -1278,29 +1292,29 @@ export const api = {
    async giftWallet(): Promise<GiftWallet> {
      return json("/me/gifts", { cache: "no-store" });
    },
@@ -144,7 +144,7 @@ index dee8bcb..4934d8b 100644
    },
    /** The About page's thank-you list (names of supporters who opted in). */
    async supporters(): Promise<{ names: string[]; top: TopSupporter[] }> {
-@@ -1306,8 +1320,8 @@ export const api = {
+@@ -1311,8 +1325,8 @@ export const api = {
      return json<AccountView>("/me/account", { cache: "no-store" });
    },
    /** Removes a sign-in method (refused for the last one: ApiError 400 "last_method"). A password needs `current` (or the recovery window). */
@@ -155,7 +155,7 @@ index dee8bcb..4934d8b 100644
      setMe(v.user);
      return v;
    },
-@@ -1360,23 +1374,28 @@ export const api = {
+@@ -1365,23 +1379,28 @@ export const api = {
      return json<OnboardingState>("/me/onboarding", post(o));
    },
    /** Discord-linked players: show (or hide) their Discord avatar publicly. Off by default; there are no uploads. */
@@ -190,7 +190,7 @@ index dee8bcb..4934d8b 100644
    async playerStats(id: string): Promise<{ totals: { verifiedRuns: number; jumps: number; playtimeSeconds: number; runTimeMs: number; mapsCompleted: number }; styles: { style: string; runs: number; maps: number }[]; maps: { map: string; runs: number }[]; activity: { at: number; runs: number }[] }> {
      return json(`/players/${encodeURIComponent(id)}/stats`);
    },
-@@ -1423,7 +1442,7 @@ export const api = {
+@@ -1428,7 +1447,7 @@ export const api = {
     * Uploads the server refuses outright (unranked map, zone/build mismatch, rate limit, ...) resolve to
     * { id: "", status: "rejected", reason, code } rather than throwing.
     */
@@ -199,7 +199,7 @@ index dee8bcb..4934d8b 100644
      // ?room=<id>: played in a multiplayer room, so the room announces the verified result (PB / top 10 / SR / WR).
      // &race=<id>: a run for the room's race you're in (net/race.ts): the room ties it to the race.
      // ?gauntlet=<attemptId>: a run in a gauntlet attempt (gauntlet/): the reply says whether it became the next split.
-@@ -1444,7 +1463,7 @@ export const api = {
+@@ -1449,7 +1468,7 @@ export const api = {
        if (opts.mouse) form.append("mouse", JSON.stringify(opts.mouse));
        init = { method: "POST", body: form };
      }
@@ -208,7 +208,7 @@ index dee8bcb..4934d8b 100644
      const body = (await res.json().catch(() => null)) as (Submission & { error?: string; message?: string }) | null;
      // A 429 without our JSON (the edge's own limit) is still "not yet", not a verdict on the run (uploads.ts holds).
      if (!res.ok || !body) return { id: "", status: "rejected", reason: body?.message ?? `HTTP ${res.status}`, code: body?.error ?? (res.status === 429 ? "rate_limited" : "error") };
-@@ -1452,8 +1471,8 @@ export const api = {
+@@ -1457,8 +1476,8 @@ export const api = {
      return body;
    },
    /** A run-session heartbeat (run-clock.ts): the server signs what was recorded so far. */
@@ -219,7 +219,7 @@ index dee8bcb..4934d8b 100644
    },
    // --- the Daily Challenge
    async daily(): Promise<DailyView> {
-@@ -1588,16 +1607,16 @@ export const api = {
+@@ -1593,16 +1612,16 @@ export const api = {
      return json("/me/cosmetics", { cache: "no-cache" });
    },
    /** Partial update; throws ApiError(400, "bad_cosmetic") naming the slot when an item is locked or unknown. */
@@ -910,7 +910,7 @@ index 6096588..e991496 100644
    });
    return p;
 diff --git a/apps/web/src/ui/card-editor.ts b/apps/web/src/ui/card-editor.ts
-index e7387f9..17e1d79 100644
+index 569cb73..20b70a0 100644
 --- a/apps/web/src/ui/card-editor.ts
 +++ b/apps/web/src/ui/card-editor.ts
 @@ -1,3 +1,4 @@

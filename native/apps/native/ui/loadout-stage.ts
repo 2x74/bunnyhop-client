@@ -21,6 +21,8 @@ export interface StageLook {
   facing?: "front" | "back";
   /** The Hat slot's head close-up on the website. The host draws the whole bunny for now. */
   focus?: "body" | "head";
+  /** The Charm slot's close-up on the hilt and its charm on the website; the host keeps its knife view. */
+  charm?: boolean;
 }
 export type ThumbJob =
   | { key: string; kind: "knife"; knife: string; loadout: CosmeticLoadout; focus?: "hilt" }

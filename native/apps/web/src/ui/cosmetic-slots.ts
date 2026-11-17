@@ -4,9 +4,10 @@
 
 import { MEDAL_ITEM, CAPE_ITEM, LENGTH_HATS, MASK_HAT, ROBE_ITEM, ROLE_SETS, supporterItem, type CosmeticDef, type CosmeticSlot } from "../progression";
 import { isWig } from "../loadout";
+import { charmPlaces } from "../viewmodel/charms/places";
 
 /** Loadout categories, in the order the Loadout lists them. */
-export type LoadoutCategory = "knife" | "finish" | "hilt" | "glove" | "camo" | "outfit" | "hat" | "back" | "ghost" | "trail" | "shape" | "hop";
+export type LoadoutCategory = "knife" | "finish" | "hilt" | "charm" | "glove" | "camo" | "outfit" | "hat" | "back" | "ghost" | "trail" | "shape" | "hop";
 /**
  * What a category dresses, which is how the Loadout's list is spaced: your hands (first person), your bunny, and what
  * a run leaves behind (the ghost, its trail, the hop effect). A new slot (pets) joins the group it belongs to.
@@ -24,6 +25,8 @@ export const LOADOUT_CATEGORIES: readonly { slot: LoadoutCategory; label: string
   { slot: "knife", label: "Knife", group: "hands" },
   { slot: "finish", label: "Finish", group: "hands" },
   { slot: "hilt", label: "Hilt", group: "hands" },
+  // The charm on the knife (v0.0.43): a "hands" stage, so dragging it swings the charm.
+  { slot: "charm", label: "Charm", group: "hands", none: "No charm" },
   { slot: "glove", label: "Gloves", group: "hands" },
   { slot: "camo", label: "Gun camo", group: "hands", none: "No camo" },
   { slot: "outfit", label: "Colourway", group: "bunny" },
@@ -54,7 +57,7 @@ export function stageKind(slot: LoadoutCategory): StageKind {
 }
 
 /** The Loadout's option rows (loadout-view.ts), under the slot's grid. */
-export type LoadoutOption = "model" | "pool" | "hair" | "highlights" | "hair-length" | "mask" | "cape-length" | "cape-colour" | "cape-lining" | "robe-wear" | "robe-pattern" | "robe-colour" | "robe-print" | "medal-metal";
+export type LoadoutOption = "model" | "pool" | "hair" | "highlights" | "hair-length" | "mask" | "cape-length" | "cape-colour" | "cape-lining" | "robe-wear" | "robe-pattern" | "robe-colour" | "robe-print" | "medal-metal" | "charm-cord" | "charm-size" | "charm-swing" | "charm-place";
 /**
  * The option rows a slot shows: its own (the player model on Colourway, the knife pool on Knife and Finish) and those
  * of the item WORN in it, if it is yours (a wig's colours, the lengths, the Kitsune Mask, the Cape, the Robe).
@@ -66,9 +69,17 @@ export type LoadoutOption = "model" | "pool" | "hair" | "highlights" | "hair-len
  * Support page, where nothing is saved.
  */
 /** `metals`: how many of the daily medals' metals the player holds: the Daily Medal's metal row is a choice from two. */
-export function loadoutOptions(slot: LoadoutCategory, worn: { hat?: string | null; back?: string | null }, a: { owns: (id: string) => boolean; fixedModel?: boolean; previewOnly?: boolean; metals?: number }): LoadoutOption[] {
+export function loadoutOptions(slot: LoadoutCategory, worn: { hat?: string | null; back?: string | null; charm?: string | null; knife?: string | null }, a: { owns: (id: string) => boolean; fixedModel?: boolean; previewOnly?: boolean; metals?: number }): LoadoutOption[] {
   if (slot === "outfit") return a.previewOnly || a.fixedModel ? [] : ["model"];
   if (slot === "knife" || slot === "finish") return a.previewOnly ? [] : ["pool"];
+  if (slot === "charm") {
+    // The worn charm's cord, size and swing; where it hangs only on a knife with both places (viewmodel/charms/
+    // places.ts: with one, it hangs there and there is nothing to choose).
+    const charm = worn.charm;
+    if (!charm || !a.owns(charm)) return [];
+    const places = charmPlaces(worn.knife);
+    return ["charm-cord", "charm-size", "charm-swing", ...(places.guard && places.pommel ? (["charm-place"] as const) : [])];
+  }
   if (slot === "hat") {
     const hat = worn.hat;
     if (!hat || !a.owns(hat)) return [];

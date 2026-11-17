@@ -654,7 +654,7 @@ export interface RankHistory {
   peak: { rank: number; day: string } | null;
 }
 
-export type CosmeticChoice = Record<"background" | "frame" | "title" | "ghost" | "trail" | "shape" | "outfit" | "knife" | "finish" | "glove" | "hilt" | "hat" | "body" | "camo" | "back" | "hop", string | null> & {
+export type CosmeticChoice = Record<"background" | "frame" | "title" | "ghost" | "trail" | "shape" | "outfit" | "knife" | "finish" | "glove" | "hilt" | "hat" | "body" | "camo" | "back" | "hop" | "charm", string | null> & {
   /** A wig's hair colour ("#rrggbb"), kept for players who own one; absent = the default. */
   hairColor?: string | null;
   /** The ponytail's length (a whole percent, progression.ts HAIR_LENGTH), kept for wig owners; absent = 100. */
@@ -672,6 +672,11 @@ export type CosmeticChoice = Record<"background" | "frame" | "title" | "ghost" |
   robeTied?: boolean | null;
   robeColor?: string | null;
   robePrint?: string | null;
+  /** The charm's cord length, size, swing (whole numbers on progression.ts CHARM_* steps) and pommel place; absent = the defaults. */
+  charmLength?: number | null;
+  charmSize?: number | null;
+  charmSwing?: number | null;
+  charmPommel?: boolean | null;
   /** Knives (with their finishes) the game swaps between (progression.ts KnifePool); absent = none. */
   knifePool?: import("./progression").KnifePool | null;
   /** The overall Number One's title colour ("#rrggbb", ranking.ts shownRankColor); absent = the title's own. */

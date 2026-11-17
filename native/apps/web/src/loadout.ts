@@ -14,7 +14,9 @@
 // - Wire forms: the room roster carries the object (`CosmeticLoadout`, JSON), replays carry `packLoadout()` text in an
 //   optional trailer (replay.ts). Both are read leniently: anything unknown falls back to the defaults, never an error.
 
+import { CHARM_LENGTH, CHARM_SIZE, CHARM_SWING, charmLengthOf, charmSizeOf, charmSwingOf } from "./progression";
 import { CAPE_ITEM, CAPE_LENGTH, capeHexOf, capeLengthOf, heldMetals, MEDAL_CODES, MEDAL_ITEM, medalCode, medalCodeOf, ROBE_ITEM, robePatternOf, cosmetic, DEFAULT_COSMETICS, HAIR_HATS, HAIR_LENGTH, LENGTH_HATS, MASK_HAT, hairLengthOf, highlightHexOf, type CosmeticSlot, type KnifePool, type MedalCounts } from "./progression";
+import { LIVE_HILT_SKINS } from "./viewmodel/hilts/live/skins";
 export { HAIR_LENGTH, LENGTH_HATS, hairLengthOf };
 export type { KnifePool };
 
@@ -111,6 +113,18 @@ export interface CosmeticLoadout {
    * default Gold trail (absent = Gold). The trail itself never travels with a loadout; this is its colour for the burst.
    */
   hopTrail?: string;
+  /**
+   * The charm on the knife (progression.ts "charm-*" id, v0.0.43; viewmodel/charms/). Absent = none. Shown in first
+   * person only. Replays carry it in the loadout's continuation (packLoadoutExt), never in packLoadout's text, so older
+   * readers never see it. With it, its options (absent = the default: progression.ts CHARM_LENGTH / CHARM_SIZE /
+   * CHARM_SWING, the guard): the cord's length and the size (percents), the swing's liveliness (0 .. 100), and whether it
+   * hangs from the pommel.
+   */
+  charm?: string;
+  charmLength?: number;
+  charmSize?: number;
+  charmSwing?: number;
+  charmPommel?: true;
   /**
    * RESERVED, not implemented: a player-picked colour (sRGB 0xRRGGBB) for finishes that offer one (FinishStyle.tintable).
    * Nothing writes, reads, validates or sends it yet; cleanLoadout drops it. Plan: research/COSMETICS-PLAN.md §4.1.
@@ -408,6 +422,8 @@ export const HILT_SKIN: Record<string, HiltSkin | null> = {
   // Draftsman: blueprint-blue cord over white (the drawing's lines), white enamel fittings.
   "hilt-draftsman": HS(HL("cord", 0x1d4f91, 0xf4f8ff), HL("enamel", 0xf4f8ff, 0xbfe0ff)),
   "hilt-founder": { grip: HL("leather", 0x3a1e7a, 0xff7a1a), guard: HL("polished", 0xffc23d, 0xe8a92e), pommel: HL("enamel", 0xff7a1a, 0xffc23d) },
+  // Living hilts (v0.0.43, Supporter): their skins; the moving pieces are viewmodel/hilts/live.
+  ...LIVE_HILT_SKINS,
 };
 
 /** Render data of a hilt id: null for the knife's own hilt, an unknown id or a missing one. */
@@ -429,7 +445,7 @@ const slotId = (slot: CosmeticSlot, v: unknown, fallback: string): string => {
  * fall back to the defaults, retired ids read as their replacement). Unlocks are checked where choices are saved and
  * read (the API).
  */
-export function loadoutFor(choice: { knife?: unknown; finish?: unknown; glove?: unknown; hilt?: unknown; hat?: unknown; body?: unknown; hairColor?: unknown; hairLength?: unknown; hairHighlight?: unknown; maskOn?: unknown; camo?: unknown; hop?: unknown; hopTrail?: unknown; trail?: unknown; back?: unknown; capeLength?: unknown; capeColor?: unknown; capeLining?: unknown; robePattern?: unknown; robeTied?: unknown; robeColor?: unknown; robePrint?: unknown; medal?: unknown; medalMetal?: unknown } | null | undefined, crown: 1 | 2 | 3 | null = null, medals: MedalCounts | null = null): CosmeticLoadout {
+export function loadoutFor(choice: { knife?: unknown; finish?: unknown; glove?: unknown; hilt?: unknown; hat?: unknown; body?: unknown; hairColor?: unknown; hairLength?: unknown; hairHighlight?: unknown; maskOn?: unknown; camo?: unknown; hop?: unknown; hopTrail?: unknown; trail?: unknown; back?: unknown; capeLength?: unknown; capeColor?: unknown; capeLining?: unknown; robePattern?: unknown; robeTied?: unknown; robeColor?: unknown; robePrint?: unknown; charm?: unknown; charmLength?: unknown; charmSize?: unknown; charmSwing?: unknown; charmPommel?: unknown; medal?: unknown; medalMetal?: unknown } | null | undefined, crown: 1 | 2 | 3 | null = null, medals: MedalCounts | null = null): CosmeticLoadout {
   const c = choice ?? {};
   const l: CosmeticLoadout = { knife: slotId("knife", c.knife, DEFAULT_KNIFE), finish: slotId("finish", c.finish, DEFAULT_FINISH), glove: slotId("glove", c.glove, DEFAULT_GLOVE) };
   // Absent = the knife's own hilt; only a real skin is carried (so every older reader and writer stays the same).
@@ -479,6 +495,15 @@ export function loadoutFor(choice: { knife?: unknown; finish?: unknown; glove?: 
     if (cloth) l.robeColor = parseInt(cloth.slice(1), 16);
     if (print) l.robePrint = parseInt(print.slice(1), 16);
   }
+  const charm = slotId("charm", c.charm, "");
+  if (charm) {
+    l.charm = charm;
+    const length = charmLengthOf(c.charmLength), size = charmSizeOf(c.charmSize), swing = charmSwingOf(c.charmSwing);
+    if (length !== null && length !== CHARM_LENGTH.default) l.charmLength = length;
+    if (size !== null && size !== CHARM_SIZE.default) l.charmSize = size;
+    if (swing !== null && swing !== CHARM_SWING.default) l.charmSwing = swing;
+    if (c.charmPommel === true) l.charmPommel = true;
+  }
   return l;
 }
 
@@ -495,9 +520,9 @@ export function cleanLoadout(raw: unknown): CosmeticLoadout | null {
 }
 
 export const sameLoadout = (a: CosmeticLoadout | null | undefined, b: CosmeticLoadout | null | undefined) =>
-  !!a && !!b && a.knife === b.knife && a.finish === b.finish && a.glove === b.glove && (a.hilt ?? DEFAULT_HILT) === (b.hilt ?? DEFAULT_HILT) && (a.crown ?? null) === (b.crown ?? null) && (a.hat ?? null) === (b.hat ?? null) && (a.body ?? "body-a") === (b.body ?? "body-a") && (a.outfit ?? null) === (b.outfit ?? null) && (a.hairColor ?? null) === (b.hairColor ?? null) && (a.hairLength ?? null) === (b.hairLength ?? null) && (a.hairHighlight ?? null) === (b.hairHighlight ?? null) && !!a.maskOn === !!b.maskOn && (a.camo ?? null) === (b.camo ?? null) && (a.hop ?? null) === (b.hop ?? null) && (a.hopTrail ?? null) === (b.hopTrail ?? null) && (a.back ?? null) === (b.back ?? null) && (a.capeLength ?? null) === (b.capeLength ?? null) && (a.capeColor ?? null) === (b.capeColor ?? null) && (a.capeLining ?? null) === (b.capeLining ?? null) && (a.robePattern ?? null) === (b.robePattern ?? null) && (a.robeTied ?? null) === (b.robeTied ?? null) && (a.robeColor ?? null) === (b.robeColor ?? null) && (a.robePrint ?? null) === (b.robePrint ?? null);
+  !!a && !!b && a.knife === b.knife && a.finish === b.finish && a.glove === b.glove && (a.hilt ?? DEFAULT_HILT) === (b.hilt ?? DEFAULT_HILT) && (a.crown ?? null) === (b.crown ?? null) && (a.hat ?? null) === (b.hat ?? null) && (a.body ?? "body-a") === (b.body ?? "body-a") && (a.outfit ?? null) === (b.outfit ?? null) && (a.hairColor ?? null) === (b.hairColor ?? null) && (a.hairLength ?? null) === (b.hairLength ?? null) && (a.hairHighlight ?? null) === (b.hairHighlight ?? null) && !!a.maskOn === !!b.maskOn && (a.camo ?? null) === (b.camo ?? null) && (a.hop ?? null) === (b.hop ?? null) && (a.hopTrail ?? null) === (b.hopTrail ?? null) && (a.back ?? null) === (b.back ?? null) && (a.capeLength ?? null) === (b.capeLength ?? null) && (a.capeColor ?? null) === (b.capeColor ?? null) && (a.capeLining ?? null) === (b.capeLining ?? null) && (a.robePattern ?? null) === (b.robePattern ?? null) && (a.robeTied ?? null) === (b.robeTied ?? null) && (a.robeColor ?? null) === (b.robeColor ?? null) && (a.robePrint ?? null) === (b.robePrint ?? null) && (a.charm ?? null) === (b.charm ?? null) && (a.charmLength ?? null) === (b.charmLength ?? null) && (a.charmSize ?? null) === (b.charmSize ?? null) && (a.charmSwing ?? null) === (b.charmSwing ?? null) && !!a.charmPommel === !!b.charmPommel;
 
-export const isDefaultLoadout = (l: CosmeticLoadout) => l.knife === DEFAULT_KNIFE && l.finish === DEFAULT_FINISH && l.glove === DEFAULT_GLOVE && (l.hilt ?? DEFAULT_HILT) === DEFAULT_HILT && l.body !== "body-b" && !l.camo && !l.hop && !l.back;
+export const isDefaultLoadout = (l: CosmeticLoadout) => l.knife === DEFAULT_KNIFE && l.finish === DEFAULT_FINISH && l.glove === DEFAULT_GLOVE && (l.hilt ?? DEFAULT_HILT) === DEFAULT_HILT && l.body !== "body-b" && !l.camo && !l.hop && !l.back && !l.charm;
 
 // ---------------------------------------------------------------------------------------------
 // Knife pool (progression.ts KnifePool): which knife is held. The pool itself never travels with a loadout: a replay
@@ -650,6 +675,45 @@ export function unpackRobe(s: string | null | undefined): { robePattern?: number
   const a = cloth ? unb64(s.slice(2, 5)) : 0, b = print ? unb64(s.slice(cloth ? 5 : 2)) : 0;
   if ((pattern !== 0 && robePatternOf(pattern) === null) || a < 0 || b < 0) return {};
   return { ...(pattern ? { robePattern: pattern } : {}), ...(head & 8 ? { robeTied: true as const } : {}), ...(cloth ? { robeColor: ungrid18(a) } : {}), ...(print ? { robePrint: ungrid18(b) } : {}) };
+}
+
+/**
+ * The loadout's continuation (v0.0.43): the fields that come after packLoadout's 16, in their own text, which replays
+ * carry in their own trailer after every other one (replay.ts BHLX) so packLoadout's text, and every reader that drops
+ * it past 200 characters, never changes. "" when there is nothing to carry (no trailer is written).
+ *   "<charm>[;<charm options>]"
+ * charm = the charm's id; options = two characters (B64, 12 bits: the cord's length step + 16 × the size step + 128 ×
+ * the swing step + 2048 if it hangs from the pommel), only when one isn't its default. Later fields append after a ";".
+ * At most 200 characters, like packLoadout's.
+ */
+export function packLoadoutExt(l: CosmeticLoadout): string {
+  if (!l.charm) return "";
+  const opt = l.charmLength !== undefined || l.charmSize !== undefined || l.charmSwing !== undefined || l.charmPommel;
+  if (!opt) return l.charm;
+  const step = (v: number | undefined, r: { min: number; step: number; default: number }) => ((v ?? r.default) - r.min) / r.step;
+  const n = step(l.charmLength, CHARM_LENGTH) + 16 * step(l.charmSize, CHARM_SIZE) + 128 * step(l.charmSwing, CHARM_SWING) + (l.charmPommel ? 2048 : 0);
+  return `${l.charm};${b64(n, 2)}`;
+}
+/**
+ * Inverse of packLoadoutExt, as loadoutFor's fields ({} for nothing, an empty or malformed text, or an unknown charm:
+ * loadoutFor then drops the rest). A malformed options field keeps the charm at its defaults.
+ */
+export function unpackLoadoutExt(s: string | null | undefined): { charm?: string; charmLength?: number; charmSize?: number; charmSwing?: number; charmPommel?: true } {
+  if (!s || s.length > 200) return {};
+  const [charm, opt] = s.split(";");
+  if (!charm) return {};
+  const n = opt && opt.length === 2 ? unb64(opt) : -1;
+  if (n < 0 || n >= 4096) return { charm };
+  const at = (k: number, r: { min: number; step: number }) => r.min + k * r.step;
+  return { charm, charmLength: at(n & 15, CHARM_LENGTH), charmSize: at((n >> 4) & 7, CHARM_SIZE), charmSwing: at((n >> 7) & 15, CHARM_SWING), ...(n & 2048 ? { charmPommel: true as const } : {}) };
+}
+
+/** `l` with the continuation's fields (unpackLoadoutExt) checked and added: an unknown charm adds nothing. */
+export function withLoadoutExt(l: CosmeticLoadout, s: string | null | undefined): CosmeticLoadout {
+  const x = loadoutFor(unpackLoadoutExt(s));
+  if (!x.charm) return l;
+  const { charm, charmLength, charmSize, charmSwing, charmPommel } = x;
+  return { ...l, charm, ...(charmLength !== undefined ? { charmLength } : {}), ...(charmSize !== undefined ? { charmSize } : {}), ...(charmSwing !== undefined ? { charmSwing } : {}), ...(charmPommel ? { charmPommel } : {}) };
 }
 
 /** A known colourway id (retired ids read as their replacement), else null. */
