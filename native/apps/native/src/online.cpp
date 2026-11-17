@@ -1,5 +1,6 @@
 #include "atomic_replace.hpp"
 #include "data_location.hpp"
+#include "download_stats.hpp"
 #include "json_fields.hpp"
 #include "online.hpp"
 #include "bunnyhop_native.h"
@@ -7,6 +8,7 @@
 #include <algorithm>
 #include <exception>
 #include <fstream>
+#include <iostream>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -28,6 +30,30 @@ constexpr long connect_timeout_seconds = 15;
 // round trip or more.
 constexpr size_t content_workers = 8;
 using Bytes = std::vector<uint8_t>;
+
+thread_local DownloadStats *download_stats = nullptr;
+
+struct DownloadStatsScope {
+    DownloadStats *previous = download_stats;
+
+    explicit DownloadStatsScope(DownloadStats *stats) { download_stats = stats; }
+
+    ~DownloadStatsScope() { download_stats = previous; }
+};
+
+void record_request(CURL *handle, size_t decoded_bytes) {
+    if (!download_stats) return;
+    DownloadSample sample;
+    curl_off_t bytes = 0;
+    curl_easy_getinfo(handle, CURLINFO_SIZE_DOWNLOAD_T, &bytes);
+    sample.bytes = uint64_t(std::max<curl_off_t>(0, bytes));
+    sample.decoded_bytes = decoded_bytes;
+    curl_easy_getinfo(handle, CURLINFO_TOTAL_TIME, &sample.seconds);
+    curl_easy_getinfo(handle, CURLINFO_STARTTRANSFER_TIME, &sample.first_byte_seconds);
+    curl_easy_getinfo(handle, CURLINFO_NUM_CONNECTS, &sample.connections);
+    curl_easy_getinfo(handle, CURLINFO_HTTP_VERSION, &sample.protocol);
+    download_stats->request(sample);
+}
 
 struct Response {
     Bytes bytes;
@@ -112,6 +138,7 @@ Bytes fetch(
     curl_easy_setopt(handle, CURLOPT_XFERINFOFUNCTION, transfer);
     curl_easy_setopt(handle, CURLOPT_XFERINFODATA, &transfer_state);
     const auto result = curl_easy_perform(handle);
+    record_request(handle, r.bytes.size());
     long status = 0;
     curl_easy_getinfo(handle, CURLINFO_RESPONSE_CODE, &status);
     if (cancel && cancel->load()) throw std::runtime_error("Map download cancelled");
@@ -161,7 +188,9 @@ bool file_matches(const std::filesystem::path &path, const std::string &sha, siz
     if (error || size > max_size) return false;
     std::ifstream stream(path, std::ios::binary);
     Bytes bytes((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
-    return bytes.size() == size && hash(bytes) == sha;
+    const bool matches = bytes.size() == size && hash(bytes) == sha;
+    if (matches && download_stats) download_stats->cached();
+    return matches;
 }
 
 void report_cached(const LoadProgressCallback &progress, uint64_t size, bool offline) {
@@ -186,6 +215,7 @@ asset(const std::filesystem::path &cache,
         return file;
     }
     if (offline) throw std::runtime_error("Cached map data is missing or corrupt; reconnect and retry");
+    if (download_stats) download_stats->missing();
     const auto bytes = fetch ? fetch(route, max_size, cancel, progress) : get(route, max_size, cancel, progress);
     if (cancel && cancel->load()) throw std::runtime_error("Map download cancelled");
     if (bytes.size() > max_size) throw std::runtime_error("Downloaded content exceeds size budget");
@@ -303,6 +333,8 @@ struct MapTransfer {
     const DownloadFetch &fetch;
     bool offline = false;
     LoadProgress current;
+    DownloadStats *stats = nullptr;
+    size_t workers_started = 0;
 
     void emit(LoadProgress value) const {
         value.offline = offline;
@@ -464,6 +496,7 @@ struct MapTransfer {
             ContentRun &run,
             size_t worker
     ) {
+        DownloadStatsScope scope(stats);
         try {
             const ContentObject *active = nullptr;
             const LoadProgressCallback transfer = [&](const LoadProgress &value) {
@@ -492,6 +525,7 @@ struct MapTransfer {
         ContentRun run;
         run.files_total = files.size();
         const size_t workers = std::min(content_workers, objects.size());
+        workers_started = workers;
         run.in_flight.assign(workers, 0);
         {
             WorkerThreads threads;
@@ -553,8 +587,27 @@ DownloadedMap download_map(
         const LoadProgressCallback &detail_progress,
         const DownloadFetch &fetch
 ) {
+    DownloadStats stats;
+    DownloadStatsScope scope(&stats);
     MapTransfer transfer{id, cache, progress, cancel, limits, detail_progress, fetch, false, {}};
-    return transfer.run();
+    transfer.stats = &stats;
+    const auto report = [&](bool complete) noexcept {
+        try {
+            auto summary = stats.summary(id, complete, transfer.workers_started);
+            summary["curl"] = curl_version();
+            // One insertion keeps concurrent map summaries together in the existing scrubbed log.
+            std::cerr << "Download speed: " + summary.dump() + "\n";
+        } catch (...) {
+        }
+    };
+    try {
+        auto result = transfer.run();
+        report(true);
+        return result;
+    } catch (...) {
+        report(false);
+        throw;
+    }
 }
 
 // Optional Valve sound content stays in the verified object cache, outside the

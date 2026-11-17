@@ -1,4 +1,5 @@
 #include "online.hpp"
+#include "download_stats.hpp"
 #include "data_location.hpp"
 #include "map_prefetch.hpp"
 #include <future>
@@ -15,6 +16,22 @@ int main() {
             std::exit(1);
         }
     };
+    native::DownloadStats stats;
+    const native::DownloadSample sample{1024, 4096, 0.5, 0.1, 1, CURL_HTTP_VERSION_2_0};
+    auto worker = std::async(std::launch::async, [&] {
+        stats.request(sample);
+        stats.cached();
+    });
+    stats.request(sample);
+    stats.missing();
+    stats.retried();
+    worker.get();
+    const auto summary = stats.summary("bhop_test", false, 2);
+    check(summary.at("bytes") == 2048 && summary.at("decodedBytes") == 8192, "download bytes not summed");
+    check(summary.at("requests") == 2 && summary.at("connections") == 2, "download connections not summed");
+    check(summary.at("retries") == 1 && summary.at("cache") == "mixed", "download retry/cache summary wrong");
+    check(summary.at("protocol") == "HTTP/2" && summary.at("complete") == false, "download outcome missing");
+    check(summary.at("requestSeconds") == 1.0 && summary.at("firstByteSeconds") == 0.2, "download timing wrong");
     for (const auto &id : {"bhop_eazy", "bhop_lol_tutorial", "bhop_map-v2"})
         check(native::valid_map_id(id), "valid map rejected");
     for (const auto &id : {"", ".", "..", "../map", "https://evil.test/a", "a?b", "a#b", "a\\b"})
