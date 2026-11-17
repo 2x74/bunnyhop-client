@@ -44,6 +44,7 @@ impl Mark {
             + self.data.segments.capacity() * std::mem::size_of::<Load>()
             + self.data.header.to_string().len()
             + loadout.as_ref().map_or(0, String::capacity)
+            + self.data.packed_loadout_ext.as_ref().map_or(0, String::capacity)
     }
 }
 impl History {

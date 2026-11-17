@@ -34,6 +34,9 @@ pub struct ReplayData {
     pub cosmetic: Vec<super::replay::CosmeticEvent>,
     pub inspect: Vec<super::replay::CosmeticEvent>,
     pub packed_loadout: Option<String>,
+    /// The loadout's continuation (web loadout.ts packLoadoutExt: the charm and its options), written last as the
+    /// `BHLX` trailer and only beside a loadout. None: nothing written, the file as before charms.
+    pub packed_loadout_ext: Option<String>,
     pub segments: Vec<super::segments::Load>,
 }
 impl ReplayData {
@@ -43,7 +46,7 @@ impl ReplayData {
             looks: Vec::new(), checkpoints: Vec::new(), start_tick: self.start_tick,
             end_tick: self.end_tick, track: self.track, cosmetic: Vec::new(),
             inspect: Vec::new(), packed_loadout: self.packed_loadout.clone(),
-            segments: self.segments.clone(),
+            packed_loadout_ext: self.packed_loadout_ext.clone(), segments: self.segments.clone(),
         }
     }
     fn checkpoint(&mut self, s: super::BhState) {
@@ -338,9 +341,16 @@ impl ReplayData {
                 }
             }
         }
+        // replay.ts: the loadout's continuation comes last of all, so every older reader sees the file it did.
+        if let (Some(_), Some(ext)) = (&self.packed_loadout, &self.packed_loadout_ext) {
+            w.u32(LOADOUT_EXT_MAGIC);
+            w.str8(ext)?;
+        }
         Ok(w.0)
     }
 }
+/// "BHLX" little-endian (replay.ts LOADOUT_EXT_MAGIC).
+pub const LOADOUT_EXT_MAGIC: u32 = 0x584c4842;
 struct Writer(Vec<u8>);
 impl Writer {
     fn u16(&mut self, v: u16) {
@@ -504,6 +514,7 @@ impl Map {
                 cosmetic: Vec::new(),
                 inspect: Vec::new(),
                 packed_loadout: None,
+                packed_loadout_ext: None,
                 segments: Vec::new(),
             },
         };
@@ -638,6 +649,33 @@ unsafe fn record_event(ctx: *mut super::BhContext, kind: u32, inspect: bool) -> 
                     kind: kind as u8,
                 });
             }
+            Ok(())
+        })
+    }
+}
+/// The charm and its options (web loadout.ts packLoadoutExt), the replay's `BHLX` trailer. Empty: none.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bh_record_loadout_ext(
+    ctx: *mut super::BhContext,
+    packed: *const std::ffi::c_char,
+) -> std::ffi::c_int {
+    unsafe {
+        super::call(ctx, |c| {
+            let packed = super::string(packed)?;
+            // (loadout.ts unpackLoadoutExt reads at most 200 characters.)
+            if packed.len() > 200 {
+                return Err("loadout continuation exceeds 200 bytes".into());
+            }
+            c.map()?
+                .recorder
+                .as_mut()
+                .ok_or("no active recording")?
+                .data
+                .packed_loadout_ext = if packed.is_empty() {
+                None
+            } else {
+                Some(packed.to_string())
+            };
             Ok(())
         })
     }

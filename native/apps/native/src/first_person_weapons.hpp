@@ -183,6 +183,11 @@ struct ViewmodelLayer {
     double fov_scale = 1;
 };
 
+// The last frame's clock as the viewmodel ran it: its step, its own clock and the landing it took (< 0, or 0).
+struct FrameClock {
+    double dt = 0, clock = 0, landed = 0;
+};
+
 struct FirstPersonOutput {
     // Drawn in order: the weapons lowering out of view, then the one in hand. A fast knife, gun, knife, gun switch
     // has the knife and the first gun both still lowering while the second draws, as on the website.
@@ -250,6 +255,7 @@ public:
         hand_idle_.reset();
         grip_idle_.reset();
         landing_.reset();
+        frame_clock_ = {};
         combo_.reset();
         pending_presses_ = 0;
         last_seconds_.reset();
@@ -298,6 +304,7 @@ public:
         auto movement = in.movement;
         movement.landed = landing_.take();
         movement.sidemove = side_move_;
+        frame_clock_ = {dt, clock_, movement.landed};
         const Matrix34 feel =
                 in.feel ? view_feel_.update(dt, movement, in.bob * in.motion, in.sway * in.motion, clock_) : identity34;
         const bool switched = switch_weapons(in);
@@ -322,6 +329,8 @@ public:
     double since_shot() const { return clock_ - last_shot_; }
 
     bool inspecting() const { return combo_.active(); }
+
+    const FrameClock &frame_clock() const { return frame_clock_; }
 
 private:
     static constexpr double no_shot = -1e9;
@@ -888,6 +897,7 @@ private:
     HandIdle hand_idle_;
     GripIdle grip_idle_;
     LandingWatch landing_;
+    FrameClock frame_clock_;
     double side_move_ = 0;
     InspectCombo combo_;
     std::span<const TrickSpec> own_chain_, quiet_chain_;

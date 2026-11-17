@@ -21,7 +21,7 @@ struct ReplayPlayer {
     std::string id;
     std::filesystem::path path;
     // The runner's look, shown on the player model in third person.
-    std::string runner_outfit, runner_loadout;
+    std::string runner_outfit, runner_loadout, runner_charm;
     bool active = false, paused = false, failed = false, orbit_drag = false;
     // The weapon in hand (V) in-eye and in third person, and the viewer's HUD switch (H).
     bool weapon_eye = true, weapon_third = true, hud = true;

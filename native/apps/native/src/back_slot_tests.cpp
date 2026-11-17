@@ -34,9 +34,10 @@ double check_runs(const json &oracle) {
         for (size_t i = 0; i < steps.size(); ++i) {
             const auto step = step_from(steps[i], kind, run["len"], run["tied"]);
             native_back::advance(motion, step);
-            const auto u = native_back::uniforms(
+            auto u = native_back::uniforms(
                     motion, kind, std::hypot(step.velocity[0], step.velocity[1]), step.cape_length
             );
+            if (run.value("gun", false)) native_back::hold_medal_flat(u);
             const auto &want = run["uniforms"][i];
             for (size_t k = 0; k < 4; ++k) {
                 // The key's angle grows with its clicks (thousands of radians); compare it relative to its size.
@@ -132,6 +133,14 @@ void check_options(const json &oracle) {
     }
 }
 
+void check_medals(const json &oracle) {
+    for (const auto &row : oracle.at("medals")) {
+        const auto got = native_back::unpack_medal(row["field"].get<std::string>());
+        const auto &want = row["value"];
+        assert(got.medal == (want.contains("medal") ? std::optional<int>(want["medal"].get<int>()) : std::nullopt));
+    }
+}
+
 void check_keys() {
     using native_back::fit_for;
     using native_back::mesh_key;
@@ -140,6 +149,10 @@ void check_keys() {
     assert(mesh_key("back-cape", fit_for("plush", false, false, true), 100, true) == "back:back-cape|plush|up|tail");
     assert(mesh_key("back-robe", fit_for("bune", false, true, true), 200, true) == "back:back-robe|b|up|tail|tied");
     assert(mesh_key("back-key", fit_for("tek", false, false, false), 100, false) == "back:back-key|a|up");
+    const auto bunny = fit_for("bunny", false, false, false);
+    assert(mesh_key("back-medal", bunny, 100, false, 13) == "back:back-medal|a|up|m13");
+    assert(mesh_key("back-medal", bunny, 100, false) == "back:back-medal|a|up");
+    assert(mesh_key("back-cape", bunny, 100, false, 13) == "back:back-cape|a|up");
     assert(native_back::drawn_cape_length(100, 20) == 100);
     assert(native_back::drawn_cape_length(105, 20) == 100);
     assert(native_back::drawn_cape_length(110, 20) == 120);
@@ -163,6 +176,7 @@ int main(int argc, char **argv) {
     assert(sleeves < motion_tolerance);
     assert(tones < tone_tolerance);
     check_options(oracle);
+    check_medals(oracle);
     check_keys();
     std::cout << "Back items match the website: " << oracle["runs"].size() << " motion runs, " << oracle["tones"].size()
               << " tone pairs, " << oracle["options"].size() << " packed options\n";

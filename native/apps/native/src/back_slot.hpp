@@ -14,7 +14,7 @@ namespace native_back {
 
 constexpr double pi = 3.141592653589793;
 
-enum class Kind { none, still, key, pinwheel, cape, balloon, jet, wings, pack, blade, robe };
+enum class Kind { none, still, key, pinwheel, cape, balloon, jet, wings, pack, blade, robe, medal };
 
 inline Kind kind_named(std::string_view name) {
     constexpr std::pair<std::string_view, Kind> names[] = {
@@ -28,13 +28,16 @@ inline Kind kind_named(std::string_view name) {
             {"pack", Kind::pack},
             {"blade", Kind::blade},
             {"robe", Kind::robe},
+            {"medal", Kind::medal},
     };
     for (const auto &[text, kind] : names)
         if (text == name) return kind;
     return Kind::none;
 }
 
-inline constexpr std::string_view cape_item = "back-cape", robe_item = "back-robe";
+inline constexpr std::string_view cape_item = "back-cape", robe_item = "back-robe", medal_item = "back-medal";
+// progression.ts MEDAL_CODES: three metals times six count steps.
+inline constexpr int medal_codes = 18;
 inline constexpr int cape_length_min = 100, cape_length_max = 260, cape_length_step = 5;
 
 using Rgb = std::array<float, 3>;
@@ -45,6 +48,8 @@ struct Options {
     std::optional<uint32_t> outer, lining;
     int robe_pattern = 0;
     bool robe_tied = false;
+    // The Daily Medal's metal and count step (progression.ts medalCode); absent draws the plainest bronze.
+    std::optional<int> medal;
 };
 
 // loadout.ts B64: six bits a character. -1 for a character outside the alphabet.
@@ -114,6 +119,15 @@ inline Options unpack_robe(std::string_view field) {
     return out;
 }
 
+// loadout.ts unpackMedal: one character, the medal code. Anything else is the default medal.
+inline Options unpack_medal(std::string_view field) {
+    Options out;
+    if (field.size() != 1) return out;
+    const auto code = unb64(field);
+    if (code >= 0 && code < medal_codes) out.medal = int(code);
+    return out;
+}
+
 // The Cape length native draws (export-viewmodels.ts NATIVE_CAPE_STEP): the nearest exported one, ties going longer.
 inline int drawn_cape_length(int length, int exported_step) {
     const int steps = (std::clamp(length, cape_length_min, cape_length_max) - cape_length_min + exported_step / 2)
@@ -137,11 +151,13 @@ inline Fit fit_for(std::string_view body_look, bool feminine, bool hood_down, bo
     return fit;
 }
 
-inline std::string mesh_key(std::string_view id, const Fit &fit, int cape_length, bool tied) {
+inline std::string
+mesh_key(std::string_view id, const Fit &fit, int cape_length, bool tied, std::optional<int> medal = std::nullopt) {
     std::string key = "back:" + std::string(id) + "|" + fit.profile + (fit.hood_down ? "|down" : "|up");
     if (fit.tail) key += "|tail";
     if (id == cape_item && cape_length != cape_length_min) key += "|l" + std::to_string(cape_length);
     if (id == robe_item && tied) key += "|tied";
+    if (id == medal_item && medal) key += "|m" + std::to_string(*medal);
     return key;
 }
 
@@ -262,6 +278,8 @@ inline const Swing *swing_of(Kind kind) {
     static const Swing key{4.5, .22, 4.5, .3, 0, 700, 0, 0, .00009, .00006, 0, {-.16, .16}, .12, 0};
     static const Swing robe{1.3, .5, 1.2, .4, .4, 900, .36, .00022, .00016, .00018, .028, {0, .58}, .46, .016};
     static const Swing wings{2.1, .3, 1.9, .22, 0, 700, 0, 0, .00034, 0, 0, {-.5, .5}, .01, .035};
+    // The Daily Medal lies on the chest: its pitch is how far it stands off it, so the chest is its lower limit.
+    static const Swing medal{2.2, .2, 2.5, .24, 0, 700, 0, -.00022, .00023, .00035, .04, {0, .45}, .28, .012};
     switch (kind) {
         case Kind::cape:
             return &cape;
@@ -279,6 +297,8 @@ inline const Swing *swing_of(Kind kind) {
             return &robe;
         case Kind::wings:
             return &wings;
+        case Kind::medal:
+            return &medal;
         default:
             return nullptr;
     }
@@ -332,6 +352,9 @@ constexpr double mid_hz_scale = 1.55, bounce_limit = 1.6;
 constexpr double wing_fold = .62, wing_fold_speed = 700, wing_turn = .06;
 constexpr double jet_idle = .2, jet_speed = .2, jet_speed_scale = 800, flare_seconds = .2;
 constexpr double acceleration_seconds = .06, acceleration_saturation = 1400;
+constexpr double swing_step_seconds = 1. / 120, medal_step_seconds = 1. / 240;
+// model.ts: under a gun the forearms cross the chest in front of the medal, so it only slides, and less.
+constexpr float medal_slide_under_gun = .4f;
 
 inline double finite(double x) {
     return std::isfinite(x) ? x : 0;
@@ -489,7 +512,9 @@ inline void advance(Motion &m, const Step &step) {
     m.yaw_rate += (dyaw / h - m.yaw_rate) * (1 - std::exp(-h / .05));
     const double a_left = saturate(-sy * a[0] + cy * a[1]), a_forward = saturate(cy * a[0] + sy * a[1]);
     const double a_up = saturate(a[2]);
-    const int steps = std::max(1, int(std::ceil(h / (1. / 120))));
+    // The medal is light and quick: finer steps keep its swing the same from 60 to 240 frames a second.
+    const double step_seconds = step.kind == Kind::medal ? medal_step_seconds : swing_step_seconds;
+    const int steps = std::max(1, int(std::ceil(h / step_seconds)));
     const double dh = h / steps;
     if (bounce) detail::spring_bounce(m, *bounce, a_up, steps, dh);
     if (!sw) return;
@@ -564,6 +589,11 @@ inline Uniforms uniforms(const Motion &m, Kind kind, double speed, double cape_l
             };
             u.tip = {f(-m.tip_pitch), f(-m.tip_side), 0, 0};
             break;
+        case Kind::medal:
+            // Off the chest is toward the front, and its free end never goes behind the chest.
+            u.back = {0, f(-std::max(0., m.pitch)), f(m.side), 0};
+            u.tip = {f(-std::max(0., m.tip_pitch)), f(m.tip_side), 0, 0};
+            break;
         case Kind::pinwheel:
         case Kind::pack:
             u.back = {f(m.spin), f(-m.pitch), f(-m.side), 0};
@@ -582,6 +612,15 @@ inline Uniforms uniforms(const Motion &m, Kind kind, double speed, double cape_l
     } else
         u.mid = {u.back[1], u.back[2], 0, 0};
     return u;
+}
+
+// model.ts: the Daily Medal under a gun stays lying on the chest and only slides a little.
+inline void hold_medal_flat(Uniforms &u) {
+    u.back[1] = 0;
+    u.tip[0] = 0;
+    u.back[2] *= medal_slide_under_gun;
+    u.tip[1] *= medal_slide_under_gun;
+    u.mid = {u.back[1], u.back[2], 0, 0};
 }
 
 // robe-fx.ts advanceSleeves: one pendulum per sleeve in the model's own frame.

@@ -662,6 +662,20 @@ if(BUILD_TESTING)
             WORKING_DIRECTORY "${BUNNYHOP_ROOT}" FIXTURES_SETUP back_slot_oracle TIMEOUT 60)
         add_test(NAME native_back_slot COMMAND bunnyhop-native-back-slot-tests "${BACK_SLOT_ORACLE}")
         set_tests_properties(native_back_slot PROPERTIES FIXTURES_REQUIRED back_slot_oracle)
+        set(LIVE_HILTS_ORACLE "${CMAKE_CURRENT_BINARY_DIR}/live-hilts-oracle.json")
+        add_test(NAME native_live_hilts_oracle
+            COMMAND "${BUN_EXECUTABLE}" apps/native/src/live-hilts-oracle.ts "${LIVE_HILTS_ORACLE}")
+        set_tests_properties(native_live_hilts_oracle PROPERTIES
+            WORKING_DIRECTORY "${BUNNYHOP_ROOT}" FIXTURES_SETUP live_hilts_oracle TIMEOUT 60)
+        add_test(NAME native_live_hilts COMMAND bunnyhop-native-live-hilts-tests "${LIVE_HILTS_ORACLE}")
+        set_tests_properties(native_live_hilts PROPERTIES FIXTURES_REQUIRED live_hilts_oracle)
+        set(CHARMS_ORACLE "${CMAKE_CURRENT_BINARY_DIR}/charms-oracle.json")
+        add_test(NAME native_charms_oracle
+            COMMAND "${BUN_EXECUTABLE}" apps/native/src/charms-oracle.ts "${CHARMS_ORACLE}")
+        set_tests_properties(native_charms_oracle PROPERTIES
+            WORKING_DIRECTORY "${BUNNYHOP_ROOT}" FIXTURES_SETUP charms_oracle TIMEOUT 120)
+        add_test(NAME native_charms COMMAND bunnyhop-native-charms-tests "${CHARMS_ORACLE}")
+        set_tests_properties(native_charms PROPERTIES FIXTURES_REQUIRED charms_oracle)
         set(HOP_EFFECTS_ORACLE "${CMAKE_CURRENT_BINARY_DIR}/hop-effects-oracle.json")
         add_test(NAME native_hop_effects_oracle
             COMMAND "${BUN_EXECUTABLE}" apps/native/src/hop-effects-oracle.ts "${HOP_EFFECTS_ORACLE}")
@@ -773,6 +787,14 @@ if(BUILD_TESTING)
     add_executable(bunnyhop-native-back-slot-tests src/back_slot_tests.cpp)
     target_include_directories(bunnyhop-native-back-slot-tests PRIVATE vendor)
     target_compile_options(bunnyhop-native-back-slot-tests PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
+    add_executable(bunnyhop-native-live-hilts-tests src/live_hilts_tests.cpp)
+    target_include_directories(bunnyhop-native-live-hilts-tests PRIVATE vendor)
+    target_compile_options(bunnyhop-native-live-hilts-tests PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
+    add_executable(bunnyhop-native-charms-tests src/charms_tests.cpp)
+    target_include_directories(bunnyhop-native-charms-tests PRIVATE vendor)
+    target_compile_options(bunnyhop-native-charms-tests PRIVATE
         $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
     add_executable(bunnyhop-native-hop-effects-tests src/hop_effects_tests.cpp)
     target_include_directories(bunnyhop-native-hop-effects-tests PRIVATE vendor)

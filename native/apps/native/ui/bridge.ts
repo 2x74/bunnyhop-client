@@ -85,6 +85,8 @@ export type MenuMessage =
       type: "cosmetics";
       outfit: string;
       packedLoadout: string;
+      /** The charm and its options (loadout.ts packLoadoutExt), which the packed loadout never carries. */
+      charmLoadout?: string;
       ghostId?: string;
       trailId?: string;
       shapeId?: string;

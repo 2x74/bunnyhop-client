@@ -1,7 +1,7 @@
 // Other players' looks in a room: the game draws each from the website's own packed loadout (loadout.ts packLoadout),
 // worked out here from their roster entry, so every field the website adds (hop effect, back item, cape and robe
 // options, head options) reaches it byte for byte. The game keeps its own packing for menus older than this.
-import { cleanLoadout, packLoadout } from "../../web/src/loadout";
+import { cleanLoadout, packLoadout, packLoadoutExt } from "../../web/src/loadout";
 import type { ServerMsg } from "../../web/src/net/protocol";
 
 /** The roster loadout's pack, or null when there is nothing the website would draw. */
@@ -10,10 +10,17 @@ export function rosterPack(loadout: unknown): string | null {
   return clean ? packLoadout(clean) : null;
 }
 
-function withPack<T extends { loadout?: unknown }>(entry: T): T & { pack?: string } {
+/** The roster loadout's charm and its options (loadout.ts packLoadoutExt): "" for none, null when nothing is drawn. */
+export function rosterCharm(loadout: unknown): string | null {
+  const clean = cleanLoadout(loadout);
+  return clean ? packLoadoutExt(clean) : null;
+}
+
+function withPack<T extends { loadout?: unknown }>(entry: T): T & { pack?: string; charm?: string } {
   if (!entry || typeof entry !== "object" || !("loadout" in entry)) return entry;
   const pack = rosterPack(entry.loadout);
-  return pack === null ? entry : { ...entry, pack };
+  // The charm rides beside the pack: the packed text never carries it (older readers drop a pack past 200 bytes).
+  return pack === null ? entry : { ...entry, pack, charm: rosterCharm(entry.loadout) ?? "" };
 }
 
 /** The message with `pack` beside each roster loadout it carries (welcome players, a join, a player's patch). */

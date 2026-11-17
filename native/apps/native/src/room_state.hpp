@@ -137,6 +137,10 @@ class RoomState {
         if (p.contains("pack") && p["pack"].is_string()) {
             peer.actor.loadout = p["pack"].get<std::string>();
             if (peer.actor.loadout.size() > max_pack_bytes) peer.actor.loadout.clear();
+            // The charm rides beside the pack (loadout.ts packLoadoutExt); a menu or server without it sends none.
+            const auto charm = p.find("charm");
+            peer.actor.charm = charm != p.end() && charm->is_string() ? charm->get<std::string>() : std::string();
+            if (peer.actor.charm.size() > max_pack_bytes) peer.actor.charm.clear();
         } else if (p.contains("loadout")) {
             if (p["loadout"].is_object()) {
                 const auto &l = p["loadout"];

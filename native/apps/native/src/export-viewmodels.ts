@@ -16,6 +16,8 @@ import {
   HAIR_HATS,
   HAIR_LENGTH,
   LENGTH_HATS,
+  MEDAL_CODES,
+  MEDAL_ITEM,
   ROBE_ITEM,
 } from "../../web/src/progression";
 import { COLOURWAYS } from "../../web/src/player/bunny/palettes";
@@ -31,6 +33,7 @@ import { fpRobeGeometry, fpRobeUniform } from "../../web/src/viewmodel/robe-slee
 import { bakeGunAO } from "../../web/src/viewmodel/guns/ao";
 import { writePlayerMaterials } from "./export-player-materials";
 import { writeHopEffects } from "./export-hop-effects";
+import { writeCharms } from "./export-charms";
 import { crownGeometry } from "../../web/src/player/bunny/crown";
 import { vmRig } from "../../web/src/viewmodel/rig";
 import { VmProcedural, PROC_DURATION, type VmAction } from "../../web/src/viewmodel/procedural";
@@ -521,7 +524,7 @@ for (const id of HAT_IDS) {
 }
 /**
  * Back items (backs.ts) at every fit a body gives them: the build's torso profile, the hood, a ponytail from a raised
- * hood, the Robe tied or open, and the Cape at NATIVE_CAPE_LENGTHS (each length is its own geometry; a worn length
+ * hood, the Robe tied or open, the Daily Medal's looks, and the Cape at NATIVE_CAPE_LENGTHS (each length is its own geometry; a worn length
  * draws at the nearest of these). The client rebuilds the same key with backKey's rules (back_slot.hpp).
  */
 const NATIVE_CAPE_LENGTHS = Array.from(
@@ -545,6 +548,12 @@ function backVariants(id: string): BackFit[] {
       NATIVE_CAPE_LENGTHS.map((len) => (len === CAPE_LENGTH.default ? place : { ...place, len })),
     );
   if (id === ROBE_ITEM) return BACK_FIT_PLACES.flatMap((place) => [place, { ...place, tied: true as const }]);
+  // The Daily Medal at each metal and count step, plus the plain key a loadout without its code draws.
+  if (id === MEDAL_ITEM)
+    return BACK_FIT_PLACES.flatMap((place) => [
+      place,
+      ...Array.from({ length: MEDAL_CODES }, (_, medal) => ({ ...place, medal })),
+    ]);
   return BACK_FIT_PLACES;
 }
 for (const id of Object.keys(BACK_KIND))
@@ -647,6 +656,8 @@ function outfitPatterns(): Record<string, { kind: number[]; shape: number[]; col
   return out;
 }
 
+// The charms' meshes go in the same blob as everything else.
+const charms = writeCharms(geometry);
 await mkdir(directory, { recursive: true });
 const compressed = deflateSync(Buffer.concat(pieces), { level: 9 });
 await writeFile(resolve(directory, "viewmodels.bin.z"), compressed);
@@ -693,6 +704,7 @@ await writeFile(
       sleeveAnchor: sleeveAnchor().at,
       firstPersonRobe: fpRobeUniform(0),
     },
+    charms,
     hair: {
       hats: HAIR_HATS,
       lengthHats: LENGTH_HATS,
@@ -801,6 +813,12 @@ const gestureExport = Bun.spawnSync([process.execPath, resolve(import.meta.dir, 
   stderr: "inherit",
 });
 if (gestureExport.exitCode) throw new Error("Third-person inspect export failed");
+
+const liveHiltExport = Bun.spawnSync([process.execPath, resolve(import.meta.dir, "export-live-hilts.ts"), directory], {
+  stdout: "inherit",
+  stderr: "inherit",
+});
+if (liveHiltExport.exitCode) throw new Error("Living hilt export failed");
 
 const avatarExport = Bun.spawnSync([process.execPath, resolve(import.meta.dir, "export-avatar.ts"), directory], {
   stdout: "inherit",

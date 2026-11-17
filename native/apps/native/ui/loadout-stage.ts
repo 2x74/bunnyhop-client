@@ -4,7 +4,7 @@ import { VisiblePreviews } from "./visible-previews";
 import { StageFrames } from "./stage-frames";
 import authored from "./authored-previews.json";
 import { COSMETICS, cosmetic } from "../../web/src/progression";
-import { packLoadout, type CosmeticLoadout } from "../../web/src/loadout";
+import { packLoadout, packLoadoutExt, type CosmeticLoadout } from "../../web/src/loadout";
 import { requestPreview, cancelPreview, nativePreviewAvailable, type PreviewRequest } from "./loadout-preview";
 import type { PreviewSpec } from "../../web/src/notify/item-preview";
 import type { PlayerGlow } from "../../web/src/player/glow-config";
@@ -325,6 +325,7 @@ export class LoadoutStage {
   private stageRequest(): PreviewRequest {
     return {
       loadout: packLoadout(this.shown),
+      charm: packLoadoutExt(this.shown),
       outfit: this.look.outfit ?? "outfit-cream",
       ghost: this.look.ghost ?? "ghost-gold",
       trail: this.look.trail ?? "trail-gold",
@@ -427,6 +428,7 @@ export class LoadoutStage {
         const request = requestPreview(
           {
             loadout: packLoadout(loadout),
+            charm: packLoadoutExt(loadout),
             outfit: spec?.outfit ?? this.look.outfit ?? "outfit-cream",
             ghost: (spec?.kind === "ghost" && colourItem("ghost", spec)) || this.look.ghost || "ghost-gold",
             trail: (spec?.kind === "trail" && colourItem("trail", spec)) || this.look.trail || "trail-gold",

@@ -345,6 +345,8 @@ int run(const native::Options &opt) {
             std::cerr << "Window bounds: " << e.what() << '\n';
         }
     };
+    // The charm and its options (loadout.ts packLoadoutExt), from the menu beside the packed loadout.
+    std::string charm_loadout;
     std::string selected_style = opt.style, active_style = opt.style, outfit, packed_loadout,
                 ghost_cosmetic = "ghost-default", trail_cosmetic = "trail-none", shape_cosmetic = "shape-ribbon";
     // The style the player last picked starts the next launch too (saved_style.hpp); --style wins for that launch.
@@ -745,7 +747,8 @@ int run(const native::Options &opt) {
                 active_style,
                 replay_player,
                 configured_turns,
-                held_knife.loadout()
+                held_knife.loadout(),
+                charm_loadout
         );
         run_history.select(map_id, active_track, active_style, double(SDL_GetTicksNS()) / run_second_ns);
     };
@@ -807,7 +810,7 @@ int run(const native::Options &opt) {
             renderer->reset_presentation();
             scope.reset();
             renderer->set_viewmodel_weapon(std::nullopt);
-            renderer->set_cosmetics(outfit, held_knife.loadout());
+            renderer->set_cosmetics(outfit, held_knife.loadout(), charm_loadout);
         }
         audio.reset();
         hud.reset_history(true);
@@ -1098,7 +1101,7 @@ int run(const native::Options &opt) {
         next_knife_event = pending_replay.empty() ? native::KnifePoolEvent::map : native::KnifePoolEvent::none;
         reset();
         apply_preferences();
-        renderer->set_cosmetics(outfit, held_knife.loadout());
+        renderer->set_cosmetics(outfit, held_knife.loadout(), charm_loadout);
         renderer->set_ghost_cosmetics(ghost_cosmetic, trail_cosmetic, shape_cosmetic);
         apply_room_mode(room_modes.map_loaded(map_id, room.spectator_target.has_value(), epoch_ms()));
     };
@@ -1255,7 +1258,9 @@ int run(const native::Options &opt) {
                                                 : std::string();
             viewer.runner_outfit = native_render::packed_outfit(runner_loadout).value_or(outfit);
             viewer.runner_loadout = runner_loadout;
-            renderer->set_cosmetics(viewer.runner_outfit, runner_loadout);
+            const auto runner_charm = viewer.session.info.value("packedLoadoutExt", nlohmann::json());
+            viewer.runner_charm = runner_charm.is_string() ? runner_charm.get<std::string>() : std::string();
+            renderer->set_cosmetics(viewer.runner_outfit, runner_loadout, viewer.runner_charm);
             viewer.begin(path);
             replay_timeline.request(path, viewer.id);
             recorder.clear(true);
@@ -3125,7 +3130,8 @@ int run(const native::Options &opt) {
                         player_glow = native_render::parse_glow(message.value("playerGlow", nlohmann::json(nullptr)));
                         outfit = message.value("outfit", std::string());
                         packed_loadout = message.value("packedLoadout", std::string());
-                        if (outfit.size() > 64 || packed_loadout.size() > 200)
+                        charm_loadout = message.value("charmLoadout", std::string());
+                        if (outfit.size() > 64 || packed_loadout.size() > 200 || charm_loadout.size() > 200)
                             throw std::runtime_error("Invalid cosmetic selection");
                         held_knife.update(
                                 packed_loadout,
@@ -3139,7 +3145,7 @@ int run(const native::Options &opt) {
                             throw std::runtime_error("Invalid ghost cosmetic");
                         if (renderer) {
                             renderer->set_player_glow(player_glow);
-                            renderer->set_cosmetics(outfit, held_knife.loadout());
+                            renderer->set_cosmetics(outfit, held_knife.loadout(), charm_loadout);
                             renderer->set_ghost_cosmetics(ghost_cosmetic, trail_cosmetic, shape_cosmetic);
                         }
                     } else if (type == "roomEvent") {
@@ -4114,7 +4120,7 @@ int run(const native::Options &opt) {
                             hud, feedback, room.watched_feed, target->frame.tick, watched_style, steady_seconds
                     );
                     camera_input.set_angles(target->frame.pitch, target->frame.yaw);
-                    renderer->set_cosmetics(target->outfit, target->loadout);
+                    renderer->set_cosmetics(target->outfit, target->loadout, target->charm);
                     renderer->set_player_glow(target->playerGlow);
                     renderer->set_viewmodel_weapon(target->frame.weapon);
                     actors.erase(
