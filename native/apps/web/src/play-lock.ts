@@ -136,6 +136,11 @@ export function setPlayAttempt(fn: () => boolean): void {
   maybeShowCtrlWHint();
 }
 
+/** A timed attempt is in progress (the leave guard's test, without the recent-lock part): menu.ts Exit game asks then. */
+export function attemptInProgress(): boolean {
+  return !!S.attempt?.();
+}
+
 /** Deliberate navigation coming (room map change, leaving a room): no "Leave site?" prompt. */
 export function allowLeave(): void {
   S.leaving = true;

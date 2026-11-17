@@ -39,7 +39,8 @@ import { fetchMapIndex, goToMainMenu, initMenu, openMap, revealGame, showError, 
 import { gameView, keyLabel, prefs, verticalFov } from "./ui/settings";
 import { applyPalette } from "./palette";
 import { setUiHidden, uiHidden } from "./ui/hide-ui";
-import { isStyleId, styleDef, styleLabel, styleSettings, type StyleId } from "./styles";
+import { isSegmented, isStyleId, styleDef, styleLabel, styleSettings, type StyleId } from "./styles";
+import { registerTimescaleCommand, runTicks, Timescale, timescaleBlocked, type TimescaleContext } from "./practice-mode/timescale";
 import { turnBindsAllowed } from "./turn-binds";
 import { nullBindsAllowed } from "./null-binds";
 import { wReleaseAllowed, type WReleaseContext } from "./w-release";
@@ -47,6 +48,8 @@ import { resolveGauntlet, startGauntletMode } from "./gauntlet/mode";
 import { readQueue, settleQueue } from "./map-queue";
 import { startQueueMode } from "./queue-mode";
 import { GAUNTLET_STYLE } from "./gauntlet/state";
+import { startDailyMode } from "./daily/mode";
+import { dailyStyle, isDay } from "./daily/state";
 import { selectedStyle, setSelectedStyle } from "./ui/style-picker";
 import { afterPaint, fmtBytes } from "./ui/dom";
 import { countJump, hasFinishedAMap, recordMapPlayed } from "./ui/stats";
@@ -103,7 +106,7 @@ import { setSharedRenderer } from "./shared-gl";
 import { Practice } from "./practice-mode/controller";
 import { practiceMenuView } from "./practice-mode/menu-view";
 import { practiceUnavailable, thirdPersonBlocked } from "./practice-mode/rules";
-import { giveWeapon, initWeaponCommands, isDigitCode, numberMenuOpen, openGunPicker, registerWeaponChatCommands, weaponsAfterRestart, weaponsAfterTick, weaponsBeforeTick } from "./weapon-commands";
+import { giveWeapon, initWeaponCommands, menuOwnsKey, openGunPicker, registerWeaponChatCommands, weaponsAfterRestart, weaponsAfterTick, weaponsBeforeTick } from "./weapon-commands";
 import { startPlaytime } from "./playtime";
 import { mapTime } from "./map-time";
 import { deviceIdSettled } from "./device";
@@ -461,9 +464,15 @@ if (!params.get("map") && !replayMap) void loadFlags();
 const mapName = params.get("map") || replayMap || (await showHome());
 // Run style: ?style=<id> (e.g. links from a leaderboard) else the last one picked (map browser / pause menu / F3).
 const styleParam = params.get("style");
-if (isStyleId(styleParam) && !gauntletStart) setSelectedStyle(styleParam);
-// (Gauntlets are Normal only: this session runs Normal without changing the style you picked for other maps.)
-const style = gauntletStart ? (GAUNTLET_STYLE as StyleId) : selectedStyle();
+// The Daily Challenge's entry (?daily=<day>, daily/mode.ts): the day's style (Normal unless the link names the day's
+// own, ?style=), and only for this session.
+// (Read from the address as it is now: picking the daily on the home screen sets it without a page load.)
+const dailyParam = appLocation().searchParams.get("daily");
+const dailyEntry = !gauntletStart && !params.get("server") && isDay(dailyParam) ? dailyParam : null;
+if (isStyleId(styleParam) && !gauntletStart && !dailyEntry) setSelectedStyle(styleParam);
+// (Gauntlets are Normal only, a daily is its day's style: this session runs it without changing the style you picked
+// for other maps.)
+const style = gauntletStart ? (GAUNTLET_STYLE as StyleId) : dailyEntry ? dailyStyle(appLocation().searchParams.get("style")) : selectedStyle();
 localStorage.setItem("bunnyhop:last-map", mapName);
 lookMap = mapName;
 setLookMapNow(mapName);
@@ -778,11 +787,14 @@ practice = new Practice({
   // while practice mode is off.
   fallthrough: (code) => !!tutorial?.onKey(code) || (zoneEditorAllowed && code === "KeyZ" && session.onKey(code)),
   menu: practiceMenuView(),
+  timescaleMenu: () => timescaleBlocked(timescaleContext()) ? null : { get value() { return timescale.value; }, set: (v) => void timescale.set(v, timescaleContext()) },
 });
 const practiceMode = practice;
 if (import.meta.env.DEV) Object.assign(window, { __practice: practice });
 // Gauntlet mode: the tag on this map's runs, the HUD line, pings, the next map's prefetch and the split flow.
 if (gauntletStart) startGauntletMode(gauntletStart, session);
+// The Daily Challenge: the day's line in the HUD on the day's map, and the day place under a counted run's result.
+else if (mapName !== TUTORIAL_MAP && !viewerStart && !replayMap) startDailyMode({ session, map: mapName, entry: dailyParam, inRoom: !!params.get("server") });
 // A set played in order: the next map after a finish (queue-mode.ts).
 startQueueMode({ session, map: mapName, arrived: queued, gauntlet: !!gauntletStart });
 // Tutorial mode on the tutorial map: lessons, strafe guide, demos (tutorial/mode.ts, loaded on demand).
@@ -970,7 +982,7 @@ registerWeaponChatCommands();
 // This map's Brightness / Fullbright (look-menu.ts, map-look.ts): !bright, !fb.
 initLookMenu(input);
 registerLookCommands();
-initPaint(w.root, camera, () => !replayViewer.active && !(mp?.isSpectating ?? false), w.skyFaces);
+initPaint(w.root, camera, () => !replayViewer.active && !(mp?.isSpectating ?? false), w.skyFaces, session.mapSha256 ? { map: mapName, sha: session.mapSha256 } : null);
 initMeasure(w.root, scene, camera, () => !replayViewer.active && !(mp?.isSpectating ?? false), w.skyFaces);
 
 // This facility exists ONLY on a loopback Vite dev server. No production query/storage enablement.
@@ -1111,10 +1123,11 @@ const leaveHold = new LeaveHold({
   },
   ask: (text) => session.hud.toast(text, CONFIRM_MS, "leave"),
 });
-// A numbered menu on screen (a room vote, !cp, the guns menu) owns the digit keys, as in CS:S: no bind fires with them,
-// and they don't move, turn or attack. The menus read the keys from their own listeners.
+// A numbered menu on screen (a room vote, !cp, the guns menu) owns the digit keys, as in CS:S: no bind fires with them
+// (no weapon slot), except a digit the player bound to a move, jump or turn, which keeps moving them (menuDigit). The
+// menus read the keys from their own listeners.
 // voice: in a room that relays voice, the push to talk key (X) talks instead of its solo bind (voice/client.ts).
-input.ownsKey = (code) => (isDigitCode(code) && numberMenuOpen()) || voice.ownsKey(code);
+input.ownsKey = (code) => menuOwnsKey(code, input) || voice.ownsKey(code);
 input.onAction = (a, code) => {
   if (replayViewer.active) return;
   // The chat bind (Settings -> Keys): the room's chat, or solo play's command chat. None on the tutorial map.
@@ -1239,6 +1252,14 @@ const tickMs = DEFAULT_SETTINGS.tickInterval * 1000;
 const potatoHint = new PotatoHint();
 let accumulator = 0;
 let last = performance.now();
+const timescale = new Timescale();
+function timescaleContext(): TimescaleContext {
+  return {
+    practiceMode: session.practiceMode, inRoom: !!params.get("server") || session.multiplayer, tutorial: mapName === TUTORIAL_MAP,
+    gauntlet: !!gauntletStart || !!session.modeLock, segmented: isSegmented(session.runStyle), experiment: inputExperiment,
+  };
+}
+registerTimescaleCommand(timescale, timescaleContext);
 
 let lastCmd = { forward: 0, side: 0 };
 /** cl_showpos in game (the replay viewer has its own): one state object reused every frame. */
@@ -1421,14 +1442,17 @@ function frame(now: number) {
     }
     last = now;
   } else {
-    accumulator += Math.min(now - last, 250);
+    // Practice timescale (practice-mode/timescale.ts): 1 unless solo practice mode chose another, checked every frame.
+    const scale = timescale.frame(timescaleContext());
+    session.timescale = scale;
+    const elapsed = now - last;
     last = now;
     if (input.locked) {
-      while (accumulator >= tickMs) {
-        // This tick's boundary: where it fell between the last frame and this one (timed input, timed-input.ts).
-        tick(now - (accumulator - tickMs));
-        accumulator -= tickMs;
-      }
+      // Each tick's boundary: where it fell between the last frame and this one (timed input, timed-input.ts).
+      accumulator = runTicks(accumulator, elapsed, now, scale, tickMs, (at) => {
+        session.practiceTicked(scale);
+        tick(at);
+      });
     } else {
       accumulator = 0;
     }

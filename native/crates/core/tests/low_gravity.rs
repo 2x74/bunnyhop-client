@@ -1,4 +1,5 @@
-//! Low Gravity is a settings preset on the unchanged simulation, including map gravity multipliers.
+//! Low Gravity up to physics 29: sv_gravity 400 times the map's gravity multiplier (Settings::css_bhop() is v1). From v30
+//! it is sv_gravity 800 with bhoptimer's 0.5 player multiplier: low_gravity_v30.rs.
 use bunnyhop_core::{Cmd, Game, Settings};
 
 #[test]

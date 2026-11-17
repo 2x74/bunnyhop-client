@@ -13,6 +13,14 @@ import { h } from "./dom";
 
 let uid = 0;
 
+/**
+ * The looping layers' clock (card-fx.css, avatar-deco.css, profile.css: animation-delay: var(--fx-t)): how long the
+ * page has been up, as a negative delay, so a layer created now starts where one created at page load would be by
+ * now. Cards are rebuilt all the time (every Edit card and Support preview, every hover card): a rebuilt card's lights,
+ * sparks and ornaments carry on from where the last one's were instead of starting over.
+ */
+export const fxClock = (): string => `--fx-t:-${((typeof performance !== "undefined" ? performance.now() : 0) / 1000).toFixed(2)}s`;
+
 /** `avatar` wrapped with the player's decoration (unchanged when they have none). */
 export function decorated(avatar: HTMLElement, p: Pick<PlayerMarks, "avatarDeco" | "nameColor"> | null | undefined, o: { animate?: boolean; watch?: boolean } = {}): HTMLElement {
   const id = avatarDecoOf(p?.avatarDeco);
@@ -27,12 +35,13 @@ export function decorated(avatar: HTMLElement, p: Pick<PlayerMarks, "avatarDeco"
     const moving = !!l.anim && !!o.animate;
     // .av-anim: every moving span (the card's off-screen watch finds them by it). A placed layer (supporter-looks.ts
     // DecoLayer.place) is two spans: the fixed placement outside, the motion inside it.
-    const motion = moving ? { class: `av-anim av-${l.anim}`, style: decoMotion(l) || undefined } : {};
+    // (A layer's own delay rides on the page's clock: card-fx.ts fxClock, avatar-deco.css.)
+    const motion = moving ? { class: `av-anim av-${l.anim}`, style: decoMotion(l).replace(/animation-delay:(-?[\d.]+)s/, "animation-delay:calc(var(--fx-t, 0s) + $1s)") || undefined } : {};
     const place = decoPlace(l);
     if (!place) return h("span.av-deco-l", { "aria-hidden": "true", html, ...motion });
     return h("span.av-deco-l", { "aria-hidden": "true", style: place.css }, h("span.av-deco-a", { html, ...motion }));
   });
-  const wrap = h(`span.av-deco.av-deco-${id}`, { style: `color:${color}` }, avatar, ...layers);
+  const wrap = h(`span.av-deco.av-deco-${id}`, { style: o.animate ? `color:${color};${fxClock()}` : `color:${color}` }, avatar, ...layers);
   // watch: false inside a card, whose own registration (ui/card-fx.ts watchCardFx) pauses it with the card.
   if (o.animate && o.watch !== false) fxVisibility(wrap);
   return wrap;

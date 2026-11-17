@@ -68,10 +68,33 @@ export interface ChangelogEntry {
 /** Notes for the next release, unpublished until promoted into CHANGELOG. */
 export const UPCOMING: ChangelogEntry = {
   version: "0.0.43",
-  date: "2026-11-16",
+  date: "2026-11-17",
   kind: "minor",
-  title: "Next update",
-  notes: [],
+  title: "The Daily Challenge, world record card backgrounds, a new Loadout and 12 maps",
+  notes: [
+    "The Daily Challenge: one map a day, the same for everyone, with its own leaderboard. A new day starts at 16:00 UTC. Play it from Daily on the main menu or from the block at the top right, which shows today's map, the three fastest and your place. Your best run of the day counts, and the same run goes on the map's normal leaderboard when it beats your time there. Most days are Normal; some days may be set to another style, and the page says which.",
+    "The day's three fastest stand on a podium on the Daily Challenge page as their own bunnies, wearing what they have equipped. Rest the pointer on any run to see its stats, and watch any run with one click. Earlier days stay: page back by month to see any day's final board.",
+    "Daily medals: the three fastest each day get gold, silver and bronze. A mark next to your name counts how many of your best medal you hold and changes look at 5, 10, 25, 50 and 100, and your profile shows all three counts. Your first medal also gives you the Daily Medal for the Back slot: a medal on a ribbon round your neck in a metal you hold, which gets grander as you collect more.",
+    "Everyone who finishes the Daily Challenge works toward unlocks, whatever their time: the First Light gun camo at 5 days, the Sunray knife finish at 15, and the Daybreak, Noon and Dusk colourways and the Midnight Sun camo along the way, with 11 achievements. Days count in total, so a missed day never takes anything away.",
+    "The Daily Challenge leaderboard shows players with an account. A guest can play it and the run still counts on the normal leaderboard; link an account or register the same day and that run appears on the day's board.",
+    "World record card backgrounds: hold the world record on a map and you can make that map your player card's background, from Edit card. It shows on your profile, your mini profile and in Discord and link previews. Lose the record and your card goes back to the background you had; take it back and the map comes back too. It counts on a map's main course in Normal, EZ Scroll, Legit Scroll, W-Only, Sideways, Half-Sideways, Backwards and A/D-Only, once at least three players have finished that board.",
+    "The Loadout has a new layout: the slots are a list down the left, so all of them are in view at any window size, and an item's options stay in one place under the items. This fixes the flicker when pointing at the Robe, the Cape or a wig. Hilt opens in the close-up and Hat brings the camera in on the head.",
+    "Edit card has a new layout too: the card's parts in a list, your card in the middle and the choices beside it. You can set your flag from there. Any locked frame, background, title or effect can be tried on your own card; nothing is saved and nobody else sees it.",
+    "The Support page has sections now: What you get, Loadout, Player card, Gifting and Top supporters. Your own card fades through supporter frames, borders and effects at the top, and supporters can give again from the top of the page, which says how many gift credits an amount gives before you pay. The set names are gone from the Support page and the Loadout; every item is still there on its own.",
+    "Player cards: every frame has a proper rim, and the Holo frame and the Foil effect are real foil now, with colours that shift as you move the pointer over the card. Stride, Vine and Neon were redrawn, and Embers, Stars and Snow are scattered unevenly instead of in a grid. Discord and link previews now draw the Geode, High Roller, Borealis and Brass frames too.",
+    "Leaderboards: a run's stats card opens right where your pointer is again, and shows gain and start, top and average speed for new runs. Resting on a player's name or picture still shows their mini profile.",
+    "Servers: a short connection drop no longer shows as a player leaving and joining. Your place is held for 20 seconds, anyone watching you keeps watching, and connections that have died are cleared within a couple of minutes instead of up to 20. Thanks to weedgotmefunky33 and PewPewPwnLazer for the reports.",
+    "Servers: Extend is always on the map vote now. The first two extensions work as before; after that Extend needs 60% of the players, and the vote shows how many votes it still needs. Typing extend while the vote is up counts as your vote for it. Thanks to hena for the report.",
+    "Servers: vote with the number keys, on the number row or the numpad, without leaving your run. A number key you bound to jump, a move or a turn keeps doing that while a vote is up.",
+    "Gain logs in servers: every 6 jumps on Normal, anyone with 85% gain or more gets a line in chat with their gain, strafes per jump and sync. Jumps turned with turn binds don't count. !logs off turns them off, !logs 90 changes the bar, and !logs me shows every line of your own. Thanks to weedgotmefunky33 for the suggestion.",
+    "Timescale in practice: !timescale 0.5 (or !ts) slows the game down while practice mode is on, from 0.1x to 1x, for working out a route. Thanks to hena for the suggestion.",
+    "Your paint now stays after a reload. It is kept on this device for each map until you clear it with !clearpaint. Thanks to Worldspawn for the report.",
+    "Low Gravity works like on CS:S timer servers: a map's own boosters and gravity changes keep their full strength. bhop_24, bhop_kirous, bhop_gigaheish_fix, bhop_sativa and bhop_ponpon_fix can be finished in Low Gravity now, and the strafe trainer's Bar shows your gain there too. Older Low Gravity times stay. Thanks to teto for the reports.",
+    "bhop_4triedsame's booster pad works, as on the servers the map comes from, and on bhop_theory_hard ducking under stage 10's clip reaches the teleport above it, as in CS:S. You are no longer reset next to the outer walls of a few large maps, bhop_depot and bhop_downdowndown among them. Thanks to teto for the reports.",
+    "12 new maps: bhop_iso and bhop_hex from your requests, and bhop_moderated, bhop_autumnland, bhop_terral, bhop_bplastic, bhop_nougat, bhop_stoneblox, bhop_moomymilkers4xxxxl_fix, bhop_intertwined, bhop_purple_flow and bhop_pohb_not_idiot. bhop_iso's checkpoint floors and one-jump pad work as on the servers it comes from. Thanks to hena for asking.",
+    "Map downloads are being made faster: map files are served from a copy that is already compressed instead of being compressed during every download.",
+    "Desktop app: an Exit game button at the bottom of the main menu and in the pause menu, which asks first if you are mid-run.",
+  ],
 };
 
 /** Newest first. */

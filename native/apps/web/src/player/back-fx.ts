@@ -32,7 +32,7 @@
 import { rig, type V3 } from "./bunny/rig";
 
 /** What a back item does (backs.ts BACK_KIND): how advanceBack reads the player. */
-export type BackKind = "still" | "key" | "pinwheel" | "cape" | "balloon" | "jet" | "wings" | "pack" | "blade" | "robe";
+export type BackKind = "still" | "key" | "pinwheel" | "cape" | "balloon" | "jet" | "wings" | "pack" | "blade" | "robe" | "medal";
 
 export interface BackMotion {
   /** The spin: the key's place in its ratchet (clicks), the pinwheel's angle (rad) and its rate (rad/s). */
@@ -116,6 +116,11 @@ const SWING: Partial<Record<BackKind, Swing>> = {
   // The Robe's body (robe-fx.ts): a jacket's weight of cloth, shorter than a cape and held at the shoulders, so it
   // streams less far and settles sooner. (Tied, robeSwing: only the skirt below the sash moves, less again.)
   robe: { hz: 1.3, zeta: 0.5, tipHz: 1.2, tipZeta: 0.4, lift: 0.4, liftV: 900, sideLift: 0.36, kFwd: 0.00022, kUp: 0.00016, kSide: 0.00018, turn: 0.028, pitch: [0, 0.58], side: 0.46, idle: 0.016 },
+  // The Daily Medal on its ribbon (backs.ts medal): a small weight hanging on the CHEST, so its pitch is how far it
+  // stands off the chest (0 = lying on it; it can't swing into the body, so that is its limit). Forward speed presses
+  // it on (no lift), slowing down throws it out (kFwd is the other way round from the things on the back), a takeoff
+  // presses it on and it floats off in the air and taps back on the landing; turns and side steps slide it across.
+  medal: { hz: 2.2, zeta: 0.2, tipHz: 2.5, tipZeta: 0.24, lift: 0, liftV: 700, sideLift: 0, kFwd: -0.00022, kUp: 0.00023, kSide: 0.00035, turn: 0.04, pitch: [0, 0.45], side: 0.28, idle: 0.012 },
   // The wings' beat (pitch is the flap, + up): a takeoff presses them down, they recover past rest and float up in the
   // air, the tips late.
   wings: { hz: 2.1, zeta: 0.3, tipHz: 1.9, tipZeta: 0.22, lift: 0, liftV: 700, sideLift: 0, kFwd: 0, kUp: 0.00034, kSide: 0, turn: 0, pitch: [-0.5, 0.5], side: 0.01, idle: 0.035 },
@@ -228,7 +233,8 @@ export function advanceBack(s: BackMotion, kind: BackKind, vel: ArrayLike<number
   s.yaw = yaw;
   s.yawRate += (dyaw / h - s.yawRate) * (1 - Math.exp(-h / 0.05));
   const aLeft = sat(-sy * a[0] + cy * a[1]), aFwd = sat(cy * a[0] + sy * a[1]), aUp = sat(a[2]);
-  const n = Math.max(1, Math.ceil(h / (1 / 120)));
+  // (The medal is light and quick: finer steps keep its swing the same from 60 to 240 frames a second.)
+  const n = Math.max(1, Math.ceil(h / (kind === "medal" ? 1 / 240 : 1 / 120)));
   const dh = h / n;
   if (bo) {
     const w0 = 2 * Math.PI * bo[0], kk = w0 * w0, c = 2 * bo[1] * w0;
@@ -295,6 +301,9 @@ export function backUniform(s: BackMotion, kind: BackKind, speed: number): [numb
     case "cape":
     case "blade":
       return [0, s.pitch, s.side, 1 - Math.exp(-sp / 700)];
+    case "medal":
+      // (Off the chest is toward the front: the other way from a hanging thing's lift on the back.)
+      return [0, -Math.max(0, s.pitch), s.side, 0];
     case "robe":
       // (x: the open fronts' flare, from the low-passed forward speed and the last hop.)
       return [ROBE_FLARE * (1 - Math.exp(-s.fold / ROBE_FLARE_V)) + ROBE_FLARE_HOP * s.flare, s.pitch, s.side, 1 - Math.exp(-sp / 700)];
@@ -318,6 +327,9 @@ export function backUniformTip(s: BackMotion, kind: BackKind): [number, number, 
     case "blade":
     case "robe":
       return [s.tipP, s.tipS, 0, 0];
+    case "medal":
+      // (The free end's overshoot never goes behind the chest.)
+      return [-Math.max(0, s.tipP), s.tipS, 0, 0];
     case "balloon":
     case "pinwheel":
       return [-s.tipP, -s.tipS, 0, 0];

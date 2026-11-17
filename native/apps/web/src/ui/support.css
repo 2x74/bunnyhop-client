@@ -1,130 +1,117 @@
-/* Support page (ui/support.ts): the coming-soon note (or the thanks) and your card in each set on the left, the picked
-   set on the Loadout's own stage on the right, your name's look and glow beside it; one screen at desktop sizes, stacked (and scrolling) on narrow ones. Plain
-   text, one button, no boxes round the copy. Top supporters is the header's second tab. */
-/* One screen, capped in height: on a tall window it sits in the middle (auto margins: safe when it doesn't fit), not
-   pinned to the top over an empty lower half. */
-.panel-support { width: min(84rem, 100%); height: min(100%, 46rem); margin-block: auto; display: flex; flex-direction: column; padding-bottom: 1.2rem; }
+/* Support page (ui/support.ts): five tabs in the screen header, a section each. Plain text, no boxes round the copy.
+   Each section fills the panel and, where its content can outgrow the screen, scrolls inside itself: nothing here is
+   fitted into a fixed box beside something else that grows, and nothing of the Loadout's is laid out from this file
+   (ui/support-loadout.ts has why). Everything is rem-sized, so it scales with the menu font (1280x720 to 4K). */
+html body[data-screen="support"] #menu { overflow: hidden; }
+#menu > .panel-support { width: min(84rem, 100%); height: calc(100vh - 7.5vh); display: flex; flex-direction: column; }
+#menu > .panel-support > .menu-legal { margin-top: auto; padding-top: var(--sp-3); }
 /* The tabs in the header, as on the profile (profile.css .pf-tabs-host). */
 .panel-support .screen-head:has(.pf-tabs) { padding-bottom: 0; }
 .panel-support .screen-head:has(.pf-tabs) .screen-title { align-self: stretch; align-items: flex-end; flex-wrap: nowrap; }
 .panel-support .screen-head:has(.pf-tabs) .screen-title h2 { padding-bottom: 0.62rem; }
 .sp-screen { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.sp { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(20rem, 30rem) minmax(0, 1fr); gap: var(--sp-8); }
-.sp[hidden] { display: none; }
+.sp-screen > [hidden] { display: none; }
+.sp-h { margin: 0 0 0.55rem; font-size: var(--fs-md); font-weight: 700; }
+.sp-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 0.6rem 1rem; margin-top: 0.9rem; }
 
-/* The card can expand into spare space, but its row must retain the slot's minimum height.
-   Extra controls overflow this column vertically rather than collapsing the card into the next heading. */
-/* One screen, no scrollbar: the card takes whatever height is left and scales to fit it. */
-.sp-col { min-height: 0; display: flex; flex-direction: column; gap: 1.2rem; overflow: hidden; }
-.sp-col > [hidden] { display: none; }
-/* Waiting for GET /me/support: the place held, nothing shown; then the answer fades in (support.ts drawPending). */
-.sp-ask.pending { visibility: hidden; }
-.sp-ask.arrive > * { animation: sp-ask-in 0.2s var(--ease-glide) both; }
+/* ---- What you get: the ask and the rows on the left, your card on the right. */
+.sp { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(20rem, 27rem) minmax(0, 1fr); gap: var(--sp-8); }
+.sp-col { min-height: 0; display: flex; flex-direction: column; gap: 1.4rem; overflow: hidden auto; scrollbar-width: thin; }
+/* Waiting for GET /me/support: the column is there, unseen; then the ask and the rows come in together, in their
+   final place (support.ts drawPending). */
+.sp-ask { flex: none; }
+.sp-col.pending { visibility: hidden; }
+.sp-col.arrive > * { animation: sp-ask-in 0.2s var(--ease-glide) both; }
 @keyframes sp-ask-in { from { opacity: 0; } }
-body.potato .sp-ask.arrive > * { animation: none; }
-@media (prefers-reduced-motion: reduce) { .sp-ask.arrive > * { animation: none; } }
+body.potato .sp-col.arrive > * { animation: none; }
+@media (prefers-reduced-motion: reduce) { .sp-col.arrive > * { animation: none; } }
 .sp-ask p { margin: 0 0 0.6rem; color: var(--dim); line-height: 1.5; }
 .sp-ask p.sp-lead { color: var(--text); font-size: var(--fs-lg); font-weight: 700; line-height: 1.3; }
-.sp-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 0.6rem 1rem; margin-top: 0.9rem; }
+/* Under the amount: what it gives (a line kept whether or not there is something to say, so typing never moves the
+   page). Then, for a supporter, the gift credits they hold and the way to Gifting. */
+.sp-ask p.sp-gain, .sp-again p.sp-gain { margin: 0.5rem 0 0; min-height: 1.5em; color: var(--dim); font-size: var(--fs-sm); line-height: 1.5; }
+.sp-standing { display: flex; align-items: center; flex-wrap: wrap; gap: 0.3rem 0.9rem; margin-top: 0.5rem; font-weight: 650; }
+.sp-standing-n { display: inline-flex; align-items: center; gap: 0.4em; }
+.sp-standing .link-btn { display: inline-flex; align-items: center; gap: 0.15em; padding-inline: 0.2em; }
 /* Where the pay button will go: plainly not pressable yet. */
 .sp-soon:disabled { opacity: 0.55; cursor: default; }
 .sp-when { font-size: var(--fs-sm); color: var(--dim); }
 .sp-discord { display: inline-flex; align-items: center; gap: 0.3em; color: var(--text); }
 .sp-discord svg { width: 1em; height: 1em; }
-.sp-h { margin: 0 0 0.55rem; font-size: var(--fs-md); font-weight: 700; }
+/* What a Supporter gets: the pause menu's rows (style.css .list-row: the amber bar and the chevron under the pointer),
+   each opening its section; then the rest in one sentence. */
+.sp-what { flex: none; padding-top: 1.1rem; border-top: 1px solid var(--line); }
+.sp-what .list-rows { margin-inline: -0.9rem; }
+.sp-what .list-row { font-weight: 560; }
+.sp-also { margin: 0.9rem 0 0; color: var(--dim); font-size: var(--fs-sm); line-height: 1.5; }
 
-/* The supporter cards (support.ts cardDeck): a fan of three real player cards, the picked one in front, the others
-   behind it in set order (data-d: places from the front, negative to the left), then the sets' names. The fan takes the
-   height the column has left and the cards scale with it (--cw: the front card's width). */
-/* The fan never grows taller than its cards need (at most 88% of the column wide, its peek above); the card and the
-   sets' names then sit in the middle of what the column has left, not pinned under the ask with a gap above them. */
-.sp-col { container: sp-col / inline-size; }
-.sp-cards { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; justify-content: center; }
-.sp-deck-wrap { flex: 1 1 0; min-height: 8rem; max-height: calc(88cqw * 560 / 888 * 1.36); container-type: size; }
-.sp-deck { --peek: 0.3; --cw: min(88cqw, 100cqh / (1 + var(--peek)) * 888 / 560); --shift: 0%; position: relative; height: 100%; }
-.sp-deck[data-sel="0"] { --shift: -5%; }
-.sp-deck[data-sel="2"] { --shift: 5%; }
-.sp-deck-card {
-  --x: 0%; --y: 0%; --r: 0deg; --s: 1; --lift: 0%;
-  position: absolute; left: 50%; bottom: 0; width: var(--cw); margin-left: calc(var(--cw) / -2);
-  transform-origin: 50% 100%; transform: translate(calc(var(--x) + var(--shift)), calc(var(--y) + var(--lift))) rotate(var(--r)) scale(var(--s));
-  transition: transform 260ms var(--ease-land);
-}
-.sp-deck-card[data-d="0"] { z-index: 3; }
-.sp-deck-card[data-d="-1"], .sp-deck-card[data-d="1"] { --x: -9%; --y: -15%; --r: -2.5deg; --s: 0.93; z-index: 2; cursor: pointer; }
-.sp-deck-card[data-d="1"] { --x: 9%; --r: 2.5deg; }
-.sp-deck-card[data-d="-2"], .sp-deck-card[data-d="2"] { --x: -17%; --y: -29%; --r: -5deg; --s: 0.86; z-index: 1; cursor: pointer; }
-.sp-deck-card[data-d="2"] { --x: 17%; --r: 5deg; }
-.sp-deck-card:not([data-d="0"]):hover { --lift: -4%; }
-/* The cards behind are shaded (inside the card's own cut shape) and don't tilt. */
-.sp-deck .pc::after { content: ""; position: absolute; inset: 0; background: var(--ink-0); opacity: 0; pointer-events: none; transition: opacity 260ms var(--ease-glide); }
-.sp-deck-card:not([data-d="0"]) .pc::after { opacity: 0.4; }
-.sp-deck-card:not([data-d="0"]):hover .pc::after { opacity: 0.2; }
-.sp-deck-card:not([data-d="0"]) .pc { transform: none; }
-/* Text and boxes inside the card scale with it (inline line boxes too, so nothing spills past the band at small sizes). */
-.sp-deck .pc { font-size: calc(16 * var(--u)); }
-body.potato .sp-deck-card, body.potato .sp-deck .pc::after { transition: none; }
-@media (prefers-reduced-motion: reduce) { .sp-deck-card, .sp-deck .pc::after { transition: none; } }
+/* Your card, fading from one design to the next (support-card.ts cardShowcase). Two cards in one box, the same box
+   from the first frame: the one coming in is on top and only its opacity changes; the one under it stays whole until
+   it is covered, then goes out at once. Nothing moves or resizes, so there is no shift and no flash. The card takes
+   the width its column has, or the height, whichever is less. */
+.sp-show { container: sp-show / size; min-width: 0; min-height: 12rem; display: grid; place-items: center; border-radius: var(--r-2); }
+.sp-show:focus-visible { outline: none; box-shadow: var(--ring); }
+.sp-show-stack { position: relative; width: min(100cqw, 100cqh * 888 / 560, 52rem); aspect-ratio: 888 / 560; animation: sp-ask-in 0.25s var(--ease-glide) both; }
+/* Until we know whose card it is: its place held, nothing shown (support-card.ts cardShowcase). */
+.sp-show.pending .sp-show-stack { visibility: hidden; animation: none; }
+.sp-show-card { position: absolute; inset: 0; z-index: 2; opacity: 0; pointer-events: none; transition: opacity 1600ms linear; }
+.sp-show-card.on { opacity: 1; pointer-events: auto; }
+.sp-show-card.under { z-index: 1; pointer-events: none; transition: none; }
+/* The card that is not showing is not painted (and its layers rest: .fx-off). */
+.sp-show-card.fx-off { visibility: hidden; }
+/* Text and boxes inside a card scale with it (inline line boxes too, so nothing spills past the band at small sizes). */
+.sp-show .pc, .sp-card-host .pc { font-size: calc(16 * var(--u)); }
+@media (prefers-reduced-motion: reduce) { .sp-show-card { transition: none; } .sp-show-stack { animation: none; } }
+body.potato .sp-show-card { transition: none; }
+body.potato .sp-show-stack { animation: none; }
 
-/* The sets' names: the picked one in cream, the landing dot over it. */
-.sp-pick { flex: none; display: flex; justify-content: center; gap: 0.4rem; padding-top: 1.3rem; }
-.sp-pick-name { padding: 0.35rem 0.8rem; border: 0; border-radius: var(--r-1); background: none; color: var(--cream-3); font: inherit; font-family: var(--font-ui); font-size: var(--fs-md); font-weight: 700; cursor: pointer; transition: color var(--t-step) var(--ease-glide); }
-.sp-pick-name:hover { color: var(--cream-2); }
-.sp-pick-name.on { color: var(--cream); }
-.sp-pick-name:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--amber); }
+/* ---- Loadout (support-loadout.ts): one line and the section's button, then the Loadout's own view, which lays
+   itself out (loadout-view.css) in the room it is given, as on the profile. Nothing of the Loadout's is styled here. */
+.sp-loadout { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: var(--sp-3); }
+.sp-loadout-head { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 1rem; min-height: 2.2rem; }
+.sp-loadout-note { margin: 0; color: var(--dim); font-size: var(--fs-sm); line-height: 1.4; }
+.sp-loadout-head .sp-actions { flex: none; margin: 0; }
 
-/* Your name: the colours, then the effects (each written in itself). */
-.sp-colours { display: flex; flex-wrap: wrap; gap: 0.4rem; }
-.sp-swatch { width: 1.6rem; height: 1.6rem; padding: 0; border: 0; border-radius: 50%; background: var(--sw); cursor: pointer; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12); }
-.sp-swatch.on { box-shadow: 0 0 0 2px var(--bg, #0b0d12), 0 0 0 4px var(--accent); }
-.sp-swatch:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--bg, #0b0d12), 0 0 0 4px var(--text); }
-.sp-fx { display: flex; flex-wrap: wrap; gap: 0.25rem; margin-top: 0.55rem; }
-.sp-fx-i { display: inline-flex; align-items: center; gap: 0.45rem; padding: 0.3rem 0.55rem; border: 0; border-radius: var(--radius-sm); background: none; color: var(--dim); font: inherit; font-size: var(--fs-sm); cursor: pointer; }
-.sp-fx-i:hover { background: var(--raise); color: var(--text); }
-.sp-fx-i.on { background: var(--raise-2); color: var(--text); box-shadow: inset 3px 0 0 var(--accent); }
-.sp-fx-i:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent); }
-.sp-fx-s { font-weight: 850; font-size: 1rem; }
-.sp-perks { margin: 0; color: var(--dim); font-size: var(--fs-sm); line-height: 1.5; }
-
-/* Your name | Your card: two views under one heading (the set names' style), so the column keeps its height. The font,
-   decoration, border and effect choices are Edit card's swatches (ui/supporter-pickers.ts), without the tiles. */
-.sp-look-head { display: flex; align-items: baseline; gap: 0.9rem; margin-bottom: 0.55rem; }
-.sp-look-tabs { display: flex; gap: 0.9rem; }
-.sp-look-tab { padding: 0; border: 0; background: none; color: var(--cream-3); font: inherit; font-size: var(--fs-md); font-weight: 700; cursor: pointer; transition: color var(--t-step) var(--ease-glide); }
-.sp-look-tab:hover { color: var(--cream-2); }
-.sp-look-tab.on { color: var(--cream); }
-.sp-look-tab:focus-visible { outline: none; border-radius: var(--r-1); box-shadow: 0 0 0 2px var(--amber); }
-.sp-look { min-height: 5.9rem; }
-.sp-look-row { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.3rem; }
-.sp-look-row:first-child { margin-top: 0; }
-.sp-look-label { flex: none; width: 3.4rem; color: var(--dim); font-size: var(--fs-sm); }
-.sp-look-opts { min-width: 0; display: flex; flex-wrap: wrap; gap: 0.15rem; }
-.sp-look-i { display: grid; place-items: center; padding: 0.1rem 0.15rem; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text); cursor: pointer; }
-.sp-look-i:hover { background: var(--raise); }
-.sp-look-i.on { background: var(--raise-2); box-shadow: inset 0 -2px 0 var(--accent); }
-.sp-look-i:focus-visible { outline: none; box-shadow: var(--ring); }
-.sp-look-i .pf-sw-name { width: 1.75rem; height: 1.5rem; font-size: 1rem; }
-.sp-look-i .pf-sw-av { width: 2.3rem; height: 1.9rem; }
-.sp-look-i .pf-sw-fx { width: 2.4rem; height: 1.45rem; }
-
-/* The Loadout, supporter items only: each set's items on a row of their own under its name (three at most), so every
-   set shows at once beside the stage. */
-.sp-set { min-height: 0; display: flex; flex-direction: column; }
-.sp-set .lo { min-height: 0; }
-@container lo (min-width: 44rem) {
-  .sp-set .lo-body { grid-template-columns: minmax(0, 1fr) minmax(18rem, 25rem); }
-  .sp-set .lo-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-}
-.sp-set .lo-set-h:first-child { margin-top: 0; }
-/* Eleven slots: closer tabs, so the row fits beside the ask without scrolling at laptop widths. */
-.sp-set .lo-tab { padding-inline: 0.45rem; }
-.sp-set .lo-tab::after { left: 0.35rem; right: 0.35rem; }
-
-/* Each set's own light on the stage. */
-.sp-set[data-set="geode"] .lo-stage { background: radial-gradient(36% 28% at 50% 88%, rgba(80, 235, 215, 0.13), transparent 70%), radial-gradient(70% 60% at 50% 38%, rgba(150, 110, 255, 0.1), transparent 75%), linear-gradient(180deg, #161a29, #0d1017); }
-.sp-set[data-set="highroller"] .lo-stage { background: radial-gradient(36% 28% at 50% 88%, rgba(255, 200, 100, 0.15), transparent 70%), radial-gradient(70% 60% at 50% 42%, rgba(50, 160, 100, 0.1), transparent 75%), linear-gradient(180deg, #161c1b, #0c100f); }
-.sp-set[data-set="borealis"] .lo-stage { background: radial-gradient(80% 45% at 40% 0%, rgba(80, 255, 185, 0.12), transparent 70%), radial-gradient(55% 40% at 75% 8%, rgba(120, 130, 255, 0.11), transparent 72%), radial-gradient(36% 28% at 50% 88%, rgba(160, 220, 255, 0.09), transparent 70%), linear-gradient(180deg, #0f1627, #0a0d16); }
-.sp-set[data-set="tidepool"] .lo-stage { background: radial-gradient(70% 45% at 45% 0%, rgba(159, 242, 226, 0.13), transparent 70%), radial-gradient(36% 28% at 50% 88%, rgba(255, 127, 110, 0.12), transparent 70%), linear-gradient(180deg, #0f2a29, #0a1514); }
+/* ---- Player card (support-card.ts): your card on the left, a row of choices per look on the right. The card keeps
+   its place; the rows scroll under a soft edge when there are more than fit (style.css .scroll-cue; the rows rest
+   unless pointed at, so the fade is not a mask over things that move). */
+.sp-card { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(26rem, 1.1fr); gap: var(--sp-8); }
+.sp-card-view { min-width: 0; min-height: 0; display: flex; flex-direction: column; justify-content: center; gap: 0.9rem; }
+.sp-card-host { width: min(100%, 44rem); margin-inline: auto; }
+.sp-card-foot { display: flex; align-items: baseline; gap: 0.8rem; width: min(100%, 44rem); margin-inline: auto; }
+.sp-card-note { flex: 1; margin: 0; color: var(--dim); font-size: var(--fs-sm); line-height: 1.5; }
+.sp-card-view > .sp-actions { width: min(100%, 44rem); margin: 0 auto; }
+.sp-card-rows { min-width: 0; min-height: 0; overflow: hidden auto; overscroll-behavior: contain; scrollbar-width: thin; display: flex; flex-direction: column; gap: 1.5rem; padding: 0 0.6rem 0.6rem 0; }
+.sp-group { flex: none; scroll-margin-top: 0.4rem; }
+.sp-group .sp-h { padding-bottom: 0.5rem; border-bottom: 1px solid var(--line); }
+/* A row: what it is and, under it, which one is on (or the one under the pointer); then the choices. The label column
+   is two lines tall whatever it says, so a name coming or going never moves a row. */
+.sp-row { display: grid; grid-template-columns: 7rem minmax(0, 1fr); align-items: center; gap: 0.3rem 1rem; min-height: 3.1rem; padding: 0.25rem 0; }
+.sp-row.sp-row-off { visibility: hidden; }
+.sp-row-label { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; line-height: 1.25; }
+.sp-row-label span { font-weight: 620; }
+.sp-row-label small { min-height: 1.25em; color: var(--dim); font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sp-opts { min-width: 0; display: flex; flex-wrap: wrap; gap: 0.2rem; }
+.sp-opt { position: relative; display: grid; place-items: center; padding: 0.25rem; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text); font: inherit; cursor: pointer; }
+.sp-opt:hover { background: var(--raise); }
+.sp-opt.on { background: var(--raise-2); box-shadow: inset 0 -2px 0 var(--accent); }
+.sp-opt:focus-visible { outline: none; box-shadow: var(--ring); }
+/* The swatches are Edit card's (profile.css, card-fx.css .pf-sw-*), a size up: they are what the row is for. */
+.sp-opt .pf-sw { zoom: 1.2; }
+.sp-opt .pf-sw-name { width: 1.9rem; height: 1.7rem; }
+.sp-dot { display: block; width: 1.5rem; height: 1.5rem; border-radius: 50%; background: var(--sw); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12); }
+.sp-opts-dots .sp-opt { padding: 0.35rem; border-radius: 50%; }
+.sp-opts-dots .sp-opt.on { background: none; box-shadow: none; }
+.sp-opts-dots .sp-opt.on .sp-dot { box-shadow: 0 0 0 2px var(--ink-0), 0 0 0 4px var(--accent); }
+/* "Aa" in a colour, effect, font or cut: every sample in the same box, whatever its letters measure (a font is
+   fitted to its own width, ui/name-fit.ts), so a pick never re-wraps a row. */
+.sp-opts-aa .sp-opt { width: 2.75rem; height: 2.5rem; padding: 0; overflow: hidden; }
+/* Only the choice under the pointer moves, and only the showing card (support-card.ts puts .fx-off on the rest;
+   card-fx.css and avatar-deco.css hold their layers still for it). The name's shine repaints as it moves, so it rests
+   with them. */
+.sp-opt.fx-off .nm-fx.nm-fx-sparkle, .sp-show-card.fx-off .nm-fx.nm-fx-sparkle { animation-play-state: paused; }
+.sp-opts-text .sp-opt { padding: 0.4rem 0.7rem; }
+.sp-title { font-size: var(--fs-sm); font-weight: 650; white-space: nowrap; }
 
 /* Top supporters: plain rows, the total in the warm accent; a supporter's switch above them. */
 .sp-top-page { flex: 1; min-height: 0; width: min(100%, 52rem); margin: 0 auto; display: flex; flex-direction: column; gap: var(--sp-4); }
@@ -141,26 +128,12 @@ body.potato .sp-deck-card, body.potato .sp-deck .pc::after { transition: none; }
 .sp-top-since { color: var(--dim); font-size: var(--fs-sm); white-space: nowrap; text-align: right; }
 .sp-top-empty { margin: 2rem 0 0; color: var(--dim); text-align: center; }
 
-/* Narrow: one column, the page scrolls. */
-@media (max-width: 62rem) {
-  .panel-support { height: auto; }
-  .sp { grid-template-columns: minmax(0, 1fr); }
-  .sp-col { grid-template-rows: none; }
-  .sp-cards { flex: none; }
-  .sp-deck-wrap { flex: none; height: min(62vw, 24rem); }
-  .sp-set { min-height: 34rem; }
-  .sp-top-page { min-height: 20rem; }
-}
-@media (max-width: 40rem) {
-  .panel-support .screen-head:has(.pf-tabs) { align-items: flex-start; }
-  .panel-support .screen-head:has(.pf-tabs) .screen-title { flex-wrap: wrap; }
-  .panel-support .pf-tabs-host { flex-basis: 100%; margin-left: -0.75rem; }
-  .panel-support .screen-head:has(.pf-tabs) .esc-hint { display: none; }
-}
+
 /* Payments open (src/stripe.ts): whole dollars, then the button to Stripe's page. */
 .sp-dollars { display: inline-flex; align-items: center; gap: 0.35rem; color: var(--dim); font-weight: 700; }
 .sp-amount { flex: none; width: 6.5rem; font-variant-numeric: tabular-nums; }
 .sp-err { margin: 0.6rem 0 0; color: var(--loss); font-size: var(--fs-sm); }
+
 
 /* Gifting: credits and the button on the left, the Gifter badge on the right. Plain text, no boxes round the copy. */
 .sp-gifting-page { flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: minmax(0, 27rem) minmax(0, 1fr); gap: 4rem; padding: var(--sp-4) 0; }
@@ -188,13 +161,15 @@ body.potato .sp-deck-card, body.potato .sp-deck .pc::after { transition: none; }
 .sp-gift-set span { width: 0.9rem; height: 0.9rem; border-radius: 50%; }
 .sp-gift-set.on { box-shadow: 0 0 0 2px var(--accent); }
 .sp-gift-set:focus-visible { outline: none; box-shadow: var(--ring); }
-.sp-gifting-page p.sp-gift-note { margin-top: auto; padding-top: 1rem; font-size: var(--fs-sm); color: var(--faint); text-align: center; }
-@media (max-width: 62rem) {
-  .sp-gifting-page { grid-template-columns: minmax(0, 1fr); gap: 2.5rem; }
-}
+.sp-gifting-page p.sp-gift-note { padding-top: 0.6rem; font-size: var(--fs-sm); color: var(--faint); text-align: center; }
+
 
 /* Player glow (ui/player-glow-controls.ts; also Profile → Loadout): the on switch by the heading, then colour,
    intensity and the aura. */
+.sp-colours { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.sp-swatch { width: 1.6rem; height: 1.6rem; padding: 0; border: 0; border-radius: 50%; background: var(--sw); cursor: pointer; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12); }
+.sp-swatch.on { box-shadow: 0 0 0 2px var(--bg, #0b0d12), 0 0 0 4px var(--accent); }
+.sp-swatch:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--bg, #0b0d12), 0 0 0 4px var(--text); }
 .sp-glow { display: grid; gap: 0.75rem; }
 .sp-glow .sp-h { margin: 0; }
 .sp-glow-head { display: flex; align-items: center; gap: 0.6rem; }
@@ -210,24 +185,35 @@ body.potato .sp-deck-card, body.potato .sp-deck .pc::after { transition: none; }
 .sp-glow-custom.on { border-color: var(--accent); }
 .sp-glow-custom-dot { width: 0.9rem; height: 0.9rem; border-radius: 50%; background: var(--sw); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.25); }
 
-/* Support's Loadout: the items, then the glow controls under them. */
-/* The items take what the name and glow controls leave, down to a row of tiles. A slot's own rows (hair, highlights,
-   the cape's and the robe's) come under the glow: when they don't all fit, the column scrolls rather than squeezing the
-   items away. */
-.sp-side { flex: 1 0 auto; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-4); }
-.sp-set .lo-side { overflow: hidden auto; overscroll-behavior: contain; scrollbar-width: thin; }
-/* The sets side by side: each tile is named after its set already, so the set headings go. The slots with many items
-   (Hat, Finish) scroll inside the column with the page's quiet scrollbar; the page itself stays one screen. A short
-   bottom pad: a slot whose rows fit (Colourway) shows no scrollbar. */
-.sp-side > .lo-grid { flex: 1; min-height: 7rem; contain: size; grid-template-columns: repeat(3, minmax(0, 1fr)) !important; overflow: hidden auto; scrollbar-width: thin; padding-bottom: 2px; }
-/* More rows below: a soft edge (Settings' .set-scroll), gone once scrolled to the end. */
-.sp-side > .lo-grid.sp-more { mask-image: linear-gradient(to bottom, #000 calc(100% - 2.6rem), transparent 100%); }
-.sp-side .lo-set-h { display: none; }
-.sp-side > .sp-name { flex: none; padding: var(--sp-3) 0.35rem 0; border-top: 1px solid var(--line); }
-.sp-side > .sp-glow { flex: none; gap: 0.6rem; padding: var(--sp-3) 0.35rem 0; border-top: 1px solid var(--line); }
-/* The two switches on one row. */
-.sp-side .sp-glow { grid-template-columns: 1fr 1fr; column-gap: 1.5rem; }
-.sp-side .sp-glow > :not(.sp-glow-aura) { grid-column: 1 / -1; }
 .sp-glow-support { display: flex; align-items: center; gap: 0.75rem; color: var(--dim); font-size: var(--fs-sm); }
 .sp-glow-support[hidden] { display: none; }
 .lo-glow-settings .sp-glow-support { flex-basis: 100%; }
+
+/* ---- Narrow: one column and the page scrolls (the whole menu, as on every narrow screen), each section at its own
+   height. */
+@media (max-width: 62rem) {
+  html body[data-screen="support"] #menu { overflow: hidden auto; }
+  #menu > .panel-support { height: auto; min-height: calc(100vh - 7.5vh); }
+  .sp, .sp-card { grid-template-columns: minmax(0, 1fr); }
+  .sp-col, .sp-card-rows { overflow: visible; }
+  .sp-show { height: min(60vw, 26rem); }
+  /* The window's height, as on a wide screen, so the Loadout lays itself out in a box here too and its tiles scroll
+     inside it (left to its content's height, its stage grew as tall as its tallest list of tiles). */
+  .sp-loadout { flex: none; height: max(34rem, calc(100vh - 9rem)); }
+  .sp-loadout-head { flex-wrap: wrap; }
+  .sp-card-view { justify-content: flex-start; }
+  .sp-top-page { min-height: 20rem; }
+  .sp-gifting-page { grid-template-columns: minmax(0, 1fr); gap: 2.5rem; }
+}
+/* A phone: the Loadout has stacked its stage over its tiles by now (its own switch, at 44rem of its width), and takes
+   the height they need; the page scrolls. */
+@media (max-width: 36rem) {
+  .sp-loadout { height: auto; min-height: 34rem; }
+}
+@media (max-width: 40rem) {
+  .panel-support .screen-head:has(.pf-tabs) { align-items: flex-start; }
+  .panel-support .screen-head:has(.pf-tabs) .screen-title { flex-wrap: wrap; }
+  .panel-support .pf-tabs-host { flex-basis: 100%; margin-left: -0.75rem; }
+  .panel-support .screen-head:has(.pf-tabs) .esc-hint { display: none; }
+  .sp-row { grid-template-columns: minmax(0, 1fr); }
+}

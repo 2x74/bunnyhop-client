@@ -36,3 +36,18 @@ export function spectateSlot(players: readonly SpecRoster[], friendId: string, y
   const t = players.find((p) => p.slot === f.spec && p.slot !== you && p.spec === null);
   return t ? t.slot : f.slot;
 }
+
+/**
+ * What a room's welcome does to your spectating (net/mp.ts). `watching`: the id of the player you watch, null when you
+ * play; `resumed`: the welcome follows a dropped connection on this page (not the first one). Keep watching them at
+ * their slot in the new roster; wait for them when both of you dropped and they aren't back yet; else stop watching.
+ * Not one of these restarts your run (only stopping to watch on purpose does, like CS:S).
+ */
+export type WelcomeSpectate = { k: "play" } | { k: "keep"; slot: number } | { k: "wait"; id: string } | { k: "end" };
+
+export function welcomeSpectate(players: readonly SpecRoster[], watching: string | null, resumed: boolean, you: number): WelcomeSpectate {
+  if (watching === null) return { k: "play" };
+  if (!resumed) return { k: "end" };
+  const slot = players.find((p) => p.id === watching && p.slot !== you)?.slot;
+  return slot !== undefined ? { k: "keep", slot } : { k: "wait", id: watching };
+}

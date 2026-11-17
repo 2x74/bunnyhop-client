@@ -66,6 +66,8 @@ export interface PracticeHost extends PracticeContext {
   fallthrough: (code: string) => boolean;
   /** Where the !cp menu shows (main.ts: the game's numbered menu, net/hud.ts NumberMenu); null: no menu. */
   menu?: PracticeMenuView | null;
+  /** The pause menu's Timescale row (timescale.ts), or null where it can't be used now. */
+  timescaleMenu?: () => { readonly value: number; set: (scale: number) => void } | null;
 }
 
 /** The !cp menu's screen side: a CS:S-style numbered menu (keys 1-9 pick, 0 closes and calls onExit). */
@@ -109,7 +111,7 @@ export class Practice {
     });
     // The pause menu item, only where practice mode works.
     if (!this.unavailable) {
-      h.session.practiceMenu = () => ({ on: this.on, toggle: () => this.toggle() });
+      h.session.practiceMenu = () => ({ on: this.on, toggle: () => this.toggle(), timescale: h.timescaleMenu?.() ?? null });
       void h.session.refreshMenu();
     }
   }

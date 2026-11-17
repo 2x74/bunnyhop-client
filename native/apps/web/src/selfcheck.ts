@@ -19,6 +19,8 @@ import { VERSION } from "./version";
 import { fingerprint } from "./device";
 import { nativeClient } from "./client-bridge";
 import { runClientInfo } from "./client-identity";
+import { currentRoom } from "./net/presence";
+import { roomHealth, runRoomNet, type RunRoomNet } from "./net/room-health";
 
 export interface SelfCheckResult {
   /** "na": not checked (a big map on a low-memory device, map-physics.ts; apps/api src/diagnostics.ts SELF_CHECKS). */
@@ -47,6 +49,8 @@ export class RunWatch {
   private blurs = 0;
   /** input-trust.ts's count when the run started. */
   private untrustedAt = 0;
+  /** net/room-health.ts's reconnect count when the run started. */
+  private reconnectsAt = 0;
   /** The run's polling rate (mouse-filter.ts), from the input's stats while the run is on. */
   private readonly poll = new RunPollRate();
   private pollSource: ((now: number, windowMs: number) => number) | null = null;
@@ -68,6 +72,7 @@ export class RunWatch {
   start(pollHz?: (now: number, windowMs: number) => number): void {
     this.running = true;
     this.untrustedAt = untrustedInputEvents();
+    this.reconnectsAt = roomHealth().reconnects;
     this.poll.reset();
     this.pollSource = pollHz ?? null;
     this.startAt = performance.now();
@@ -88,7 +93,7 @@ export class RunWatch {
     }
   }
 
-  stop(): { fps: number; visibility: { hidden: number; hiddenMs: number; blurs: number }; clock?: { raf: number; perf: number; secs: number }; pollHz?: number; untrusted?: number } {
+  stop(): { fps: number; visibility: { hidden: number; hiddenMs: number; blurs: number }; clock?: { raf: number; perf: number; secs: number }; pollHz?: number; untrusted?: number; room?: RunRoomNet } {
     const now = performance.now();
     this.running = false;
     const hiddenMs = this.hiddenMs + (this.hiddenAt !== null ? now - this.hiddenAt : 0);
@@ -98,7 +103,8 @@ export class RunWatch {
     const clock = wall > 0 && this.rafFirst !== null ? { raf: r2((this.rafLast - this.rafFirst) / wall), perf: r2((now - this.startAt) / wall), secs: Math.round(wall / 100) / 10 } : undefined;
     const pollHz = this.poll.hz();
     const untrusted = untrustedInputEvents() - this.untrustedAt;
-    return { fps: secs > 0 ? Math.round((this.frames / secs) * 10) / 10 : 0, visibility: { hidden: this.hidden, hiddenMs: Math.round(hiddenMs), blurs: this.blurs }, ...(clock ? { clock } : {}), ...(pollHz ? { pollHz } : {}), ...(untrusted ? { untrusted } : {}) };
+    const room = runRoomNet(this.reconnectsAt, currentRoom() !== null);
+    return { fps: secs > 0 ? Math.round((this.frames / secs) * 10) / 10 : 0, visibility: { hidden: this.hidden, hiddenMs: Math.round(hiddenMs), blurs: this.blurs }, ...(clock ? { clock } : {}), ...(pollHz ? { pollHz } : {}), ...(untrusted ? { untrusted } : {}), ...(room ? { room } : {}) };
   }
 }
 
@@ -143,6 +149,7 @@ export async function reportRun(o: { check: Promise<SelfCheckResult>; upload: Pr
     visibility: o.watched.visibility,
     ...(o.watched.clock ? { clock: o.watched.clock } : {}),
     ...(o.watched.untrusted ? { untrusted: o.watched.untrusted } : {}),
+    ...(o.watched.room ? { room: o.watched.room } : {}),
     ...(fp ? { fp: fp.components } : {}),
     ...(o.play ? { play: o.play } : {}),
   });

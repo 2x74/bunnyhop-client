@@ -37,6 +37,9 @@
   60% { opacity: 0.9; transform: translate(calc(var(--dx) * 0.45), calc(var(--dy) * 0.5)) rotate(140deg); }
   85%, 100% { opacity: 0; transform: translate(var(--dx), var(--dy)) rotate(260deg); }
 }
+/* On the page's clock (card-fx.ts fxClock, set on the wrapper), so a redrawn avatar's ornament carries on. */
+.av-anim { animation-delay: var(--fx-t, 0s); }
+.av-twinkle-late { animation-delay: calc(var(--fx-t, 0s) - 1.4s); }
 .fx-off .av-anim, .av-deco.fx-off .av-anim { animation-play-state: paused; }
 @media (prefers-reduced-motion: reduce) { .av-anim { animation: none !important; } }
 body.potato .av-anim { animation: none !important; }

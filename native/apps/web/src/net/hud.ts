@@ -243,6 +243,8 @@ export interface MenuSpec {
   /** Under the title, before the numbered rows (look-menu.ts: the brightness slider). */
   head?: HTMLElement;
   items: MenuItem[];
+  /** A short line under the rows, before the footer (a map vote's "Press a number to vote"). */
+  hint?: string;
   footer?: string;
   /** Key 0 label (default "Exit"). */
   exit?: string;
@@ -272,6 +274,7 @@ export class NumberMenu {
   show(id: string, spec: MenuSpec): void {
     this.id.current = id;
     this.spec = spec;
+    this.el.dataset.menu = id;
     this.render();
     this.el.hidden = false;
   }
@@ -289,6 +292,7 @@ export class NumberMenu {
     const was = !!this.spec;
     this.spec = null;
     this.id.current = "";
+    delete this.el.dataset.menu;
     this.el.hidden = true;
     if (was) this.onHide();
   }
@@ -307,6 +311,7 @@ export class NumberMenu {
           it.control ?? (it.detail ? h("span.mm-detail", null, it.detail) : null),
         ),
       ),
+      s.hint ? h("div.mm-hint", null, s.hint) : null,
       s.footer ? h("div.mm-footer", null, s.footer) : null,
       h("div.mm-item.exit", { role: "menuitem", onclick: () => this.key(0) }, h("span.mm-key", null, "0."), h("span.mm-label", null, s.exit ?? "Exit")),
     );

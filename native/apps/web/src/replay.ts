@@ -90,6 +90,12 @@
 //                like any replay; the verifier also requires every recorded load state to be exactly the re-simulated state
 //                at its tick, i.e. a state the run really reached and saved (sim.ts, verifier.ts, research/SEGMENTED.md).
 //                No version bump (older decoders stop before it); a malformed one is an error.
+//   loadout, continued  optional trailer after the segments, the last of all (absent when the loadout has nothing past
+//                packLoadout's fields): u32 "BHLX", str8 of loadout.ts packLoadoutExt (v0.0.43: the knife's charm and
+//                its options). Its own trailer so packLoadout's text, which every older reader drops past 200
+//                characters, never grows; at the end because older readers stop at the first magic they don't know
+//                in a trailer's place and ignore whatever follows the segments. Cosmetic: never verified, dropped
+//                when malformed, only read when the loadout trailer is there.
 
 // v8 (counted yaw, research/ANTICHEAT.md §8.17): the client keeps the view yaw as an exact base plus whole mouse counts,
 // yaw = countedYaw(base, count, k) = norm360(base - count * k) with k = sensitivity * m_yaw (CS:S units), so the yaw of
@@ -111,7 +117,7 @@ import { IN_FLIGHT, PHYSICS_V1, PHYSICS_V7, type RestartPoint, type Settings } f
 import { TIMER_RULES_V1, TIMER_RULES_V3 } from "./timer";
 import { styleDef } from "./styles";
 import { trackOf, trackSuffix, type Zone, type ZoneKind } from "./zones";
-import { packLoadout, unpackLoadout, type CosmeticLoadout } from "./loadout";
+import { packLoadout, packLoadoutExt, unpackLoadout, withLoadoutExt, type CosmeticLoadout } from "./loadout";
 import { foldRange } from "./run-hash";
 import type { TurnSpeed } from "./turn-binds";
 
@@ -262,6 +268,7 @@ export const LOADOUT_MAGIC = 0x4f4c4842; // "BHLO" little-endian
 export const INSPECT_MAGIC = 0x49434842; // "BHCI" little-endian
 export const TURN_SPEED_MAGIC = 0x53544842; // "BHTS" little-endian
 export const SEGMENTS_MAGIC = 0x47534842; // "BHSG" little-endian
+export const LOADOUT_EXT_MAGIC = 0x584c4842; // "BHLX" little-endian
 /** Most checkpoint loads a replay may record (a load every second for 4 h is 14400). */
 export const MAX_SEGMENT_LOADS = 100_000;
 /** Inspect trailer kinds (the first two are combo.ts SIG_START / SIG_NEXT). */
@@ -833,6 +840,11 @@ export function encodeRaw(r: Replay): Uint8Array {
       prev = c.tick;
     }
   }
+  const ext = r.loadout ? packLoadoutExt(r.loadout) : "";
+  if (ext) {
+    w.u32(LOADOUT_EXT_MAGIC);
+    w.str8(ext);
+  }
   return w.result();
 }
 
@@ -952,10 +964,12 @@ export function decodeRaw(buf: Uint8Array, opts: { commands?: boolean } = {}): R
     checkpoints.push({ tick, position: [v[0], v[1], v[2]], velocity: [v[3], v[4], v[5]] });
   }
   const cosmetic = readCosmetics(r);
-  const loadout = readLoadout(r);
+  let loadout = readLoadout(r);
   const inspect = readInspects(r);
   const turnSpeed = readTurnSpeed(r);
   const segments = readSegments(r);
+  const ext = readLoadoutExt(r);
+  if (loadout && ext) loadout = withLoadoutExt(loadout, ext);
   if (styleDef(style)?.airJump) settings.airJump = true;
   return {
     header: {
@@ -1163,6 +1177,22 @@ function readSegments(r: Reader): SegmentLoad[] | null {
     out.push({ tick, position: [v[0], v[1], v[2]], velocity: [v[3], v[4], v[5]] });
   }
   return out;
+}
+
+/** The optional loadout continuation (BHLX, see the format notes): its text, or null when absent or malformed. */
+function readLoadoutExt(r: Reader): string | null {
+  if (r.remaining < 5) return null;
+  const at = r.pos;
+  try {
+    if (r.u32() !== LOADOUT_EXT_MAGIC) {
+      r.pos = at;
+      return null;
+    }
+    return r.str8();
+  } catch {
+    r.pos = at;
+    return null;
+  }
 }
 
 /** The optional loadout trailer (see the format notes); null when absent or malformed. */

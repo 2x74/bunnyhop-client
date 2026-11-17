@@ -71,6 +71,8 @@ const DRAW = {
   star: [p("M10 2.8L11.94 7.93L17.42 8.19L13.14 11.62L14.58 16.91L10 13.9L5.42 16.91L6.86 11.62L2.58 8.19L8.06 7.93Z")],
   /** Arrow out of a doorway, to the left: leave (the pause menu's Main menu). */
   leave: [p("M11 3H16.5V17H11"), p("M13 10H3.5"), p("M7 6.5L3.5 10L7 13.5")],
+  /** The power symbol: quit the app (Exit game in the desktop app's pause menu). */
+  power: [p("M14.2 5.5A6.5 6.5 0 1 1 5.8 5.5"), p("M10 2.5V9.5")],
   /** A bell: notifications (social/dock.ts). */
   bell: [p("M5 14.5V9A5 5 0 0 1 15 9V14.5L16.5 16H3.5Z"), p("M8.2 16.2A1.9 1.9 0 0 0 11.8 16.2")],
   /** Two heads: friends (social/dock.ts). */

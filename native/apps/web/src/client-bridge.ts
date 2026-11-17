@@ -75,6 +75,8 @@ export interface BunnyhopClient {
   /** The skies folder: the whole list now and after every change. Returns an unsubscribe. */
   onCustomSkies?: (listener: (skies: ClientSky[]) => void) => () => void;
   openSkiesFolder?: () => unknown;
+  /** Quits the app (0.2.6 and later), after the page has unloaded as on a window close. exit-game.ts. */
+  quit?: () => unknown;
 }
 declare global { interface Window { bunnyhopClient?: BunnyhopClient } }
 export function nativeClient(): BunnyhopClient | null {

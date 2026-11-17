@@ -17,7 +17,9 @@ export type NavRequest =
   | { screen: "support" }
   /** Gauntlets (ui/gauntlets.ts): the list, one gauntlet's page, or (`attempt`) an attempt's result. */
   | { screen: "gauntlets" }
-  | { screen: "gauntlet"; slug: string; attempt?: string | null };
+  | { screen: "gauntlet"; slug: string; attempt?: string | null }
+  /** The Daily Challenge (ui/daily.ts), on a day's board (none: today's). */
+  | { screen: "daily"; day?: string | null };
 
 let handler: ((r: NavRequest) => void) | null = null;
 
@@ -38,6 +40,7 @@ export function navigate(r: NavRequest): void {
     else if (r.screen === "loadout") url.pathname = "/";
     else if (r.screen === "support") (url.pathname = "/"), url.searchParams.set("support", "");
     else if (r.screen === "gauntlets") url.pathname = "/gauntlets";
+    else if (r.screen === "daily") url.pathname = r.day ? `/daily/${r.day}` : "/daily";
     else if (r.screen === "gauntlet") {
       url.pathname = `/g/${encodeURIComponent(r.slug)}`;
       if (r.attempt) url.searchParams.set("attempt", r.attempt);
@@ -77,7 +80,7 @@ export function profileUrl(id: string): string {
 
 /**
  * Screen requested by the page URL: /u/<id> (or ?u=<id>), /ranks[?style=<style>&page=<n>] (or ?ranks=<scope>), /maps,
- * /maps/<name>, /servers, /gauntlets, /g/<slug>[?attempt=<id>], /?support (the About page's link).
+ * /maps/<name>, /servers, /gauntlets, /g/<slug>[?attempt=<id>], /daily[/<day>], /?support (the About page's link).
  * The Worker serves these paths with per-page meta (apps/api/src/seo/); /replay/<id> is the viewer's (viewer/request.ts).
  */
 export function routeFromUrl(): NavRequest | null {
@@ -96,6 +99,8 @@ export function routeFromUrl(): NavRequest | null {
   if (path === "/stats") return { screen: "stats" };
   if (path === "/servers") return { screen: "servers" };
   if (path === "/gauntlets") return { screen: "gauntlets" };
+  const d = /^\/daily(?:\/(\d{4}-\d{2}-\d{2}))?$/.exec(path);
+  if (d) return { screen: "daily", day: d[1] ?? null };
   const g = /^\/g\/([a-z0-9-]+)$/.exec(path);
   if (g) return { screen: "gauntlet", slug: g[1], attempt: p.get("attempt") };
   if (p.has("support")) return { screen: "support" };

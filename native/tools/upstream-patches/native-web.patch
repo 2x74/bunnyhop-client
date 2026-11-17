@@ -1,8 +1,8 @@
 diff --git a/apps/web/src/api.ts b/apps/web/src/api.ts
-index b69862c..ec7b9fb 100644
+index 4029835..b5579cb 100644
 --- a/apps/web/src/api.ts
 +++ b/apps/web/src/api.ts
-@@ -902,11 +902,23 @@ const countWrite = (init: RequestInit) => {
+@@ -1025,11 +1025,23 @@ const countWrite = (init: RequestInit) => {
    if (m !== "GET" && m !== "HEAD") writes++;
  };
  
@@ -28,7 +28,7 @@ index b69862c..ec7b9fb 100644
    } catch (e) {
      if (e instanceof ApiUnavailable) throw e;
      throw new ApiUnavailable();
-@@ -915,24 +927,26 @@ async function request(path: string, init: ApiRequestInit = {}): Promise<Respons
+@@ -1038,24 +1050,26 @@ async function request(path: string, init: ApiRequestInit = {}): Promise<Respons
    return res;
  }
  
@@ -61,7 +61,7 @@ index b69862c..ec7b9fb 100644
    if (!res.ok) {
      if (!body?.error) throw new ApiUnavailable();
      throw new ApiError(res.status, body.error, body.message ?? `HTTP ${res.status}`, body as Record<string, unknown>);
-@@ -1105,19 +1119,19 @@ export const api = {
+@@ -1228,19 +1242,19 @@ export const api = {
     * reserved, ...), 409 "taken" / "held" (body.suggestion; registered players), 429 "rename_limit". Guests asking for a
     * taken name get a numbered variant: the result has nameAdjusted. oldNameHeld: the name left behind is kept for them.
     */
@@ -87,7 +87,7 @@ index b69862c..ec7b9fb 100644
      setMe(user);
      return user;
    },
-@@ -1141,12 +1155,12 @@ export const api = {
+@@ -1264,12 +1278,12 @@ export const api = {
      return json("/me/links", { cache: "no-cache" });
    },
    /** Strict: 400 bad_links names the platform (`body.platform`) and what's wrong. */
@@ -104,7 +104,7 @@ index b69862c..ec7b9fb 100644
    },
    /** Your support (Settings → Account, the Support page). 401 without a session. */
    async mySupport(): Promise<MySupport> {
-@@ -1155,29 +1169,29 @@ export const api = {
+@@ -1278,29 +1292,29 @@ export const api = {
    async giftWallet(): Promise<GiftWallet> {
      return json("/me/gifts", { cache: "no-store" });
    },
@@ -144,7 +144,7 @@ index b69862c..ec7b9fb 100644
    },
    /** The About page's thank-you list (names of supporters who opted in). */
    async supporters(): Promise<{ names: string[]; top: TopSupporter[] }> {
-@@ -1188,8 +1202,8 @@ export const api = {
+@@ -1311,8 +1325,8 @@ export const api = {
      return json<AccountView>("/me/account", { cache: "no-store" });
    },
    /** Removes a sign-in method (refused for the last one: ApiError 400 "last_method"). A password needs `current` (or the recovery window). */
@@ -155,7 +155,7 @@ index b69862c..ec7b9fb 100644
      setMe(v.user);
      return v;
    },
-@@ -1242,23 +1256,28 @@ export const api = {
+@@ -1365,23 +1379,28 @@ export const api = {
      return json<OnboardingState>("/me/onboarding", post(o));
    },
    /** Discord-linked players: show (or hide) their Discord avatar publicly. Off by default; there are no uploads. */
@@ -190,16 +190,16 @@ index b69862c..ec7b9fb 100644
    async playerStats(id: string): Promise<{ totals: { verifiedRuns: number; jumps: number; playtimeSeconds: number; runTimeMs: number; mapsCompleted: number }; styles: { style: string; runs: number; maps: number }[]; maps: { map: string; runs: number }[]; activity: { at: number; runs: number }[] }> {
      return json(`/players/${encodeURIComponent(id)}/stats`);
    },
-@@ -1305,7 +1324,7 @@ export const api = {
+@@ -1428,7 +1447,7 @@ export const api = {
     * Uploads the server refuses outright (unranked map, zone/build mismatch, rate limit, ...) resolve to
     * { id: "", status: "rejected", reason, code } rather than throwing.
     */
--  async submitRun(replay: Uint8Array, opts: { room?: string | null; race?: string | null; gauntlet?: string | null; beats?: string[]; mouse?: import("./mouse-settings").MouseSettings | null } = {}): Promise<Submission> {
-+  async submitRun(replay: Uint8Array, opts: { room?: string | null; race?: string | null; gauntlet?: string | null; beats?: string[]; mouse?: import("./mouse-settings").MouseSettings | null; dispatch?: RequestDispatch } = {}): Promise<Submission> {
+-  async submitRun(replay: Uint8Array, opts: { room?: string | null; race?: string | null; gauntlet?: string | null; daily?: string | null; beats?: string[]; mouse?: import("./mouse-settings").MouseSettings | null } = {}): Promise<Submission> {
++  async submitRun(replay: Uint8Array, opts: { room?: string | null; race?: string | null; gauntlet?: string | null; daily?: string | null; beats?: string[]; mouse?: import("./mouse-settings").MouseSettings | null; dispatch?: RequestDispatch } = {}): Promise<Submission> {
      // ?room=<id>: played in a multiplayer room, so the room announces the verified result (PB / top 10 / SR / WR).
      // &race=<id>: a run for the room's race you're in (net/race.ts): the room ties it to the race.
      // ?gauntlet=<attemptId>: a run in a gauntlet attempt (gauntlet/): the reply says whether it became the next split.
-@@ -1324,7 +1343,7 @@ export const api = {
+@@ -1449,7 +1468,7 @@ export const api = {
        if (opts.mouse) form.append("mouse", JSON.stringify(opts.mouse));
        init = { method: "POST", body: form };
      }
@@ -208,7 +208,7 @@ index b69862c..ec7b9fb 100644
      const body = (await res.json().catch(() => null)) as (Submission & { error?: string; message?: string }) | null;
      // A 429 without our JSON (the edge's own limit) is still "not yet", not a verdict on the run (uploads.ts holds).
      if (!res.ok || !body) return { id: "", status: "rejected", reason: body?.message ?? `HTTP ${res.status}`, code: body?.error ?? (res.status === 429 ? "rate_limited" : "error") };
-@@ -1332,8 +1351,8 @@ export const api = {
+@@ -1457,8 +1476,8 @@ export const api = {
      return body;
    },
    /** A run-session heartbeat (run-clock.ts): the server signs what was recorded so far. */
@@ -217,9 +217,9 @@ index b69862c..ec7b9fb 100644
 +  async runBeat(body: { sid: string | null; map: string; track: number; style: string; tick: number; hash: string; paused: boolean; att?: [number, number, number, number] }, dispatch?: RequestDispatch): Promise<{ sid: string; token: string }> {
 +    return json("/runs/beat", { ...post(body, true), keepalive: true }, dispatch);
    },
-   // --- gauntlets
-   async gauntlets(): Promise<GauntletHub> {
-@@ -1453,16 +1472,16 @@ export const api = {
+   // --- the Daily Challenge
+   async daily(): Promise<DailyView> {
+@@ -1593,16 +1612,16 @@ export const api = {
      return json("/me/cosmetics", { cache: "no-cache" });
    },
    /** Partial update; throws ApiError(400, "bad_cosmetic") naming the slot when an item is locked or unknown. */
@@ -243,7 +243,7 @@ index b69862c..ec7b9fb 100644
    /** Public URL of a verified run's replay (watch links: ?replay=<url>). */
    replayUrl(runId: string): string {
 diff --git a/apps/web/src/assets/audio/manifest.json b/apps/web/src/assets/audio/manifest.json
-index eed970c..459b8ff 100644
+index 59538a3..7e0b2bd 100644
 --- a/apps/web/src/assets/audio/manifest.json
 +++ b/apps/web/src/assets/audio/manifest.json
 @@ -740,24 +740,6 @@
@@ -271,7 +271,7 @@ index eed970c..459b8ff 100644
      "ui_press": {
        "variants": 1,
        "durations": [
-@@ -1069,7 +1051,14 @@
+@@ -1141,7 +1123,14 @@
    ],
    "credits": [
      "Sound effects: original, generated with ElevenLabs Sound Effects for bunnyhop.lol",
@@ -290,7 +290,7 @@ index eed970c..459b8ff 100644
 +  }
  }
 diff --git a/apps/web/src/core.ts b/apps/web/src/core.ts
-index fcf27f2..0526d79 100644
+index 1c32b6f..a9be659 100644
 --- a/apps/web/src/core.ts
 +++ b/apps/web/src/core.ts
 @@ -1,5 +1,6 @@
@@ -300,7 +300,7 @@ index fcf27f2..0526d79 100644
  
  export interface MeshGroup {
    model: number;
-@@ -478,6 +479,8 @@ export const FLIGHT_EXIT_CAP = 3510;
+@@ -480,6 +481,8 @@ export const FLIGHT_EXIT_CAP = 3510;
  
  interface Exports {
    memory: WebAssembly.Memory;
@@ -309,7 +309,7 @@ index fcf27f2..0526d79 100644
    alloc(len: number): number;
    load_map(ptr: number, len: number): number;
    load_map_physics?: (ptr: number, len: number) => number;
-@@ -561,6 +564,27 @@ const wasmLoaders = WebAssembly as unknown as WasmLoaders;
+@@ -564,6 +567,27 @@ const wasmLoaders = WebAssembly as unknown as WasmLoaders;
  
  export class Core {
    private constructor(private x: Exports) {}
@@ -337,7 +337,7 @@ index fcf27f2..0526d79 100644
  
    /** From wasm bytes, a fetch Response, or an already compiled module (Workers can't compile bytes at runtime). */
    static async create(source: BufferSource | WebAssembly.Module | Response | Promise<Response>): Promise<Core> {
-@@ -572,21 +596,21 @@ export class Core {
+@@ -575,21 +599,21 @@ export class Core {
    }
  
    private str(ptr: number, len: number): string {
@@ -363,7 +363,7 @@ index fcf27f2..0526d79 100644
      if (!this.x.load_map(ptr, bsp.length)) throw new Error(this.lastError());
    }
  
-@@ -597,7 +621,7 @@ export class Core {
+@@ -600,7 +624,7 @@ export class Core {
    loadMapPhysics(bsp: Uint8Array): void {
      this.addPhysicsContent();
      const ptr = this.x.alloc(bsp.length);
@@ -372,7 +372,7 @@ index fcf27f2..0526d79 100644
      this.commitPhysics(ptr, bsp.length);
    }
  
-@@ -613,7 +637,7 @@ export class Core {
+@@ -616,7 +640,7 @@ export class Core {
          if (done) break;
          if (off + value.length > len) throw new Error(`map stream longer than ${len} bytes`);
          // Re-take the view each chunk: memory.buffer is detached if the wasm memory grew.
@@ -381,7 +381,7 @@ index fcf27f2..0526d79 100644
          off += value.length;
        }
        if (off !== len) throw new Error(`map stream ended at ${off} of ${len} bytes`);
-@@ -884,7 +908,7 @@ export class Core {
+@@ -899,7 +923,7 @@ export class Core {
      const levels: TextureLevel[] = [];
      for (let i = 0; i < h[1]; i++) {
        const [width, height, offset, size] = h.subarray(2 + i * 4, 6 + i * 4);
@@ -390,7 +390,7 @@ index fcf27f2..0526d79 100644
      }
      return { format: h[0] as TextureFormat, levels };
    }
-@@ -893,7 +917,7 @@ export class Core {
+@@ -908,7 +932,7 @@ export class Core {
    lightmap(): Lightmap {
      const len = this.x.lightmap_size();
      const [width, height, hdr] = this.u32(this.x.scratch_u32_ptr(), len);
@@ -399,7 +399,7 @@ index fcf27f2..0526d79 100644
      return { width, height, data, scale: this.x.lightmap_scale(), hdr: hdr === 1 };
    }
  
-@@ -923,12 +947,12 @@ export class Core {
+@@ -938,12 +962,12 @@ export class Core {
    /** The BSP pakfile lump (a store-only zip of embedded content). */
    pakfile(): Uint8Array {
      const len = this.x.pak_len();
@@ -414,7 +414,7 @@ index fcf27f2..0526d79 100644
    }
  
    /**
-@@ -1155,7 +1179,7 @@ export class Core {
+@@ -1170,7 +1194,7 @@ export class Core {
    /** Copies bytes into a fresh wasm allocation (ownership passes to the callee). */
    private give(bytes: Uint8Array): [number, number] {
      const ptr = this.x.alloc(bytes.length);
@@ -423,7 +423,7 @@ index fcf27f2..0526d79 100644
      return [ptr, bytes.length];
    }
  
-@@ -1192,7 +1216,7 @@ export class Core {
+@@ -1207,7 +1231,7 @@ export class Core {
    /** Bytes of a file fetched via `contentProvide`/`contentAddFile` (assembled, CRC-checked), or null. */
    contentFile(path: string): Uint8Array | null {
      const len = this.cx.content_file(...this.giveStr(path));
@@ -432,7 +432,7 @@ index fcf27f2..0526d79 100644
    }
  
    /** Supplies bytes for a pending request (archive chunk for VPKs, whole file for listings). */
-@@ -1240,7 +1264,7 @@ export class Core {
+@@ -1255,7 +1279,7 @@ export class Core {
    /** Reads a file through the current VFS (pakfile → fetched → mounts), or null (a mount hit becomes pending). */
    contentRead(path: string): Uint8Array | null {
      if (!this.cx.content_read(...this.giveStr(path))) return null;
@@ -441,7 +441,7 @@ index fcf27f2..0526d79 100644
    }
  
    /** Pending requests of the current VFS (materials and anything read since the last `contentResolve`). */
-@@ -1454,7 +1478,7 @@ export class Core {
+@@ -1469,7 +1493,7 @@ export class Core {
      const levels: TextureLevel[] = [];
      for (let i = 0; i < h[1]; i++) {
        const [width, height, offset, size] = h.subarray(2 + i * 4, 6 + i * 4);
@@ -450,7 +450,7 @@ index fcf27f2..0526d79 100644
      }
      return { format: h[0] as TextureFormat, levels };
    }
-@@ -1538,6 +1562,8 @@ interface ContentExports {
+@@ -1553,6 +1577,8 @@ interface ContentExports {
  
  interface RestartExports {
    memory: WebAssembly.Memory;
@@ -459,7 +459,7 @@ index fcf27f2..0526d79 100644
    scratch_f32_ptr(): number;
    set_position?: (x: number, y: number, z: number, yaw: number) => void;
    restart_point?: () => number;
-@@ -1586,9 +1612,10 @@ export function setRestartNames(core: Core, targetname: string, classname: strin
+@@ -1601,9 +1627,10 @@ export function setRestartNames(core: Core, targetname: string, classname: strin
    const name = new TextEncoder().encode(targetname);
    const cls = new TextEncoder().encode(classname);
    const ptr = e.alloc(name.length + cls.length);
@@ -471,7 +471,7 @@ index fcf27f2..0526d79 100644
    e.set_restart_names(ptr, name.length, cls.length);
    RESTART_NAMES.set(core, { targetname, classname });
  }
-@@ -1605,7 +1632,7 @@ export function restartPoint(core: Core): RestartPoint | null {
+@@ -1620,7 +1647,7 @@ export function restartPoint(core: Core): RestartPoint | null {
    if (!e.restart_point) return null;
    const len = e.restart_point();
    if (len < 4) return null;
@@ -480,7 +480,7 @@ index fcf27f2..0526d79 100644
    const names = RESTART_NAMES.get(core);
    const p: RestartPoint = { position: [s[0], s[1], s[2]], yaw: s[3] };
    if (names?.targetname) p.targetname = names.targetname;
-@@ -1633,7 +1660,7 @@ export function propCollisionMesh(core: Core): Float32Array {
+@@ -1648,7 +1675,7 @@ export function propCollisionMesh(core: Core): Float32Array {
    const e = restartExports(core);
    if (!e.prop_collision_mesh) return new Float32Array(0);
    const len = e.prop_collision_mesh();
@@ -489,7 +489,7 @@ index fcf27f2..0526d79 100644
  }
  
  // ---- replay viewer wrappers (appended; exports at the end of crates/core/src/wasm.rs) ----
-@@ -1801,7 +1828,7 @@ export function attackReport(core: Core): AttackReport | null {
+@@ -1816,7 +1843,7 @@ export function attackReport(core: Core): AttackReport | null {
    if (!x.attack_report) return null;
    const len = x.attack_report();
    if (len < 13) return null;
@@ -498,7 +498,7 @@ index fcf27f2..0526d79 100644
    return {
      weapon: s[0],
      mode: s[1] === 2 ? 2 : 1,
-@@ -1906,7 +1933,7 @@ export function weaponReport(core: Core): WeaponReport | null {
+@@ -1921,7 +1948,7 @@ export function weaponReport(core: Core): WeaponReport | null {
    if (!x.weapon_report) return null;
    const len = x.weapon_report();
    if (len < 9) return null;
@@ -507,7 +507,7 @@ index fcf27f2..0526d79 100644
    return { flags: s[0], active: s[1], primary: s[2], secondary: s[3], knife: s[4] !== 0, clip: s[5], clipSize: s[6], reloadTicks: s[7], burst: s[8] !== 0, floorChanged: len > 9 && s[9] !== 0, silencer: len > 10 && s[10] !== 0, silencerTicks: len > 11 ? s[11] : 0 };
  }
  
-@@ -1933,6 +1960,7 @@ export function floorWeapons(core: Core): Float32Array {
+@@ -1948,6 +1975,7 @@ export function floorWeapons(core: Core): Float32Array {
    const len = x.floor_weapons ? x.floor_weapons() : 0;
    if (len === 0) return EMPTY_F32;
    const ptr = x.scratch_f32_ptr();
@@ -516,10 +516,10 @@ index fcf27f2..0526d79 100644
    if (!v || v.buffer !== x.memory.buffer || v.byteOffset !== ptr || v.length !== len) floorViews.set(core, (v = new Float32Array(x.memory.buffer, ptr, len)));
    return v;
 diff --git a/apps/web/src/feedback/modal.ts b/apps/web/src/feedback/modal.ts
-index 4cea6c9..0267c06 100644
+index ec626b5..a810ceb 100644
 --- a/apps/web/src/feedback/modal.ts
 +++ b/apps/web/src/feedback/modal.ts
-@@ -114,8 +114,28 @@ export function gameContext(fps: number | null): Record<string, unknown> {
+@@ -115,8 +115,28 @@ export function gameContext(fps: number | null): Record<string, unknown> {
    const room = currentRoom();
    // The hashed entry chunk of this deploy (/assets/index-<hash>.js); "dev" under Vite.
    const script = [...document.scripts].map((x) => x.getAttribute("src")).find((src) => !!src && src.includes("/assets/")) ?? (import.meta.env.DEV ? "dev" : null);
@@ -547,8 +547,8 @@ index 4cea6c9..0267c06 100644
 -    ...(gameInfo() ?? { inGame: false }),
 +    ...(game ?? { inGame: false }),
      ...(runId ? { runId } : {}),
-     ...(room ? { room } : {}),
-     screen: document.body.dataset.screen || null,
+     // In a room: how its connection held up on this map (net/room-health.ts: reconnects, the last drop's close code).
+     ...(room ? { room, roomNet: roomHealth() } : {}),
 diff --git a/apps/web/src/feedback/state.ts b/apps/web/src/feedback/state.ts
 index 25201b9..a4ceaad 100644
 --- a/apps/web/src/feedback/state.ts
@@ -896,10 +896,10 @@ index a67bee7..66410ea 100644
          input.value = u.name;
          const kept = u.oldNameHeld ? ` ${u.oldNameHeld.name} stays yours until ${new Date(u.oldNameHeld.until).toLocaleDateString()} if you want it back.` : "";
 diff --git a/apps/web/src/ui/account-state.ts b/apps/web/src/ui/account-state.ts
-index a66b61c..5665314 100644
+index 6096588..e991496 100644
 --- a/apps/web/src/ui/account-state.ts
 +++ b/apps/web/src/ui/account-state.ts
-@@ -54,8 +54,7 @@ export function me(): Promise<User | null> {
+@@ -55,8 +55,7 @@ export function me(): Promise<User | null> {
      if (epoch !== accountEpoch) return;
      setPBAccount(u);
      if (!api.meStale()) void syncPBs();
@@ -910,7 +910,7 @@ index a66b61c..5665314 100644
    });
    return p;
 diff --git a/apps/web/src/ui/card-editor.ts b/apps/web/src/ui/card-editor.ts
-index 97b62ff..a8f4ccd 100644
+index 569cb73..20b70a0 100644
 --- a/apps/web/src/ui/card-editor.ts
 +++ b/apps/web/src/ui/card-editor.ts
 @@ -1,3 +1,4 @@
@@ -918,16 +918,16 @@ index 97b62ff..a8f4ccd 100644
  import { NewTracker as IndicatorTracker } from "./new-tracker";
  // Your profile card, edited in place (v0.0.9: no Customise tab). cardEditor() is the small editor under the card in
  // ui/profile.ts's "Edit card" mode: background, frame, title, name (supporters), badges and links; one click equips and
-@@ -17,7 +18,7 @@ import { arrowNav, h } from "./dom";
+@@ -21,7 +22,7 @@ import { arrowNav, h } from "./dom";
  import { isLoadoutSlot, listedCosmetic, loadoutSwatch, shownCosmetic } from "./loadout-ui";
  import { availableNow } from "./community";
- import { CARD_PARTS, type CardPart } from "./cosmetic-slots";
+ import { CARD_PARTS, loadoutSections, type CardPart } from "./cosmetic-slots";
 -import { refreshMyProfile } from "./account-state";
 +import { accountGeneration, refreshMyProfile } from "./account-state";
  import { nameMarks } from "./marks";
  import { SPECIAL_BADGES, GIFTER_TIERS } from "../creators";
  import { linkIcon } from "./marks";
-@@ -47,6 +48,8 @@ export class Loadout {
+@@ -57,6 +58,8 @@ export class Loadout {
    readonly owned: Set<string>;
    readonly earned: Set<string>;
    status: Status = { kind: "idle", text: "" };
@@ -936,32 +936,32 @@ index 97b62ff..a8f4ccd 100644
    private saved: CosmeticChoice;
    private pending: Partial<CosmeticChoice> = {};
    private timer = 0;
-@@ -54,6 +57,7 @@ export class Loadout {
-   private listeners = new Set<() => void>();
+@@ -72,6 +75,7 @@ export class Loadout {
+   private mapBgsLoading = false;
  
    constructor(readonly p: Profile) {
 +    this.writes=profileWriteGuard(p.player.id);
-     this.choice = { ...DEFAULT_COSMETICS, ...p.cosmetics };
+     this.choice = { ...DEFAULT_COSMETICS, ...p.cosmetics, ...(p.mapBgChoice !== undefined ? { mapBg: p.mapBgChoice } : {}) };
      this.saved = { ...this.choice };
      this.badges = [...p.badges];
-@@ -71,7 +75,7 @@ export class Loadout {
+@@ -89,7 +93,7 @@ export class Loadout {
  
    /** Your equipped knife / finish / gloves -> the viewmodel, your bunny, replays. */
    private syncLoadout(): void {
 -    if (!this.p.mine) return;
 +    if (!this.p.mine || !this.current()) return;
-     const l = loadoutFor(this.choice, crownOf(profileRanks(this.p)));
+     // (The Daily Medal's face: from the medals on the player's marks, as everywhere.)
+     const l = loadoutFor(this.choice, crownOf(profileRanks(this.p)), this.choice.back === MEDAL_ITEM ? medalCountsOf(this.p.player.special) : null);
      setKnifePool(this.choice.knifePool ?? null);
-     if (!sameLoadout(l, getLoadout())) setLoadout(l);
-@@ -99,6 +103,7 @@ export class Loadout {
+@@ -118,6 +122,7 @@ export class Loadout {
    }
  
    equip(slot: CosmeticSlot, id: string | null): void {
 +    if (!this.current()) return;
      const c = id ? COSMETICS.find((x) => x.id === id) : null;
      if (id && (!c || !this.owned.has(id) || !listedCosmetic(c))) return;
-     if (this.choice[slot] === id) return;
-@@ -107,6 +112,7 @@ export class Loadout {
+     // A background picked while a map is on: that background, not "under the map" (the server says the same).
+@@ -153,6 +158,7 @@ export class Loadout {
  
    /** Changes several slots at once (Randomise / Reset); `label` + undo in the status line. */
    apply(patch: Partial<CosmeticChoice>, label?: string): void {
@@ -969,7 +969,7 @@ index 97b62ff..a8f4ccd 100644
      const before = { ...this.choice };
      this.choice = { ...this.choice, ...patch };
      Object.assign(this.pending, patch);
-@@ -120,12 +126,14 @@ export class Loadout {
+@@ -166,12 +172,14 @@ export class Loadout {
  
    private async flush(label?: string, undo?: () => void): Promise<void> {
      if (this.inflight) await this.inflight;
@@ -985,7 +985,7 @@ index 97b62ff..a8f4ccd 100644
          this.saved = res;
          // What's saved is the profile now (the Loadout screen builds from it); the page's cached own profile refetches.
          this.p.cosmetics = { ...res };
-@@ -137,6 +145,7 @@ export class Loadout {
+@@ -183,6 +191,7 @@ export class Loadout {
          this.syncLoadout();
          this.setStatus({ kind: "saved", text: label ? `${label} saved` : "Saved", undo });
        } catch (e) {
@@ -993,7 +993,7 @@ index 97b62ff..a8f4ccd 100644
          this.choice = { ...this.saved };
          this.pending = {};
          this.syncLoadout();
-@@ -156,13 +165,15 @@ export class Loadout {
+@@ -202,13 +211,15 @@ export class Loadout {
    }
  
    setBadges(next: string[]): void {
@@ -1011,7 +1011,7 @@ index 97b62ff..a8f4ccd 100644
          this.badges = before;
          this.setStatus({ kind: "error", text: e instanceof ApiError ? e.message : "Couldn't save" });
        },
-@@ -497,6 +508,7 @@ export function cardEditor(p: Profile, lo: Loadout, news: NewTracker, o: CardEdi
+@@ -901,6 +912,7 @@ export function cardEditor(p: Profile, lo: Loadout, news: NewTracker, o: CardEdi
  // boosts the Discord server (the API sends boosterSettings then); the server decides who has the badge.
  
  function boosterSwitch(p: Profile, onBooster?: (show: boolean) => void): HTMLElement | null {
@@ -1019,7 +1019,7 @@ index 97b62ff..a8f4ccd 100644
    if (!p.boosterSettings) return null;
    let show = p.boosterSettings.show;
    const toggle = h("input.switch", { type: "checkbox", checked: show }) as HTMLInputElement;
-@@ -506,7 +518,8 @@ function boosterSwitch(p: Profile, onBooster?: (show: boolean) => void): HTMLEle
+@@ -910,7 +922,8 @@ function boosterSwitch(p: Profile, onBooster?: (show: boolean) => void): HTMLEle
      status.className = "pf-status saving";
      status.textContent = "Saving…";
      try {
@@ -1029,7 +1029,7 @@ index 97b62ff..a8f4ccd 100644
        p.boosterSettings = { show };
        status.className = "pf-status saved";
        status.replaceChildren(h("span.pf-status-ok", { html: CHECK_SVG }), "Saved");
-@@ -546,6 +559,7 @@ interface SupporterEditor {
+@@ -950,6 +963,7 @@ interface SupporterEditor {
  }
  
  function supporterEditor(p: Profile, onSaved?: (s: SupporterSettings) => void): SupporterEditor | null {
@@ -1037,7 +1037,7 @@ index 97b62ff..a8f4ccd 100644
    if (!p.supporterSettings) return null;
    const status = () => h("span.pf-status", { role: "status", "aria-live": "polite" });
    const badgeStatus = status();
-@@ -559,7 +573,8 @@ function supporterEditor(p: Profile, onSaved?: (s: SupporterSettings) => void):
+@@ -963,7 +977,8 @@ function supporterEditor(p: Profile, onSaved?: (s: SupporterSettings) => void):
    const save = async (patch: SupporterPatch, el: HTMLElement | null = null): Promise<void> => {
      if (el) say(el, "saving", "Saving…");
      try {
@@ -1047,7 +1047,7 @@ index 97b62ff..a8f4ccd 100644
        p.supporterSettings = s;
        badge.checked = s.showBadge;
        board.checked = s.showOnBoard;
-@@ -595,6 +610,7 @@ function supporterEditor(p: Profile, onSaved?: (s: SupporterSettings) => void):
+@@ -999,6 +1014,7 @@ function supporterEditor(p: Profile, onSaved?: (s: SupporterSettings) => void):
  const LINK_PLACEHOLDER: Record<LinkPlatform, string> = { youtube: "@yourchannel", twitch: "yourchannel", x: "@yourhandle", tiktok: "@yourhandle" };
  
  function linksEditor(p: Profile, onLinks?: (links: ProfileLinks, show: boolean) => void): { el: HTMLElement; count: () => string; onCount: () => void } {
@@ -1055,7 +1055,7 @@ index 97b62ff..a8f4ccd 100644
    let saved: ProfileLinks = { ...(p.linkSettings?.links ?? {}) };
    let show = p.linkSettings?.show ?? false;
    const out = { el: h("div.lk-editor"), count: () => (Object.keys(saved).length ? `${Object.keys(saved).length}${show ? "" : " · off"}` : "none"), onCount: () => {} };
-@@ -611,7 +627,8 @@ function linksEditor(p: Profile, onLinks?: (links: ProfileLinks, show: boolean)
+@@ -1015,7 +1031,8 @@ function linksEditor(p: Profile, onLinks?: (links: ProfileLinks, show: boolean)
      say("saving", "Saving…");
      for (const r of rows.values()) r.err.textContent = "";
      try {
@@ -1065,7 +1065,7 @@ index 97b62ff..a8f4ccd 100644
        saved = { ...r.links };
        show = r.show;
        toggle.checked = show;
-@@ -679,6 +696,7 @@ function linksEditor(p: Profile, onLinks?: (links: ProfileLinks, show: boolean)
+@@ -1083,6 +1100,7 @@ function linksEditor(p: Profile, onLinks?: (links: ProfileLinks, show: boolean)
  
  /** The badges after your name (Edit card → Badges): Verified, Creator, Server Booster, Supporter, your Gifter tier. */
  function nameBadgeEditor(p: Profile, changed: () => void): HTMLElement {
@@ -1073,7 +1073,7 @@ index 97b62ff..a8f4ccd 100644
    const root = h("section.ce-name-badges", { "aria-label": "Badges after your name" });
    let busy = false;
    let feedback = "";
-@@ -718,7 +736,8 @@ function nameBadgeEditor(p: Profile, changed: () => void): HTMLElement {
+@@ -1122,7 +1140,8 @@ function nameBadgeEditor(p: Profile, changed: () => void): HTMLElement {
      const status = root.querySelector(".ce-name-status");
      if (status) status.textContent = feedback;
      try {
@@ -1084,7 +1084,7 @@ index 97b62ff..a8f4ccd 100644
        Object.assign(p.player, next, {
          supporter: next.nameBadges.includes("supporter") && next.owned.includes("supporter"),
 diff --git a/apps/web/src/ui/country-picker.ts b/apps/web/src/ui/country-picker.ts
-index f25e06f..dea342c 100644
+index 8806f8a..8cccc52 100644
 --- a/apps/web/src/ui/country-picker.ts
 +++ b/apps/web/src/ui/country-picker.ts
 @@ -1,4 +1,5 @@
@@ -1094,15 +1094,15 @@ index f25e06f..dea342c 100644
  import { COUNTRIES, countryCode, flagName, PRIDE_FLAGS } from "../countries";
  import { countryFlag } from "./country-flag";
  import { arrowNav, h } from "./dom";
-@@ -6,6 +7,7 @@ import { dismissOutside } from "./dismiss";
+@@ -102,6 +103,7 @@ export function flagList(o: FlagListOpts): FlagList {
  
  /** Detection is a shortcut only; nothing is published until Save. A pride flag is picked instead of a country. */
  export function countryPicker(current: string | null | undefined, saved: (code: string | null) => void): void {
 +  const writes=profileWriteGuard(lastKnownMe()?.id??"");
    let selected = countryCode(current);
    let busy = false;
-   const countries = Object.entries(COUNTRIES).sort((a, b) => a[1].localeCompare(b[1]));
-@@ -63,8 +65,9 @@ export function countryPicker(current: string | null | undefined, saved: (code:
+   const dialog = h("dialog.acct-dialog.country-dialog", { "aria-labelledby": "country-title" });
+@@ -128,8 +130,9 @@ export function countryPicker(current: string | null | undefined, saved: (code:
      controls.disabled = save.disabled = true;
      status.textContent = "Saving…";
      try {
@@ -1114,7 +1114,7 @@ index f25e06f..dea342c 100644
      } catch (error) {
        status.textContent = error instanceof Error ? error.message : "Couldn't save your flag. Try again.";
 diff --git a/apps/web/src/ui/gifting.ts b/apps/web/src/ui/gifting.ts
-index c2de027..a94cc83 100644
+index bde35a6..d13cd1e 100644
 --- a/apps/web/src/ui/gifting.ts
 +++ b/apps/web/src/ui/gifting.ts
 @@ -3,8 +3,9 @@ import "./account.css";
@@ -1197,7 +1197,7 @@ index c2de027..a94cc83 100644
      showWallet(w);
      controls.disabled = false;
      invalidate();
-@@ -245,7 +254,9 @@ export function giftWalletPanel(): HTMLElement {
+@@ -248,7 +257,9 @@ export function giftWalletPanel(signal?: AbortSignal): HTMLElement {
    const detail = h("p.gift-wallet-note", null, "Loading…");
    const open = h("button.btn.primary", { type: "button", disabled: true, onclick: () => openGiftDialog() }, "Gift Supporter");
    const panel = h("section.sp-gifts", { "aria-label": "Your gift credits" }, h("div.sp-gifts-top", null, amount, open), track, detail);
@@ -1208,14 +1208,14 @@ index c2de027..a94cc83 100644
      if (!w) { track.hidden = true; detail.hidden = false; detail.textContent = "Sign in to see your gift credits."; return; }
      amount.replaceChildren(giftCreditCoin(), `${w.credits} gift credit${w.credits === 1 ? "" : "s"}`);
      const next = GIFTER_TIERS.find(t => t.goal === w.nextTier);
-@@ -257,9 +268,10 @@ export function giftWalletPanel(): HTMLElement {
+@@ -260,9 +271,10 @@ export function giftWalletPanel(signal?: AbortSignal): HTMLElement {
      track.hidden = false;
      detail.hidden = true;
      open.disabled = false;
 -  }).catch(() => { track.hidden = true; detail.hidden = false; detail.textContent = "Couldn't load your gift credits."; open.disabled = false; });
 +  }).catch(() => {if(generation!==accountGeneration()||seq!==refreshSeq)return;track.hidden = true; detail.hidden = false; detail.textContent = "Couldn't load your gift credits."; open.disabled = false; });};
    const changed = () => { if (!panel.isConnected) window.removeEventListener("bunnyhop:gifts-changed", changed); else refresh(); };
-   window.addEventListener("bunnyhop:gifts-changed", changed);
+   window.addEventListener("bunnyhop:gifts-changed", changed, { signal });
 +  onAccountChange(panel,refresh);
    refresh();
    return panel;
@@ -1267,7 +1267,7 @@ index 0000000..dfd1a56
 + * API can apply response side effects. Native keeps its document across logins. */
 +export function profileWriteGuard(owner:string):RequestDispatch&{current():boolean} {return captureProfileWrite(owner,{generation:accountGeneration,owner:()=>lastKnownMe()?.id??null});}
 diff --git a/apps/web/src/ui/profile.ts b/apps/web/src/ui/profile.ts
-index 2ff84aa..68b893b 100644
+index 37be491..c57deb5 100644
 --- a/apps/web/src/ui/profile.ts
 +++ b/apps/web/src/ui/profile.ts
 @@ -1,3 +1,4 @@
@@ -1275,7 +1275,7 @@ index 2ff84aa..68b893b 100644
  import { whisper } from "../notify";
  import { playerGlowControls } from "./player-glow-controls";
  import { DOTS } from "../social/dock";
-@@ -36,7 +37,7 @@ import "./profile.css";
+@@ -37,7 +38,7 @@ import "./profile.css";
  import { mouseFromPrefs } from "../mouse-settings";
  import { prefs } from "./settings";
  import { mouseProfileEditor, mouseProfileStats } from "./mouse-profile";
@@ -1284,7 +1284,7 @@ index 2ff84aa..68b893b 100644
  import { countryPicker } from "./country-picker";
  import { api, ApiError, ApiUnavailable, lastKnownMe, type PlayerGauntlets, type PointsPage, type Profile, type RunCard } from "../api";
  import { COSMETICS, supporterItem, type CosmeticChoice } from "../progression";
-@@ -175,12 +176,15 @@ export function profileScreen(id: string, a: ProfileActions, open: ProfileOpen =
+@@ -176,12 +177,15 @@ export function profileScreen(id: string, a: ProfileActions, open: ProfileOpen =
      root.removeAttribute("aria-busy");
      return root;
    }
@@ -1300,7 +1300,7 @@ index 2ff84aa..68b893b 100644
          render(root, p, a, open, tabs, p.player.id === early.id ? early : { id: p.player.id });
          if (ownTabs) root.prepend(tabs);
        })
-@@ -208,6 +212,7 @@ export function profileScreen(id: string, a: ProfileActions, open: ProfileOpen =
+@@ -209,6 +213,7 @@ export function profileScreen(id: string, a: ProfileActions, open: ProfileOpen =
  // ---------------------------------------------------------------------------------------------
  
  function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileOpen, tabsHost: HTMLElement, early: EarlyReads): void {
@@ -1308,7 +1308,7 @@ index 2ff84aa..68b893b 100644
    const lo = new Loadout(p);
    const news = NewTracker.forProfile(p);
    let featuredIds = p.featuredAuto ? [] : p.featured.map((r) => r.runId);
-@@ -526,9 +531,11 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
+@@ -577,9 +582,11 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
      known.set(run.runId, run);
      const next = featuredIds.includes(run.runId) ? featuredIds.filter((x) => x !== run.runId) : [...featuredIds, run.runId].slice(-5);
      try {
@@ -1322,10 +1322,10 @@ index 2ff84aa..68b893b 100644
        runs?.refresh();
        whisper(featuredIds.includes(run.runId) ? "Pinned" : "Unpinned");
 diff --git a/apps/web/src/ui/run-stats.ts b/apps/web/src/ui/run-stats.ts
-index ea5e83f..6521794 100644
+index 6d41e56..c5d1cef 100644
 --- a/apps/web/src/ui/run-stats.ts
 +++ b/apps/web/src/ui/run-stats.ts
-@@ -282,7 +282,7 @@ function bindGlobal(): void {
+@@ -289,7 +289,7 @@ function bindGlobal(): void {
    globalBound = true;
    watchPointer();
    // Escape closes the card first (not the dialog or menu under it).
@@ -1334,7 +1334,7 @@ index ea5e83f..6521794 100644
      "keydown",
      (e) => {
        if (e.key !== "Escape" || !card || card.hidden) return;
-@@ -295,13 +295,13 @@ function bindGlobal(): void {
+@@ -302,13 +302,13 @@ function bindGlobal(): void {
    );
    // Any other key (paging the board, typing in its search) or a press anywhere closes it too; Tab moves focus, which
    // moves the card itself (focusin / focusout).
@@ -1354,27 +1354,27 @@ index ea5e83f..6521794 100644
  
  const rowOf = (t: EventTarget | null): HTMLElement | null => (t instanceof Element ? t.closest<HTMLElement>("tr[data-run]") : null);
 diff --git a/apps/web/src/ui/support.ts b/apps/web/src/ui/support.ts
-index 9120b09..26beaab 100644
+index 87db3c1..c6ca3f0 100644
 --- a/apps/web/src/ui/support.ts
 +++ b/apps/web/src/ui/support.ts
-@@ -25,7 +25,7 @@ import { playerGlowControls } from "./player-glow-controls";
+@@ -35,7 +35,7 @@ import { playerGlowControls } from "./player-glow-controls";
  import { WAVEDASH } from "../platform/env";
  import { wavedashCopy } from "../platform/wavedash";
  import "./support.css";
--import { api, type MySupport, type Profile, type TopSupporter, type User } from "../api";
-+import { api, lastKnownMe, type MySupport, type Profile, type TopSupporter, type User } from "../api";
- import { NAME_COLORS, peakOf, type NameColorId } from "../creators";
+-import { api, type MySupport, type TopSupporter, type User } from "../api";
++import { api, lastKnownMe, type MySupport, type TopSupporter, type User } from "../api";
+ import { GIFT_CENTS, giftCreditsGained, type GiftWallet } from "../gifting";
  import { askOf, supportStatus } from "../support-ask";
- import { lookSaver, PREVIEW_LOOK, savedPicks, type LookPicks } from "../support-look";
-@@ -43,6 +43,7 @@ import { loadoutView, type LoadoutChoice, type LoadoutModel } from "./loadout-vi
- import { nameAttrs, supporterMark } from "./marks";
+ import { lookSaver, savedPicks } from "../support-look";
+@@ -51,6 +51,7 @@ import { nameAttrs, supporterMark } from "./marks";
  import { navigate } from "./nav";
  import { scrollCue } from "./scroll-cue";
+ import { cardOwner, cardSection, cardShowcase, lookState, type CardSection } from "./support-card";
 +import { profileWriteGuard } from "./profile-write";
  import { supportGifting } from "./support-gifting";
- import { borderChoices, cardEffectChoices, cardFxSwatch, COLOUR_CHOICES, DECO_CHOICES, decoSwatch, EFFECT_CHOICES, FONT_CHOICES, HOVER_FX_CHOICES, hoverFxSwatch, nameSample, styleChoices } from "./supporter-pickers";
- 
-@@ -182,7 +183,7 @@ export function supportScreen(o: SupportScreenOpts): HTMLElement {
+ import { loadoutSection, type LoadoutSection } from "./support-loadout";
+ // The look rows' choices and swatches are Edit card's, one implementation (ui/supporter-pickers.ts: FONT_CHOICES,
+@@ -122,7 +123,7 @@ export function supportScreen(o: SupportScreenOpts): HTMLElement {
      nameStatus.className = `pf-status ${kind}`;
    };
    const saver = lookSaver({
@@ -1429,11 +1429,3 @@ index 7e5b205..7a9a8c3 100644
        blend34(this.D2, this.D, pz.mix, this.D);
      }
      p *= w;
-diff --git a/apps/web/src/wasm/.gitignore b/apps/web/src/wasm/.gitignore
-new file mode 100644
-index 0000000..f3fae4a
---- /dev/null
-+++ b/apps/web/src/wasm/.gitignore
-@@ -0,0 +1,2 @@
-+/bunnyhop_core.wasm
-+/bunnyhop_core.wasm.download-*

@@ -1,19 +1,55 @@
-/* Loadout (ui/loadout-view.ts, ui/loadout-stage.ts): the categories across the top, the stage on the left, the item
-   grid on the right. Same language as Settings: no borders, a 3px accent bar for "this one", sentence-case labels.
+/* Loadout (ui/loadout-view.ts, ui/loadout-stage.ts): the slots down the left like Settings' sections, the stage in
+   the middle, the slot's items on the right with the worn item's options under them. Where there's no room for the
+   list the slots are a row across the top instead. The profile and the Support page (ui/support-loadout.ts) both
+   show this view whole; it lays itself out by its own width.
+   Same language as Settings: no borders, a 3px accent bar for "this one", sentence-case labels. Every size here is in
+   rem (the root size follows the window, style.css html): a px size stays small on a big screen.
    No rarity is shown anywhere (owner 11-12: the item is what matters): the --rar rules below stay only so a theme
    can light the stage itself. All static gradients; the only motion is transforms. */
 
 /* ---- the profile's Loadout tab (ui/profile.ts; its layout in profile.css) */
 .lo-boot { flex: 1; margin-top: calc(2.7rem + var(--sp-4)); display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(18rem, 1fr); gap: var(--sp-6); min-height: 0; }
 .lo-boot > div { border-radius: var(--radius); background: var(--raise); }
+/* (Where the list will be: the same boxes as the loaded screen. .pf-main is the container, as wide as .lo will be.) */
+@container (min-width: 60rem) { .lo-boot { margin-top: 0; margin-left: calc(var(--lo-rail) + var(--sp-4)); grid-template-columns: minmax(0, 1fr) 18.5rem; } }
+@container (min-width: 76rem) { .lo-boot { grid-template-columns: minmax(0, 1fr) 26.5rem; } }
 
-/* ---- layout: hero | side, stacked when narrow (container query on .lo) */
-.lo { container: lo / inline-size; flex: 1; min-height: 0; display: flex; flex-direction: column; gap: var(--sp-4); }
-.lo-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(18rem, 1fr); gap: var(--sp-6); }
+/* ---- layout. .lo is the container; .lo-frame lays out the slots and the body by its width:
+        under 44rem   slots across the top, stage over the grid
+        under 60rem   slots across the top, stage | grid
+        from 60rem    slots down the left, stage | grid (2 tiles across; 3 from 76rem) */
+:root { --lo-rail: 10.25rem; }
+.lo { container: lo / inline-size; flex: 1; min-height: 0; display: flex; }
+.lo-frame { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: var(--sp-4); }
+.lo-body { flex: 1; min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(18rem, 1fr); gap: var(--sp-6); }
 @container lo (max-width: 44rem) {
   .lo-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); gap: var(--sp-4); }
   .lo-stage { min-height: 16rem; aspect-ratio: 16 / 10; max-height: 50vh; }
 }
+@container lo (min-width: 60rem) {
+  .lo-frame[data-layout="rail"] { flex-direction: row; }
+  .lo-frame[data-layout="rail"] > .lo-body { grid-template-columns: minmax(0, 1fr) 18.5rem; }
+  /* The list: Settings' rail (settings.css .set-rail-item), words only. */
+  .lo-frame[data-layout="rail"] > .lo-head { flex: none; width: var(--lo-rail); min-height: 0; flex-direction: column; align-items: stretch; gap: 0; border-bottom: 0; }
+  .lo-frame[data-layout="rail"] .lo-tabs { flex: 0 1 auto; flex-direction: column; gap: 2px; overflow: hidden auto; }
+  .lo-frame[data-layout="rail"] .lo-tab { width: 100%; gap: 0.5rem; padding: 0.42rem 0.75rem; border-radius: var(--radius-sm); font-weight: 620; text-align: left; transition: background var(--t-fast), color var(--t-fast); }
+  .lo-frame[data-layout="rail"] .lo-tab:hover { background: var(--raise); }
+  .lo-frame[data-layout="rail"] .lo-tab.on { background: var(--raise-2); }
+  .lo-frame[data-layout="rail"] .lo-tab::after { left: 0; right: auto; top: 22%; bottom: 22%; width: 3px; height: auto; transform: scaleY(0); }
+  .lo-frame[data-layout="rail"] .lo-tab.on::after { transform: scaleY(1); }
+  .lo-frame[data-layout="rail"] .lo-tab small { order: 2; margin-left: auto; }
+  /* A little air between what dresses the hands, the bunny, and what a run leaves behind. */
+  .lo-frame[data-layout="rail"] .lo-tab-gap { margin-top: var(--sp-3); }
+  /* Under the list: the save state (as Settings' tick at the foot of its rail) and "Mark all seen". */
+  .lo-frame[data-layout="rail"] .lo-clear { margin: auto 0 0; padding: 0.3em 0.75rem; align-self: flex-start; }
+  .lo-frame[data-layout="rail"] .lo-status { min-height: 1.6em; padding: 0 0.75rem; }
+}
+@container lo (min-width: 76rem) {
+  .lo-frame[data-layout="rail"] > .lo-body { grid-template-columns: minmax(0, 1fr) 26.5rem; }
+}
+/* The profile's tiles: 3 across in the 26.5rem column, 2 in the 18.5rem one and in the narrow layouts' 18rem. */
+.lo-frame[data-layout="rail"] .lo-grid { grid-template-columns: repeat(auto-fill, minmax(7.9rem, 1fr)); }
+.lo-frame[data-layout="rail"] .lo-tile { contain-intrinsic-size: auto 8.6rem; }
 
 /* ---- hero stage */
 .lo-stage {
@@ -57,6 +93,7 @@ body.potato .lo-rim { display: none; }
 .lo-cap-rar { display: inline-flex; align-items: center; gap: 0.45rem; color: var(--rar); font-weight: 650; }
 .lo-cap-rar i { display: block; width: 1.1rem; height: 3px; border-radius: 2px; background: var(--rar); box-shadow: 0 0 0.6rem color-mix(in srgb, var(--rar) 60%, transparent); }
 .lo-cap-how { margin: 0.2rem 0 0; font-size: var(--fs-sm); color: var(--dim); }
+.lo-cap-meta[hidden], .lo-cap-meta > :empty, .lo-cap-how[hidden], .lo-cap-cta[hidden] { display: none; }
 .lo-cap-state { margin: 0.2rem 0 0; display: flex; align-items: center; gap: 0.4rem; font-size: var(--fs-sm); color: var(--dim); }
 .lo-cap-state.on { color: var(--gain); }
 .lo-cap-state.locked { color: var(--text); }
@@ -84,13 +121,16 @@ body.potato .lo-rim { display: none; }
 .lo-stage.failed .lo-tools, .lo-stage.failed .lo-insp { display: none; }
 .lo-stage.failed { cursor: default; }
 
-/* ---- categories across the top, the save status at the end of the line */
+/* ---- the slots: across the top here (the list's rules are with the layout above), the save state at the end */
 .lo-clear { flex-shrink: 0; font-size: var(--fs-xs); color: var(--cream-3); }
 .lo-clear:disabled { visibility: hidden; }
 @media (max-width: 42rem) { .lo-head { flex-wrap: wrap; } .lo-head .lo-tabs { flex-basis: 100%; } }
 .lo-head { display: flex; align-items: center; gap: var(--sp-3); border-bottom: 1px solid var(--line); }
-.lo-tabs { display: flex; gap: var(--sp-1); flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
-.lo-tab { position: relative; display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.5rem 0.75rem 0.6rem; border: 0; background: none; color: var(--dim); font-size: var(--fs-md); font-weight: 650; white-space: nowrap; cursor: pointer; transition: color var(--t-fast); }
+.lo-tabs { display: flex; gap: var(--sp-1); flex: 1; min-width: 0; overflow: auto hidden; scrollbar-width: none; }
+.lo-tab { position: relative; flex: none; display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.5rem 0.75rem 0.6rem; border: 0; background: none; color: var(--dim); font-size: var(--fs-md); font-weight: 650; white-space: nowrap; cursor: pointer; transition: color var(--t-fast); }
+.lo-tab .pf-new-dot[hidden] { display: none; }
+/* The profile's Loadout keeps room for "Saving…" / "Saved" beside the row, so the row doesn't change width on a save. */
+.lo-frame[data-layout="rail"] .lo-status { min-width: 4.8rem; }
 .lo-tab small { font-size: 0.7rem; font-weight: 650; color: var(--faint); font-variant-numeric: tabular-nums; }
 .lo-tab:hover { color: var(--text); }
 .lo-tab.on { color: var(--text); }
@@ -104,7 +144,8 @@ body.potato .lo-rim { display: none; }
 .lo-status-ok { display: inline-flex; width: 0.95em; height: 0.95em; }
 .lo-status-ok svg, .lo-lock-i svg { width: 100%; height: 100%; }
 
-.lo-grid { min-height: 0; min-width: 0; overflow: hidden auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(9.25rem, 1fr)); align-content: start; gap: var(--sp-2) var(--sp-2); padding: 2px 0.35rem var(--sp-4) 2px; overscroll-behavior: contain; }
+/* (The gutter is always there: a scrollbar that comes when the options shorten the grid doesn't narrow the tiles.) */
+.lo-grid { min-height: 0; min-width: 0; overflow: hidden auto; scrollbar-width: thin; scrollbar-gutter: stable; display: grid; grid-template-columns: repeat(auto-fill, minmax(9.25rem, 1fr)); align-content: start; gap: var(--sp-2) var(--sp-2); padding: 2px 0.35rem var(--sp-4) 2px; overscroll-behavior: contain; }
 
 /* Swatches for colours (ghost, trail, colourway before its thumbnail lands) and "No hat". */
 .lo-sw-dot { width: 1.6rem; height: 1.6rem; border-radius: 50%; background: var(--sw); box-shadow: 0 0 0.8rem color-mix(in srgb, var(--sw) 55%, transparent); }
@@ -152,7 +193,7 @@ body.potato .lo-rim { display: none; }
 
 @media (prefers-reduced-motion: reduce) {
   .lo-stage[data-view="bunny"] .lo-rim { animation: none; }
-  .lo-canvas, .lo-thumb canvas, .lo-on, .lo-tab::after { transition: none; }
+  .lo-canvas, .lo-thumb canvas, .lo-on, .lo-tab, .lo-tab::after { transition: none; }
   .lo-stage.loading::after { animation: none; }
 }
 
@@ -164,33 +205,34 @@ body.potato .lo-rim { display: none; }
 
 /* The Supporter and Staff sections' headings in the grid: a line across, the name, and (not a supporter yet) the way
    to become one at the end of the line. */
-.lo-set-h { grid-column: 1 / -1; display: flex; align-items: baseline; gap: var(--sp-3); margin: var(--sp-4) 0.35rem 0 0.35rem; padding-top: var(--sp-3); border-top: 1px solid var(--line); font-size: var(--fs-md); font-weight: 680; color: var(--text); }
+.lo-set-h { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--sp-3); margin: var(--sp-4) 0.35rem 0 0.35rem; padding-top: var(--sp-3); border-top: 1px solid var(--line); font-size: var(--fs-md); font-weight: 680; color: var(--text); }
 .lo-set-link { margin-left: auto; font-size: var(--fs-sm); font-weight: 600; color: var(--accent); text-decoration: none; }
 .lo-set-link:hover { text-decoration: underline; }
 .lo-set-note { margin-left: auto; font-size: var(--fs-sm); font-weight: 500; color: var(--dim); }
 
-/* The right column: the category's options over its grid (the stage beside them keeps its place on every tab). */
+/* The right column: the slot's items, and under them the options of the slot and of what you wear in it. */
 .lo-side { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .lo-side > .lo-grid, .lo-side > .lo-glow-pane { flex: 1; }
-.lo-side > .lo-model-row { padding: 0 0.35rem 12px; flex-wrap: wrap; row-gap: 8px; }
-.lo-side > .lo-hair-row, .lo-side > .lo-length-row { padding: 12px 0.35rem 0; border-top: 1px solid var(--line); }
-.lo-side > .lo-highlight-row { border-top: 0; padding-top: 8px; }
-/* The Cape's three rows (length, colour, lining) read as one group: one rule above them. */
-.lo-side > .lo-cape-row:not([hidden]) ~ .lo-cape-row { border-top: 0; padding-top: 10px; }
 
-/* The bunny build is independent of the equipped colourway and accessories. */
-.lo-model-row { display: flex; align-items: center; gap: 12px; padding: 0 0 14px; }
+/* ---- options (loadout-view.ts drawOptions): label | control rows. They follow what you wear, not the pointer, so
+   this block only changes height on a click. */
+.lo-opts { flex: none; max-height: 55%; overflow: hidden auto; scrollbar-width: thin; display: flex; flex-direction: column; gap: 0.55rem; padding: var(--sp-3) 0.35rem 2px 2px; border-top: 1px solid var(--line); }
+.lo-opts[hidden] { display: none; }
+.lo-model-row { display: grid; grid-template-columns: 6.2rem minmax(0, 1fr); align-items: center; column-gap: var(--sp-3); min-height: 1.9rem; }
 .lo-model-row[hidden] { display: none; }
-/* A hat row kept in place while the hat on the stage doesn't use it (loadout-view.ts reserveRow): no layout shift. */
-.lo-model-row.lo-row-idle { visibility: hidden; }
-.lo-model-label { font-size: 12px; font-weight: 700; color: var(--text); }
-.lo-modelseg button { min-width: 44px; }
-.lo-modelseg button:disabled { opacity: .45; cursor: default; }
-.lo-model-note { font-size: 11px; opacity: .6; }
+.lo-model-label { font-size: var(--fs-sm); font-weight: 650; color: var(--text); }
+.lo-modelseg button { min-width: 2.9rem; }
+.lo-modelseg button:disabled { opacity: 0.45; cursor: default; }
+.lo-model-note { font-size: var(--fs-xs); color: var(--faint); }
+.lo-opts .seg { justify-self: start; }
+.lo-opts .seg button { padding: 0.3rem 0.5rem; }
+/* The knife pool's control runs to two lines (its hint under the button): its label sits by the first. */
+.lo-pool-row { align-items: start; }
+.lo-pool-row > .lo-model-label { line-height: 1.9rem; }
 
 /* The Player glow tab (loadout-view.ts): Support's editor where the category's grid goes. */
 .lo-grid[hidden], .lo-glow-pane[hidden] { display: none; }
-.lo.glow-tab .lo-model-row { display: none; }
+.lo.glow-tab .lo-opts { display: none; }
 .lo-glow-pane { min-width: 0; min-height: 0; overflow: hidden auto; padding: var(--sp-2) 0.4rem var(--sp-2) 0; }
 .lo-glow-pane .sp-glow-head .pf-status:empty { display: none; }
 .lo-glow-pane .sp-glow-head .sp-h { display: none; }
@@ -198,29 +240,44 @@ body.potato .lo-rim { display: none; }
 
 /* A supporter item tried on: the way to get it (ui/loadout-view.ts). The caption ignores the pointer; the button doesn't. */
 .lo-cap .lo-cap-cta { align-self: flex-start; margin-top: 0.35rem; pointer-events: auto; }
-/* Hair colour (a wig on the stage): round swatches like the glow palette, and a custom colour. */
-.lo-hair-sw { display: flex; flex-wrap: wrap; gap: 6px; }
-.lo-hair-swatch { width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; background: var(--sw); cursor: pointer; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14); }
-.lo-hair-swatch.on { box-shadow: 0 0 0 2px var(--bg, #0b0d12), 0 0 0 4px var(--accent); }
-.lo-hair-swatch:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--bg, #0b0d12), 0 0 0 4px var(--text); }
+/* Colours (a wig's, the Cape's, the Robe's): round swatches like the glow palette, then one for any colour. */
+.lo-sw-line { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; min-width: 0; padding: 0.25rem 0; }
+.lo-hair-sw { display: contents; }
+.lo-hair-swatch { flex: none; width: 1.25rem; height: 1.25rem; padding: 0; border: 0; border-radius: 50%; background: var(--sw); cursor: pointer; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14); }
+.lo-hair-swatch.on { box-shadow: 0 0 0 0.12rem var(--bg, #0b0d12), 0 0 0 0.25rem var(--accent); }
+.lo-hair-swatch:focus-visible { outline: none; box-shadow: 0 0 0 0.12rem var(--bg, #0b0d12), 0 0 0 0.25rem var(--text); }
 /* "None" among the highlight swatches: an empty ring with a stroke through it. */
-.lo-hair-none { background: linear-gradient(to top right, transparent 46%, var(--muted, #9aa3b2) 46% 54%, transparent 54%); box-shadow: inset 0 0 0 1.5px var(--muted, #9aa3b2); }
-.lo-hair-custom { display: inline-flex; align-items: center; gap: 6px; }
-.lo-hair-custom.on { border-color: var(--accent); }
-/* Ponytail length (the Ponytail on the stage): a slider like the glow Intensity one, its value after it. */
-.lo-length { display: flex; align-items: center; gap: 10px; flex: 0 1 22rem; }
-.lo-length input[type="range"] { flex: 1; }
-.lo-length output { min-width: 3.2em; font-variant-numeric: tabular-nums; color: var(--muted, #9aa3b2); }
-.lo-hair-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--sw); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25); }
-/* Knife pool (Knife / Finish tabs): chips for the knives (with finishes) the game swaps between, then its two choices. */
-.lo-pool-row { flex-wrap: wrap; row-gap: 8px; }
-.lo-pool-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.lo-hair-none { background: linear-gradient(to top right, transparent 46%, var(--cream-3) 46% 54%, transparent 54%); box-shadow: inset 0 0 0 0.1rem var(--cream-3); }
+/* Any colour: an open ring with a plus; filled with your colour once you've chosen one. */
+.lo-hair-custom { position: relative; background: none; box-shadow: inset 0 0 0 0.1rem var(--line-2); color: var(--dim); }
+.lo-hair-custom::before, .lo-hair-custom::after { content: ""; position: absolute; left: 50%; top: 50%; width: 0.55rem; height: 0.1rem; margin: -0.05rem 0 0 -0.275rem; border-radius: 1px; background: currentColor; }
+.lo-hair-custom::after { transform: rotate(90deg); }
+.lo-hair-custom:hover { color: var(--text); box-shadow: inset 0 0 0 0.1rem var(--cream-3); }
+.lo-hair-custom.on { background: var(--sw); }
+.lo-hair-custom.on::before, .lo-hair-custom.on::after { content: none; }
+/* A length (the Ponytail's, the Cape's): a slider like the glow's Intensity, its value after it. */
+.lo-length { display: flex; align-items: center; gap: 0.7rem; max-width: 20rem; }
+.lo-length input[type="range"] { flex: 1; min-width: 0; }
+.lo-length output { min-width: 3.2em; font-size: var(--fs-sm); font-variant-numeric: tabular-nums; color: var(--dim); }
+/* Knife pool (Knife / Finish): the knives (with finishes) the game swaps between, then its two choices. */
+.lo-pool { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.5rem; min-width: 0; }
+.lo-pool-list { display: flex; flex-wrap: wrap; gap: 0.4rem; }
 .lo-pool-list:empty { display: none; }
-.lo-pool-chip { display: inline-flex; align-items: center; border-radius: 999px; background: var(--raise); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); font-size: 12px; }
+.lo-pool-chip { display: inline-flex; align-items: center; border-radius: var(--r-round); background: var(--raise); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); font-size: var(--fs-xs); }
 .lo-pool-chip.on { box-shadow: inset 0 0 0 1px var(--accent); }
 .lo-pool-pick, .lo-pool-x { border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
-.lo-pool-pick { display: inline-flex; align-items: center; gap: 6px; padding: 4px 4px 4px 10px; }
-.lo-pool-x { padding: 4px 9px 4px 4px; opacity: 0.55; }
+.lo-pool-pick { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.28rem 0.28rem 0.28rem 0.7rem; }
+.lo-pool-x { padding: 0.28rem 0.6rem 0.28rem 0.28rem; opacity: 0.55; }
 .lo-pool-x:hover, .lo-pool-x:focus-visible { opacity: 1; }
-.lo-pool-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--sw); }
+.lo-pool-dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; background: var(--sw); }
 .lo-poolseg[hidden] { display: none; }
+
+/* ---- the profile's Loadout where the page itself scrolls (profile.css: a window under 60rem wide or 31rem tall):
+   the grid is as tall as its items there, so the options stay at the foot of the window instead of under the last
+   tile, and the list (a short, wide window) stays in view like the stage. */
+@media (max-width: 60rem), (max-height: 31rem) {
+  .pf-panel[data-tab="loadout"] .lo-opts { position: sticky; bottom: 0; max-height: 45vh; background: var(--ink-1); z-index: 1; }
+  @container lo (min-width: 60rem) {
+    .pf-panel[data-tab="loadout"] .lo-frame[data-layout="rail"] > .lo-head { position: sticky; top: var(--sp-4); align-self: flex-start; max-height: calc(100vh - 2 * var(--sp-4)); }
+  }
+}

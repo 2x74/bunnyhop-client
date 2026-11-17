@@ -490,6 +490,15 @@ export function hueOf(id: string): number {
 
 /** Avatar (Discord picture when shown publicly) + name (opens the profile) + Verified / Creator marks + an optional quiet suffix. */
 export function playerCell(p: { id: string; name: string; avatarUrl: string | null; provider?: string; country?: string | null } & PlayerMarks, open: () => void, sub: string[] = [], href = `/u/${encodeURIComponent(p.id)}`): HTMLTableCellElement {
+  return h("td.rb-player", null, playerChip(p, open, sub, href));
+}
+
+/**
+ * What a board row shows of a player, for a place that isn't a table cell (a line of text, a list row): the picture,
+ * the flag, the name in the player's own name style, their marks. The box is one row high and marks that don't fit
+ * are left out, as on a narrow board.
+ */
+export function playerChip(p: { id: string; name: string; avatarUrl: string | null; provider?: string; country?: string | null } & PlayerMarks, open: () => void, sub: string[] = [], href = `/u/${encodeURIComponent(p.id)}`): HTMLElement {
   const letter = () => h("span.rb-av", { "aria-hidden": "true", style: `--hue:${hueOf(p.id)}` }, (p.name.trim()[0] ?? "?").toUpperCase());
   const pic = pictureOf(p);
   // The name and picture show the player's hover card (ui/hover-card.ts); the rest of the row keeps its run stats card.
@@ -497,23 +506,19 @@ export function playerCell(p: { id: string; name: string; avatarUrl: string | nu
   const av = hoverCardFor(decorated(pic ? avatarImg(pic, { cls: "rb-av", px: 24, letter }) : letter(), p), p);
   const tags = [...sub, p.provider === "guest" ? "guest" : ""].filter(Boolean);
   return h(
-    "td.rb-player",
+    "div.rb-pwrap",
     null,
-    h(
-      "div.rb-pwrap",
-      null,
-      av,
-      countryFlag(p.country),
-      // A real link to the profile's address (middle-click / Ctrl-click open it in a new tab); a plain click opens it in place.
-      hoverCardFor(h("a.rb-name", { href, onclick: (ev: Event) => {
-        const e = ev as MouseEvent;
-        if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
-        e.preventDefault();
-        open();
-      }, ...nameAttrs(p) }, p.name), p),
-      nameMarks(p),
-      tags.length ? h("span.rb-sub", { title: p.provider === "guest" ? "Guest players haven't linked an account" : null }, tags.join(" · ")) : null,
-    ),
+    av,
+    countryFlag(p.country),
+    // A real link to the profile's address (middle-click / Ctrl-click open it in a new tab); a plain click opens it in place.
+    hoverCardFor(h("a.rb-name", { href, onclick: (ev: Event) => {
+      const e = ev as MouseEvent;
+      if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+      e.preventDefault();
+      open();
+    }, ...nameAttrs(p) }, p.name), p),
+    nameMarks(p),
+    tags.length ? h("span.rb-sub", { title: p.provider === "guest" ? "Guest players haven't linked an account" : null }, tags.join(" · ")) : null,
   );
 }
 

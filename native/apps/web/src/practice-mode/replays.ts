@@ -32,6 +32,8 @@ export interface PracticeReplayMeta {
   at: number | null;
   /** Checkpoint teleports on its path (the replay's segment loads). */
   teleports: number;
+  /** The slowest timescale it ran at (timescale.ts), when it was slowed. */
+  scale?: number;
   savedAt: number;
   bytes: number;
 }

@@ -54,7 +54,7 @@ import { loadoutFor } from "../loadout";
 import { menuIdleAllowed, onMenuMapStart } from "./menu-work";
 import { loadThumb, saveThumb } from "./thumb-store";
 import { playerLookTier } from "../player/look-tier";
-import { CamoStage } from "./camo-stage";
+import { CamoStage, prewarmCamoGun } from "./camo-stage";
 import { softwareContext } from "../gfx-auto";
 import { sharedRenderer } from "../shared-gl";
 
@@ -64,7 +64,7 @@ export type StageView = "fp" | "close" | "bunny" | "ghost" | "hop" | "gun" | "gu
 const bunnyView = (v: StageView) => v === "bunny" || v === "ghost" || v === "hop";
 const gunView = (v: StageView) => v === "gun" || v === "gunside";
 /** What the bunny views dress the bunny in (the knife, gloves and hat come from the loadout). */
-export type StageLook = Pick<BunnyLook, "outfit" | "ghost" | "trail" | "shape" | "veil" | "playerGlow" | "previewGlow" | "facing">;
+export type StageLook = Pick<BunnyLook, "outfit" | "ghost" | "trail" | "shape" | "veil" | "playerGlow" | "previewGlow" | "facing" | "focus">;
 
 /** Thumbnail size in device pixels (16:10). */
 export const THUMB_W = 384;
@@ -85,6 +85,8 @@ const FINISH_CODES = [...new Set(Object.values(FINISH_CODE))];
 const knifeProgram = (l: CosmeticLoadout): string => `${FINISH_CODE[specOf(l).kind] ?? 0}|${hiltSkin(l.hilt) ? 1 : 0}`;
 /** The shortest frame the stage draws (~62 fps, as the menu background: attract.ts). */
 const FRAME_MIN_MS = 1000 / 62;
+/** Thumbnails drawn and waiting to be read back at once (gpuFree). Each read costs a frame about 1.5 ms of copying. */
+const READS_AT_ONCE = 2;
 /** Seconds of the idle sequence the hero loops (see drawFirstPerson). */
 const IDLE_LOOP = 4.6;
 
@@ -555,9 +557,13 @@ export class LoadoutStage {
   private serial(): boolean {
     return !parallelCompile(this.renderer);
   }
-  /** Whether a thumbnail may start a GPU step now (see compiling). */
+  /**
+   * Whether a thumbnail may start a GPU step now (see compiling). Where programs compile in parallel (any hardware GL)
+   * READS_AT_ONCE thumbnails may be in flight: each has its own pixel buffer and they share the frame's fence, so a slot
+   * opened for the first time fills in half the frames. One at a time without it (SwiftShader), as before.
+   */
   private gpuFree(): boolean {
-    return !this.reading && !(this.serial() && this.compiling);
+    return this.serial() ? !this.reading && !this.compiling : this.reading < READS_AT_ONCE;
   }
 
   /** Compiles the next queued thumbnail's programs that aren't ready (one at a time); their thumbnails draw after. */
@@ -1166,6 +1172,29 @@ export class LoadoutStage {
       void this.show.precompile(this.renderer, this.closeCam, FINISH_CODES, !!hiltSkin(this.shown.hilt), go).catch(() => {});
     });
   }
+
+  /**
+   * The Gun camo stage's parts, built ahead of the click that opens it: its gun's model, then the hands that hold it
+   * (both are kept by their own modules, per gun and glove). Built inside that click they held it up for 80 ms (0.3 s
+   * at 4x CPU). The view asks for this when the player heads for Gun camo (the pointer or the focus reaches its entry:
+   * `soon`, a task each), or is on a slot next to it (in idle time). Only then: it is one long step, and most visits
+   * never open the guns. The stage made here is thrown away: one kept alive would follow every display() from then on
+   * (a glove hovered would re-pose a gun nobody is looking at).
+   */
+  warmGuns(soon = false): void {
+    if (this.gunsWarm || this.guns || this.disposed) return;
+    this.gunsWarm = true;
+    const later = (fn: () => void) => (soon ? setTimeout(fn, 0) : ric(fn));
+    const ok = () => !this.disposed && !this.guns && this.canvas.isConnected && menuIdleAllowed();
+    later(() => {
+      if (!ok()) return void (this.gunsWarm = false);
+      prewarmCamoGun();
+      later(() => {
+        if (ok()) new CamoStage(this.shown).dispose();
+      });
+    });
+  }
+  private gunsWarm = false;
 
   /** Pending thumbnails: dropped (their tiles are gone with the view). */
   private dropThumbs(): void {

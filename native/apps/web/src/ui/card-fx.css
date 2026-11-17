@@ -6,6 +6,55 @@
 /* The hover card lifts its content with position: relative on every child but its own layers; these stay absolute. */
 .hc-inner > .pc-sfx.pc-sfx { position: absolute; }
 
+/* The pointer on a card: --mx / --my (0..1 across it), written once per frame on the few layers that follow it
+   (.pc-sheen, .pc-holo, .pc-sfx-foil, .hfx-spot: card-fx.ts POINTER_LAYERS), not on the card: as inherited properties
+   on the card they restyled all 150 of its nodes every frame (1.1 ms of style a frame against 0.15; measured in the
+   v0.0.43 card pass). A new layer that reads them must be added to that list. */
+
+/* Rings: an outline in the frame band between two insets from the card's edge (--a, --b), parallel to the edge round
+   the cut corners. Built from the card's shape (profile.css .pc, hover-card.css .hc: --band, --cut-w, --cut-h, --kw,
+   --kh), so the same rule draws on both cards. Used by the rim below and by the borders that follow the frame. */
+.pc-rim::before, .pc-rim::after, .pc-sborder-neon::after, .pc-sborder-vine::before {
+  --aw: calc(var(--a) + var(--cut-w) + var(--a) * var(--kw)); --ah: calc(var(--a) + var(--cut-h) + var(--a) * var(--kh));
+  --bw: calc(var(--b) + var(--cut-w) + var(--b) * var(--kw)); --bh: calc(var(--b) + var(--cut-h) + var(--b) * var(--kh));
+  --ar: calc(100% - var(--a)); --br: calc(100% - var(--b));
+  clip-path: polygon(evenodd,
+    var(--aw) var(--a), var(--ar) var(--a), var(--ar) calc(100% - var(--ah)), calc(100% - var(--aw)) var(--ar), var(--a) var(--ar), var(--a) var(--ah), var(--aw) var(--a),
+    var(--bw) var(--b), var(--br) var(--b), var(--br) calc(100% - var(--bh)), calc(100% - var(--bw)) var(--br), var(--b) var(--br), var(--b) var(--bh), var(--bw) var(--b));
+}
+/* The rim every frame wears (ui/card.ts, ui/hover-card.ts append .pc-rim after the content box): the band's outer edge
+   catches the light at the top left and falls into shade at the bottom right, its inner edge the other way round, so
+   the band reads as a raised rim rather than a flat strip. A frame tunes it with --rim-hi / --rim-lo (strength) and
+   may widen the inner line into an inlay (--inlay-w, --inlay). Still: nothing here moves. */
+.pc-rim { position: absolute; inset: 0; pointer-events: none; --rim-w: max(1px, calc(1.4 * var(--u, 1px))); }
+.pc-rim::before, .pc-rim::after { content: ""; position: absolute; inset: 0; }
+.pc-rim::before { --a: 0px; --b: var(--rim-w);
+  background: linear-gradient(135deg, rgba(255, 255, 255, var(--rim-hi, 0.5)) 0%, rgba(255, 255, 255, 0) 42%, rgba(0, 0, 0, 0) 58%, rgba(0, 0, 0, var(--rim-lo, 0.42)) 100%); }
+/* (The inner ring laps 0.75 px onto the content box: the frame's paint showed through the seam between the two clips.) */
+.pc-rim::after { --a: calc(var(--band) - var(--inlay-w, var(--rim-w))); --b: calc(var(--band) + 0.75px);
+  background: var(--inlay, linear-gradient(135deg, rgba(0, 0, 0, 0.5) 0%, rgba(0, 0, 0, 0.22) 44%, rgba(255, 255, 255, 0.06) 60%, rgba(255, 255, 255, var(--rim-in, 0.26)) 100%)); }
+.pc-frame-plain { --rim-hi: 0.2; --rim-lo: 0.3; --rim-in: 0.1; }
+
+/* Holo (the level 30 frame, .pc-frame-holo): foil in the band. A layer under the content box (ui/card-fx.ts
+   frameLayers) carries bands of spectrum over the silver; it slides with the pointer (--mx / --my: the profile card's
+   tilt, the hover card's pointer watch), so the colour at any spot depends on the angle, and a light sits on the band
+   nearest the pointer. It moves only with the pointer (transform alone); at rest it is the still, and costs nothing. */
+.pc-holo { position: absolute; inset: 0; overflow: hidden; pointer-events: none; background: var(--holo-base); }
+.pc-holo::before, .pc-holo::after { content: ""; position: absolute; }
+.pc-holo::before { inset: 0 -45%;
+  background: repeating-linear-gradient(115deg, transparent 0, transparent calc(50 * var(--u, 1px)), #ff7aa8 calc(84 * var(--u, 1px)), #ffd66b calc(112 * var(--u, 1px)), #8cf5a6 calc(140 * var(--u, 1px)), #79d2ff calc(168 * var(--u, 1px)), #b98cff calc(196 * var(--u, 1px)), transparent calc(236 * var(--u, 1px)),
+    transparent calc(318 * var(--u, 1px)), rgba(255, 255, 255, 0.85) calc(330 * var(--u, 1px)), transparent calc(342 * var(--u, 1px)), transparent calc(420 * var(--u, 1px)));
+  transform: translateX(calc((var(--mx, 0.5) - 0.5) * -400 * var(--u, 1px) + (var(--my, 0.5) - 0.5) * -230 * var(--u, 1px))); }
+.pc-holo::after { left: 0; top: 0; width: 60%; aspect-ratio: 1; opacity: 0; transition: opacity 0.2s;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.75), rgba(255, 255, 255, 0) 62%);
+  /* Centred on the pointer: its own width is 0.6 of the card's, the card 0.63 as tall as wide (the hover card about 0.53). */
+  transform: translate(calc(var(--mx, 0.5) * 166.67% - 50%), calc(var(--my, 0.5) * var(--holo-h, 105%) - 50%)); }
+.hc > .pc-holo::after { --holo-h: 88%; }
+.is-live > .pc-holo::before, .is-live > .pc-holo::after { will-change: transform; }
+.is-live > .pc-holo::after { opacity: 1; }
+body.potato .pc-holo::before, body.potato .pc-holo::after { transform: none; }
+body.potato .pc-holo::after { display: none; }
+
 /* Borders: a square turning under the content box (the same geometry as .pc-aura), so only the frame shows it. */
 .pc-sborder::before { content: ""; position: absolute; left: 50%; top: 50%; width: 120%; aspect-ratio: 1; margin: -60% 0 0 -60%; will-change: transform; }
 .pc-sborder-comet::before { background: conic-gradient(from 0deg, transparent 0deg 200deg, color-mix(in srgb, var(--sx) 35%, transparent) 300deg, var(--sx) 352deg, #ffffff 357deg, transparent 360deg); animation: pc-sb-turn 7s linear infinite; }
@@ -24,24 +73,26 @@
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='560' viewBox='0 0 240 560'%3E%3Cpath d='M0 470Q60 330 120 470Q180 330 240 470' fill='none' stroke='%23000' stroke-width='3' stroke-dasharray='2 9' stroke-linecap='round'/%3E%3Cpath d='M-60 250Q0 150 60 250Q120 150 180 250' fill='none' stroke='%23000' stroke-width='2' stroke-dasharray='2 10' stroke-linecap='round' opacity='.6'/%3E%3C/svg%3E") 0 0 / calc(240 * var(--u, 1px)) 100% repeat-x;
   animation: pc-sfx-left 9s linear infinite; }
 @keyframes pc-sfx-left { to { transform: translateX(calc(-240 * var(--u, 1px))); } }
-/* Embers: sparks in the colour and a warm white, rising and leaning a little. */
-.pc-sfx-embers { opacity: 0.85; }
-.pc-sfx-embers::before { left: -10%; right: -10%; top: 0; height: calc(100% + 200 * var(--u, 1px));
-  background:
-    radial-gradient(circle, var(--sx) 0 calc(2.4 * var(--u, 1px)), transparent calc(3.4 * var(--u, 1px))) calc(20 * var(--u, 1px)) calc(30 * var(--u, 1px)) / calc(96 * var(--u, 1px)) calc(100 * var(--u, 1px)),
-    radial-gradient(circle, #ffe2b0 0 calc(1.6 * var(--u, 1px)), transparent calc(2.4 * var(--u, 1px))) calc(70 * var(--u, 1px)) calc(80 * var(--u, 1px)) / calc(130 * var(--u, 1px)) calc(200 * var(--u, 1px)),
-    radial-gradient(circle, color-mix(in srgb, var(--sx) 70%, #ffffff) 0 calc(1.2 * var(--u, 1px)), transparent calc(1.9 * var(--u, 1px))) calc(45 * var(--u, 1px)) calc(10 * var(--u, 1px)) / calc(70 * var(--u, 1px)) calc(50 * var(--u, 1px));
-  -webkit-mask: linear-gradient(to top, #000 0%, #000 30%, transparent 92%); mask: linear-gradient(to top, #000 0%, #000 30%, transparent 92%);
-  animation: pc-sfx-rise 7s linear infinite; }
-@keyframes pc-sfx-rise { to { transform: translate(calc(-30 * var(--u, 1px)), calc(-200 * var(--u, 1px))); } }
-/* Stars: two scatters of small four-point stars, one fading in as the other fades out. */
-.pc-sfx-stars::before, .pc-sfx-stars::after { inset: 0;
-  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='150'%3E%3Cpath d='M30 20q1 5 6 6q-5 1-6 6q-1-5-6-6q5-1 6-6zM120 90q.8 4 5 5q-4.2 1-5 5q-1-4-5-5q4-1 5-5zM160 30q.6 3 3.6 3.6q-3 .6-3.6 3.6q-.6-3-3.6-3.6q3-.6 3.6-3.6z'/%3E%3C/svg%3E") 0 0 / calc(180 * var(--u, 1px)) calc(150 * var(--u, 1px));
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='150'%3E%3Cpath d='M30 20q1 5 6 6q-5 1-6 6q-1-5-6-6q5-1 6-6zM120 90q.8 4 5 5q-4.2 1-5 5q-1-4-5-5q4-1 5-5zM160 30q.6 3 3.6 3.6q-3 .6-3.6 3.6q-.6-3-3.6-3.6q3-.6 3.6-3.6z'/%3E%3C/svg%3E") 0 0 / calc(180 * var(--u, 1px)) calc(150 * var(--u, 1px));
-  will-change: opacity; }
-.pc-sfx-stars::before { background: var(--sx); animation: pc-sfx-twinkle 4s ease-in-out infinite; }
-.pc-sfx-stars::after { background: #ffffff; -webkit-mask-position: calc(90 * var(--u, 1px)) calc(75 * var(--u, 1px)); mask-position: calc(90 * var(--u, 1px)) calc(75 * var(--u, 1px)); animation: pc-sfx-twinkle 4s ease-in-out -2s infinite; }
-@keyframes pc-sfx-twinkle { 0%, 100% { opacity: 0.55; } 50% { opacity: 0.05; } }
+/* Embers: sparks rising off the bottom edge and dying out before the name: an uneven scatter in the colour (dots of a
+   few sizes, the odd short streak) and a quicker, finer one in warm white. The fade is the layer's, so it stays put
+   while the sparks climb through it. */
+.pc-sfx-embers { opacity: 0.9; -webkit-mask: linear-gradient(to top, #000 0%, #000 18%, transparent 74%); mask: linear-gradient(to top, #000 0%, #000 18%, transparent 74%); }
+.pc-sfx-embers::before { left: 0; right: 0; top: 0; height: calc(100% + calc(260 * var(--u, 1px))); background: var(--sx); -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='260' viewBox='0 0 300 260'%3E%3Ccircle cx='22' cy='40' r='2.6'/%3E%3Ccircle cx='88' cy='212' r='1.8'/%3E%3Ccircle cx='141' cy='96' r='2.9'/%3E%3Ccircle cx='203' cy='168' r='1.5'/%3E%3Ccircle cx='262' cy='30' r='2.2'/%3E%3Ccircle cx='57' cy='130' r='1.3'/%3E%3Ccircle cx='176' cy='236' r='2.4'/%3E%3Ccircle cx='238' cy='104' r='1.2'/%3E%3Ccircle cx='118' cy='18' r='1.6'/%3E%3Cpath d='M40 196l3.4-9.4M224 226l2.6-7.2M286 150l3-8.4' stroke='%23000' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E") 0 0 / calc(300 * var(--u, 1px)) calc(260 * var(--u, 1px)); mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='260' viewBox='0 0 300 260'%3E%3Ccircle cx='22' cy='40' r='2.6'/%3E%3Ccircle cx='88' cy='212' r='1.8'/%3E%3Ccircle cx='141' cy='96' r='2.9'/%3E%3Ccircle cx='203' cy='168' r='1.5'/%3E%3Ccircle cx='262' cy='30' r='2.2'/%3E%3Ccircle cx='57' cy='130' r='1.3'/%3E%3Ccircle cx='176' cy='236' r='2.4'/%3E%3Ccircle cx='238' cy='104' r='1.2'/%3E%3Ccircle cx='118' cy='18' r='1.6'/%3E%3Cpath d='M40 196l3.4-9.4M224 226l2.6-7.2M286 150l3-8.4' stroke='%23000' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E") 0 0 / calc(300 * var(--u, 1px)) calc(260 * var(--u, 1px));
+  animation: pc-sfx-rise 10s linear infinite; }
+.pc-sfx-embers::after { left: 0; right: 0; top: 0; height: calc(100% + calc(200 * var(--u, 1px))); background: #ffe2b0; opacity: 0.8; -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='200' viewBox='0 0 220 200'%3E%3Ccircle cx='30' cy='150' r='1.3'/%3E%3Ccircle cx='96' cy='44' r='1.6'/%3E%3Ccircle cx='158' cy='182' r='1.1'/%3E%3Ccircle cx='204' cy='86' r='1.5'/%3E%3Ccircle cx='64' cy='96' r='0.9'/%3E%3C/svg%3E") 0 0 / calc(220 * var(--u, 1px)) calc(200 * var(--u, 1px)); mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='200' viewBox='0 0 220 200'%3E%3Ccircle cx='30' cy='150' r='1.3'/%3E%3Ccircle cx='96' cy='44' r='1.6'/%3E%3Ccircle cx='158' cy='182' r='1.1'/%3E%3Ccircle cx='204' cy='86' r='1.5'/%3E%3Ccircle cx='64' cy='96' r='0.9'/%3E%3C/svg%3E") 0 0 / calc(220 * var(--u, 1px)) calc(200 * var(--u, 1px));
+  animation: pc-sfx-rise-b 6.5s linear infinite; }
+/* (Straight up: a sideways lean would have to be a whole tile per cycle to loop without a jump.) */
+@keyframes pc-sfx-rise { to { transform: translateY(calc(-260 * var(--u, 1px))); } }
+@keyframes pc-sfx-rise-b { to { transform: translateY(calc(-200 * var(--u, 1px))); } }
+/* Stars: two uneven scatters of four-point stars of a few sizes, one in the colour and one white, each fading in as
+   the other fades out. */
+.pc-sfx-stars::before, .pc-sfx-stars::after { inset: 0; will-change: opacity; }
+/* (At rest, reduced motion and Potato: one scatter lit, the other dim.) */
+.pc-sfx-stars::before { opacity: 0.55; }
+.pc-sfx-stars::after { opacity: 0.2; }
+.pc-sfx-stars::before { background: var(--sx); -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='310' height='260' viewBox='0 0 310 260'%3E%3Cpath d='M34 21Q35.4 28.6 43 30Q35.4 31.4 34 39Q32.6 31.4 25 30Q32.6 28.6 34 21ZM196 52.5Q196.9 57.1 201.5 58Q196.9 58.9 196 63.5Q195.1 58.9 190.5 58Q195.1 57.1 196 52.5ZM118 121Q119.1 126.9 125 128Q119.1 129.1 118 135Q116.9 129.1 111 128Q116.9 126.9 118 121ZM268 171.5Q268.7 175.3 272.5 176Q268.7 176.7 268 180.5Q267.3 176.7 263.5 176Q267.3 175.3 268 171.5ZM52 201Q52.8 205.2 57 206Q52.8 206.8 52 211Q51.2 206.8 47 206Q51.2 205.2 52 201ZM232 234.5Q232.6 237.4 235.5 238Q232.6 238.6 232 241.5Q231.4 238.6 228.5 238Q231.4 237.4 232 234.5Z'/%3E%3C/svg%3E") 0 0 / calc(310 * var(--u, 1px)) calc(260 * var(--u, 1px)); mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='310' height='260' viewBox='0 0 310 260'%3E%3Cpath d='M34 21Q35.4 28.6 43 30Q35.4 31.4 34 39Q32.6 31.4 25 30Q32.6 28.6 34 21ZM196 52.5Q196.9 57.1 201.5 58Q196.9 58.9 196 63.5Q195.1 58.9 190.5 58Q195.1 57.1 196 52.5ZM118 121Q119.1 126.9 125 128Q119.1 129.1 118 135Q116.9 129.1 111 128Q116.9 126.9 118 121ZM268 171.5Q268.7 175.3 272.5 176Q268.7 176.7 268 180.5Q267.3 176.7 263.5 176Q267.3 175.3 268 171.5ZM52 201Q52.8 205.2 57 206Q52.8 206.8 52 211Q51.2 206.8 47 206Q51.2 205.2 52 201ZM232 234.5Q232.6 237.4 235.5 238Q232.6 238.6 232 241.5Q231.4 238.6 228.5 238Q231.4 237.4 232 234.5Z'/%3E%3C/svg%3E") 0 0 / calc(310 * var(--u, 1px)) calc(260 * var(--u, 1px)); animation: pc-sfx-twinkle 5s ease-in-out infinite; }
+.pc-sfx-stars::after { background: #ffffff; -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='250' height='200' viewBox='0 0 250 200'%3E%3Cpath d='M160 18Q161.0 23.0 166 24Q161.0 25.0 160 30Q159.0 25.0 154 24Q159.0 23.0 160 18ZM40 80Q40.6 83.4 44 84Q40.6 84.6 40 88Q39.4 84.6 36 84Q39.4 83.4 40 80ZM214 110Q215.3 116.7 222 118Q215.3 119.3 214 126Q212.7 119.3 206 118Q212.7 116.7 214 110ZM96 165.5Q96.7 169.3 100.5 170Q96.7 170.7 96 174.5Q95.3 170.7 91.5 170Q95.3 169.3 96 165.5Z'/%3E%3C/svg%3E") 0 0 / calc(250 * var(--u, 1px)) calc(200 * var(--u, 1px)); mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='250' height='200' viewBox='0 0 250 200'%3E%3Cpath d='M160 18Q161.0 23.0 166 24Q161.0 25.0 160 30Q159.0 25.0 154 24Q159.0 23.0 160 18ZM40 80Q40.6 83.4 44 84Q40.6 84.6 40 88Q39.4 84.6 36 84Q39.4 83.4 40 80ZM214 110Q215.3 116.7 222 118Q215.3 119.3 214 126Q212.7 119.3 206 118Q212.7 116.7 214 110ZM96 165.5Q96.7 169.3 100.5 170Q96.7 170.7 96 174.5Q95.3 170.7 91.5 170Q95.3 169.3 96 165.5Z'/%3E%3C/svg%3E") 0 0 / calc(250 * var(--u, 1px)) calc(200 * var(--u, 1px)); animation: pc-sfx-twinkle 5s ease-in-out -2.5s infinite; }
+@keyframes pc-sfx-twinkle { 0%, 100% { opacity: 0.6; } 50% { opacity: 0.06; } }
 /* Aurora: soft bands of the colour and a cool partner drifting along the top of the card. */
 .pc-sfx-aurora { opacity: 0.4; -webkit-mask: linear-gradient(to bottom, #000 0%, transparent 70%); mask: linear-gradient(to bottom, #000 0%, transparent 70%); }
 .pc-sfx-aurora::before { left: 0; top: -20%; height: 80%; width: 200%;
@@ -73,7 +124,7 @@ body.potato .pc-sborder-pulse::before { opacity: 0.5; }
 .ce-grid-deco .ce-item { min-height: 3rem; }
 /* A small card: the frame band 4 px (the border shows in it), the effect at about a fifth of card scale so its marks
    stay visible at this size. */
-.pf-sw-fx { --u: 0.22px; position: relative; width: 2.9rem; height: 1.85rem; overflow: hidden; border-radius: 0.3rem; background: #3a4152; }
+.pf-sw-fx { --u: 0.22px; --band: 4px; --cut-w: 0px; --cut-h: 0px; --kw: 0; --kh: 0; position: relative; width: 2.9rem; height: 1.85rem; overflow: hidden; border-radius: 0.3rem; background: #3a4152; }
 .pf-sw-fx-in { position: absolute; inset: 4px; overflow: hidden; border-radius: 0.15rem; background: #12151c; }
 .pf-sw-fx .pc-sborder::before { width: 160%; margin: -80% 0 0 -80%; }
 .pf-sw-fx-in svg { display: block; width: 100%; height: 100%; }
@@ -97,19 +148,16 @@ body.potato .pc-sborder-pulse::before { opacity: 0.5; }
   33.3% { opacity: 0; transform: translateX(calc(37 * var(--u, 1px))); } 41% { opacity: 0.9; } 59%, 66.5% { opacity: 0; transform: translateX(calc(37 * var(--u, 1px))); }
   66.6% { opacity: 0; transform: translateX(calc(61 * var(--u, 1px))); } 74% { opacity: 0.9; } 92%, 100% { opacity: 0; transform: translateX(calc(61 * var(--u, 1px))); }
 }
-/* Snow: big slow flakes in white, swaying a little as they fall; smaller quicker ones in the colour. */
-.pc-sfx-snow::before { left: calc(-10 * var(--u, 1px)); right: calc(-10 * var(--u, 1px)); top: calc(-140 * var(--u, 1px)); height: calc(100% + calc(140 * var(--u, 1px))); background: #ffffff; opacity: 0.6;
-  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='140' viewBox='0 0 120 140'%3E%3Ccircle cx='16' cy='18' r='2.6'/%3E%3Ccircle cx='74' cy='46' r='3.3'/%3E%3Ccircle cx='104' cy='104' r='2.2'/%3E%3Ccircle cx='42' cy='112' r='3'/%3E%3Ccircle cx='96' cy='12' r='1.8'/%3E%3Ccircle cx='20' cy='74' r='1.9'/%3E%3C/svg%3E") 0 0 / calc(120 * var(--u, 1px)) calc(140 * var(--u, 1px));
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='140' viewBox='0 0 120 140'%3E%3Ccircle cx='16' cy='18' r='2.6'/%3E%3Ccircle cx='74' cy='46' r='3.3'/%3E%3Ccircle cx='104' cy='104' r='2.2'/%3E%3Ccircle cx='42' cy='112' r='3'/%3E%3Ccircle cx='96' cy='12' r='1.8'/%3E%3Ccircle cx='20' cy='74' r='1.9'/%3E%3C/svg%3E") 0 0 / calc(120 * var(--u, 1px)) calc(140 * var(--u, 1px));
-  animation: pc-sfx-snow 11s linear infinite; }
-@keyframes pc-sfx-snow { 50% { transform: translate(calc(9 * var(--u, 1px)), calc(70 * var(--u, 1px))); } 100% { transform: translate(0, calc(140 * var(--u, 1px))); } }
-.pc-sfx-snow::after { left: 0; right: 0; top: calc(-100 * var(--u, 1px)); height: calc(100% + calc(100 * var(--u, 1px))); background: color-mix(in srgb, var(--sx) 70%, #ffffff); opacity: 0.55;
-  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='100' viewBox='0 0 80 100'%3E%3Ccircle cx='10' cy='10' r='1.3'/%3E%3Ccircle cx='46' cy='30' r='1'/%3E%3Ccircle cx='70' cy='64' r='1.4'/%3E%3Ccircle cx='28' cy='82' r='1.1'/%3E%3Ccircle cx='60' cy='6' r='0.9'/%3E%3C/svg%3E") 0 0 / calc(80 * var(--u, 1px)) calc(100 * var(--u, 1px));
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='100' viewBox='0 0 80 100'%3E%3Ccircle cx='10' cy='10' r='1.3'/%3E%3Ccircle cx='46' cy='30' r='1'/%3E%3Ccircle cx='70' cy='64' r='1.4'/%3E%3Ccircle cx='28' cy='82' r='1.1'/%3E%3Ccircle cx='60' cy='6' r='0.9'/%3E%3C/svg%3E") 0 0 / calc(80 * var(--u, 1px)) calc(100 * var(--u, 1px));
-  animation: pc-sfx-snow-s 6.5s linear infinite; }
-@keyframes pc-sfx-snow-s { 50% { transform: translate(calc(-6 * var(--u, 1px)), calc(50 * var(--u, 1px))); } 100% { transform: translate(0, calc(100 * var(--u, 1px))); } }
+/* Snow: a few big slow flakes in white, swaying as they fall, and finer quicker ones in the colour behind them. An
+   uneven scatter on large tiles, sparse enough that the card's text is never dotted over. */
+.pc-sfx-snow::before { left: calc(-12 * var(--u, 1px)); right: calc(-12 * var(--u, 1px)); top: calc(-250 * var(--u, 1px)); height: calc(100% + calc(250 * var(--u, 1px))); background: #ffffff; opacity: 0.62; -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='270' height='250' viewBox='0 0 270 250'%3E%3Ccircle cx='28' cy='34' r='3.4'/%3E%3Ccircle cx='150' cy='20' r='2.4'/%3E%3Ccircle cx='232' cy='92' r='3.1'/%3E%3Ccircle cx='84' cy='128' r='2.6'/%3E%3Ccircle cx='196' cy='196' r='3.6'/%3E%3Ccircle cx='40' cy='222' r='2.2'/%3E%3C/svg%3E") 0 0 / calc(270 * var(--u, 1px)) calc(250 * var(--u, 1px)); mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='270' height='250' viewBox='0 0 270 250'%3E%3Ccircle cx='28' cy='34' r='3.4'/%3E%3Ccircle cx='150' cy='20' r='2.4'/%3E%3Ccircle cx='232' cy='92' r='3.1'/%3E%3Ccircle cx='84' cy='128' r='2.6'/%3E%3Ccircle cx='196' cy='196' r='3.6'/%3E%3Ccircle cx='40' cy='222' r='2.2'/%3E%3C/svg%3E") 0 0 / calc(270 * var(--u, 1px)) calc(250 * var(--u, 1px));
+  animation: pc-sfx-snow 16s linear infinite; }
+@keyframes pc-sfx-snow { 25% { transform: translate(calc(10 * var(--u, 1px)), calc(62.5 * var(--u, 1px))); } 50% { transform: translate(0, calc(125 * var(--u, 1px))); } 75% { transform: translate(calc(-10 * var(--u, 1px)), calc(187.5 * var(--u, 1px))); } 100% { transform: translate(0, calc(250 * var(--u, 1px))); } }
+.pc-sfx-snow::after { left: calc(-8 * var(--u, 1px)); right: calc(-8 * var(--u, 1px)); top: calc(-180 * var(--u, 1px)); height: calc(100% + calc(180 * var(--u, 1px))); background: color-mix(in srgb, var(--sx) 70%, #ffffff); opacity: 0.5; -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='180' viewBox='0 0 200 180'%3E%3Ccircle cx='20' cy='24' r='1.4'/%3E%3Ccircle cx='112' cy='58' r='1.1'/%3E%3Ccircle cx='170' cy='132' r='1.5'/%3E%3Ccircle cx='64' cy='150' r='1.0'/%3E%3Ccircle cx='140' cy='12' r='0.9'/%3E%3Ccircle cx='30' cy='96' r='1.2'/%3E%3C/svg%3E") 0 0 / calc(200 * var(--u, 1px)) calc(180 * var(--u, 1px)); mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='180' viewBox='0 0 200 180'%3E%3Ccircle cx='20' cy='24' r='1.4'/%3E%3Ccircle cx='112' cy='58' r='1.1'/%3E%3Ccircle cx='170' cy='132' r='1.5'/%3E%3Ccircle cx='64' cy='150' r='1.0'/%3E%3Ccircle cx='140' cy='12' r='0.9'/%3E%3Ccircle cx='30' cy='96' r='1.2'/%3E%3C/svg%3E") 0 0 / calc(200 * var(--u, 1px)) calc(180 * var(--u, 1px));
+  animation: pc-sfx-snow-s 9s linear infinite; }
+@keyframes pc-sfx-snow-s { 50% { transform: translate(calc(-7 * var(--u, 1px)), calc(90 * var(--u, 1px))); } 100% { transform: translate(0, calc(180 * var(--u, 1px))); } }
 /* Petals: blossom petals drifting across and down, two drifts at different speeds. */
-.pc-sfx-petals::before { left: calc(-240 * var(--u, 1px)); top: calc(-190 * var(--u, 1px)); width: calc(100% + calc(240 * var(--u, 1px))); height: calc(100% + calc(190 * var(--u, 1px))); background: color-mix(in srgb, var(--sx) 45%, #ffd3e2); opacity: 0.7;
+.pc-sfx-petals::before { left: calc(-240 * var(--u, 1px)); top: calc(-190 * var(--u, 1px)); width: calc(100% + calc(240 * var(--u, 1px))); height: calc(100% + calc(190 * var(--u, 1px))); background: color-mix(in srgb, var(--sx) 16%, #ffc2d6); opacity: 0.72;
   -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='190' viewBox='0 0 240 190'%3E%3Cpath transform='translate(30 30) rotate(20) scale(2)' d='M0 0C3-4 9-4 11-1L9.6 0L11 1C9 4 3 4 0 0z'/%3E%3Cpath transform='translate(160 84) rotate(-40) scale(1.7)' d='M0 0C3-4 9-4 11-1L9.6 0L11 1C9 4 3 4 0 0z'/%3E%3Cpath transform='translate(86 150) rotate(75) scale(1.85)' d='M0 0C3-4 9-4 11-1L9.6 0L11 1C9 4 3 4 0 0z'/%3E%3C/svg%3E") 0 0 / calc(240 * var(--u, 1px)) calc(190 * var(--u, 1px));
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='190' viewBox='0 0 240 190'%3E%3Cpath transform='translate(30 30) rotate(20) scale(2)' d='M0 0C3-4 9-4 11-1L9.6 0L11 1C9 4 3 4 0 0z'/%3E%3Cpath transform='translate(160 84) rotate(-40) scale(1.7)' d='M0 0C3-4 9-4 11-1L9.6 0L11 1C9 4 3 4 0 0z'/%3E%3Cpath transform='translate(86 150) rotate(75) scale(1.85)' d='M0 0C3-4 9-4 11-1L9.6 0L11 1C9 4 3 4 0 0z'/%3E%3C/svg%3E") 0 0 / calc(240 * var(--u, 1px)) calc(190 * var(--u, 1px));
   animation: pc-sfx-petals 14s linear infinite; }
@@ -120,52 +168,95 @@ body.potato .pc-sborder-pulse::before { opacity: 0.5; }
   animation: pc-sfx-petals-b 9s linear infinite; }
 @keyframes pc-sfx-petals-b { to { transform: translate(calc(170 * var(--u, 1px)), calc(140 * var(--u, 1px))); } }
 /* Speed Lines: tapered streaks passing behind the content right to left, a fast near row and a slower far one. */
-.pc-sfx-speed::before { left: 0; top: 0; bottom: 0; width: calc(100% + calc(300 * var(--u, 1px))); background: var(--sx); opacity: 0.5;
+.pc-sfx-speed::before { left: 0; top: 0; bottom: 0; width: calc(100% + calc(300 * var(--u, 1px))); background: var(--sx); opacity: 0.42;
   -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='90' viewBox='0 0 300 90'%3E%3Cpath d='M20 12L170 14L20 16z'/%3E%3Ccircle cx='20' cy='14' r='2'/%3E%3Cpath d='M190 38.4L290 40L190 41.6z'/%3E%3Ccircle cx='190' cy='40' r='1.6'/%3E%3Cpath d='M70 67.8L250 70L70 72.2z'/%3E%3Ccircle cx='70' cy='70' r='2.2'/%3E%3C/svg%3E") 0 0 / calc(300 * var(--u, 1px)) calc(90 * var(--u, 1px));
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='90' viewBox='0 0 300 90'%3E%3Cpath d='M20 12L170 14L20 16z'/%3E%3Ccircle cx='20' cy='14' r='2'/%3E%3Cpath d='M190 38.4L290 40L190 41.6z'/%3E%3Ccircle cx='190' cy='40' r='1.6'/%3E%3Cpath d='M70 67.8L250 70L70 72.2z'/%3E%3Ccircle cx='70' cy='70' r='2.2'/%3E%3C/svg%3E") 0 0 / calc(300 * var(--u, 1px)) calc(90 * var(--u, 1px));
-  animation: pc-sfx-speed 1.1s linear infinite; }
+  animation: pc-sfx-speed 2.4s linear infinite; }
 @keyframes pc-sfx-speed { to { transform: translateX(calc(-300 * var(--u, 1px))); } }
-.pc-sfx-speed::after { left: 0; top: 0; bottom: 0; width: calc(100% + calc(220 * var(--u, 1px))); background: #ffffff; opacity: 0.25;
+.pc-sfx-speed::after { left: 0; top: 0; bottom: 0; width: calc(100% + calc(220 * var(--u, 1px))); background: #ffffff; opacity: 0.2;
   -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='80' viewBox='0 0 220 80'%3E%3Cpath d='M10 18.8L110 20L10 21.2z'/%3E%3Ccircle cx='10' cy='20' r='1.2'/%3E%3Cpath d='M130 54.6L250 56L130 57.4z'/%3E%3Ccircle cx='130' cy='56' r='1.4'/%3E%3C/svg%3E") 0 0 / calc(220 * var(--u, 1px)) calc(80 * var(--u, 1px));
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='80' viewBox='0 0 220 80'%3E%3Cpath d='M10 18.8L110 20L10 21.2z'/%3E%3Ccircle cx='10' cy='20' r='1.2'/%3E%3Cpath d='M130 54.6L250 56L130 57.4z'/%3E%3Ccircle cx='130' cy='56' r='1.4'/%3E%3C/svg%3E") 0 0 / calc(220 * var(--u, 1px)) calc(80 * var(--u, 1px));
-  animation: pc-sfx-speed-b 2s linear infinite; }
+  animation: pc-sfx-speed-b 4s linear infinite; }
 @keyframes pc-sfx-speed-b { to { transform: translateX(calc(-220 * var(--u, 1px))); } }
-/* Foil: a band of colour across the card that slides with the pointer (--mx / --my: the card's tilt on the profile,
-   the hover card's pointer watch in ui/hover-fx.ts) and brightens while the card is live; still otherwise. */
-.pc-sfx-foil::before { left: -60%; top: -60%; width: 220%; height: 220%; opacity: 0.55; transition: opacity 0.2s;
-  background: linear-gradient(115deg, transparent 34%, color-mix(in srgb, var(--sx) 40%, transparent) 42%, rgba(255, 255, 255, 0.22) 46%, rgba(255, 143, 200, 0.2) 50%, rgba(255, 214, 107, 0.16) 54%, color-mix(in srgb, var(--sx) 30%, transparent) 58%, transparent 66%);
-  transform: translate(calc((0.5 - var(--mx, 0.5)) * 30%), calc((0.5 - var(--my, 0.5)) * 18%)); }
-.is-live .pc-sfx-foil::before { opacity: 0.9; }
+/* Foil: card stock with a holographic finish. Fine ruled lines over the whole back (still), and bands of spectrum,
+   edged in the colour, lying across them: the bands slide a full period with the pointer (--mx / --my: the card's tilt
+   on the profile, the hover card's pointer watch in ui/hover-fx.ts), so the colour at any spot depends on the angle,
+   and a narrow glare crosses the other way. Behind the content and faint, so text reads as before; brighter while the
+   card is live; a still otherwise, with no layer of its own until the pointer arrives. */
+.pc-sfx-foil { background: repeating-linear-gradient(25deg, rgba(255, 255, 255, 0.032) 0 calc(1.2 * var(--u, 1px)), transparent calc(1.2 * var(--u, 1px)) calc(6 * var(--u, 1px))); }
+.pc-sfx-foil::before { inset: 0 -60%; opacity: 0.55; transition: opacity 0.2s; will-change: auto;
+  background: repeating-linear-gradient(115deg, transparent 0, transparent calc(70 * var(--u, 1px)), color-mix(in srgb, var(--sx) 36%, transparent) calc(112 * var(--u, 1px)), rgba(255, 122, 168, 0.26) calc(150 * var(--u, 1px)), rgba(255, 214, 107, 0.24) calc(186 * var(--u, 1px)), rgba(140, 245, 166, 0.22) calc(222 * var(--u, 1px)), rgba(121, 210, 255, 0.26) calc(258 * var(--u, 1px)), rgba(185, 140, 255, 0.26) calc(294 * var(--u, 1px)), color-mix(in srgb, var(--sx) 26%, transparent) calc(332 * var(--u, 1px)), transparent calc(380 * var(--u, 1px)), transparent calc(480 * var(--u, 1px)));
+  transform: translateX(calc((var(--mx, 0.5) - 0.5) * -480 * var(--u, 1px) + (var(--my, 0.5) - 0.5) * -260 * var(--u, 1px))); }
+.pc-sfx-foil::after { inset: -20% -60%; opacity: 0; transition: opacity 0.2s; will-change: auto;
+  background: linear-gradient(115deg, transparent 45%, rgba(255, 255, 255, 0.09) 49%, rgba(255, 255, 255, 0.17) 50%, rgba(255, 255, 255, 0.09) 51%, transparent 55%);
+  transform: translateX(calc((var(--mx, 0.5) - 0.5) * 70%)); }
+.is-live .pc-sfx-foil::before { opacity: 1; will-change: transform; }
+.is-live .pc-sfx-foil::after { opacity: 1; will-change: transform; }
+body.potato .pc-sfx-foil::before { transform: none; }
 
 /* ---- v0.0.40 borders (supporter-looks.ts CARD_BORDERS: stride, vine, neon). --nb: the frame band's width. */
-.pc > .pc-sborder { --nb: calc(9 * var(--u)); }
-.hc > .pc-sborder, .pf-sw-fx > .pc-sborder { --nb: 4px; }
-/* Stride: spokes of a slowly turning wheel, which the band shows as dashes walking round the frame. */
-.pc-sborder-stride { background: color-mix(in srgb, var(--sx) 16%, transparent); }
-.pc-sborder-stride::before { background: repeating-conic-gradient(from 0deg, var(--sx) 0deg 3.2deg, transparent 3.2deg 9deg); animation: pc-sb-turn 36s linear infinite; }
+.pc-sborder { --nb: var(--band, 4px); }
+/* Stride: dashes of one length walking clockwise round the frame. Six strips (card-fx.ts strideStrips: the four sides
+   and the two cut corners), each a row of dashes on the band's centre line moved one step by transform, then again. */
+.pc-sborder-stride { background: color-mix(in srgb, var(--sx) 14%, transparent); --step: calc(44 * var(--u, 1px)); --dash: calc(18 * var(--u, 1px)); --dw: calc(var(--nb) * 0.4); --dm: calc(var(--nb) * 0.3);
+  /* Where the band's centre line meets the cut's, on each axis. */
+  --jx: calc(var(--cut-w) + var(--nb) * 0.5 * var(--kw)); --jy: calc(var(--cut-h) + var(--nb) * 0.5 * var(--kh)); }
+.pc-sborder.pc-sborder-stride::before { content: none; }
+.pc-sborder-stride > i { position: absolute; overflow: hidden; }
+.pc-sborder-stride > i::before { content: ""; position: absolute; inset: 0; will-change: transform; background: repeating-linear-gradient(90deg, var(--sx) 0 var(--dash), transparent var(--dash) var(--step)); animation: pc-stride 2.4s linear infinite; }
+.pc-stride-t { top: var(--dm); height: var(--dw); left: var(--jx); right: var(--dm); }
+.pc-stride-b { bottom: var(--dm); height: var(--dw); left: var(--dm); right: var(--jx); }
+.pc-stride-r { right: var(--dm); width: var(--dw); top: var(--dm); bottom: var(--jy); }
+.pc-stride-l { left: var(--dm); width: var(--dw); top: var(--jy); bottom: var(--dm); }
+.pc-stride-t::before, .pc-stride-c1::before, .pc-stride-c2::before { left: calc(-1 * var(--step)); --sx-to: var(--step); }
+.pc-stride-b::before { right: calc(-1 * var(--step)); --sx-to: calc(-1 * var(--step)); }
+.pc-stride-r::before, .pc-stride-l::before { background: repeating-linear-gradient(180deg, var(--sx) 0 var(--dash), transparent var(--dash) var(--step)); }
+.pc-stride-r::before { top: calc(-1 * var(--step)); --sy-to: var(--step); }
+.pc-stride-l::before { bottom: calc(-1 * var(--step)); --sy-to: calc(-1 * var(--step)); }
+/* The cut corners: a strip from one side's centre line to the next, turned to the cut's angle. */
+.pc-stride-c1, .pc-stride-c2 { height: var(--dw); transform-origin: 0 0;
+  width: hypot(calc(var(--jx) - var(--nb) * 0.5), calc(var(--jy) - var(--nb) * 0.5)); --turn: atan2(calc(var(--nb) * 0.5 - var(--jy)), calc(var(--jx) - var(--nb) * 0.5)); }
+.pc-stride-c1 { left: calc(var(--nb) * 0.5); top: var(--jy); transform: rotate(var(--turn)) translateY(-50%); }
+.pc-stride-c2 { left: calc(100% - var(--nb) * 0.5); top: calc(100% - var(--jy)); transform: rotate(calc(var(--turn) + 180deg)) translateY(-50%); }
+@keyframes pc-stride { to { transform: translate(var(--sx-to, 0), var(--sy-to, 0)); } }
+.pf-sw-fx .pc-sborder-stride { --step: 9px; --dash: 4px; }
+.pf-sw-fx .pc-stride-c1, .pf-sw-fx .pc-stride-c2 { display: none; }
 /* Neon: the band lit in the colour with a pale core along its middle, and a faint glow on the content's edge; a rare
    flicker (the whole layer's opacity). */
 .pc-sborder.pc-sborder-neon::before { left: 0; top: 0; width: 100%; height: 100%; margin: 0; aspect-ratio: auto; background: var(--sx); will-change: auto; }
-.pc-sborder-neon::after { content: ""; position: absolute; inset: calc(var(--nb) * 0.32); border: calc(var(--nb) * 0.36) solid color-mix(in srgb, var(--sx) 25%, #ffffff); }
+.pc-sborder-neon::after { content: ""; position: absolute; inset: 0; --a: calc(var(--nb) * 0.32); --b: calc(var(--nb) * 0.68); background: color-mix(in srgb, var(--sx) 25%, #ffffff); }
 .pc-sborder-neon, .pc-sfx-neon { animation: pc-sb-flicker 13s linear infinite; }
 .pc-sfx-neon { box-shadow: inset 0 0 calc(18 * var(--u, 1px)) color-mix(in srgb, var(--sx) 30%, transparent); }
 @keyframes pc-sb-flicker { 0%, 88%, 100% { opacity: 1; } 88.6% { opacity: 0.35; } 89.2% { opacity: 1; } 89.8% { opacity: 0.55; } 90.6% { opacity: 1; } }
-/* Vine: a stem along the band near the two cut corners, and a sprig of leaves inside each cut corner swaying a little
-   (a layer behind the content, .pc-sfx-vine). The leaves lean green, tinted by the colour. */
-.pc-sborder-vine { --vine: color-mix(in srgb, var(--sx) 40%, #4f9e3a); background: linear-gradient(135deg, var(--vine) 0 9%, color-mix(in srgb, var(--vine) 35%, transparent) 22%, transparent 34% 66%, color-mix(in srgb, var(--vine) 35%, transparent) 78%, var(--vine) 91%); }
-.pc-sborder.pc-sborder-vine::before { content: none; }
-.pc-sfx-vine { --vine: color-mix(in srgb, var(--sx) 40%, #7fd35f); opacity: 0.85; }
-.pc-sfx-vine::before, .pc-sfx-vine::after { width: calc(150 * var(--u, 1px)); height: calc(94 * var(--u, 1px)); background: var(--vine); }
-.pc-sfx-vine::before { left: 0; top: 0; transform-origin: 0 0; -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='50' viewBox='0 0 80 50'%3E%3Cpath d='M1 46C3 24 22 4 46 1' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round'/%3E%3Cpath d='M46 1C58 0 66 3 74 1' fill='none' stroke='%23000' stroke-width='1.4' stroke-linecap='round'/%3E%3Cpath d='M4 32Q10.4 39.2 20 38Q13.6 30.8 4 32z' fill='%23000' fill-opacity='.55' stroke='%23000' stroke-width='1.1'/%3E%3Cpath d='M4 32L12.0 35.0' stroke='%23000' stroke-width='.9'/%3E%3Cpath d='M11 18Q17.2 25.7 27 24Q20.8 16.3 11 18z' fill='%23000' fill-opacity='.55' stroke='%23000' stroke-width='1.1'/%3E%3Cpath d='M11 18L19.0 21.0' stroke='%23000' stroke-width='.9'/%3E%3Cpath d='M22 8Q26.4 16.7 36 18Q31.6 9.3 22 8z' fill='%23000' fill-opacity='.55' stroke='%23000' stroke-width='1.1'/%3E%3Cpath d='M22 8L29.0 13.0' stroke='%23000' stroke-width='.9'/%3E%3Cpath d='M36 3Q41.0 10.5 50 11Q45.0 3.5 36 3z' fill='%23000' fill-opacity='.55' stroke='%23000' stroke-width='1.1'/%3E%3Cpath d='M36 3L43.0 7.0' stroke='%23000' stroke-width='.9'/%3E%3Cpath d='M58 1Q61.3 7.0 68 8Q64.7 2.0 58 1z' fill='%23000' fill-opacity='.55' stroke='%23000' stroke-width='1.1'/%3E%3Cpath d='M58 1L63.0 4.5' stroke='%23000' stroke-width='.9'/%3E%3C/svg%3E") 0 0 / 100% 100%; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='50' viewBox='0 0 80 50'%3E%3Cpath d='M1 46C3 24 22 4 46 1' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round'/%3E%3Cpath d='M46 1C58 0 66 3 74 1' fill='none' stroke='%23000' stroke-width='1.4' stroke-linecap='round'/%3E%3Cpath d='M4 32Q10.4 39.2 20 38Q13.6 30.8 4 32z' fill='%23000' fill-opacity='.55' stroke='%23000' stroke-width='1.1'/%3E%3Cpath d='M4 32L12.0 35.0' stroke='%23000' stroke-width='.9'/%3E%3Cpath d='M11 18Q17.2 25.7 27 24Q20.8 16.3 11 18z' fill='%23000' fill-opacity='.55' stroke='%23000' stroke-width='1.1'/%3E%3Cpath d='M11 18L19.0 21.0' stroke='%23000' stroke-width='.9'/%3E%3Cpath d='M22 8Q26.4 16.7 36 18Q31.6 9.3 22 8z' fill='%23000' fill-opacity='.55' stroke='%23000' stroke-width='1.1'/%3E%3Cpath d='M22 8L29.0 13.0' stroke='%23000' stroke-width='.9'/%3E%3Cpath d='M36 3Q41.0 10.5 50 11Q45.0 3.5 36 3z' fill='%23000' fill-opacity='.55' stroke='%23000' stroke-width='1.1'/%3E%3Cpath d='M36 3L43.0 7.0' stroke='%23000' stroke-width='.9'/%3E%3Cpath d='M58 1Q61.3 7.0 68 8Q64.7 2.0 58 1z' fill='%23000' fill-opacity='.55' stroke='%23000' stroke-width='1.1'/%3E%3Cpath d='M58 1L63.0 4.5' stroke='%23000' stroke-width='.9'/%3E%3C/svg%3E") 0 0 / 100% 100%; animation: pc-sb-sway 5s ease-in-out infinite; }
-.pc-sfx-vine::after { right: 0; bottom: 0; transform-origin: 100% 100%; -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='50' viewBox='0 0 80 50'%3E%3Cg transform='rotate(180 40 25)'%3E%3Cpath d='M1 46C3 24 22 4 46 1' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round'/%3E%3Cpath d='M46 1C58 0 66 3 74 1' fill='none' stroke='%23000' stroke-width='1.4' stroke-linecap='round'/%3E%3Cpath d='M4 32Q10.4 39.2 20 38Q13.6 30.8 4 32z' fill='%23000' fill-opacity='.55' stroke='%23000' stroke-width='1.1'/%3E%3Cpath d='M4 32L12.0 35.0' stroke='%23000' stroke-width='.9'/%3E%3Cpath d='M11 18Q17.2 25.7 27 24Q20.8 16.3 11 18z' fill='%23000' fill-opacity='.55' stroke='%23000' stroke-width='1.1'/%3E%3Cpath d='M11 18L19.0 21.0' stroke='%23000' stroke-width='.9'/%3E%3Cpath d='M22 8Q26.4 16.7 36 18Q31.6 9.3 22 8z' fill='%23000' fill-opacity='.55' stroke='%23000' stroke-width='1.1'/%3E%3Cpath d='M22 8L29.0 13.0' stroke='%23000' stroke-width='.9'/%3E%3Cpath d='M36 3Q41.0 10.5 50 11Q45.0 3.5 36 3z' fill='%23000' fill-opacity='.55' stroke='%23000' stroke-width='1.1'/%3E%3Cpath d='M36 3L43.0 7.0' stroke='%23000' stroke-width='.9'/%3E%3Cpath d='M58 1Q61.3 7.0 68 8Q64.7 2.0 58 1z' fill='%23000' fill-opacity='.55' stroke='%23000' stroke-width='1.1'/%3E%3Cpath d='M58 1L63.0 4.5' stroke='%23000' stroke-width='.9'/%3E%3C/g%3E%3C/svg%3E") 0 0 / 100% 100%; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='50' viewBox='0 0 80 50'%3E%3Cg transform='rotate(180 40 25)'%3E%3Cpath d='M1 46C3 24 22 4 46 1' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round'/%3E%3Cpath d='M46 1C58 0 66 3 74 1' fill='none' stroke='%23000' stroke-width='1.4' stroke-linecap='round'/%3E%3Cpath d='M4 32Q10.4 39.2 20 38Q13.6 30.8 4 32z' fill='%23000' fill-opacity='.55' stroke='%23000' stroke-width='1.1'/%3E%3Cpath d='M4 32L12.0 35.0' stroke='%23000' stroke-width='.9'/%3E%3Cpath d='M11 18Q17.2 25.7 27 24Q20.8 16.3 11 18z' fill='%23000' fill-opacity='.55' stroke='%23000' stroke-width='1.1'/%3E%3Cpath d='M11 18L19.0 21.0' stroke='%23000' stroke-width='.9'/%3E%3Cpath d='M22 8Q26.4 16.7 36 18Q31.6 9.3 22 8z' fill='%23000' fill-opacity='.55' stroke='%23000' stroke-width='1.1'/%3E%3Cpath d='M22 8L29.0 13.0' stroke='%23000' stroke-width='.9'/%3E%3Cpath d='M36 3Q41.0 10.5 50 11Q45.0 3.5 36 3z' fill='%23000' fill-opacity='.55' stroke='%23000' stroke-width='1.1'/%3E%3Cpath d='M36 3L43.0 7.0' stroke='%23000' stroke-width='.9'/%3E%3Cpath d='M58 1Q61.3 7.0 68 8Q64.7 2.0 58 1z' fill='%23000' fill-opacity='.55' stroke='%23000' stroke-width='1.1'/%3E%3Cpath d='M58 1L63.0 4.5' stroke='%23000' stroke-width='.9'/%3E%3C/g%3E%3C/svg%3E") 0 0 / 100% 100%; animation: pc-sb-sway 5s ease-in-out -2.5s infinite; }
-@keyframes pc-sb-sway { 0%, 100% { transform: rotate(-2.5deg); } 50% { transform: rotate(2.5deg); } }
+/* Vine: a stem running in the band all the way round, and leaves growing off it into the card along the top (from the
+   top-left cut corner) and the bottom (from the bottom-right one), thinning out toward the middle; they lean one way
+   and the other as if in a light wind. The leaves stay inside the card's own margin (18 units; smaller on the hover
+   card, whose margin is), clear of the logo, the name and the footer line. Green, tinted by the colour. */
+.hc-inner > .pc-sfx-vine { --u: 0.5px; }
+.pc-sborder-vine { --vine: color-mix(in srgb, var(--sx) 40%, #4f9e3a); background: color-mix(in srgb, var(--vine) 30%, transparent); }
+.pc-sborder.pc-sborder-vine::before { inset: 0; left: 0; top: 0; width: auto; margin: 0; aspect-ratio: auto; will-change: auto; --a: calc(var(--nb) * 0.34); --b: calc(var(--nb) * 0.66); background: var(--vine); }
+.pc-sfx-vine { --vine: color-mix(in srgb, var(--sx) 40%, #7fd35f); opacity: 0.9; }
+.pc-sfx-vine::before, .pc-sfx-vine::after { left: 0; right: 0; height: calc(18 * var(--u, 1px)); background: var(--vine);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='132' height='18' viewBox='0 0 132 18'%3E%3Cpath d='M0 3Q33 .2 66 3T132 3' fill='none' stroke='%23000' stroke-width='1.7'/%3E%3Cg fill='%23000' fill-opacity='.6' stroke='%23000' stroke-width='1' stroke-linejoin='round'%3E%3Cpath d='M14 2.6C18 8.5 27 15 38 16C35 8.5 26 3 14 2.6Z'/%3E%3Cpath d='M70 3.2C67 8 61 12 52.5 13C54.5 7.5 61 3.6 70 3.2Z'/%3E%3Cpath d='M96 2.4C99 6 105 9.4 112 10C110 5.6 104 2.6 96 2.4Z'/%3E%3C/g%3E%3Cg fill='none' stroke='%23000' stroke-width='.8' stroke-linecap='round'%3E%3Cpath d='M14 2.6L30 12M70 3.2L58 10.4M96 2.4L107 8'/%3E%3C/g%3E%3C/svg%3E") 0 0 / calc(132 * var(--u, 1px)) 100% repeat-x, linear-gradient(90deg, #000 0%, #000 30%, transparent 58%); -webkit-mask-composite: source-in;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='132' height='18' viewBox='0 0 132 18'%3E%3Cpath d='M0 3Q33 .2 66 3T132 3' fill='none' stroke='%23000' stroke-width='1.7'/%3E%3Cg fill='%23000' fill-opacity='.6' stroke='%23000' stroke-width='1' stroke-linejoin='round'%3E%3Cpath d='M14 2.6C18 8.5 27 15 38 16C35 8.5 26 3 14 2.6Z'/%3E%3Cpath d='M70 3.2C67 8 61 12 52.5 13C54.5 7.5 61 3.6 70 3.2Z'/%3E%3Cpath d='M96 2.4C99 6 105 9.4 112 10C110 5.6 104 2.6 96 2.4Z'/%3E%3C/g%3E%3Cg fill='none' stroke='%23000' stroke-width='.8' stroke-linecap='round'%3E%3Cpath d='M14 2.6L30 12M70 3.2L58 10.4M96 2.4L107 8'/%3E%3C/g%3E%3C/svg%3E") 0 0 / calc(132 * var(--u, 1px)) 100% repeat-x, linear-gradient(90deg, #000 0%, #000 30%, transparent 58%); mask-composite: intersect;
+  animation: pc-sb-sway 5.5s ease-in-out infinite; }
+.pc-sfx-vine::before { top: 0; transform-origin: 50% 0; }
+/* (The bottom strip is the top one turned over about its own centre, so it stays on the bottom edge.) */
+.pc-sfx-vine::after { bottom: 0; transform-origin: 50% 50%; scale: -1 -1; animation-delay: -2.2s; }
+@keyframes pc-sb-sway { 0%, 100% { transform: skewX(-5deg); } 50% { transform: skewX(5deg); } }
 
 /* The new layers at rest with the others: off screen paused, reduced motion and Potato still (each still reads as itself:
    streaks, flakes, petals, lines, the foil band, dashes, leaves, the lit tube). */
 .fx-off .pc-sborder, .fx-off .pc-sfx { animation-play-state: paused; }
 @media (prefers-reduced-motion: reduce) { .pc-sborder, .pc-sfx { animation: none; } }
 body.potato .pc-sborder, body.potato .pc-sfx { animation: none; }
-/* Edit card's small cards: the band shows Stride's dashes at this size too. */
-.pf-sw-fx .pc-sborder-stride::before { background: repeating-conic-gradient(from 0deg, var(--sx) 0deg 7deg, transparent 7deg 18deg); }
-/* Vine at swatch size: the sprigs scaled down to the small card. */
-.pf-sw-fx .pc-sfx-vine::before, .pf-sw-fx .pc-sfx-vine::after { width: 15px; height: 9.5px; }
+/* Every looping layer starts on the page's clock (card-fx.ts fxClock), so a rebuilt card carries on where the last one
+   was. After all the animation shorthands above; the two layers with an offset of their own keep it. */
+.pc-sborder, .pc-sfx, .pc-sborder::before, .pc-sborder > i::before, .pc-sfx::before, .pc-sfx::after { animation-delay: var(--fx-t, 0s); }
+.pc-sfx-stars::after { animation-delay: calc(var(--fx-t, 0s) - 2.5s); }
+.pc-sfx-vine::after { animation-delay: calc(var(--fx-t, 0s) - 2.2s); }
+.fx-off .pc-sborder > i::before { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) { .pc-sborder > i::before { animation: none; will-change: auto; } }
+body.potato .pc-sborder > i::before { animation: none; will-change: auto; }
+/* Vine at swatch size: the leaves at half scale, so the small card still shows them. */
+.pf-sw-fx .pc-sfx-vine { --u: 0.5px; }

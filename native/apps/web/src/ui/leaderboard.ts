@@ -100,9 +100,8 @@ export function leaderboardPanel(map: string, style: string, opts: BoardOptions 
         { class: [e.rank <= 3 ? `top${e.rank}` : "", c.mine ? "me" : "", c.found ? "found" : ""].filter(Boolean).join(" ") || null, "data-run": e.runId, "data-run-title": name, "data-run-points": runPointsAttr(e.points) },
         h("td.rb-rank", null, String(e.rank)),
         playerCell(e.player, () => navigate({ screen: "profile", id: e.player.id })),
-        // .rs-keep: the row's stats card stays clear of these columns (ui/run-stats.ts).
-        h("td.num.rb-strong.rs-keep", { title: [`${e.ticks.toLocaleString("en-US")} ticks`, physicsNote(e)].filter(Boolean).join(" · ") }, formatTime(e.time)),
-        h("td.num.rb-opt3.rs-keep", null, gap),
+        h("td.num.rb-strong", { title: [`${e.ticks.toLocaleString("en-US")} ticks`, physicsNote(e)].filter(Boolean).join(" · ") }, formatTime(e.time)),
+        h("td.num.rb-opt3", null, gap),
         h("td.num.dim.rb-opt.lb-minor", null, String(e.jumps)),
         h("td.num.dim.rb-opt.lb-minor", null, e.strafes == null ? "—" : String(e.strafes)),
         h("td.num.dim.rb-opt.lb-perf", { title: e.perf == null ? "Not recorded for this run" : "Perfectly timed measured hops" }, e.perf == null ? "—" : `${e.perf.toFixed(1)}%`),

@@ -15,6 +15,7 @@ import { CLASSIC, DEFAULT_KEYS, HUD_ELEMENTS, HUD_SCALE, moveRetiredPlaces, type
 import { VIEWMODEL_BOB, VIEWMODEL_BOB_V3, VIEWMODEL_POS, VIEWMODEL_POS_V1, VIEWMODEL_POS_V2, VIEWMODEL_REV } from "../viewmodel/defaults";
 import { DEFAULT_SSJ, type SsjPrefs } from "../ssj/stats";
 import { DEFAULT_JHUD, type JhudPrefs } from "../ssj/jhud";
+import { DEFAULT_LOGS, type LogsPrefs } from "../ssj/logs";
 import { DEFAULT_TRIGGER_PREFS, normalizeTriggerPrefs, type TriggerPrefs } from "../triggers/volumes";
 import { DEFAULT_PAINT, type PaintPrefs } from "../paint/prefs";
 import { DEFAULT_LANDING_PREFS, normalizeLandingPrefs, type LandingPrefs } from "../landing/prefs";
@@ -266,6 +267,8 @@ export interface Prefs {
     ssj: SsjPrefs;
     /** JHUD (!jhud, ssj/jhud.ts): what it shows and its colours. The HUD element is layout.jhud. */
     jhud: JhudPrefs;
+    /** Gain logs (!logs, ssj/logs.ts): a chat line every 6 jumps. */
+    logs: LogsPrefs;
     /** slowTicks: the strafe offsets line also shows each strafe's slow ticks, below slowBelow % of the best gain. */
     movement: { fjtChat: boolean; lj: boolean; ljChat: boolean; slowTicks: boolean; slowBelow: number };
     /** CS:S `cl_showpos` (hud/showpos.ts): 0 off, 1 eye position and view angles, 2 feet origin. */
@@ -627,7 +630,7 @@ export const DEFAULT_PREFS: Prefs = {
   inputStats: false,
   fov: 90,
   crosshair: { style: "cross", color: "#4dff6a", size: 6, thickness: 2, gap: 4, outline: true, alpha: 1 },
-  hud: { speedColors: true, gainTicks: true, edgeGlow: false, place: "off", strafeTrainer: DEFAULT_TRAINER, scale: 1, layout: CLASSIC, keys: DEFAULT_KEYS, hidden: false, hiddenKeeps: "speedKeys", ssj: DEFAULT_SSJ, jhud: DEFAULT_JHUD, movement: { fjtChat: false, lj: false, ljChat: true, slowTicks: false, slowBelow: 75 }, showPos: 0, netGraph: false },
+  hud: { speedColors: true, gainTicks: true, edgeGlow: false, place: "off", strafeTrainer: DEFAULT_TRAINER, scale: 1, layout: CLASSIC, keys: DEFAULT_KEYS, hidden: false, hiddenKeeps: "speedKeys", ssj: DEFAULT_SSJ, jhud: DEFAULT_JHUD, logs: DEFAULT_LOGS, movement: { fjtChat: false, lj: false, ljChat: true, slowTicks: false, slowBelow: 75 }, showPos: 0, netGraph: false },
   volume: 0.8,
   audio: {
     announcer: { enabled: false, finish: true, movement: true, local: true, server: true, volume: 0.8, pb: "perfect", wr: "godlike", speed: "godlike", highSpeed: "holyshit", streak: "perfect", lj: "perfect", speedThreshold: 1500, highSpeedThreshold: 2500, streakThreshold: 3, ljThreshold: 250 },

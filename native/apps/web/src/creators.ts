@@ -180,7 +180,7 @@ export function marksOf(
     // name_style: SUPPORTER_COLS too (v0.0.40); absent from older rows / queries.
     ...(row.name_style !== undefined ? { nameStyle: isNameStyle(row.name_style) ? row.name_style : null } : {}),
     ...(row.avatar_deco !== undefined ? { avatarDeco: avatarDecoOf(row.avatar_deco) } : {}),
-    ...(row.special_badges !== undefined ? { special: onePeak(oneWeeklyPerMedal(parseBadgeList(row.special_badges).filter(isSpecialBadge))) } : {}),
+    ...(row.special_badges !== undefined ? { special: onePeak(oneDailyPerMetal(oneWeeklyPerMedal(parseBadgeList(row.special_badges).filter(isSpecialBadge)))) } : {}),
   };
 }
 
@@ -417,6 +417,132 @@ export function oneWeeklyPerMedal(ids: string[]): string[] {
   });
 }
 
+// Daily Challenge marks (apps/api/src/daily.ts awards them when a day closes): a sun disc in the weekly marks' gold,
+// silver and bronze with the count engraved, one per medal ("daily-gold", "daily-gold-12"). The disc grows with the
+// count (DAILY_STEPS): plain, short rays, a twelve-point burst, the burst with an engraved ring, a second row of points
+// behind it, and from 100 a raised light centre. The sun is the daily's (the weekly is a calendar page).
+export type DailyMetal = "gold" | "silver" | "bronze";
+const DAILY_METALS: Record<DailyMetal, { light: string; mid: string; dark: string; word: string }> = { gold: MEDALS.winner, silver: MEDALS.second, bronze: MEDALS.third };
+/** Counts engraved past this read as it. */
+export const DAILY_MARK_MAX = 999;
+/** The counts a daily mark changes its look at. */
+export const DAILY_STEPS = [1, 5, 10, 25, 50, 100] as const;
+/** Which look (0 to DAILY_STEPS.length - 1) a count wears. */
+export const dailyStep = (n: number): number => DAILY_STEPS.reduce((s, at, i) => (n >= at ? i : s), 0);
+/** The daily mark for `n` (1..) places of a medal: "daily-gold", "daily-gold-3", "daily-bronze-12". */
+export const dailyMarkId = (metal: DailyMetal, n: number) => `daily-${metal}${n > 1 ? `-${Math.min(DAILY_MARK_MAX, Math.floor(n))}` : ""}`;
+/**
+ * How many of each daily medal a player holds, read off their special marks ("daily-gold-12"): the same public counters
+ * the name badge shows, so nothing else has to be asked or carried (the Daily Medal on the chest, loadout.ts medal).
+ * `special`: the marks as a list or as the stored JSON text.
+ */
+export function medalCountsOf(special: unknown): { gold: number; silver: number; bronze: number } {
+  const out = { gold: 0, silver: 0, bronze: 0 };
+  for (const id of parseBadgeList(special)) {
+    const d = dailyMarkOf(id);
+    if (d) out[d.metal] = Math.max(out[d.metal], d.n);
+  }
+  return out;
+}
+
+/** The medal and count of a daily mark id, or null. */
+export function dailyMarkOf(id: string): { metal: DailyMetal; n: number } | null {
+  const m = /^daily-(gold|silver|bronze)(?:-([1-9]\d{0,2}))?$/.exec(id);
+  if (!m) return null;
+  const n = m[2] === undefined ? 1 : Number(m[2]);
+  if (m[2] !== undefined && n < 2) return null;
+  return { metal: m[1] as DailyMetal, n };
+}
+const r2 = (v: number) => Math.round(v * 100) / 100;
+/** A star polygon's points: `points` tips at radius `outer`, valleys at `inner`, turned by `turn` (radians). */
+function burst(points: number, outer: number, inner: number, turn = 0): string {
+  let d = "";
+  for (let i = 0; i < points * 2; i++) {
+    const a = turn - Math.PI / 2 + (i * Math.PI) / points;
+    const r = i % 2 ? inner : outer;
+    d += `${i ? "L" : "M"}${r2(12 + Math.cos(a) * r)} ${r2(12 + Math.sin(a) * r)}`;
+  }
+  return `${d}z`;
+}
+export function dailyMarkSvg(metal: DailyMetal, n: number): string {
+  const c = DAILY_METALS[metal];
+  const step = dailyStep(n);
+  const id = `dy-${metal}-${n}`;
+  const digits = String(Math.min(DAILY_MARK_MAX, n));
+  const fill = `url(#${id})`;
+  let body = "";
+  if (step === 0) body = `<circle cx="12" cy="12" r="9.4" fill="${fill}"/>`;
+  else if (step === 1) {
+    let rays = "";
+    for (let i = 0; i < 8; i++) {
+      const a = (i * Math.PI) / 4;
+      rays += `M${r2(12 + Math.cos(a) * 9.7)} ${r2(12 + Math.sin(a) * 9.7)}L${r2(12 + Math.cos(a) * 11.2)} ${r2(12 + Math.sin(a) * 11.2)}`;
+    }
+    body = `<path d="${rays}" stroke="${c.mid}" stroke-width="1.9" stroke-linecap="round"/><circle cx="12" cy="12" r="8.1" fill="${fill}"/>`;
+  } else {
+    // From 50: a second, darker row of points behind the burst.
+    if (step >= 4) body += `<path d="${burst(12, 11.8, 9.2, Math.PI / 12)}" fill="${c.dark}"/>`;
+    body += `<path d="${burst(12, 11.6, 9.3)}" fill="${fill}"/>`;
+    // From 100: a raised light centre.
+    if (step >= 5) body += `<circle cx="12" cy="12" r="7.7" fill="${c.light}"/>`;
+    if (step >= 3) body += `<circle cx="12" cy="12" r="7.7" fill="none" stroke="${GAUNTLET_INK}" stroke-width=".7" opacity=".45"/>`;
+  }
+  const [y, size] = digits.length === 1 ? [16.3, 12] : digits.length === 2 ? [15.5, 9.6] : [14.7, 7.2];
+  return (
+    `<defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${c.light}"/><stop offset=".55" stop-color="${c.mid}"/><stop offset="1" stop-color="${c.dark}"/></linearGradient></defs>` +
+    body +
+    engraved(digits, y, size, GAUNTLET_INK)
+  );
+}
+/**
+ * Every daily mark, 1 to DAILY_MARK_MAX of each medal (the drawing is made when first read). Next to a name by
+ * default: the best medal the player holds (bestDailyMark); the others when picked. Gold glints from 50.
+ */
+const DAILY_MARKS: Record<string, { name: string; svg: string; gold?: boolean; earned?: boolean; quiet?: boolean }> = Object.fromEntries(
+  (Object.keys(DAILY_METALS) as DailyMetal[]).flatMap((metal) =>
+    Array.from({ length: DAILY_MARK_MAX }, (_, i) => {
+      const n = i + 1;
+      let svg: string | null = null;
+      return [
+        dailyMarkId(metal, n),
+        {
+          name: `Daily Challenge ${DAILY_METALS[metal].word}${n > 1 ? ` ×${n}` : ""}`,
+          get svg() {
+            return (svg ??= dailyMarkSvg(metal, n));
+          },
+          gold: metal === "gold" && n >= 50,
+          earned: true,
+          quiet: true,
+        },
+      ];
+    }),
+  ),
+);
+const DAILY_ORDER: readonly DailyMetal[] = ["gold", "silver", "bronze"];
+/** A list of special badges with one daily mark per medal, the highest count (an account merge can bring two). */
+export function oneDailyPerMetal(ids: string[]): string[] {
+  const best = new Map<DailyMetal, number>();
+  for (const id of ids) {
+    const d = dailyMarkOf(id);
+    if (d && d.n > (best.get(d.metal) ?? 0)) best.set(d.metal, d.n);
+  }
+  return ids.filter((id) => {
+    const d = dailyMarkOf(id);
+    if (!d) return true;
+    if (best.get(d.metal) !== d.n) return false;
+    best.set(d.metal, -1); // once
+    return true;
+  });
+}
+/** The daily mark worn by default: the best medal held (gold over silver over bronze), or null. */
+export function bestDailyMark(ids: readonly string[]): string | null {
+  for (const metal of DAILY_ORDER) {
+    const id = ids.find((x) => dailyMarkOf(x)?.metal === metal);
+    if (id) return id;
+  }
+  return null;
+}
+
 export const GAUNTLET_CLASSIC_SVG =
   `${goldFill("gc-oct")}<path d="M8.1 1.4h7.8l5.7 5.7v7.8l-5.7 5.7H8.1l-5.7-5.7V7.1z" fill="url(#gc-oct)"/>` +
   `<path d="M8.7 3h6.6l4.7 4.7v6.6L15.3 19H8.7L4 14.3V7.7z" fill="none" stroke="${GOLD_INK}" stroke-width=".8" opacity=".5"/>${engraved("20", 15.6, 10.5, GOLD_INK)}`;
@@ -502,6 +628,7 @@ export const SPECIAL_BADGES: Record<string, { name: string; svg: string; gold?: 
   mapper: { name: "Mapper", svg: MAPPER_SVG },
   gauntlet: { name: "Gauntlet clear", svg: GAUNTLET_SVG, earned: true, quiet: true },
   ...WEEKLY_MARKS,
+  ...DAILY_MARKS,
   "gauntlet-classic": { name: "Bunny Hop Map Gauntlet", svg: GAUNTLET_CLASSIC_SVG, gold: true, earned: true },
   ...PEAK_MARKS,
   ...Object.fromEntries(
@@ -649,7 +776,9 @@ function nameBadgesOf(saved: string | null | undefined): { nameBadges?: string[]
 export const gifterTier = (n = 0) => [...GIFTER_TIERS].reverse().find((t) => n >= t.goal);
 export function equippedNameBadges(m: PlayerMarks): string[] {
   const special = onePeak(m.special ?? []);
-  const legacy = [m.verified && "verified", m.creator && "creator", m.booster && "booster", m.supporter && "supporter", ...special.filter((id) => !SPECIAL_BADGES[id]?.quiet)].filter(
+  // Daily marks: the best medal held is worn by default, the others when picked (bestDailyMark).
+  const bestDaily = bestDailyMark(special);
+  const legacy = [m.verified && "verified", m.creator && "creator", m.booster && "booster", m.supporter && "supporter", ...special.filter((id) => !SPECIAL_BADGES[id]?.quiet || id === bestDaily)].filter(
     (x): x is string => typeof x === "string",
   );
   const tier = gifterTier(m.giftsSent);
@@ -668,6 +797,8 @@ export function equippedNameBadges(m: PlayerMarks): string[] {
               ? !!tier
               : weeklyMarkOf(id)
                 ? !!heldWeekly(id)
+                : dailyMarkOf(id)
+                  ? !!heldDaily(id)
                 : peakMarkOf(id)
                   ? !!heldPeak()
                   : isSpecialBadge(id) && special.includes(id);
@@ -678,9 +809,14 @@ export function equippedNameBadges(m: PlayerMarks): string[] {
     const medal = weeklyMarkOf(id)?.medal;
     return special.find((x) => weeklyMarkOf(x)?.medal === medal) ?? null;
   };
+  // ... and a picked daily mark its medal's count (a pick of "daily-gold" wears "daily-gold-12").
+  const heldDaily = (id: string) => {
+    const metal = dailyMarkOf(id)?.metal;
+    return special.find((x) => dailyMarkOf(x)?.metal === metal) ?? null;
+  };
   const picked = m.nameBadges?.filter(owned);
   const selected = picked && (picked.length || !m.nameBadges!.length) ? picked : legacy;
-  const ids = [...new Set(selected.map((id) => (id === "gifter" || id.startsWith("gifter-") ? tier!.id : weeklyMarkOf(id) ? heldWeekly(id)! : peakMarkOf(id) ? heldPeak()! : id)))];
+  const ids = [...new Set(selected.map((id) => (id === "gifter" || id.startsWith("gifter-") ? tier!.id : weeklyMarkOf(id) ? heldWeekly(id)! : dailyMarkOf(id) ? heldDaily(id)! : peakMarkOf(id) ? heldPeak()! : id)))];
   // A moderator who picked Contributor wears it in the shield's place (wearsContributorForStaff).
   if (wearsContributorForStaff(m)) return ["contributor", ...ids.filter((id) => id !== "staff" && id !== "contributor").slice(0, 2)];
   return [...(m.staff ? ["staff"] : []), ...ids.filter((id) => id !== "staff").slice(0, m.staff ? 2 : 3)];

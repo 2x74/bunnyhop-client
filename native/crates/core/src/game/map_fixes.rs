@@ -244,6 +244,8 @@ pub(crate) struct PlayerIo {
     pub map: &'static str,
     /// Worldspawn keyvalues that must match exactly (bounds and Hammer's mapversion pin the build).
     pub worldspawn: &'static [(&'static str, &'static str)],
+    /// First physics version the entry runs at (with `PHYSICS_FIX_MAP_PLAYER_IO`): 16 for the original three.
+    pub min_physics: u32,
     /// Why, for the reader.
     #[allow(dead_code)]
     pub reason: &'static str,
@@ -253,6 +255,7 @@ pub(crate) const PLAYER_IO: &[PlayerIo] = &[
     PlayerIo {
         map: "bhop_synthetic_fix",
         worldspawn: &[("world_mins", "-15884 -16291 -14628"), ("world_maxs", "15856 16291 13654"), ("mapversion", "50")],
+        min_physics: 16,
         reason: "stage 3's potion room: three potions (trigger_multiple *100..*102) feed counter_potcount, whose max \
                  renames the player potpass; the door (trigger_teleport *98, filter_potpass, the room's whole exit) \
                  sends everyone else back to teleport_12. Its stage 4 / 7 tick plates also send filter_*,TestActivator \
@@ -261,14 +264,26 @@ pub(crate) const PLAYER_IO: &[PlayerIo] = &[
     PlayerIo {
         map: "bhop_wonderland",
         worldspawn: &[("world_mins", "-11616 -16184 -13814"), ("world_maxs", "12588 15864 2454"), ("mapversion", "136")],
+        min_physics: 16,
         reason: "the cp3 key room: three keys (*241..*243) feed counter, whose max renames the player ng0_pass; only \
                  that name takes the exit teleport *244 to cp4a",
     },
     PlayerIo {
         map: "bhop_lego3",
         worldspawn: &[("world_mins", "-13216 -4576 -3680"), ("world_maxs", "11136 12288 1856"), ("mapversion", "4978")],
+        min_physics: 16,
         reason: "three coins (*3..*5) feed counter at checking_trigger *171, whose max renames the player ng0_pass; \
                  everyone else meets the denied teleport *178 and push *177",
+    },
+    PlayerIo {
+        map: "bhop_iso",
+        // GameBanana 733101 file 1866671 = the main.fastdl.me build, BSP sha256 92af3d97fc0ceadf65f8a6c99820f32299078c4b20306569b1c8a8b8b7fa9606.
+        worldspawn: &[("world_mins", "-2757 -6689 -1463"), ("world_maxs", "2757 6689 593"), ("mapversion", "100")],
+        min_physics: 30,
+        reason: "fail floors *49 / *53 send you to your checkpoint through filter_activator_name TestActivator chains \
+                 (Checkpoint9 iso_checkpoint9* -> tele9, else Checkpoint8 -> tele8 / tele7; Checkpoint11 -> tele11 / tele10) \
+                 and the one-jump pad *50 (OnEndTouch OneJumpUsed) sends a second exit to tele9; without them a fall is \
+                 not caught and the pit floor under *49 leads to the one-jump shaft",
     },
 ];
 
@@ -625,6 +640,43 @@ pub(crate) const EVENT_CLOCK_V29: &[EventClock] = event_clock![
     "bhop_bistro_6" 0xfccd7e4e,
     "bhop_bistro_7" 0x863ea0a0,
 ];
+
+/// The same clock from physics v30, on this build, plus eventqueuefix's handling of a delay too long for its tick
+/// counter (`Game::queue_delay`). bhop_4triedsame's "ускоритель" pad (`*865`) has `OnStartTouch !activator,AddOutput,
+/// basevelocity 1455.21 -363,8.03438e+28,0`: the delay field reads 8.03438e28 s. Stock CS:S (and the core before v30)
+/// queues it that far ahead, so the boost never comes. eventqueuefix (hermansimensen/eventqueue-fix, eventqueuefix.sp
+/// `DHook_AddEventThree`) converts a player-activated delay to ticks with `RoundToCeil((delay - FLT_EPSILON) /
+/// GetTickInterval())`; past 2^31 ticks that is INT_MIN on x86 (cvttss2si), which its `OnPlayerRunCmd` fires on the next
+/// command, as a 0 delay. SourceJump, KawaiiClan and eufrag, where the map's tier comes from, run the plugin. The rest of
+/// the map's player outputs (the room's gravity 44 slam, the 1-hop teleporters) move to that clock too, as on those servers.
+pub(crate) const EVENT_CLOCK_V30: &[EventClock] = event_clock!["bhop_4triedsame" 0x0c832785,];
+
+/// Builds whose triggers the player touches with the previous tick's hull from physics v30 (`Game::touch_hull`), as
+/// CS:S does on every map: `CPlayerMove::RunCommand` runs ProcessMovement, then `ProcessImpacts` ->
+/// `PhysicsTouchTriggers`, which tests the collision prop's bounds, and only `CBasePlayer::PostThink` sets those bounds
+/// from the new duck state (SDK 2013 player_command.cpp, movehelper_server.cpp, player.cpp "set correct collision bounds
+/// (may have changed in player movement code)"). So on the command that ducks in the air (origin lifted 8.5) the touch
+/// still uses the 62-unit standing box, reaching 8.5 higher than the head was. bhop_theory_hard's stage 10 (the only way
+/// from the lower route to the upper) is a playerclip at z 32..40 with the teleport `*80` (to the pyramid, `stage10_2`)
+/// at 40..45 and the stage reset `*33` at 45..50 on top of it: a duck press with the head at the clip reaches `*80`.
+/// The core tested the new hull, so stage 10 couldn't be finished. Per map only: doing this everywhere moves timer zone
+/// touches too (research/PHYSICS-30.md).
+pub(crate) struct StaleTouchHull {
+    pub map: &'static str,
+    pub fingerprint: u32,
+}
+
+pub(crate) const STALE_TOUCH_HULL_V30: &[StaleTouchHull] = &[StaleTouchHull { map: "bhop_theory_hard", fingerprint: 0x7cdad20a }];
+
+/// The map's entry in `STALE_TOUCH_HULL_V30`, if `fingerprint` (`entity_fingerprint`) is that build.
+pub(crate) fn stale_touch_hull_v30(fingerprint: u32) -> Option<&'static StaleTouchHull> {
+    STALE_TOUCH_HULL_V30.iter().find(|m| m.fingerprint == fingerprint)
+}
+
+/// The map's entry in `EVENT_CLOCK_V30`, if `fingerprint` (`entity_fingerprint`) is that build.
+pub(crate) fn event_clock_v30(fingerprint: u32) -> Option<&'static EventClock> {
+    EVENT_CLOCK_V30.iter().find(|m| m.fingerprint == fingerprint)
+}
 
 /// The map's entry in `EVENT_CLOCK_V29`, if `fingerprint` (`entity_fingerprint`) is one of those builds.
 pub(crate) fn event_clock_v29(fingerprint: u32) -> Option<&'static EventClock> {

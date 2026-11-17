@@ -217,11 +217,26 @@ export interface ProgressStats {
   halloweenSeason?: number;
   /** Gauntlets (apps/api/src/gauntlets.ts). Absent = none cleared. */
   gauntlets?: GauntletStats;
+  /** The Daily Challenge (apps/api/src/daily.ts). Absent = never played one. */
+  daily?: DailyStats;
   /**
    * Maps made by a linked mapper (apps/api/src/mappers.ts) where the player's best Normal main-track time is under the
    * mapper's own. Never the player's own maps.
    */
   beatMapper?: number;
+}
+
+/**
+ * A player's Daily Challenge record. Taking part: days with a time on the day's board, days they beat their own earlier
+ * time of that day, days they closed in the faster half of the board. Podium places, frozen at each close.
+ */
+export interface DailyStats {
+  days: number;
+  improved?: number;
+  topHalf?: number;
+  gold: number;
+  silver: number;
+  bronze: number;
 }
 
 /** A player's gauntlet record for the gauntlet achievements. */
@@ -640,7 +655,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   {
     id: SUPPORTER,
     name: "Supporter",
-    desc: "Supported bunnyhop.lol with a donation. Every supporter set is yours to keep",
+    desc: "Supported bunnyhop.lol with a donation. Every Supporter item is yours to keep",
     goal: "Supporter item",
     group: "social",
     icon: "heart",
@@ -754,6 +769,40 @@ export const GAUNTLET_ACHIEVEMENTS: AchievementDef[] = [
 ];
 ACHIEVEMENTS.push(...GAUNTLET_ACHIEVEMENTS);
 
+// The Daily Challenge (apps/api/src/daily.ts): from DailyStats. Two families.
+//   Taking part (DAILY_LADDER): days finished in total, at any pace and any place on the board. Never days in a row: a
+//   missed day takes nothing away. Each step unlocks something from the day-cycle set below (colourways, gun camos),
+//   the first with the first finish. Two more for effort rather than rank: beating your own time of the day, and
+//   closing a day in the faster half of its board.
+//   The podium: top 3, a win, ten wins. Their rewards are the counted medals (creators.ts dailyMarkId).
+const ds = (s: ProgressStats): DailyStats => s.daily ?? { days: 0, gold: 0, silver: 0, bronze: 0 };
+/** Days finished at each step of the taking-part ladder. */
+export const DAILY_LADDER = [1, 5, 15, 30, 60, 100] as const;
+const DAILY_STEP_NAMES = ["Daily", "Five Days", "Fifteen Days", "Thirty Days", "Sixty Days", "A Hundred Days"];
+const DAILY_STEP_RINGS: Ring[] = [0, 0, 1, 1, 2, 3];
+export const dailyStepId = (days: number) => `daily_${days}`;
+export const DAILY_ACHIEVEMENTS: AchievementDef[] = [
+  ...DAILY_LADDER.map(
+    (n, i): AchievementDef => ({
+      id: dailyStepId(n),
+      name: DAILY_STEP_NAMES[i],
+      desc: n === 1 ? "Finish a Daily Challenge" : `Finish the Daily Challenge on ${n} days`,
+      goal: n === 1 ? "Finish a Daily Challenge" : `Finish ${n} Daily Challenges`,
+      group: "gauntlet",
+      icon: n === 1 ? "d_sun" : `d_${n}`,
+      ring: DAILY_STEP_RINGS[i],
+      ...(n === 100 ? { title: "Sun Chaser" } : {}),
+      progress: (s) => at(ds(s).days, n),
+    }),
+  ),
+  { id: "daily_better", name: "Second Wind", desc: "Beat your own time on the same Daily Challenge", goal: "Beat your own daily time the same day", group: "gauntlet", icon: "d_better", ring: 0, progress: (s) => at(ds(s).improved ?? 0, 1) },
+  { id: "daily_top_half", name: "Upper Half", desc: "Finish a Daily Challenge in the faster half of the day's board", goal: "Top half of a Daily Challenge", group: "gauntlet", icon: "d_half", ring: 1, progress: (s) => at(ds(s).topHalf ?? 0, 1) },
+  { id: "daily_podium", name: "Daily Podium", desc: "Finish a Daily Challenge in the top 3", goal: "Top 3 on a Daily Challenge", group: "gauntlet", icon: "d_podium", ring: 1, progress: (s) => at(ds(s).gold + ds(s).silver + ds(s).bronze, 1) },
+  { id: "daily_win", name: "Day Winner", desc: "Win a Daily Challenge", group: "gauntlet", icon: "d_win", ring: 2, title: "Day Winner", progress: (s) => at(ds(s).gold, 1) },
+  { id: "daily_win_10", name: "Ten Golds", desc: "Win 10 Daily Challenges", group: "gauntlet", icon: "d_10", ring: 3, progress: (s) => at(ds(s).gold, 10) },
+];
+ACHIEVEMENTS.push(...DAILY_ACHIEVEMENTS);
+
 /**
  * Mapper recognition (2026-10-28, Maharero's idea): a verified Normal time under the mapper's own on a map they made.
  * "Mapper" means a player staff linked to the map's author name (migrations/0076, apps/api/src/mappers.ts), and the
@@ -806,7 +855,7 @@ export function earnedAchievements(s: ProgressStats): string[] {
 // ---------------------------------------------------------------------------------------------
 // Cosmetics (all unlocked by playing; card editor + ghost settings)
 
-export type CosmeticSlot = "background" | "frame" | "title" | "ghost" | "trail" | "shape" | "outfit" | "knife" | "finish" | "glove" | "hilt" | "hat" | "body" | "camo" | "back" | "hop";
+export type CosmeticSlot = "background" | "frame" | "title" | "ghost" | "trail" | "shape" | "outfit" | "knife" | "finish" | "glove" | "hilt" | "hat" | "body" | "camo" | "back" | "hop" | "charm";
 
 /**
  * The first-person loadout slots (apps/web/src/loadout.ts): what you hold, what its blade is painted with, its hilt (one
@@ -1303,6 +1352,14 @@ COSMETICS.push(
   { id: "hilt-highroller", slot: "hilt", name: "High Roller", unlock: ach(SUPPORTER), color: "#0f5a3a", rarity: 4 },
   { id: "hilt-borealis", slot: "hilt", name: "Borealis", unlock: ach(SUPPORTER), color: "#3ff0a0", rarity: 4 },
   { id: "hilt-tidepool", slot: "hilt", name: "Sea Glass", unlock: ach(SUPPORTER), color: "#5fc8b8", rarity: 4 },
+  // Living hilts (v0.0.43, Supporter, standalone): pieces that move and glow in first person (viewmodel/hilts/live).
+  { id: "hilt-watcher", slot: "hilt", name: "Watcher", unlock: ach(SUPPORTER), color: "#8fb23a", rarity: 4 },
+  { id: "hilt-frostrune", slot: "hilt", name: "Frostrune", unlock: ach(SUPPORTER), color: "#5cb8ff", rarity: 4 },
+  { id: "hilt-clockwork", slot: "hilt", name: "Escapement", unlock: ach(SUPPORTER), color: "#d9a54a", rarity: 4 },
+  { id: "hilt-ember", slot: "hilt", name: "Forge", unlock: ach(SUPPORTER), color: "#ff6a1a", rarity: 4 },
+  { id: "hilt-deep", slot: "hilt", name: "Deepwater", unlock: ach(SUPPORTER), color: "#58ffc8", rarity: 4 },
+  { id: "hilt-storm", slot: "hilt", name: "Stormfork", unlock: ach(SUPPORTER), color: "#8a6cff", rarity: 4 },
+  { id: "hilt-bloom", slot: "hilt", name: "Bloom", unlock: ach(SUPPORTER), color: "#ff7a6a", rarity: 4 },
   // Role sets (ROLE_SETS): storm-navy rubber with a hi-vis lime groove and reflective silver; teal-stained wood and
   // brass; oxblood lacquer and polished silver; violet leather edged in carrot orange, gold fittings.
   { id: "hilt-lookout", slot: "hilt", name: "Lookout", unlock: role("moderator"), color: "#c8f53a", rarity: 5 },
@@ -1414,6 +1471,10 @@ COSMETICS.push(
   // A haori: an open-fronted jacket with wide hanging sleeves, worn over the hoodie. Its owner wears it open or tied,
   // picks one of five patterns and may pick its two colours (ROBE_PATTERN_COUNT, CosmeticChoice.robe*).
   { id: "back-robe", slot: "back", name: "Robe", unlock: ach(SUPPORTER), color: "#2b303b", rarity: 4 },
+  // The Daily Challenge's medal, worn round the neck (player/bunny/backs.ts medal): earned with the first podium place.
+  // Its owner picks which of the metals they hold it shows (CosmeticChoice.medalMetal); its face grows richer with the
+  // count of that medal, in the six steps of the name badge (MEDAL_STEPS).
+  { id: "back-medal", slot: "back", name: "Daily Medal", unlock: ach("daily_podium"), color: "#ffcf3d", rarity: 4 },
 );
 
 // ---------------------------------------------------------------------------------------------
@@ -1553,6 +1614,21 @@ for (const set of SUPPORTER_SETS) for (const id of set.items) {
 }
 
 // ---------------------------------------------------------------------------------------------
+// The Daily Challenge's day-cycle set (v0.0.43): earned by taking part, whatever the place (DAILY_LADDER above). Three
+// colourways, a knife finish and two gun camos that follow the sun through a day, one at each step: Daybreak with the
+// first finish, First Light at 5, Sunray (the knife) at 15, Noon at 30, Dusk at 60, Midnight Sun at 100. (The podium's
+// rewards are the counted medals, a step above these.) Colourways in player/bunny/palettes.ts, camos in camo.ts, the
+// finish in viewmodel/finishes/shader.ts (FINISH 30). Ids are stable forever.
+COSMETICS.push(
+  { id: "outfit-daybreak", slot: "outfit", name: "Daybreak", unlock: ach("daily_1"), color: "#ffa86e" },
+  { id: "camo-first-light", slot: "camo", name: "First Light", unlock: ach("daily_5"), color: "#ff8a4a", rarity: 2 },
+  { id: "fin-sunray", slot: "finish", name: "Sunray", unlock: ach("daily_15"), color: "#ffcc42", rarity: 3 },
+  { id: "outfit-noon", slot: "outfit", name: "Noon", unlock: ach("daily_30"), color: "#ffd84a" },
+  { id: "outfit-dusk", slot: "outfit", name: "Dusk", unlock: ach("daily_60"), color: "#6a3f9e" },
+  { id: "camo-midnight-sun", slot: "camo", name: "Midnight Sun", unlock: ach("daily_100"), color: "#ffc23d", rarity: 4 },
+);
+
+// ---------------------------------------------------------------------------------------------
 // Gun camos (v0.0.38; camo.ts has the designs, viewmodel/guns/camo.ts draws them): one camo on every gun you're handed.
 // No camo is the default (null). Earned ones fill achievements and levels that had no loadout item yet (the style
 // clears, the record and sweep goals, the Backrooms, a few early levels); Supporter ones join their set; role ones
@@ -1649,6 +1725,41 @@ COSMETICS.push(
   { id: "hop-aurora", slot: "hop", name: "Aurora", unlock: ach(SUPPORTER), color: "#3ff0a0", color2: "#9a6bff", rarity: 4, set: "borealis" },
   { id: "hop-splash", slot: "hop", name: "Splash", unlock: ach(SUPPORTER), color: "#f3ece2", color2: "#5fc8b8", rarity: 4, set: "tidepool" },
 );
+// Charms (v0.0.43; viewmodel/charms/ builds and swings them): a small thing hanging on a short cord from the knife's
+// guard (or its pommel), swinging with your movement, in first person. null = none (the default). One fixed look each,
+// no rarity. A third are earned by playing, the rest are Supporter items, standalone like the back items. Its owner sets
+// the cord's length, the size, how lively it swings and where it hangs (CHARM_LENGTH / CHARM_SIZE / CHARM_SWING,
+// CosmeticChoice.charm*). Ids are stable forever.
+COSMETICS.push(
+  // The game's carrot in small, leaves and all (First Hop: finish a map).
+  { id: "charm-carrot", slot: "charm", name: "Carrot", unlock: ach("first_finish"), color: "#ff7a1a" },
+  // The bunny's hooded head: cream hood and ears, the dark face, the amber visor with its two lit eyes.
+  { id: "charm-bun", slot: "charm", name: "Bun", unlock: lvl(5), color: "#ece5d8" },
+  // A round snail with an orange swirl shell (Jackrabbit: 10,000 jumps).
+  { id: "charm-snail", slot: "charm", name: "Snail", unlock: ach("jumps_10k"), color: "#f08a3a" },
+  // A puffed gold star that turns slowly on its cord.
+  { id: "charm-star", slot: "charm", name: "Star", unlock: lvl(25), color: "#ffc93a" },
+  // A sleepy crescent moon (Night Shift: 25 hours played).
+  { id: "charm-moon", slot: "charm", name: "Moon", unlock: ach("clock_25h"), color: "#f5e6a0" },
+  // A puffed cherry-red heart that beats now and then.
+  { id: "charm-heart", slot: "charm", name: "Heart", unlock: ach(SUPPORTER), color: "#e0283c" },
+  // A round grey-and-white cat sitting as a loaf, its tail wrapped round, the tip flicking.
+  { id: "charm-loaf", slot: "charm", name: "Loaf", unlock: ach(SUPPORTER), color: "#8a8f99" },
+  // A brass bell whose clapper swings inside it.
+  { id: "charm-bell", slot: "charm", name: "Bell", unlock: ach(SUPPORTER), color: "#e2ae48" },
+  // A small red paper lantern with a warm light inside.
+  { id: "charm-lantern", slot: "charm", name: "Lantern", unlock: ach(SUPPORTER), color: "#d8332e" },
+  // A yellow bath duck.
+  { id: "charm-duck", slot: "charm", name: "Duck", unlock: ach(SUPPORTER), color: "#ffd23a" },
+  // A round green frog that blinks.
+  { id: "charm-frog", slot: "charm", name: "Frog", unlock: ach(SUPPORTER), color: "#5cbf4a" },
+  // A red toadstool with white spots.
+  { id: "charm-toadstool", slot: "charm", name: "Toadstool", unlock: ach(SUPPORTER), color: "#d8322c" },
+  // Bun-E's head: the cream box, antenna ears, the dark visor with two amber eyes.
+  { id: "charm-bune", slot: "charm", name: "Bun-E", unlock: ach(SUPPORTER), color: "#f2e8d8" },
+  // A four-leaf clover in green enamel in a thin gold rim.
+  { id: "charm-clover", slot: "charm", name: "Clover", unlock: ach(SUPPORTER), color: "#3f9a4a" },
+);
 for (const c of COSMETICS) if (c.slot === "hop" && c.set) {
   const st = SUPPORTER_SETS.find((x) => x.id === c.set);
   if (st && !st.items.includes(c.id)) (st.items as string[]).push(c.id);
@@ -1702,6 +1813,8 @@ export const DEFAULT_COSMETICS: Record<CosmeticSlot, string | null> = {
   back: null,
   /** null = no hop effect (v0.0.42; player/hop-fx.ts). */
   hop: null,
+  /** null = no charm on the knife (v0.0.43; viewmodel/charms/). */
+  charm: null,
 };
 
 /**
@@ -1810,6 +1923,16 @@ export type CosmeticChoice = Record<CosmeticSlot, string | null> & {
   robeTied?: boolean | null;
   robeColor?: string | null;
   robePrint?: string | null;
+  /** The Daily Medal's (MEDAL_ITEM) metal: one the player holds (absent = their best), kept only for its owners. */
+  medalMetal?: MedalMetal | null;
+  /**
+   * The charm's options (CHARM_LENGTH, CHARM_SIZE, CHARM_SWING: whole numbers on their steps; absent = the default) and
+   * `charmPommel` (true = it hangs from the pommel; absent = the guard), kept for players who own a charm.
+   */
+  charmLength?: number | null;
+  charmSize?: number | null;
+  charmSwing?: number | null;
+  charmPommel?: boolean | null;
   knifePool?: KnifePool | null;
   /** The overall Number One's title colour ("#rrggbb", ranking.ts shownRankColor). Set only while #1, kept after. */
   rankColor?: string | null;
@@ -1930,6 +2053,45 @@ const ownsCape = (level: number, achievements: readonly string[], ranks: HeldRan
   const c = cosmetic(CAPE_ITEM);
   return !!c && isUnlocked(c, level, achievements, ranks, staff);
 };
+/**
+ * The Daily Medal (player/bunny/backs.ts medal): a medal on a ribbon round the neck, in a metal its wearer holds, its
+ * face in the look of how many of that medal they have (the name badge's six steps). What is drawn is one number, the
+ * medal code: metal * MEDAL_STEPS.length + step, 0 .. MEDAL_CODES - 1 (gold first). The count itself is never carried:
+ * the code is worked out wherever a loadout is made from a saved choice (loadout.ts loadoutFor), from the player's medal
+ * counts, so a pick the player doesn't hold reads as their best medal.
+ */
+export const MEDAL_ITEM = "back-medal";
+export const MEDAL_METALS = ["gold", "silver", "bronze"] as const;
+export type MedalMetal = (typeof MEDAL_METALS)[number];
+/** The counts a medal's face changes at (creators.ts DAILY_STEPS, the name badge's: the test keeps them the same). */
+export const MEDAL_STEPS = [1, 5, 10, 25, 50, 100] as const;
+export const MEDAL_CODES = MEDAL_METALS.length * MEDAL_STEPS.length;
+/** What a loadout without a code draws (a writer that didn't know them): bronze at its first step, never more than was earned. */
+export const MEDAL_DEFAULT = MEDAL_METALS.indexOf("bronze") * MEDAL_STEPS.length;
+/** How many of each medal a player holds (apps/api daily_medals; creators.ts medalCountsOf reads them off the marks). */
+export type MedalCounts = Readonly<Record<MedalMetal, number>>;
+export const medalMetalOf = (v: unknown): MedalMetal | null => (MEDAL_METALS as readonly unknown[]).includes(v) ? (v as MedalMetal) : null;
+/** A carried medal code (a whole number 0 .. MEDAL_CODES - 1), else null. */
+export const medalCodeOf = (v: unknown): number | null => (typeof v === "number" && Number.isInteger(v) && v >= 0 && v < MEDAL_CODES ? v : null);
+/** The metals a player holds, best first. */
+export const heldMetals = (m: MedalCounts | null | undefined): MedalMetal[] => MEDAL_METALS.filter((k) => (m?.[k] ?? 0) > 0);
+/**
+ * The medal a player wears: the metal they picked if they hold it, else their best, in the step of its count. A player
+ * who holds none (staff trying it on) gets the pick, or bronze, at the first step.
+ */
+export function medalCode(pick: unknown, m: MedalCounts | null | undefined): number {
+  const held = heldMetals(m), want = medalMetalOf(pick);
+  const metal = held.length ? (want && held.includes(want) ? want : held[0]) : (want ?? "bronze");
+  const n = m?.[metal] ?? 0;
+  const step = MEDAL_STEPS.reduce((s, at, i) => (n >= at ? i : s), 0);
+  return MEDAL_METALS.indexOf(metal) * MEDAL_STEPS.length + step;
+}
+export const medalOf = (code: number): { metal: MedalMetal; step: number } => ({ metal: MEDAL_METALS[Math.floor(code / MEDAL_STEPS.length)] ?? "bronze", step: code % MEDAL_STEPS.length });
+const ownsMedal = (level: number, achievements: readonly string[], ranks: HeldRanks, staff: Holder) => {
+  const c = cosmetic(MEDAL_ITEM);
+  return !!c && isUnlocked(c, level, achievements, ranks, staff);
+};
+
 /** The back item worn open or tied, in a pattern and two colours its owner picks (player/bunny/robe.ts). */
 export const ROBE_ITEM = "back-robe";
 /** How many patterns the Robe has, Plain (0) included (player/robe-fx.ts ROBE_PATTERNS names them). */
@@ -1940,6 +2102,23 @@ const ownsRobe = (level: number, achievements: readonly string[], ranks: HeldRan
   const c = cosmetic(ROBE_ITEM);
   return !!c && isUnlocked(c, level, achievements, ranks, staff);
 };
+/**
+ * The charm's options (v0.0.43; viewmodel/charms/): the cord's length and the charm's size as percents of the built
+ * ones, and how lively it swings (0 = barely, 100 = a lot; the default is calm). Steps of 10, so the three ride in 11
+ * bits of the replay's loadout continuation (loadout.ts packLoadoutExt).
+ */
+export const CHARM_LENGTH = { min: 50, max: 200, default: 100, step: 10 } as const;
+export const CHARM_SIZE = { min: 80, max: 140, default: 100, step: 10 } as const;
+export const CHARM_SWING = { min: 0, max: 100, default: 30, step: 10 } as const;
+type Range = { min: number; max: number; step: number };
+const onSteps = (r: Range, v: unknown): number | null => (typeof v === "number" && Number.isInteger(v) && v >= r.min && v <= r.max && (v - r.min) % r.step === 0 ? v : null);
+/** A saved / carried charm option (on its slider's steps, in range), else null. */
+export const charmLengthOf = (v: unknown) => onSteps(CHARM_LENGTH, v);
+export const charmSizeOf = (v: unknown) => onSteps(CHARM_SIZE, v);
+export const charmSwingOf = (v: unknown) => onSteps(CHARM_SWING, v);
+const CHARM_OPTIONS = { charmLength: [CHARM_LENGTH, charmLengthOf], charmSize: [CHARM_SIZE, charmSizeOf], charmSwing: [CHARM_SWING, charmSwingOf] } as const;
+const ownsCharm = (level: number, achievements: readonly string[], ranks: HeldRanks, staff: Holder) =>
+  COSMETICS.some((c) => c.slot === "charm" && isUnlocked(c, level, achievements, ranks, staff));
 const ownsHair = (level: number, achievements: readonly string[], ranks: HeldRanks, staff: Holder) =>
   HAIR_HATS.some((id) => {
     const c = cosmetic(id);
@@ -1980,6 +2159,15 @@ export function cleanCosmetics(raw: unknown, level: number, achievements: readon
     if (r.robeTied === true) out.robeTied = true;
     if (robeColor) out.robeColor = robeColor;
     if (robePrint) out.robePrint = robePrint;
+  }
+  const metal = medalMetalOf(r.medalMetal);
+  if (metal && ownsMedal(level, achievements, ranks, staff)) out.medalMetal = metal;
+  if (ownsCharm(level, achievements, ranks, staff)) {
+    for (const [k, [range, of]] of Object.entries(CHARM_OPTIONS)) {
+      const v = of(r[k]);
+      if (v !== null && v !== range.default) out[k as keyof typeof CHARM_OPTIONS] = v;
+    }
+    if (r.charmPommel === true) out.charmPommel = true;
   }
   const pool = knifePoolOf(r.knifePool, (c) => isUnlocked(c, level, achievements, ranks, staff));
   if (pool) out.knifePool = pool;
@@ -2032,6 +2220,23 @@ export function cosmeticsProblem(raw: unknown, level: number, achievements: read
       if (!ownsRobe(level, achievements, ranks, staff)) return { slot, reason: `locked (${unlockHint(cosmetic(ROBE_ITEM)!)})` };
       continue;
     }
+    if (slot === "medalMetal") {
+      if (v === null) continue;
+      // (Whether the player holds that metal is checked where the loadout is made: a pick they don't hold shows their best.)
+      if (!medalMetalOf(v)) return { slot, reason: `expected one of ${MEDAL_METALS.join(", ")}` };
+      if (!ownsMedal(level, achievements, ranks, staff)) return { slot, reason: `locked (${unlockHint(cosmetic(MEDAL_ITEM)!)})` };
+      continue;
+    }
+    if (slot in CHARM_OPTIONS || slot === "charmPommel") {
+      if (v === null) continue;
+      if (slot === "charmPommel" && typeof v !== "boolean") return { slot, reason: "expected true or false" };
+      if (slot !== "charmPommel") {
+        const [range, of] = CHARM_OPTIONS[slot as keyof typeof CHARM_OPTIONS];
+        if (of(v) === null) return { slot, reason: `expected a multiple of ${range.step} from ${range.min} to ${range.max}` };
+      }
+      if (!ownsCharm(level, achievements, ranks, staff)) return { slot, reason: `locked (${unlockHint(COSMETICS.find((c) => c.slot === "charm")!)})` };
+      continue;
+    }
     if (slot === "rankColor") {
       if (v === null) continue;
       if (!rankColorOf(v)) return { slot, reason: "expected a colour like #ffd45e" };
@@ -2044,7 +2249,7 @@ export function cosmeticsProblem(raw: unknown, level: number, achievements: read
       continue;
     }
     if (!(slot in DEFAULT_COSMETICS)) return { slot, reason: "unknown slot" };
-    if (v === null && (slot === "title" || slot === "hat" || slot === "camo" || slot === "back" || slot === "hop")) continue;
+    if (v === null && (slot === "title" || slot === "hat" || slot === "camo" || slot === "back" || slot === "hop" || slot === "charm")) continue;
     const c = typeof v === "string" ? cosmetic(v) : null;
     // A staff item its sender doesn't hold reads exactly like an id that doesn't exist (staffItem).
     if (!c || c.slot !== slot || !listedFor(c, staff)) return { slot, reason: "unknown item" };

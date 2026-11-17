@@ -270,7 +270,7 @@ export const runsView: View = async (root, params) => {
       h("td", { class: "nowrap" }, playerLink(r.user_id, r.user_name)),
       h("td", null, mapLine(r.map, { track: r.track })),
       h("td", null, styleWord(r.style)),
-      h("td", { class: "num" }, h("a", { class: "t-run", href: r.status === "verified" ? `/replay/${encodeURIComponent(r.id)}` : `/?replay=run:${encodeURIComponent(r.id)}`, target: "_blank", rel: "noopener", title: "Watch" }, fmtTime(r.time))),
+      h("td", { class: "num" }, h("a", { class: "t-run", href: r.status === "verified" ? `/replay/${encodeURIComponent(r.id)}?stats=1` : `/?replay=run:${encodeURIComponent(r.id)}&stats=1`, target: "_blank", rel: "noopener", title: "Watch" }, fmtTime(r.time))),
       h("td", { class: "nowrap" }, statusBadge(r.status), r.pb ? badge("PB", "acc") : null, r.physics === 1 ? badge("physics 1") : null),
       h("td", { class: "msg" }, r.reason ?? "", r.room_id ? h("div", { class: "faint" }, `in ${r.room_id}`) : null),
       h("td", { class: "num", title: attemptText(r.session) ?? "No attempt counter (an older client)" }, r.session ? `#${r.session.attempt}` : "—", h("div", null, h("a", { href: `#/suspicious?run=${encodeURIComponent(r.id)}`, class: "faint" }, "analysis"))),

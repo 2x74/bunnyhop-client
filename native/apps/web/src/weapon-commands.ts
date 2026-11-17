@@ -125,8 +125,28 @@ let keysHooked = false;
  * doesn't also open the guns menu.
  */
 export const numberMenuOpen = (): boolean => typeof document !== "undefined" && !!document.querySelector("#mp-menu:not([hidden])");
-/** A digit key (the numbered menus' keys). */
-export const isDigitCode = (code: string): boolean => /^(?:Digit|Numpad)\d$/.test(code);
+/**
+ * The digit (0-9) a numbered menu takes from key `code`, number row or numpad, or null. A digit the player bound to
+ * something that moves them (jump, a strafe, a turn bind: input.ts movesPlayer) stays with that bind, so a menu or a
+ * map vote never eats a movement key mid-run.
+ */
+export function menuDigit(code: string, input: Pick<Input, "movesPlayer"> | null = host?.input ?? null): number | null {
+  const d = /^(?:Digit|Numpad)(\d)$/.exec(code);
+  if (!d || input?.movesPlayer(code)) return null;
+  return Number(d[1]);
+}
+
+/**
+ * The digit a numbered menu takes from this key press, or null: Ctrl / Cmd / Alt held, a key repeat, typing in a text
+ * field (the chat, the console), or a key menuDigit leaves to its bind.
+ */
+export function menuKey(e: Pick<KeyboardEvent, "code" | "repeat" | "ctrlKey" | "metaKey" | "altKey" | "target">, input?: Pick<Input, "movesPlayer"> | null): number | null {
+  if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || isTextField(e.target)) return null;
+  return menuDigit(e.code, input);
+}
+
+/** main.ts input.ownsKey: while a numbered menu is on screen its digits fire no bind (menuDigit's keys excepted). */
+export const menuOwnsKey = (code: string, input: Pick<Input, "movesPlayer"> | null = host?.input ?? null): boolean => menuDigit(code, input) !== null && numberMenuOpen();
 
 /** The guns menu is open (its digit keys pick). */
 export function gunPickerOpen(): boolean {
@@ -164,11 +184,11 @@ export async function openGunPicker(say?: (text: string) => void): Promise<void>
           e.stopImmediatePropagation();
           return menu.hide();
         }
-        const d = /^(?:Digit|Numpad)(\d)$/.exec(e.code);
-        if (!d) return;
+        const d = menuKey(e);
+        if (d === null) return;
         e.preventDefault();
         e.stopImmediatePropagation();
-        menu.key(Number(d[1]));
+        menu.key(d);
       },
       true,
     );

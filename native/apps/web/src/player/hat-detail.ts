@@ -65,6 +65,9 @@ const BY_COLOUR: [number, number][] = [
   [0xcdbfa6, HAT_MAT.fabric],
   // Balloon: its string, the eyes printed on it.
   [0xf2efe6, HAT_MAT.fabric], [0xffd84a, HAT_MAT.lacquer],
+  // Daily Medal (bunny/backs.ts medal): its metals are the rank crowns' above, with a bright chamfer for silver and
+  // bronze (gold's is the Lucky Coins'); its ribbon is cloth.
+  [0xf7fafd, HAT_MAT.metal], [0xf2b885, HAT_MAT.metal], [0x26304f, HAT_MAT.fabric], [0xffb43c, HAT_MAT.fabric],
   // Wings: soft feathers.
   ...[0xf4f4ee, 0xeef0e8, 0xe2e6e0, 0xcfd6d4].map((c): [number, number] => [c, HAT_MAT.fabric]),
 ];
