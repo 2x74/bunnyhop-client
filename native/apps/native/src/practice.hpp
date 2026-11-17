@@ -2,6 +2,7 @@
 #include "hud_text.hpp"
 #include "bunnyhop_native.h"
 #include "infinite_flight.hpp"
+#include "practice_timescale.hpp"
 #include <algorithm>
 #include <string>
 #include <vector>
@@ -30,6 +31,12 @@ struct Practice {
     std::vector<Checkpoint> checkpoints;
     size_t current = 0;
     int64_t hinted_run = -1;
+    // !timescale, and whether this attempt ran a tick at another scale (then it is practice: never submitted).
+    PracticeTimescale timescale;
+    bool slowed = false;
+
+    // This attempt can be submitted: not practice, and every tick ran at 1x.
+    bool counts() const { return !active && !slowed; }
 
     bool key_allowed(const std::string &action, bool timed) const {
         // Noclip works mid-run in any mode: it stops the timer (bh_practice_enter, or Infinite's first flight tick).
@@ -55,6 +62,7 @@ struct Practice {
         infinite_flight.restart();
         tool.clear();
         hinted_run = -1;
+        slowed = false;
     }
 
     // Drops the checkpoints and practice state. The attempt itself goes on (a room join, a gauntlet, a replay), so

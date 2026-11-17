@@ -118,7 +118,8 @@ nlohmann::json PracticeController::state(const std::string &unavailable, bool th
             {"menuOpen", menu_open},
             {"count", checkpoints.size()},
             {"current", number()},
-            {"keepVelocity", keep_velocity}};
+            {"keepVelocity", keep_velocity},
+            {"timescale", timescale.value()}};
 }
 
 }  // namespace native

@@ -2597,6 +2597,20 @@ int run(const native::Options &opt) {
                         else if (action == "triggerMenu") {
                             trigger_menu.toggle();
                             numbered_menus.opened(native::NumberedMenus::Menu::triggers);
+                        } else if (action == "timescale") {
+                            const native::TimescaleContext context{
+                                    practice.mode,
+                                    !room.id.empty(),
+                                    map_id == native::TutorialRunner::map_id,
+                                    !gauntlet_id.empty(),
+                                    active_style == "segmented"
+                            };
+                            const auto value = message.find("value");
+                            const auto reply = value != message.end() && value->is_number()
+                                                       ? practice.timescale.set(value->get<double>(), context)
+                                                       : practice.timescale.status(context);
+                            chat.push(reply, "", "local", epoch_ms() / 1000.);
+                            menu_state.reset();
                         } else if (action == "movementStat") {
                             preferences = native::patch_settings(
                                     preferences, native::movement_stat_patch(preferences, message)
@@ -3530,15 +3544,25 @@ int run(const native::Options &opt) {
         input_frame_ms = frame_seconds * 1000;
         const double step_dt = viewer.active ? viewer.session.range.tick_interval : dt;
         const uint64_t tick_ns = uint64_t(std::llround(step_dt * 1e9));
+        const native::TimescaleContext timescale_context{
+                practice.mode,
+                !room.id.empty(),
+                map_id == native::TutorialRunner::map_id,
+                !gauntlet_id.empty(),
+                active_style == "segmented"
+        };
+        const double timescale = practice.timescale.frame(timescale_context);
         input_scheduler.frame(
-                mouse_pump_start, simulation_active, tick_ns, viewer.active ? viewer.speed : 1, opt.frames != 0
+                mouse_pump_start, simulation_active, tick_ns, viewer.active ? viewer.speed : timescale, opt.frames != 0
         );
         frame_diagnostics.mark(native::FrameDiagnostics::kOther, SDL_GetTicksNS());
         uint64_t &sim_ns = input_scheduler.sim_ns;
         input_timeline.begin_frame(input, simulation_active, now_ns);
         while (input_scheduler.due(tick_ns)) {
             const double counts_before = input.yaw_counts;
-            input_timeline.take_tick(input, sim_ns, tick_ns, opt.frames != 0);
+            input_scheduler.place_tick(tick_ns);
+            if (!viewer.active && timescale != 1) practice.slowed = true;
+            input_timeline.take_tick(input, sim_ns, input_scheduler.real_tick_ns(tick_ns), opt.frames != 0);
             const double mouse_counts = input.yaw_counts - counts_before;
             // A track-style switch restarts facing where this tick's mouse motion turned the view, and drops the
             // tick's command (website session.ts command).
@@ -3764,7 +3788,7 @@ int run(const native::Options &opt) {
                     if (log && !viewer.active && menu && menu_ready)
                         menu->evaluate_js(
                                 native::gain_log_script(
-                                        *log, active_style, practice.active || turn_admission.local_only
+                                        *log, active_style, !practice.counts() || turn_admission.local_only
                                 )
                         );
                 }
@@ -3925,12 +3949,13 @@ int run(const native::Options &opt) {
                         run_state.seconds,
                         double(SDL_GetTicksNS()) / 1e9,
                         hud.extras.personal_best,
-                        !practice.active && !turn_admission.local_only
+                        practice.counts() && !turn_admission.local_only
                 );
-            if (practice.active && !viewer.active && run_state.status == 2 && !recorder.ended) {
+            const bool practice_attempt = !practice.counts();
+            if (practice_attempt && !viewer.active && run_state.status == 2 && !recorder.ended) {
                 recorder.ended = true;
             }
-            if (!practice.active && !viewer.active && run_state.status == 2 && !recorder.ended) {
+            if (!practice_attempt && !viewer.active && run_state.status == 2 && !recorder.ended) {
                 recorder.ended = true;
                 if (!recorder.path.empty()) {
                     try {
