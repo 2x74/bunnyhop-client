@@ -95,7 +95,8 @@ test("home is the web title screen: menu, maps to try, footer, and native routes
     expect(await page.locator("#menu.screen-home > section.home > .home-left > .home-brand .wordmark-xl").count()).toBe(
       1,
     );
-    expect(await page.locator(".home-menu .home-item .mb-title").allTextContents()).toEqual([
+    // Daily stays hidden until the server says there is one (this fixture has none).
+    expect(await page.locator(".home-menu .home-item:not([hidden]) .mb-title").allTextContents()).toEqual([
       "Play",
       "Learn to bhop",
       "Play online",
@@ -583,3 +584,31 @@ test("the console's quit and exit close the game; disconnect still goes back to 
     await browser.close();
   }
 }, 20_000);
+
+test("with a Daily Challenge, Daily is on the menu and the home block plays the day's map in its style", async () => {
+  const now = Date.now();
+  const today = {
+    day: "2026-11-17",
+    label: "Nov 17",
+    map: { name: "bhop_tasku", tier: 2, thumbnailUrl: null },
+    style: "legit",
+    startsAt: now - 3_600_000,
+    endsAt: now + 5 * 3_600_000 + 600_000,
+    closed: false,
+    players: 0,
+    top: [],
+  };
+  const daily = { enabled: true, now, today, yesterday: null, me: null, progress: null };
+  const { browser, page, errors } = await open(1280, 720, (url) => (url.pathname === "/api/daily" ? daily : null));
+  try {
+    const row = page.locator(".home-menu .home-item", { hasText: "Daily" });
+    await row.locator("b", { hasText: "bhop_tasku" }).waitFor();
+    expect(await row.isVisible()).toBe(true);
+    await page.locator("#home-daily").waitFor();
+    await row.click();
+    expect(await last(page)).toEqual({ type: "selectMap", id: "bhop_tasku", style: "legit", track: 0 });
+    expect(errors).toEqual([]);
+  } finally {
+    await browser.close();
+  }
+}, 30_000);
