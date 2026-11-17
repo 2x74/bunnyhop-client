@@ -563,3 +563,40 @@ test("the game's HUD feed rides on the state batch only for a room that takes it
     }
   }
 });
+
+test("a reconnect keeps watching the same player, and quiet joins make no sound (mp 0.0.43)", async () => {
+  const f = fixture();
+  try {
+    await f.service.join("test");
+    const start = welcome("test");
+    start.players = [
+      { slot: 0, id: "me", name: "Player", style: "autohop", spec: 3 } as never,
+      { slot: 3, id: "runner", name: "Runner", style: "autohop", spec: null } as never,
+    ];
+    f.handlers[0].message(start);
+    // The first welcome on a connection never re-sends a target.
+    expect(f.commands.filter((c) => (c as { t: string }).t === "spec")).toEqual([]);
+    // The socket reconnects by itself: a second welcome on the same connection, the runner on a new slot.
+    const again = welcome("test");
+    again.players = [
+      { slot: 0, id: "me", name: "Player", style: "autohop", spec: null } as never,
+      { slot: 5, id: "runner", name: "Runner", style: "autohop", spec: null } as never,
+    ];
+    f.handlers[0].message(again);
+    expect(f.commands.filter((c) => (c as { t: string }).t === "spec")).toEqual([{ t: "spec", target: 5 }]);
+    // Not watching anyone: a reconnect sends nothing.
+    f.handlers[0].message(again);
+    expect(f.commands.filter((c) => (c as { t: string }).t === "spec")).toHaveLength(1);
+    const joins = () => f.sent.filter((m) => m.type === "audioCue" && m.id === "player_join").length;
+    f.handlers[0].message({
+      t: "join",
+      quiet: true,
+      player: { slot: 6, id: "back", name: "Back", style: "autohop" },
+    } as never);
+    expect(joins()).toBe(0);
+    f.handlers[0].message({ t: "join", player: { slot: 7, id: "new", name: "New", style: "autohop" } } as never);
+    expect(joins()).toBe(1);
+  } finally {
+    f.service.leave();
+  }
+});

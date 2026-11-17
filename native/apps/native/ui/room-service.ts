@@ -306,6 +306,8 @@ export class NativeRoomService {
   private pendingSnapshot: Snapshot | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private connectionEpoch = 0;
+  /** The connection the last welcome came on: a second welcome on it is the socket reconnecting by itself. */
+  private welcomedEpoch = -1;
   private pendingMap: string | null = null;
   private changeTimer: ReturnType<typeof setTimeout> | null = null;
   private audioMapSecond = -1;
@@ -623,7 +625,8 @@ export class NativeRoomService {
     const lines = this.chatLines(message);
     // Compare before updating room state, so vote refreshes and reconnects
     // cannot duplicate a cue. Identity fencing above rejects stale sockets.
-    if (message.t === "join") this.cue("player_join");
+    // A quiet join is a player coming back after a dropped connection or a map change: no sound.
+    if (message.t === "join" && !message.quiet) this.cue("player_join");
     else if (message.t === "chat" && message.slot !== undefined && message.slot !== this.view.you) this.cue("chat");
     else if (message.t === "gift" && !this.audioGifts.has(message.batchId)) {
       this.audioGifts.add(message.batchId);
@@ -670,6 +673,12 @@ export class NativeRoomService {
       this.cue(a.kind === "wr" || a.kind === "sr" ? "shine" : "chat");
     }
     if (message.t === "welcome") {
+      // After a reconnect, keep watching the same player (by id; their slot may have changed): web net/mp.ts.
+      const resumed = this.welcomedEpoch === this.connectionEpoch;
+      this.welcomedEpoch = this.connectionEpoch;
+      const me = this.view.players.find((p) => p.slot === this.view.you);
+      const watchedId =
+        resumed && me?.spec != null ? (this.view.players.find((p) => p.slot === me.spec)?.id ?? null) : null;
       this.view.status = "open";
       this.view.room = message.room;
       this.view.map = message.map.name;
@@ -692,6 +701,8 @@ export class NativeRoomService {
       // A new connection: the room knows nothing of practice yet (the next batch says so if it is).
       this.practiceSent = false;
       this.practiceAt = -Infinity;
+      const again = watchedId ? message.players.find((p) => p.id === watchedId && p.slot !== message.you) : undefined;
+      if (again) this.command({ t: "spec", target: again.slot });
     } else if (message.t === "join") {
       this.view.players = this.view.players.filter((p) => p.slot !== message.player.slot);
       if (this.view.players.length < 64) this.view.players.push(message.player);
