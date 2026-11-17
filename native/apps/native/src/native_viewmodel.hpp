@@ -168,6 +168,11 @@ class NativeViewmodel {
         return {parts->names.data(), parts->count};
     }
 
+    bool holds_gun(const native_render::Actor &actor) const {
+        const auto &gun = weapons[std::min(size_t(actor.frame.weapon), weapons.size() - 1)];
+        return !actor.emptyHand && !gun.empty() && gun != "knife";
+    }
+
     std::array<std::array<float, 3>, 2> previewTrail{{{1, .761f, .239f}, {1, .761f, .239f}}};
     bool previewTrailVisible = true;
     std::vector<std::string> actorNames;
@@ -356,14 +361,15 @@ class NativeViewmodel {
         back.id = id;
         back.kind = native_back::kind_named(kind->get<std::string>());
         const auto &options = fields.size() > options_field ? fields[options_field] : std::string();
-        back.options =
-                id == native_back::robe_item ? native_back::unpack_robe(options) : native_back::unpack_cape(options);
+        back.options = id == native_back::robe_item    ? native_back::unpack_robe(options)
+                       : id == native_back::medal_item ? native_back::unpack_medal(options)
+                                                       : native_back::unpack_cape(options);
         const auto &lengths = backs.at("capeLengths");
         const int step = lengths.size() > 1 ? lengths[1].get<int>() - lengths[0].get<int>() : 5;
         const auto fit =
                 native_back::fit_for(out.bodyLook, out.body == "feminine", out.hoodDown, out.hat == "hat-ponytail");
         const int drawn = native_back::drawn_cape_length(back.options.cape_length, step);
-        back.mesh = native_back::mesh_key(id, fit, drawn, back.options.robe_tied);
+        back.mesh = native_back::mesh_key(id, fit, drawn, back.options.robe_tied, back.options.medal);
         const auto rig = backs.at("rigs").find(back.mesh);
         if (rig == backs.at("rigs").end() || !meshes.count(back.mesh)) {
             back = {};
@@ -1059,6 +1065,7 @@ class NativeViewmodel {
         step.tied = worn.options.robe_tied;
         native_back::advance(state.motion, step);
         state.uniforms = native_back::uniforms(state.motion, worn.kind, speed, step.cape_length);
+        if (worn.kind == native_back::Kind::medal && holds_gun(actor)) native_back::hold_medal_flat(state.uniforms);
         state.cape = worn.cape;
         if (worn.cape[0] > .5f) {
             const bool grounded = actor.frame.flags & 2;

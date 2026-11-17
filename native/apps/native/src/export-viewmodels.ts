@@ -16,6 +16,8 @@ import {
   HAIR_HATS,
   HAIR_LENGTH,
   LENGTH_HATS,
+  MEDAL_CODES,
+  MEDAL_ITEM,
   ROBE_ITEM,
 } from "../../web/src/progression";
 import { COLOURWAYS } from "../../web/src/player/bunny/palettes";
@@ -521,7 +523,7 @@ for (const id of HAT_IDS) {
 }
 /**
  * Back items (backs.ts) at every fit a body gives them: the build's torso profile, the hood, a ponytail from a raised
- * hood, the Robe tied or open, and the Cape at NATIVE_CAPE_LENGTHS (each length is its own geometry; a worn length
+ * hood, the Robe tied or open, the Daily Medal's looks, and the Cape at NATIVE_CAPE_LENGTHS (each length is its own geometry; a worn length
  * draws at the nearest of these). The client rebuilds the same key with backKey's rules (back_slot.hpp).
  */
 const NATIVE_CAPE_LENGTHS = Array.from(
@@ -545,6 +547,12 @@ function backVariants(id: string): BackFit[] {
       NATIVE_CAPE_LENGTHS.map((len) => (len === CAPE_LENGTH.default ? place : { ...place, len })),
     );
   if (id === ROBE_ITEM) return BACK_FIT_PLACES.flatMap((place) => [place, { ...place, tied: true as const }]);
+  // The Daily Medal at each metal and count step, plus the plain key a loadout without its code draws.
+  if (id === MEDAL_ITEM)
+    return BACK_FIT_PLACES.flatMap((place) => [
+      place,
+      ...Array.from({ length: MEDAL_CODES }, (_, medal) => ({ ...place, medal })),
+    ]);
   return BACK_FIT_PLACES;
 }
 for (const id of Object.keys(BACK_KIND))
