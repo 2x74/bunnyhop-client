@@ -143,14 +143,6 @@ export class NativeChatService {
           },
         });
       registerChatCommand({
-        name: "logs",
-        where: "both",
-        group: "more",
-        help: "gain logs",
-        args: "[on|off|me|%]",
-        run: (ctx) => ctx.reply("Gain logs aren't in the desktop client yet. They're on the website."),
-      });
-      registerChatCommand({
         name: "gun",
         aliases: ["give", "guns", "weapons"],
         where: "both",

@@ -1,4 +1,5 @@
 #pragma once
+#include "gain_logs.hpp"
 #include "jhud.hpp"
 #include "ssj.hpp"
 #include "hud_geometry.hpp"
@@ -481,6 +482,8 @@ struct MovementFeedback {
     JhudTracker jhud;
     // Every 6th jump whatever your own Jumps setting, for spectators whose setting differs (spectate_input.hpp).
     SsjTracker ssj_sixth = every_sixth_tracker();
+    // Gain logs: six-jump windows without turn-bind jumps (gain_logs.hpp).
+    GainLogTracker gain_logs;
     std::string ssj_line;
     std::optional<float> ssj_gain;
     bool ssj_was_in_start = false, ssj_was_noclip = false;
@@ -499,6 +502,7 @@ struct MovementFeedback {
     void reset(bool in_start = false, bool noclip = false, bool incomplete = false) {
         ssj.reset();
         ssj_sixth.reset();
+        gain_logs.reset();
         jhud.reset();
         ssj_line.clear();
         ssj_gain.reset();

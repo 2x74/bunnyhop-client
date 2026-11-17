@@ -340,7 +340,7 @@ int main(int argc, char **argv) {
             check_text(report_from(item.at("report")), item.at("expected"), "format boundary");
         for (const auto &item : data.at("offsets")) {
             const auto &value = item.at("report");
-            check(native::offset_text({value.at("ticks"), value.at("overlap"), value.at("gap")}).view()
+            check(native::offset_text({value.at("ticks"), value.at("overlap"), value.at("gap"), std::nullopt}).view()
                           == item.at("text").get<std::string>(),
                   "offset boundary");
         }

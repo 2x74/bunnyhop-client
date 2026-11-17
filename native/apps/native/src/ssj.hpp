@@ -46,6 +46,21 @@ inline constexpr std::uint32_t ssj_in_forward = 1u << 3;
 inline constexpr std::uint32_t ssj_in_back = 1u << 4;
 inline constexpr std::uint32_t ssj_in_moveleft = 1u << 9;
 inline constexpr std::uint32_t ssj_in_moveright = 1u << 10;
+// Turn binds (+left / +right), as the web's turn-binds.ts IN_LEFT / IN_RIGHT.
+inline constexpr std::uint32_t ssj_in_turn_left = 1u << 7;
+inline constexpr std::uint32_t ssj_in_turn_right = 1u << 8;
+
+/**
+ * The raw sums of the window a jump closed (web SsjTracker.lastWindow), which the gain logs add up (gain_logs.hpp).
+ * `binds`: sampled ticks that turned with a turn bind (+left or +right held, not both).
+ */
+struct SsjWindow {
+    unsigned ticks = 0;
+    float raw_gain = 0;
+    unsigned synced = 0;
+    unsigned strafes = 0;
+    unsigned binds = 0;
+};
 
 /** Player state before a tick. */
 struct SsjState {
@@ -123,6 +138,8 @@ public:
     unsigned jump = 0;
     /** The last tick went into the jump's stats (the JHUD's JSS covers the same ticks, jhud.hpp). */
     bool sampled = false;
+    /** The window as it stood at the last counted jump, before the mode cleared it (empty until one). */
+    std::optional<SsjWindow> last_window;
 
     SsjMode mode() const { return mode_; }
 
@@ -187,12 +204,13 @@ private:
     void clear_window() {
         strafe_ticks_ = synced_ticks_ = 0;
         raw_gain_ = trajectory_ = dx_ = dy_ = 0;
-        strafes_ = 0;
+        strafes_ = binds_ = 0;
     }
 
     void sample(const SsjState &pre, const SsjCmd &cmd) {
         sampled = true;
         ++strafe_ticks_;
+        if (!(cmd.buttons & ssj_in_turn_left) != !(cmd.buttons & ssj_in_turn_right)) ++binds_;
         const float vx = pre.velocity[0], vy = pre.velocity[1];
         dx_ = dx_ + vx * ssj_detail::tick_interval;
         dy_ = dy_ + vy * ssj_detail::tick_interval;
@@ -222,6 +240,7 @@ private:
         // (the plugin's double-fire guard).
         if (jump > 0 && strafe_ticks_ == 0) return std::nullopt;
         const unsigned n = ++jump;
+        last_window = SsjWindow{strafe_ticks_, raw_gain_, synced_ticks_, strafes_, binds_};
         const float speed = ssj_detail::len2(pre.velocity[0], pre.velocity[1]);
         const float z = pre.position[2];
         std::optional<SsjReport> report;
@@ -270,7 +289,7 @@ private:
 
     SsjMode mode_;
     unsigned interval_ = 6;
-    unsigned ground_ticks_ = 0, strafe_ticks_ = 0, synced_ticks_ = 0, strafes_ = 0;
+    unsigned ground_ticks_ = 0, strafe_ticks_ = 0, synced_ticks_ = 0, strafes_ = 0, binds_ = 0;
     float raw_gain_ = 0, trajectory_ = 0, dx_ = 0, dy_ = 0;
     std::uint32_t prev_buttons_ = 0;
     float initial_speed_ = 0, initial_height_ = 0, old_speed_ = 0, old_height_ = 0;

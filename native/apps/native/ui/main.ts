@@ -52,7 +52,7 @@ import { installTutorialProgress } from "./tutorial-entry";
 import { watchGauntletSplit } from "./gauntlet-watch";
 import { NativeRoomService } from "./room-service";
 import { RoomConnection } from "../../web/src/net/room";
-import { installVoicePeople } from "./voice-people";
+import { installVoicePeople, voicePeople } from "./voice-people";
 import { leaveRoomBefore } from "./room-message-policy";
 import { setRoomPresence, setRaceTag, currentRoom, currentRace } from "../../web/src/net/presence";
 import { serverBrowser } from "../../web/src/ui/servers";
@@ -64,7 +64,7 @@ import { NativeChatService } from "./chat-service";
 import { RoomAccountBoundary } from "./room-account";
 import { installNativeUiAudio } from "./audio";
 import { initDock } from "../../web/src/social/dock";
-import { initSocial, refreshFriends, setPlaying, setWatching } from "../../web/src/social/state";
+import { friendsView, initSocial, refreshFriends, setPlaying, setWatching } from "../../web/src/social/state";
 import { ranksScreen, leaveRanksUrl } from "../../web/src/ui/ranks";
 import { statsScreen } from "../../web/src/ui/stats-screen";
 import { profilePanel } from "./profile-panel";
@@ -81,6 +81,9 @@ import { getHeldLoadout, onHeldLoadout } from "../../web/src/player/cosmetics";
 import { creditsPanel } from "./credits";
 import { homeScreen, watchMenuMotion, LAST_MAP } from "./home-menu";
 import { NativeDaily } from "./daily-native";
+import { NativeGainLogs } from "./gain-logs-native";
+import { gainLogs } from "../../web/src/ssj";
+
 import { pauseScreen } from "./pause-menu";
 import { setGameInfo } from "../../web/src/feedback/state";
 import { latestMouseDiagnostics } from "./mouse-diagnostics";
@@ -835,7 +838,15 @@ function chatKeyLabel(): string | null {
   const code = state.settings.binds.chat?.[0];
   return code ? keyLabel(code) : null;
 }
+const nativeGainLogs = new NativeGainLogs(
+  gainLogs,
+  { relayLog: (log) => roomService.relayLog(log) },
+  () => prefs.get().hud.logs,
+);
 const roomService = new NativeRoomService({
+  gainLogs: nativeGainLogs.roomSide(
+    (id) => voicePeople.muted(id) || !!friendsView()?.blocked.some((blocked) => blocked.id === id),
+  ),
   chatKey: chatKeyLabel,
   heldKnife: getHeldLoadout,
   connect: (id, handlers) => new RoomConnection(id, () => state.style, handlers),
@@ -853,6 +864,8 @@ const roomService = new NativeRoomService({
   send,
 });
 onHeldLoadout(() => roomService.heldKnifeChanged());
+// !logs, cl_logs and Settings change the bar the room is asked for.
+prefs.watch(() => roomService.syncLogs());
 const chatService = new NativeChatService(roomService, () => {
   send({ type: "chatAction", action: "openRoom" } as unknown as Parameters<typeof send>[0]);
   show("room");
@@ -1063,6 +1076,7 @@ window.bunnyhopNativeMenu = {
   onActivity: (value) => activityService.receive(value),
   onState: receive,
   onAuth: refreshAccount,
+  onGainLog: (value) => nativeGainLogs.own(value),
   onRunEvent: (value) => {
     void runService.receive(value);
   },

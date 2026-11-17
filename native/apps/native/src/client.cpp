@@ -3751,6 +3751,14 @@ int run(const native::Options &opt) {
                     }
                     if (const auto report = feedback.ssj_sixth.tick(pre, ssj_cmd, info))
                         feed_reports.sixth_jump = native::spectate_input::Jump{*report, {}};
+                    // Your six-jump gain log: the menu shows it and passes it to a room (ui/gain-logs-native.ts).
+                    const auto log = feedback.gain_logs.tick(pre, ssj_cmd, info);
+                    if (log && !viewer.active && menu && menu_ready)
+                        menu->evaluate_js(
+                                native::gain_log_script(
+                                        *log, active_style, practice.active || turn_admission.local_only
+                                )
+                        );
                 }
                 hud.jhud.expire(curr.tick);
                 if (timing.update_flags & 1) ghost_compare.restart();  // started

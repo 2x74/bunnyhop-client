@@ -16,7 +16,6 @@ export type Gate = { needs: readonly string[]; unavailable?: string } | { exclud
 const needs = (...keys: string[]): Gate => ({ needs: keys });
 const menuOnly: Gate = { needs: [] };
 const excluded = (reason: string): Gate => ({ excluded: reason });
-const GAIN_LOGS = "The desktop client doesn't make or show gain logs yet.";
 const ownVersion = (note: string, ...keys: string[]): Gate => ({ needs: keys, unavailable: note });
 
 const RAW_INPUT = "The desktop client always reads raw mouse motion; there's no browser pointer lock to adjust.";
@@ -105,10 +104,10 @@ const ROWS: Record<string, Gate> = {
   "hud/Strafe trainer/Jump sound": needs("hudStrafeTrainerSound"),
   "hud/Jump stats/Chat": needs("hudSsjChat"),
   "hud/Jump stats/Only gain from": needs("hudSsjMinGain"),
-  // Gain logs (web ssj/logs.ts) need the game's six-jump window and the room's log relay; not in this client yet.
-  "hud/Jump stats/Gain logs in servers": excluded(GAIN_LOGS),
-  "hud/Jump stats/All my gain logs": excluded(GAIN_LOGS),
-  "hud/Jump stats/Gain logs from": excluded(GAIN_LOGS),
+  // Gain logs: the game counts the windows, the menu shows and relays them (gain-logs-native.ts).
+  "hud/Jump stats/Gain logs in servers": menuOnly,
+  "hud/Jump stats/All my gain logs": menuOnly,
+  "hud/Jump stats/Gain logs from": menuOnly,
   "hud/Jump stats/HUD": needs("jumpStats"),
   "hud/Jump stats/Jumps": needs("jumpStatsMode", "jumpStatsInterval"),
   "hud/Jump stats/Speed": needs("hudSsjFieldsSpeed"),

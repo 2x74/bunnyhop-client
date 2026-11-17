@@ -854,6 +854,14 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME native_movement_hud_parity COMMAND bunnyhop-native-movement-hud-parity-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/src/movement_hud_vectors.json.gz")
+    # Gain log windows from the website's GainLogTracker; regenerate with tools/movement-hud/gain-log-vectors.ts.
+    add_executable(bunnyhop-native-gain-logs-tests src/gain_logs_tests.cpp)
+    target_include_directories(bunnyhop-native-gain-logs-tests PRIVATE include vendor src)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+        target_compile_options(bunnyhop-native-gain-logs-tests PRIVATE -ffp-contract=off)
+    endif()
+    add_test(NAME native_gain_logs COMMAND bunnyhop-native-gain-logs-tests
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/gain_log_vectors.json")
     # Golden vectors from the web's TimedInput; regenerate with native/tools/timed-input/generate-vectors.ts.
     add_executable(bunnyhop-native-timed-input-parity-tests src/timed_input_parity_tests.cpp)
     target_include_directories(bunnyhop-native-timed-input-parity-tests PRIVATE include vendor src)

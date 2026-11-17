@@ -82,7 +82,7 @@ test("room service validates native pose identity and sends each batch as it arr
     expect(f.service.pose({ ...pose(f), generation: -1 })).toBe(false);
     expect(f.service.pose(pose(f))).toBe(true);
     expect(f.poses.map((s) => s.tick)).toEqual([4, 8, 12, 16, 20]);
-    expect(f.batches).toEqual([[{ style: 3, track: 0, timer: 2, timerTicks: 100 }, 2, true, null]]);
+    expect(f.batches).toEqual([[{ style: 3, track: 0, timer: 2, timerTicks: 100 }, 2, true, null, null]]);
     // A repeat or an older batch is refused; nothing waits for a page timer or a minimum gap.
     expect(f.service.pose(pose(f))).toBe(false);
     expect(f.service.pose(pose(f, 40))).toBe(true);
@@ -301,7 +301,7 @@ test("latest native timer metadata is sent with its sample batch and kick stops 
     f.handlers[0].message(welcome("test"));
     f.service.pose(pose(f));
     f.service.pose({ ...pose(f, 40), meta: { style: "sideways", track: 0, timer: 3, timerTicks: 200 } });
-    expect(f.batches[1]).toEqual([{ style: 3, track: 0, timer: 3, timerTicks: 200 }, 2, true, null]);
+    expect(f.batches[1]).toEqual([{ style: 3, track: 0, timer: 3, timerTicks: 200 }, 2, true, null, null]);
     f.handlers[0].message({ t: "kicked", reason: "Removed" });
     expect(f.service.view.status).toBe("closed");
     expect(f.service.command({ t: "chat", text: "late" })).toBe(false);
@@ -599,4 +599,65 @@ test("a reconnect keeps watching the same player, and quiet joins make no sound 
   } finally {
     f.service.leave();
   }
+});
+
+test("gain logs: asked for at the room's bar, yours rides the next state batch, others' lines by name (0.0.43)", async () => {
+  const handlers: RoomHandlers[] = [],
+    commands: unknown[] = [],
+    batches: unknown[][] = [];
+  const shown: string[] = [];
+  let bar: number | null = null;
+  const transport: RoomTransport = {
+    send: (value) => commands.push(value),
+    pushSample: () => {},
+    flushSamples: (...value) => batches.push(value),
+    close: () => {},
+  };
+  const service = new NativeRoomService({
+    ensureAccount: async () => true,
+    connect: (_id, h) => (handlers.push(h), transport),
+    send: () => {},
+    gainLogs: {
+      roomBar: (value) => void (bar = value),
+      wanted: (roomBar) => roomBar,
+      other: (log, name) => void shown.push(`${name} ${log.gain}`),
+      hidden: (id) => id === "muted",
+    },
+  });
+  const log = { jump: 6, jumps: 6, gain: 91.5, sync: 93, strafes: 25, ticks: 400 };
+  try {
+    await service.join("test");
+    // An older room (no room.logs): nothing asked, nothing relayed.
+    handlers[0].message(welcome("test"));
+    expect(service.relayLog(log)).toBe(false);
+    const start = welcome("test");
+    start.room = { ...start.room, logs: 85 } as never;
+    start.players = [
+      { slot: 0, id: "me", name: "Player", style: "autohop" } as never,
+      { slot: 2, id: "ana", name: "Ana", style: "autohop" } as never,
+      { slot: 3, id: "muted", name: "Muted", style: "autohop" } as never,
+    ];
+    handlers[0].message(start);
+    expect(bar).toBe(85);
+    expect(commands).toContainEqual({ t: "logs", min: 85 });
+    expect(service.relayLog(log)).toBe(true);
+    const batch = {
+      generation: service.view.generation,
+      id: service.view.id,
+      map: "bhop_eazy",
+      samples: [16, 12, 8, 4, 0].map((back) => ({ ...sample, tick: 20 - back })),
+      meta: { style: "autohop", track: 0, timer: 2, timerTicks: 100 },
+    };
+    expect(service.pose(batch)).toBe(true);
+    expect(batches.at(-1)?.[4]).toEqual(log);
+    expect(service.pose({ ...batch, samples: batch.samples.map((s) => ({ ...s, tick: s.tick + 20 })) })).toBe(true);
+    expect(batches.at(-1)?.[4]).toBeNull();
+    // Lines from the room: by name, never your own slot's or a muted player's.
+    const logs = [0, 2, 3].map((slot) => ({ slot, log }));
+    handlers[0].snapshot({ ...decodeSnapshot(Buffer.from(SNAPSHOT_0036, "base64"))!, logs } as Snapshot);
+    expect(shown).toEqual(["Ana 91.5"]);
+  } finally {
+    service.leave();
+  }
+  expect(bar).toBeNull();
 });

@@ -675,6 +675,8 @@ declare global {
       onState: (value: unknown) => void;
       onAuth: (value?: unknown) => void;
       onRunEvent: (value: unknown) => void;
+      /** One six-jump gain log window from the game (gain_logs.hpp gain_log_script). */
+      onGainLog?: (value: unknown) => void;
       version: number;
       open?: (screen: string, focus?: string) => void;
       /** The host left the map (every leave_map, also its own Main menu bind): stop the room, the gauntlet and their timers now. */
