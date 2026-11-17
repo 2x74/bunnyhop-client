@@ -5,6 +5,8 @@
 #include "third_person_events.hpp"
 #include "first_person_weapons.hpp"
 #include "model_light.hpp"
+#include "back_slot.hpp"
+#include "hop_layer.hpp"
 #include <charconv>
 #include <optional>
 #include <span>
@@ -17,13 +19,18 @@ class NativeViewmodel {
     using Clip = native_vm::PoseClip;
     using Entry = native_vm::PoseEntry;
 
+    // Four-float attributes only some meshes carry (export-viewmodels.ts EXTRA_ATTRIBUTES), each in a buffer of its
+    // own: a back item's motion code (backfx) and a sprung lock's root (hairRoot). Every other mesh reads zeros.
+    static constexpr std::array<const char *, 2> extra_attributes = {"backfx", "hairRoot"};
+    static constexpr std::array<GLuint, 2> extra_locations = {11, 10};
+    static constexpr size_t no_extra = SIZE_MAX;
+
     struct Mesh {
         GLuint vao = 0, vbo = 0, ebo = 0;
         size_t vertices = 0, offset = 0, indices = 0, indexOffset = 0, glowOffset = 0;
         GLuint glowVbo = 0;
-        // Sprung hair's lock pivots (hair-fx.ts hairRoot), four floats a vertex in their own buffer.
-        std::optional<size_t> hairRootOffset;
-        GLuint hairRootVbo = 0;
+        std::array<size_t, 2> extraOffsets{no_extra, no_extra};
+        std::array<GLuint, 2> extraVbos{};
         bool borrowed = false;
     };
 
@@ -60,6 +67,10 @@ class NativeViewmodel {
         bool sprungHair = false;
         float sprungLength = 1, hairRests = 0;
         HeadwearFit fit;
+        native_back::Worn back;
+        // The hop effect (packed field 12, "hop-*[:trail]") and the trail colours it takes (linear).
+        const std::vector<native_hop::Part> *hop = nullptr;
+        std::string hopTrail;
     };
 
     struct CachedLook {
@@ -83,9 +94,6 @@ class NativeViewmodel {
     using PlayerProgram = native_render::PlayerProgram;
     using PlayerMaterial = native_render::PlayerMaterial;
     static constexpr size_t vertex_floats = 26;
-    // Attribute locations outside the vertex layout (export-player-materials.ts): sprung hair's pivots, and the back
-    // items' motion data.
-    static constexpr GLuint hair_root_location = 10, back_effect_location = 11;
     // The metals' scene reflection sampler: a black cube on its own unit, read only when a look turns reflections on.
     static constexpr GLint reflection_unit = 9;
     GLuint bonesTexture = 0, identityBonesTexture = 0, reflectionCube = 0;
@@ -119,7 +127,7 @@ class NativeViewmodel {
         std::string id, outfit, loadout;
         uint32_t weapon = 0;
         bool silenced = false, emptyHand = false, used = false;
-        std::array<std::string, 5> names;
+        std::array<std::string, 6> names;
         size_t count = 0;
     };
 
@@ -152,6 +160,7 @@ class NativeViewmodel {
         parts->names[parts->count++] = "body:" + body + ":" + (body == "bunny" ? look.body : "classic") + ":"
                                        + look.glove + (look.hoodDown ? ":down" : "");
         if (!look.hatMesh.empty()) parts->names[parts->count++] = look.hatMesh;
+        if (!look.back.mesh.empty()) parts->names[parts->count++] = look.back.mesh;
         const auto &gun = weapons[std::min(size_t(actor.frame.weapon), weapons.size() - 1)];
         if (actor.emptyHand) return {parts->names.data(), parts->count};
         parts->names[parts->count++] = gun.empty() || gun == "knife" ? "tpknife:" + look.knife : "tpgun:" + gun;
@@ -167,6 +176,16 @@ class NativeViewmodel {
     nlohmann::json tpInspects;
     std::unordered_map<std::string, native_tp::PartPose> tpParts;
 
+    // A worn back item's motion on one player (web model.ts update and sleeveLayer).
+    struct BackState {
+        std::string mesh;
+        native_back::Motion motion;
+        native_back::SleeveMotion sleeves;
+        native_back::Uniforms uniforms;
+        std::array<float, 4> cape{};
+        std::array<float, 4> robe_left{}, robe_right{};
+    };
+
     struct ActorAction {
         native_tp::Combo gesture;
         double last = -1;
@@ -178,9 +197,28 @@ class NativeViewmodel {
         native_render::AccessoryMotion accessory;
         native_render::PonytailMotion ponytail;
         native_render::HairMotion hair;
+        BackState back;
     };
 
     std::unordered_map<std::string, ActorAction> actorActions;
+
+    // Hop effects: the recipes, the layer (made at the first burst), each player's emitter and its clock slot.
+    struct ActorHop {
+        native_hop::Emitter emitter;
+        int slot = -1;
+    };
+
+    std::optional<native_hop::Recipes> hopRecipes;
+    std::unique_ptr<native_hop::Layer> hopLayer;
+    std::unordered_map<std::string, ActorHop> actorHops;
+    std::filesystem::path hopAssetRoot;
+    // Settings: other players' hop effects (yours always show), and the Potato and reduced-motion scales.
+    bool showOtherHops = true;
+    // The Robe's first-person sleeves: the setting, the mesh and their lag.
+    inline static const std::string first_person_robe = "fprobe";
+    bool showFirstPersonRobe = true;
+    native_back::FirstPersonSleeves firstPersonSleeves;
+    double firstPersonSleevesAt = -1;
 
     // The two-handed third-person gun hold (gun_hold.hpp): per gun data, and per actor its pose state and where its
     // muzzle was last drawn (world space), for the flash and tracer of its next shot.
@@ -303,6 +341,77 @@ class NativeViewmodel {
         }
     }
 
+    // Packed loadout fields 13 and 14 (loadout.ts packLoadout): the back item and its options. An item this build
+    // doesn't have is not drawn.
+    void read_back(const std::vector<std::string> &fields, Look &out) const {
+        constexpr size_t back_field = 13, options_field = 14;
+        if (fields.size() <= back_field || fields[0] != "2") return;
+        const auto &backs = metadata.at("backs");
+        const auto &id = fields[back_field];
+        const auto kind = backs.at("kinds").find(id);
+        if (kind == backs.at("kinds").end()) return;
+        auto &back = out.back;
+        back.id = id;
+        back.kind = native_back::kind_named(kind->get<std::string>());
+        const auto &options = fields.size() > options_field ? fields[options_field] : std::string();
+        back.options =
+                id == native_back::robe_item ? native_back::unpack_robe(options) : native_back::unpack_cape(options);
+        const auto &lengths = backs.at("capeLengths");
+        const int step = lengths.size() > 1 ? lengths[1].get<int>() - lengths[0].get<int>() : 5;
+        const auto fit =
+                native_back::fit_for(out.bodyLook, out.body == "feminine", out.hoodDown, out.hat == "hat-ponytail");
+        const int drawn = native_back::drawn_cape_length(back.options.cape_length, step);
+        back.mesh = native_back::mesh_key(id, fit, drawn, back.options.robe_tied);
+        const auto rig = backs.at("rigs").find(back.mesh);
+        if (rig == backs.at("rigs").end() || !meshes.count(back.mesh)) {
+            back = {};
+            return;
+        }
+        read_back_rig(*rig, back);
+        if (out.hat == "hat-ponytail") back.ponytail_rest = native_back::ponytail_rest(id, out.bodyLook == "bunny");
+        read_back_tones(out);
+    }
+
+    static void read_back_rig(const nlohmann::json &rig, native_back::Worn &back) {
+        back.pivot = vector3(rig.at("pivot"));
+        back.axis = vector3(rig.at("axis"));
+        back.pivot2 = rig.contains("pivot2") ? vector3(rig.at("pivot2")) : back.pivot;
+        if (rig.contains("hang")) back.cape = {1, rig["hang"][0].get<float>(), rig["hang"][1].get<float>(), 0};
+        if (rig.contains("robe")) {
+            const auto &robe = rig.at("robe");
+            back.robe = {
+                    float(back.options.robe_pattern),
+                    robe.at("drop").get<float>(),
+                    robe.at("radius").get<float>(),
+                    robe.at("from").get<float>()
+            };
+        }
+    }
+
+    static void read_back_tones(Look &out) {
+        auto &back = out.back;
+        constexpr size_t pants_slot = 2;
+        const native_back::Rgb accent = out.accent;
+        const native_back::Rgb pants = {
+                out.palette[pants_slot * 3], out.palette[pants_slot * 3 + 1], out.palette[pants_slot * 3 + 2]
+        };
+        const auto tones = back.kind == native_back::Kind::robe
+                                   ? native_back::robe_tones(pants, accent, back.options.outer, back.options.lining)
+                                   : native_back::cape_tones(accent, back.options.outer, back.options.lining);
+        for (size_t role = 0; role < 4; ++role)
+            std::copy(tones[role].begin(), tones[role].end(), back.tones.begin() + long(role * 3));
+    }
+
+    void read_hop(const std::vector<std::string> &fields, Look &out) const {
+        constexpr size_t hop_field = 12;
+        if (!hopRecipes || fields.size() <= hop_field || fields[0] != "2") return;
+        const auto &field = fields[hop_field];
+        const auto colon = field.find(':');
+        out.hop = hopRecipes->effect(field.substr(0, colon));
+        if (!out.hop) return;
+        out.hopTrail = colon == std::string::npos ? hopRecipes->default_trail : "trail-" + field.substr(colon + 1);
+    }
+
     const Look &look(const std::string &outfit, const std::string &packed) {
         for (const auto &cached : lookCache) {
             if (cached.used && cached.outfit == outfit && cached.packed == packed) return cached.look;
@@ -377,6 +486,8 @@ class NativeViewmodel {
         for (size_t slot = 0; slot < 5; ++slot)
             linearColor(glove.at(gloveSlots[slot]), out.gloveColors.data() + slot * 3);
         fit_headwear(out);
+        read_back(f, out);
+        read_hop(f, out);
         cached.look = std::move(out);
         return cached.look;
     }
@@ -489,6 +600,17 @@ class NativeViewmodel {
         p.camoP = at("uCamoP");
         p.camoScale = at("uCamoScale");
         p.camoTp = at("uCamoTp");
+        p.back = at("uBack");
+        p.backTip = at("uBackTip");
+        p.backMid = at("uBackMid");
+        p.cape = at("uCape");
+        p.backPivot = at("uBackPivot");
+        p.backPivot2 = at("uBackPivot2");
+        p.backAxis = at("uBackAxis");
+        p.capeTones = at("uCapeTones");
+        p.robeLeft = at("uRobeL");
+        p.robeRight = at("uRobeR");
+        p.robe = at("uRobe");
         return p;
     }
 
@@ -589,11 +711,12 @@ class NativeViewmodel {
             gl.GenBuffers(1, &m.glowVbo);
             gl.BindBuffer(GL_ARRAY_BUFFER, m.glowVbo);
             gl.BufferData(GL_ARRAY_BUFFER, m.vertices * 3 * sizeof(float), data.data() + m.glowOffset, GL_STATIC_DRAW);
-            if (m.hairRootOffset) {
-                gl.GenBuffers(1, &m.hairRootVbo);
-                gl.BindBuffer(GL_ARRAY_BUFFER, m.hairRootVbo);
+            for (size_t e = 0; e < extra_attributes.size(); ++e) {
+                if (m.extraOffsets[e] == no_extra) continue;
+                gl.GenBuffers(1, &m.extraVbos[e]);
+                gl.BindBuffer(GL_ARRAY_BUFFER, m.extraVbos[e]);
                 gl.BufferData(
-                        GL_ARRAY_BUFFER, m.vertices * 4 * sizeof(float), data.data() + *m.hairRootOffset, GL_STATIC_DRAW
+                        GL_ARRAY_BUFFER, m.vertices * 4 * sizeof(float), data.data() + m.extraOffsets[e], GL_STATIC_DRAW
                 );
             }
             if (m.indices) {
@@ -622,10 +745,11 @@ class NativeViewmodel {
             gl.BindBuffer(GL_ARRAY_BUFFER, m.glowVbo);
             gl.EnableVertexAttribArray(7);
             gl.VertexAttribPointer(7, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), nullptr);
-            if (m.hairRootVbo) {
-                gl.BindBuffer(GL_ARRAY_BUFFER, m.hairRootVbo);
-                gl.EnableVertexAttribArray(hair_root_location);
-                gl.VertexAttribPointer(hair_root_location, 4, GL_FLOAT, GL_FALSE, 4 * sizeof(float), nullptr);
+            for (size_t e = 0; e < extra_attributes.size(); ++e) {
+                if (!m.extraVbos[e]) continue;
+                gl.BindBuffer(GL_ARRAY_BUFFER, m.extraVbos[e]);
+                gl.EnableVertexAttribArray(extra_locations[e]);
+                gl.VertexAttribPointer(extra_locations[e], 4, GL_FLOAT, GL_FALSE, 4 * sizeof(float), nullptr);
             }
             if (m.indices) gl.BindBuffer(GL_ELEMENT_ARRAY_BUFFER, m.ebo);
         }
@@ -637,10 +761,10 @@ class NativeViewmodel {
         if (at == meshes.end()) return;
         const auto &m = at->second;
         gl.BindVertexArray(m.vao);
-        // The attributes most meshes don't carry read zero, as the website's defaults (materials.ts backfx). The
-        // current value is context state, not the VAO's, so it is set at each draw.
-        if (!m.hairRootVbo) gl.VertexAttrib4f(hair_root_location, 0, 0, 0, 0);
-        gl.VertexAttrib4f(back_effect_location, 0, 0, 0, 0);
+        // A disabled array reads the current value, which defaults to (0, 0, 0, 1): a w of 1 would recolour the body as
+        // the Cape's outside.
+        for (size_t e = 0; e < extra_attributes.size(); ++e)
+            if (!m.extraVbos[e]) gl.VertexAttrib4f(extra_locations[e], 0, 0, 0, 0);
         if (instances > 1) {
             if (m.indices)
                 gl.DrawElementsInstanced(GL_TRIANGLES, m.indices, GL_UNSIGNED_INT, nullptr, instances);
@@ -785,6 +909,7 @@ class NativeViewmodel {
         auto &state = actorActions[actor.id];
         if (pulses.snapped || seconds < state.last || state.knife != look.knife || state.weapon != actor.frame.weapon)
             state = {};
+        const bool fresh = state.last < 0;
         const double dt = state.last < 0 ? 0 : std::clamp(seconds - state.last, 0., .1);
         state.last = seconds;
         state.knife = look.knife;
@@ -815,15 +940,169 @@ class NativeViewmodel {
         );
         if (look.sprungHair)
             native_render::advance_hair(state.hair, actor.frame.velocity, actor.frame.yaw, dt, pulses.snapped);
+        // (Drawn again in the same frame, for a reflection or a shadow, it holds: dt is 0.)
+        advance_back(state.back, actor, look.back, dt, pulses.snapped || fresh, feetYaw);
+        hop_update(actor, look, seconds, pulses.snapped);
         gun_layer(actor, pulses, dt, feetYaw, acting);
         gl.ActiveTexture(GL_TEXTURE0);
         gl.BindTexture(GL_TEXTURE_2D, bonesTexture);
         gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, 3, pose.size() / 12, 0, GL_RGBA, GL_FLOAT, pose.data());
         if (actorActions.size() > 256) {
+            for (auto &[id, hop] : actorHops)
+                release_hop(hop);
+            actorHops.clear();
             actorActions.clear();
             actorAnimationStates.clear();
             actorHolds.clear();
         }
+    }
+
+    static bool own_hops_id(const std::string &id) {
+        return id == native_render::own_actor_id || id == "menu-preview" || id == "asset-preview";
+    }
+
+    static bool own_hops(const native_render::Actor &actor) { return own_hops_id(actor.id); }
+
+    native_hop::Rgb hop_color(const std::array<float, 3> &srgb) const {
+        return {native_render::srgb_linear(srgb[0]),
+                native_render::srgb_linear(srgb[1]),
+                native_render::srgb_linear(srgb[2])};
+    }
+
+    // hop-layer.ts HopEmitter.update: a burst at the takeoff when this player hops, while hop effects show for them.
+    void hop_update(const native_render::Actor &actor, const Look &look, double seconds, bool snapped) {
+        auto found = actorHops.find(actor.id);
+        if (snapped && found != actorHops.end()) release_hop(found->second);
+        if (!look.hop || !hopRecipes || (!own_hops(actor) && !showOtherHops)) return;
+        auto &hop = actorHops[actor.id];
+        if (hopLayer && hop.slot >= 0) hopLayer->set_clock(hop.slot, seconds);
+        native_hop::Pose pose;
+        const auto &frame = actor.frame;
+        for (size_t k = 0; k < 3; ++k) {
+            pose.position[k] = frame.position[k];
+            pose.velocity[k] = frame.velocity[k];
+        }
+        pose.grounded = frame.flags & 2;
+        const auto probe = [this](double x, double y, double z) {
+            return ground_below(x, y, z);
+        };
+        double back = 0;
+        const auto place = hop.emitter.takeoff(*hopRecipes, *look.hop, pose, seconds, actor.jumped, probe, back);
+        if (!place || !claim_hop(hop)) return;
+        hopLayer->set_clock(hop.slot, seconds);
+        const auto colors = own_hops(actor) ? previewTrail : cosmetic_colors(look.hopTrail);
+        native_hop::Spawn spawn;
+        spawn.x = place->x;
+        spawn.y = place->z;
+        spawn.z = -place->y;
+        spawn.vx = frame.velocity[0];
+        spawn.vz = -frame.velocity[1];
+        spawn.t = seconds - back;
+        spawn.slot = hop.slot;
+        spawn.quality = cosmeticsTier == 0 ? .5 : 1;
+        spawn.motion = motionScale < 1 ? native_hop::reduced_motion : 1;
+        spawn.tint = hop_color(colors[0]);
+        spawn.tint2 = hop_color(colors[1]);
+        spawn.alpha =
+                ghost_source_of(actor) == native_render::GhostSource::none ? 1 : std::clamp(actor.opacity, 0.f, 1.f);
+        spawn.reach = place->reach;
+        if (place->reach) spawn.slope = std::array<double, 2>{float(place->slope[0]), float(place->slope[1])};
+        if (hopLayer->burst(*look.hop, spawn)) hop.emitter.last_burst = seconds;
+    }
+
+    bool claim_hop(ActorHop &hop) {
+        if (!hopLayer) hopLayer = std::make_unique<native_hop::Layer>(gl, *hopRecipes, hopAssetRoot);
+        if (hop.slot >= 0) return true;
+        const auto slot = hopLayer->claim();
+        if (!slot) return false;
+        hop.slot = *slot;
+        return true;
+    }
+
+    void release_hop(ActorHop &hop) {
+        if (hopLayer && hop.slot >= 0) hopLayer->release(hop.slot);
+        hop.slot = -1;
+        hop.emitter.reset();
+    }
+
+    // Seconds the ground under a long cape takes to come back on a landing, and to fall away in the air (model.ts).
+    static constexpr double cape_ground_seconds = .05, cape_air_seconds = .12;
+    static constexpr float cape_air_drop_units = 40;
+
+    void advance_back(
+            BackState &state,
+            const native_render::Actor &actor,
+            const native_back::Worn &worn,
+            double dt,
+            bool snap,
+            float feetYaw
+    ) {
+        if (worn.kind == native_back::Kind::none) return;
+        if (state.mesh != worn.mesh) {
+            state = {};
+            state.mesh = worn.mesh;
+            snap = true;
+        }
+        const auto &v = actor.frame.velocity;
+        const double speed = std::hypot(v[0], v[1]);
+        native_back::Step step;
+        step.kind = worn.kind;
+        step.velocity = {v[0], v[1], v[2]};
+        step.yaw_degrees = actor.frame.yaw;
+        step.dt = dt;
+        step.jumped = actor.jumped;
+        step.snap = snap;
+        step.still = cosmeticsTier == 0;
+        step.cape_length = worn.cape_length_scale();
+        step.tied = worn.options.robe_tied;
+        native_back::advance(state.motion, step);
+        state.uniforms = native_back::uniforms(state.motion, worn.kind, speed, step.cape_length);
+        state.cape = worn.cape;
+        if (worn.cape[0] > .5f) {
+            const bool grounded = actor.frame.flags & 2;
+            const float ground = worn.cape[2], want = grounded ? ground : ground - cape_air_drop_units;
+            const double seconds = grounded ? cape_ground_seconds : cape_air_seconds;
+            state.cape[2] = snap ? want : state.cape[2] + (want - state.cape[2]) * float(1 - std::exp(-dt / seconds));
+        }
+        if (worn.kind == native_back::Kind::robe) advance_sleeves(state, actor, dt, snap, feetYaw);
+    }
+
+    // The sleeves swing from where the forearms are now (model.ts sleeveLayer), after the pose is final.
+    void advance_sleeves(BackState &state, const native_render::Actor &actor, double dt, bool snap, float feetYaw) {
+        const auto &anchor = metadata.at("backs").at("sleeveAnchor");
+        const std::array<int, 2> bones = {actor_bone("L_Forearm"), actor_bone("R_Forearm")};
+        std::array<double, 6> anchors{};
+        for (size_t side = 0; side < 2; ++side) {
+            if (bones[side] < 0 || size_t(bones[side] + 1) * 12 > pose.size()) return;
+            const float *skin = pose.data() + size_t(bones[side]) * 12;
+            const double x = side ? -anchor[0].get<double>() : anchor[0].get<double>();
+            const double y = anchor[1].get<double>(), z = anchor[2].get<double>();
+            for (size_t k = 0; k < 3; ++k)
+                anchors[side * 3 + k] = skin[k * 4] * x + skin[k * 4 + 1] * y + skin[k * 4 + 2] * z + skin[k * 4 + 3];
+        }
+        const auto &v = actor.frame.velocity;
+        native_back::advance_sleeves(state.sleeves, anchors, {v[0], v[1], v[2]}, feetYaw, dt, snap, cosmeticsTier == 0);
+        state.robe_left = native_back::sleeve_uniform(state.sleeves, 0);
+        state.robe_right = native_back::sleeve_uniform(state.sleeves, 1);
+    }
+
+    void back_motion_uniforms(const PlayerProgram &p, const BackState *state) {
+        static const BackState rest;
+        const auto &shown = state ? *state : rest;
+        gl.Uniform4fv(p.back, 1, shown.uniforms.back.data());
+        gl.Uniform4fv(p.backTip, 1, shown.uniforms.tip.data());
+        gl.Uniform4fv(p.backMid, 1, shown.uniforms.mid.data());
+        gl.Uniform4fv(p.cape, 1, shown.cape.data());
+        gl.Uniform4fv(p.robeLeft, 1, shown.robe_left.data());
+        gl.Uniform4fv(p.robeRight, 1, shown.robe_right.data());
+    }
+
+    void back_look_uniforms(const PlayerProgram &p, const native_back::Worn &back) {
+        gl.Uniform3fv(p.backPivot, 1, back.pivot.data());
+        gl.Uniform3fv(p.backPivot2, 1, back.pivot2.data());
+        gl.Uniform3fv(p.backAxis, 1, back.axis.data());
+        gl.Uniform3fv(p.capeTones, 4, back.tones.data());
+        gl.Uniform4fv(p.robe, 1, back.robe.data());
     }
 
     static void linearColor(uint32_t hex, float *out) {
@@ -907,12 +1186,14 @@ class NativeViewmodel {
         gl.Uniform3fv(p.headwearOffset, 1, look.fit.offset.data());
         gl.Uniform3fv(p.headwearFaceScale, 1, look.fit.faceScale.data());
         gl.Uniform3fv(p.headwearFaceOffset, 1, look.fit.faceOffset.data());
-        const float ponytail[4] = {0, 0, look.hairLength, 0};
+        const float ponytail[4] = {0, 0, look.hairLength, look.back.ponytail_rest};
         gl.Uniform4fv(p.ponytail, 1, ponytail);
         gl.Uniform4fv(p.hairHighlight, 1, look.hairHighlight.data());
         const float sway[4] = {0, 0, 0, look.sprungLength}, flex[4] = {0, 0, 0, look.hairRests};
         gl.Uniform4fv(p.hairSway, 1, sway);
         gl.Uniform4fv(p.hairFlex, 1, flex);
+        back_look_uniforms(p, look.back);
+        back_motion_uniforms(p, nullptr);
     }
 
     void bind_glow(const PlayerProgram &p, const native_render::Glow *glow, float opacity) {
@@ -968,6 +1249,9 @@ public:
         , modelData(native_vm::ModelData::load(assetRoot))
         , data(modelData->vertices)
         , metadata(modelData->metadata) {
+        hopAssetRoot = assetRoot;
+        if (std::filesystem::exists(assetRoot / "hop-fx.json"))
+            hopRecipes = native_hop::Recipes::load(assetRoot / "hop-fx.json");
         if (std::filesystem::exists(assetRoot / "actor-animations.json"))
             actorAnimationData = std::make_shared<native_actor_anim::Data>(assetRoot.string());
         {
@@ -1000,10 +1284,13 @@ public:
             m.glowOffset = raw.at("glowOffset").get<size_t>() / 4;
             m.indices = raw.value("indices", size_t(0));
             m.indexOffset = raw.value("indexOffset", size_t(0)) / 4;
-            if (raw.contains("hairRootOffset")) {
-                m.hairRootOffset = raw.at("hairRootOffset").get<size_t>() / 4;
-                if (*m.hairRootOffset + m.vertices * 4 > data.size()) throw std::runtime_error("Invalid hair range");
-            }
+            if (raw.contains("extras"))
+                for (size_t e = 0; e < extra_attributes.size(); ++e)
+                    if (raw["extras"].contains(extra_attributes[e])) {
+                        m.extraOffsets[e] = raw["extras"][extra_attributes[e]].get<size_t>() / 4;
+                        if (m.extraOffsets[e] + m.vertices * 4 > data.size())
+                            throw std::runtime_error("Invalid native mesh range");
+                    }
             if (m.glowOffset + m.vertices * 3 > data.size() || !m.vertices || m.vertices > 4000000
                 || m.offset + m.vertices * vertex_floats > data.size() || m.indexOffset + m.indices > data.size())
                 throw std::runtime_error("Invalid native mesh range");
@@ -1079,7 +1366,8 @@ public:
                 continue;
             }
             if (m.glowVbo) gl.DeleteBuffers(1, &m.glowVbo);
-            if (m.hairRootVbo) gl.DeleteBuffers(1, &m.hairRootVbo);
+            for (auto &extra : m.extraVbos)
+                if (extra) gl.DeleteBuffers(1, &extra);
             if (m.ebo) gl.DeleteBuffers(1, &m.ebo);
             if (m.vbo) gl.DeleteBuffers(1, &m.vbo);
             if (m.vao) gl.DeleteVertexArrays(1, &m.vao);
@@ -1104,7 +1392,8 @@ public:
 
         struct Buffers {
             std::string name;
-            GLuint vertices, glow, indices, hairRoots;
+            GLuint vertices, glow, indices;
+            std::array<GLuint, 2> extras;
         };
 
         std::vector<Buffers> meshes;
@@ -1139,7 +1428,7 @@ public:
             const auto at = meshes.find(name);
             if (at == meshes.end()) continue;
             const auto &mesh = at->second;
-            result.meshes.push_back({name, mesh.vbo, mesh.glowVbo, mesh.ebo, mesh.hairRootVbo});
+            result.meshes.push_back({name, mesh.vbo, mesh.glowVbo, mesh.ebo, mesh.extraVbos});
         }
         return result;
     }
@@ -1170,8 +1459,8 @@ public:
             auto &mesh = at->second;
             mesh.vbo = buffers.vertices;
             mesh.glowVbo = buffers.glow;
-            mesh.hairRootVbo = buffers.hairRoots;
             mesh.ebo = buffers.indices;
+            mesh.extraVbos = buffers.extras;
             mesh.borrowed = true;
         }
     }
@@ -1210,6 +1499,29 @@ public:
     }
 
     void player_glow(std::optional<native_render::Glow> value) { localGlow = std::move(value); }
+
+    // Settings -> Ghosts & players -> Hop effects: other players' bursts. Off, theirs cost nothing.
+    void hop_visibility(bool others) {
+        showOtherHops = others;
+        if (others) return;
+        for (auto &[id, hop] : actorHops)
+            if (!own_hops_id(id)) release_hop(hop);
+    }
+
+    // Every live burst, after the bunnies (the main view only: not in reflections or shadows).
+    void draw_hop_effects(const native::Matrix &view_projection, const float eye[3]) {
+        if (hopLayer) hopLayer->draw(view_projection, eye);
+    }
+
+    // Settings -> First person -> Robe sleeves (cl_firstpersonrobe).
+    void first_person_robe_visibility(bool show) { showFirstPersonRobe = show; }
+
+    // A seek or a map change: every burst goes.
+    void clear_hop_effects() {
+        for (auto &[id, hop] : actorHops)
+            hop.emitter.reset();
+        if (hopLayer) hopLayer->clear();
+    }
 
     void glow_visibility(bool show, bool firstPerson) {
         showGlow = show;
@@ -1258,6 +1570,7 @@ public:
         firstPerson->reset();
         firstPersonWeapon = 0;
         firstPersonEntry.clear();
+        clear_hop_effects();
     }
 
     native_render::InspectCueQueue &inspect_cues() { return inspectCueQueue; }
@@ -1285,7 +1598,7 @@ public:
             draw_knife_sample(width, height, kind == "hilt", seconds);
         } else if (kind == "gunside") {
             draw_gun_side(width, height, weapon, seconds);
-        } else if (kind == "actor" || kind == "hat" || kind == "ghost") {
+        } else if (kind == "actor" || kind == "hat" || kind == "ghost" || kind == "back") {
             native_render::Actor actor;
             actor.id = "asset-preview";
             actor.opacity = kind == "ghost" ? .55f : 1.f;
@@ -1298,12 +1611,26 @@ public:
             actor.frame.weapon = weapon;
             actor.inspect = previewAction == "inspect" && seconds == 0 ? 1 : 0;
             actor.attack = previewAction == "fire" && seconds == 0 ? 1 : 0;
+            // "hop": a hop every preview_hop_seconds, for the hop effect.
+            constexpr double preview_hop_seconds = .5, preview_frame_seconds = 1. / 60;
+            actor.jumped =
+                    previewAction == "hop" && std::fmod(seconds + 1e-6, preview_hop_seconds) < preview_frame_seconds;
             actor.frame.view_offset_z = 64;
+            // "back": from behind and a little to the left, where a back item shows.
             const float eye[3] = {
-                    kind == "hat" ? 35.f : 105.f, kind == "hat" ? -52.f : -160.f, kind == "hat" ? 87.f : 82.f
+                    kind == "hat"    ? 35.f
+                    : kind == "back" ? -150.f
+                                     : 105.f,
+                    kind == "hat"    ? -52.f
+                    : kind == "back" ? 75.f
+                                     : -160.f,
+                    kind == "hat" ? 87.f : 82.f
             };
-            const auto vp = native::camera_matrix(eye, 120, 9, float(width) / height);
+            constexpr float radians_to_degrees = 57.29578f;
+            const float yaw = kind == "back" ? std::atan2(-eye[1], -eye[0]) * radians_to_degrees : 120.f;
+            const auto vp = native::camera_matrix(eye, yaw, 9, float(width) / height);
             draw_actor(actor, vp, eye, seconds);
+            draw_hop_effects(vp, eye);
         } else {
             const PreviewScope still(previewing);
             BhSnapshot state{};
@@ -1334,9 +1661,12 @@ public:
             draw_knife_sample(width, height, kind == "hilt", seconds);
         } else if (kind == "gunside") {
             draw_gun_side(width, height, weapon, seconds);
-        } else if (kind == "bunny" || kind == "ghost") {
+        } else if (kind == "bunny" || kind == "ghost" || kind == "hop") {
             native_render::Actor actor;
             actor.id = "menu-preview";
+            // The Hop effect tab: the bunny hops on the spot with its effect.
+            constexpr double stage_hop_seconds = .8, stage_frame_seconds = 1. / 60;
+            actor.jumped = kind == "hop" && std::fmod(seconds, stage_hop_seconds) < stage_frame_seconds;
             actor.opacity = kind == "ghost" ? .55f : 1.f;
             actor.source = kind == "ghost" ? native_render::GhostSource::pb : native_render::GhostSource::none;
             actor.playerGlow = localGlow;
@@ -1352,6 +1682,7 @@ public:
             const float eye[3] = {65.f, -100.f, 74.f};
             const auto projection = native::camera_matrix(eye, 120, 9, float(width) / height);
             draw_actor(actor, projection, eye, seconds);
+            draw_hop_effects(projection, eye);
             gunFx->clear();
             constexpr unsigned segments = 64;
             constexpr float radius = 28;
@@ -1675,6 +2006,10 @@ public:
 
     // Drops an actor's animation and gesture state, so its next pose starts from scratch.
     void forget_actor(const std::string &id) {
+        if (const auto hop = actorHops.find(id); hop != actorHops.end()) {
+            release_hop(hop->second);
+            actorHops.erase(hop);
+        }
         modelLight.forget(id);
         actorAnimationStates.erase(id);
         actorActions.erase(id);
@@ -1791,7 +2126,7 @@ public:
         gl.Uniform4fv(actorProgram.capybara, 1, capy);
         gl.Uniform1f(actorProgram.propellerAngle, float(motion.angle));
         const auto &tail = actorActions[actor.id].ponytail;
-        const float ponytail[4] = {float(tail.pitch), float(tail.side), l.hairLength, 0};
+        const float ponytail[4] = {float(tail.pitch), float(tail.side), l.hairLength, l.back.ponytail_rest};
         gl.Uniform4fv(actorProgram.ponytail, 1, ponytail);
         if (l.sprungHair) {
             const auto &hair = actorActions[actor.id].hair;
@@ -1800,6 +2135,7 @@ public:
             gl.Uniform4fv(actorProgram.hairSway, 1, sway);
             gl.Uniform4fv(actorProgram.hairFlex, 1, flex);
         }
+        if (l.back.kind != native_back::Kind::none) back_motion_uniforms(actorProgram, &actorActions[actor.id].back);
         world_body_uniforms(actorProgram, origin.data());
         constexpr float chest_units = 40;
         const float chest[3] = {origin[0], origin[1], origin[2] + chest_units};
@@ -1861,6 +2197,7 @@ public:
         input.attack_mode = mode;
         input.presentation_event = presentationEvent;
         const auto &out = firstPerson->frame(input, inspectCueQueue);
+        step_first_person_robe(snapshot, seconds);
         if (shot && active > 1) gunFlashStarted = seconds;
         gl.Enable(GL_DEPTH_TEST);
         gl.DepthMask(GL_TRUE);
@@ -1990,8 +2327,53 @@ private:
             mesh(part);
         if (showGlow && firstPersonGlow && localGlow && localGlow->enabled)
             draw_glow(layer.entry->meshes, handsProgram, localGlow->aura, .2f);
+        if (first_person_robe_worn()) draw_first_person_robe(projection, model, seconds, options);
         gl.FrontFace(GL_CCW);
         if (flash) draw_muzzle_flash(projection, view, seconds);
+    }
+
+    // The Robe's sleeves on the forearms (viewmodel/robe-sleeves.ts): one more mesh on the hands' skeleton, in the
+    // solid material, only while the Robe is worn and Settings -> First person -> Robe sleeves is on.
+    bool first_person_robe_worn() const {
+        return showFirstPersonRobe && equipped.back.kind == native_back::Kind::robe && meshes.count(first_person_robe);
+    }
+
+    void draw_first_person_robe(
+            const native::Matrix &projection, const native::Matrix &model, double seconds, BindOptions options
+    ) {
+        const float eye[3] = {};
+        options.material = PlayerMaterial::solid;
+        options.glow = nullptr;
+        const auto &program = bind(equipped, projection, model, eye, seconds, options);
+        world_light_uniforms(program, eye_light_key, worldLook.eye.data(), seconds, worldLook.exposure, true);
+        const auto &uniform = metadata.at("backs").at("firstPersonRobe");
+        const float robe[4] = {
+                float(equipped.back.options.robe_pattern),
+                uniform.at(1).get<float>(),
+                uniform.at(2).get<float>(),
+                uniform.at(3).get<float>()
+        };
+        gl.Uniform4fv(program.robe, 1, robe);
+        const auto lag = firstPersonSleeves.uniform();
+        gl.Uniform4fv(program.robeLeft, 1, lag.data());
+        gl.Uniform4fv(program.robeRight, 1, lag.data());
+        mesh(first_person_robe);
+    }
+
+    // The sleeves' lag behind the view's turns and strafes, once per drawn frame.
+    void step_first_person_robe(const BhSnapshot &snapshot, double seconds) {
+        if (!first_person_robe_worn()) {
+            firstPersonSleeves = {};
+            return;
+        }
+        const double dt =
+                firstPersonSleevesAt < 0 || seconds < firstPersonSleevesAt ? 0 : seconds - firstPersonSleevesAt;
+        firstPersonSleevesAt = seconds;
+        const auto &v = snapshot.player.velocity;
+        constexpr double sway_cap = 1.5;
+        firstPersonSleeves.update(
+                dt, {v[0], v[1], v[2]}, viewYaw, std::min(double(swayScale), sway_cap) * motionScale, leftHand
+        );
     }
 
     // The shot's muzzle flash at the muzzle of the gun just drawn (its silencer's tip while it's on).

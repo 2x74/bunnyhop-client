@@ -496,6 +496,8 @@ int run(const native::Options &opt) {
             renderer->set_glow_visible(
                     preferences.value("showPlayerGlow", true), preferences.value("firstPersonGlow", false)
             );
+            renderer->set_hop_effects_visible(preferences.value("showHopFx", true));
+            renderer->set_first_person_robe_visible(preferences.value("firstPersonRobe", true));
             renderer->set_fov(prefs.fov);
             renderer->set_viewmodel(
                     preferences.at("viewmodelFov").get<float>(),

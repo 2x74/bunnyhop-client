@@ -31,6 +31,9 @@ struct PlayerProgram {
     // The map's light and fog (web model-light.ts, depth-fog.ts); zero is the look without them.
     GLint mapLight = -1, depthFogColor = -1, depthFogRange = -1;
     GLint garmentPattern = -1, garmentPatternShape = -1, garmentPatternColors = -1;
+    // The back item's motion and fit (web back-fx.ts, robe-fx.ts).
+    GLint back = -1, backTip = -1, backMid = -1, cape = -1, backPivot = -1, backPivot2 = -1, backAxis = -1,
+          capeTones = -1, robeLeft = -1, robeRight = -1, robe = -1;
 };
 
 // Source (x, y, z) -> three.js (x, z, -y).

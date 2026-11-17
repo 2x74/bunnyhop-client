@@ -655,6 +655,21 @@ if(BUILD_TESTING)
             WORKING_DIRECTORY "${BUNNYHOP_ROOT}" FIXTURES_SETUP ponytail_oracle TIMEOUT 60)
         add_test(NAME native_ponytail COMMAND bunnyhop-native-ponytail-tests "${PONYTAIL_ORACLE}")
         set_tests_properties(native_ponytail PROPERTIES FIXTURES_REQUIRED ponytail_oracle)
+        set(BACK_SLOT_ORACLE "${CMAKE_CURRENT_BINARY_DIR}/back-slot-oracle.json")
+        add_test(NAME native_back_slot_oracle
+            COMMAND "${BUN_EXECUTABLE}" apps/native/src/back-slot-oracle.ts "${BACK_SLOT_ORACLE}")
+        set_tests_properties(native_back_slot_oracle PROPERTIES
+            WORKING_DIRECTORY "${BUNNYHOP_ROOT}" FIXTURES_SETUP back_slot_oracle TIMEOUT 60)
+        add_test(NAME native_back_slot COMMAND bunnyhop-native-back-slot-tests "${BACK_SLOT_ORACLE}")
+        set_tests_properties(native_back_slot PROPERTIES FIXTURES_REQUIRED back_slot_oracle)
+        set(HOP_EFFECTS_ORACLE "${CMAKE_CURRENT_BINARY_DIR}/hop-effects-oracle.json")
+        add_test(NAME native_hop_effects_oracle
+            COMMAND "${BUN_EXECUTABLE}" apps/native/src/hop-effects-oracle.ts "${HOP_EFFECTS_ORACLE}")
+        set_tests_properties(native_hop_effects_oracle PROPERTIES
+            WORKING_DIRECTORY "${BUNNYHOP_ROOT}" FIXTURES_SETUP hop_effects_oracle TIMEOUT 60)
+        add_test(NAME native_hop_effects COMMAND bunnyhop-native-hop-effects-tests "${HOP_EFFECTS_ORACLE}"
+            "${CMAKE_CURRENT_BINARY_DIR}/hop-fx.json")
+        set_tests_properties(native_hop_effects PROPERTIES FIXTURES_REQUIRED hop_effects_oracle)
         set(GUN_HOLD_ORACLE "${CMAKE_CURRENT_BINARY_DIR}/gun-hold-oracle.json")
         add_test(NAME native_gun_hold_oracle
             COMMAND "${BUN_EXECUTABLE}" apps/native/src/gun-hold-oracle.ts "${GUN_HOLD_ORACLE}")
@@ -755,6 +770,14 @@ if(BUILD_TESTING)
     target_compile_options(bunnyhop-native-inspect-cues-tests PRIVATE
         $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
     add_test(NAME native_inspect_cues COMMAND bunnyhop-native-inspect-cues-tests)
+    add_executable(bunnyhop-native-back-slot-tests src/back_slot_tests.cpp)
+    target_include_directories(bunnyhop-native-back-slot-tests PRIVATE vendor)
+    target_compile_options(bunnyhop-native-back-slot-tests PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
+    add_executable(bunnyhop-native-hop-effects-tests src/hop_effects_tests.cpp)
+    target_include_directories(bunnyhop-native-hop-effects-tests PRIVATE vendor)
+    target_compile_options(bunnyhop-native-hop-effects-tests PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
     add_executable(bunnyhop-native-ponytail-tests src/ponytail_tests.cpp)
     target_include_directories(bunnyhop-native-ponytail-tests PRIVATE vendor)
     target_compile_options(bunnyhop-native-ponytail-tests PRIVATE

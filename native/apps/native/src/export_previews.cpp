@@ -35,6 +35,7 @@ int main(int argc, char **argv) {
             models.player_glow(
                     job.contains("playerGlow") ? native_render::parse_glow(job["playerGlow"]) : std::nullopt
             );
+            models.first_person_robe_visibility(job.value("firstPersonRobe", true));
             models.cosmetics(
                     job.value("outfit", "outfit-cream"), job.value("loadout", "2;knife-carrot;fin-garden;glove-knit")
             );
