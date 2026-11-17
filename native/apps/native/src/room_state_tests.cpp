@@ -407,13 +407,18 @@ void test_spectator_inputs() {
     assert(played == 1);  // slot 2's block isn't the watched player's
 }
 
-// Real packs with the v0.0.42 fields, as the website packs them (ui/room-loadout.test.ts pins the same bytes).
-const std::array<std::string, 4> website_packs = {
+// Real packs with the v0.0.42 and v0.0.43 fields, as the website packs them (ui/room-loadout.test.ts pins the same
+// bytes): back items and their options, head options, the Daily items and the Daily Medal's look, a living hilt.
+const std::array<std::string, 8> website_packs = {
         "2;knife-carrot;fin-garden;glove-knit;;hat-ponytail;;;2fa59a;150;;;hop-ring:sky;back-balloon;;-z",
         "2;knife-carrot;fin-garden;glove-knit;;;;;;;;;;back-cape;dgN8b___",
         "2;knife-carrot;fin-garden;glove-knit;;hat-kitsune-mask;;;;;;;;back-robe;cb8dhTX_;f",
         "2;knife-karrotbit;fin-dewweb;glove-garden-tulip;3;hat-ponytail;body-b;;f29bbf;260;hilt-oak;camo-carrot-patch;"
         "hop-crystals:rose;back-cape;ewN8b48d;-z",
+        "2;knife-carrot;fin-sunray;glove-knit;;;;;;;;camo-first-light",
+        "2;knife-carrot;fin-garden;glove-knit;;;;;;;;camo-midnight-sun;;back-medal;d",
+        "2;knife-carrot;fin-garden;glove-knit;;;;;;;;;;back-medal",
+        "2;knife-karrotbit;fin-garden;glove-knit;;;;;;;hilt-frostrune",
 };
 
 // The menu's pack of a roster loadout (ui/room-loadout.ts) is drawn as sent, new fields and all; a pack past 200 bytes

@@ -77,6 +77,22 @@ const WEBSITE_PACKS: [Record<string, unknown>, string][] = [
     },
     "2;knife-carrot;fin-garden;glove-knit;;hat-kitsune-mask;;;;;;;;back-robe;cb8dhTX_;f",
   ],
+  // v0.0.43: the Daily Challenge's finish and camos, the Daily Medal with and without its look, the living hilts. A
+  // charm never enters the pack (it rides in its own roster fields and the replay's continuation trailer).
+  [{ finish: "fin-sunray", camo: "camo-first-light" }, "2;knife-carrot;fin-sunray;glove-knit;;;;;;;;camo-first-light"],
+  [
+    { camo: "camo-midnight-sun", back: "back-medal", medal: 13 },
+    "2;knife-carrot;fin-garden;glove-knit;;;;;;;;camo-midnight-sun;;back-medal;d",
+  ],
+  [{ back: "back-medal" }, "2;knife-carrot;fin-garden;glove-knit;;;;;;;;;;back-medal"],
+  [
+    { hilt: "hilt-watcher", charm: "charm-bun", charmSwing: 60, charmPommel: true },
+    "2;knife-carrot;fin-garden;glove-knit;;;;;;;hilt-watcher",
+  ],
+  [
+    { knife: "knife-karrotbit", hilt: "hilt-frostrune", charm: "charm-toadstool", charmLength: 200, charmSize: 140 },
+    "2;knife-karrotbit;fin-garden;glove-knit;;;;;;;hilt-frostrune",
+  ],
 ];
 
 test("players wearing the new items reach the game byte for byte", () => {
