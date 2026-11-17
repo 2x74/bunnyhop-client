@@ -7,7 +7,7 @@ import { countryFlag } from "./country-flag";
 import type { CosmeticChoice, Profile, RunCard } from "../api";
 import { cosmetic, DEFAULT_COSMETICS } from "../progression";
 import { peakOf, STAFF_LABEL, staffBadgeOf, type NameLook, type PeakTier } from "../creators";
-import { fmtPoints, topPercent } from "../ranking";
+import { fmtPoints, STYLE_WEIGHT, topPercent } from "../ranking";
 import { styleLabel } from "../styles";
 import { CARD_TIERS, cardTierCounts, cardTierLabel, tierColor, tierLabel } from "../tiers";
 import { countWord } from "../hud/time-face";
@@ -259,9 +259,9 @@ export function playerCard(p: Profile, o: CardOverrides = {}): HTMLElement {
           null,
           // Each count in its own column with its label; longer numbers step down a size so three of them never run
           // together ("102 155 141" read as one number: UI audit, 11-05).
-          ...([[s.wrs, "WRs", ".wr"], [s.top10s, "Top 10s", ""], [s.maps, "Maps", ""]] as const).map(([n, label, cls]) => {
+          ...([[s.wrs, "WRs", ".wr", wrsNote()], [s.top10s, "Top 10s", "", null], [s.maps, "Maps", "", null]] as const).map(([n, label, cls, title]) => {
             const v = n.toLocaleString("en-US");
-            return h(`div${v.length >= 5 ? ".xl" : v.length >= 3 ? ".l" : ""}`, null, h(`b${cls}`, null, v), h("small", null, label));
+            return h(`div${v.length >= 5 ? ".xl" : v.length >= 3 ? ".l" : ""}`, title ? { title } : null, h(`b${cls}`, null, v), h("small", null, label));
           }),
         ),
       ),
@@ -319,4 +319,14 @@ function tilt(stage: HTMLElement, card: HTMLElement): void {
     card.style.setProperty("--rx", "0deg");
     card.style.setProperty("--ry", "0deg");
   });
+}
+
+/**
+ * The card's WRs: the overall rank's count (apps/api points.ts), so styles worth no overall points (STYLE_WEIGHT 0)
+ * don't add to it. Said on hover; the profile's Ranks rows count each style's WRs.
+ */
+export function wrsNote(): string {
+  const own = Object.entries(STYLE_WEIGHT).filter(([, w]) => w === 0).map(([id]) => styleLabel(id));
+  const list = own.length > 1 ? `${own.slice(0, -1).join(", ")} and ${own.at(-1)}` : own.join("");
+  return `World records in styles that count for the overall rank.${list ? ` ${list} records count on their own style's rank (profile, Ranks).` : ""}`;
 }

@@ -118,6 +118,8 @@ void RoomBridge::publish_tick(
         pose_generation_ = room.generation;
     }
     const bool sending = menu && menu_ready && !spectator && !room.id.empty() && room.map == map_id;
+    inputs.on = sending && room.inputs_wanted();
+    if (!inputs.on) inputs.clear();
     if (!poses_.advance(sending)) return;
     RoomPoseSample sample;
     std::copy(std::begin(curr.position), std::end(curr.position), sample.position.begin());
@@ -132,7 +134,8 @@ void RoomBridge::publish_tick(
     auto meta = room_pose_meta(run_state, curr.tick, active_style);
     meta.weapon = weapon.active;
     meta.silenced = weapon.silencer != 0;
-    pose_outbox_.add(room.generation, poses_.samples(), meta);
+    const auto input = inputs.take();
+    pose_outbox_.add(room.generation, poses_.samples(), meta, input ? spectate_input::to_json(*input).dump() : "");
     poses_.clear();
 }
 

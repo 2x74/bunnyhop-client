@@ -142,6 +142,11 @@ int main() {
     normal.motion(1, 3);
     inverted.motion(1, 3);
     assert(normal.pitch == -inverted.pitch);
+    // The website's restart-hold vectors: (hold to restart, hold after minutes, run seconds).
+    assert(!native::restart_hold_needed(false, 5, 299.99));
+    assert(native::restart_hold_needed(false, 5, 300));
+    assert(!native::restart_hold_needed(false, 0, 1800));
+    assert(native::restart_hold_needed(true, 0, 0));
     native::RestartGuard guard;
     assert(guard.press("restart", 0, true, true, true));     // wheel remains immediate
     assert(!guard.press("restart", 0, true, false, false));  // hold also applies before timer

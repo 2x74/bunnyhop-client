@@ -14,7 +14,7 @@
 // - Wire forms: the room roster carries the object (`CosmeticLoadout`, JSON), replays carry `packLoadout()` text in an
 //   optional trailer (replay.ts). Both are read leniently: anything unknown falls back to the defaults, never an error.
 
-import { cosmetic, DEFAULT_COSMETICS, HAIR_HATS, HAIR_LENGTH, LENGTH_HATS, hairLengthOf, type CosmeticSlot, type KnifePool } from "./progression";
+import { CAPE_ITEM, CAPE_LENGTH, capeHexOf, capeLengthOf, ROBE_ITEM, robePatternOf, cosmetic, DEFAULT_COSMETICS, HAIR_HATS, HAIR_LENGTH, LENGTH_HATS, MASK_HAT, hairLengthOf, highlightHexOf, type CosmeticSlot, type KnifePool } from "./progression";
 export { HAIR_LENGTH, LENGTH_HATS, hairLengthOf };
 export type { KnifePool };
 
@@ -54,15 +54,57 @@ export interface CosmeticLoadout {
    */
   hairColor?: number;
   /**
+   * The cape's length (a percent, progression.ts CAPE_LENGTH; absent = 100, the short cape) and its outer and lining
+   * colours (sRGB 0xRRGGBB on the cape's grid, capeHexOf; absent = the colourway's accent / ivory), only while the Cape
+   * is on the back. Readers that don't know them draw the default cape.
+   */
+  capeLength?: number;
+  capeColor?: number;
+  capeLining?: number;
+  /**
+   * The Robe's pattern (1 .. 4, player/robe-fx.ts ROBE_PATTERNS; absent = Plain), whether it is tied (absent = open) and
+   * its cloth and print colours (sRGB 0xRRGGBB on the cape's grid; absent = the colourway's own), only while the Robe is
+   * on the back. Readers that don't know them draw the default robe.
+   */
+  robePattern?: number;
+  robeTied?: true;
+  robeColor?: number;
+  robePrint?: number;
+  /**
    * The ponytail's length (a whole percent of the built length, progression.ts HAIR_LENGTH), only while the Ponytail is
    * the hat (LENGTH_HATS) and not the default. Absent = 100. Older readers drop it and draw the built length.
    */
   hairLength?: number;
   /**
+   * A wig's highlight colour (sRGB 0xRRGGBB on the highlight grid, progression.ts highlightHexOf), only while a wig is
+   * the hat. Absent = none: the hair in one colour, as before v0.0.42. Older readers drop it.
+   */
+  hairHighlight?: number;
+  /**
+   * The Kitsune Mask over the face, only while it is the hat (progression.ts MASK_HAT). Absent = pushed up on the side
+   * of the head. Older readers don't know the mask at all.
+   */
+  maskOn?: true;
+  /**
    * Gun camo (progression.ts "camo-*" id; camo.ts CAMO_STYLE): one camo on every gun you're handed (v0.0.38). Absent =
    * none, the guns as they've always looked. Older readers drop it.
    */
   camo?: string;
+  /**
+   * What's on the bunny's back (progression.ts "back-*" id, v0.0.42; player/bunny/backs.ts). Absent = nothing. Older
+   * readers drop it.
+   */
+  back?: string;
+  /**
+   * Hop effect (progression.ts "hop-*" id; player/hop-fx.ts): a small burst at the feet on every hop (v0.0.42). Absent =
+   * none. Older readers drop it.
+   */
+  hop?: string;
+  /**
+   * The trail ("trail-*" id) whose colours tint the hop effect, carried only with `hop` and only when it isn't the
+   * default Gold trail (absent = Gold). The trail itself never travels with a loadout; this is its colour for the burst.
+   */
+  hopTrail?: string;
   /**
    * RESERVED, not implemented: a player-picked colour (sRGB 0xRRGGBB) for finishes that offer one (FinishStyle.tintable).
    * Nothing writes, reads, validates or sends it yet; cleanLoadout drops it. Plan: research/COSMETICS-PLAN.md §4.1.
@@ -73,9 +115,33 @@ export interface CosmeticLoadout {
 /** Hats that are hair (player/bunny/wigs.ts): the standard bunny wears its hood down for them, and they take hairColor. */
 export const WIGS = HAIR_HATS;
 export const isWig = (hat: string | null | undefined): boolean => !!hat && WIGS.includes(hat);
+/** Cape colour presets for the pickers (sRGB, on the cape's colour grid: progression.ts capeHexOf). Any other colour is allowed. */
+export const CAPE_PRESETS: readonly { name: string; hex: string }[] = [
+  { name: "Black", hex: "#1c1c20" },
+  { name: "White", hex: "#f3f3ef" },
+  { name: "Crimson", hex: "#c61c28" },
+  { name: "Royal blue", hex: "#2849c2" },
+  { name: "Forest", hex: "#1c6938" },
+  { name: "Violet", hex: "#6d3cc6" },
+  { name: "Gold", hex: "#e7b649" },
+].map((p) => ({ name: p.name, hex: capeHexOf(p.hex)! }));
+/** The cape's lining when none is picked (ivory), for the pickers. */
+export const CAPE_LINING_DEFAULT = "#f3ecdc";
 /** Hair colour when none is picked (dark chestnut). */
 export const HAIR_DEFAULT = 0x5a3426;
 /** Hair colour presets for the picker (sRGB). Any other colour is allowed. */
+/** Highlight colour presets for the picker (sRGB, on the highlight grid). Any other colour is allowed (it snaps to the grid). */
+export const HIGHLIGHT_PRESETS: readonly { name: string; hex: string }[] = [
+  { name: "Blonde", hex: "#eecc77" },
+  { name: "Platinum", hex: "#eeeedd" },
+  { name: "Copper", hex: "#cc6633" },
+  { name: "Pink", hex: "#ff88bb" },
+  { name: "Red", hex: "#dd2233" },
+  { name: "Violet", hex: "#9966ee" },
+  { name: "Blue", hex: "#3399ee" },
+  { name: "Teal", hex: "#22ccaa" },
+  { name: "Lime", hex: "#aaee44" },
+];
 export const HAIR_PRESETS: readonly { name: string; hex: string }[] = [
   { name: "Black", hex: "#1f1b1d" },
   { name: "Dark brown", hex: "#3d2620" },
@@ -342,6 +408,9 @@ export const hiltSkin = (id: string | null | undefined): HiltSkin | null => (id 
 // ---------------------------------------------------------------------------------------------
 // Reading
 
+/** The trail colour a hop effect takes when none is carried (progression.ts DEFAULT_COSMETICS.trail, Gold). */
+export const HOP_TRAIL_DEFAULT = DEFAULT_COSMETICS.trail!;
+
 const slotId = (slot: CosmeticSlot, v: unknown, fallback: string): string => {
   const c = typeof v === "string" ? cosmetic(v) : null;
   return c && c.slot === slot ? c.id : fallback;
@@ -352,7 +421,7 @@ const slotId = (slot: CosmeticSlot, v: unknown, fallback: string): string => {
  * fall back to the defaults, retired ids read as their replacement). Unlocks are checked where choices are saved and
  * read (the API).
  */
-export function loadoutFor(choice: { knife?: unknown; finish?: unknown; glove?: unknown; hilt?: unknown; hat?: unknown; body?: unknown; hairColor?: unknown; hairLength?: unknown; camo?: unknown } | null | undefined, crown: 1 | 2 | 3 | null = null): CosmeticLoadout {
+export function loadoutFor(choice: { knife?: unknown; finish?: unknown; glove?: unknown; hilt?: unknown; hat?: unknown; body?: unknown; hairColor?: unknown; hairLength?: unknown; hairHighlight?: unknown; maskOn?: unknown; camo?: unknown; hop?: unknown; hopTrail?: unknown; trail?: unknown; back?: unknown; capeLength?: unknown; capeColor?: unknown; capeLining?: unknown; robePattern?: unknown; robeTied?: unknown; robeColor?: unknown; robePrint?: unknown } | null | undefined, crown: 1 | 2 | 3 | null = null): CosmeticLoadout {
   const c = choice ?? {};
   const l: CosmeticLoadout = { knife: slotId("knife", c.knife, DEFAULT_KNIFE), finish: slotId("finish", c.finish, DEFAULT_FINISH), glove: slotId("glove", c.glove, DEFAULT_GLOVE) };
   // Absent = the knife's own hilt; only a real skin is carried (so every older reader and writer stays the same).
@@ -366,8 +435,34 @@ export function loadoutFor(choice: { knife?: unknown; finish?: unknown; glove?: 
   if (hair !== null) l.hairColor = hair;
   const length = LENGTH_HATS.includes(hat) ? hairLengthOf(c.hairLength) : null;
   if (length !== null && length !== HAIR_LENGTH.default) l.hairLength = length;
+  // (A saved choice carries "#rrggbb", a carried loadout the number; both come out on the highlight grid.)
+  const highlight = isWig(hat) ? highlightHexOf(typeof c.hairHighlight === "number" ? (hairColorOf(c.hairHighlight) !== null ? hairHex(c.hairHighlight) : null) : c.hairHighlight) : null;
+  if (highlight) l.hairHighlight = parseInt(highlight.slice(1), 16);
+  if (hat === MASK_HAT && c.maskOn === true) l.maskOn = true;
   const camo = slotId("camo", c.camo, "");
   if (camo) l.camo = camo;
+  // The hop effect, and the trail it takes its colours from (a saved choice names it `trail`, a carried loadout `hopTrail`).
+  const hop = slotId("hop", c.hop, "");
+  if (hop) {
+    l.hop = hop;
+    const trail = slotId("trail", c.hopTrail ?? c.trail, HOP_TRAIL_DEFAULT);
+    if (trail !== HOP_TRAIL_DEFAULT) l.hopTrail = trail;
+  }
+  const back = slotId("back", c.back, "");
+  if (back) l.back = back;
+  if (back === CAPE_ITEM) {
+    const length = capeLengthOf(c.capeLength), outer = capeHexOf(c.capeColor), lining = capeHexOf(c.capeLining);
+    if (length !== null && length !== CAPE_LENGTH.default) l.capeLength = length;
+    if (outer) l.capeColor = parseInt(outer.slice(1), 16);
+    if (lining) l.capeLining = parseInt(lining.slice(1), 16);
+  }
+  if (back === ROBE_ITEM) {
+    const pattern = robePatternOf(c.robePattern), cloth = capeHexOf(c.robeColor), print = capeHexOf(c.robePrint);
+    if (pattern !== null) l.robePattern = pattern;
+    if (c.robeTied === true) l.robeTied = true;
+    if (cloth) l.robeColor = parseInt(cloth.slice(1), 16);
+    if (print) l.robePrint = parseInt(print.slice(1), 16);
+  }
   return l;
 }
 
@@ -384,9 +479,9 @@ export function cleanLoadout(raw: unknown): CosmeticLoadout | null {
 }
 
 export const sameLoadout = (a: CosmeticLoadout | null | undefined, b: CosmeticLoadout | null | undefined) =>
-  !!a && !!b && a.knife === b.knife && a.finish === b.finish && a.glove === b.glove && (a.hilt ?? DEFAULT_HILT) === (b.hilt ?? DEFAULT_HILT) && (a.crown ?? null) === (b.crown ?? null) && (a.hat ?? null) === (b.hat ?? null) && (a.body ?? "body-a") === (b.body ?? "body-a") && (a.outfit ?? null) === (b.outfit ?? null) && (a.hairColor ?? null) === (b.hairColor ?? null) && (a.hairLength ?? null) === (b.hairLength ?? null) && (a.camo ?? null) === (b.camo ?? null);
+  !!a && !!b && a.knife === b.knife && a.finish === b.finish && a.glove === b.glove && (a.hilt ?? DEFAULT_HILT) === (b.hilt ?? DEFAULT_HILT) && (a.crown ?? null) === (b.crown ?? null) && (a.hat ?? null) === (b.hat ?? null) && (a.body ?? "body-a") === (b.body ?? "body-a") && (a.outfit ?? null) === (b.outfit ?? null) && (a.hairColor ?? null) === (b.hairColor ?? null) && (a.hairLength ?? null) === (b.hairLength ?? null) && (a.hairHighlight ?? null) === (b.hairHighlight ?? null) && !!a.maskOn === !!b.maskOn && (a.camo ?? null) === (b.camo ?? null) && (a.hop ?? null) === (b.hop ?? null) && (a.hopTrail ?? null) === (b.hopTrail ?? null) && (a.back ?? null) === (b.back ?? null) && (a.capeLength ?? null) === (b.capeLength ?? null) && (a.capeColor ?? null) === (b.capeColor ?? null) && (a.capeLining ?? null) === (b.capeLining ?? null) && (a.robePattern ?? null) === (b.robePattern ?? null) && (a.robeTied ?? null) === (b.robeTied ?? null) && (a.robeColor ?? null) === (b.robeColor ?? null) && (a.robePrint ?? null) === (b.robePrint ?? null);
 
-export const isDefaultLoadout = (l: CosmeticLoadout) => l.knife === DEFAULT_KNIFE && l.finish === DEFAULT_FINISH && l.glove === DEFAULT_GLOVE && (l.hilt ?? DEFAULT_HILT) === DEFAULT_HILT && l.body !== "body-b" && !l.camo;
+export const isDefaultLoadout = (l: CosmeticLoadout) => l.knife === DEFAULT_KNIFE && l.finish === DEFAULT_FINISH && l.glove === DEFAULT_GLOVE && (l.hilt ?? DEFAULT_HILT) === DEFAULT_HILT && l.body !== "body-b" && !l.camo && !l.hop && !l.back;
 
 // ---------------------------------------------------------------------------------------------
 // Knife pool (progression.ts KnifePool): which knife is held. The pool itself never travels with a loadout: a replay
@@ -427,11 +522,22 @@ export const pairsHave = (packed: string | null | undefined, knife: string, fini
 
 // ---------------------------------------------------------------------------------------------
 // Packed text form:
-//   "2;<knife>;<finish>;<glove>[;<crown>[;<hat>[;<body>[;<outfit>[;<hair>[;<length>[;<hilt>[;<camo>]]]]]]]]".
+//   "2;<knife>;<finish>;<glove>[;<crown>[;<hat>[;<body>[;<outfit>[;<hair>[;<length>[;<hilt>[;<camo>[;<hop>[;<back>[;<cape>[;<head>]]]]]]]]]]]]".
 // Empty tail fields are placeholders; absent body means Model A, absent outfit an unknown colourway; hair is the wig's
 // colour as 6 hex digits, length the ponytail's length as a whole percent, hilt the hilt skin's id (11th field, v0.0.38),
-// camo the gun camo's id (12th field, v0.0.38); absent = the defaults (the knife's own hilt, no camo). Older readers ignore new fields
+// camo the gun camo's id (12th field, v0.0.38), hop the hop effect's id (13th, v0.0.42), with ":<trail>" after it when
+// its colours come from a trail other than Gold ("hop-ring:sky" = trail-sky), back the back item's (14th, v0.0.42) and
+// cape the Cape's length and colours (15th, v0.0.42: packCape, at most 8 characters; its own field and not a suffix of
+// the back item's id, so a reader that knows back items but not this one still reads "back-cape" and draws the default
+// cape); absent = the defaults (the knife's own hilt, no camo, no hop effect, nothing on the back, the short cape in the
+// colourway's colours). Older readers ignore new fields
 // (a v2 reader takes the fields it knows and stops), so every build keeps the v2 replay format.
+// The 16th (v0.0.42) is the hat's own option, whichever the hat has (packHead): a wig's highlight colour as two
+// characters (12 bits: four a channel, the highlight grid), or "f" for the Kitsune Mask over the face. Absent = no
+// highlight / the mask pushed up, so a loadout without either packs to what it did. Two characters, because the longest
+// possible trailer (every field at its longest id, a wig with a colour and a length, a hop effect with a trail, a cape
+// with both colours) is 196 characters and readers up to v0.0.41 drop a trailer longer than 200: with ";" and two
+// characters it is 199. Wig ids stay at 12 characters or fewer for the same reason (the Ponytail's length).
 // v1 (v0.0.5 replays) was "1;<knife>;<finish>;<seed>;<wear × 10000>;<glove>[;<crown>]": still read, seed / wear ignored.
 
 const PACK_VERSION = "2";
@@ -439,9 +545,81 @@ const PACK_VERSION = "2";
 export function packLoadout(l: CosmeticLoadout): string {
   const outfit = outfitId(l.outfit);
   const hilt = l.hilt && l.hilt !== DEFAULT_HILT ? l.hilt : "";
-  const tail: (string | number)[] = [l.crown ?? "", l.hat ?? "", l.body === "body-b" ? l.body : "", outfit ?? "", l.hairColor !== undefined ? hairHex(l.hairColor).slice(1) : "", l.hairLength ?? "", hilt, l.camo ?? ""];
+  const hop = l.hop ? (l.hopTrail ? `${l.hop}:${l.hopTrail.replace(/^trail-/, "")}` : l.hop) : "";
+  const tail: (string | number)[] = [l.crown ?? "", l.hat ?? "", l.body === "body-b" ? l.body : "", outfit ?? "", l.hairColor !== undefined ? hairHex(l.hairColor).slice(1) : "", l.hairLength ?? "", hilt, l.camo ?? "", hop, l.back ?? "", l.back === ROBE_ITEM ? packRobe(l) : packCape(l), packHead(l)];
   while (tail.length && tail[tail.length - 1] === "") tail.pop();
   return [PACK_VERSION, l.knife, l.finish, l.glove, ...tail].join(";");
+}
+
+/**
+ * The Cape's settings in the trailer's 15th field: two characters for (length - 100) + 256 if an outer colour follows +
+ * 512 if a lining colour follows, then three characters per colour (6 bits a channel: the cape's colour grid,
+ * progression.ts capeHexOf), all in B64 (12 bits in two characters, 18 in three). "" when nothing is set: the trailer is
+ * then what it was. At most 8 characters.
+ */
+const B64 = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_";
+const b64 = (n: number, digits: number) => Array.from({ length: digits }, (_, i) => B64[(n >> (6 * (digits - 1 - i))) & 63]).join("");
+const unb64 = (s: string): number => [...s].reduce((n, ch) => (n < 0 || B64.indexOf(ch) < 0 ? -1 : n * 64 + B64.indexOf(ch)), 0);
+const grid18 = (c: number) => (Math.round(((c >> 16) / 255) * 63) << 12) | (Math.round((((c >> 8) & 255) / 255) * 63) << 6) | Math.round(((c & 255) / 255) * 63);
+const ungrid18 = (n: number) => (Math.round((((n >> 12) & 63) * 255) / 63) << 16) | (Math.round((((n >> 6) & 63) * 255) / 63) << 8) | Math.round(((n & 63) * 255) / 63);
+export function packCape(l: CosmeticLoadout): string {
+  if (l.back !== CAPE_ITEM || (l.capeLength === undefined && l.capeColor === undefined && l.capeLining === undefined)) return "";
+  const head = (l.capeLength ?? CAPE_LENGTH.default) - CAPE_LENGTH.min + (l.capeColor !== undefined ? 256 : 0) + (l.capeLining !== undefined ? 512 : 0);
+  return b64(head, 2) + (l.capeColor !== undefined ? b64(grid18(l.capeColor), 3) : "") + (l.capeLining !== undefined ? b64(grid18(l.capeLining), 3) : "");
+}
+/** Inverse of packCape: the fields it carries; {} for an empty, malformed or out-of-range field (the default cape). */
+export function unpackCape(s: string | null | undefined): { capeLength?: number; capeColor?: number; capeLining?: number } {
+  if (!s || s.length < 2) return {};
+  const head = unb64(s.slice(0, 2));
+  if (head < 0 || head >= 1024) return {};
+  const outer = !!(head & 256), lining = !!(head & 512);
+  if (s.length !== 2 + (outer ? 3 : 0) + (lining ? 3 : 0)) return {};
+  const length = capeLengthOf((head & 255) + CAPE_LENGTH.min);
+  const a = outer ? unb64(s.slice(2, 5)) : 0, b = lining ? unb64(s.slice(outer ? 5 : 2)) : 0;
+  if (length === null || a < 0 || b < 0) return {};
+  return { ...(length !== CAPE_LENGTH.default ? { capeLength: length } : {}), ...(outer ? { capeColor: ungrid18(a) } : {}), ...(lining ? { capeLining: ungrid18(b) } : {}) };
+}
+/**
+ * The hat's own option for the trailer's 16th field: a wig's highlight as two characters (r, g, b at four bits each),
+ * "f" for the Kitsune Mask over the face, "" when neither is set.
+ */
+export function packHead(l: CosmeticLoadout): string {
+  if (isWig(l.hat) && l.hairHighlight !== undefined) {
+    const c = l.hairHighlight, n = (((c >> 16) & 255) >> 4 << 8) | (((c >> 8) & 255) >> 4 << 4) | ((c & 255) >> 4);
+    return b64(n, 2);
+  }
+  return l.hat === MASK_HAT && l.maskOn ? "f" : "";
+}
+/** Inverse of packHead, as loadoutFor's fields; {} for an empty or malformed field (loadoutFor keeps only what the hat takes). */
+export function unpackHead(s: string | null | undefined): { hairHighlight?: number; maskOn?: true } {
+  if (s === "f") return { maskOn: true };
+  if (!s || s.length !== 2) return {};
+  const n = unb64(s);
+  if (n < 0) return {};
+  return { hairHighlight: (((n >> 8) & 15) * 17 << 16) | (((n >> 4) & 15) * 17 << 8) | ((n & 15) * 17) };
+}
+
+/**
+ * The Robe's settings in the same 15th field (it belongs to whichever back item is worn), laid out like the Cape's: two
+ * characters for the pattern (0 .. 4) + 8 if tied + 256 if a cloth colour follows + 512 if a print colour follows, then
+ * three characters per colour. "" when nothing is set. At most 8 characters, so the longest trailer is no longer.
+ */
+export function packRobe(l: CosmeticLoadout): string {
+  if (l.back !== ROBE_ITEM || (l.robePattern === undefined && !l.robeTied && l.robeColor === undefined && l.robePrint === undefined)) return "";
+  const head = (l.robePattern ?? 0) + (l.robeTied ? 8 : 0) + (l.robeColor !== undefined ? 256 : 0) + (l.robePrint !== undefined ? 512 : 0);
+  return b64(head, 2) + (l.robeColor !== undefined ? b64(grid18(l.robeColor), 3) : "") + (l.robePrint !== undefined ? b64(grid18(l.robePrint), 3) : "");
+}
+/** Inverse of packRobe: {} for an empty, malformed or out-of-range field (the default robe). */
+export function unpackRobe(s: string | null | undefined): { robePattern?: number; robeTied?: true; robeColor?: number; robePrint?: number } {
+  if (!s || s.length < 2) return {};
+  const head = unb64(s.slice(0, 2));
+  if (head < 0 || head >= 1024 || head & 0xf0) return {};
+  const cloth = !!(head & 256), print = !!(head & 512);
+  if (s.length !== 2 + (cloth ? 3 : 0) + (print ? 3 : 0)) return {};
+  const pattern = head & 7;
+  const a = cloth ? unb64(s.slice(2, 5)) : 0, b = print ? unb64(s.slice(cloth ? 5 : 2)) : 0;
+  if ((pattern !== 0 && robePatternOf(pattern) === null) || a < 0 || b < 0) return {};
+  return { ...(pattern ? { robePattern: pattern } : {}), ...(head & 8 ? { robeTied: true as const } : {}), ...(cloth ? { robeColor: ungrid18(a) } : {}), ...(print ? { robePrint: ungrid18(b) } : {}) };
 }
 
 /** A known colourway id (retired ids read as their replacement), else null. */
@@ -450,12 +628,19 @@ const outfitId = (v: unknown): string | null => {
   return c?.slot === "outfit" ? c.id : null;
 };
 
+/** The 13th pack field ("hop-ring" or "hop-ring:sky") as loadoutFor's hop and hopTrail. */
+const hopField = (v: string | undefined): { hop?: string; hopTrail?: string } => {
+  if (!v) return {};
+  const [hop, trail] = v.split(":");
+  return trail ? { hop, hopTrail: `trail-${trail}` } : { hop };
+};
+
 /** Inverse of packLoadout (v2, or a v1 trailer); null for anything else. Unknown ids fall back to the defaults. */
 export function unpackLoadout(s: string | null | undefined): CosmeticLoadout | null {
   if (!s || s.length > 200) return null;
   const f = s.split(";");
   if (f[0] === "2" && f.length >= 4) {
-    const l = cleanLoadout({ knife: f[1], finish: f[2], glove: f[3], crown: f[4] ? Number(f[4]) : null, hat: f[5], body: f[6], hairColor: f[8] ? `#${f[8]}` : undefined, hairLength: f[9] && /^\d+$/.test(f[9]) ? Number(f[9]) : undefined, hilt: f[10] || undefined, camo: f[11] })!;
+    const l = cleanLoadout({ knife: f[1], finish: f[2], glove: f[3], crown: f[4] ? Number(f[4]) : null, hat: f[5], body: f[6], hairColor: f[8] ? `#${f[8]}` : undefined, hairLength: f[9] && /^\d+$/.test(f[9]) ? Number(f[9]) : undefined, hilt: f[10] || undefined, camo: f[11], ...hopField(f[12]), back: f[13], ...(f[13] === ROBE_ITEM ? unpackRobe(f[14]) : unpackCape(f[14])), ...unpackHead(f[15]) })!;
     const outfit = outfitId(f[7]);
     return outfit ? { ...l, outfit } : l;
   }

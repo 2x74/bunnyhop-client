@@ -19,13 +19,37 @@
 //
 // Binary layouts (little endian):
 //
-//   MSG_STATE (client -> room), 16 + n * 24 bytes
+//   MSG_STATE (client -> room), 16 + n * 24 bytes [+ input block]
 //     0  u8  type = MSG_STATE         1  u8  n samples (1..MAX_SAMPLES)   2 u8 weapon (WEAPON_REPORTED | id, 0x40 = the
 //                                                                          USP's silencer is on (0.0.12); 0 = not reported)
 //     3  u8  style (WIRE_STYLES idx)   4  u8  track                        5 u8 timer status (TIMER_*)
 //     6  u16 ping ms (client RTT)      8  u32 timer ticks (running: elapsed; finished: final time)
 //     12 u32 base tick (client's monotonic net tick of sample 0)
 //     16 samples
+//     then (0.0.42) an optional input block, only to a room whose welcome says `room.inputs` (older rooms refuse any
+//     state message longer than its samples), and only while someone spectates the sender.
+//
+//   input block (0.0.42): the sender's per-tick HUD feed since its last batch, for its spectators' HUD (keys, strafe
+//   trainer, jump stats, JHUD). Everything in it is in the player's replay, or computed from it.
+//     0 u8 n ticks (1..MAX_INPUT_TICKS)   1 u8 bytes per tick record (>= INPUT_TICK_BYTES; readers skip what they don't
+//     know)   2 u8 n reports (0..MAX_INPUT_REPORTS)   3 u8 reserved (0)   4 u32 net tick of the first record (the
+//     records are consecutive ticks, on the samples' clock)   8 f64 tick interval (s)   16 f32 sv_maxspeed
+//     20 f32 sv_airaccelerate (the strafe trainer's push; the sender's current style)
+//     24 tick records:
+//       0 u8 keys (IK_*: W, S, A, D, jump, duck)
+//       1 u8 moves: bits 0-1 forwardmove, 2-3 sidemove (0 none, 1 +MOVE_SPEED, 2 -MOVE_SPEED), 4-6 the trainer's
+//            gain band (IG_*)
+//       2 u8 state (IS_*: grounded, on a ladder, jumped, interrupted (teleport / respawn / noclip), reset (a restart:
+//            per-tick HUD history starts over before this tick), turn yaw present)
+//       3 f32 yaw (deg)   7 f32 vx   11 f32 vy (post-tick velocity, u/s)
+//       15 f32 turn yaw (deg; Auto-strafe's lead view, hud/strafe-trainer.ts TrainerSample.turnYaw; NaN = none yet)
+//     then reports, each: u8 kind (IR_*), u8 tick offset (record index), u8 payload length, payload. Readers skip
+//     kinds they don't know.
+//       IR_SSJ_EVERY / IR_SSJ_SIXTH (45 bytes): the jump's SSJ report in "every jump" / "every 6th" mode (ssj/stats.ts;
+//         "6th jump" is the every-6th report of jump 6). u8 mask of the fields present (bits: diff, height, gain,
+//         sync, eff, strafes, time, jss), u16 jump, u32 speed, i32 diff, i32 height, f32 gain, f32 sync, f32 eff,
+//         u16 strafes, f64 time (s), f64 jss (JHUD ratio; every-jump reports only)
+//       IR_START_PRE (4 bytes): u32 start-zone prespeed (u/s), 0xffffffff = cleared
 //
 //   sample, 24 bytes
 //     0 u8 tick offset from base   1 u8 flags (SF_*)   2 f32 x  6 f32 y  10 f32 z (feet, Source units)
@@ -42,6 +66,8 @@
 //                  newest sample. Sent when it changes and with the meta refresh (~1/s), not with every block.
 //     EXT_SILENCED (0.0.12): u8 block indices, the blocks of this snapshot's EXT_WEAPONS entries whose gun has the
 //                  silencer on (USP, physics v7); an entry not listed has it off. Sent with EXT_WEAPONS when any is on.
+//     EXT_INPUT (0.0.42): u8 slot, then that player's input block as they sent it. Only in the snapshots sent to the
+//                  players spectating that slot (one per input block in the flush), after the other extensions.
 //
 // Weapons (physics v5 guns, research/WEAPONS.md): the held weapon is the core's weapon id (core.ts WEAPON_IDS: 0 none,
 // 1 knife, 2+ guns). Clients report it in the state header (byte 2, reserved and 0 before 0.0.11, so old rooms ignore
@@ -119,6 +145,54 @@ export const BF_META = 1;
 export const EXT_WEAPONS = 1;
 /** Snapshot extension (0.0.12): which of the EXT_WEAPONS entries have the USP's silencer on. */
 export const EXT_SILENCED = 2;
+/** Snapshot extension (0.0.42): a watched player's input block, to their spectators only (see the layout above). */
+export const EXT_INPUT = 3;
+
+export const INPUT_HEADER_BYTES = 24;
+/** A tick record without the turn yaw; with it, INPUT_TURN_BYTES. */
+export const INPUT_TICK_BYTES = 15;
+export const INPUT_TURN_BYTES = 19;
+/** A batch is SEND_TICKS (20) ticks; room for a late one. */
+export const MAX_INPUT_TICKS = 40;
+export const MAX_INPUT_REPORTS = 8;
+const MAX_REPORT_BYTES = 64;
+const MAX_TICK_BYTES = 32;
+export const MAX_INPUT_BYTES = INPUT_HEADER_BYTES + MAX_INPUT_TICKS * MAX_TICK_BYTES + MAX_INPUT_REPORTS * (3 + MAX_REPORT_BYTES);
+/** Largest state message a room that takes input blocks accepts. */
+export const MAX_STATE_INPUT_BYTES = STATE_HEADER_BYTES + MAX_SAMPLES * SAMPLE_BYTES + MAX_INPUT_BYTES;
+/** cl_forwardspeed / cl_sidespeed: the only non-zero moves a keyboard command has (input.ts). */
+export const MOVE_SPEED = 450;
+
+/** Input record keys (byte 0). */
+export const IK_FORWARD = 1;
+export const IK_BACK = 2;
+export const IK_LEFT = 4;
+export const IK_RIGHT = 8;
+export const IK_JUMP = 16;
+export const IK_DUCK = 32;
+/** Input record state (byte 2). */
+export const IS_GROUNDED = 1;
+export const IS_LADDER = 2;
+export const IS_JUMPED = 4;
+export const IS_INTERRUPTED = 8;
+export const IS_RESET = 16;
+export const IS_TURN = 32;
+/**
+ * The strafe trainer's gain band of a tick (hud/strafe-trainer.ts barBand of barGain): none (not judgeable), zero
+ * ("low"), a loss ("high"), then "ok", "good", "perfect".
+ */
+export const IG_NONE = 0;
+export const IG_ZERO = 1;
+export const IG_LOSS = 2;
+export const IG_OK = 3;
+export const IG_GOOD = 4;
+export const IG_PERFECT = 5;
+/** Input block report kinds. */
+export const IR_SSJ_EVERY = 1;
+export const IR_SSJ_SIXTH = 2;
+export const IR_START_PRE = 3;
+const SSJ_REPORT_BYTES = 45;
+
 /** State header byte 2, bit 6 (0.0.12): the gun in hand has its silencer on. */
 export const WEAPON_SILENCED = 0x40;
 /** State header byte 2: the weapon field is set (a client that knows weapons; 0 = not reported, pre-0.0.11). */
@@ -197,6 +271,54 @@ export interface StateMsg {
   weapon: number | null;
   /** Its silencer is on (0.0.12; false from older clients). */
   silenced: boolean;
+  /** The input block (0.0.42), checked for shape, as sent; null when there is none. */
+  input: Uint8Array | null;
+}
+
+/** One tick of a watched player's HUD feed (input block record). */
+export interface NetInputTick {
+  /** Sender's net tick (the samples' clock). */
+  tick: number;
+  /** IK_* bits. */
+  keys: number;
+  /** forwardmove / sidemove: 0 or ±MOVE_SPEED. */
+  forward: number;
+  side: number;
+  /** IG_* band. */
+  gain: number;
+  /** IS_* bits. */
+  state: number;
+  yaw: number;
+  vx: number;
+  vy: number;
+  /** With IS_TURN: Auto-strafe's lead view yaw (NaN: none yet). */
+  turnYaw?: number;
+}
+
+/** A jump's SSJ report as the sender's trackers made it (ssj/stats.ts SsjReport, plus the JHUD's JSS). */
+export interface NetSsjReport {
+  jump: number;
+  speed: number;
+  diff: number | null;
+  height: number | null;
+  gain: number | null;
+  sync: number | null;
+  eff: number | null;
+  strafes: number | null;
+  time: number | null;
+  jss: number | null;
+}
+
+export type NetInputReport =
+  | { tick: number; kind: typeof IR_SSJ_EVERY | typeof IR_SSJ_SIXTH; ssj: NetSsjReport }
+  | { tick: number; kind: typeof IR_START_PRE; speed: number | null };
+
+export interface NetInput {
+  tickInterval: number;
+  maxSpeed: number;
+  airAccelerate: number;
+  ticks: NetInputTick[];
+  reports: NetInputReport[];
 }
 
 export interface SnapshotBlock {
@@ -212,6 +334,8 @@ export interface SnapshotBlock {
 export interface Snapshot {
   serverTime: number;
   blocks: SnapshotBlock[];
+  /** EXT_INPUT (0.0.42): input blocks of the player you spectate, in arrival order. */
+  inputs?: { slot: number; input: NetInput }[];
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -259,10 +383,14 @@ export function sampleInWorld(s: Pick<NetSample, "x" | "y" | "z">): boolean {
 // ---------------------------------------------------------------------------------------------
 // MSG_STATE
 
-/** `weapon`: the weapon id in hand (core.ts WEAPON_IDS), null = don't report one; `silenced`: its silencer is on. */
-export function encodeState(meta: NetMeta, samples: readonly NetSample[], weapon: number | null = null, silenced = false): Uint8Array<ArrayBuffer> {
+/**
+ * `weapon`: the weapon id in hand (core.ts WEAPON_IDS), null = don't report one; `silenced`: its silencer is on;
+ * `input`: an encoded input block (encodeInput), only for a room that takes them.
+ */
+export function encodeState(meta: NetMeta, samples: readonly NetSample[], weapon: number | null = null, silenced = false, input: Uint8Array | null = null): Uint8Array<ArrayBuffer> {
   const n = Math.min(samples.length, MAX_SAMPLES);
-  const buf = new Uint8Array(STATE_HEADER_BYTES + n * SAMPLE_BYTES);
+  const buf = new Uint8Array(STATE_HEADER_BYTES + n * SAMPLE_BYTES + (input?.length ?? 0));
+  if (input) buf.set(input, STATE_HEADER_BYTES + n * SAMPLE_BYTES);
   const dv = new DataView(buf.buffer);
   const base = n ? samples[0].tick >>> 0 : 0;
   dv.setUint8(0, MSG_STATE);
@@ -285,11 +413,14 @@ export function encodeState(meta: NetMeta, samples: readonly NetSample[], weapon
  */
 export function decodeState(data: ArrayBuffer | Uint8Array): StateMsg | null {
   const u8 = data instanceof Uint8Array ? data : new Uint8Array(data);
-  if (u8.length < STATE_HEADER_BYTES || u8.length > MAX_STATE_BYTES) return null;
+  if (u8.length < STATE_HEADER_BYTES || u8.length > MAX_STATE_INPUT_BYTES) return null;
   const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
   if (dv.getUint8(0) !== MSG_STATE) return null;
   const n = dv.getUint8(1);
-  if (n < 1 || n > MAX_SAMPLES || u8.length !== STATE_HEADER_BYTES + n * SAMPLE_BYTES) return null;
+  const end = STATE_HEADER_BYTES + n * SAMPLE_BYTES;
+  if (n < 1 || n > MAX_SAMPLES || u8.length < end) return null;
+  const input = u8.length > end ? u8.subarray(end) : null;
+  if (input && !inputShapeOk(input)) return null;
   const meta: NetMeta = { style: dv.getUint8(3), track: dv.getUint8(4), timer: dv.getUint8(5), ping: dv.getUint16(6, true), timerTicks: dv.getUint32(8, true) };
   if (meta.style >= WIRE_STYLES.length || meta.timer > TIMER_FINISHED || meta.track > 64) return null;
   const base = dv.getUint32(12, true);
@@ -303,7 +434,146 @@ export function decodeState(data: ArrayBuffer | Uint8Array): StateMsg | null {
     samples.push(readSample(dv, o, base));
   }
   const wb = dv.getUint8(2);
-  return { meta, samples, weapon: readWeaponByte(wb), silenced: readSilencedByte(wb) };
+  return { meta, samples, weapon: readWeaponByte(wb), silenced: readSilencedByte(wb), input };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Input blocks (0.0.42)
+
+const moveCode = (v: number) => (v > 0 ? 1 : v < 0 ? 2 : 0);
+const codeMove = (c: number) => (c === 1 ? MOVE_SPEED : c === 2 ? -MOVE_SPEED : 0);
+
+/**
+ * Whether `u8` is exactly one well-formed input block: counts in range, the records and every report inside it, the
+ * reserved byte 0. The values aren't checked (display only, like the samples' flags); the room relays it as it came.
+ */
+export function inputShapeOk(u8: Uint8Array): boolean {
+  if (u8.length < INPUT_HEADER_BYTES) return false;
+  const n = u8[0];
+  const rec = u8[1];
+  const nr = u8[2];
+  if (n < 1 || n > MAX_INPUT_TICKS || rec < INPUT_TICK_BYTES || rec > MAX_TICK_BYTES || nr > MAX_INPUT_REPORTS || u8[3] !== 0) return false;
+  let o = INPUT_HEADER_BYTES + n * rec;
+  for (let k = 0; k < nr; k++) {
+    if (o + 3 > u8.length) return false;
+    const len = u8[o + 2];
+    if (u8[o + 1] >= n || len > MAX_REPORT_BYTES) return false;
+    o += 3 + len;
+  }
+  return o === u8.length;
+}
+
+export function encodeInput(input: NetInput): Uint8Array<ArrayBuffer> {
+  const n = Math.min(input.ticks.length, MAX_INPUT_TICKS);
+  const ticks = input.ticks.slice(input.ticks.length - n);
+  const rec = ticks.some((t) => t.turnYaw !== undefined) ? INPUT_TURN_BYTES : INPUT_TICK_BYTES;
+  const base = n ? ticks[0].tick >>> 0 : 0;
+  const reports = input.reports.filter((r) => r.tick >= base && r.tick < base + n).slice(0, MAX_INPUT_REPORTS);
+  const size = (r: NetInputReport) => (r.kind === IR_START_PRE ? 4 : SSJ_REPORT_BYTES);
+  const buf = new Uint8Array(INPUT_HEADER_BYTES + n * rec + reports.reduce((s, r) => s + 3 + size(r), 0));
+  const dv = new DataView(buf.buffer);
+  dv.setUint8(0, n);
+  dv.setUint8(1, rec);
+  dv.setUint8(2, reports.length);
+  dv.setUint32(4, base, true);
+  dv.setFloat64(8, input.tickInterval, true);
+  dv.setFloat32(16, input.maxSpeed, true);
+  dv.setFloat32(20, input.airAccelerate, true);
+  let o = INPUT_HEADER_BYTES;
+  for (const t of ticks) {
+    dv.setUint8(o, t.keys & 0x3f);
+    dv.setUint8(o + 1, moveCode(t.forward) | (moveCode(t.side) << 2) | ((t.gain & 7) << 4));
+    dv.setUint8(o + 2, (t.state & (IS_GROUNDED | IS_LADDER | IS_JUMPED | IS_INTERRUPTED | IS_RESET)) | (t.turnYaw !== undefined ? IS_TURN : 0));
+    dv.setFloat32(o + 3, t.yaw, true);
+    dv.setFloat32(o + 7, t.vx, true);
+    dv.setFloat32(o + 11, t.vy, true);
+    if (rec === INPUT_TURN_BYTES) dv.setFloat32(o + 15, t.turnYaw ?? NaN, true);
+    o += rec;
+  }
+  for (const r of reports) {
+    dv.setUint8(o, r.kind);
+    dv.setUint8(o + 1, r.tick - base);
+    dv.setUint8(o + 2, size(r));
+    o += 3;
+    if (r.kind === IR_START_PRE) dv.setUint32(o, r.speed === null ? 0xffffffff : Math.max(0, Math.min(0xfffffffe, Math.round(r.speed))), true);
+    else {
+      const s = r.ssj;
+      const fields = [s.diff, s.height, s.gain, s.sync, s.eff, s.strafes, s.time, s.jss];
+      dv.setUint8(o, fields.reduce<number>((m, v, i) => (v === null ? m : m | (1 << i)), 0));
+      dv.setUint16(o + 1, Math.min(0xffff, s.jump), true);
+      dv.setUint32(o + 3, Math.max(0, Math.min(0xffffffff, s.speed)), true);
+      dv.setInt32(o + 7, s.diff ?? 0, true);
+      dv.setInt32(o + 11, s.height ?? 0, true);
+      dv.setFloat32(o + 15, s.gain ?? 0, true);
+      dv.setFloat32(o + 19, s.sync ?? 0, true);
+      dv.setFloat32(o + 23, s.eff ?? 0, true);
+      dv.setUint16(o + 27, Math.min(0xffff, s.strafes ?? 0), true);
+      dv.setFloat64(o + 29, s.time ?? 0, true);
+      dv.setFloat64(o + 37, s.jss ?? 0, true);
+    }
+    o += size(r);
+  }
+  return buf;
+}
+
+/** Reads an input block (inputShapeOk first); reports of unknown kinds or sizes are skipped. */
+export function decodeInput(u8: Uint8Array): NetInput | null {
+  if (!inputShapeOk(u8)) return null;
+  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  const n = u8[0];
+  const rec = u8[1];
+  const base = dv.getUint32(4, true);
+  const ticks: NetInputTick[] = [];
+  let o = INPUT_HEADER_BYTES;
+  for (let i = 0; i < n; i++, o += rec) {
+    const m = u8[o + 1];
+    const state = u8[o + 2];
+    const t: NetInputTick = { tick: (base + i) >>> 0, keys: u8[o] & 0x3f, forward: codeMove(m & 3), side: codeMove((m >> 2) & 3), gain: (m >> 4) & 7, state, yaw: dv.getFloat32(o + 3, true), vx: dv.getFloat32(o + 7, true), vy: dv.getFloat32(o + 11, true) };
+    if (state & IS_TURN && rec >= INPUT_TURN_BYTES) t.turnYaw = dv.getFloat32(o + 15, true);
+    ticks.push(t);
+  }
+  const reports: NetInputReport[] = [];
+  for (let k = 0; k < u8[2]; k++) {
+    const kind = u8[o];
+    const tick = (base + u8[o + 1]) >>> 0;
+    const len = u8[o + 2];
+    const p = o + 3;
+    o = p + len;
+    if (kind === IR_START_PRE && len >= 4) {
+      const v = dv.getUint32(p, true);
+      reports.push({ tick, kind, speed: v === 0xffffffff ? null : v });
+    } else if ((kind === IR_SSJ_EVERY || kind === IR_SSJ_SIXTH) && len >= SSJ_REPORT_BYTES) {
+      const mask = u8[p];
+      const has = (i: number) => (mask & (1 << i)) !== 0;
+      reports.push({
+        tick,
+        kind,
+        ssj: {
+          jump: dv.getUint16(p + 1, true),
+          speed: dv.getUint32(p + 3, true),
+          diff: has(0) ? dv.getInt32(p + 7, true) : null,
+          height: has(1) ? dv.getInt32(p + 11, true) : null,
+          gain: has(2) ? dv.getFloat32(p + 15, true) : null,
+          sync: has(3) ? dv.getFloat32(p + 19, true) : null,
+          eff: has(4) ? dv.getFloat32(p + 23, true) : null,
+          strafes: has(5) ? dv.getUint16(p + 27, true) : null,
+          time: has(6) ? dv.getFloat64(p + 29, true) : null,
+          jss: has(7) ? dv.getFloat64(p + 37, true) : null,
+        },
+      });
+    }
+  }
+  return { tickInterval: dv.getFloat64(8, true), maxSpeed: dv.getFloat32(16, true), airAccelerate: dv.getFloat32(20, true), ticks, reports };
+}
+
+/** EXT_INPUT for a snapshot: `slot`'s input block (as the room got it), appended after the snapshot's other extensions. */
+export function inputExtension(slot: number, input: Uint8Array): Uint8Array<ArrayBuffer> {
+  const out = new Uint8Array(4 + input.length);
+  out[0] = EXT_INPUT;
+  new DataView(out.buffer).setUint16(1, 1 + input.length, true);
+  out[3] = slot;
+  out.set(input, 4);
+  return out;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -412,6 +682,7 @@ export function decodeSnapshot(data: ArrayBuffer | Uint8Array): Snapshot | null 
     blocks.push({ slot, meta, samples });
   }
   // Extensions (0.0.11+): skipped when unknown; a truncated one ends the reading (the blocks stay good).
+  let inputs: Snapshot["inputs"];
   while (o + 3 <= u8.length) {
     const type = dv.getUint8(o);
     const len = dv.getUint16(o + 1, true);
@@ -431,9 +702,13 @@ export function decodeSnapshot(data: ArrayBuffer | Uint8Array): Snapshot | null 
         const blk = blocks[dv.getUint8(o + k)];
         if (blk && blk.weapon !== undefined) blk.silenced = true;
       }
+    else if (type === EXT_INPUT && len > 1) {
+      const input = decodeInput(u8.subarray(o + 1, o + len));
+      if (input) (inputs ??= []).push({ slot: dv.getUint8(o), input });
+    }
     o += len;
   }
-  return { serverTime: dv.getUint32(2, true), blocks };
+  return inputs ? { serverTime: dv.getUint32(2, true), blocks, inputs } : { serverTime: dv.getUint32(2, true), blocks };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -549,6 +824,11 @@ export interface RoomInfo {
   host?: number | null;
   /** Voice chat (net/voice-wire.ts) relays here: 1 = push to talk, alltalk. Absent: an older room, send no voice. */
   voice?: number;
+  /**
+   * (0.0.42) The room takes input blocks on state messages and relays them to your spectators (EXT_INPUT): 1. Absent:
+   * an older room, which refuses them, so send none.
+   */
+  inputs?: number;
 }
 
 export interface MapInfo {

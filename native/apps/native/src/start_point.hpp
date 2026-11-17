@@ -193,6 +193,13 @@ struct StartPoints {
     }
 };
 
+// Whether a restart key press needs the hold: "Hold to restart" is on, or a timed run `run_seconds` long has reached
+// "Hold after" minutes (0: never). The website's restart-hold.ts holdNeeded.
+inline bool restart_hold_needed(bool hold_restart, int hold_after_minutes, double run_seconds) {
+    constexpr double seconds_per_minute = 60;
+    return hold_restart || (hold_after_minutes > 0 && run_seconds >= hold_after_minutes * seconds_per_minute);
+}
+
 // Hold-to-restart ignores autorepeat, cancels on release/focus transitions and
 // fires only once. Wheel bindings cannot be held and act immediately, as on web.
 struct RestartGuard {

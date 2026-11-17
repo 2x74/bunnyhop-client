@@ -28,10 +28,10 @@ index 6e679c1..6a42f8b 100644
  playsrc-collision = { path = "../vendor/collision" }
  playsrc-movement = { path = "../vendor/movement" }
 diff --git a/crates/core/src/game.rs b/crates/core/src/game.rs
-index 32ea0e0..a50e478 100644
+index 349a705..422b884 100644
 --- a/crates/core/src/game.rs
 +++ b/crates/core/src/game.rs
-@@ -1359,8 +1359,8 @@ impl Tracer for Scene<'_> {
+@@ -1376,8 +1376,8 @@ impl Tracer for Scene<'_> {
  }
  
  fn angle_vectors_forward(angles: [f32; 3]) -> [f32; 3] {
@@ -42,7 +42,7 @@ index 32ea0e0..a50e478 100644
      [cp * cy, cp * sy, -sp]
  }
  
-@@ -2495,8 +2495,8 @@ impl Game {
+@@ -2529,8 +2529,8 @@ impl Game {
          let lo = [p[0] + hull.mins[0], p[1] + hull.mins[1], p[2] + hull.mins[2]];
          let hi = [p[0] + hull.maxs[0], p[1] + hull.maxs[1], p[2] + hull.maxs[2]];
          let center = [(lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5, (lo[2] + hi[2]) * 0.5];
@@ -229,7 +229,7 @@ index ec9c34e..2d2fbd4 100644
                  let p = self.state.position;
                  let o = self.ents[i].origin;
 diff --git a/crates/core/src/game/usable.rs b/crates/core/src/game/usable.rs
-index 28d151e..3ec0530 100644
+index 3d67fcb..c66beae 100644
 --- a/crates/core/src/game/usable.rs
 +++ b/crates/core/src/game/usable.rs
 @@ -132,8 +132,8 @@ impl Game {
@@ -423,7 +423,7 @@ index 051a366..cbfe4cd 100644
          [cp * cy, sr * sp * cy - cr * sy, cr * sp * cy + sr * sy],
          [cp * sy, sr * sp * sy + cr * cy, cr * sp * sy - sr * cy],
 diff --git a/crates/core/src/wasm.rs b/crates/core/src/wasm.rs
-index 6a508e1..d958345 100644
+index c92046c..515cb34 100644
 --- a/crates/core/src/wasm.rs
 +++ b/crates/core/src/wasm.rs
 @@ -31,7 +31,7 @@ fn with<R>(f: impl FnOnce(&mut Ctx) -> R) -> R {
@@ -953,19 +953,32 @@ index 6a508e1..d958345 100644
  pub extern "C" fn timing_path() -> usize {
      with(|c| {
          c.timing_f64.clear();
-@@ -1037,9 +1037,9 @@ pub extern "C" fn timing_path() -> usize {
+@@ -1037,13 +1037,13 @@ pub extern "C" fn timing_path() -> usize {
          c.timing_f64.len()
      })
  }
 -#[unsafe(no_mangle)]
 +#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
  pub extern "C" fn timing_path_ptr() -> *const f64 { with(|c| c.timing_f64.as_ptr()) }
+ /// The trigger_teleport whose Touch moved the player in the last step's touch pass (`game/timing_teleport.rs`), into
+ /// timing_f64 (read with timing_path_ptr): [status (0 none, 1 measured, 2 not measured), phase in [0, 1] (NaN unless
+ /// measured), trigger entity index (-1 if none), byte length of the reason in scratch_str (why it isn't measured),
+ /// 1 if measured on the straight move instead of the accepted path]. Returns the f64 count.
+-#[unsafe(no_mangle)]
++#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
+ pub extern "C" fn timing_teleport() -> usize {
+     with(|c| {
+         c.timing_f64.clear();
+@@ -1065,7 +1065,7 @@ pub extern "C" fn timing_teleport() -> usize {
+         c.timing_f64.len()
+     })
+ }
 -#[unsafe(no_mangle)]
 +#[cfg_attr(all(feature = "native-web", not(target_arch = "wasm32")), bunnyhop_native_web_macros::unwind)] #[unsafe(no_mangle)]
  pub extern "C" fn timing_path_reason() -> usize {
      with(|c| {
          c.scratch_str = c.game.as_ref().and_then(|g| g.timing_path.as_ref())
-@@ -1176,3 +1176,7 @@ pub extern "C" fn dressing_glow_visibility(x: f32, y: f32, z: f32, first: usize,
+@@ -1202,3 +1202,7 @@ pub extern "C" fn dressing_glow_visibility(x: f32, y: f32, z: f32, first: usize,
          c.scratch_f32.len()
      })
  }
@@ -1422,10 +1435,10 @@ index 9538c83..72c1d0b 100644
  [lib]
  path = "src/lib.rs"
 diff --git a/crates/vendor/collision/src/lib.rs b/crates/vendor/collision/src/lib.rs
-index 67fdadf..e1626d1 100644
+index 6ce4fbf..5a68230 100644
 --- a/crates/vendor/collision/src/lib.rs
 +++ b/crates/vendor/collision/src/lib.rs
-@@ -2848,3 +2848,6 @@ mod tests {
+@@ -2915,3 +2915,6 @@ mod tests {
          assert!(overlap.start_solid && overlap.all_solid);
      }
  }

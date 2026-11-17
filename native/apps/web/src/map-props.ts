@@ -304,6 +304,8 @@ interface Instance {
   random: RandomAnimator | null;
   /** The map's light where it stands (six linear RGB colours, core.ts lightCube), null: none, the stand-in shading. */
   cube: Float32Array | null;
+  /** Height above its origin the cube was sampled at. */
+  cubeLift: number;
   /** Its own copy of each geometry it has worn, coloured by `cube`. */
   lit: Map<THREE.BufferGeometry, THREE.BufferGeometry>;
 }
@@ -345,6 +347,9 @@ export interface AnimatedProps {
   setEnabled(on: boolean): void;
   /** Prop lighting: the map's light (on, the default) or the stand-in shading, live. */
   setLit(on: boolean): void;
+  /** The map's light changed (a switchable light went on or off): each prop samples it again, and the ones it reached
+   * are recoloured at their next update. */
+  relight(): void;
   dispose(): void;
   /** Poses computed since the last call (perf counter). */
   takePoseCount(): number;
@@ -496,7 +501,8 @@ export function animatedProps(o: AnimatedPropsInput): AnimatedProps | null {
     // Lit where it spawns, a little above its origin (which often sits in the floor).
     const at = fallback.position;
     const cube = new Float32Array(18);
-    const lit = !!o.light && [16, 0, 48].some((dz) => o.light!(at.x, at.y, at.z + dz, cube));
+    const cubeLift = o.light ? ([16, 0, 48].find((dz) => o.light!(at.x, at.y, at.z + dz, cube)) ?? NaN) : NaN;
+    const lit = !Number.isNaN(cubeLift);
     const worn = new Map<THREE.BufferGeometry, THREE.BufferGeometry>();
     if (lit) worn.set(geo, (geo = litGeometry(geo, cube, fallback.rotation)));
     const mesh = new THREE.SkinnedMesh(geo, o.materials);
@@ -511,7 +517,7 @@ export function animatedProps(o: AnimatedPropsInput): AnimatedProps | null {
     mesh.position.copy(fallback.position);
     mesh.rotation.copy(fallback.rotation);
     mesh.scale.setScalar(info.scale ?? 1);
-    const inst: Instance = { entity: info.entity, model, mesh, skeleton, fallback, info, state: null, stamp: NaN, stillAt: null, seq: -1, sizedFor: -2, random: null, cube: lit ? cube : null, lit: worn };
+    const inst: Instance = { entity: info.entity, model, mesh, skeleton, fallback, info, state: null, stamp: NaN, stillAt: null, seq: -1, sizedFor: -2, random: null, cube: lit ? cube : null, cubeLift, lit: worn };
     if (info.random) inst.random = new RandomAnimator(hashSeed(model.data.info.path, (o.mapSeed ?? 0) ^ Math.imul(info.entity + 1, 0x9e3779b1)), info.random.min, info.random.max, randomSource(model));
     skeleton.compute = () => pose(inst);
     instances.push(inst);
@@ -682,6 +688,24 @@ export function animatedProps(o: AnimatedPropsInput): AnimatedProps | null {
         let own = inst.lit.get(base);
         if (on && !own) inst.lit.set(base, (own = litGeometry(base, inst.cube, inst.fallback.rotation)));
         inst.mesh.geometry = on ? own! : base;
+      }
+    },
+    relight() {
+      const cube = new Float32Array(18);
+      for (const inst of instances) {
+        if (!inst.cube || !o.light) continue;
+        const at = inst.fallback.position;
+        if (!o.light(at.x, at.y, at.z + inst.cubeLift, cube) || cube.every((v, i) => v === inst.cube![i])) continue;
+        inst.cube.set(cube);
+        const worn = inst.mesh.geometry;
+        const base = inst.lit.has(worn) ? worn : [...inst.lit].find(([, own]) => own === worn)?.[0];
+        for (const own of inst.lit.values()) own.dispose();
+        inst.lit.clear();
+        if (base && lit) {
+          const own = litGeometry(base, inst.cube, inst.fallback.rotation);
+          inst.lit.set(base, own);
+          inst.mesh.geometry = own;
+        }
       }
     },
     dispose() {

@@ -84,6 +84,10 @@ struct RecordingHud {
     std::vector<Rect> rects;
     std::vector<std::string> texts;
 
+    void overlay_quad(const std::array<native::HudPoint, 4> &, const std::array<native::NameColor, 4> &) {}
+
+    float overlay_pixel() const { return 1; }
+
     void overlay_rect(float x, float y, float width, float height, native::NameColor color) {
         rects.push_back({x, y, width, height, color});
     }

@@ -14,6 +14,24 @@ inline constexpr double trainer_pace_max = 200;
 inline constexpr double trainer_target_pace = 100;
 inline constexpr double trainer_min_speed = 100;
 inline constexpr double trainer_turn_deadzone_degrees = .001;
+// The Gauge's needle eases towards each tick's pace with this half-life in ticks per Smoothing tick (Smoothing 8, the
+// default, is a 4-tick half-life), holds through a strafe switch and a hop's ground tick for at most gauge_hold_ticks,
+// and rests below gauge_floor. The website's hud/strafe-trainer.ts GAUGE_*.
+inline constexpr double gauge_half_life = .5;
+inline constexpr unsigned gauge_hold_ticks = 8;
+inline constexpr double gauge_floor = .05;
+// A bad strafe switch lies the needle flat for gauge_flat_ticks: flat red on the switch tick when the wish points back
+// against the velocity (sync pace at least gauge_red: the key came with or after the mouse), flat blue on a tick
+// turning against the keys that gains nothing (at most gauge_blue: the key came two or more ticks early).
+inline constexpr double gauge_red = 190;
+inline constexpr double gauge_blue = 10;
+inline constexpr unsigned gauge_flat_ticks = 2;
+
+// Share of the gap to this tick's pace the needle closes per tick (gaugeEase).
+inline double gauge_ease(unsigned smoothing) {
+    return 1 - std::pow(.5, 1 / std::max(.5, double(smoothing) * gauge_half_life));
+}
+
 inline constexpr unsigned trainer_landing_min_ticks = 5;
 inline constexpr unsigned trainer_ok_span = 3;
 inline constexpr unsigned trainer_max_smoothing = 50;
@@ -60,6 +78,8 @@ struct StrafeReading {
     std::optional<double> last_jump;
     // This tick's gain as a share of the best possible, the Bar's colour. Empty when it can't be judged.
     std::optional<double> gain;
+    // The Gauge look's needle (0 when it rests). Empty in previews, where the Gauge shows the pace.
+    std::optional<double> gauge;
 };
 
 struct TrainerSample {
@@ -76,7 +96,35 @@ struct TrainerSample {
     // The core's AirAccelerate observation. NaN when it has nothing to judge.
     double air_speed_gain = NAN;
     double air_best_gain = NAN;
+    // The post-tick velocity's heading in degrees (the Gauge's strafe sync). NaN when the feed doesn't know it.
+    double vel_yaw = NAN;
 };
+
+// The way the view has to turn to follow this strafe (web strafeTurn): 1 left (yaw rising), -1 right, 0 no wish. With
+// the velocity's heading, the side of it the wish lies on, which covers W/S strafes and a view facing back.
+inline int strafe_turn(double forward, double side, double yaw, double vel_yaw) {
+    constexpr double edge_degrees = 1e-3, degrees_per_radian = 180 / ssj_detail::pi;
+    if (forward == 0 && side == 0) return 0;
+    if (std::isfinite(vel_yaw)) {
+        const double wish_yaw = yaw + std::atan2(-side, forward) * degrees_per_radian;
+        const double off = std::fmod(std::fmod(wish_yaw - vel_yaw + 540, 360) + 360, 360) - 180;
+        if (std::abs(off) > edge_degrees && std::abs(off) < 180 - edge_degrees) return (off > 0) - (off < 0);
+    }
+    return -((side > 0) - (side < 0));
+}
+
+// The Gauge's per-tick sync pace (web gaugeSync): 100 when the wish is square to the last velocity, 0 when it gains
+// nothing, 200 when it points back against it. Empty without a wish or a push.
+inline std::optional<double>
+gauge_sync(double speed, double vel_yaw, double forward, double side, double yaw, double push) {
+    constexpr double radians_per_degree = ssj_detail::pi / 180;
+    const double y = yaw * radians_per_degree, velocity = vel_yaw * radians_per_degree;
+    const double wx = forward * std::cos(y) + side * std::sin(y), wy = forward * std::sin(y) - side * std::cos(y);
+    const double length = std::hypot(wx, wy);
+    if (!(length > 0) || !(push > 0)) return std::nullopt;
+    const double dot = speed * (std::cos(velocity) * wx + std::sin(velocity) * wy) / length;
+    return std::max(0., std::min(trainer_pace_max, 100 * (1 - dot / push)));
+}
 
 inline unsigned trainer_band(double pace, double width = 10) {
     const double off = std::abs(pace - trainer_target_pace);
@@ -172,6 +220,10 @@ class StrafeTrainer {
     double bar_sum_ = 0;
     int bar_side_ = 0;
     unsigned ground_ticks_ = 0;
+    double needle_ = 0;
+    unsigned needle_held_ = 0, needle_flat_ = 0;
+    int last_turn_ = 0;
+    std::optional<std::pair<double, double>> last_velocity_;
 
     void clear() {
         size_ = 0;
@@ -313,11 +365,81 @@ class StrafeTrainer {
         reading.bar_side = bar_side_;
     }
 
+    // The Gauge's needle (web StrafeTrainer.feedGauge): towards this tick's sync pace, towards 0 with nothing to judge,
+    // held through the one ground tick of a hop, and flat on a bad strafe switch. Without the velocity's heading it
+    // follows the turn and holds through ticks turning against the keys, as before the sync.
+    void feed_gauge(const SsjCmd &command, const TrainerSample &sample, double previous_yaw, bool continuous) {
+        const auto last_velocity = last_velocity_;
+        last_velocity_ = std::isfinite(sample.vel_yaw) && std::isfinite(sample.speed)
+                                 ? std::optional{std::pair{sample.speed, sample.vel_yaw}}
+                                 : std::nullopt;
+        if (!samples_finite(command, sample) || !std::isfinite(command.forward) || sample.interrupted || !continuous
+            || !std::isfinite(previous_yaw) || !supported_style(sample.style)) {
+            needle_ = 0;
+            needle_held_ = needle_flat_ = 0;
+            last_turn_ = 0;
+            reading.gauge = 0;
+            return;
+        }
+        const double push = air_push(sample);
+        const bool active = !sample.grounded && !sample.on_ladder && sample.speed >= trainer_min_speed
+                            && (command.side != 0 || command.forward != 0) && push > 0;
+        const double delta = turn_degrees(command.yaw, previous_yaw);
+        const int turn = -strafe_turn(command.forward, command.side, command.yaw, sample.vel_yaw);
+        const bool against =
+                turn && std::abs(delta) > trainer_turn_deadzone_degrees && ((delta > 0) - (delta < 0)) == turn;
+        const bool switched = turn && last_turn_ && turn != last_turn_;
+        if (turn) last_turn_ = turn;
+        const auto sync = active && last_velocity ? gauge_sync(
+                                                            last_velocity->first,
+                                                            last_velocity->second,
+                                                            command.forward,
+                                                            command.side,
+                                                            command.yaw,
+                                                            push
+                                                    )
+                                                  : std::nullopt;
+        if (sync && switched && *sync >= gauge_red) return flatten(trainer_pace_max, true);
+        if (sync && against && *sync <= gauge_blue) return flatten(0, false);
+        if (needle_flat_ > 0) {
+            --needle_flat_;
+            reading.gauge = needle_;
+            return;
+        }
+        std::optional<double> target;
+        if (sync)
+            target = sync;
+        else if (active && !against)
+            target = raw_pace(delta, push, sample.speed);
+        else if (!active && ground_ticks_ != 1)
+            target = 0;
+        if (target)
+            needle_held_ = 0;
+        else if (++needle_held_ > gauge_hold_ticks)
+            target = 0;
+        if (target) needle_ += (*target - needle_) * gauge_ease(smoothing_);
+        reading.gauge = needle_ < gauge_floor ? 0 : needle_;
+    }
+
+    // A flatten: the needle at `at` for gauge_flat_ticks (this one included); a new one replaces a running one.
+    void flatten(double at, bool red) {
+        needle_ = at;
+        needle_flat_ = gauge_flat_ticks - 1;
+        needle_held_ = 0;
+        ++(red ? flattens.red : flattens.blue);
+        reading.gauge = at;
+    }
+
 public:
     static constexpr unsigned max_smoothing = trainer_max_smoothing;
     static constexpr uint32_t left_bit = ssj_in_moveleft, right_bit = ssj_in_moveright;
     double zone = 10;
     StrafeReading reading{.has_pace = false};
+
+    // The Gauge's flattens so far (tests and the WR check count them).
+    struct {
+        unsigned red = 0, blue = 0;
+    } flattens;
 
     unsigned smoothing() const { return smoothing_; }
 
@@ -345,6 +467,7 @@ public:
         ground_ticks_ = sample.grounded ? ground_ticks_ + 1 : 0;
         feed_pace(command, sample, previous_yaw, continuous);
         feed_bar(command, sample, previous_yaw, continuous);
+        feed_gauge(command, sample, previous_yaw, continuous);
         reading.last_jump = last_jump_;
     }
 };
@@ -355,6 +478,8 @@ public:
 struct MovementFeedback {
     SsjTracker ssj;
     JhudTracker jhud;
+    // Every 6th jump whatever your own Jumps setting, for spectators whose setting differs (spectate_input.hpp).
+    SsjTracker ssj_sixth = every_sixth_tracker();
     std::string ssj_line;
     std::optional<float> ssj_gain;
     bool ssj_was_in_start = false, ssj_was_noclip = false;
@@ -363,8 +488,16 @@ struct MovementFeedback {
     unsigned strafe_ground_ticks = 0, history_ground_ticks = 0;
     bool incomplete_history = false;
 
+    static SsjTracker every_sixth_tracker() {
+        constexpr unsigned sixth = 6;
+        SsjTracker tracker(SsjMode::every_nth);
+        tracker.set_interval(sixth);
+        return tracker;
+    }
+
     void reset(bool in_start = false, bool noclip = false, bool incomplete = false) {
         ssj.reset();
+        ssj_sixth.reset();
         jhud.reset();
         ssj_line.clear();
         ssj_gain.reset();

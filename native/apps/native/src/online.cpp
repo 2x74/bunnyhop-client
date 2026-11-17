@@ -5,9 +5,14 @@
 #include "bunnyhop_native.h"
 #include <curl/curl.h>
 #include <algorithm>
+#include <exception>
 #include <fstream>
+#include <map>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <stdexcept>
+#include <thread>
 #include <vector>
 
 namespace native {
@@ -19,6 +24,9 @@ const std::string origin = "https://bunnyhop.lol";
 constexpr long stalled_bytes_per_second = 1024;
 constexpr long stall_window_seconds = 30;
 constexpr long connect_timeout_seconds = 15;
+// Content files download this many at a time. A map like bhop_epiphany has 859, and one at a time each paid a full
+// round trip or more.
+constexpr size_t content_workers = 8;
 using Bytes = std::vector<uint8_t>;
 
 struct Response {
@@ -68,35 +76,44 @@ int transfer(void *context, curl_off_t total, curl_off_t received, curl_off_t, c
     return 0;
 }
 
+// One handle per thread, reset between requests. curl keeps open connections and TLS sessions on the handle, so the
+// next request from the same thread skips the handshake.
+CURL *thread_handle() {
+    static const bool initialized = curl_global_init(CURL_GLOBAL_DEFAULT) == CURLE_OK;
+    if (!initialized) return nullptr;
+    thread_local std::unique_ptr<CURL, decltype(&curl_easy_cleanup)> handle(curl_easy_init(), curl_easy_cleanup);
+    if (handle) curl_easy_reset(handle.get());
+    return handle.get();
+}
+
 Bytes fetch(
         const std::string &url, size_t limit, const std::atomic_bool *cancel, const LoadProgressCallback &progress = {}
 ) {
     if (cancel && cancel->load()) throw std::runtime_error("Map download cancelled");
     Transfer transfer_state{cancel, progress};
-    using Curl = std::unique_ptr<CURL, decltype(&curl_easy_cleanup)>;
-    Curl handle(curl_easy_init(), curl_easy_cleanup);
+    CURL *const handle = thread_handle();
     if (!handle) throw std::runtime_error("Cannot initialize HTTPS");
     Response r{{}, limit};
     char error[CURL_ERROR_SIZE]{};
-    curl_easy_setopt(handle.get(), CURLOPT_URL, url.c_str());
-    curl_easy_setopt(handle.get(), CURLOPT_USERAGENT, "bunnyhop-native/0.1");
-    curl_easy_setopt(handle.get(), CURLOPT_PROTOCOLS_STR, "https");
-    curl_easy_setopt(handle.get(), CURLOPT_FOLLOWLOCATION, 0L);
-    curl_easy_setopt(handle.get(), CURLOPT_FAILONERROR, 1L);
-    curl_easy_setopt(handle.get(), CURLOPT_ACCEPT_ENCODING, "");
-    curl_easy_setopt(handle.get(), CURLOPT_CONNECTTIMEOUT, connect_timeout_seconds);
-    curl_easy_setopt(handle.get(), CURLOPT_LOW_SPEED_LIMIT, stalled_bytes_per_second);
-    curl_easy_setopt(handle.get(), CURLOPT_LOW_SPEED_TIME, stall_window_seconds);
-    curl_easy_setopt(handle.get(), CURLOPT_NOSIGNAL, 1L);
-    curl_easy_setopt(handle.get(), CURLOPT_ERRORBUFFER, error);
-    curl_easy_setopt(handle.get(), CURLOPT_WRITEFUNCTION, receive);
-    curl_easy_setopt(handle.get(), CURLOPT_WRITEDATA, &r);
-    curl_easy_setopt(handle.get(), CURLOPT_NOPROGRESS, 0L);
-    curl_easy_setopt(handle.get(), CURLOPT_XFERINFOFUNCTION, transfer);
-    curl_easy_setopt(handle.get(), CURLOPT_XFERINFODATA, &transfer_state);
-    const auto result = curl_easy_perform(handle.get());
+    curl_easy_setopt(handle, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(handle, CURLOPT_USERAGENT, "bunnyhop-native/0.1");
+    curl_easy_setopt(handle, CURLOPT_PROTOCOLS_STR, "https");
+    curl_easy_setopt(handle, CURLOPT_FOLLOWLOCATION, 0L);
+    curl_easy_setopt(handle, CURLOPT_FAILONERROR, 1L);
+    curl_easy_setopt(handle, CURLOPT_ACCEPT_ENCODING, "");
+    curl_easy_setopt(handle, CURLOPT_CONNECTTIMEOUT, connect_timeout_seconds);
+    curl_easy_setopt(handle, CURLOPT_LOW_SPEED_LIMIT, stalled_bytes_per_second);
+    curl_easy_setopt(handle, CURLOPT_LOW_SPEED_TIME, stall_window_seconds);
+    curl_easy_setopt(handle, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(handle, CURLOPT_ERRORBUFFER, error);
+    curl_easy_setopt(handle, CURLOPT_WRITEFUNCTION, receive);
+    curl_easy_setopt(handle, CURLOPT_WRITEDATA, &r);
+    curl_easy_setopt(handle, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(handle, CURLOPT_XFERINFOFUNCTION, transfer);
+    curl_easy_setopt(handle, CURLOPT_XFERINFODATA, &transfer_state);
+    const auto result = curl_easy_perform(handle);
     long status = 0;
-    curl_easy_getinfo(handle.get(), CURLINFO_RESPONSE_CODE, &status);
+    curl_easy_getinfo(handle, CURLINFO_RESPONSE_CODE, &status);
     if (cancel && cancel->load()) throw std::runtime_error("Map download cancelled");
     if (r.oversized) throw std::runtime_error("Hosted map data exceeds size budget");
     if (status >= 500 && status <= 599)
@@ -136,6 +153,21 @@ void save(const std::filesystem::path &path, const Bytes &bytes) {
     atomic_write_file(path, std::string_view(reinterpret_cast<const char *>(bytes.data()), bytes.size()));
 }
 
+// Whether `path` already holds exactly the bytes hashing to `sha`. Its size can't prove that, so this reads it.
+bool file_matches(const std::filesystem::path &path, const std::string &sha, size_t max_size) {
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(path, error)) return false;
+    const auto size = std::filesystem::file_size(path, error);
+    if (error || size > max_size) return false;
+    std::ifstream stream(path, std::ios::binary);
+    Bytes bytes((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+    return bytes.size() == size && hash(bytes) == sha;
+}
+
+void report_cached(const LoadProgressCallback &progress, uint64_t size, bool offline) {
+    if (progress) progress({"cache", "Using verified downloaded content", size, size, 0, 0, true, offline});
+}
+
 std::filesystem::path
 asset(const std::filesystem::path &cache,
       const std::string &sha,
@@ -144,20 +176,14 @@ asset(const std::filesystem::path &cache,
       const std::atomic_bool *cancel,
       const LoadProgressCallback &progress = {},
       bool offline = false,
-      const DownloadFetch &fetch = {}) {
+      const DownloadFetch &fetch = {},
+      bool *downloaded = nullptr) {
     if (cancel && cancel->load()) throw std::runtime_error("Map download cancelled");
     if (!hash_id(sha)) throw std::runtime_error("Invalid hosted content hash");
     const auto file = cache / "objects" / sha;
-    if (std::filesystem::is_regular_file(file) && std::filesystem::file_size(file) <= max_size) {
-        std::ifstream stream(file, std::ios::binary);
-        Bytes bytes((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
-        if (hash(bytes) == sha) {
-            if (progress)
-                progress(
-                        {"cache", "Using verified downloaded content", bytes.size(), bytes.size(), 0, 0, true, offline}
-                );
-            return file;
-        }
+    if (file_matches(file, sha, max_size)) {
+        report_cached(progress, std::filesystem::file_size(file), offline);
+        return file;
     }
     if (offline) throw std::runtime_error("Cached map data is missing or corrupt; reconnect and retry");
     const auto bytes = fetch ? fetch(route, max_size, cancel, progress) : get(route, max_size, cancel, progress);
@@ -165,6 +191,7 @@ asset(const std::filesystem::path &cache,
     if (bytes.size() > max_size) throw std::runtime_error("Downloaded content exceeds size budget");
     if (hash(bytes) != sha) throw std::runtime_error("Content checksum mismatch: " + route);
     save(file, bytes);
+    if (downloaded) *downloaded = true;
     return file;
 }
 }  // namespace
@@ -230,6 +257,41 @@ Bytes cached_detail(const std::filesystem::path &cache, const std::string &id, c
     if (newest.empty()) throw std::runtime_error("Map is not downloaded; connect to download it first");
     return newest;
 }
+
+// One hosted object and every path the manifest puts it at.
+struct ContentObject {
+    std::string sha;
+    size_t size = 0;
+    std::vector<std::string> paths;
+};
+
+// What the content workers share: the next object to take, the totals so far, and the first error.
+struct ContentRun {
+    std::mutex mutex;
+    std::atomic_size_t next = 0;
+    std::atomic_bool failed = false;
+    std::exception_ptr error;
+    size_t files_total = 0, files_done = 0;
+    uint64_t bytes_done = 0;
+    std::vector<uint64_t> in_flight;
+
+    uint64_t received() const {
+        uint64_t sum = bytes_done;
+        for (const auto bytes : in_flight)
+            sum += bytes;
+        return sum;
+    }
+};
+
+// Joins every worker it started, including when starting the next one throws.
+struct WorkerThreads {
+    std::vector<std::thread> threads;
+
+    ~WorkerThreads() {
+        for (auto &thread : threads)
+            if (thread.joinable()) thread.join();
+    }
+};
 
 struct MapTransfer {
     const std::string &id;
@@ -315,44 +377,143 @@ struct MapTransfer {
         return files;
     }
 
-    void content_file(
-            const std::filesystem::path &content, const std::string &path, const nlohmann::json &info, size_t size
-    ) const {
-        try {
+    std::vector<ContentObject> content_objects(const nlohmann::json &files) const {
+        std::map<std::string, ContentObject> objects;
+        size_t total = 0;
+        for (const auto &[path, info] : files.items()) {
+            if (!safe_content_path(path)) throw std::runtime_error("Unsafe content path");
+            const auto size = info.at("size").get<size_t>();
+            if (size > limits.content_file || size > limits.content_total - total)
+                throw std::runtime_error("Map content is too large");
+            total += size;
             const auto sha = info.at("sha256").get<std::string>();
-            const auto object = asset(cache, sha, "/content/" + sha, size, cancel, transfer_progress(), offline, fetch);
-            if (std::filesystem::file_size(object) != size) throw std::runtime_error("Content size mismatch");
-            const auto destination = content / data_location::from_utf8(path);
-            std::filesystem::create_directories(destination.parent_path());
-            std::filesystem::copy_file(object, destination, std::filesystem::copy_options::overwrite_existing);
-        } catch (const std::exception &error) {
-            throw std::runtime_error("Map content " + path + ": " + error.what());
+            auto &object = objects[sha];
+            if (!object.paths.empty() && object.size != size)
+                throw std::runtime_error("Map content " + path + ": Content size mismatch");
+            object.sha = sha;
+            object.size = size;
+            object.paths.push_back(path);
+        }
+        std::vector<ContentObject> list;
+        list.reserve(objects.size());
+        for (auto &[sha, object] : objects)
+            list.push_back(std::move(object));
+        return list;
+    }
+
+    // Puts one object at each of its paths, downloading it at most once. A path that already holds the right bytes is
+    // left alone. Returns how many paths needed no download.
+    size_t materialize(
+            const std::filesystem::path &content, const ContentObject &object, const LoadProgressCallback &transfer
+    ) const {
+        std::optional<std::filesystem::path> source;
+        bool downloaded = false;
+        for (const auto &path : object.paths) {
+            try {
+                const auto destination = content / data_location::from_utf8(path);
+                if (file_matches(destination, object.sha, object.size)) continue;
+                if (!source) {
+                    const auto route = "/content/" + object.sha;
+                    source =
+                            asset(cache, object.sha, route, object.size, cancel, transfer, offline, fetch, &downloaded);
+                }
+                if (std::filesystem::file_size(*source) != object.size)
+                    throw std::runtime_error("Content size mismatch");
+                std::filesystem::create_directories(destination.parent_path());
+                std::filesystem::copy_file(*source, destination, std::filesystem::copy_options::overwrite_existing);
+            } catch (const std::exception &error) {
+                throw std::runtime_error("Map content " + path + ": " + error.what());
+            }
+        }
+        return object.paths.size() - (downloaded ? 1 : 0);
+    }
+
+    std::string content_message(size_t file, size_t total, const std::string &path) const {
+        return "Map content " + std::to_string(file) + "/" + std::to_string(total) + ": " + path;
+    }
+
+    // A transfer moved: the menu names the file it belongs to.
+    void content_received(ContentRun &run, size_t worker, const std::string &path, uint64_t received) {
+        std::lock_guard lock(run.mutex);
+        run.in_flight[worker] = received;
+        current.message = content_message(run.files_done + 1, run.files_total, path);
+        current.received = run.received();
+        emit(current);
+    }
+
+    void content_finished(ContentRun &run, size_t worker, const ContentObject &object, size_t cached) {
+        std::lock_guard lock(run.mutex);
+        run.in_flight[worker] = 0;
+        for (size_t i = 0; i < object.paths.size(); ++i) {
+            ++run.files_done;
+            run.bytes_done += object.size;
+            current.message = content_message(run.files_done, run.files_total, object.paths[i]);
+            current.filesDone = run.files_done;
+            current.received = run.received();
+            progress(current.message);
+            auto update = current;
+            // The load journal counts the files that came from the cache by this flag.
+            update.cached = i < cached;
+            emit(update);
+        }
+    }
+
+    void content_worker(
+            const std::filesystem::path &content,
+            const std::vector<ContentObject> &objects,
+            ContentRun &run,
+            size_t worker
+    ) {
+        try {
+            const ContentObject *active = nullptr;
+            const LoadProgressCallback transfer = [&](const LoadProgress &value) {
+                if (!value.cached) content_received(run, worker, active->paths.front(), value.received);
+            };
+            for (size_t i = run.next++; i < objects.size(); i = run.next++) {
+                if (run.failed || (cancel && cancel->load())) return;
+                active = &objects[i];
+                content_finished(run, worker, objects[i], materialize(content, objects[i], transfer));
+            }
+        } catch (...) {
+            std::lock_guard lock(run.mutex);
+            if (!run.error) run.error = std::current_exception();
+            run.failed = true;
         }
     }
 
     void content(const std::filesystem::path &directory, const nlohmann::json &files) {
         const auto content = directory / "content";
         std::filesystem::create_directories(content);
-        size_t count = 0, total = 0;
-        for (const auto &[path, info] : files.items()) {
-            if (cancel && cancel->load()) throw std::runtime_error("Map download cancelled");
-            if (!safe_content_path(path)) throw std::runtime_error("Unsafe content path");
-            const auto size = info.at("size").get<size_t>();
-            if (size > limits.content_file || size > limits.content_total - total)
-                throw std::runtime_error("Map content is too large");
-            total += size;
-            phase({"content",
-                   "Map content " + std::to_string(count + 1) + "/" + std::to_string(files.size()) + ": " + path,
-                   0,
-                   size,
-                   count,
-                   files.size()});
-            content_file(content, path, info, size);
-            ++count;
-            current.filesDone = count;
-            current.received = size;
-            emit(current);
+        const auto objects = content_objects(files);
+        uint64_t total = 0;
+        for (const auto &object : objects)
+            total += uint64_t(object.size) * object.paths.size();
+        phase({"content", "Map content: " + std::to_string(files.size()) + " files", 0, total, 0, files.size()});
+        ContentRun run;
+        run.files_total = files.size();
+        const size_t workers = std::min(content_workers, objects.size());
+        run.in_flight.assign(workers, 0);
+        {
+            WorkerThreads threads;
+            for (size_t worker = 0; worker < workers; ++worker)
+                threads.threads.emplace_back([&, worker] { content_worker(content, objects, run, worker); });
         }
+        if (run.error) std::rethrow_exception(run.error);
+        if (cancel && cancel->load()) throw std::runtime_error("Map download cancelled");
+    }
+
+    // The map's own copy of the BSP, checked against its hash; downloaded or copied from the object cache if needed.
+    std::filesystem::path bsp_file(const std::filesystem::path &directory, const std::string &sha) const {
+        const auto bsp = directory / (id + ".bsp");
+        if (file_matches(bsp, sha, limits.bsp)) {
+            report_cached(transfer_progress(), std::filesystem::file_size(bsp), offline);
+            return bsp;
+        }
+        const auto route = "/api/bsp/" + sha + ".bsp";
+        const auto object = asset(cache, sha, route, limits.bsp, cancel, transfer_progress(), offline, fetch);
+        std::filesystem::create_directories(directory);
+        std::filesystem::copy_file(object, bsp, std::filesystem::copy_options::overwrite_existing);
+        return bsp;
     }
 
     DownloadedMap run() {
@@ -362,12 +523,8 @@ struct MapTransfer {
         const auto sha = map_detail.at("sha256").get<std::string>();
         if (!hash_id(sha)) throw std::runtime_error("Invalid map checksum");
         phase({"bsp", "Downloading BSP: " + id});
-        const auto object =
-                asset(cache, sha, "/api/bsp/" + sha + ".bsp", limits.bsp, cancel, transfer_progress(), offline, fetch);
         const auto directory = cache / "maps" / sha;
-        std::filesystem::create_directories(directory);
-        const auto bsp = directory / (id + ".bsp");
-        std::filesystem::copy_file(object, bsp, std::filesystem::copy_options::overwrite_existing);
+        const auto bsp = bsp_file(directory, sha);
         save(directory / "detail.json", detail_bytes);
         const auto manifest_bytes = manifest(directory, sha);
         const auto files = content_files(manifest_bytes, sha);

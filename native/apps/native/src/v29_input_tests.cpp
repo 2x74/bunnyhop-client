@@ -409,7 +409,7 @@ void test_replay_library_cache() {
         const auto retimed = library.take();
         assert(retimed && retimed->errors.empty() && retimed->decoded == 0);
         const auto &scored = retimed->replays->at(0);
-        assert(scored.at("timingPolicy") == 1);
+        assert(scored.at("timingPolicy") == native::timing_policy);
         assert(scored.at("timeMs") == native::score_ms(expected.seconds));
         assert(scored.at("seconds").get<double>() == expected.seconds);
         library.archive(

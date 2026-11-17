@@ -611,6 +611,15 @@ pub unsafe extern "C" fn bh_effect_states(ctx: *mut BhContext, count: *mut usize
     result
 }
 
+/// A switchable light style's values (lightstyles.ts): now, at spawn, and with its lights on. A style is lit while any
+/// of its lights is.
+#[derive(Clone, Copy, Default)]
+struct StyleLevels {
+    now: f32,
+    spawn: f32,
+    on: f32,
+}
+
 impl Map {
     pub(super) fn refresh_light_styles(&mut self) -> bool {
         let Some(styles)=self.assets.light_styles.as_mut() else {return false};
@@ -618,13 +627,29 @@ impl Map {
         for (i,p) in bunnyhop_core::lightmap::LIGHT_STYLE_PATTERNS.iter().enumerate(){values[i]=bunnyhop_core::lightmap::light_style_pattern(p);}
         values[63]=0.;
         let enabled=self.game.effect_states().into_iter().collect::<HashMap<_,_>>();
+        let mut levels: HashMap<usize, StyleLevels> = HashMap::new();
         for (index,e) in self.game.entities.iter().enumerate(){
             if !matches!(e.classname().to_ascii_lowercase().as_str(),"light"|"light_spot") {continue;}
             let style=e.int("style");if !(32..64).contains(&style)||e.get("targetname").is_none(){continue;}
             let preset=e.int("defaultstyle");let pattern=e.get("pattern").filter(|p|!p.is_empty()).unwrap_or_else(||bunnyhop_core::lightmap::LIGHT_STYLE_PATTERNS.get(preset.max(0) as usize).copied().unwrap_or("m"));
-            let on=enabled.get(&index).copied().unwrap_or(e.int("spawnflags")&1==0);
-            values[style as usize]=if on {bunnyhop_core::lightmap::light_style_pattern(pattern)} else {0.};
+            let lit=bunnyhop_core::lightmap::light_style_pattern(pattern);
+            let starts_on=e.int("spawnflags")&1==0;
+            let on=enabled.get(&index).copied().unwrap_or(starts_on);
+            let level=levels.entry(style as usize).or_default();
+            level.now=level.now.max(if on {lit} else {0.});
+            level.spawn=level.spawn.max(if starts_on {lit} else {0.});
+            level.on=level.on.max(lit);
         }
+        // Models take the switched lights too (core lighting.rs style_light / style_full): how far each style is above
+        // its spawn value now, and with its lights on.
+        let lighting=self.mesh.lighting.as_mut();
+        if let Some(lighting)=lighting {
+            for (&style,level) in &levels {
+                lighting.style_light[style]=(level.now-level.spawn).max(0.);
+                lighting.style_full[style]=(level.on-level.spawn).max(0.);
+            }
+        }
+        for (&style,level) in &levels { values[style]=level.now; }
         styles.apply(&mut self.mesh.lightmap,&values)
     }
 }

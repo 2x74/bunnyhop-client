@@ -1,7 +1,9 @@
 // Practice (research/ROADMAP.md, v0.0.10; bhoptimer-style since 0.0.27): noclip and checkpoints, solo and in rooms (0.0.36). They work
 // in any attempt. Saving a checkpoint never touches the run; a checkpoint teleport or noclip turns the attempt into
-// practice (attempt.ts): the timer keeps going in yellow, and it's never submitted, a PB or a ghost, no replay, no XP
-// or stats. A restart (R / B / M / a style switch) is a real run again.
+// practice (attempt.ts): the timer keeps going in yellow, and it's never submitted, a PB or a ghost, no XP or stats. Its
+// replay is kept on this device when it plays back (replays.ts): every save keeps the attempt's place (segments.ts),
+// and a teleport to one rewinds the recording to it, as in Segmented. A restart (R / B / M / a style switch) is a real
+// run again.
 // Practice mode (the pause menu, !practice, its bind) makes every attempt practice until it's turned off; leaving
 // puts you back at the start.
 // As on CS:S, a stray key can't do that to a real run: during a timed run the teleport / noclip keys only act while the
@@ -42,6 +44,11 @@ interface CheckpointData {
   pitch: number;
   /** Saved in a clean Segmented attempt: the run's place, so a load rewinds the run to it (segments.ts). */
   segment?: { mark: SegmentMark; filter: StyleFilter };
+  /**
+   * Saved where the attempt's recording plays back (session.ts pathMark): its place, so a practice teleport here keeps
+   * the practice replay playable (the same object as `segment` when there is one).
+   */
+  path?: { mark: SegmentMark; filter: StyleFilter };
 }
 
 export interface PracticeHost extends PracticeContext {
@@ -93,10 +100,11 @@ export class Practice {
       free: (x) => freeState(core, x),
       bytes: (x) => snapshotBytes(core, x),
     }, undefined, {
-      // Segmented checkpoints hold their run's path (segments.ts): budgeted with the snapshots, let go with them.
+      // Checkpoints hold their run's path (segments.ts): budgeted with the snapshots, let go with them.
       extraBytes: () => h.session.segmentBytes,
       onDrop: (d) => {
-        if (d.segment) h.session.segmentDrop(d.segment.mark);
+        const m = d.path?.mark ?? d.segment?.mark;
+        if (m) h.session.segmentDrop(m);
       },
     });
     // The pause menu item, only where practice mode works.
@@ -321,10 +329,11 @@ export class Practice {
 
   private save(): void {
     const s = this.h.session;
-    const mark = s.segmenting ? s.segmentMark() : null;
+    const mark = s.pathMark();
     if (s.segmenting && !mark) return this.toast("This Segmented run's history is full (4 hours of play). Restart to start a new one.", 4000, "bad");
-    const segment = mark ? { mark, filter: s.filterState() } : undefined;
-    const cp = this.cps.save({ style: s.runStyle, selected: s.selectedStyle, timer: saveTimer(s.timer), yaw: this.h.input.yaw, pitch: this.h.input.pitch, ...(segment ? { segment } : {}) });
+    const path = mark ? { mark, filter: s.filterState() } : undefined;
+    const segment = s.segmenting ? path : undefined;
+    const cp = this.cps.save({ style: s.runStyle, selected: s.selectedStyle, timer: saveTimer(s.timer), yaw: this.h.input.yaw, pitch: this.h.input.pitch, ...(path ? { path } : {}), ...(segment ? { segment } : {}) });
     if (cp) whisper(`Checkpoint ${this.cps.number} saved`, { key: "practice-cp" });
     else this.toast("Couldn't save a checkpoint.", 2500, "bad");
   }
@@ -347,8 +356,11 @@ export class Practice {
     // The core is the checkpoint's now: this attempt is practice (said once while the timer is still the old one).
     s.practiceUse("teleport");
     this.endNoclip();
+    // Keep speed off: a speed set outside the simulation, which no replay plays back (unless there was none to reset).
+    const reset = !prefs.get().practice.keepVelocity && this.h.core.state().velocity.some((v) => v !== 0);
     if (!prefs.get().practice.keepVelocity) setVelocity(this.h.core, [0, 0, 0]);
-    s.practiceRestored(cp.data.style, cp.data.timer);
+    s.practiceRestored(cp.data.style, cp.data.timer, reset ? null : cp.data.path ?? null);
+    if (reset) s.practiceSpeedReset();
     this.h.resync({ yaw: cp.data.yaw, pitch: cp.data.pitch });
     return true;
   }
@@ -395,17 +407,19 @@ export class Practice {
     const why = replayStartProblem(replay.header, { map: this.h.map, selectedStyle: s.selectedStyle });
     if (why) return why;
     s.practiceUse("teleport"); // (before the core is touched; a failed playback restarts below)
-    const run = new SimRun(this.h.core, replay, zones, { untilTick: Math.max(0, Math.min(replay.header.totalTicks, tick)) });
+    const run = new SimRun(this.h.core, replay, zones, { untilTick: Math.max(0, Math.min(replay.header.totalTicks, tick)), frames: true });
     run.step();
     if (run.desynced) {
       this.h.restart(); // (the core was left mid-replay)
       return "This replay doesn't play back exactly in this version, so it can only be watched.";
     }
     const state = this.h.core.state();
-    const timer = run.result().timer;
+    const result = run.result();
+    const timer = result.timer;
     const style = styleForTrack(s.selectedStyle, timer.track, this.h.map);
     this.endNoclip();
-    s.practiceRestored(style, saveTimer(timer));
+    // The recording takes the replay's commands up to here, so this attempt's practice replay plays back too.
+    s.practiceFromReplay(style, saveTimer(timer), replay, result);
     const n = run.ticksDone;
     this.h.resync(n > 0 ? { yaw: replay.yaw[n - 1], pitch: replay.pitch[n - 1] } : { yaw: state.teleportAngles[1], pitch: state.teleportAngles[0] });
     this.toast(`Practising from ${s.timer.status === "running" ? formatTime(s.timer.time()) : "the start"} of that run. ${restartHow()}`, 5000);

@@ -5,7 +5,8 @@
 // whose results may differ between JS engines (V8 vs JavaScriptCore).
 
 import { playerInZone, splitCount, touching, trackOf, type Zone } from "./zones";
-import { crossesZone, entryCrossing, exitCrossing, FRACTION_UNITS, movement, TIMING_POLICY, timeUnits, unitsToMs, type Crossing, type PathSource, type RunTiming } from "./run-timing";
+import { crossesZone, entryCrossing, exitCrossing, FRACTION_UNITS, movement, quantizePhase, TIMING_POLICY, timeUnits, unitsToMs, type Crossing, type PathSource, type RunTiming } from "./run-timing";
+import type { TeleportTouch } from "./timing-trace";
 
 export type RunStatus = "idle" | "running" | "finished";
 
@@ -210,6 +211,8 @@ export class RunTimer {
   endCrossing: Crossing = { fraction: FRACTION_UNITS, method: "boundary" };
   /** The accepted movement path of the tick just stepped (sim.ts afterStep sets it); null = straight traces only. */
   pathSource: PathSource | null = null;
+  /** The trigger_teleport that moved the player in the tick just stepped (sim.ts afterStep sets it); null = none read. */
+  teleportSource: (() => TeleportTouch | null) | null = null;
   /** Feet position after the previous update: where this tick's straight trace starts. */
   private prevPosition: readonly number[] | null = null;
 
@@ -621,7 +624,9 @@ export class RunTimer {
 
   /**
    * Where in this tick the player first touched the end zone they finished in (run-timing.ts entryCrossing): along the
-   * move to this tick's touch position (passEnd), else (a teleport or respawn put them in it) at the tick's end.
+   * move to this tick's touch position (passEnd). When a trigger_teleport in this tick's touch pass sent them into it,
+   * where they first touched that trigger on the move (policy 2); any other teleport or a respawn finishes at the tick's
+   * end.
    */
   private entryCrossing(events: number, s: TickState, from: readonly number[] | null, passEnd: boolean): Crossing {
     const ends = this.zones.filter((z) => z.kind === "end" && trackOf(z) === this.track);
@@ -629,7 +634,11 @@ export class RunTimer {
     const moved = s.touchPosition
       ? s.touchPosition[0] !== s.position[0] || s.touchPosition[1] !== s.position[1] || s.touchPosition[2] !== s.position[2]
       : (events & (EVENT_TELEPORTED | EVENT_RESPAWNED)) !== 0;
-    if (moved) return { fraction: FRACTION_UNITS, method: "boundary" };
+    if (moved) {
+      const t = s.touchPosition && (events & (EVENT_TELEPORTED | EVENT_RESPAWNED)) === EVENT_TELEPORTED ? this.teleportSource?.() : null;
+      if (t?.phase != null) return { fraction: quantizePhase(t.phase), method: t.chord ? "teleport-chord" : "teleport" };
+      return { fraction: FRACTION_UNITS, method: "boundary" };
+    }
     return entryCrossing(movement(this.pathSource?.() ?? null, from, s.position, s.crouched), ends);
   }
 

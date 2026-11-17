@@ -6,13 +6,15 @@
 // core's atlas (crates/core/src/lightmap.rs) holds style 0 only, so anything lit by a named light rendered dark:
 // bhop_cutekittenz lights everything after its start room that way.
 //
-// This re-adds the other pages in the client, so it ships without a core (wasm) change: it repeats lightmap.rs's face
-// selection and shelf packing to find each face's block in the atlas, checks that the style-0 texels there match its
-// own encoding (any mismatch, e.g. after a core change to the packing, leaves the atlas as it was), then rewrites the
-// blocks of faces that have extra styles with the sum of their pages. Style values are static: a named light's
-// spawn state (spawnflag 1 "Initially dark", plus TurnOn / TurnOff / Toggle sent straight from a logic_auto at spawn),
-// and animated patterns at their time-average. The core doesn't track light entities, so later TurnOn / TurnOff
-// inputs (triggers, timers, buttons) don't change the lighting.
+// This re-adds the other pages in the client: it repeats lightmap.rs's face selection and shelf packing to find each
+// face's block in the atlas, checks that the style-0 texels there match its own encoding (any mismatch, e.g. after a
+// core change to the packing, leaves the atlas as it was), then rewrites the blocks of faces that have extra styles
+// with the sum of their pages. At load the styles take their spawn values: a named light's spawn state (spawnflag 1
+// "Initially dark", plus TurnOn / TurnOff / Toggle sent straight from a logic_auto at spawn), and animated patterns at
+// their time-average. After that, the styles of named lights that the map's I/O can reach follow the core's light
+// states (`effect_states`: TurnOn / TurnOff / Toggle / Use from triggers, buttons, timers, relays), so a section
+// that a trigger lights is dark until the player reaches it and lit after, as in CS:S. The states come from the core
+// that drives the view, so restarts, replays and scrubbing follow too. Patterns stay at their time-average.
 
 import type { Lightmap } from "./core";
 
@@ -22,6 +24,8 @@ const SURF_NOLIGHT = 0x400;
 const SURF_BUMPLIGHT = 0x800;
 const BORDER = 1;
 const WHITE_BLOCK = 4;
+/** Texels between two changed blocks on a shelf that are cheaper to upload again than to split the upload over. */
+const MERGE_GAP = 64;
 const MIN_EXP = -32;
 const MAX_EXP = 16;
 const EXP_UNIT = Array.from({ length: MAX_EXP - MIN_EXP + 1 }, (_, i) => 2 ** (i + MIN_EXP) / 255);
@@ -78,9 +82,7 @@ export function lightStyleValues(ents: Entity[]): Map<number, number> {
     if (!/^light(_spot)?$/i.test(e.classname ?? "")) continue;
     const style = parseInt(e.style ?? "0", 10);
     if (!(style >= 32 && style < 64) || !e.targetname) continue;
-    const preset = parseInt(e.defaultstyle ?? "0", 10);
-    const pattern = e.pattern || (preset > 0 ? (DEFAULT_PATTERNS[preset] ?? "m") : "m");
-    const light = { style, on: !((parseInt(e.spawnflags ?? "0", 10) || 0) & 1), pattern };
+    const light = { style, on: !((parseInt(e.spawnflags ?? "0", 10) || 0) & 1), pattern: lightPattern(e) };
     const name = e.targetname.toLowerCase();
     byName.set(name, [...(byName.get(name) ?? []), light]);
   }
@@ -112,6 +114,74 @@ export function styleValue(values: Map<number, number>, style: number): number {
   return values.get(style) ?? 256 / 264;
 }
 
+/** A named light's pattern while on: its `pattern`, else its `defaultstyle` preset's, else 'm' (CLight::Spawn). */
+function lightPattern(e: Readonly<Record<string, string>>): string {
+  const preset = parseInt(e.defaultstyle ?? "0", 10);
+  return e.pattern || (preset > 0 ? (DEFAULT_PATTERNS[preset] ?? "m") : "m");
+}
+
+/** A switchable style's lights (entity indices: the core's `effect_states` keys) and its value while they're on. */
+export interface SwitchableStyle {
+  ids: number[];
+  on: number;
+}
+
+/**
+ * The named lights' styles (32+) that the map's I/O can switch: some output (of `wired`, the entity lump with outputs)
+ * names one of their lights, or a `name*` wildcard covers it. The other styles keep their spawn value. `ents` gives
+ * the entity indices: the core's entity order (Core.entities).
+ */
+export function switchableStyles(ents: readonly Record<string, string>[], wired: Entity[]): Map<number, SwitchableStyle> {
+  const names = new Set<string>();
+  const prefixes: string[] = [];
+  for (const e of wired) {
+    for (const [, value] of e.outputs ?? []) {
+      const target = (value.split(value.includes("\x1b") ? "\x1b" : ",")[0] ?? "").trim().toLowerCase();
+      if (target.endsWith("*")) prefixes.push(target.slice(0, -1));
+      else if (target) names.add(target);
+    }
+  }
+  const styles = new Map<number, SwitchableStyle>();
+  ents.forEach((e, id) => {
+    if (!/^light(_spot)?$/i.test(e.classname ?? "") || !e.targetname) return;
+    const style = parseInt(e.style ?? "0", 10);
+    const name = e.targetname.toLowerCase();
+    if (!(style >= 32 && style < 64) || (!names.has(name) && !prefixes.some((p) => name.startsWith(p)))) return;
+    const s = styles.get(style) ?? { ids: [], on: patternValue(lightPattern(e)) };
+    s.ids.push(id);
+    styles.set(style, s);
+  });
+  return styles;
+}
+
+/**
+ * Sets each switchable style in `values` from the core's light states (entity index -> on): lit while any of its
+ * lights is (they share a targetname, so they switch together). A style none of whose lights is reported keeps its
+ * value. Returns the styles that changed.
+ */
+export function followLightStates(styles: Map<number, SwitchableStyle>, states: ReadonlyMap<number, boolean>, values: Map<number, number>): number[] {
+  const changed: number[] = [];
+  for (const [style, s] of styles) {
+    let seen = false;
+    let on = false;
+    for (const id of s.ids) {
+      const state = states.get(id);
+      if (state === undefined) continue;
+      seen = true;
+      if (state) {
+        on = true;
+        break;
+      }
+    }
+    const v = on ? s.on : 0;
+    if (seen && values.get(style) !== v) {
+      values.set(style, v);
+      changed.push(style);
+    }
+  }
+  return changed;
+}
+
 /** Entity lump text -> entities, keeping every output (keys repeat: OnMapSpawn, OnTrigger, ...). */
 export function parseEntityLump(text: string): Entity[] {
   const out: Entity[] = [];
@@ -136,6 +206,14 @@ interface Item {
   first: number;
   styles: number[];
   bumped: boolean;
+}
+
+/** A face's block in the atlas; `rgbe`: its pages (styles in order), kept when map I/O can switch one. */
+interface Block {
+  it: Item;
+  x: number;
+  y: number;
+  rgbe: Uint8Array | null;
 }
 
 /** lightmap.rs `pack`: shelf packing of items sorted by height; top-left (incl. border) per item and used height. */
@@ -171,7 +249,10 @@ function nextPow2(v: number): number {
  * `lineartolightmap` table, `0.5 * v^(1/2.2)` with v quantized to 1/1024.
  */
 function encoder(lm: Lightmap): (v: number) => number {
-  if (!lm.hdr) return (v) => Math.min(255, Math.round(Math.pow(Math.min(4091, Math.max(0, Math.round(v * 1024))) / 1024, 1 / LDR_GAMMA) * 127.5));
+  if (!lm.hdr) {
+    const table = Uint8Array.from({ length: 4092 }, (_, q) => Math.min(255, Math.round(Math.pow(q / 1024, 1 / LDR_GAMMA) * 127.5)));
+    return (v) => table[Math.min(4091, Math.max(0, Math.round(v * 1024)))];
+  }
   const steps = new Float64Array(256);
   for (let k = 1; k < 256; k++) {
     const s = (k - 0.5) / 255;
@@ -193,12 +274,49 @@ export interface LightStyleResult {
   skipped?: string;
 }
 
+/** The atlas with its light styles, kept in step with the core's light states. */
+export interface LightStyleAtlas {
+  /** Faces whose styles some map I/O can switch. */
+  readonly switchable: number;
+  /**
+   * Re-adds the pages of the styles whose lights the core turned on or off since the last call (`states`: the core's
+   * `effect_states`). Returns the atlas rectangles that changed (upload those again) and the styles that did.
+   */
+  update(states: ReadonlyMap<number, boolean> | undefined): { rects: AtlasRect[]; styles: number[] };
+  /**
+   * How far `style` is above its spawn value now (0 when it is at or below it): what model lighting adds of that
+   * style's lights (core `set_light_style`). Models keep their spawn light otherwise, as before.
+   */
+  above(style: number): number;
+  /** How far `style` is above its spawn value while its lights are on: what models in reach of it wait for. */
+  full(style: number): number;
+  /** The switchable styles. */
+  readonly styles: number[];
+}
+
+/** Texels `x`..`x + w`, `y`..`y + h` of the atlas. */
+export interface AtlasRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 /**
- * Adds every face's switchable-style pages (at their spawn values) to the core's style-0 atlas `lm`, in place. `bsp`
- * is the map file the core built the atlas from.
+ * Adds every face's light-style pages (at their spawn values) to the core's style-0 atlas `lm`, in place. `bsp` is the
+ * map file the core built the atlas from.
  */
 export function applyLightStyles(lm: Lightmap, bsp: Uint8Array): LightStyleResult {
-  const none = (skipped: string, styledFaces = 0): LightStyleResult => ({ faces: 0, styledFaces, skipped });
+  return lightStyleAtlas(lm, bsp).result;
+}
+
+/**
+ * `applyLightStyles`, plus an `atlas` that follows the core's light states afterwards when the map can switch any of
+ * its styles. `ents`: the core's entities (Core.entities), whose indices the states use; the entity lump's order
+ * without them.
+ */
+export function lightStyleAtlas(lm: Lightmap, bsp: Uint8Array, ents?: readonly Record<string, string>[]): { result: LightStyleResult; atlas: LightStyleAtlas | null } {
+  const none = (skipped: string, styledFaces = 0) => ({ result: { faces: 0, styledFaces, skipped }, atlas: null });
   if (bsp.length < 1036) return none("not a BSP");
   const dv = new DataView(bsp.buffer, bsp.byteOffset, bsp.byteLength);
   if (dv.getUint32(0, true) !== 0x50534256) return none("not a VBSP"); // "VBSP"
@@ -244,7 +362,6 @@ export function applyLightStyles(lm: Lightmap, bsp: Uint8Array): LightStyleResul
   }
   if (styledFaces === 0) return none("no switchable light styles");
 
-  const lightBase = lighting.ofs;
   // lightmap.rs `is_unlit`: the core drew the map fullbright (no atlas blocks), so there's nothing to add to.
   const visible = items.some((it) => {
     for (let i = it.first; i < it.first + it.w * it.h; i++) {
@@ -267,19 +384,31 @@ export function applyLightStyles(lm: Lightmap, bsp: Uint8Array): LightStyleResul
   const height = Math.ceil(Math.max(packed.height, WHITE_BLOCK) / 4) * 4;
   if (width !== lm.width || height !== lm.height) return none(`atlas layout differs (${width}x${height} vs ${lm.width}x${lm.height})`, styledFaces);
 
-  const values = lightStyleValues(parseEntityLump(entityText(bsp, lump(LUMP_ENTITIES))));
+  const wired = parseEntityLump(entityText(bsp, lump(LUMP_ENTITIES)));
+  const values = lightStyleValues(wired);
+  const switchable = switchableStyles(ents ?? wired, wired);
   const encode = encoder(lm);
-  const work: { it: Item; x: number; y: number; weights: number[] }[] = [];
+  const work: Block[] = [];
   for (let k = 0; k < order.length; k++) {
     const it = order[k];
     if (it.styles.length < 2) continue;
-    const weights = it.styles.map((s) => styleValue(values, s));
-    // Unchanged: only style 0 at full value (every extra style off), or a page past the end of the lump.
+    // A page past the end of the lump: left as the core drew it.
     const pages = it.bumped ? 4 : 1;
     const n = it.w * it.h;
     if (it.styles.some((_, i) => it.first + (i * pages + 1) * n > samples)) continue;
-    if (weights[0] === 1 && weights.slice(1).every((v) => v === 0)) continue;
-    work.push({ it, x: packed.pos[k][0], y: packed.pos[k][1], weights });
+    const live = it.styles.some((s) => switchable.has(s));
+    // Unchanged for good: only style 0 at full value, every extra style off and none switchable.
+    if (!live && styleValue(values, it.styles[0]) === 1 && it.styles.slice(1).every((s) => styleValue(values, s) === 0)) continue;
+    // Faces that may change keep their own copy of their pages (RGBE), the BSP isn't kept.
+    let rgbe: Uint8Array | null = null;
+    if (live) {
+      rgbe = new Uint8Array(it.styles.length * n * 4);
+      for (let s = 0; s < it.styles.length; s++) {
+        const p = lighting.ofs + (it.first + s * pages * n) * 4;
+        rgbe.set(bsp.subarray(p, p + n * 4), s * n * 4);
+      }
+    }
+    work.push({ it, x: packed.pos[k][0], y: packed.pos[k][1], rgbe });
   }
 
   // Check every block we'd rewrite holds this face's style-0 light (±1 for float rounding) before touching anything.
@@ -302,22 +431,27 @@ export function applyLightStyles(lm: Lightmap, bsp: Uint8Array): LightStyleResul
     }
   }
 
-  for (const { it, x, y, weights } of work) {
-    const pages = it.bumped ? 4 : 1;
+  /** Writes block `b` with each style's page scaled by its current value; `src`/`base`: where its pages are. */
+  // Scratch for one block (faces are at most 1024 x 1024 luxels, but almost all are tiny).
+  let lit = new Float64Array(0);
+  let out = new Uint8Array(0);
+  const write = ({ it, x, y }: Block, src: Uint8Array, base: number, pageStride: number) => {
     const n = it.w * it.h;
-    const lit = new Float64Array(n * 3);
-    for (let s = 0; s < weights.length; s++) {
-      const v = weights[s];
+    if (lit.length < n * 3) {
+      lit = new Float64Array(n * 3);
+      out = new Uint8Array(n * 3);
+    } else lit.fill(0, 0, n * 3);
+    for (let s = 0; s < it.styles.length; s++) {
+      const v = styleValue(values, it.styles[s]);
       if (v === 0) continue;
-      let p = lightBase + (it.first + s * pages * n) * 4;
+      let p = base + s * pageStride;
       for (let i = 0; i < n * 3; i += 3, p += 4) {
-        const m = v * EXP_UNIT[Math.min(MAX_EXP, Math.max(MIN_EXP, (bsp[p + 3] << 24) >> 24)) - MIN_EXP];
-        lit[i] += bsp[p] * m;
-        lit[i + 1] += bsp[p + 1] * m;
-        lit[i + 2] += bsp[p + 2] * m;
+        const m = v * EXP_UNIT[Math.min(MAX_EXP, Math.max(MIN_EXP, (src[p + 3] << 24) >> 24)) - MIN_EXP];
+        lit[i] += src[p] * m;
+        lit[i + 1] += src[p + 1] * m;
+        lit[i + 2] += src[p + 2] * m;
       }
     }
-    const out = new Uint8Array(n * 3);
     for (let i = 0; i < n * 3; i++) out[i] = encode(lit[i]);
     for (let j = 0; j < it.h + 2 * BORDER; j++) {
       const sy = Math.min(it.h - 1, Math.max(0, j - BORDER));
@@ -331,8 +465,48 @@ export function applyLightStyles(lm: Lightmap, bsp: Uint8Array): LightStyleResul
         data[o + 3] = 255;
       }
     }
+  };
+  const writeLive = (b: Block) => write(b, b.rgbe!, 0, b.it.w * b.it.h * 4);
+  for (const b of work) {
+    if (b.rgbe) writeLive(b);
+    else write(b, bsp, lighting.ofs + b.it.first * 4, (b.it.bumped ? 4 : 1) * b.it.w * b.it.h * 4);
   }
-  return { faces: work.length, styledFaces };
+  const result = { faces: work.length, styledFaces };
+  const live = work.filter((b) => b.rgbe);
+  if (!live.length) return { result, atlas: null };
+  const byStyle = new Map<number, Block[]>();
+  for (const b of live) for (const s of b.it.styles) if (switchable.has(s)) byStyle.set(s, [...(byStyle.get(s) ?? []), b]);
+  const spawn = new Map([...switchable.keys()].map((s) => [s, styleValue(values, s)]));
+  return {
+    result,
+    atlas: {
+      switchable: live.length,
+      above: (style) => Math.max(0, styleValue(values, style) - (spawn.get(style) ?? styleValue(values, style))),
+      full: (style) => Math.max(0, (switchable.get(style)?.on ?? 0) - (spawn.get(style) ?? 0)),
+      styles: [...switchable.keys()],
+      update(states) {
+        if (!states) return { rects: [], styles: [] };
+        const changed = followLightStates(switchable, states, values);
+        if (!changed.length) return { rects: [], styles: [] };
+        const blocks = new Set<Block>();
+        for (const s of changed) for (const b of byStyle.get(s) ?? []) blocks.add(b);
+        // Upload rectangles: neighbouring blocks on one shelf (they share its top) go up together, so a style's
+        // scattered faces cost a few hundred small uploads instead of the whole atlas.
+        const rects: AtlasRect[] = [];
+        for (const b of [...blocks].sort((p, q) => p.y - q.y || p.x - q.x)) {
+          writeLive(b);
+          const w = b.it.w + 2 * BORDER;
+          const h = b.it.h + 2 * BORDER;
+          const r = rects.at(-1);
+          if (r && r.y === b.y && b.x - (r.x + r.w) <= MERGE_GAP) {
+            r.w = b.x + w - r.x;
+            r.h = Math.max(r.h, h);
+          } else rects.push({ x: b.x, y: b.y, w, h });
+        }
+        return { rects, styles: changed };
+      },
+    },
+  };
 }
 
 function entityText(bsp: Uint8Array, l: { ofs: number; len: number; compressed: boolean }): string {

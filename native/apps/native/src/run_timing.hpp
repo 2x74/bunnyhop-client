@@ -5,7 +5,7 @@
 #include <limits>
 
 namespace native {
-inline constexpr uint32_t timing_policy = 1;
+inline constexpr uint32_t timing_policy = 2;
 inline constexpr double milliseconds_per_second = 1000.0;
 inline constexpr double microseconds_per_second = 1000000.0;
 inline constexpr double microseconds_per_millisecond = 1000.0;

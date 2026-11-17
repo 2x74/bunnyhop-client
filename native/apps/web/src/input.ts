@@ -441,6 +441,14 @@ export class Input {
   /** Any other key pressed while locked (zone editor digits, etc.). */
   onKey: ((code: string) => void) | null = null;
   /**
+   * A key bound to buttons (movement, use; or a command bind's + of one) went down while playing: its IN_* bits, from
+   * the keydown / mousedown handler itself (audio/keysounds.ts plays the key sound there). Not for key repeats, a key
+   * already held, keys held through a lock coming back, text fields or menus.
+   */
+  onMovePress: ((bits: number) => void) | null = null;
+  /** restoreDown is re-pressing held keys (no onMovePress: nobody pressed them now). */
+  private restoring = false;
+  /**
    * A key some on-screen UI owns right now (the numbered menus' digits): its press is ignored here, so no bind and no
    * held movement, turn or attack comes from it. Its keyup still releases a key that was already held.
    */
@@ -594,11 +602,16 @@ export class Input {
   /** The lock is back: keys held since before it go down now, as fresh presses (holds only: no actions fire). */
   private restoreDown(): void {
     const e = { timeStamp: performance.now(), preventDefault() {} } as unknown as Event;
-    for (const c of this.down) {
-      if (this.heldCodes.has(c) || this.untilKeyup.has(c)) continue;
-      if (MOD_CODES.has(c)) this.mods.add(c);
-      const a = this.codeAction.get(c);
-      if (this.codeBits.has(c) || (a && ACTION_PRESS_BITS[a])) this.press(c, false, e);
+    this.restoring = true;
+    try {
+      for (const c of this.down) {
+        if (this.heldCodes.has(c) || this.untilKeyup.has(c)) continue;
+        if (MOD_CODES.has(c)) this.mods.add(c);
+        const a = this.codeAction.get(c);
+        if (this.codeBits.has(c) || (a && ACTION_PRESS_BITS[a])) this.press(c, false, e);
+      }
+    } finally {
+      this.restoring = false;
     }
   }
 
@@ -795,6 +808,7 @@ export class Input {
     if (this.codeBits.has(code)) {
       // A key not held yet: a press, or a key repeat of one a release-all forgot while it stayed down (blur / focus).
       // Frame-sampled input re-adds it on that repeat too (heldCodes below), so timed input gives it back the same way.
+      if (!repeat && !this.restoring && !this.heldCodes.has(code)) this.onMovePress?.(this.codeBits.get(code)!);
       if (this.timedActive && !this.heldCodes.has(code)) this.timedPress(code, e);
       this.heldCodes.add(code);
       this.queue({type:"key", code, down:true, bits:this.codeBits.get(code)!}, e.timeStamp);

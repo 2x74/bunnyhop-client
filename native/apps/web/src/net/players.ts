@@ -23,7 +23,7 @@ import { hasAnimRig, loadAnimRig } from "../player/studio/loader";
 import { DEFAULT_COSMETICS } from "../progression";
 import { cleanLoadout, DEFAULT_LOADOUT } from "../loadout";
 import { stageModelTextures } from "../player/bunny/prebuild";
-import { NameTag, TagSight, type SightTrace } from "../player/tag";
+import { NameTag, TAG_CROUCH, TAG_STAND, TagSight, type SightTrace } from "../player/tag";
 import { probeFromTrace } from "../player/bunny/legs";
 import { LadderGuess, waterLevelAt } from "../player/map-volumes";
 import { uiHidden } from "../ui/hide-ui";
@@ -225,7 +225,7 @@ export class RemotePlayers {
     const color = slotColor(p.slot);
     // Their bunny colourway and loadout (knife, finish with their seed, gloves) from the roster (defaults for older
     // servers), accented with their slot colour. The geometry is cached by now (prep), so this is cheap.
-    const model = new PlayerModel({ style: "solid", playerGlow: p.info.playerGlow ?? null, color, outfit: p.info.outfit ?? DEFAULT_COSMETICS.outfit!, loadout: cleanLoadout(p.info.loadout) ?? { ...DEFAULT_LOADOUT } });
+    const model = new PlayerModel({ style: "solid", playerGlow: p.info.playerGlow ?? null, color, outfit: p.info.outfit ?? DEFAULT_COSMETICS.outfit!, loadout: cleanLoadout(p.info.loadout) ?? { ...DEFAULT_LOADOUT }, hops: "others" });
     // Glow shells are created lazily by update(), and guns by setGun(). Both must exist when we compile.
     // Otherwise their first visible frame builds the shell and links its programs synchronously.
     const serial = !!this.renderer && !this.renderer.extensions.has("KHR_parallel_shader_compile");
@@ -328,7 +328,7 @@ export class RemotePlayers {
             p.unposed = true;
             if (hear) (p.sound ??= new SpatialMover()).update(dt, s.pos, s.vel, s.grounded, s.crouched, s.jumped, s.snapped);
             else p.sound?.moves.reset();
-            p.tag!.place(tmp.set(s.pos[0], s.pos[2] + 76, -s.pos[1]), camPos, 0);
+            p.tag!.place(tmp.set(s.pos[0], s.pos[2] + TAG_STAND, -s.pos[1]), camPos, 0);
             continue;
           }
         }
@@ -361,7 +361,7 @@ export class RemotePlayers {
       m.root.visible = !eye;
       // Tag above the head: name + current time (or the style when not running).
       const tag = p.tag!;
-      tmp.set(s.pos[0], s.pos[2] + (s.crouched ? 58 : 76), -s.pos[1]);
+      tmp.set(s.pos[0], s.pos[2] + (s.crouched ? TAG_CROUCH : TAG_STAND), -s.pos[1]);
       const dist = tmp.distanceTo(camPos);
       if (s.snapped) p.sight.reset();
       // Only players you can see (no names through walls by default), fading out far away (TagSight) and right next
@@ -402,6 +402,11 @@ export class RemotePlayers {
     const hand = s.crouched ? 30 : 46;
     const from = m?.gunMuzzle(tmp) ? [tmp.x, -tmp.z, tmp.y] : [s.pos[0] + (fwd[0] / rl) * 26 + right[0] * 7, s.pos[1] + (fwd[1] / rl) * 26 + right[1] * 7, s.pos[2] + hand];
     this.impacts.hit(end, [0, 0, 0], "concrete", { from });
+  }
+
+  /** The tick of a slot's own clock shown at `now` (spectating: their HUD feed plays to it), null without data. */
+  renderTick(slot: number, now: number): number | null {
+    return this.players.get(slot)?.track.renderTick(now) ?? null;
   }
 
   /** Interpolated state of a slot this frame (spectating). */

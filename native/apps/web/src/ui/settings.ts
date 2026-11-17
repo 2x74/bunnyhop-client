@@ -1,6 +1,7 @@
 import { videoGrade, VIDEO_LIMITS, type VideoGrade } from "../video-settings";
 import { sanitizeMapLooks, type MapLook } from "../map-look";
 import { ANGLE_SPEED_KEY_RANGE, YAW_SPEED_RANGE } from "../turn-binds";
+import { HOLD_AFTER_DEFAULT, HOLD_AFTER_RANGE } from "../restart-hold";
 import type { LightingProfileId } from "../graphics/profiles";
 import { graphicsPreset as lookPreset, MODEL_LIGHTING_MODES, type GraphicsPreset as LookPreset, type ModelLighting } from "../graphics/presets";
 import { DEFAULT_MOUSE_DPI } from "../mouse-settings";
@@ -20,6 +21,8 @@ import { DEFAULT_LANDING_PREFS, normalizeLandingPrefs, type LandingPrefs } from 
 import type { GhostRouteMode, GhostRouteSource } from "../ghost-route-data";
 import type { AutoRestartAction, AutoRestartWhen } from "../auto-restart";
 import { COLOR_BLIND_MODES, type ColorBlindMode } from "../palette";
+import type { KeySoundKeys, KeySoundSet } from "../audio/keysound-policy";
+import type { PerfectSoundSet, StreakLength } from "../audio/perfect-policy";
 
 export type Action =
   | "forward"
@@ -129,7 +132,12 @@ export interface AudioPrefs {
   announcer: AnnouncerPrefs;
   perfHud: boolean;
   perfectIndicator: boolean;
+  /**
+   * Perfect jump sound (Settings → Audio → Perfect jump sound, snd_perfecttick): EZ Scroll and Legit Scroll play
+   * `perfectSound` on a perfect jump. Off by default. (The name is the old quiet tick's, which it replaced: 0.0.42.)
+   */
   perfectTick: boolean;
+  perfectSound: PerfectSoundPrefs;
   music: number;
   sfx: number;
   ui: number;
@@ -158,6 +166,30 @@ export interface AudioPrefs {
   ghosts: boolean;
   /** Silence everything while the tab is in the background. */
   muteInBackground: boolean;
+  /** A short sound as a key goes down (audio/keysounds.ts); off by default. */
+  keySounds: KeySoundPrefs;
+}
+
+/**
+ * Key sounds: `set` (keysound-policy.ts KEY_SOUND_SETS), `volume` (their own level, under the master volume only),
+ * `keys`: the style's strafe keys, or every movement key including jump and duck.
+ */
+/**
+ * The perfect jump sound: `set` (perfect-policy.ts), its own `volume`, the pitch rising with a `streak`, and how far it
+ * rises before it holds (`length`: STREAK_TOP).
+ */
+export interface PerfectSoundPrefs {
+  set: PerfectSoundSet;
+  volume: number;
+  streak: boolean;
+  length: StreakLength;
+}
+
+export interface KeySoundPrefs {
+  enabled: boolean;
+  set: KeySoundSet;
+  volume: number;
+  keys: KeySoundKeys;
 }
 
 export interface Prefs {
@@ -288,8 +320,15 @@ export interface Prefs {
    * shots, for you only (net/players.ts).
    */
   showPlayers: boolean;
+  /**
+   * Other players' hop effects (player/hop-fx.ts, v0.0.42): the bursts at their feet on servers, on ghosts and in
+   * replays. Off draws none (nothing is spawned). Your own in third person and the Loadout always show.
+   */
+  showHopFx: boolean;
   /** A supporter's own glow on their first-person hands and knife (0.0.21; the glow panel's "In first person"). */
   firstPersonGlow: boolean;
+  /** The Robe's sleeves on your first-person arms while you wear it (v0.0.42; viewmodel/robe-sleeves.ts). */
+  firstPersonRobe: boolean;
   /** Trigger and clip overlays (!showtriggers, !showclips, the !triggers menu; triggers/). Drawn only, never part of a run. */
   triggers: TriggerPrefs;
   /**
@@ -435,6 +474,8 @@ export interface Prefs {
   landfix: boolean;
   /** Restart keys (R / B / M) need a short hold (restart-hold.ts HOLD_MS) so a stray press can't end a run (restart-guard.ts). */
   holdRestart: boolean;
+  /** With holdRestart off: minutes into a timed run from which the restart keys need the hold anyway; 0 = never (restart-hold.ts). */
+  holdRestartAfter: number;
   /** Auto restart (auto-restart.ts): once a run passes your PB / the WR / the custom ghost, restart it or play a sound. Off by default. */
   autoRestart: { when: AutoRestartWhen; action: AutoRestartAction };
   /**
@@ -511,22 +552,27 @@ export { VIEWMODEL_BOB, VIEWMODEL_POS, VIEWMODEL_REV };
 /** Prefs.mouseNames: mouse binds use Source's button names (binds.ts mouseCode; 0.0.12). */
 export const MOUSE_NAMES = 2;
 
-/** Strafe trainer looks: the original thin gauge, a thick bar with coloured zones, a thin zoned line with a marker, a track filled from the edge opposite the turn. */
-export type TrainerStyle = "classic" | "detailed" | "minimal" | "bar";
+/**
+ * Strafe trainer looks: the original thin gauge, a thick bar with coloured zones, a thin zoned line with a marker, a track
+ * filled from the edge opposite the turn, a filled blue-white-red half dial whose needle stands up at 100%, and the
+ * same dial drawn as a thin zoned arc.
+ */
+export type TrainerStyle = "classic" | "detailed" | "minimal" | "bar" | "gauge" | "arc";
 export interface TrainerPrefs {
   color: string;
   hints: boolean;
   style: TrainerStyle;
-  /** 100% in the middle and the marker moves the way you turn; off: 0% at the left end, 200% at the right. The Bar look always goes by the turn. */
+  /** 100% in the middle and the marker moves the way you turn; off: 0% at the left end, 200% at the right. The Bar look always goes by the turn; the Gauge and Arc never mirror. */
   follow: boolean;
   /** Ticks averaged into the reading (1 = none). */
   smoothing: number;
   /** ± % around 100 that counts as on pace (green); amber reaches three times as far. The Bar look's bands: hud/strafe-trainer.ts barBand. */
   zone: number;
-  /** Gauge thickness, a multiple of the style's own. */
+  /** Gauge thickness, a multiple of the style's own (the Gauge look: its needle's width). */
   height: number;
   /** The trainer fades while the pace is under this % (0 = never). */
   dimBelow: number;
+  /** The number under the trainer. Picking the Gauge look turns it off, leaving it turns it back on (settings-panel.ts). */
   showPace: boolean;
   /** A tick on each jump, pitched by that jump's zone. */
   sound: boolean;
@@ -539,14 +585,24 @@ const TRAINER_PRESETS: Record<TrainerPreset, Pick<TrainerPrefs, "style" | "follo
   standard: { style: "classic", follow: false, smoothing: 8, zone: 10, hints: false, showPace: true },
   strict: { style: "minimal", follow: true, smoothing: 3, zone: 5, hints: false, showPace: true },
 };
-/** The Bar look stays through a preset: its presets are about the tolerance and smoothing, which it uses like the others. */
+/** Looks that keep themselves through a preset (its tolerance and smoothing still apply) and have no Follow the turn. */
+const OWN_LOOKS: ReadonlySet<TrainerStyle> = new Set(["bar", "gauge", "arc"]);
+/**
+ * The Bar, Gauge and Arc looks stay through a preset: its presets are about the tolerance and smoothing, which they use
+ * like the others. The Gauge keeps the player's Percentage too (off unless they turned it on).
+ */
 export function applyTrainerPreset(t: TrainerPrefs, preset: TrainerPreset): void {
-  const style = t.style === "bar" ? t.style : TRAINER_PRESETS[preset].style;
-  Object.assign(t, TRAINER_PRESETS[preset], { style });
+  const own = OWN_LOOKS.has(t.style);
+  Object.assign(t, TRAINER_PRESETS[preset], { style: own ? t.style : TRAINER_PRESETS[preset].style, showPace: t.style === "gauge" ? t.showPace : TRAINER_PRESETS[preset].showPace });
 }
-/** The preset `t` matches, if any. The Bar look has no use for a preset's look or Follow the turn. */
+/** A look picked in Settings: the Gauge starts without its number, and leaving it brings the number back. */
+export function pickTrainerStyle(t: TrainerPrefs, style: TrainerStyle): void {
+  if (style !== t.style && (style === "gauge" || t.style === "gauge")) t.showPace = style !== "gauge";
+  t.style = style;
+}
+/** The preset `t` matches, if any. Those looks have no use for a preset's look or Follow the turn (nor the Gauge for its Percentage). */
 export function trainerPreset(t: TrainerPrefs): TrainerPreset | null {
-  const ignored = (f: string) => t.style === "bar" && (f === "style" || f === "follow");
+  const ignored = (f: string) => (OWN_LOOKS.has(t.style) && (f === "style" || f === "follow")) || (t.style === "gauge" && f === "showPace");
   return (Object.keys(TRAINER_PRESETS) as TrainerPreset[]).find((k) => Object.entries(TRAINER_PRESETS[k]).every(([f, v]) => ignored(f) || t[f as keyof TrainerPrefs] === v)) ?? null;
 }
 
@@ -576,6 +632,7 @@ export const DEFAULT_PREFS: Prefs = {
   audio: {
     announcer: { enabled: false, finish: true, movement: true, local: true, server: true, volume: 0.8, pb: "perfect", wr: "godlike", speed: "godlike", highSpeed: "holyshit", streak: "perfect", lj: "perfect", speedThreshold: 1500, highSpeedThreshold: 2500, streakThreshold: 3, ljThreshold: 250 },
     perfHud: true, perfectIndicator: true, perfectTick: false,
+    perfectSound: { set: "ping", volume: 0.6, streak: true, length: "long" },
     music: 0.5,
     sfx: 0.8,
     ui: 0.6,
@@ -592,6 +649,7 @@ export const DEFAULT_PREFS: Prefs = {
     others: true,
     ghosts: false,
     muteInBackground: true,
+    keySounds: { enabled: false, set: "thock", volume: 0.6, keys: "strafe" },
   },
   showGhost: true,
   ghost: { pb: true, wr: true, custom: true, opacity: 0.55, trail: true, route: false, routeOnly: false, routeSource: "auto", compare: "auto", routeMode: "jumps", nearFade: true, tag: true },
@@ -603,7 +661,9 @@ export const DEFAULT_PREFS: Prefs = {
   voice: { enabled: true, volume: 0.8, key: "KeyX", device: "" },
   showPlayerGlow: true,
   showPlayers: true,
+  showHopFx: true,
   firstPersonGlow: true,
+  firstPersonRobe: true,
   mapLooks: {},
   graphics: { preset: "source", waterReflections: true, mapFog: true, mapDetails: true, modelLighting: "subtle", propLighting: true, bloom: true, mapProfiles: false, ambienceShowcase: false, lightingProfile: "map", skyMode: "map", skyPackId: null, skyRotation: 0, skyExposure: 0, lightingSource: "map", directContribution: 1, ambientContribution: 1, clouds: false, cloudQuality: "low", cloudCoverage: .45, cloudDensity: 1, contactShading: false, atmosphere: false, sunShafts: false, materialResponse: true, volumetric: false, spatialAA: true, localLights: false, localQuality: "medium", localBudget: 1, localStrength: .2, dynamicGI: false, tracedGI: false, giQuality: "low", giStrength: .25, giRange: 256, dynamicShadows: false, shadowQuality: "medium", shadowDistance: 1024, shadowStrength: .18, resolutionScale: 1, antialias: true, aspect: "native", aspectFit: "stretch", pixelated: false, anisotropy: 8, brightness: 1, gamma: 1, vibrance: 1, fullbright: false, menuBackground: "live", fullscreen: true, potato: false, flashlight: false, fpsLimit: 1000, uncapped: false, lowLatency: false, menuFps: 0 },
   viewmodel: { show: true, ...VIEWMODEL_POS, bob: VIEWMODEL_BOB, sway: 1, hand: "right", inspect: "tricks", landSettle: false, speedFov: false, rev: VIEWMODEL_REV },
@@ -613,6 +673,7 @@ export const DEFAULT_PREFS: Prefs = {
   practice: { keepVelocity: true },
   landfix: true,
   holdRestart: false,
+  holdRestartAfter: HOLD_AFTER_DEFAULT,
   autoRestart: { when: "off", action: "restart" },
   mouseNames: MOUSE_NAMES,
   bonusBindRevision: 1,
@@ -656,6 +717,11 @@ function migrate(raw: Record<string, unknown>, partial = false): Record<string, 
     const v = raw[key];
     if (typeof v !== "number" || !Number.isFinite(v)) delete raw[key];
     else raw[key] = Math.max(lo, Math.min(hi, v));
+  }
+  if (raw.holdRestartAfter !== undefined) {
+    const v = raw.holdRestartAfter;
+    if (typeof v !== "number" || !Number.isFinite(v)) delete raw.holdRestartAfter;
+    else raw.holdRestartAfter = Math.max(HOLD_AFTER_RANGE[0], Math.min(HOLD_AFTER_RANGE[1], Math.round(v)));
   }
   const graphics = raw.graphics;
   if (graphics && typeof graphics === "object" && !Array.isArray(graphics)) {

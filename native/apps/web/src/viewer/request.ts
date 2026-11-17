@@ -15,8 +15,11 @@ import { appHref, appLocation } from "../platform/navigation";
 export type ReplayTarget =
   /** A verified leaderboard run. */
   | { runId: string; name?: string }
-  /** Raw .bhr bytes (a local file, the run you just finished, a cached replay). */
-  | { bytes: Uint8Array; name?: string }
+  /**
+   * Raw .bhr bytes (a local file, the run you just finished, a cached replay). `practice`: a practice replay kept on
+   * this device (practice-mode/replays.ts), shown as practice and never treated as a board run.
+   */
+  | { bytes: Uint8Array; name?: string; practice?: true }
   /** Your local PB replay: `true` = the current map's selected style on the main track. */
   | { pb: true | { map: string; style?: string; track?: number } };
 

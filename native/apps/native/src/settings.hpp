@@ -95,6 +95,7 @@ inline Json default_settings() {
             // Turn rates follow cl_yawspeed and cl_anglespeedkey and freeze for each recording.
             {"invertY", false},
             {"holdRestart", false},
+            {"holdRestartAfter", 5},
             {"mouseDiagnostics", false},
             {"inputBackend", "auto"},
             // Hidden: false goes back to the per-frame proration comparator (also --legacy-input). See timed_input.hpp.
@@ -141,6 +142,16 @@ inline Json default_settings() {
             {"muteInBackground", true},
             {"classicSounds", false},
             {"perfectTick", false},
+            {"showHopFx", true},
+            {"firstPersonRobe", true},
+            {"audioKeySoundsEnabled", false},
+            {"audioKeySoundsSet", "thock"},
+            {"audioKeySoundsVolume", .6},
+            {"audioKeySoundsKeys", "strafe"},
+            {"audioPerfectSoundSet", "ping"},
+            {"audioPerfectSoundVolume", .6},
+            {"audioPerfectSoundStreak", true},
+            {"audioPerfectSoundLength", "long"},
             {"announcer", default_announcer()},
             {"footsteps", true},
             {"weaponSounds", true},
@@ -399,7 +410,18 @@ inline Json hud_capabilities() {
              "wRelease",
              "landfix",
              "autoRestartWhen",
-             "autoRestartAction"}
+             "autoRestartAction",
+             "holdRestartAfter",
+             "showHopFx",
+             "firstPersonRobe",
+             "audioKeySoundsEnabled",
+             "audioKeySoundsSet",
+             "audioKeySoundsVolume",
+             "audioKeySoundsKeys",
+             "audioPerfectSoundSet",
+             "audioPerfectSoundVolume",
+             "audioPerfectSoundStreak",
+             "audioPerfectSoundLength"}
     );
 }
 
@@ -577,6 +599,15 @@ inline Json patch_settings(const Json &current, const Json &patch, bool switch_l
         } else if (key == "viewmodelInspect") {
             if (!v.is_string() || (v != "tricks" && v != "quiet"))
                 throw std::runtime_error("Inspect style must be tricks or quiet");
+        } else if (key == "audioKeySoundsSet" || key == "audioKeySoundsKeys" || key == "audioPerfectSoundSet"
+                   || key == "audioPerfectSoundLength") {
+            const auto choices = key == "audioKeySoundsSet"    ? std::set<std::string>{"thock", "click", "wood", "blip"}
+                                 : key == "audioKeySoundsKeys" ? std::set<std::string>{"strafe", "movement"}
+                                 : key == "audioPerfectSoundSet"
+                                         ? std::set<std::string>{"ping", "marimba", "chime", "pop"}
+                                         : std::set<std::string>{"short", "long"};
+            if (!v.is_string() || !choices.contains(v.get<std::string>()))
+                throw std::runtime_error("Unknown setting choice: " + key);
         } else if (key == "triggersStyle" || key == "audioMusicMode") {
             const auto choices = key == "triggersStyle" ? std::set<std::string>{"filled", "outline", "bottom"}
                                                         : std::set<std::string>{"always", "menus", "off"};
@@ -584,13 +615,14 @@ inline Json patch_settings(const Json &current, const Json &patch, bool switch_l
                 throw std::runtime_error("Unknown setting choice: " + key);
         } else if (key == "hudHiddenKeeps" || key == "hudPlace" || key == "hudStrafeTrainerStyle"
                    || key == "autoRestartWhen" || key == "autoRestartAction" || key == "ghostCompare") {
-            const auto choices = key == "hudHiddenKeeps" ? std::set<std::string>{"speedKeys", "nothing"}
-                                 : key == "ghostCompare" ? std::set<std::string>{"auto", "pb", "wr", "custom"}
-                                 : key == "hudPlace"     ? std::set<std::string>{"off", "place", "top"}
-                                 : key == "hudStrafeTrainerStyle"
-                                         ? std::set<std::string>{"classic", "detailed", "minimal", "bar"}
-                                 : key == "autoRestartWhen" ? std::set<std::string>{"off", "pb", "wr", "ghost"}
-                                                            : std::set<std::string>{"restart", "sound"};
+            const auto choices =
+                    key == "hudHiddenKeeps" ? std::set<std::string>{"speedKeys", "nothing"}
+                    : key == "ghostCompare" ? std::set<std::string>{"auto", "pb", "wr", "custom"}
+                    : key == "hudPlace"     ? std::set<std::string>{"off", "place", "top"}
+                    : key == "hudStrafeTrainerStyle"
+                            ? std::set<std::string>{"classic", "detailed", "minimal", "bar", "gauge", "arc"}
+                    : key == "autoRestartWhen" ? std::set<std::string>{"off", "pb", "wr", "ghost"}
+                                               : std::set<std::string>{"restart", "sound"};
             if (!v.is_string() || !choices.contains(v.get<std::string>()))
                 throw std::runtime_error("Unknown setting choice: " + key);
         } else if (key == "hudKeysPressed" || key == "hudKeysIdle" || key == "hudStrafeTrainerColor"
@@ -663,7 +695,7 @@ inline Json patch_settings(const Json &current, const Json &patch, bool switch_l
                 throw std::runtime_error("Crosshair thickness must be .5–10");
             if ((key == "volume" || key == "sfxVolume" || key == "musicVolume" || key == "uiVolume"
                  || key == "ambienceVolume" || key == "mapVolume" || key == "voiceVolume" || key == "crosshairAlpha"
-                 || key == "ghostOpacity")
+                 || key == "ghostOpacity" || key == "audioKeySoundsVolume" || key == "audioPerfectSoundVolume")
                 && (n < 0 || n > 1))
                 throw std::runtime_error("Volume must be 0–1");
             if (key == "yawSpeed" && (n < 60 || n > 720)) throw std::runtime_error("Yaw speed must be 60–720");
@@ -688,6 +720,8 @@ inline Json patch_settings(const Json &current, const Json &patch, bool switch_l
                 throw std::runtime_error("JHUD speed colours must be a whole number 1–16");
             if (key == "hudJhudCutoff" && (n != std::floor(n) || n < 0 || n > 30))
                 throw std::runtime_error("JHUD cutoff must be a whole number 0–30");
+            if (key == "holdRestartAfter" && (n != std::floor(n) || n < 0 || n > 60))
+                throw std::runtime_error("Hold after must be a whole number of minutes 0–60");
             if (key == "fpsLimit" && (n != std::floor(n) || (n != 0 && (n < 30 || n > 1000))))
                 throw std::runtime_error("FPS limit must be 0 or 30–1000");
         }

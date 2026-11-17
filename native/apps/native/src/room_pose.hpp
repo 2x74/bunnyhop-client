@@ -54,6 +54,9 @@ public:
 
     bool batch_due() const { return count_ > 0 && net_tick_ % send_ticks == 0; }
 
+    // The samples' clock: this tick's, once advance() has counted it.
+    uint32_t net_tick() const { return net_tick_; }
+
     std::span<const RoomPoseSample> samples() const { return {samples_.data(), count_}; }
 
     void clear() { count_ = 0; }
@@ -102,11 +105,17 @@ public:
         size_t count = 0;
         RoomPoseMeta meta;
         HudLabel<48> style;
+        // The watched player's HUD feed (spectate_input.hpp) as JSON, or empty.
+        std::string input;
 
         std::span<const RoomPoseSample> taken() const { return {samples.data(), count}; }
     };
 
-    void add(uint64_t generation, std::span<const RoomPoseSample> samples, const RoomPoseMeta &meta) {
+    void
+    add(uint64_t generation,
+        std::span<const RoomPoseSample> samples,
+        const RoomPoseMeta &meta,
+        std::string input = {}) {
         if (count_ == max_batches) {
             std::shift_left(batches_.begin(), batches_.end(), 1);
             --count_;
@@ -118,6 +127,7 @@ public:
         batch.meta = meta;
         batch.style.assign(meta.style);
         batch.meta.style = {};
+        batch.input = std::move(input);
     }
 
     std::span<const Batch> batches() const { return {batches_.data(), count_}; }
@@ -161,6 +171,10 @@ public:
         add_unsigned(batch.meta.weapon);
         text_ += ",\"silenced\":";
         text_ += batch.meta.silenced ? "true" : "false";
+        if (!batch.input.empty()) {
+            text_ += ",\"input\":";
+            text_ += batch.input;
+        }
         text_ += "})";
         return text_;
     }

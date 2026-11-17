@@ -58,6 +58,9 @@ public:
         state_.assign(instances, unsampled);
     }
 
+    // A switchable light went on or off: every prop takes its light again.
+    void relight() { std::fill(state_.begin(), state_.end(), unsampled); }
+
     const LightCube *at(const BhContext *core, size_t instance, const float origin[3], bool hdr) {
         if (instance >= state_.size()) return nullptr;
         if (state_[instance] == unsampled) state_[instance] = sample(core, cubes_[instance], origin, hdr);

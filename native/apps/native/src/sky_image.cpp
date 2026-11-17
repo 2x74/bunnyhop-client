@@ -171,8 +171,8 @@ SkyPicture picture_with_lighting(const FloatImage &image, bool from_hdr, SkyClou
         picture.lighting = sky_lighting(image.rgba, image.width, image.height, clouds);
     } else {
         // web from-image.ts: the sun of a small linear copy (a picture's sun is at most 1.0).
-        const auto small = resample(image, lighting_width, lighting_width / 2);
-        picture.lighting = sky_lighting(small.rgba, small.width, small.height, clouds);
+        const auto small_copy = resample(image, lighting_width, lighting_width / 2);
+        picture.lighting = sky_lighting(small_copy.rgba, small_copy.width, small_copy.height, clouds);
     }
     return picture;
 }

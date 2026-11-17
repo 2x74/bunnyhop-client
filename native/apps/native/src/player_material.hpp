@@ -21,7 +21,7 @@ struct PlayerProgram {
           auraPass = -1, auraSize = -1, glowTime = -1, boneMatrices = -1;
     GLint palette = -1, accent = -1, glove = -1, finTime = -1, cosTier = -1, playerLook = -1, fabric = -1;
     GLint headwearScale = -1, headwearOffset = -1, headwearFaceScale = -1, headwearFaceOffset = -1, hairColor = -1;
-    GLint propellerAngle = -1, capybara = -1, ponytail = -1;
+    GLint propellerAngle = -1, capybara = -1, ponytail = -1, hairHighlight = -1, hairSway = -1, hairFlex = -1;
     GLint finEnvOn = -1, cosEnvOn = -1, playerEnvOn = -1, finSunDir = -1, finSunColor = -1, finEnv = -1, cosEnv = -1,
           playerEnv = -1, gunFlash = -1, gunFlashPos = -1;
     GLint glowEnabled = -1, glowColor = -1, glowIntensity = -1, glowOpacity = -1, glowAxisA = -1, glowAxisB = -1,
@@ -31,6 +31,9 @@ struct PlayerProgram {
     // The map's light and fog (web model-light.ts, depth-fog.ts); zero is the look without them.
     GLint mapLight = -1, depthFogColor = -1, depthFogRange = -1;
     GLint garmentPattern = -1, garmentPatternShape = -1, garmentPatternColors = -1;
+    // The back item's motion and fit (web back-fx.ts, robe-fx.ts).
+    GLint back = -1, backTip = -1, backMid = -1, cape = -1, backPivot = -1, backPivot2 = -1, backAxis = -1,
+          capeTones = -1, robeLeft = -1, robeRight = -1, robe = -1;
 };
 
 // Source (x, y, z) -> three.js (x, z, -y).

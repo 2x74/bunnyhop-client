@@ -226,3 +226,30 @@ fn static_props_take_baked_light_else_the_light_where_they_stand() {
         assert!(src[0] == 2 || (c[1] - lit[1]).abs() < 0.05 * lit[1], "{c:?} vs {lit:?}");
     }
 }
+
+/// bhop_mine's mine section is lit only by switchable lights (style 32, "light1"): models there take them once the
+/// host says the style is on, and nothing else changes.
+#[test]
+fn switched_lights_light_models_only_while_on() {
+    let Some(bsp) = load("bhop_mine") else { return };
+    let mut mesh = mesh::build(&bsp);
+    let light = mesh.lighting.as_mut().expect("bhop_mine carries ambient lighting");
+    assert!(light.styled.iter().any(|&(style, _)| style == 32));
+    let tunnel = [5300.0, 6870.0, -140.0];
+    let start = [-11515.0, 12860.0, 380.0];
+    let dark = light.cube(tunnel).expect("light in the tunnel");
+    let start_light = light.cube(start).expect("light at the start");
+    light.style_light[32] = 1.0;
+    let lit = light.cube(tunnel).unwrap();
+    let luma = |c: &bunnyhop_core::lighting::Cube| { let a = average(c); 0.2126 * a[0] + 0.7152 * a[1] + 0.0722 * a[2] };
+    assert!(luma(&lit) > 4.0 * luma(&dark) + 0.02, "tunnel {} -> {}", luma(&dark), luma(&lit));
+    assert_eq!(light.cube(start).unwrap(), start_light, "the start room doesn't see the mine's lights");
+    light.style_light[32] = 0.0;
+    assert_eq!(light.cube(tunnel).unwrap(), dark);
+    // With the lights able to come on, the all-on cube says how much light waits on the switch.
+    assert_eq!(light.cubes(start).unwrap(), (start_light, None));
+    light.style_full[32] = 1.0;
+    let (now, full) = light.cubes(tunnel).unwrap();
+    assert_eq!((now, full), (dark, Some(lit)));
+    assert_eq!(light.cubes(start).unwrap(), (start_light, Some(start_light)));
+}

@@ -15,15 +15,22 @@
 // (retainedBytes) and checkpoints.ts budgets them with the snapshots.
 // A restart starts a new path in the same log: a checkpoint from an earlier attempt is loadable too (bhoptimer's are,
 // they hold their frames and timer), and continues that attempt.
+// Practice replays (0.0.42, replays.ts): every attempt logs here, not only Segmented ones, so a practice teleport to a
+// checkpoint with a playable path rebuilds the recording the same way (session.ts practiceRestored) and the attempt's
+// replay re-simulates. With no checkpoint holding a path, a restart drops the log (session.ts onReset), and a new path
+// takes back the ticks of the one before when no checkpoint was saved on it (begin): the log only grows by the
+// attempts checkpoints were saved in, as before.
 // DOM-free (apps/web/test/segmented.test.ts).
 
-import { MAX_SEGMENT_LOADS, type Checkpoint, type CosmeticEvent, type LookSample, type ReplayRecorder, type SegmentLoad } from "../replay";
+import { MAX_SEGMENT_LOADS, type Checkpoint, type CosmeticEvent, type LookSample, type Replay, type ReplayRecorder, type SegmentLoad } from "../replay";
 import type { TurnSpeed } from "../turn-binds";
 
 /** Floats per live frame (sim.ts FRAME_STRIDE: x, y, z, flags, yaw, pitch). */
 const STRIDE = 6;
 /** Log length limit: 4 h at 100 tick, the longest run the server takes (apps/api/src/run-clock.ts MAX_BEATS). */
 export const MAX_LOG_TICKS = 1_440_000;
+/** A cleared log keeps arrays up to this many ticks (11 minutes at 100 tick, about 2.7 MB). */
+const REUSE_TICKS = 65_536;
 
 /** One command as the session records it (ReplayRecorder.push) with the live frame drawn after it. */
 export interface LoggedTick {
@@ -33,8 +40,9 @@ export interface LoggedTick {
   pitch: number;
   buttons: number;
   look: LookSample | null;
-  /** The live frame after the tick (session.ts pushFrame: FRAME_STRIDE floats) and its jump / teleport events. */
+  /** The live frame after the tick (session.ts pushFrame: FRAME_STRIDE floats from `frameAt`) and its jump / teleport events. */
   frame: ArrayLike<number>;
+  frameAt?: number;
   frameEvents: number;
 }
 
@@ -128,6 +136,10 @@ export class SegmentLog {
   private frame0Events = 0;
   /** Marks not dropped yet (drop). */
   private held = new WeakSet<SegmentMark>();
+  private marks = 0;
+  /** Where the log stood when the current path began, and whether a mark was made since (begin). */
+  private pathFrom = 0;
+  private markedSince = false;
   private heldBytes = 0;
   /** The log reached MAX_LOG_TICKS: nothing more is logged and no checkpoint can be saved until it's cleared. */
   full = false;
@@ -155,17 +167,38 @@ export class SegmentLog {
     return this.heldBytes;
   }
 
-  /** Drops the whole log: earlier marks can't be rebuilt any more (stale). */
+  /** Marks not dropped yet: while there are none, nothing needs the log's earlier ticks. */
+  get holding(): number {
+    return this.marks;
+  }
+
+  /**
+   * Drops the whole log: earlier marks can't be rebuilt any more (stale). Every restart without checkpoint paths does
+   * (session.ts onReset), so a log of ordinary size keeps its arrays.
+   */
   clear(): void {
-    this.log = new Columns();
+    const L = this.log;
+    if (L.forward.length > REUSE_TICKS) this.log = new Columns();
+    else {
+      L.n = 0;
+      L.looks = [];
+      L.cps.clear();
+      L.cosmetic.clear();
+      L.inspect.clear();
+    }
     this.gen++;
     this.full = false;
+    this.pathFrom = 0;
     this.begin([], 0);
   }
 
   /** A new recording (a core reset): an empty path from `frame0` (the reset state's live frame). */
   begin(frame0: ArrayLike<number>, frame0Events: number): void {
     this.setTip(null);
+    // No mark since the last path began: nothing holds the ticks logged since (the path that held them just went).
+    if (!this.markedSince) this.truncate(this.pathFrom);
+    this.pathFrom = this.log.n;
+    this.markedSince = false;
     this.ticks = 0;
     this.loads = 0;
     this.frame0 = Array.from(frame0);
@@ -187,7 +220,8 @@ export class SegmentLog {
     L.yaw[i] = t.yaw;
     L.pitch[i] = t.pitch;
     L.looks[i] = t.look;
-    L.frames.set(Array.from({ length: STRIDE }, (_, k) => t.frame[k] ?? 0), i * STRIDE);
+    const at = t.frameAt ?? 0;
+    for (let k = 0; k < STRIDE; k++) L.frames[i * STRIDE + k] = t.frame[at + k] ?? 0;
     L.frameEvents[i] = t.frameEvents;
     if (this.openFrom >= 0 && this.openTo === i) this.openTo = i + 1;
     else {
@@ -228,6 +262,8 @@ export class SegmentLog {
     };
     retain(m.tip);
     this.held.add(m);
+    this.marks++;
+    this.markedSince = true;
     this.heldBytes += MARK_BYTES;
     return m;
   }
@@ -235,6 +271,7 @@ export class SegmentLog {
   /** The mark's checkpoint is gone: its path no longer counts (retainedBytes) once nothing else holds it. */
   drop(m: SegmentMark): void {
     if (!this.held.delete(m)) return;
+    this.marks--;
     this.heldBytes -= MARK_BYTES;
     this.release(m.tip);
   }
@@ -242,6 +279,15 @@ export class SegmentLog {
   /** The mark belongs to this log (it wasn't cleared since), and one more load fits in a replay. */
   usable(m: SegmentMark): boolean {
     return m.gen === this.gen && !this.full && m.loadCount < MAX_SEGMENT_LOADS;
+  }
+
+  /** Forgets the log's ticks from `from` on (no path holds them). */
+  private truncate(from: number): void {
+    const L = this.log;
+    if (L.n <= from) return;
+    L.n = from;
+    L.looks.length = from;
+    for (const m of [L.cps, L.cosmetic, L.inspect]) for (const k of m.keys()) if (k >= from) m.delete(k);
   }
 
   /** The range pushed since the last node becomes a node of the current path. */
@@ -328,6 +374,36 @@ export class SegmentLog {
     rec.inspect = inspect;
     rec.segments = loads;
     return true;
+  }
+}
+
+/**
+ * "Practice from here" (controller.ts fromReplay, session.ts practiceFromReplay): the live core played `replay`'s first
+ * `sim.ticks` commands from its reset (sim.ts SimRun with frames). `rec` (cleared) and a new path in `log` become those
+ * commands with the replay's checkpoints up to there, and `putFrame` gets the live frames, so the attempt's own
+ * recording plays back from the replay's start. Its yaw is written raw (no view states: a v7 replay).
+ */
+export function seedRecording(replay: Replay, sim: { ticks: number; frames: Float32Array; frameEvents: Uint8Array }, rec: ReplayRecorder, log: SegmentLog, putFrame: (tick: number, frame: ArrayLike<number>, events: number) => void): void {
+  const h = replay.header, f = sim.frames, e = sim.frameEvents;
+  rec.nullBinds = !!h.nullBinds;
+  rec.timedInput = !!h.timedInput;
+  rec.timedPresses = !!h.timedPresses;
+  rec.wRelease = !!h.wRelease;
+  const frame = (t: number) => f.subarray(t * STRIDE, (t + 1) * STRIDE);
+  log.begin(frame(0), e[0]);
+  putFrame(0, frame(0), e[0]);
+  const cps = replay.checkpoints;
+  let c = 0;
+  for (let i = 0; i < sim.ticks; i++) {
+    const t = { forward: replay.forward[i], side: replay.side[i], yaw: replay.yaw[i], pitch: replay.pitch[i], buttons: replay.buttons[i] };
+    rec.push(t.forward, t.side, t.yaw, t.pitch, t.buttons);
+    log.push({ ...t, look: null, frame: frame(i + 1), frameEvents: e[i + 1] });
+    putFrame(i + 1, frame(i + 1), e[i + 1]);
+    for (; c < cps.length && cps[c].tick <= i + 1; c++) {
+      if (cps[c].tick !== i + 1) continue;
+      rec.addCheckpoint(cps[c].tick, cps[c].position, cps[c].velocity);
+      log.checkpoint(cps[c].position, cps[c].velocity);
+    }
   }
 }
 

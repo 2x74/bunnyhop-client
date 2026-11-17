@@ -22,9 +22,14 @@ const ATTRIBUTE_LOCATIONS: Record<string, number> = {
   glowNormal: 7,
   headwear: 8,
   gunCamo: 9,
+  // Only back items carry backfx and only sprung hair carries hairRoot, each in a buffer of its own; every other mesh
+  // reads the zero the renderer sets as their constant value.
+  hairRoot: 10,
+  backfx: 11,
 };
 
 const VERTEX_PRELUDE = `
+#define USE_SKINNING
 layout(location=0) in vec3 position;
 layout(location=1) in vec3 normal;
 layout(location=3) in vec4 skinIndex;
@@ -62,6 +67,8 @@ const COMMON = `
 #define saturate(a) clamp(a, 0.0, 1.0)
 `;
 
+// three.js's bone names let the cape and the robe read the legs and the hips after skinning (VERTEX_PRELUDE says
+// USE_SKINNING, before their declarations).
 const SKINNING_PARS = `
 uniform sampler2D boneMatrices;
 mat4 nativeBone(float index) {
@@ -71,6 +78,7 @@ mat4 nativeBone(float index) {
   vec4 c = texelFetch(boneMatrices, ivec2(2, i), 0);
   return transpose(mat4(a, b, c, vec4(0.0, 0.0, 0.0, 1.0)));
 }
+mat4 getBoneMatrix(const in float index) { return nativeBone(index); }
 `;
 
 // The glow's aura pass inflates the body along its smooth normals (glowNormal); the halo pass is instanced, one shell
@@ -109,19 +117,23 @@ const VERTEX_CHUNKS: Record<string, string> = {
   skinning_pars_vertex: SKINNING_PARS,
   beginnormal_vertex: BEGIN_NORMAL,
   skinbase_vertex: `
-  mat4 skinMatrix = nativeBone(skinIndex.x) * skinWeight.x + nativeBone(skinIndex.y) * skinWeight.y
-    + nativeBone(skinIndex.z) * skinWeight.z + nativeBone(skinIndex.w) * skinWeight.w;
+  mat4 boneMatX = nativeBone(skinIndex.x), boneMatY = nativeBone(skinIndex.y);
+  mat4 boneMatZ = nativeBone(skinIndex.z), boneMatW = nativeBone(skinIndex.w);
+  mat4 skinMatrix = boneMatX * skinWeight.x + boneMatY * skinWeight.y + boneMatZ * skinWeight.z + boneMatW * skinWeight.w;
 `,
   skinnormal_vertex: `
   objectNormal = mat3(skinMatrix) * objectNormal;
   objectNormal.y *= mirror;
 `,
   begin_vertex: BEGIN_VERTEX,
+  // The offset and the mirror wait for the projection: code between the two (the cape's and the robe's) works in the
+  // skinned model space, as on the website.
   skinning_vertex: `
-  transformed = (skinMatrix * vec4(transformed, 1.0)).xyz + offset;
-  transformed.y *= mirror;
+  transformed = (skinMatrix * vec4(transformed, 1.0)).xyz;
 `,
   project_vertex: `
+  transformed += offset;
+  transformed.y *= mirror;
   gl_Position = projection * model * vec4(transformed, 1.0);
 `,
 };

@@ -8,7 +8,8 @@
 //
 // Tick k moves the player during [k - 1, k] (in ticks), so with the run's first tick S and its finishing tick E:
 //   time = (E - 1 + entry) - (S - 1 + exit) ticks
-// where `entry` is the phase in tick E at which the hull first touched the end zone, and `exit` is the phase in tick S
+// where `entry` is the phase in tick E at which the hull first touched the end zone (or, when a trigger_teleport sent the
+// player into it, the trigger that did: policy 2), and `exit` is the phase in tick S
 // at which it stopped touching the start zone on a walk-out (0 when the run began with a jump, a ledge drop or speed
 // inside the zone: under timer rules 2 the run starts on that tick, before the zone is left). The old tick timer counted
 // E - S, which is this time with exit = 0 and entry = 0.
@@ -19,8 +20,15 @@
 import type { TimingPath, TimingSegment } from "./timing-trace";
 import { HULL_HALF_WIDTH, HULL_HEIGHT, HULL_HEIGHT_DUCKED, playerInZone, type Zone } from "./zones";
 
-/** Timing policy recorded with every verified run (runs.timing_policy). Bump when the measurement changes. */
-export const TIMING_POLICY = 1;
+/**
+ * Timing policy recorded with every verified run (runs.timing_policy). Bump when the measurement changes.
+ * - 1 (v0.0.29): sub-tick start-zone exit and end-zone entry; a teleport or respawn into the end zone finishes at the
+ *   end of the tick.
+ * - 2 (v0.0.42): a finish by a trigger_teleport into the end zone is timed where the player first touched that trigger
+ *   in the tick (research/MS-TIMING.md "Teleport finishes"). Every other run measures exactly as under policy 1, so a
+ *   policy 1 run whose finish isn't "boundary" already has its policy 2 time.
+ */
+export const TIMING_POLICY = 2;
 /** Phase quantum: millionths of a tick (10 ns at 100 tick). */
 export const FRACTION_UNITS = 1_000_000;
 
@@ -30,8 +38,15 @@ export type CrossingMethod =
   | "path"
   /** Straight hull trace between the tick's start and touch positions (bhoptimer's method). */
   | "chord"
-  /** At a tick boundary by rule: a jump / ledge / speed start, or entering by teleport (the end of the tick). */
+  /**
+   * At a tick boundary by rule: a jump / ledge / speed start, or entering by a teleport the timer can't measure (one the
+   * map's I/O fired, a respawn, a trigger already touched before the tick: the end of the tick).
+   */
   | "boundary"
+  /** Entering by a trigger_teleport: where in the tick the player first touched it, on the core's accepted path. */
+  | "teleport"
+  /** The same on the straight move of the tick, when the accepted path isn't available (as "chord" for zones). */
+  | "teleport-chord"
   /** Not measurable (no previous position): the conservative boundary (start 0, finish 1: never faster). */
   | "fallback";
 

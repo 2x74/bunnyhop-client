@@ -1,10 +1,20 @@
-// Hold to restart (Settings → Keys, off by default): with it on, the restart keys (R / B / M, whatever they're bound
-// to) fire after a short hold instead of on press, so a stray press can't throw a run away. DOM-free state machine;
+// Hold to restart (Settings → Keys): the restart keys (R / B / M, whatever they're bound to) fire after a short hold
+// instead of on press, so a stray press can't throw a run away. Always with "Hold to restart" on; otherwise once the
+// timed run has gone "Hold after" minutes (5 by default, 0 = never). DOM-free state machine;
 // restart-guard.ts wires it to the input and the HUD ring. It only delays *when* the existing restart action fires:
 // nothing here reaches the sim or the replay (restart keys are non-movement binds and never part of a command).
 
 /** How long a restart key must be held when "Hold to restart" is on. */
 export const HOLD_MS = 500;
+
+/** "Hold after" (Settings → Keys, cl_holdrestart_after): whole minutes, 0 = never. */
+export const HOLD_AFTER_DEFAULT = 5;
+export const HOLD_AFTER_RANGE = [0, 60] as const;
+
+/** Whether a restart key press needs the hold: always on, or a timed run `runSeconds` long has reached `afterMin` minutes. */
+export function holdNeeded(always: boolean, afterMin: number, runSeconds: number): boolean {
+  return always || (afterMin > 0 && runSeconds >= afterMin * 60);
+}
 
 export type HoldResult<A> = { action: A; result: "fire" | "tap" } | null;
 

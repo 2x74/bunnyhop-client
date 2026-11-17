@@ -25,13 +25,35 @@ export interface CosmeticApi {
   myCosmetics(): Promise<{ choice: CosmeticChoice; unlocked: string[] }>;
   saveCosmetics(patch: Partial<CosmeticChoice>): Promise<CosmeticChoice>;
 }
-/** The equipped look as a saved choice: the loadout carries a wig's hair colour as a number, the account as "#rrggbb". */
-function localChoice(base: CosmeticChoice): CosmeticChoice {
+/**
+ * The equipped look as a saved choice (as the website's offline loadout, ui/loadout-view.ts localModel): the loadout
+ * carries colours as numbers and leaves out what isn't worn; the account keeps "#rrggbb" and null.
+ */
+export function localChoice(base: CosmeticChoice): CosmeticChoice {
   const loadout = getLoadout();
+  const hex = (n: number | undefined): string | null => (n === undefined ? null : hairHex(n));
   return {
     ...base,
-    ...loadout,
+    knife: loadout.knife,
+    finish: loadout.finish,
+    glove: loadout.glove,
+    hilt: loadout.hilt ?? DEFAULT_COSMETICS.hilt,
+    hat: loadout.hat ?? null,
+    body: loadout.body ?? DEFAULT_COSMETICS.body,
+    camo: loadout.camo ?? null,
+    back: loadout.back ?? null,
+    hop: loadout.hop ?? null,
     hairColor: loadout.hairColor === undefined ? base.hairColor : hairHex(loadout.hairColor),
+    hairLength: loadout.hairLength ?? null,
+    hairHighlight: hex(loadout.hairHighlight),
+    maskOn: !!loadout.maskOn,
+    capeLength: loadout.capeLength ?? null,
+    capeColor: hex(loadout.capeColor),
+    capeLining: hex(loadout.capeLining),
+    robePattern: loadout.robePattern ?? null,
+    robeTied: loadout.robeTied ?? null,
+    robeColor: hex(loadout.robeColor),
+    robePrint: hex(loadout.robePrint),
     outfit: getOutfit(),
     ghost: getGhostCosmetics().ghostId,
     trail: getGhostCosmetics().trailId,

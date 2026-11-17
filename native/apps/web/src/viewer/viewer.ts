@@ -186,7 +186,7 @@ export class ReplayViewer implements ExportSource {
    * the rest of the visit; MP4 export keeps its own camera setting (default chase, export.ts).
    */
   readonly rig = Object.assign(new CameraRig(), { mode: "eye" as CamMode });
-  readonly model = new PlayerModel({ style: "solid", playerGlow: null });
+  readonly model = new PlayerModel({ style: "solid", playerGlow: null, hops: "others" });
   compare: Compare | null = null;
   /** What render() animates: the viewer's model / compare ghost, or fresh copies during an export. */
   private playerShadow: PlayerShadowProxy;
@@ -221,6 +221,8 @@ export class ReplayViewer implements ExportSource {
   /** Hide UI: the controls, timeline and title are hidden (setClean). */
   clean = false;
   private label = "";
+  /** A practice replay kept on this device (request.ts): its teleports are named so, and it's never a board run. */
+  private practice = false;
   private corePromise: Promise<Core> | null = null;
   private core: Core | null = null;
   /** The viewer's own sim (map sounds read the map's state from it while a replay shows). */
@@ -536,6 +538,7 @@ export class ReplayViewer implements ExportSource {
       }
       await this.viewerCore();
       if (my !== this.seq) return;
+      this.practice = "bytes" in req.target && !!req.target.practice;
       this.clearH2H();
       this.setLoading("Preparing replay…");
       await afterPaint();
@@ -696,7 +699,8 @@ export class ReplayViewer implements ExportSource {
     this.titleEl.replaceChildren(h("b", null, this.playerName() || "unknown"), h("span.rv-time-big", null, time));
     const track = d.runTrack || h0.track || 0;
     const loads = r.segments?.length ?? 0;
-    const style = styleLabel(replayStyle(h0)) + (loads ? ` (${loads} load${loads === 1 ? "" : "s"})` : "");
+    const what = this.practice ? "teleport" : "load";
+    const style = styleLabel(replayStyle(h0)) + (loads ? ` (${loads} ${what}${loads === 1 ? "" : "s"})` : "");
     this.subEl.textContent = [h0.map, track ? trackName(track) : "", style, `${d.tickrate} tick`, this.label, new Date(h0.recordedAt).toLocaleDateString()].filter(Boolean).join(" · ");
     this.noticeEl.textContent = this.notice;
     this.noticeEl.hidden = !this.notice;
@@ -1636,7 +1640,7 @@ export class ReplayViewer implements ExportSource {
     // Fresh player model / ghost for the render, so no animation state carries over from viewing (the exporter
     // seeds Math.random first, so their construction is deterministic too).
     this.model.root.visible = false;
-    this.drawModel = new PlayerModel({ style: "solid", playerGlow: this.look.glow, outfit: this.look.outfit, loadout: this.look.loadout });
+    this.drawModel = new PlayerModel({ style: "solid", playerGlow: this.look.glow, outfit: this.look.outfit, loadout: this.look.loadout, hops: "others" });
     this.drawModel.root.userData.h2hPrimary = true;
     this.playerShadow.bind(this.drawModel.root);
     this.drawModel.setNearFade(...CHASE_NEAR_FADE);
@@ -1746,7 +1750,7 @@ export class ReplayViewer implements ExportSource {
     };
   }
 
-  /** <map>_<style>_<time>_<player>.mp4 */
+  /** <map>_<style>_<time>_<player>.mp4 (_practice for a practice replay) */
   fileName(): string {
     const r = this.replay!;
     const d = this.data!;
@@ -1754,7 +1758,7 @@ export class ReplayViewer implements ExportSource {
     const clean = (s: string) => s.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "") || "x";
     const track = d.runTrack || hd.track || 0;
     const time = d.endTick ? formatTime(finalRunTime(d)!).replace(":", "m").replace(".", "s") : "dnf";
-    return `${clean(hd.map)}${track ? "_b" + track : ""}_${clean(replayStyle(hd))}_${time}_${clean(hd.player || "player")}.mp4`;
+    return `${clean(hd.map)}${track ? "_b" + track : ""}_${clean(replayStyle(hd))}_${time}_${clean(hd.player || "player")}${this.practice ? "_practice" : ""}.mp4`;
   }
 
   private openExport(): void {

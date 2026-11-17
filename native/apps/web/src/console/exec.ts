@@ -150,10 +150,12 @@ export function bindCommand(p: Prefs, code: string, text: string): Action[] {
   return took;
 }
 
-/** Unbinds `code` from whatever it runs. True if it was bound. */
+/** Unbinds `code` from whatever it runs, push to talk included. True if it was bound. */
 export function unbindIn(p: Prefs, code: string): boolean {
   const took = unbindKey(p.binds, code);
-  return uncommand(p, code) || took.length > 0;
+  const voice = !!p.voice?.key && p.voice.key === code;
+  if (voice) p.voice.key = "";
+  return uncommand(p, code) || took.length > 0 || voice;
 }
 
 /** Every bound key and its command, Source style, in key order. */
@@ -380,7 +382,7 @@ export class ConsoleRunner {
       case "unbindall":
         return this.unbindAll();
       case "binds_default":
-        h.update((p) => ((p.binds = JSON.parse(JSON.stringify(DEFAULT_BINDS))), (p.cmdBinds = {})));
+        h.update((p) => ((p.binds = JSON.parse(JSON.stringify(DEFAULT_BINDS))), (p.cmdBinds = {}), (p.voice.key = DEFAULT_PREFS.voice.key)));
         return h.print("Every key is back to its default.", "ok");
       case "toggle":
         return this.toggle(args);
@@ -576,7 +578,7 @@ export class ConsoleRunner {
       return h.print("This unbinds every key except Esc and the console key. Type unbindall again within 10 seconds to do it. binds_default puts the defaults back.");
     }
     this.state.unbindAllUntil = 0;
-    h.update((p) => (unbindAllIn(p.binds), (p.cmdBinds = {})));
+    h.update((p) => (unbindAllIn(p.binds), (p.cmdBinds = {}), (p.voice.key = "")));
     h.print("Unbound every key. The console key still opens the console.", "ok");
   }
 
@@ -802,7 +804,8 @@ export function importConfig(text: string, base: Prefs, o: ImportOptions = {}): 
       line(cmd, "unbound", keyForCode(code));
     } else if (name === "unbindall") {
       for (const a of actions(p.binds)) if (a !== "console" && !(keepOwn && ownAction(a))) p.binds[a] = [];
-      if (!keepOwn) p.cmdBinds = {};
+      // Push to talk is a Source key (+voicerecord): a pasted unbindall clears it; a CS:S config import keeps it.
+      if (!keepOwn) (p.cmdBinds = {}), (p.voice.key = "");
       binds++;
       line(cmd, "unbound", keepOwn ? "every Source key (this game's own keys and chat keys kept)" : "every key except the console's");
     } else if (name === "alias") {

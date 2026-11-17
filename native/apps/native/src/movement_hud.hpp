@@ -281,7 +281,8 @@ inline void feed_strafe_trainer(
              interrupted || bool(state.events & 9),
              bool(state.events & jump),
              gain.delta,
-             gain.best}
+             gain.best,
+             std::atan2(double(state.velocity[1]), double(state.velocity[0])) * 180 / ssj_detail::pi}
     );
     feedback.strafe_reading = feedback.strafe_trainer.reading;
 }
@@ -427,8 +428,18 @@ public:
     std::string color_blind;
     bool new_first = false;
     bool new_long_jump = false;
+    // The start prespeed shown changed this tick (empty inside: cleared), for spectators (spectate_input.hpp).
+    std::optional<std::optional<int>> start_pre_change;
 
     void reset() { *this = {}; }
+
+    // A watched player's start prespeed (spectate_input.hpp), or none to clear it.
+    void show_start_pre(std::optional<int> speed) {
+        if (speed)
+            start_pre.format("Start Pre %d", *speed);
+        else
+            start_pre.assign("");
+    }
 
     // A flight tick (Infinite's noclip) is no part of a jump: the next jump starts a fresh chain and sync.
     void skip_jump() {
@@ -451,6 +462,7 @@ private:
         first_.reset();
         longjump_.reset();
         start_pre_.reset();
+        if (!start_pre.view().empty()) start_pre_change = std::optional<int>{};
         start_pre.assign("");
         offset.assign("");
         first_jump.assign("");
@@ -475,6 +487,7 @@ private:
         } else {
             start_pre.assign("");
         }
+        start_pre_change = *value;
     }
 
     void feed_long_jump(const BhJumpObservation &observation, double dt, const std::string &style, bool enabled) {

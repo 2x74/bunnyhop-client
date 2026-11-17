@@ -1233,6 +1233,9 @@ button:active:not(:disabled) { transform: translateY(1px); }
 .pp-tabs.hop-host { padding-top: 1.4rem; margin-top: -1.4rem; }
 .pp-lastrun { margin-bottom: var(--sp-4); }
 .pp-lastrun h3 { margin: 0 0 var(--sp-2); font-size: var(--fs-md); font-weight: 750; color: var(--cream-2); }
+.pp-practice { margin-top: var(--sp-5); }
+.pp-practice h3 { margin: 0 0 var(--sp-2); padding: 0 0.9rem; font-size: var(--fs-md); font-weight: 750; color: var(--cream-2); }
+.pp-practice > .link-btn { margin: var(--sp-2) 0 0 0.9rem; padding-left: 0; }
 /* Key hints in the pause rail: the key's name as quiet text, shown on the row you're on (not a keycap on every row). */
 .rail-item kbd, .list-row kbd { font-family: var(--font-ui); font-size: var(--fs-xs); font-weight: 650; padding: 0; border: 0; background: none; color: var(--cream-3); opacity: 0; transition: opacity var(--t-step) var(--ease-glide); }
 .rail-item:hover kbd, .rail-item:focus-visible kbd, .list-row:hover kbd, .list-rows:not(:hover) .list-row:focus-visible kbd { opacity: 1; }

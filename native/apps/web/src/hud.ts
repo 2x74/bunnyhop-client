@@ -11,7 +11,7 @@
 
 import type { MapTimes } from "./map-time";
 import "./hud/hud.css";
-import { StrafeTrainer, trainerCommand, trainerZone, type TrainerZone } from "./hud/strafe-trainer";
+import { StrafeTrainer, trainerCommand, trainerZone, type TrainerSample, type TrainerZone } from "./hud/strafe-trainer";
 import { StrafeTrainerView } from "./hud/strafe-trainer-view";
 import { registerChatCommand } from "./chat-commands";
 import type { Settings } from "./core";
@@ -30,6 +30,8 @@ import { LjView, fjtNodes, offsetNodes, startPreNodes } from "./movement-stats/v
 import { KeysOverlay, PREVIEW_BITS } from "./hud/keys";
 import { EDGE_PAD, HUD_ELEMENTS, hudPoints, keepOnScreen, placeStyle, remFraction, type HudElId, type HudLayout } from "./hud/layout";
 import { spectatorLines } from "./net/spectators";
+import { IS_RESET, type NetInputTick } from "./net/protocol";
+import { watchedSample, type InputSettings } from "./net/spectate-input";
 import { EVENT_RESPAWNED, formatTime, type RunStatus, type TickCmd } from "./timer";
 import { h } from "./ui/dom";
 import { keyLabel, prefs, type Prefs } from "./ui/settings";
@@ -692,29 +694,65 @@ export class Hud {
    * Drives the keys overlay, speed graph (jump marks) and sync bar; the jump stats element is fed by session.ts (setJumpStats).
    */
   tick(cmd: TickCmd, state: PlayerState, events: number, trainer?: { settings: Settings; noclip?: boolean; turnYaw?: number }): void {
+    // A room's spectators get exactly this feed (net/spectate-input.ts), the layout editor open or not.
+    if (trainer) this.tap?.tick(cmd, state, events, trainer);
     if (this.editing) return;
-    // Spectating: the graph draws the watched player's speed. The room sends their position and speed but not their
-    // keys, so the keys, trainer and jump readouts (hidden meanwhile, net.css) have nothing true to show.
-    if (this.spectated) return this.graph.push(this.spectated.speed);
+    // Spectating: the watched player's feed drives the per-tick readouts (watchedTick). A player whose client sends
+    // none (older clients, native) only has position and speed in the room's samples: the graph draws that speed, and
+    // the keys, trainer and jump readouts stay hidden (net.css).
+    if (this.spectated) return void (this.watching || this.graph.push(this.spectated.speed));
     const v = state.velocity;
     const speed = Math.sqrt(v[0] * v[0] + v[1] * v[1]);
-    if (trainer && this.p.hud.layout.strafeTrainer.on) this.trainer.feed(cmd, {
+    this.feed(cmd, {
       airSpeedGain: state.airSpeedGain, airBestGain: state.airBestGain,
       speed, velYaw: Math.atan2(v[1], v[0]) * 180 / Math.PI, grounded: state.grounded, onLadder: state.onLadder, tick: state.tick,
-      dt: trainer.settings.tickInterval, maxSpeed: trainer.settings.maxSpeed, airAccelerate: trainer.settings.airAccelerate,
-      interrupted: !!trainer.noclip || !!(events & (EVENT_TELEPORTED | EVENT_RESPAWNED)), jumped: (events & EVENT_JUMPED) !== 0,
-      ...(trainer.turnYaw !== undefined ? { turnYaw: trainer.turnYaw } : {}),
-    });
+      dt: trainer?.settings.tickInterval ?? NaN, maxSpeed: trainer?.settings.maxSpeed ?? NaN, airAccelerate: trainer?.settings.airAccelerate ?? NaN,
+      interrupted: !!trainer?.noclip || !!(events & (EVENT_TELEPORTED | EVENT_RESPAWNED)), jumped: (events & EVENT_JUMPED) !== 0,
+      ...(trainer?.turnYaw !== undefined ? { turnYaw: trainer.turnYaw } : {}),
+    }, !!trainer);
+  }
+
+  private feed(cmd: TickCmd, s: TrainerSample, trainer: boolean): void {
+    if (trainer && this.p.hud.layout.strafeTrainer.on) this.trainer.feed(cmd, s);
     else this.trainer.reset();
     const jump = this.trainer.takeLanding();
     if (jump !== null && this.p.hud.strafeTrainer.sound) sfx("count_tick", 1.6, TRAINER_PITCH[trainerZone(jump, this.trainer.zone)]);
     this.keys.feed(cmd.buttons, cmd.yaw);
-    this.graph.push(speed);
-    this.jumps.feed(cmd.side, cmd.yaw, speed, state.grounded, (events & EVENT_JUMPED) !== 0);
+    this.graph.push(s.speed);
+    this.jumps.feed(cmd.side, cmd.yaw, s.speed, s.grounded, !!s.jumped);
+  }
+
+  /** Taps the per-tick feed and its resets for a room's spectators (net/mp.ts). */
+  tap: { tick(cmd: TickCmd, state: PlayerState, events: number, o: { settings: Settings; noclip?: boolean; turnYaw?: number }): void; reset(): void } | null = null;
+  /** The watched player's feed is coming (net/mp.ts): the per-tick readouts are theirs, from watchedTick. */
+  private watching = false;
+
+  /** Spectating: whether the watched player's feed is coming (their keys and jump readouts show, net.css). */
+  setWatching(on: boolean): void {
+    if (on === this.watching) return;
+    this.watching = on;
+    this.clearTicks();
+    this.setJumpStats(null);
+    this.setJhud(null);
+    this.setStartPre(null);
+  }
+
+  /** One tick of the watched player's feed (net/spectate-input.ts InputFeed), as their own HUD got it. */
+  watchedTick(t: NetInputTick, s: InputSettings): void {
+    if (this.editing) return;
+    // Their restart (their HUD's resetTicks): what their own screen drops then, as LiveSsj.reset clears the JHUD.
+    if (t.state & IS_RESET) this.clearTicks(), this.setJhud(null);
+    const w = watchedSample(t, s);
+    this.feed(w.cmd, w.sample, true);
   }
 
   /** Forget per-tick history (restart, replay seek, watch start/exit). */
   resetTicks(): void {
+    this.tap?.reset();
+    this.clearTicks();
+  }
+
+  private clearTicks(): void {
     this.keys.reset();
     this.ghostKeys.reset();
     this.graph.reset();

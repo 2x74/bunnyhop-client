@@ -1,4 +1,5 @@
 #pragma once
+#include "key_sounds.hpp"
 #include "settings.hpp"
 #include "bunnyhop_native.h"
 #include "audio_pack.hpp"
@@ -156,6 +157,21 @@ class Audio {
     SDL_AudioStream *stream = nullptr;
     MapAudioMixer *map_mixer = nullptr;
     float volume = .65f, sfx_volume = 1, ui_volume = 1, music_volume = 1, ambience_volume = 1;
+
+    // Key sounds and the perfect jump sound (key_sounds.hpp): their own levels under the master volume.
+    struct KeySoundPrefs {
+        bool enabled = false, all_movement = false;
+        std::string set = "thock";
+        float volume = .6f;
+    } key_sounds;
+
+    struct PerfectSoundPrefs {
+        std::string set = "ping";
+        float volume = .6f;
+        bool streak = true, long_rise = true;
+    } perfect_sound;
+
+    PerfectStreak perfect_streak;
     bool footsteps_enabled = true, weapon_sounds_enabled = true, wind_enabled = true, others_enabled = true,
          ghosts_enabled = true;
     std::array<float, 3> listener_position{};
@@ -227,7 +243,11 @@ class Audio {
                         v.filtered += a * (sample - v.filtered);
                         sample = v.filtered;
                     }
-                    sample *= v.gain * volume * (v.bus == 1 ? ui_volume : v.bus == 2 ? ambience_volume : sfx_volume);
+                    sample *= v.gain * volume
+                              * (v.bus == 1   ? ui_volume
+                                 : v.bus == 2 ? ambience_volume
+                                 : v.bus == 3 ? 1.f
+                                              : sfx_volume);
                     const auto pan = pan_gains(v.pan);
                     output[2 * i] += sample * pan[0];
                     output[2 * i + 1] += sample * pan[1];
@@ -648,6 +668,18 @@ public:
             others_enabled = p.value("othersAudio", true);
             ghosts_enabled = p.value("ghostAudio", true);
             perfect_tick = p.value("perfectTick", false);
+            key_sounds = {
+                    p.value("audioKeySoundsEnabled", false),
+                    p.value("audioKeySoundsKeys", std::string("strafe")) == "movement",
+                    p.value("audioKeySoundsSet", std::string("thock")),
+                    p.value("audioKeySoundsVolume", .6f)
+            };
+            perfect_sound = {
+                    p.value("audioPerfectSoundSet", std::string("ping")),
+                    p.value("audioPerfectSoundVolume", .6f),
+                    p.value("audioPerfectSoundStreak", true),
+                    p.value("audioPerfectSoundLength", std::string("long")) != "short"
+            };
             announcer_prefs = p.value("announcer", default_announcer());
             movement.footsteps = footsteps_enabled;
             if (mode_ == AudioMode::live) music.gain(volume * music_volume);
@@ -714,6 +746,40 @@ public:
             layer = def.value("layer", std::string());
         }
         if (!layer.empty() && layer != id) play(layer, gain, rate, pan, positional);
+    }
+
+    // A key sound or perfect jump sound (`key_*`, `perfect_*`) at its own volume under the master: up to six of one id
+    // ring at once, layered rather than cut, so fast presses don't clip each other.
+    void play_feedback(const std::string &id, double rate = 1) {
+        constexpr size_t layered_voices = 6;
+        const bool key = id.starts_with("key_");
+        const float level =
+                float(std::pow(double(key ? key_sounds.volume : perfect_sound.volume), feedback_volume_exponent));
+        if (!enabled_ || level <= 0 || !std::isfinite(rate)) return;
+        const auto *found = bank_for(id);
+        if (!found || found->empty()) return;
+        Lock lock(stream);
+        const auto def = mix.value(id, nlohmann::json::object());
+        size_t active = 0;
+        auto oldest = voices.end();
+        for (auto it = voices.begin() + 2; it != voices.end(); ++it)
+            if (it->samples && it->id == id) {
+                ++active;
+                if (oldest == voices.end() || it->cursor > oldest->cursor) oldest = it;
+            }
+        auto at = active >= layered_voices && oldest != voices.end()
+                          ? oldest
+                          : std::find_if(voices.begin() + 2, voices.end(), [](const Voice &v) { return !v.samples; });
+        if (at == voices.end()) at = voices.begin() + 2 + (variant % (voices.size() - 2));
+        ++variant;
+        *at = {&found->front(), 0, level * def.value("gain", 1.f), false, std::clamp(rate, .25, 4.), 3, 0, id};
+    }
+
+    // Keys holding `bits` went down (your keydown, not a repeat), in `style`: their key sound, if it's on.
+    void key_press(uint32_t bits, std::string_view style) {
+        if (!key_sounds.enabled) return;
+        const double rate = key_sound_rate(bits, key_sounds.all_movement, strafe_keys_of(style));
+        if (rate > 0) play_feedback(key_sound_id(key_sounds.set), rate);
     }
 
     // A knife inspect's flip, spin or regrip (inspect_cues.hpp), with the other weapon sounds.
@@ -871,7 +937,14 @@ public:
         if (!event.empty()) announce(event);
         if (longjumps.tick(s, jump_observation, dt, movement_style, announcer_prefs.at("ljThreshold").get<double>()))
             announce("lj");
-        if (scroll_style && hop == 1 && !broken && perfect_tick) play("split", .12f, 1.5);
+        // The perfect jump sound, rising with a streak (key_sounds.hpp). Practice counts.
+        const unsigned streak = scroll_style ? perfect_streak.tick(hop, p.grounded, dt, broken) : 0;
+        if (streak && perfect_tick) {
+            const auto &set = perfect_sound.set;
+            play_feedback(
+                    perfect_sound_id(set), perfect_sound.streak ? streak_rate(streak, perfect_sound.long_rise, set) : 1
+            );
+        }
         if (run.update_flags & 1) play("start_beep");
         if (run.update_flags & 16) play("split");
         if (run.update_flags & 2) {

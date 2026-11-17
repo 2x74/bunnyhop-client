@@ -10,6 +10,8 @@
 //       in the air and with speed, out of a strafe; and stretched to the player's length (uPonytail.z, hairLength): the
 //       arc out of the tie keeps its shape (a short tail's shrinks a little), the falling part scales, the lock's
 //       thickness stays
+//   -12  sprung locks of hair (hair-fx.ts: Spiky Hair, Long Hair), with the hair highlight colour and the hair sheen,
+//       which every hair code takes
 //   11  the Aurora ribbon (Borealis): floats (bobs) above the ears with a light flowing round it (AURORA_C)
 //   12  a gem of the Gem Orbit (and a coin of Lucky Coins: the same orbit): the ring of four turns slowly about the vertical axis through ORBIT_C, each gem spins
 //       on its own axis and bobs, and every few seconds one of them pops and a white shine crosses it (hold, burst,
@@ -254,7 +256,7 @@ float fxMaxwellStretch() {
 }
 // Ponytail: how much a point swings (0 at the tie, 1 at the tip: the root stays stiff, the tip bends most), and the
 // swing about the tie: side to side about the vertical, then up and back (+y) by the pendulum (uPonytail).
-bool fxHair() { return accent < -8.5 && accent > -11.5; }
+bool fxHair() { return accent < -8.5 && accent > -12.5; }
 // Hair tone t: 0.5 = the colour; below darkens toward 0.45x at 0, above lifts toward a soft sheen (dark hair gets a
 // visible one too: lifted toward a grey, not just multiplied).
 vec3 fxHairTone(vec3 c, float t) {
@@ -275,9 +277,10 @@ vec3 fxPonyMapped(float s, float L) {
   if (s <= 2.0) return p0 + (fxPonyAt(s) - p0) * a;
   vec3 d = fxPonyAt(s) - p2;
   // Down: by L when shorter, a little more when longer (the slider's top reaches between the shoulder blades); back: a
-  // long tail steps out over the lowered hood's pouch on the upper back, then hangs straight again below it.
+  // long tail steps out over the lowered hood's pouch on the upper back, then hangs straight again below it; over a
+  // pack worn on the back (uPonytail.w, bunny/backs.ts ponytailRest) it steps out again and rests on it.
   float z = d.z * (L < 1.0 ? L : 1.0 + (L - 1.0) * 1.3);
-  float y = d.y * (1.0 + max(0.0, L - 1.0) * 0.1) + 1.9 * smoothstep(6.0, 11.0, -z);
+  float y = d.y * (1.0 + max(0.0, L - 1.0) * 0.1) + 1.9 * smoothstep(6.0, 11.0, -z) + uPonytail.w * smoothstep(14.0, 20.0, -z);
   return p0 + (p2 - p0) * a + vec3(d.x * L, y, z);
 }
 // Stretches a tail point to the player's length: finds its place along the centreline (the nearest point on it) and

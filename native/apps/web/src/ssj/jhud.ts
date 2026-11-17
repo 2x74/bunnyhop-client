@@ -12,7 +12,7 @@
 // The count starts over as in !ssj: after standing still. Hops in a start zone count and a teleport doesn't reset it, as
 // in both plugins.
 
-import { SsjTracker, type SsjCmd, type SsjState, type SsjTick } from "./stats";
+import { SsjTracker, type SsjCmd, type SsjReport, type SsjState, type SsjTick } from "./stats";
 
 /** What one jump shows. Jump 1 is only the speed, like both plugins. */
 export interface JhudReport {
@@ -62,6 +62,8 @@ const DEG = 180 / Math.PI;
 /** Runs SsjTracker in "every jump" mode and adds JSS over the same ticks. */
 export class JhudTracker {
   private ssj = new SsjTracker("every");
+  /** The full "every jump" report behind the last JHUD report (a room relays it to spectators, net/spectate-input.ts). */
+  lastSsj: SsjReport | null = null;
   private yaw = NaN;
   private jssSum = 0;
   private ticks = 0;
@@ -75,6 +77,7 @@ export class JhudTracker {
   /** One tick, as SsjTracker.tick. Returns the jump this tick took off for, if any. */
   tick(pre: SsjState, cmd: SsjCmd, t: SsjTick): JhudReport | null {
     const r = this.ssj.tick(pre, cmd, t);
+    this.lastSsj = r;
     let dy = cmd.yaw - this.yaw;
     this.yaw = cmd.yaw;
     if (dy > 180) dy -= 360;

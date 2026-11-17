@@ -33,6 +33,10 @@ struct Preferences {
     bool strafe_trainer_hints;
     bool practice_keep_velocity;
     bool hold_restart;
+    int hold_restart_after_minutes;
+    // Other players' hop effects (cl_hopfx) and your Robe's sleeves in first person (cl_firstpersonrobe).
+    bool show_hop_fx;
+    bool first_person_robe;
     bool show_ghost;
     float ghost_opacity;
     bool ghost_near_fade;

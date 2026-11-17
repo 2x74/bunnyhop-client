@@ -7,6 +7,7 @@
 #include <array>
 #include <functional>
 #include <set>
+#include <map>
 #include <string>
 using J = nlohmann::json;
 
@@ -343,7 +344,126 @@ void test_closing_a_replay_returns_to_the_room_map() {
     assert(room->map_after_replay("bhop_blue").empty());
 }
 
+// The room drops spec targets on a player who leaves without sending patches: no row may keep watching them.
+void test_leaving_ends_spectating_them() {
+    const auto room = std::make_unique<native::RoomState>();
+    auto welcome = easy_welcome();
+    welcome["players"] = J::array(
+            {{{"slot", 0}, {"name", "me"}, {"spec", 1}},
+             {{"slot", 1}, {"name", "runner"}},
+             {{"slot", 2}, {"name", "watcher"}, {"spec", 1}},
+             {{"slot", 3}, {"name", "other"}, {"spec", 2}}}
+    );
+    room->event(envelope(welcome));
+    assert(room->spectator_target == 1u);
+    room->event(envelope({{"t", "leave"}, {"slot", 1}}));
+    refresh(*room, 1);
+    assert(!room->spectator_target);
+    const auto &board = room->display();
+    for (size_t i = 0; i < board.count; ++i)
+        assert(board.rows[i].spectator == (board.rows[i].slot == 3));
+}
+
+// A room that takes input blocks wants yours while someone spectates you; a watched player's blocks feed your HUD.
+void test_spectator_inputs() {
+    const auto room = std::make_unique<native::RoomState>();
+    auto welcome = easy_welcome();
+    welcome["players"] = J::array({{{"slot", 0}, {"name", "me"}}, {{"slot", 1}, {"name", "watcher"}, {"spec", 0}}});
+    room->event(envelope(welcome));
+    assert(!room->inputs_wanted());  // an older room: no room.inputs
+    welcome["room"]["inputs"] = 1;
+    room->event(envelope(welcome));
+    assert(room->inputs_wanted());
+    room->event(envelope({{"t", "player"}, {"slot", 1}, {"patch", {{"spec", nullptr}}}}));
+    assert(!room->inputs_wanted());
+    room->event(envelope({{"t", "player"}, {"slot", 0}, {"patch", {{"spec", 1}}}}));
+    const J tick = {
+            {"tick", 7},
+            {"keys", 1},
+            {"forward", 450},
+            {"side", 0},
+            {"gain", 0},
+            {"state", 0},
+            {"yaw", 0},
+            {"vx", 0},
+            {"vy", 0}
+    };
+    const J block = {
+            {"tickInterval", .01},
+            {"maxSpeed", 250},
+            {"airAccelerate", 1000},
+            {"ticks", J::array({tick})},
+            {"reports", J::array()}
+    };
+    const J snapshot = {
+            {"serverTime", 1},
+            {"blocks", J::array()},
+            {"inputs", J::array({{{"slot", 2}, {"input", block}}, {{"slot", 1}, {"input", block}}})}
+    };
+    room->snapshot({{"generation", 1}, {"id", "test"}, {"snapshot", snapshot}}, 10);
+    assert(room->watched_feed.live(10.5));
+    unsigned played = 0;
+    room->watched_feed.take(7, [&](const auto &, const auto &) { ++played; }, [](const auto &) {});
+    assert(played == 1);  // slot 2's block isn't the watched player's
+}
+
+// Real packs with the v0.0.42 fields, as the website packs them (ui/room-loadout.test.ts pins the same bytes).
+const std::array<std::string, 4> website_packs = {
+        "2;knife-carrot;fin-garden;glove-knit;;hat-ponytail;;;2fa59a;150;;;hop-ring:sky;back-balloon;;-z",
+        "2;knife-carrot;fin-garden;glove-knit;;;;;;;;;;back-cape;dgN8b___",
+        "2;knife-carrot;fin-garden;glove-knit;;hat-kitsune-mask;;;;;;;;back-robe;cb8dhTX_;f",
+        "2;knife-karrotbit;fin-dewweb;glove-garden-tulip;3;hat-ponytail;body-b;;f29bbf;260;hilt-oak;camo-carrot-patch;"
+        "hop-crystals:rose;back-cape;ewN8b48d;-z",
+};
+
+// The menu's pack of a roster loadout (ui/room-loadout.ts) is drawn as sent, new fields and all; a pack past 200 bytes
+// is dropped, as the website's readers drop it; without one the loadout object is packed here as before.
+void test_loadout_pack(const std::string &pack) {
+    const auto room = std::make_unique<native::RoomState>();
+    auto welcome = easy_welcome();
+    welcome["players"] = J::array(
+            {{{"slot", 0}, {"name", "me"}},
+             {{"slot", 1}, {"name", "caped"}, {"loadout", {{"knife", "knife-carrot"}}}, {"pack", pack}},
+             {{"slot", 2}, {"name", "older"}, {"loadout", {{"knife", "knife-leek"}}}}}
+    );
+    room->event(envelope(welcome));
+    feed(*room, J::array({sample(100, 0)}), 1);
+    room->snapshot(
+            {{"generation", 1},
+             {"id", "test"},
+             {"snapshot",
+              {{"blocks",
+                J::array(
+                        {{{"slot", 1}, {"samples", J::array({sample(1, 0)})}},
+                         {{"slot", 2}, {"samples", J::array({sample(1, 0)})}}}
+                )}}}},
+            1
+    );
+    std::map<std::string, std::string> loadouts;
+    for (const auto &actor : room->actors(1.01))
+        loadouts[actor.id] = actor.loadout;
+    assert(loadouts["1"] == pack);
+    assert(loadouts["2"].starts_with("2;knife-leek;"));
+    // A patch carries the new pack through unchanged too, and one past the limit is dropped, not cut.
+    room->event(envelope(
+            {{"t", "player"}, {"slot", 2}, {"patch", {{"loadout", {{"knife", "knife-carrot"}}}, {"pack", pack}}}}
+    ));
+    room->event(envelope({{"t", "player"}, {"slot", 1}, {"patch", {{"pack", std::string(201, 'x')}}}}));
+    for (const auto &actor : room->actors(1.02)) {
+        if (actor.id == "1") assert(actor.loadout.empty());
+        if (actor.id == "2") assert(actor.loadout == pack);
+    }
+}
+
+void test_loadout_packs() {
+    for (const auto &pack : website_packs)
+        test_loadout_pack(pack);
+}
+
 int main() {
+    test_loadout_packs();
+    test_spectator_inputs();
+    test_leaving_ends_spectating_them();
     test_closing_a_replay_returns_to_the_room_map();
     test_vote_shows_tiers();
     test_unknown_slot_keeps_map_changes();

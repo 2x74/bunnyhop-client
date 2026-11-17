@@ -29,6 +29,15 @@ export function uiSound(id: unknown, gain = 1, rate = 1): void {
     return;
   send({ type: "audioCue", id, gain: Math.max(0, Math.min(1, gain)), rate: Math.max(0.25, Math.min(4, rate)) });
 }
+/** The website's key sound and perfect jump sound players (audio/keysounds.ts): the host plays them at their own volumes. */
+const feedbackPlayer = {
+  play(id: string, rate = 1): void {
+    if (!Number.isFinite(rate)) return;
+    send({ type: "audioCue", id, gain: 1, rate: Math.max(0.25, Math.min(4, rate)) });
+  },
+};
+export const keySounds = feedbackPlayer;
+export const perfectSounds = feedbackPlayer;
 export function sfx(id: unknown, gain = 1, rate = 1): void {
   if (typeof id !== "string" || !Object.hasOwn(SFX, id) || !Number.isFinite(gain) || !Number.isFinite(rate)) return;
   send({ type: "audioCue", id, gain: Math.max(0, Math.min(1, gain)), rate: Math.max(0.25, Math.min(4, rate)) });

@@ -18,6 +18,7 @@ interface TimingExports {
   timing_path?: () => number;
   timing_path_ptr?: () => number;
   timing_path_reason?: () => number;
+  timing_teleport?: () => number;
   scratch_str_ptr: () => number;
 }
 const exportsOf = (core: Core) => (core as unknown as { x: TimingExports }).x;
@@ -77,6 +78,53 @@ export function pathSource(core: Core): () => TimingPath | null {
       }
     };
     sources.set(core, source);
+  }
+  return source;
+}
+
+/**
+ * The trigger_teleport whose Touch moved the player in the last step's touch pass after their move (core
+ * game/timing_teleport.rs): `phase` is where in the tick the player's box first touched it along the accepted path, or
+ * null when that isn't measured (`reason`).
+ */
+export interface TeleportTouch {
+  trigger: number;
+  phase: number | null;
+  /** Measured on the straight move of the tick (the accepted path wasn't available), as zone crossings' "chord". */
+  chord: boolean;
+  reason: string;
+}
+
+/** The last step's teleport touch, or null when no trigger_teleport moved the player (or the build lacks the export). */
+export function teleportTouch(core: Core): TeleportTouch | null {
+  const x = exportsOf(core);
+  if (!x.timing_teleport || !x.timing_path_ptr) return null;
+  const len = x.timing_teleport();
+  if (len !== 5) throw Error("malformed teleport touch length");
+  const [status, phase, trigger, reasonLen, chord] = new Float64Array(x.memory.buffer, x.timing_path_ptr(), len).slice();
+  if (status === 0) return null;
+  if (!Number.isInteger(trigger) || trigger < 0 || !Number.isInteger(reasonLen) || reasonLen < 0 || (chord !== 0 && chord !== 1)) throw Error("malformed teleport touch");
+  if (status === 1) {
+    if (!(phase >= 0 && phase <= 1)) throw Error("teleport touch phase out of range");
+    return { trigger, phase, chord: chord === 1, reason: "" };
+  }
+  if (status !== 2) throw Error("invalid teleport touch status");
+  return { trigger, phase: null, chord: chord === 1, reason: new TextDecoder().decode(new Uint8Array(x.memory.buffer, x.scratch_str_ptr(), reasonLen)) };
+}
+
+const teleportSources = new WeakMap<Core, () => TeleportTouch | null>();
+/** A lazy reader of the last step's teleport touch (RunTimer.teleportSource): null when absent or malformed. */
+export function teleportSource(core: Core): () => TeleportTouch | null {
+  let source = teleportSources.get(core);
+  if (!source) {
+    source = () => {
+      try {
+        return teleportTouch(core);
+      } catch {
+        return null;
+      }
+    };
+    teleportSources.set(core, source);
   }
   return source;
 }

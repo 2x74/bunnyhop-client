@@ -839,6 +839,52 @@ impl World {
         self.trace_model_hull(model,ObjectTraceRequest {identity:0,transform,start:position,end:position,hull,mask:u32::MAX},0,ObjectRole::Entity).map(|trace|trace.start_solid)
     }
 
+    /// bunnyhop patch (run timing, observation only; never called by a step): the first fraction of the straight move
+    /// from `start` to `end` at which the box overlaps the transformed model by the rule of
+    /// `overlaps_transformed_model_hull` (inside or touching every plane of one brush, bevels included), or None.
+    /// The box's distance to each plane is computed at both ends exactly as that stationary test computes it and is
+    /// linear in between, so the answer is 0 when the box overlaps at `start` and lies in [0, 1] when it overlaps at
+    /// `end`. Unlike a swept trace there is no DIST_EPSILON: the box touches where the distance reaches 0.
+    pub fn first_contact_transformed_model_hull(&self, model: usize, transform: Transform, start: [f32; 3], end: [f32; 3], hull: Hull) -> Result<Option<f64>, Error> {
+        let brushes = self.model_brushes.get(model).ok_or_else(|| error(ErrorCode::InvalidReference, Some(model)))?;
+        let basis = transform.basis()?;
+        // As trace_brushes_rules: the box's centre in model space, and its half extents.
+        let center = [(hull.mins[0] + hull.maxs[0]) * 0.5, (hull.mins[1] + hull.maxs[1]) * 0.5, (hull.mins[2] + hull.maxs[2]) * 0.5];
+        let extents = [(hull.maxs[0] - hull.mins[0]) * 0.5, (hull.maxs[1] - hull.mins[1]) * 0.5, (hull.maxs[2] - hull.mins[2]) * 0.5];
+        let at = |p: [f32; 3]| add(basis.inverse_point(p), center);
+        let (s, e) = (at(start), at(end));
+        let mut first: Option<f64> = None;
+        for &index in brushes {
+            let brush = self.brushes.get(index).ok_or_else(|| error(ErrorCode::InvalidReference, Some(index)))?;
+            if brush.contents == 0 {
+                continue;
+            }
+            // Distances (positive = outside the plane) at the start and the end of the move.
+            let mut distances: Vec<(f32, f32)> = Vec::with_capacity(brush.side_count.max(6));
+            if let Some(bx) = self.box_brush(brush, 0.0) {
+                // clip_box_brush: outside the min face when (mins - start) - extents > 0, the max face when
+                // (maxs - start) + extents < 0.
+                for a in 0..3 {
+                    distances.push(((bx.mins[a] - s[a]) - extents[a], (bx.mins[a] - e[a]) - extents[a]));
+                    distances.push((-((bx.maxs[a] - s[a]) + extents[a]), -((bx.maxs[a] - e[a]) + extents[a])));
+                }
+            } else {
+                for side in self.sides.get(brush.first_side..brush.first_side + brush.side_count).ok_or_else(|| error(ErrorCode::InvalidReference, Some(index)))? {
+                    let p = self.planes.get(side.plane).ok_or_else(|| error(ErrorCode::InvalidReference, Some(side.plane)))?;
+                    let offset = extents[0] * p.normal[0].abs() + extents[1] * p.normal[1].abs() + extents[2] * p.normal[2].abs();
+                    let distance = (p.distance - 0.0) + offset;
+                    distances.push((dot(s, p.normal) - distance, dot(e, p.normal) - distance));
+                }
+            }
+            if let Some(t) = first_inside(&distances) {
+                if first.is_none_or(|f| t < f) {
+                    first = Some(t);
+                }
+            }
+        }
+        Ok(first)
+    }
+
     pub fn trace_brush_model(&self, model: usize, request: ObjectTraceRequest) -> Result<Trace, Error> {
         self.trace_model_hull(model, request, request.identity, ObjectRole::Entity)
     }
@@ -1479,6 +1525,27 @@ pub fn trace_endpoint(start: [f32; 3], end: [f32; 3], hull: Hull, fraction: f32)
 pub(crate) fn interpolate(start: [f32; 3], end: [f32; 3], fraction: f32) -> [f32; 3] {
     add(start, scale(sub(end, start), fraction))
 }
+/// bunnyhop patch (run timing): the first fraction in [0, 1] at which every distance, linear from `d1` at 0 to `d2` at
+/// 1, is at most 0 (inside or touching all the planes), or None. f64, so the fraction is exact to well under a
+/// millionth of the move.
+pub fn first_inside(distances: &[(f32, f32)]) -> Option<f64> {
+    let (mut lo, mut hi) = (0.0f64, 1.0f64);
+    for &(d1, d2) in distances {
+        if !d1.is_finite() || !d2.is_finite() {
+            return None;
+        }
+        if d1 <= 0.0 && d2 <= 0.0 {
+            continue;
+        }
+        if d1 > 0.0 && d2 > 0.0 {
+            return None;
+        }
+        let t = f64::from(d1) / (f64::from(d1) - f64::from(d2));
+        if d1 > 0.0 { lo = lo.max(t) } else { hi = hi.min(t) }
+    }
+    (lo <= hi).then_some(lo)
+}
+
 fn dot_abs(extents: [f32; 3], normal: [f32; 3]) -> f32 {
     extents[0] * normal[0].abs() + extents[1] * normal[1].abs() + extents[2] * normal[2].abs()
 }

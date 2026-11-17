@@ -202,6 +202,11 @@ export class RemoteTrack {
     return w;
   }
 
+  /** The sender's tick shown at local time `now` (fractional; sample() renders it), null until there is data. */
+  renderTick(now: number): number | null {
+    return this.offset === null ? null : (now - this.offset - this.delay) / TICK_MS;
+  }
+
   /** Interpolated state at local time `now`. Returns false until there is data. */
   sample(now: number, out: InterpState): boolean {
     const b = this.buf;

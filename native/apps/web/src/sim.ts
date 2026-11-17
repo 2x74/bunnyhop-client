@@ -5,7 +5,7 @@ import { replayPhysics, replaySettings, replayStyle, replayTimerRules, type Chec
 import { StyleFilter, strafeKeys, styleDef, styleStartReentryCap, type StyleDef } from "./styles";
 import { blocksPrehops, RunTimer, TIMER_RULES, TIMER_RULES_V1, TIMER_RULES_V2, type TickCmd, type TimerUpdate } from "./timer";
 import type { Zone } from "./zones";
-import { pathSource, startObserving } from "./timing-trace";
+import { pathSource, startObserving, teleportSource } from "./timing-trace";
 
 interface RawExports {
   set_velocity?: (x: number, y: number, z: number) => void;
@@ -49,6 +49,7 @@ export function beforeStep(core: Core, timer: RunTimer, cmd: TickCmd): void {
 export function afterStep(core: Core, timer: RunTimer, cmd: TickCmd, events: number): { state: PlayerState; update: TimerUpdate } {
   let state = core.state();
   timer.pathSource = pathSource(core);
+  timer.teleportSource = teleportSource(core);
   const update = events & EVENT_FLIGHT ? timer.flightTick(state) : timer.update(cmd, events, state);
   if (update.clampVelocity) {
     setVelocity(core, update.clampVelocity);
@@ -104,7 +105,10 @@ export function replayStep(core: Core, timer: RunTimer, filter: StyleFilter, rep
   beforeStep(core, timer, cmd);
   const events = core.step(cmd.forward, cmd.side, cmd.yaw, cmd.pitch, cmd.buttons);
   const r = afterStep(core, timer, cmd, events);
-  if (retimer) retimer.pathSource = timer.pathSource;
+  if (retimer) {
+    retimer.pathSource = timer.pathSource;
+    retimer.teleportSource = timer.teleportSource;
+  }
   const retimed = retimer ? retimer.update(cmd, events, r.state) : null;
   return { raw, cmd, events, state: r.state, update: r.update, retimed };
 }

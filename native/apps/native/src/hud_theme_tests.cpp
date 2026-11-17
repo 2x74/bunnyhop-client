@@ -79,6 +79,10 @@ struct DrawProbe {
 
     void overlay_fade(float) {}
 
+    void overlay_quad(const std::array<native::HudPoint, 4> &, const std::array<native::NameColor, 4> &) {}
+
+    float overlay_pixel() const { return 1; }
+
     void overlay_rect(float x, float y, float width, float height, native::NameColor) {
         assert(std::isfinite(x) && std::isfinite(y) && width >= 0 && height >= 0);
         particle_after_text |= texts > 0 && width == 3 && height == 5;

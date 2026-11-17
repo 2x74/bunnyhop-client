@@ -381,7 +381,7 @@ export const PHYSICS_V16 = 16;
 /** RNGFix parity: uphill / downhill inclines, edge bugs, trigger jumping and telehops as on RNGFix servers. */
 export const PHYSICS_V17 = 17;
 /** The physics version new runs are played and recorded with. */
-export const PHYSICS_VERSION = 28;
+export const PHYSICS_VERSION = 29;
 /** Climbable surface properties used by bhop_synthetic_fix. */
 export const PHYSICS_V18 = 18;
 /** Scoped entity makers and known velocity-script equivalents. */
@@ -403,6 +403,8 @@ export const PHYSICS_V26 = 26;
 export const PHYSICS_V27 = 27;
 /** Auto-strafe reads its key from the next command's yaw (a -1 key offset; styles.ts AUTOSTRAFE_LEAD_FROM). Movement is v27's. */
 export const PHYSICS_V28 = 28;
+/** Per-map only (map_fixes.rs EVENT_CLOCK_V29): bhop_bistro_6 and bhop_bistro_7 run player outputs on EventQueueFix's clock, so a short touch of the gravity lift can't leave the player floating. Every other map plays as v28. */
+export const PHYSICS_V29 = 29;
 /** Versions this code knows (the wasm build must support them too, see Core.setSettings). */
 export const isPhysicsVersion = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= PHYSICS_V1 && (v as number) <= PHYSICS_VERSION;
 
@@ -531,6 +533,7 @@ interface Exports {
   sky_camera?: () => number;
   world_fog?: () => number;
   light_cube?: (x: number, y: number, z: number) => number;
+  set_light_style?: (style: number, value: number, full: number) => void;
   dressing_materials?: () => number;
   dressing_build?: () => number;
   dressing_vertices_ptr?: () => number;
@@ -798,10 +801,22 @@ export class Core {
    * that reach it) into `out`: six linear RGB colours for +x, -x, +y, -y, +z, -z. False (and `out` untouched) where
    * there is none: a map drawn fullbright or without ambient data, a point in solid, a wasm build without the export.
    */
-  lightCube(x: number, y: number, z: number, out: Float32Array): boolean {
-    if ((this.x.light_cube?.(x, y, z) ?? 0) < 18) return false;
-    out.set(this.f32(this.x.scratch_f32_ptr(), 18));
+  lightCube(x: number, y: number, z: number, out: Float32Array, full?: Float32Array): boolean {
+    const len = this.x.light_cube?.(x, y, z) ?? 0;
+    if (len < 18) return false;
+    const data = this.f32(this.x.scratch_f32_ptr(), len);
+    out.set(data.subarray(0, 18));
+    // The cube with every switchable light on (core lighting.rs `cubes`), else the same light.
+    full?.set(len >= 36 ? data.subarray(18, 36) : data.subarray(0, 18));
     return true;
+  }
+
+  /**
+   * `lightCube` adds light style `style`'s lights by `value` (above their spawn value; lightstyles.ts `above`), and
+   * by `full` in its all-on cube (lightstyles.ts `full`).
+   */
+  setLightStyle(style: number, value: number, full: number): void {
+    this.x.set_light_style?.(style, value, full);
   }
 
   /**

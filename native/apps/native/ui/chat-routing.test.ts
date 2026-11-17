@@ -64,7 +64,8 @@ test("all built-in commands and aliases resolve without accidental ordinary chat
       f.line(`!${name}`);
       // Server-only entries broadcast; help is explicitly a local server log.
       if (command.server && !command.run) expect(f.sent).toEqual([{ t: "chat", text: `!${name}` }]);
-      else if (command.name === "help" || command.group === "practice")
+      // !keepreplay answers on this screen only, as on the website.
+      else if (command.name === "help" || (command.group === "practice" && command.name !== "keepreplay"))
         expect(f.sent).toEqual([{ t: "chat", text: `!${name}`, local: true }]);
       else expect(f.sent).toEqual([]);
     }

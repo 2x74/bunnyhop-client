@@ -24,7 +24,7 @@ import { DEFAULT_TURN_SPEED, TURN_HOLD_BITS, turnSpeedOf } from "./turn-binds";
 import { decodeReplay, encodeReplay, ReplayRecorder, replayFileName, replayStyle, sha256Hex, type Replay } from "./replay";
 import { isSegmented, nextStyle, StyleFilter, strafeKeys, styleDef, styleForTrack, styleLabel, stylePrespeedCap, styleSettings, styleStartReentryCap, type StyleDef, type StyleId } from "./styles";
 import { onStyleChange, setSelectedStyle } from "./ui/style-picker";
-import { afterStep, beforeStep, checkpointMatches, FRAME_STRIDE, frameFlags, makeTimer, quantize, simulate } from "./sim";
+import { afterStep, beforeStep, checkpointMatches, FRAME_STRIDE, frameFlags, makeTimer, quantize, simulate, type SimResult } from "./sim";
 import { blocksPrehops, EVENT_RESPAWNED, formatTime, RunTimer, type Split, type TickCmd } from "./timer";
 import { ZoneEditor, ZoneView } from "./zone-editor";
 import { zoneWarningToast } from "./zone-warning";
@@ -37,12 +37,13 @@ import type { AutoRestartRun, AutoRestartWhen } from "./auto-restart";
 import { currentRace } from "./net/presence";
 import { openReplayViewer } from "./viewer/request";
 import { mapTier } from "./ui/maps";
-import { announce, announcerPolicy, runSounds, sfx } from "./audio";
+import { announce, announcerPolicy, perfectSounds, runSounds } from "./audio";
 import { restartTarget, withRestartNames } from "./restart";
 import { copiedMessage, runStartPoint } from "./copy-start";
 import { checkStartPoint, clearPracticeSpawns, clearStartPoint, loadStartPoint, resolveStartPoint, savedMessage, saveStartPoint, type StartPoint } from "./start-point";
-import { getHeldLoadout, getOutfit, knownOutfitUnlocks } from "./player/cosmetics";
+import { getGhostCosmetics, getHeldLoadout, getOutfit, knownOutfitUnlocks } from "./player/cosmetics";
 import { cosmetic } from "./progression";
+import { HOP_TRAIL_DEFAULT, type CosmeticLoadout } from "./loadout";
 import { withTimeout } from "./content/fetch";
 import { pitchPlay, reportRun, RunWatch, type RunPlay } from "./selfcheck";
 import { MapPhysics } from "./map-physics";
@@ -56,7 +57,8 @@ import { TUTORIAL_MAP } from "./tutorial/data";
 import { practiceReason } from "./practice";
 import { finishRoute, PracticeAttempt, practiceFlipLine, practiceSpawnLine, practiceSpawnToast, practiceStartLine, type PracticeUse } from "./practice-mode/attempt";
 import { loadTimer, type TimerSnapshot } from "./practice-mode/checkpoints";
-import { SegmentLog, type SegmentMark } from "./practice-mode/segments";
+import { seedRecording, SegmentLog, type SegmentMark } from "./practice-mode/segments";
+import { practiceReplays, withFinalCheckpoint, type PracticeReplayMeta } from "./practice-mode/replays";
 import { LiveSsj, ssjChat } from "./ssj";
 import { LiveMovementStats } from "./movement-stats";
 import { neutralCommand } from "./freecam";
@@ -107,6 +109,17 @@ function recordedOutfit(): { outfit?: string } {
   return cosmetic(id)?.unlock.kind === "role" && !knownOutfitUnlocks().has(id) ? {} : { outfit: id };
 }
 
+/**
+ * The hop effect's colours for the trailer: the trail worn now (absent for Gold). Never a role-held trail: like the
+ * colourway, the API refuses one the account doesn't hold, and this browser can't tell (the burst shows in Gold then).
+ */
+function recordedHop(l: CosmeticLoadout): CosmeticLoadout {
+  if (!l.hop) return l;
+  const { hopTrail: _, ...rest } = l;
+  const id = getGhostCosmetics().trailId;
+  return id === HOP_TRAIL_DEFAULT || cosmetic(id)?.unlock.kind === "role" ? rest : { ...rest, hopTrail: id };
+}
+
 export class RunSession {
   /** Selected style: picked in the menus / F3. Every track runs in it except the tutorial's final course (styles.ts styleForTrack). */
   selectedStyle: StyleId;
@@ -127,16 +140,24 @@ export class RunSession {
     ssjChat(r);
   }, (speed) => this.hud.setStartPre(speed), (r) => this.hud.setJhud(r));
   private movementStats = new LiveMovementStats(r => this.hud.setMovementStats(r));
+  /** A room's spectators get this player's jump stats as the trackers report them (net/mp.ts, net/spectate-input.ts). */
+  set jumpStatsRelay(fn: LiveSsj["relay"]) {
+    this.ssj.relay = fn;
+  }
   readonly view = new ZoneView();
   zones: ZoneSet | null = null;
   timer: RunTimer;
   recorder = new ReplayRecorder();
-  /** Segmented runs' recording history (practice-mode/segments.ts): every tick of a clean Segmented attempt, every branch. */
+  /**
+   * The recording's history (practice-mode/segments.ts): every tick of every attempt, every branch, so a checkpoint load
+   * rebuilds the recording (Segmented runs, practice replays).
+   */
   private segLog = new SegmentLog();
   editor: ZoneEditor | null = null;
   /** Race ghosts (PB / WR / custom, per track; ghost.ts). Only the current track's ghosts are shown. */
   ghosts!: GhostManager;
-  lastRun: { replay: Replay; bytes: Uint8Array } | null = null;
+  /** The last finish with a replay. `practice`: a practice attempt's (never uploaded; practice-mode/replays.ts). */
+  lastRun: { replay: Replay; bytes: Uint8Array; practice?: true } | null = null;
   mapSha256 = "";
   clientBuild = "";
   /** Practice attempt (live third person was used): not submitted online, not saved as a PB. */
@@ -660,10 +681,12 @@ export class RunSession {
     if (update.started || update.restarted) announcerPolicy.resetAttempt();
     const measuredHop = t.measuredJumps > measured ? t.perfectJumps > perfect : null;
     const scroll = this.runStyle === "scroll" || this.runStyle === "legit";
-    const broken = this.unranked || flying || state.onLadder || !!(events & (EVENT_TELEPORTED | EVENT_RESPAWNED)) || t.status !== "running";
+    const jumpBroken = flying || state.onLadder || !!(events & (EVENT_TELEPORTED | EVENT_RESPAWNED)) || t.status !== "running";
+    const broken = this.unranked || jumpBroken;
     const cue = announcerPolicy.tick(prefs.get().audio.announcer, Math.sqrt(state.velocity[0] ** 2 + state.velocity[1] ** 2), scroll ? measuredHop : null, state.grounded, t.tickInterval, broken);
     if (cue && !broken) announce(cue);
-    if (scroll && measuredHop && !broken && prefs.get().audio.perfectTick) sfx("split", 0.12, 1.5);
+    // Perfect jump sound, on the tick that judged the jump; practice too (its jumps are timed all the same).
+    perfectSounds.tick(scroll, measuredHop, state.grounded, t.tickInterval, jumpBroken);
     if (update.started) this.runMouse.feed(mouseFromPrefs(prefs.get()), false);
     this.ssj.feed(cmd, state, events, flying ? { inStart: false, time: null, noclip: true } : ssjAt);
     if (flying) this.movementStats.reset(state);
@@ -680,10 +703,10 @@ export class RunSession {
       this.recorder.maybeCheckpoint(state.tick, state.position, state.velocity);
     }
     this.pushFrame(state, cmd, events);
-    if (this.segmenting) {
-      // Segmented: the tick goes into the history too, so a checkpoint load can rebuild the recording (segments.ts).
+    if (!this.experimentalInput) {
+      // The tick goes into the history too, so a checkpoint load can rebuild the recording (segments.ts).
       const o = state.tick * FRAME_STRIDE;
-      this.segLog.push({ forward: cmd.forward, side: cmd.side, yaw: cmd.yaw, pitch: cmd.pitch, buttons: cmd.buttons, look: u.look ?? null, frame: this.liveFrames.subarray(o, o + FRAME_STRIDE), frameEvents: this.liveFrameEvents[state.tick] });
+      this.segLog.push({ forward: cmd.forward, side: cmd.side, yaw: cmd.yaw, pitch: cmd.pitch, buttons: cmd.buttons, look: u.look ?? null, frame: this.liveFrames, frameAt: o, frameEvents: this.liveFrameEvents[state.tick] });
       if (state.tick % this.recorder.checkpointInterval === 0) this.segLog.checkpoint(state.position, state.velocity);
     }
     // A practice attempt (practice mode, third person, a lesson, scripted commands, the debug hook) is never submitted,
@@ -825,8 +848,9 @@ export class RunSession {
    * trailer so replays and ghosts show it in third person. Never touches the recorded commands.
    */
   recordCosmetic(kind: number): void {
-    if (!this.experimentalInput) this.recorder.event(kind);
-    if (this.segmenting) this.segLog.event(kind);
+    if (this.experimentalInput) return;
+    this.recorder.event(kind);
+    this.segLog.event(kind);
   }
 
   /**
@@ -850,8 +874,9 @@ export class RunSession {
 
   /** Inspect event (replay.ts INSPECT_* kinds) at the current tick: the replay's inspect trailer, for third person. */
   recordInspect(kind: number): void {
-    if (!this.experimentalInput) this.recorder.inspectEvent(kind);
-    if (this.segmenting) this.segLog.event(kind, true);
+    if (this.experimentalInput) return;
+    this.recorder.inspectEvent(kind);
+    this.segLog.event(kind, true);
   }
 
   onReset(): void {
@@ -875,8 +900,9 @@ export class RunSession {
     this.ssj.reset(s);
     this.movementStats.reset(s);
     this.pushFrame(s, { forward: 0, side: 0, yaw: s.teleportAngles[1], pitch: s.teleportAngles[0], buttons: 0 });
-    // A new path in the Segmented history (its checkpoints from earlier attempts stay loadable); a full one starts over.
-    if (this.segLog.full) this.segLog.clear();
+    // A new path in the history (its checkpoints from earlier attempts stay loadable); a full one starts over, and so
+    // does one no checkpoint holds a path in.
+    if (this.segLog.full || !this.segLog.holding) this.segLog.clear();
     this.segLog.begin(this.liveFrames.subarray(s.tick * FRAME_STRIDE, (s.tick + 1) * FRAME_STRIDE), this.liveFrameEvents[s.tick]);
   }
 
@@ -899,10 +925,14 @@ export class RunSession {
     this.liveFrameEvents[tick] = events;
   }
 
-  private buildReplay(endTick: number): Replay {
+  /**
+   * The recording as a replay, ending with a checkpoint of the state now. `live`: the attempt goes on (a practice replay
+   * kept mid-attempt), so that checkpoint goes in the copy only and the recording a real run submits later is untouched.
+   */
+  private buildReplay(endTick: number, live = false): Replay {
     if (this.experimentalInput) throw new Error("Experimental input uses local diagnostic export only; replay protocol is unverified");
     const s = this.o.core.state();
-    this.recorder.addCheckpoint(s.tick, s.position, s.velocity);
+    if (!live) this.recorder.addCheckpoint(s.tick, s.position, s.velocity);
     const replay = this.recorder.build({
       map: this.o.map,
       mapSha256: this.mapSha256,
@@ -919,11 +949,11 @@ export class RunSession {
       player: this.player,
       recordedAt: Date.now(),
     });
-    // Cosmetic trailer: the knife / finish / gloves and the colourway this run was played with (replays and ghosts show
-    // them); the knife and finish are the ones held, the knife pool's pick when a pool is active (it only moves on at a
+    // Cosmetic trailer: the knife / finish / gloves, the hop effect and the colourway this run was played with (replays
+    // and ghosts show them); the knife and finish are the ones held, the knife pool's pick when a pool is active (it only moves on at a
     // map load or a restart, so it's the one held through the run).
-    replay.loadout = { ...getHeldLoadout(), ...recordedOutfit() };
-    return replay;
+    replay.loadout = { ...recordedHop(getHeldLoadout()), ...recordedOutfit() };
+    return live ? withFinalCheckpoint(replay, s) : replay;
   }
 
   private async finish(state: PlayerState): Promise<void> {
@@ -1055,24 +1085,69 @@ export class RunSession {
   }
 
   /**
-   * A practice finish (practice mode, a checkpoint teleport, noclip): the end card for your own reference, nothing else.
-   * No replay (noclip and teleports make the recording meaningless, and nothing could verify it), no PB, no ghost, no
-   * upload.
+   * A practice finish (practice mode, a checkpoint teleport, noclip, a practice spawn): the end card for your own
+   * reference, never a PB, a ghost or an upload. When the recording plays back (practiceReplayLoss) it's kept on this
+   * device as a practice replay (practice-mode/replays.ts) and becomes the last run (V); otherwise the card says why not.
    */
   private async finishPractice(): Promise<void> {
     this.watch.stop();
     this.clock.stop();
     const t = this.timer;
     const pb = getPB(this.o.map, this.runStyle, t.track);
+    const loss = this.practiceReplayLoss();
     this.hud.runFinished({
       time: t.time(), previousPB: pb?.time ?? null, newPB: false, jumps: t.jumps, strafes: t.strafes, sync: t.syncPercent(),
-      style: styleLabel(this.runStyle), track: t.track ? trackName(t.track) : null, noReplay: true, onMap: this.onMap(),
+      style: styleLabel(this.runStyle), track: t.track ? trackName(t.track) : null, noReplay: loss !== null, onMap: this.onMap(),
     });
     const clientResult = ++this.clientResult;
     if (!this.experimentalInput) void saveClientRun(this.clientSummary(false)).then((id) => clientResultSettled(id, () => this.clientResult === clientResult && this.timer === t && t.status === "finished"));
     const reason = this.practiceReason ?? "practice mode";
-    this.hud.setSubmission({ id: "", status: "rejected", reason });
-    this.onSubmission?.({ id: "", status: "rejected", reason });
+    const replay = loss === null ? this.buildReplay(t.endTick) : null;
+    const line = this.experimentalInput ? reason : replay ? `${reason}. Replay kept on this device` : `${reason}. No replay: ${loss}`;
+    this.hud.setSubmission({ id: "", status: "rejected", reason: line });
+    this.onSubmission?.({ id: "", status: "rejected", reason: line });
+    if (!replay) return;
+    const time = t.time();
+    const bytes = await encodeReplay(replay);
+    this.lastRun = { replay, bytes, practice: true };
+    await this.keepPracticeReplay(replay, bytes, { time, at: null });
+  }
+
+  /**
+   * Why the recording since the reset can't be kept as a practice replay now (a phrase for "No replay: ..."), or null
+   * when every command from the reset plays back to where the player is (attempt.ts replayLoss).
+   */
+  practiceReplayLoss(): string | null {
+    if (this.experimentalInput) return "experimental input";
+    const loss = this.prac.replayLoss;
+    if (loss === "noclip") return "noclip can't be played back";
+    if (loss === "speed") return "a teleport that reset your speed can't be played back";
+    if (loss || this.recorder.length !== this.o.core.state().tick) return "that teleport can't be played back";
+    if (!this.recorder.length) return "nothing recorded yet";
+    return null;
+  }
+
+  /**
+   * !keepreplay and the pause menu: this attempt so far kept as a practice replay, also one that never finishes (a route
+   * test). Works in any attempt whose recording plays back; a real run carries on untouched (buildReplay `live`).
+   * Returns the line to show.
+   */
+  async keepAttempt(): Promise<string> {
+    const loss = this.practiceReplayLoss();
+    if (loss) return `Can't keep this attempt: ${loss}.`;
+    const t = this.timer;
+    const done = t.status === "finished";
+    const replay = this.buildReplay(done ? t.endTick : 0, true);
+    const when = { time: done ? t.time() : null, at: t.status === "running" ? t.time() : null };
+    const kept = await this.keepPracticeReplay(replay, await encodeReplay(replay), when);
+    return kept ? "Attempt kept. Watch it from Esc, Replays." : "Couldn't keep it on this device.";
+  }
+
+  private async keepPracticeReplay(replay: Replay, bytes: Uint8Array, when: { time: number | null; at: number | null }): Promise<PracticeReplayMeta | null> {
+    const h = replay.header;
+    const kept = await practiceReplays.keep(bytes, { map: h.map, style: replayStyle(h), track: h.track ?? 0, ...when, teleports: replay.segments?.length ?? 0 });
+    await this.refreshMenu();
+    return kept;
   }
 
   // -------------------------------------------------------------------------------------------
@@ -1122,21 +1197,50 @@ export class RunSession {
 
   /**
    * A checkpoint teleport: the core state was just restored from the checkpoint's snapshot (its settings are that
-   * style's). The run style, timer, key filter and per-tick HUD follow it; the recording starts over (it's never used
-   * for a practice attempt: practiceUse came first).
+   * style's). The run style, timer, key filter and per-tick HUD follow it. The attempt is practice (practiceUse came
+   * first). With the checkpoint's playable `path` (pathMark) and the speed it was saved with, the recording goes back
+   * to the checkpoint's commands as in a Segmented load, so the practice replay still plays back (attempt.ts
+   * replayLoss); otherwise the recording starts over and the attempt keeps no replay.
    */
-  practiceRestored(style: StyleId, timer: TimerSnapshot): void {
+  practiceRestored(style: StyleId, timer: TimerSnapshot, path: { mark: SegmentMark; filter: StyleFilter } | null = null): void {
     if (!this.prac.practice) this.prac.use("teleport"); // (the controller already said so; never a clean attempt here)
     this.setRunStyle(style);
     loadTimer(this.timer, timer);
-    this.styleFilter.reset();
-    this.newRecording();
+    const at = this.o.core.state();
+    if (path && !this.experimentalInput && at.tick === path.mark.ticks && this.segLog.usable(path.mark)) {
+      this.styleFilter = Object.assign(Object.create(Object.getPrototypeOf(path.filter)), path.filter) as StyleFilter;
+      this.segLog.load(path.mark, at, this.recorder, (tick, frame, events) => this.putFrame(tick, frame, events));
+      this.prac.rejoined();
+    } else {
+      this.styleFilter.reset();
+      this.newRecording();
+      this.segLog.begin([], 0); // (nothing logged from here can be marked: replayLoss)
+    }
     this.hud.resetTicks();
     const s = this.o.core.state();
     this.ssj.moved(s); // (a teleport: jump stats carry on, as in CS:S)
     this.movementStats.reset(s);
     this.pushFrame(s, { forward: 0, side: 0, yaw: s.teleportAngles[1], pitch: s.teleportAngles[0], buttons: 0 });
     this.updateInfo(this.timer.track);
+  }
+
+  /**
+   * "Practice from here" (controller.ts fromReplay): the live core just played `replay`'s first `sim.ticks` commands from
+   * the reset (its restart point included). As a checkpoint teleport, but the recording becomes those commands, so the
+   * attempt's practice replay plays back from the replay's start.
+   */
+  practiceFromReplay(style: StyleId, timer: TimerSnapshot, replay: Replay, sim: SimResult): void {
+    this.practiceRestored(style, timer);
+    const f = sim.frames, e = sim.frameEvents;
+    if (this.experimentalInput || !f || !e || replayStyle(replay.header) !== style) return;
+    this.styleFilter = Object.assign(Object.create(Object.getPrototypeOf(sim.filter)), sim.filter) as StyleFilter;
+    seedRecording(replay, { ticks: sim.ticks, frames: f, frameEvents: e }, this.recorder, this.segLog, (tick, frame, events) => this.putFrame(tick, frame, events));
+    this.prac.rejoined();
+  }
+
+  /** A teleport just set the speed to zero (Keep speed off): this attempt keeps no practice replay (attempt.ts). */
+  practiceSpeedReset(): void {
+    this.prac.speedReset();
   }
 
   // -------------------------------------------------------------------------------------------
@@ -1157,13 +1261,21 @@ export class RunSession {
    * Segmented attempt, or when the history can't rebuild it (full; out of step with the recording).
    */
   segmentMark(): SegmentMark | null {
-    if (!this.segmenting) return null;
+    return this.segmenting ? this.pathMark() : null;
+  }
+
+  /**
+   * The attempt's path through the history for a checkpoint saved now, in any attempt: a practice teleport to it
+   * rebuilds a recording that plays back (practiceRestored). Null when the recording doesn't play back to here
+   * (attempt.ts replayLoss), the history is full or out of step with the recording.
+   */
+  pathMark(): SegmentMark | null {
     const n = this.recorder.length;
-    if (this.segLog.length !== n || this.o.core.state().tick !== n) return null;
+    if (this.experimentalInput || this.prac.replayLoss || this.segLog.length !== n || this.o.core.state().tick !== n) return null;
     return this.segLog.mark({ nullBinds: this.recorder.nullBinds, timedInput: this.recorder.timedInput, timedPresses: this.recorder.timedPresses, wRelease: this.recorder.wRelease, turnSpeed: this.recorder.turnSpeed });
   }
 
-  /** About how much memory the Segmented paths of the kept checkpoints take (practice-mode/checkpoints.ts budget). */
+  /** About how much memory the paths of the kept checkpoints take (practice-mode/checkpoints.ts budget). */
   get segmentBytes(): number {
     return this.segLog.retainedBytes;
   }
@@ -1371,16 +1483,38 @@ export class RunSession {
       onStyle: (id) => void this.setStyle(id),
       onTrack: (track) => (this.modeLock && track ? this.hud.toast(this.modeLock, 2500, "mode-lock") : this.o.restart(track)),
       onWatchPB: hasPB ? () => openReplayViewer({ pb: { map: this.o.map, style: this.selectedStyle, track: 0 } }) : null,
-      onWatchLast: this.lastRun ? () => openReplayViewer({ bytes: this.lastRun!.bytes, name: "Last run" }) : null,
+      onWatchLast: this.lastRun ? () => this.watchLast() : null,
       onExportLast: this.lastRun ? () => this.exportLast() : null,
       onLoadReplay: (f) => void f.arrayBuffer().then((b) => openReplayViewer({ bytes: new Uint8Array(b), name: f.name.replace(/\.bhr$/, "") })),
       practice: this.practiceMenu?.() ?? null,
       clearStart: () => (this.onPracticeSpawn ? () => this.clearStartPoint() : null),
+      practiceReplays: () => practiceReplays.forMap(this.o.map).map((m) => ({ meta: m, watch: () => void this.watchPracticeReplay(m) })),
+      keepAttempt: () => {
+        const why = this.practiceReplayLoss();
+        return { go: why ? null : () => void this.keepAttempt().then((line) => this.hud.toast(line, 3000, "practice")), why };
+      },
+      onClearPracticeReplays: () => void practiceReplays.clear(this.o.map).then(() => this.refreshMenu()),
     });
   }
 
+  /** The last finish in the replay viewer (V, the pause menu): a practice one says so. */
+  watchLast(): void {
+    const r = this.lastRun;
+    if (r) openReplayViewer(r.practice ? { bytes: r.bytes, name: "Practice", practice: true } : { bytes: r.bytes, name: "Last run" });
+  }
+
+  private async watchPracticeReplay(m: PracticeReplayMeta): Promise<void> {
+    const bytes = await practiceReplays.load(m.key);
+    if (bytes) openReplayViewer({ bytes, name: "Practice", practice: true });
+    else {
+      this.hud.toast("That practice replay isn't on this device any more.", 3000);
+      await this.refreshMenu();
+    }
+  }
+
   exportLast(): void {
-    if (!this.experimentalInput && this.lastRun) download(this.lastRun.bytes, replayFileName(this.lastRun.replay.header));
+    const r = this.lastRun;
+    if (!this.experimentalInput && r) download(r.bytes, r.practice ? replayFileName(r.replay.header).replace(/\.bhr$/, "_practice.bhr") : replayFileName(r.replay.header));
   }
 
   /** Current recording (from the last reset up to now) as an encoded replay. */

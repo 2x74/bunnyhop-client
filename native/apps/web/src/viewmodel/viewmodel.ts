@@ -31,6 +31,7 @@
 
 import * as THREE from "three";
 import { playerUniforms, solidMaterial, type PlayerUniforms } from "../player/materials";
+import { RobeSleeves } from "./robe-sleeves";
 import { colourway, paletteOf } from "../player/bunny/palettes";
 import { getHeldLoadout, getOutfit, getPlayerGlow, onHeldLoadout, onOutfit } from "../player/cosmetics";
 import { PlayerGlowShell } from "../player/glow";
@@ -139,6 +140,8 @@ export class Viewmodel {
   private root = new THREE.Group();
   readonly mesh: THREE.SkinnedMesh;
   private glow: PlayerGlowShell;
+  /** The Robe's sleeves over the arms while it is worn (robe-sleeves.ts): nothing otherwise. */
+  private robe: RobeSleeves;
   /** The Loadout's stage: the glow being edited (a preview, a supporter's or not); undefined = your own. */
   glowOverride: import("../player/glow-config").PlayerGlow | null | undefined = undefined;
   private skeleton: DirectSkeleton;
@@ -212,6 +215,7 @@ export class Viewmodel {
     // A supporter's own glow on the hands and knife (the third-person shell, player/glow.ts, on the same rig).
     // Its own near-fade (off: the hands are at the camera, which the third-person fade hides) and full opacity.
     this.glow = new PlayerGlowShell(this.root, { ...this.uniforms, uNearFade: { value: new THREE.Vector2(0, 0) }, uOpacity: { value: 1 } }, { width: 0.16, strength: 0.6 });
+    this.robe = new RobeSleeves(this.root, this.skeleton, this.uniforms);
     this.root.matrixAutoUpdate = false;
     this.scene.add(this.root);
     this.proc = new VmProcedural(this.r);
@@ -267,6 +271,7 @@ export class Viewmodel {
   setLoadout(l: CosmeticLoadout): void {
     this.loadout = l;
     this.refreshLook();
+    this.robe.set(l, prefs.get().firstPersonRobe);
   }
 
   /** Shows a finish spec instead of the loadout's (dev lab, previews); undefined goes back to the loadout. */
@@ -351,6 +356,7 @@ export class Viewmodel {
     const pal = paletteOf(c);
     this.uniforms.uPalette.value.forEach((col, i) => col.set(pal[i]));
     this.uniforms.uAccent.value.set(c.accent);
+    this.robe.tones();
   }
 
   /** Loads v_knife_t's animations when the hosted content is known (procedural until then). */
@@ -585,6 +591,7 @@ export class Viewmodel {
     this.handIdle.update(dt, this.action === "idle" && !this.inspects.active);
     this.pose(dt);
     this.feel(dt, s);
+    if (this.robe.worn) this.robe.update(dt, s, Math.min(1.5, prefs.get().viewmodel.sway) * motionScale(), prefs.get().viewmodel.hand === "left");
     this.lastUpdateMs = performance.now() - t0;
   }
 
@@ -706,6 +713,7 @@ export class Viewmodel {
     // Own glow (null unless a supporter turned it on), unless "In first person" is off. The contour only: aura flames
     // around the hands would sit in the middle of the view.
     const p = prefs.get();
+    this.robe.set(this.loadout, p.firstPersonRobe);
     this.glow.set(this.glowOverride === undefined ? getPlayerGlow() : this.glowOverride, p.firstPersonGlow, false);
     this.glow.sync([this.mesh], true, this.mesh.renderOrder);
     const auto = renderer.autoClear;
@@ -737,6 +745,7 @@ export class Viewmodel {
   dispose(): void {
     for (const u of this.unsub) u();
     this.glow.dispose();
+    this.robe.dispose();
     (this.mesh.material as THREE.Material).dispose();
     this.skeleton.dispose();
   }

@@ -806,7 +806,7 @@ export function earnedAchievements(s: ProgressStats): string[] {
 // ---------------------------------------------------------------------------------------------
 // Cosmetics (all unlocked by playing; card editor + ghost settings)
 
-export type CosmeticSlot = "background" | "frame" | "title" | "ghost" | "trail" | "shape" | "outfit" | "knife" | "finish" | "glove" | "hilt" | "hat" | "body" | "camo";
+export type CosmeticSlot = "background" | "frame" | "title" | "ghost" | "trail" | "shape" | "outfit" | "knife" | "finish" | "glove" | "hilt" | "hat" | "body" | "camo" | "back" | "hop";
 
 /**
  * The first-person loadout slots (apps/web/src/loadout.ts): what you hold, what its blade is painted with, its hilt (one
@@ -1346,6 +1346,12 @@ COSMETICS.push(
   { id: "hat-ponytail", slot: "hat", name: "Ponytail", unlock: ach(SUPPORTER), color: "#f29bbf", rarity: 4 },
   // A red lacquer oni mask over the lower face, under the visor (player/bunny/oni-mask.ts).
   { id: "hat-oni-mask", slot: "hat", name: "Half Oni Mask", unlock: ach(SUPPORTER), color: "#c8202c", rarity: 4 },
+  // v0.0.42. A plain ivory festival fox mask, worn pushed up on the side of the head or over the face (CosmeticChoice.maskOn;
+  // player/bunny/kitsune-mask.ts), and two more wigs (player/bunny/hair-styles.ts): chunky swept spikes, and longer
+  // hair with a curtain fringe. Both take the hair colour, the highlight colour and the length.
+  { id: "hat-kitsune-mask", slot: "hat", name: "Kitsune Mask", unlock: ach(SUPPORTER), color: "#f3ece0", rarity: 4 },
+  { id: "hat-spiky", slot: "hat", name: "Spiky Hair", unlock: ach(SUPPORTER), color: "#f29bbf", rarity: 4 },
+  { id: "hat-long", slot: "hat", name: "Long Hair", unlock: ach(SUPPORTER), color: "#f29bbf", rarity: 4 },
   // A band of dark amethyst glass round the hood, a light sweeping the aqua line across its forehead plate.
   { id: "hat-circlet", slot: "hat", name: "Circlet", unlock: ach(SUPPORTER), color: "#342a78", rarity: 4 },
   // High Roller: a dealer's green eyeshade on a black band with gold piping; four gold coins flipping round the head.
@@ -1382,6 +1388,32 @@ COSMETICS.push(
   { id: "frame-tidepool", slot: "frame", name: "Tidepool", unlock: ach(SUPPORTER), color: "#5fc8b8", rarity: 4 },
   { id: "hat-starfish", slot: "hat", name: "Starfish", unlock: ach(SUPPORTER), color: "#ff7f6e", rarity: 4 },
   { id: "title-beachcomber", slot: "title", name: "Beachcomber", unlock: ach(SUPPORTER), rarity: 4 },
+);
+
+// Back items (v0.0.42): worn on the bunny's back over the hoodie, with any hat (player/bunny/backs.ts builds them,
+// player/back-fx.ts moves them). null = none (the default). Most are Supporter items, standalone like the bayonets; the
+// wings are the secret's (WINGS: whoever holds it); two are earned by playing. Ids are stable forever.
+COSMETICS.push(
+  // A small pair of feathered wings, the primaries dipped in gold: they fold back with speed and beat on a hop.
+  { id: "back-wings", slot: "back", name: "Wings", unlock: ach(WINGS), color: "#eef0e8", rarity: 5 },
+  // A thick brass toy key between the shoulder blades, turning in clicks: slowly at rest, faster with speed.
+  { id: "back-windup-key", slot: "back", name: "Wind-up Key", unlock: ach(SUPPORTER), color: "#d9a642", rarity: 4 },
+  // A cape in the colourway's accent, lined in ivory, that streams back with speed and swings out of strafes. Its owner
+  // sets its length (hip to ankle) and may pick its two colours (CAPE_LENGTH, CosmeticChoice.capeColor / capeLining).
+  { id: "back-cape", slot: "back", name: "Cape", unlock: ach(SUPPORTER), color: "#c8202c", rarity: 4 },
+  // A stuffed canvas rucksack with a big carrot sticking out of it (Globetrotter: 25 maps cleared).
+  { id: "back-carrot-pack", slot: "back", name: "Carrot Pack", unlock: ach("maps_25"), color: "#c9a36b", rarity: 3 },
+  // A bunny balloon in the accent colour, tied on at the shoulder: it lags behind and bobs.
+  { id: "back-balloon", slot: "back", name: "Balloon", unlock: ach(SUPPORTER), color: "#ff6fb5", rarity: 4 },
+  // Two squat pods in the accent colour, a flame under each that flares for a moment on each hop.
+  { id: "back-jetpack", slot: "back", name: "Jet Pack", unlock: ach(SUPPORTER), color: "#c9ced6", rarity: 4 },
+  // A short sword across the back in the Half Oni Mask's red lacquer and gold.
+  { id: "back-blade", slot: "back", name: "Sheathed Blade", unlock: ach(SUPPORTER), color: "#c81e2a", rarity: 4 },
+  // A paper pinwheel on a stick over the left shoulder, spinning with speed.
+  { id: "back-pinwheel", slot: "back", name: "Pinwheel", unlock: lvl(18), color: "#ffd052", rarity: 2 },
+  // A haori: an open-fronted jacket with wide hanging sleeves, worn over the hoodie. Its owner wears it open or tied,
+  // picks one of five patterns and may pick its two colours (ROBE_PATTERN_COUNT, CosmeticChoice.robe*).
+  { id: "back-robe", slot: "back", name: "Robe", unlock: ach(SUPPORTER), color: "#2b303b", rarity: 4 },
 );
 
 // ---------------------------------------------------------------------------------------------
@@ -1594,6 +1626,34 @@ COSMETICS.push(
   { id: "shape-clover", slot: "shape", name: "Clover", unlock: ach("top10_25") },
 );
 
+// Hop effects (v0.0.42; player/hop-fx.ts has the recipes, player/hop-layer.ts draws them): a small burst at the feet on
+// every hop, seen on you in third person, on other players, ghosts and replays (Settings: Hop effects). None is the
+// default (null). Dust is free; the rest fill levels and the jump achievements; one per Supporter set. The tinted ones
+// (Ring, Sparks, Embers, Petals, Boost, Static) cool to the colours of the trail you wear. Ids are stable forever.
+COSMETICS.push(
+  { id: "hop-dust", slot: "hop", name: "Dust", unlock: free, color: "#e4d6ba", rarity: 1 },
+  { id: "hop-ring", slot: "hop", name: "Ring", unlock: lvl(4), color: "#ffc23d", rarity: 1 },
+  { id: "hop-sparks", slot: "hop", name: "Sparks", unlock: lvl(9), color: "#ffb347", rarity: 2 },
+  { id: "hop-frost", slot: "hop", name: "Frost", unlock: lvl(16), color: "#d8f1ff", rarity: 2 },
+  { id: "hop-embers", slot: "hop", name: "Embers", unlock: lvl(22), color: "#ff8a4a", rarity: 2 },
+  // Bunny (1,000 jumps in finished runs).
+  { id: "hop-petals", slot: "hop", name: "Petals", unlock: ach("jumps_1k"), color: "#ffb3cf", rarity: 2 },
+  // Jackrabbit (10,000 jumps).
+  { id: "hop-carrot", slot: "hop", name: "Carrot Bits", unlock: ach("jumps_10k"), color: "#ff8a2a", rarity: 3 },
+  // Spring Loaded (25,000 jumps).
+  { id: "hop-boost", slot: "hop", name: "Boost", unlock: ach("jumps_25k"), color: "#9fe870", rarity: 3 },
+  // In Sync (a T2+ map at 90% sync).
+  { id: "hop-static", slot: "hop", name: "Static", unlock: ach("sync_90"), color: "#9fd2ff", rarity: 3 },
+  { id: "hop-crystals", slot: "hop", name: "Crystals", unlock: ach(SUPPORTER), color: "#5ff2df", color2: "#8f72ff", rarity: 4, set: "geode" },
+  { id: "hop-gold", slot: "hop", name: "Gold Rush", unlock: ach(SUPPORTER), color: "#ffcf4a", color2: "#1f9a5c", rarity: 4, set: "highroller" },
+  { id: "hop-aurora", slot: "hop", name: "Aurora", unlock: ach(SUPPORTER), color: "#3ff0a0", color2: "#9a6bff", rarity: 4, set: "borealis" },
+  { id: "hop-splash", slot: "hop", name: "Splash", unlock: ach(SUPPORTER), color: "#f3ece2", color2: "#5fc8b8", rarity: 4, set: "tidepool" },
+);
+for (const c of COSMETICS) if (c.slot === "hop" && c.set) {
+  const st = SUPPORTER_SETS.find((x) => x.id === c.set);
+  if (st && !st.items.includes(c.id)) (st.items as string[]).push(c.id);
+}
+
 /**
  * Retired cosmetic ids -> what replaced them (read everywhere through cosmetic(): saved choices, room rosters, replay
  * trailers, the local loadout cache), so an old save keeps an equivalent and is written back under the new id. The
@@ -1638,6 +1698,10 @@ export const DEFAULT_COSMETICS: Record<CosmeticSlot, string | null> = {
   hat: null,
   /** null = no gun camo (v0.0.38; camo.ts): the guns as they've always looked. */
   camo: null,
+  /** null = nothing on the bunny's back (v0.0.42; player/bunny/backs.ts). */
+  back: null,
+  /** null = no hop effect (v0.0.42; player/hop-fx.ts). */
+  hop: null,
 };
 
 /**
@@ -1723,11 +1787,29 @@ export function rankHint(u: { max: number; scope: "all" | "style" }): string {
 /**
  * Card + ghost cosmetics a player has chosen (ids), as stored and served by the API; plus `hairColor` ("#rrggbb"), the
  * colour of a wig hat (loadout.ts WIGS), and `hairLength` (a percent, HAIR_LENGTH), the ponytail's length, both kept
- * only for players who own a wig (absent = the default).
+ * only for players who own a wig (absent = the default). The same for the Cape (CAPE_ITEM): `capeLength` (a percent,
+ * CAPE_LENGTH), `capeColor` and `capeLining` ("#rrggbb" on the cape's colour grid, capeHexOf; absent = the colourway's
+ * accent outside and ivory inside), kept only for players who own it.
  */
 export type CosmeticChoice = Record<CosmeticSlot, string | null> & {
   hairColor?: string | null;
   hairLength?: number | null;
+  /** A wig's highlight colour ("#rrggbb" on the highlight grid, highlightHexOf; absent = none), for wig owners. */
+  hairHighlight?: string | null;
+  /** The Kitsune Mask over the face (true) instead of pushed up on the side of the head (absent), for its owners. */
+  maskOn?: boolean | null;
+  capeLength?: number | null;
+  capeColor?: string | null;
+  capeLining?: string | null;
+  /**
+   * The Robe's (ROBE_ITEM): `robePattern` (1 .. ROBE_PATTERN_COUNT - 1; absent = plain), `robeTied` (true = tied; absent
+   * = open), `robeColor` and `robePrint` ("#rrggbb" on the cape's colour grid; absent = the colourway's own), kept only
+   * for players who own it.
+   */
+  robePattern?: number | null;
+  robeTied?: boolean | null;
+  robeColor?: string | null;
+  robePrint?: string | null;
   knifePool?: KnifePool | null;
   /** The overall Number One's title colour ("#rrggbb", ranking.ts shownRankColor). Set only while #1, kept after. */
   rankColor?: string | null;
@@ -1796,9 +1878,14 @@ export function knifePoolOf(v: unknown, owns: (c: CosmeticDef) => boolean, stric
 }
 
 /** Hats that are hair (player/bunny/wigs.ts): the player picks their colour (CosmeticChoice.hairColor). */
-export const HAIR_HATS: readonly string[] = ["hat-space-buns", "hat-ponytail"];
-/** Hats whose length the player sets (CosmeticChoice.hairLength). */
-export const LENGTH_HATS: readonly string[] = ["hat-ponytail"];
+export const HAIR_HATS: readonly string[] = ["hat-space-buns", "hat-ponytail", "hat-spiky", "hat-long"];
+/**
+ * Hats whose length the player sets (CosmeticChoice.hairLength): the Ponytail's tail, Spiky Hair's spikes, Long Hair's
+ * fringe and back (each style maps the percent onto its own range: player/hair-fx.ts lengthFactor).
+ */
+export const LENGTH_HATS: readonly string[] = ["hat-ponytail", "hat-spiky", "hat-long"];
+/** The hat with two ways to wear it (CosmeticChoice.maskOn). */
+export const MASK_HAT = "hat-kitsune-mask";
 /**
  * The ponytail's length, a whole percent of the built length (player/bunny/wigs.ts; the shader stretches it, hat-fx.ts):
  * from a short tuft to the small of the back (v0.0.30: up from 200, the middle of the back; tyzi: "Much longer"). 100 =
@@ -1806,14 +1893,62 @@ export const LENGTH_HATS: readonly string[] = ["hat-ponytail"];
  */
 export const HAIR_LENGTH = { min: 40, max: 300, default: 100 } as const;
 const hairHexOf = (v: unknown): string | null => (typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : null);
+/**
+ * A highlight colour on its grid: 16 steps a channel ("#ffaa33": the colours CSS writes as #fa3), 4,096 colours, so it
+ * rides in two characters of the replay trailer (loadout.ts). Any "#rrggbb" snaps to the nearest; else null.
+ */
+export function highlightHexOf(v: unknown): string | null {
+  const hex = hairHexOf(v);
+  if (!hex) return null;
+  return `#${[1, 3, 5].map((i) => Math.round(parseInt(hex.slice(i, i + 2), 16) / 17).toString(16).repeat(2)).join("")}`;
+}
 /** A saved / carried hair length (a whole percent in range), else null. */
 export const hairLengthOf = (v: unknown): number | null =>
   typeof v === "number" && Number.isInteger(v) && v >= HAIR_LENGTH.min && v <= HAIR_LENGTH.max ? v : null;
+/** The back item whose length and colours its owner sets (player/bunny/backs.ts cape). */
+export const CAPE_ITEM = "back-cape";
+/**
+ * The cape's length, a whole percent of the short cape's (hip length, as built at 100): up to 260, a hem at the ankles.
+ * Steps of 5 (the slider's; each length is its own geometry).
+ */
+export const CAPE_LENGTH = { min: 100, max: 260, default: 100, step: 5 } as const;
+/** A saved / carried cape length (a percent in range, on the slider's steps), else null. */
+export const capeLengthOf = (v: unknown): number | null =>
+  typeof v === "number" && Number.isInteger(v) && v >= CAPE_LENGTH.min && v <= CAPE_LENGTH.max && v % CAPE_LENGTH.step === 0 ? v : null;
+/**
+ * A cape colour: "#rrggbb" snapped to the grid the replay trailer carries (6 bits a channel, loadout.ts packCape: at
+ * most 2 / 255 from the colour picked), else null. Everything saved and shown goes through this, so what you pick is
+ * what a replay shows.
+ */
+export function capeHexOf(v: unknown): string | null {
+  const n = typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 0xffffff ? v : typeof v === "string" && /^#?[0-9a-f]{6}$/i.test(v) ? parseInt(v.replace("#", ""), 16) : null;
+  if (n === null) return null;
+  const q = (c: number) => Math.round((Math.round((c / 255) * 63) * 255) / 63);
+  return `#${((q(n >> 16) << 16) | (q((n >> 8) & 255) << 8) | q(n & 255)).toString(16).padStart(6, "0")}`;
+}
+const ownsCape = (level: number, achievements: readonly string[], ranks: HeldRanks, staff: Holder) => {
+  const c = cosmetic(CAPE_ITEM);
+  return !!c && isUnlocked(c, level, achievements, ranks, staff);
+};
+/** The back item worn open or tied, in a pattern and two colours its owner picks (player/bunny/robe.ts). */
+export const ROBE_ITEM = "back-robe";
+/** How many patterns the Robe has, Plain (0) included (player/robe-fx.ts ROBE_PATTERNS names them). */
+export const ROBE_PATTERN_COUNT = 5;
+/** A saved / carried robe pattern other than Plain (1 .. ROBE_PATTERN_COUNT - 1), else null. */
+export const robePatternOf = (v: unknown): number | null => (typeof v === "number" && Number.isInteger(v) && v >= 1 && v < ROBE_PATTERN_COUNT ? v : null);
+const ownsRobe = (level: number, achievements: readonly string[], ranks: HeldRanks, staff: Holder) => {
+  const c = cosmetic(ROBE_ITEM);
+  return !!c && isUnlocked(c, level, achievements, ranks, staff);
+};
 const ownsHair = (level: number, achievements: readonly string[], ranks: HeldRanks, staff: Holder) =>
   HAIR_HATS.some((id) => {
     const c = cosmetic(id);
     return !!c && isUnlocked(c, level, achievements, ranks, staff);
   });
+const ownsMask = (level: number, achievements: readonly string[], ranks: HeldRanks, staff: Holder) => {
+  const c = cosmetic(MASK_HAT);
+  return !!c && isUnlocked(c, level, achievements, ranks, staff);
+};
 
 /**
  * Validates a choice. strict (on save): returns the first bad slot. lenient (on read): falls back to defaults for
@@ -1830,6 +1965,22 @@ export function cleanCosmetics(raw: unknown, level: number, achievements: readon
   if (hair && ownsHair(level, achievements, ranks, staff)) out.hairColor = hair;
   const length = hairLengthOf(r.hairLength);
   if (length !== null && length !== HAIR_LENGTH.default && ownsHair(level, achievements, ranks, staff)) out.hairLength = length;
+  const highlight = highlightHexOf(r.hairHighlight);
+  if (highlight && ownsHair(level, achievements, ranks, staff)) out.hairHighlight = highlight;
+  if (r.maskOn === true && ownsMask(level, achievements, ranks, staff)) out.maskOn = true;
+  if (ownsCape(level, achievements, ranks, staff)) {
+    const capeLength = capeLengthOf(r.capeLength), capeColor = capeHexOf(r.capeColor), capeLining = capeHexOf(r.capeLining);
+    if (capeLength !== null && capeLength !== CAPE_LENGTH.default) out.capeLength = capeLength;
+    if (capeColor) out.capeColor = capeColor;
+    if (capeLining) out.capeLining = capeLining;
+  }
+  if (ownsRobe(level, achievements, ranks, staff)) {
+    const robePattern = robePatternOf(r.robePattern), robeColor = capeHexOf(r.robeColor), robePrint = capeHexOf(r.robePrint);
+    if (robePattern !== null) out.robePattern = robePattern;
+    if (r.robeTied === true) out.robeTied = true;
+    if (robeColor) out.robeColor = robeColor;
+    if (robePrint) out.robePrint = robePrint;
+  }
   const pool = knifePoolOf(r.knifePool, (c) => isUnlocked(c, level, achievements, ranks, staff));
   if (pool) out.knifePool = pool;
   // Kept while not #1 (it only shows on the Number One title), so it's back when the place is.
@@ -1853,6 +2004,34 @@ export function cosmeticsProblem(raw: unknown, level: number, achievements: read
       if (!ownsHair(level, achievements, ranks, staff)) return { slot, reason: `locked (${unlockHint(cosmetic(HAIR_HATS[0])!)})` };
       continue;
     }
+    if (slot === "hairHighlight") {
+      if (v === null) continue;
+      if (!highlightHexOf(v)) return { slot, reason: "expected a colour like #ffaa33" };
+      if (!ownsHair(level, achievements, ranks, staff)) return { slot, reason: `locked (${unlockHint(cosmetic(HAIR_HATS[0])!)})` };
+      continue;
+    }
+    if (slot === "maskOn") {
+      if (v === null || v === false) continue;
+      if (v !== true) return { slot, reason: "expected true or false" };
+      if (!ownsMask(level, achievements, ranks, staff)) return { slot, reason: `locked (${unlockHint(cosmetic(MASK_HAT)!)})` };
+      continue;
+    }
+    if (slot === "capeLength" || slot === "capeColor" || slot === "capeLining") {
+      if (v === null) continue;
+      if (slot === "capeLength" && capeLengthOf(v) === null) return { slot, reason: `expected a multiple of ${CAPE_LENGTH.step} from ${CAPE_LENGTH.min} to ${CAPE_LENGTH.max}` };
+      if (slot !== "capeLength" && (typeof v !== "string" || !capeHexOf(v))) return { slot, reason: "expected a colour like #c8202c" };
+      if (!ownsCape(level, achievements, ranks, staff)) return { slot, reason: `locked (${unlockHint(cosmetic(CAPE_ITEM)!)})` };
+      continue;
+    }
+    if (slot === "robePattern" || slot === "robeTied" || slot === "robeColor" || slot === "robePrint") {
+      if (v === null) continue;
+      // (Plain and open are the defaults: 0 and false say so and are saved as nothing.)
+      if (slot === "robePattern" && v !== 0 && robePatternOf(v) === null) return { slot, reason: `expected a whole number from 0 to ${ROBE_PATTERN_COUNT - 1}` };
+      if (slot === "robeTied" && typeof v !== "boolean") return { slot, reason: "expected true or false" };
+      if ((slot === "robeColor" || slot === "robePrint") && (typeof v !== "string" || !capeHexOf(v))) return { slot, reason: "expected a colour like #2b303b" };
+      if (!ownsRobe(level, achievements, ranks, staff)) return { slot, reason: `locked (${unlockHint(cosmetic(ROBE_ITEM)!)})` };
+      continue;
+    }
     if (slot === "rankColor") {
       if (v === null) continue;
       if (!rankColorOf(v)) return { slot, reason: "expected a colour like #ffd45e" };
@@ -1865,7 +2044,7 @@ export function cosmeticsProblem(raw: unknown, level: number, achievements: read
       continue;
     }
     if (!(slot in DEFAULT_COSMETICS)) return { slot, reason: "unknown slot" };
-    if (v === null && (slot === "title" || slot === "hat" || slot === "camo")) continue;
+    if (v === null && (slot === "title" || slot === "hat" || slot === "camo" || slot === "back" || slot === "hop")) continue;
     const c = typeof v === "string" ? cosmetic(v) : null;
     // A staff item its sender doesn't hold reads exactly like an id that doesn't exist (staffItem).
     if (!c || c.slot !== slot || !listedFor(c, staff)) return { slot, reason: "unknown item" };

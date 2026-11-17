@@ -43,7 +43,7 @@ import { dynamicRenderEntities, fxIsFrameFade, fxIsTimed, RENDER_NONE, renderKey
 import { spriteTrails } from "./sprite-trails";
 import { crashExplosions, CRASH_BSP_SHA } from "./map-effects/crash-explosions";
 import { smokeStacks } from "./smokestacks";
-import { applyLightStyles } from "./lightstyles";
+import { lightStyleAtlas } from "./lightstyles";
 import { averageColor, potatoGeometry, withGrid, type PotatoSlot } from "./potato";
 import { ImposterSet, type ImposterKind } from "./imposter";
 import { CLIENT_DRAWN_SHADERS } from "./vmt";
@@ -736,11 +736,14 @@ export async function buildWorld(
   };
 
   const lm = core.lightmap();
-  // The core's atlas is style 0 only; add the named / patterned lights' pages (lightstyles.ts). `?nolightstyles` skips
-  // that (before / after comparisons).
-  const styles = opts.bsp && !appLocation().searchParams.has("nolightstyles") ? applyLightStyles(lm, opts.bsp) : null;
+  // The core's atlas is style 0 only; add the named / patterned lights' pages (lightstyles.ts), switched on and off
+  // with the core's light states in `update`. `?nolightstyles` skips that (before / after comparisons).
+  const lightStyles = opts.bsp && !appLocation().searchParams.has("nolightstyles") ? lightStyleAtlas(lm, opts.bsp, core.entities()) : null;
+  const styles = lightStyles?.result;
   if (styles?.skipped && styles.styledFaces) console.warn(`light styles not applied: ${styles.skipped}`);
   const lightMap = lightmapTexture(lm);
+  // The same texels as a never-drawn texture: copyTextureToTexture uploads a changed rectangle of the atlas from it.
+  const lightMapSource = new THREE.DataTexture(lm.data, lm.width, lm.height, THREE.RGBAFormat, THREE.UnsignedByteType);
   // MeshBasicMaterial scales lightmaps by 1/PI; undo that and the atlas encoding scale.
   const lightMapIntensity = Math.PI / lm.scale;
 
@@ -1306,7 +1309,9 @@ export async function buildWorld(
   const container = new THREE.Group();
   container.add(built.sky, root);
   // The players, ghosts and viewmodels drawn with this world take its fog and light (model-light.ts).
-  const modelLight = new ModelLight(worldFog, container, root, (x, y, z, out) => core.lightCube(x, y, z, out));
+  // Models wait on the switchable lights that reach them too (lightstyles.ts `full`; ModelLight's floor).
+  for (const style of lightStyles?.atlas?.styles ?? []) core.setLightStyle(style, lightStyles!.atlas!.above(style), lightStyles!.atlas!.full(style));
+  const modelLight = new ModelLight(worldFog, container, root, (x, y, z, out, full) => core.lightCube(x, y, z, out, full));
   let modelLighting: ModelLighting = "off";
   let fullbrightOn = false;
   const applyModelLighting = () => modelLight.setMode(potatoOn || fullbrightOn ? "off" : modelLighting);
@@ -1606,6 +1611,19 @@ export async function buildWorld(
       modelLight.setTime(visualTime);
       setWaterVisualTime(visualTime);
       scrolls.update(visualTime);
+      if (lightStyles?.atlas) {
+        const changed = lightStyles.atlas.update(effectStates);
+        // Only the changed blocks go up again; the whole atlas is many MB on the bigger maps.
+        for (const r of changed.rects) {
+          renderer.copyTextureToTexture(lightMapSource, lightMap, new THREE.Box2(new THREE.Vector2(r.x, r.y), new THREE.Vector2(r.x + r.w, r.y + r.h)), new THREE.Vector2(r.x, r.y));
+        }
+        // Models (hands, bunnies, animated props) take the switched lights too (core light_cube).
+        for (const style of changed.styles) core.setLightStyle(style, lightStyles.atlas.above(style), lightStyles.atlas.full(style));
+        if (changed.styles.length) {
+          modelLight.relight();
+          animProps?.relight();
+        }
+      }
       localLights.update(transforms, effectStates, visualTime);
       for (const model of instanceModels) {
         if (transforms.has(model)) continue;

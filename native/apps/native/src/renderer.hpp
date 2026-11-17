@@ -46,6 +46,7 @@
 #include <SDL3/SDL_opengl.h>
 #include "player_material.hpp"
 #include "ponytail_motion.hpp"
+#include "hair_motion.hpp"
 #include "reduced_motion.hpp"
 #include "actor_volumes.hpp"
 #include <algorithm>
@@ -93,6 +94,10 @@ namespace native {
     X(void, DeleteBuffers, (GLsizei, const GLuint *)) \
     X(void, EnableVertexAttribArray, (GLuint)) \
     X(void, VertexAttribPointer, (GLuint, GLint, GLenum, GLboolean, GLsizei, const void *)) \
+    X(void, VertexAttrib4f, (GLuint, GLfloat, GLfloat, GLfloat, GLfloat)) \
+    X(void, VertexAttribDivisor, (GLuint, GLuint)) \
+    X(void, BufferSubData, (GLenum, GLintptr, GLsizeiptr, const void *)) \
+    X(void, Uniform1fv, (GLint, GLsizei, const GLfloat *)) \
     X(GLuint, CreateShader, (GLenum)) \
     X(void, ShaderSource, (GLuint, GLsizei, const GLchar *const *, const GLint *)) \
     X(void, CompileShader, (GLuint)) \
@@ -403,8 +408,8 @@ class Renderer {
         double lightmapRefresh = 0, lightmapUpload = 0, sky = 0, buildCull = 0, sort = 0, submit = 0, presentation = 0,
                hdrFinish = 0, waterReflection = 0;
         double floorReport = 0, floorDraw = 0, actorDraw = 0, presentationBuild = 0, presentationWaterUniforms = 0,
-               presentationSubmit = 0, viewmodel = 0, mapProps = 0;
-        uint64_t mapPropPoses = 0;
+               presentationSubmit = 0, viewmodel = 0, mapProps = 0, mapEffects = 0;
+        uint64_t mapPropPoses = 0, mapEffectParticles = 0;
         uint64_t groups = 0, survivors = 0, drawCalls = 0, triangles = 0, atlasUpdateBytes = 0, floorCount = 0;
         bool hdrAuthored = false, hdrEffective = false;
         size_t waterVolumes = 0;
@@ -1650,7 +1655,7 @@ class Renderer {
             }
         }
         draw_landing(landingMarker, *presentation, eye, landingPixelsPerUnit, right, up, semanticPalette.loss);
-        draw_map_effects(eye, seconds, right, up);
+        draw_map_effects(vp, eye, seconds, right, up);
         profile_elapsed(frameProfile.presentationBuild, presentationStart);
         presentationStart = profile_now();
         gl.UseProgram(presentation->shader());
@@ -1733,9 +1738,17 @@ class Renderer {
     }
 
     void draw_map_effects(
-            const float eye[3], double seconds, const native_render::Vec3 &right, const native_render::Vec3 &up
+            const native::Matrix &vp,
+            const float eye[3],
+            double seconds,
+            const native_render::Vec3 &right,
+            const native_render::Vec3 &up
     ) {
-        mapEffects.draw(*presentation, core, eye, seconds, right, up, effectsVisible && !graphics.potato);
+        const auto start = profile_now();
+        const auto particles =
+                mapEffects.draw(*presentation, core, vp, eye, seconds, right, up, effectsVisible && !graphics.potato);
+        profile_elapsed(frameProfile.mapEffects, start);
+        if (profiling) frameProfile.mapEffectParticles += particles;
     }
 
 public:
@@ -1966,7 +1979,9 @@ public:
                 {"hdrEffective", p.hdrEffective},
                 {"waterVolumes", p.waterVolumes},
                 {"mapPropsMs", p.mapProps},
-                {"mapPropPoses", p.mapPropPoses}};
+                {"mapPropPoses", p.mapPropPoses},
+                {"mapEffectsMs", p.mapEffects},
+                {"mapEffectParticles", p.mapEffectParticles}};
     }
 
     // After a cut the bunny runs through the run's last moments (replay_preroll.hpp), like the cameras, so its legs,
@@ -2021,6 +2036,14 @@ public:
 
     void set_glow_visible(bool show, bool firstPerson) {
         if (viewmodel) viewmodel->glow_visibility(show, firstPerson);
+    }
+
+    void set_hop_effects_visible(bool others) {
+        if (viewmodel) viewmodel->hop_visibility(others);
+    }
+
+    void set_first_person_robe_visible(bool show) {
+        if (viewmodel) viewmodel->first_person_robe_visibility(show);
     }
 
     void set_ghost_cosmetics(const std::string &ghostId, const std::string &trailId, const std::string &shapeId) {
@@ -3427,6 +3450,10 @@ public:
     ) {
         const auto kind = caster(material);
         if (kind == Caster::none || (kind == Caster::cutout) != cutouts) return;
+        // A brush drawn see-through this frame (render keys, a window or an $alpha chain) lets the light through, as
+        // the website's shadow pass leaves out transparent surfaces.
+        const auto *fade = prop ? nullptr : brushFades.surface(model, material);
+        if (fade && !fade->plain) return;
         const auto &transform = scene_transform(prop, entity, model);
         if (!transform.visible) return;
         const auto matrix = native::model_matrix(transform);
@@ -3744,6 +3771,9 @@ public:
         phaseStart = profile_now();
         if (lightmapChanged > 0) {
             if (profiling) frameProfile.atlasUpdateBytes = changedLightmap.byte_count;
+            // Models and animated props take the switched lights too (core light_cube styles).
+            if (viewmodel) viewmodel->relight_models();
+            propCubes.relight();
             gl.ActiveTexture(GL_TEXTURE1);
             gl.BindTexture(GL_TEXTURE_2D, lightmap);
             gl.TexImage2D(
@@ -3817,6 +3847,7 @@ public:
             if (compareActor) viewmodel->draw_actor(*compareActor, vp, eye, seconds);
             for (const auto &actor : roomActors)
                 draw_room_actor(actor, vp, eye, seconds);
+            viewmodel->draw_hop_effects(vp, eye);
             profile_elapsed(frameProfile.actorDraw, detailStart);
         }
         BhSnapshot landingState{};

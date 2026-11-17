@@ -82,7 +82,7 @@ test("room service validates native pose identity and sends each batch as it arr
     expect(f.service.pose({ ...pose(f), generation: -1 })).toBe(false);
     expect(f.service.pose(pose(f))).toBe(true);
     expect(f.poses.map((s) => s.tick)).toEqual([4, 8, 12, 16, 20]);
-    expect(f.batches).toEqual([[{ style: 3, track: 0, timer: 2, timerTicks: 100 }, 2, true]]);
+    expect(f.batches).toEqual([[{ style: 3, track: 0, timer: 2, timerTicks: 100 }, 2, true, null]]);
     // A repeat or an older batch is refused; nothing waits for a page timer or a minimum gap.
     expect(f.service.pose(pose(f))).toBe(false);
     expect(f.service.pose(pose(f, 40))).toBe(true);
@@ -301,7 +301,7 @@ test("latest native timer metadata is sent with its sample batch and kick stops 
     f.handlers[0].message(welcome("test"));
     f.service.pose(pose(f));
     f.service.pose({ ...pose(f, 40), meta: { style: "sideways", track: 0, timer: 3, timerTicks: 200 } });
-    expect(f.batches[1]).toEqual([{ style: 3, track: 0, timer: 3, timerTicks: 200 }, 2, true]);
+    expect(f.batches[1]).toEqual([{ style: 3, track: 0, timer: 3, timerTicks: 200 }, 2, true, null]);
     f.handlers[0].message({ t: "kicked", reason: "Removed" });
     expect(f.service.view.status).toBe("closed");
     expect(f.service.command({ t: "chat", text: "late" })).toBe(false);
@@ -505,5 +505,61 @@ test("room race views, clears, clocks, announcements and reconnects reach the ho
     expect(f.service.view.roomRace).toBeNull();
   } finally {
     f.service.leave();
+  }
+});
+
+test("when the spectated player leaves, nobody's row still watches them", async () => {
+  const f = fixture();
+  try {
+    await f.service.join("test");
+    const start = welcome("test");
+    start.players = [
+      { slot: 0, id: "me", name: "Player", style: "autohop", spec: 3 } as never,
+      { slot: 2, id: "other", name: "Other", style: "autohop", spec: 3 } as never,
+      { slot: 3, id: "runner", name: "Runner", style: "autohop", spec: null } as never,
+      { slot: 4, id: "fourth", name: "Fourth", style: "autohop", spec: 2 } as never,
+    ];
+    f.handlers[0].message(start);
+    f.handlers[0].message({ t: "leave", slot: 3, name: "Runner" } as never);
+    const spec = Object.fromEntries(f.service.view.players.map((p) => [p.slot, p.spec]));
+    expect(spec).toEqual({ 0: null, 2: null, 4: 2 });
+  } finally {
+    f.service.leave();
+  }
+});
+
+test("the game's HUD feed rides on the state batch only for a room that takes it", async () => {
+  const input = {
+    tickInterval: 0.01,
+    maxSpeed: 250,
+    airAccelerate: 1000,
+    ticks: [16, 17, 18, 19, 20].map((tick) => ({
+      tick,
+      keys: 1,
+      forward: 450,
+      side: 0,
+      gain: 4,
+      state: 0,
+      yaw: 90,
+      vx: 300,
+      vy: 0,
+    })),
+    reports: [],
+  };
+  for (const inputs of [undefined, 1]) {
+    const f = fixture();
+    try {
+      await f.service.join("test");
+      const start = welcome("test");
+      if (inputs) start.room = { ...start.room, inputs };
+      f.handlers[0].message(start);
+      expect(f.service.pose({ ...pose(f), input })).toBe(true);
+      expect((f.batches[0] as unknown[])[3]).toEqual(inputs ? input : null);
+      // A block the website's encoder can't write whole is left out; the batch still goes.
+      expect(f.service.pose({ ...pose(f, 40), input: { ...input, ticks: [] } })).toBe(true);
+      expect((f.batches[1] as unknown[])[3]).toBeNull();
+    } finally {
+      f.service.leave();
+    }
   }
 });

@@ -153,7 +153,9 @@ void check_cache_recovery() {
         check(std::filesystem::file_size(loaded.content_root / "materials/test.vmt") == fixture.content.size(),
               "materialized content wasn't repaired");
     }
+    // A map's own BSP copy that still matches its hash is used as it is, so damage both to force a download.
     fixture.write(fixture.cache / "objects" / fixture.sha, "bad");
+    fixture.write(first.bsp, "bad");
     fixture.routes[fixture.bsp_route] = {'b', 'a', 'd'};
     fixture.requests.clear();
     check(fixture.failure().find("checksum mismatch") != std::string::npos, "bad BSP download wasn't reported");

@@ -96,6 +96,18 @@ double web_matrix_error(const J &frame, const J &bones, const V &world) {
     return error;
 }
 
+// How far the swing moves the right hand in the animation's own skeleton (before the bunny's layers).
+double animation_hand_offset(const Data &data, const V &swung, const V &plain) {
+    const auto at = std::find(data.names.begin(), data.names.end(), "ValveBiped.Bip01_R_Hand");
+    check(at != data.names.end(), "no right hand in the rig");
+    const int bone = data.map[size_t(at - data.names.begin())];
+    check(bone >= 0, "the right hand isn't animated");
+    const size_t o = size_t(bone) * 12;
+    return std::hypot(
+            std::hypot(swung[o + 3] - plain[o + 3], swung[o + 7] - plain[o + 7]), swung[o + 11] - plain[o + 11]
+    );
+}
+
 // Runs one stance on the native model beside the same stance without a swing, against the website's frames.
 void web_stance(const Data &data, const SwingWatch &watch, const J &stance, const J &bones) {
     const std::string name = stance.at("name");
@@ -115,9 +127,12 @@ void web_stance(const Data &data, const SwingWatch &watch, const J &stance, cons
         const bool active = frame.at("fireActive");
         check((swung.fireSeq >= 0) == active, name + ": the gesture's timing differs from the website's");
         swing_seen |= shot;
-        last_hand = watch.hand_offset(swung_skin, plain_skin);
-        check(std::abs(last_hand - frame.at("handOffset").get<double>()) <= web_hand_tolerance_units,
+        // The website's oracle measures the animation alone; the posture layer on top turns the upper body by the
+        // lean the swing changes, so the drawn hand is compared for the swing's size and return below.
+        const double animated_hand = animation_hand_offset(data, swung.bs.world, plain.bs.world);
+        check(std::abs(animated_hand - frame.at("handOffset").get<double>()) <= web_hand_tolerance_units,
               name + ": the hand doesn't move as far as on the website");
+        last_hand = watch.hand_offset(swung_skin, plain_skin);
         peak_hand = std::max(peak_hand, last_hand);
         peak_knife = std::max(peak_knife, watch.knife_offset(swung_skin, plain_skin));
         if (!swing_seen) check(last_hand <= back_to_normal_units, name + ": the hand moved before the swing");

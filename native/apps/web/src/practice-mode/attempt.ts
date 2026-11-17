@@ -14,6 +14,13 @@
  */
 export type PracticeUse = "teleport" | "noclip" | "spawn";
 
+/**
+ * Why this attempt's recording no longer plays back to where the player is (practice replays, session.ts
+ * keepPracticeReplay): noclip, a teleport the recording couldn't follow (a checkpoint without a playable path, or
+ * "Practice from here" without the replay's commands), or a teleport that reset the speed (Keep speed off).
+ */
+export type ReplayLoss = "noclip" | "teleport" | "speed";
+
 export class PracticeAttempt {
   /** Practice mode is on: every attempt is practice, also after a restart. */
   mode = false;
@@ -21,6 +28,7 @@ export class PracticeAttempt {
   private why: "mode" | PracticeUse | null = null;
   /** A tool or practice spawn moved the player outside the simulation this attempt, also in practice mode. */
   private moved = false;
+  private lost: ReplayLoss | null = null;
 
   /** This attempt is practice (practice mode, or a tool was used). Never submitted. */
   get practice(): boolean {
@@ -37,6 +45,24 @@ export class PracticeAttempt {
     return this.moved;
   }
 
+  /**
+   * Why the recording since the reset can't be played back now, or null when it can: every command from the reset (or a
+   * practice spawn, which the replay header records) up to now re-simulates to the live state.
+   */
+  get replayLoss(): ReplayLoss | null {
+    return this.lost;
+  }
+
+  /** The recording was rebuilt from a checkpoint's playable path (segments.ts): it plays back again. */
+  rejoined(): void {
+    this.lost = null;
+  }
+
+  /** A teleport set the speed to zero outside the simulation (Keep speed off). */
+  speedReset(): void {
+    this.lost = "speed";
+  }
+
   /** Practice mode on or off. Turning it off keeps this attempt practice: the caller restarts right after. */
   setMode(on: boolean): void {
     this.mode = on;
@@ -46,6 +72,7 @@ export class PracticeAttempt {
   /** A checkpoint teleport, noclip or practice spawn. True if a clean attempt just became practice (say so once). */
   use(tool: PracticeUse): boolean {
     this.moved = true;
+    if (tool !== "spawn") this.lost = tool;
     if (this.why) return false;
     this.why = tool;
     return true;
@@ -67,13 +94,14 @@ export class PracticeAttempt {
     const exited = this.why !== null && !this.mode;
     this.why = this.mode ? "mode" : null;
     this.moved = false;
+    this.lost = null;
     return exited;
   }
 }
 
 /**
- * What a finish does: "practice" (practice mode or a tool: the end card for your own reference, no replay, nothing
- * saved), "unranked" (third person, a lesson, scripted commands, the debug hook, a gun: kept on this device, never
+ * What a finish does: "practice" (practice mode or a tool: the end card for your own reference, and a practice replay
+ * kept on this device when the recording plays back; never uploaded or a PB), "unranked" (third person, a lesson, scripted commands, the debug hook, a gun: kept on this device, never
  * submitted or a PB), or "submit".
  */
 export function finishRoute(o: { practice: boolean; unranked: boolean }): "practice" | "unranked" | "submit" {

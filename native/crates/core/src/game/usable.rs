@@ -227,6 +227,18 @@ impl Game {
         if self.ents[i].removed {
             return;
         }
+        if matches!(self.ents[i].class.as_str(), "light" | "light_spot") {
+            // CLight::Use: a switchable light (style 32+) toggles, by ShouldToggle. Render-only (effect_states).
+            if self.entities[i].int("style") >= 32 {
+                let e = &mut self.ents[i];
+                e.visible = match use_type {
+                    UseType::On => true,
+                    UseType::Off => false,
+                    UseType::Toggle => !e.visible,
+                };
+            }
+            return;
+        }
         if matches!(self.ents[i].data, Data::Mover(_)) {
             self.mover_use(i, activator);
             return;

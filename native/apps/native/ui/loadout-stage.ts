@@ -8,7 +8,7 @@ import { packLoadout, type CosmeticLoadout } from "../../web/src/loadout";
 import { requestPreview, cancelPreview, nativePreviewAvailable, type PreviewRequest } from "./loadout-preview";
 import type { PreviewSpec } from "../../web/src/notify/item-preview";
 import type { PlayerGlow } from "../../web/src/player/glow-config";
-export type StageView = "fp" | "close" | "bunny" | "ghost" | "gun" | "gunside";
+export type StageView = "fp" | "close" | "bunny" | "ghost" | "hop" | "gun" | "gunside";
 export interface StageLook {
   outfit?: string | null;
   ghost?: string | null;
@@ -17,6 +17,8 @@ export interface StageLook {
   veil?: boolean;
   playerGlow?: PlayerGlow | null;
   previewGlow?: boolean;
+  /** The bunny turned to show its back (the Back category). */
+  facing?: "front" | "back";
 }
 export type ThumbJob =
   | { key: string; kind: "knife"; knife: string; loadout: CosmeticLoadout; focus?: "hilt" }
@@ -50,6 +52,8 @@ function previewId(spec: PreviewSpec): string {
   if (spec.kind === "bunny") return spec.body === "body-b" ? "body-b" : (spec.outfit ?? "outfit-cream");
   if (spec.kind === "ghost") return spec.key.startsWith("ghost-") ? spec.key : (spec.outfit ?? "outfit-cream");
   if (spec.kind === "hat") return spec.hat ?? "";
+  if (spec.kind === "back") return spec.back ?? "";
+  if (spec.kind === "hop") return spec.hop ?? "";
   if (spec.kind === "glove") return spec.glove ?? "glove-knit";
   if (spec.kind === "knife")
     return spec.knife === "knife-carrot" && spec.finish && spec.finish !== "fin-garden"
@@ -136,6 +140,45 @@ function stageRenderSize(canvas: HTMLCanvasElement): { width: number; height: nu
   };
 }
 
+// The host draws the bunny views; in the hop view the bunny hops on the spot so its hop effect bursts.
+const isBunnyView = (view: StageView) => view === "bunny" || view === "ghost" || view === "hop";
+// How far the stage turns the bunny to show its back (web ui/bunny-preview.ts).
+const BACK_FACING_YAW_DEGREES = 160;
+
+const colourValue = (hex: string | null | undefined) => (hex ? parseInt(hex.slice(1), 16) : undefined);
+
+/** A tile's loadout: what you wear, with the tile's own item on (item-preview.ts names it by slot). */
+function itemLoadout(shown: CosmeticLoadout, spec: PreviewSpec | null): CosmeticLoadout {
+  const loadout: CosmeticLoadout = { ...shown };
+  if (spec?.knife) loadout.knife = spec.knife;
+  if (spec?.finish) loadout.finish = spec.finish;
+  if (spec?.glove) loadout.glove = spec.glove;
+  if (spec?.hilt) loadout.hilt = spec.hilt;
+  if (spec?.camo) loadout.camo = spec.camo;
+  if (spec?.hat) loadout.hat = spec.hat;
+  if (spec?.hop) loadout.hop = spec.hop;
+  if (spec?.back) {
+    loadout.back = spec.back;
+    loadout.capeLength = spec.cape?.length ?? undefined;
+    loadout.capeColor = colourValue(spec.cape?.color);
+    loadout.capeLining = colourValue(spec.cape?.lining);
+    loadout.robePattern = spec.robe?.pattern ?? undefined;
+    loadout.robeTied = spec.robe?.tied ? true : undefined;
+    loadout.robeColor = colourValue(spec.robe?.color);
+    loadout.robePrint = colourValue(spec.robe?.print);
+  }
+  return loadout;
+}
+
+function thumbView(job: ThumbJob, spec: PreviewSpec | null): PreviewRequest["view"] {
+  if (spec?.kind === "gun") return "gunside";
+  if (spec?.kind === "hat" || spec?.kind === "bunny" || spec?.kind === "back" || spec?.kind === "hop") return "bunny";
+  if (spec?.kind === "ghost" || spec?.kind === "trail") return "ghost";
+  if (job.kind === "knife" && job.focus === "hilt") return "hilt";
+  if (job.kind === "knife" || spec?.kind === "knife") return "knife";
+  return "fp";
+}
+
 // Ghost and trail tiles describe the item by its colours (item-preview.ts); the host renders by item id.
 function colourItem(slot: "ghost" | "trail", spec: PreviewSpec): string | null {
   const match = COSMETICS.find(
@@ -213,7 +256,7 @@ export class LoadoutStage {
     if (this.disposed) return;
     this.renderNative();
     const slot = this.canvas.closest(".lo")?.querySelector<HTMLElement>(".lo-tab.on")?.dataset.slot;
-    const character = this.viewMode === "bunny" || this.viewMode === "ghost";
+    const character = isBunnyView(this.viewMode);
     let spec: PreviewSpec = {
       kind: this.viewMode === "ghost" ? "ghost" : character ? "bunny" : "knife",
       key: this.look.ghost ?? "stage",
@@ -282,16 +325,16 @@ export class LoadoutStage {
       playerGlow: this.look.playerGlow ?? null,
       view: this.viewMode,
       weapon: [2, 3, 7, 8, 9, 14, 17, 22][this.gunIndex],
-      yaw: this.yaw,
+      yaw: this.yaw + (isBunnyView(this.viewMode) && this.look.facing === "back" ? BACK_FACING_YAW_DEGREES : 0),
       pitch: this.pitch,
       inspect: this.inspectCount,
       held: this.held,
       ...stageRenderSize(this.canvas),
     };
   }
-  // A picture that doesn't move: no inspect playing, not held, not being turned.
+  // A picture that doesn't move: no inspect playing, not held, not being turned, no hops.
   private still(): boolean {
-    return !this.held && !this.drag && performance.now() >= this.animateUntil;
+    return !this.held && !this.drag && performance.now() >= this.animateUntil && this.viewMode !== "hop";
   }
   private renderNative(): void {
     if (this.disposed || !nativePreviewAvailable() || !this.canvas.isConnected || document.hidden) return;
@@ -316,7 +359,7 @@ export class LoadoutStage {
         if (still) stageFrames.keep(key, png);
         if (key === this.wanted) this.showHostFrame(png, ++this.received, key);
       }
-      if (this.active || this.held || performance.now() < this.animateUntil) {
+      if (this.active || !this.still()) {
         this.frame = window.setTimeout(() => this.renderNative(), 66);
       }
     });
@@ -374,18 +417,7 @@ export class LoadoutStage {
     if (nativePreviewAvailable() && canvas.dataset.nativeThumbnail !== "true") {
       this.visibleThumbs.watch(job.key, canvas, (complete) => {
         const spec = job.kind === "item" ? job.spec : null;
-        const loadout =
-          job.kind === "item"
-            ? {
-                ...this.shown,
-                ...(spec?.knife ? { knife: spec.knife } : {}),
-                ...(spec?.finish ? { finish: spec.finish } : {}),
-                ...(spec?.glove ? { glove: spec.glove } : {}),
-                ...(spec?.hilt ? { hilt: spec.hilt } : {}),
-                ...(spec?.camo ? { camo: spec.camo } : {}),
-                ...(spec?.hat ? { hat: spec.hat } : {}),
-              }
-            : job.loadout;
+        const loadout = job.kind === "item" ? itemLoadout(this.shown, spec) : job.loadout;
         const request = requestPreview(
           {
             loadout: packLoadout(loadout),
@@ -393,20 +425,9 @@ export class LoadoutStage {
             ghost: (spec?.kind === "ghost" && colourItem("ghost", spec)) || this.look.ghost || "ghost-gold",
             trail: (spec?.kind === "trail" && colourItem("trail", spec)) || this.look.trail || "trail-gold",
             playerGlow: null,
-            view:
-              spec?.kind === "gun"
-                ? "gunside"
-                : spec?.kind === "hat" || spec?.kind === "bunny"
-                  ? "bunny"
-                  : spec?.kind === "ghost" || spec?.kind === "trail"
-                    ? "ghost"
-                    : job.kind === "knife" && job.focus === "hilt"
-                      ? "hilt"
-                      : job.kind === "knife" || spec?.kind === "knife"
-                        ? "knife"
-                        : "fp",
+            view: thumbView(job, spec),
             weapon: 17,
-            yaw: 0,
+            yaw: spec?.kind === "back" ? BACK_FACING_YAW_DEGREES : 0,
             pitch: 0,
             inspect: 0,
             held: false,

@@ -5,6 +5,7 @@
 // Landfix is recorded in the command stream; the other cvars are client settings. DOM-free.
 
 import { ANGLE_SPEED_KEY_RANGE, YAW_SPEED_RANGE } from "../turn-binds";
+import { HOLD_AFTER_RANGE } from "../restart-hold";
 import { M_YAW_RANGE, SENS_RANGE, sensProblem } from "../sens-convert";
 import { HUD_ELEMENTS, HUD_SCALE, type HudElId } from "../hud/layout";
 import { COLOR_BLIND_MODES } from "../palette";
@@ -13,6 +14,8 @@ import { KINDS, TRIGGER_OPACITY, TRIGGER_STYLES, TRIGGER_THICKNESS } from "../tr
 import { JHUD_BANDS } from "../ssj/jhud";
 import { PAINT_COLORS } from "../paint/prefs";
 import { LANDING_MODES } from "../landing/prefs";
+import { KEY_SOUND_SETS } from "../audio/keysound-policy";
+import { PERFECT_SOUND_SETS } from "../audio/perfect-policy";
 import { applyGraphicsPreset, DEFAULT_PREFS, graphicsPreset, PRESET_ORDER, type GraphicsPreset, type Prefs } from "../ui/settings";
 
 export type CvarValue = number | string;
@@ -78,7 +81,7 @@ const ANNOUNCED = ["pb", "wr", "speed", "highSpeed", "streak", "lj"] as const;
 const BUSES = ["music", "sfx", "ui", "ambience", "map"] as const;
 /** The trainer, keys overlay, jump stats, JHUD and longjump settings (Settings → HUD). */
 const hudDetail: Cvar[] = [
-  pick("hud_trainer_style", "Strafe trainer look: classic, detailed, minimal or bar.", ["classic", "detailed", "minimal", "bar"] as const, (p) => p.hud.strafeTrainer.style, (p, v) => (p.hud.strafeTrainer.style = v)),
+  pick("hud_trainer_style", "Strafe trainer look: classic, detailed, minimal, bar, gauge or arc.", ["classic", "detailed", "minimal", "bar", "gauge", "arc"] as const, (p) => p.hud.strafeTrainer.style, (p, v) => (p.hud.strafeTrainer.style = v)),
   col("hud_trainer_color", "Strafe trainer colour.", (p) => p.hud.strafeTrainer.color, (p, v) => (p.hud.strafeTrainer.color = v)),
   sw("hud_trainer_follow", "100% in the middle, moving the way you turn.", (p) => p.hud.strafeTrainer.follow, (p, v) => (p.hud.strafeTrainer.follow = v)),
   num("hud_trainer_smoothing", "Ticks averaged into the trainer, 1 to 20.", [1, 20], (p) => p.hud.strafeTrainer.smoothing, (p, v) => (p.hud.strafeTrainer.smoothing = v), { int: true }),
@@ -120,7 +123,11 @@ const audioDetail: Cvar[] = [
   num("snd_announcer_lj_at", "Longjump line from this distance.", [200, 1000], (p) => p.audio.announcer.ljThreshold, (p, v) => (p.audio.announcer.ljThreshold = v)),
   sw("hud_perf", "Perf% beside Sync% in the scroll styles.", (p) => p.audio.perfHud, (p, v) => (p.audio.perfHud = v)),
   sw("hud_perfect", "Perfect text after a one-tick hop.", (p) => p.audio.perfectIndicator, (p, v) => (p.audio.perfectIndicator = v)),
-  sw("snd_perfecttick", "A quiet tick on a perfect hop.", (p) => p.audio.perfectTick, (p, v) => (p.audio.perfectTick = v)),
+  sw("snd_perfecttick", "A sound on each perfect jump in EZ Scroll and Legit Scroll.", (p) => p.audio.perfectTick, (p, v) => (p.audio.perfectTick = v), ["snd_perfsound"]),
+  pick("snd_perfsound_sound", `Perfect jump sound: ${PERFECT_SOUND_SETS.map(([s]) => s).join(", ")}.`, PERFECT_SOUND_SETS.map(([s]) => s), (p) => p.audio.perfectSound.set, (p, v) => (p.audio.perfectSound.set = v)),
+  num("snd_perfsound_volume", "Perfect jump sound volume, 0 to 1.", pct, (p) => p.audio.perfectSound.volume, (p, v) => (p.audio.perfectSound.volume = v)),
+  sw("snd_perfsound_streak", "The perfect jump sound rises with a streak.", (p) => p.audio.perfectSound.streak, (p, v) => (p.audio.perfectSound.streak = v)),
+  pick("snd_perfsound_streaklength", "How far the streak rises before it holds: short or long.", ["short", "long"] as const, (p) => p.audio.perfectSound.length, (p, v) => (p.audio.perfectSound.length = v)),
   ...BUSES.map((k) => sw(`snd_mute_${k}`, `Mute ${k === "sfx" ? "game sounds" : k}.`, (p) => p.audio.mute[k], (p, v) => (p.audio.mute[k] = v))),
 ];
 /** Ghost routes, trigger kinds and colours, paint, inspect, the look's extra switches. */
@@ -133,6 +140,7 @@ const otherDetail: Cvar[] = [
   pick("cl_ghost_compare", "The ghost the split compares with: auto, pb, wr or custom.", ["auto", "pb", "wr", "custom"] as const, (p) => p.ghost.compare, (p, v) => (p.ghost.compare = v)),
   sw("cl_ghost_nearfade", "Fade a ghost when the camera is in it.", (p) => p.ghost.nearFade, (p, v) => (p.ghost.nearFade = v)),
   sw("cl_firstpersonglow", "Your glow on your hands and knife.", (p) => p.firstPersonGlow, (p, v) => (p.firstPersonGlow = v)),
+  sw("cl_firstpersonrobe", "Your Robe's sleeves on your arms in first person.", (p) => p.firstPersonRobe, (p, v) => (p.firstPersonRobe = v)),
   num("cl_triggerthickness", "Trigger line width, pixels.", TRIGGER_THICKNESS, (p) => p.triggers.thickness, (p, v) => (p.triggers.thickness = v)),
   ...KINDS.map((k) => sw(`cl_trigger_${k.id}`, `Show ${k.id} triggers.`, (p) => p.triggers.kinds[k.id], (p, v) => (p.triggers.kinds[k.id] = v))),
   ...KINDS.map((k) => col(`cl_trigger_color_${k.id}`, `Colour of ${k.id} triggers.`, (p) => p.triggers.colors[k.id], (p, v) => (p.triggers.colors[k.id] = v))),
@@ -172,11 +180,12 @@ export const CVARS: readonly Cvar[] = [
   sw("m_timedinput", "Timestamped input: each tick takes the input made before it.", (p) => p.timedInput, (p, v) => (p.timedInput = v), ["bh_timedinput"]),
   sw("cl_inputstats", "Input diagnostics overlay.", (p) => p.inputStats, (p, v) => (p.inputStats = v), ["bh_inputstats"]),
   // ---- keys
-  num("cl_yawspeed", "+left / +right turn speed, degrees per second. From your next restart.", YAW_SPEED_RANGE, (p) => p.yawSpeed, (p, v) => (p.yawSpeed = v)),
+  num("cl_yawspeed", "+left / +right turn speed, degrees per second. From your next restart.", YAW_SPEED_RANGE, (p) => p.yawSpeed, (p, v) => (p.yawSpeed = v), { aliases: ["turnspeed"] }),
   num("cl_anglespeedkey", "Turn speed multiplier while +speed is held.", ANGLE_SPEED_KEY_RANGE, (p) => p.angleSpeedKey, (p, v) => (p.angleSpeedKey = v)),
   sw("cl_nullbinds", "Null binds: with A and D held, the last one pressed wins.", (p) => p.nullBinds, (p, v) => (p.nullBinds = v), ["bh_nullbinds"]),
   sw("cl_wrelease", "Release W on jump.", (p) => p.wRelease, (p, v) => (p.wRelease = v), ["bh_wrelease"]),
   sw("cl_holdrestart", "Restart keys need a short hold.", (p) => p.holdRestart, (p, v) => (p.holdRestart = v), ["bh_holdrestart"]),
+  num("cl_holdrestart_after", "Restart keys need the hold once a timed run is this many minutes long (0: never).", HOLD_AFTER_RANGE, (p) => p.holdRestartAfter, (p, v) => (p.holdRestartAfter = v), { int: true }),
   pick("cl_autorestart", "Restart a timed run once it's past: off, pb, wr or ghost.", ["off", "pb", "wr", "ghost"] as const, (p) => p.autoRestart.when, (p, v) => (p.autoRestart.when = v)),
   pick("cl_autorestart_action", "What auto restart does: restart or sound.", ["restart", "sound"] as const, (p) => p.autoRestart.action, (p, v) => (p.autoRestart.action = v)),
   sw("cl_cp_keepvelocity", "A checkpoint teleport keeps the speed you saved it with.", (p) => p.practice.keepVelocity, (p, v) => (p.practice.keepVelocity = v)),
@@ -236,6 +245,7 @@ export const CVARS: readonly Cvar[] = [
   sw("cl_nametags", "Name tags over other players.", (p) => p.tags.players, (p, v) => (p.tags.players = v)),
   sw("cl_nametags_walls", "Name tags through walls.", (p) => p.tags.throughWalls, (p, v) => (p.tags.throughWalls = v)),
   sw("cl_playerglow", "Supporter glows on players.", (p) => p.showPlayerGlow, (p, v) => (p.showPlayerGlow = v)),
+  sw("cl_hopfx", "Other players' hop effects.", (p) => p.showHopFx, (p, v) => (p.showHopFx = v)),
   // ---- graphics
   num("fps_max", "FPS limit while playing (0: none). Above your refresh rate needs r_uncapped 1.", [30, 1000], (p) => p.graphics.fpsLimit, (p, v) => (p.graphics.fpsLimit = v), { zero: true, int: true, aliases: ["maxfps"] }),
   num("fps_max_menu", "FPS limit in menus (0: the same as playing).", [10, 1000], (p) => p.graphics.menuFps, (p, v) => (p.graphics.menuFps = v), { zero: true, int: true }),
@@ -283,6 +293,10 @@ export const CVARS: readonly Cvar[] = [
   sw("snd_others", "Other players' sounds in servers.", (p) => p.audio.others, (p, v) => (p.audio.others = v)),
   sw("snd_ghosts", "Ghost sounds.", (p) => p.audio.ghosts, (p, v) => (p.audio.ghosts = v)),
   sw("snd_announcer", "The announcer.", (p) => p.audio.announcer.enabled, (p, v) => (p.audio.announcer.enabled = v)),
+  sw("snd_keysounds", "A short sound as a strafe key goes down.", (p) => p.audio.keySounds.enabled, (p, v) => (p.audio.keySounds.enabled = v)),
+  pick("snd_keysounds_sound", `Key sound: ${KEY_SOUND_SETS.map(([s]) => s).join(", ")}.`, KEY_SOUND_SETS.map(([s]) => s), (p) => p.audio.keySounds.set, (p, v) => (p.audio.keySounds.set = v)),
+  num("snd_keysounds_volume", "Key sound volume, 0 to 1.", pct, (p) => p.audio.keySounds.volume, (p, v) => (p.audio.keySounds.volume = v)),
+  pick("snd_keysounds_keys", "Which keys sound: strafe (the style's strafe keys) or movement (every movement key, jump and duck too).", ["strafe", "movement"] as const, (p) => p.audio.keySounds.keys, (p, v) => (p.audio.keySounds.keys = v)),
   ...hudDetail,
   ...audioDetail,
   ...otherDetail,

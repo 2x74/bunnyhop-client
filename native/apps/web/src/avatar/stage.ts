@@ -18,6 +18,8 @@
 import * as THREE from "three";
 import { PlayerModel, type PlayerPose } from "../player/model";
 import { loadoutFor } from "../loadout";
+import { BACK_KIND } from "../player/bunny/backs";
+import { SPRUNG_HATS } from "../player/hair-fx";
 import { cosmetic } from "../progression";
 import { inspectSetFor } from "../viewmodel/inspects/index";
 import { knifeById } from "../viewmodel/knives/index";
@@ -26,6 +28,20 @@ import { cosmeticsStudio, setCosmeticsStudio } from "../viewmodel/finishes/shade
 import { playerLookTier, setPlayerLookTier, type PlayerLookTier } from "../player/look-tier";
 import { BACKDROPS, type AvatarPose, type AvatarSpec } from "./spec";
 import type { ArmReach, ArmTurn, BunnyModel } from "../player/bunny/model";
+
+/**
+ * What a pose is simulated from (AvatarStage re-poses when it changes). The pose depends only on what's in hand (the
+ * knife's inspect, a gun) and the pose fields: colourway, hat, finish, gloves and build are restyles of the same pose
+ * (cheap: the picker's thumbnails swap them without re-posing). Worn things that move with the pose are the exception:
+ * the Ponytail's pendulum (hat-fx.ts, its length changes the swing), sprung hair (hair-fx.ts: Spiky Hair, Long Hair) and
+ * a moving back item (back-fx.ts: the cape, whose length changes its swing, the robe, the balloon, the key's turn).
+ * Without them the same spec could come out differently after another one was drawn.
+ */
+export function poseKey(spec: AvatarSpec, animSource: string): string {
+  const hair = spec.hat === "hat-ponytail" ? `pony${spec.hairLength ?? ""}` : spec.hat && SPRUNG_HATS.includes(spec.hat) ? "hair" : "";
+  const back = spec.back && BACK_KIND[spec.back] !== "still" ? `${spec.back}${spec.capeLength ?? ""}${spec.robeTied ? "t" : ""}` : "";
+  return [spec.knife, spec.hand, spec.gun, spec.pose, spec.moment.toFixed(3), spec.tilt.toFixed(3), spec.ears.toFixed(3), spec.turn.toFixed(1), hair, back, animSource, JSON.stringify(GESTURES[spec.pose] ?? null)].join("|");
+}
 
 /** The graphics look avatar pictures are drawn at: Enhanced detail for the cosmetics and the garments (see above). */
 export const AVATAR_LOOK: { cosmetics: CosTier; player: PlayerLookTier } = { cosmetics: 3, player: 2 };
@@ -284,18 +300,14 @@ export class AvatarStage {
     this.spec = spec;
     const bm = this.model.bunnyModel;
     if (!prev || prev.outfit !== spec.outfit) bm?.setOutfit(spec.outfit);
-    const look = [spec.knife, spec.finish, spec.glove, spec.hat, spec.body, spec.hand, spec.gun, spec.hairColor, spec.hairLength].join("|");
-    const prevLook = prev ? [prev.knife, prev.finish, prev.glove, prev.hat, prev.body, prev.hand, prev.gun, prev.hairColor, prev.hairLength].join("|") : "";
+    const look = [spec.knife, spec.finish, spec.glove, spec.hat, spec.body, spec.hand, spec.gun, spec.hairColor, spec.hairLength, spec.hairHighlight, spec.maskOn, spec.back, spec.capeLength, spec.capeColor, spec.capeLining, spec.robePattern, spec.robeTied, spec.robeColor, spec.robePrint].join("|");
+    const prevLook = prev ? [prev.knife, prev.finish, prev.glove, prev.hat, prev.body, prev.hand, prev.gun, prev.hairColor, prev.hairLength, prev.hairHighlight, prev.maskOn, prev.back, prev.capeLength, prev.capeColor, prev.capeLining, prev.robePattern, prev.robeTied, prev.robeColor, prev.robePrint].join("|") : "";
     if (look !== prevLook) {
-      this.model.setLoadout(loadoutFor({ knife: spec.knife, finish: spec.finish, glove: spec.glove, hat: spec.hat, body: spec.body, hairColor: spec.hairColor, hairLength: spec.hairLength }));
+      this.model.setLoadout(loadoutFor({ knife: spec.knife, finish: spec.finish, glove: spec.glove, hat: spec.hat, body: spec.body, hairColor: spec.hairColor, hairLength: spec.hairLength, hairHighlight: spec.hairHighlight, maskOn: spec.maskOn, back: spec.back, capeLength: spec.capeLength, capeColor: spec.capeColor, capeLining: spec.capeLining, robePattern: spec.robePattern, robeTied: spec.robeTied, robeColor: spec.robeColor, robePrint: spec.robePrint }));
       this.model.setGun(spec.hand === "gun" ? spec.gun : null);
       bm?.setKnifeHidden(spec.hand === "none");
     }
-    // The pose depends only on what's in hand (the knife's inspect, a gun) and the pose fields: colourway, hat, finish,
-    // gloves and build are restyles of the same pose (cheap: the picker's thumbnails swap them without re-posing). The
-    // Ponytail is the exception: its pendulum (hat-fx.ts) is simulated with the pose, and its length changes the swing.
-    const pony = spec.hat === "hat-ponytail" ? `pony${spec.hairLength ?? ""}` : "";
-    const key = [spec.knife, spec.hand, spec.gun, spec.pose, spec.moment.toFixed(3), spec.tilt.toFixed(3), spec.ears.toFixed(3), spec.turn.toFixed(1), pony, this.animSource, JSON.stringify(GESTURES[spec.pose] ?? null)].join("|");
+    const key = poseKey(spec, this.animSource);
     if (key !== this.posed) {
       this.posed = key;
       this.pose(spec);

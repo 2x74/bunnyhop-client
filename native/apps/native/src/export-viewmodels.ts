@@ -9,14 +9,28 @@ import { Builder } from "../../web/src/player/bunny/builder";
 import { concat, rig as bunnyRig } from "../../web/src/player/bunny/rig";
 import { buildBunnyGeometry } from "../../web/src/player/bunny/mesh";
 import { BunnyProcedural } from "../../web/src/player/bunny/procedural";
-import { COSMETICS, HAIR_HATS, LENGTH_HATS, HAIR_LENGTH } from "../../web/src/progression";
+import {
+  CAPE_ITEM,
+  CAPE_LENGTH,
+  COSMETICS,
+  HAIR_HATS,
+  HAIR_LENGTH,
+  LENGTH_HATS,
+  ROBE_ITEM,
+} from "../../web/src/progression";
 import { COLOURWAYS } from "../../web/src/player/bunny/palettes";
 import { garmentPatternUniforms, setGarmentPattern } from "../../web/src/player/fabric";
 import { hatGeometry, headwearKey } from "../../web/src/player/bunny/hats";
 import { hatFit } from "../../web/src/player/bunny/hat-fit";
+import { HAIR_RANGE, SPRUNG_HATS } from "../../web/src/player/hair-fx";
 import { ensureHeadwear } from "../../web/src/player/hat-detail";
+import { BACK_KIND, backGeometry, backKey, backRigOf, type BackFit } from "../../web/src/player/bunny/backs";
+import type { BackRig } from "../../web/src/player/back-fx";
+import { sleeveAnchor } from "../../web/src/player/bunny/robe";
+import { fpRobeGeometry, fpRobeUniform } from "../../web/src/viewmodel/robe-sleeves";
 import { bakeGunAO } from "../../web/src/viewmodel/guns/ao";
 import { writePlayerMaterials } from "./export-player-materials";
+import { writeHopEffects } from "./export-hop-effects";
 import { crownGeometry } from "../../web/src/player/bunny/crown";
 import { vmRig } from "../../web/src/viewmodel/rig";
 import { VmProcedural, PROC_DURATION, type VmAction } from "../../web/src/viewmodel/procedural";
@@ -74,6 +88,10 @@ for (const [name, code] of Object.entries(CAMO_STAMP_CODE))
   if (code >= PROGRAM_CAMO_STAMPS) throw new Error(`Camo stamp ${name} (${code}) needs a wider program key`);
 // Floats per vertex: position 3, normal 3, partColor 3, skinIndex 4, skinWeight 4, accent 1, finishUV 4, headwear 1.
 const STRIDE = 26;
+/** Four-float attributes only some meshes carry, each exported as a buffer of its own (NativeViewmodel extra_location). */
+/** The Cape lengths native carries (percent steps from the shortest); the website builds every 5. */
+const NATIVE_CAPE_STEP = 20;
+const EXTRA_ATTRIBUTES = ["backfx", "hairRoot"] as const;
 const pieces: Buffer[] = [];
 let byteOffset = 0;
 const put = (data: Float32Array) => {
@@ -105,6 +123,7 @@ function geometry(name: string, g: any) {
     finish = g.getAttribute("finishUV"),
     headwear = g.getAttribute("headwear"),
     gunCamo = g.getAttribute("gunCamo");
+  const extras = EXTRA_ATTRIBUTES.filter((attribute) => g.getAttribute(attribute));
   // Body meshes are weapon-free: selected TP weapons render as separate parts.
   if (name.startsWith("body:")) {
     const knifeBone = bunnyRig().index("bunny.Knife");
@@ -133,16 +152,19 @@ function geometry(name: string, g: any) {
   }
   // Index identical vertices; source builders intentionally emit triangle soup.
   const unique: number[] = [],
+    uniqueExtras: number[][] = extras.map(() => []),
     indices = new Uint32Array(p.count),
     seen = new Map<string, number>();
   for (let i = 0; i < p.count; i++) {
     const view = new Uint8Array(vertices.buffer, i * STRIDE * 4, STRIDE * 4);
-    const key = Buffer.from(view).toString("base64");
+    const extraValues = extras.map((attribute) => Array.from(g.getAttribute(attribute).array.slice(i * 4, i * 4 + 4)));
+    const key = Buffer.from(view).toString("base64") + extraValues.join(";");
     let at = seen.get(key);
     if (at === undefined) {
       at = unique.length / STRIDE;
       seen.set(key, at);
       for (let j = 0; j < STRIDE; j++) unique.push(vertices[i * STRIDE + j]);
+      extraValues.forEach((values, k) => uniqueExtras[k].push(...(values as number[])));
     }
     indices[i] = at;
   }
@@ -177,6 +199,13 @@ function geometry(name: string, g: any) {
     vertices: unique.length / STRIDE,
     indexOffset: putUnique(new Float32Array(indices.buffer)),
     indices: indices.length,
+    ...(extras.length
+      ? {
+          extras: Object.fromEntries(
+            extras.map((attribute, k) => [attribute, putUnique(new Float32Array(uniqueExtras[k]))]),
+          ),
+        }
+      : {}),
   };
   g.dispose();
 }
@@ -473,16 +502,63 @@ for (const tier of [1, 2, 3] as const) headwearMesh(`crown:${tier}`, crownGeomet
 const HAT_IDS = COSMETICS.filter((c) => c.slot === "hat").map((c) => c.id);
 const BODY_LOOKS = ["bunny", "tek", "plush", "bune"] as const;
 const hatMeshes: Record<string, Record<string, string>> = {};
+// The hats with a second way to wear them (the Kitsune Mask over the face: hats.ts headwearKey with maskOn).
+const hatFaceMeshes: Record<string, Record<string, string>> = {};
+const headwearOf = (key: string) => {
+  const g = hatGeometry(key);
+  if (g && !meshes[key]) headwearMesh(key, g);
+  return g ? key : null;
+};
 for (const id of HAT_IDS) {
   hatMeshes[id] = {};
   for (const look of BODY_LOOKS) {
-    const key = headwearKey(id, look);
-    const g = hatGeometry(key);
-    if (!g) continue;
-    if (!meshes[key]) headwearMesh(key, g);
-    hatMeshes[id][look] = key;
+    const key = headwearOf(headwearKey(id, look));
+    if (key) hatMeshes[id][look] = key;
+    const faceKey = headwearKey(id, look, { maskOn: true });
+    if (faceKey === key || !headwearOf(faceKey)) continue;
+    (hatFaceMeshes[id] ??= {})[look] = faceKey;
   }
 }
+/**
+ * Back items (backs.ts) at every fit a body gives them: the build's torso profile, the hood, a ponytail from a raised
+ * hood, the Robe tied or open, and the Cape at NATIVE_CAPE_LENGTHS (each length is its own geometry; a worn length
+ * draws at the nearest of these). The client rebuilds the same key with backKey's rules (back_slot.hpp).
+ */
+const NATIVE_CAPE_LENGTHS = Array.from(
+  { length: (CAPE_LENGTH.max - CAPE_LENGTH.min) / NATIVE_CAPE_STEP + 1 },
+  (_, i) => CAPE_LENGTH.min + i * NATIVE_CAPE_STEP,
+);
+const BACK_FIT_PLACES: Omit<BackFit, "len" | "tied">[] = [
+  { profile: "a", hood: "up" },
+  { profile: "a", hood: "down" },
+  { profile: "a", hood: "up", tail: true },
+  { profile: "b", hood: "up" },
+  { profile: "b", hood: "down" },
+  { profile: "b", hood: "up", tail: true },
+  { profile: "plush", hood: "up" },
+  { profile: "plush", hood: "up", tail: true },
+];
+const backRigs: Record<string, BackRig> = {};
+function backVariants(id: string): BackFit[] {
+  if (id === CAPE_ITEM)
+    return BACK_FIT_PLACES.flatMap((place) =>
+      NATIVE_CAPE_LENGTHS.map((len) => (len === CAPE_LENGTH.default ? place : { ...place, len })),
+    );
+  if (id === ROBE_ITEM) return BACK_FIT_PLACES.flatMap((place) => [place, { ...place, tied: true as const }]);
+  return BACK_FIT_PLACES;
+}
+for (const id of Object.keys(BACK_KIND))
+  for (const fit of backVariants(id)) {
+    const g = backGeometry(id, fit);
+    if (!g) throw new Error(`Back item without geometry: ${id}`);
+    const name = "back:" + backKey(id, fit);
+    const rig = backRigOf(g);
+    if (!rig) throw new Error(`Back item without a rig: ${name}`);
+    backRigs[name] = rig;
+    geometry(name, g.clone());
+  }
+// The Robe's sleeves on the first-person forearms (viewmodel/robe-sleeves.ts), drawn only while it is worn.
+geometry("fprobe", fpRobeGeometry().clone());
 const hatFits = Object.fromEntries(
   BODY_LOOKS.map((look) => [look, Object.fromEntries(["", ...HAT_IDS].map((id) => [id, hatFit(look, id || null)]))]),
 );
@@ -608,8 +684,23 @@ await writeFile(
     outfits: COLOURWAYS,
     outfitPatterns: outfitPatterns(),
     hats: hatMeshes,
+    hatFaces: hatFaceMeshes,
     hatFits,
-    hair: { hats: HAIR_HATS, lengthHats: LENGTH_HATS, length: HAIR_LENGTH, defaultColor: HAIR_DEFAULT },
+    backs: {
+      kinds: BACK_KIND,
+      capeLengths: NATIVE_CAPE_LENGTHS,
+      rigs: backRigs,
+      sleeveAnchor: sleeveAnchor().at,
+      firstPersonRobe: fpRobeUniform(0),
+    },
+    hair: {
+      hats: HAIR_HATS,
+      lengthHats: LENGTH_HATS,
+      length: HAIR_LENGTH,
+      defaultColor: HAIR_DEFAULT,
+      sprung: SPRUNG_HATS,
+      ranges: HAIR_RANGE,
+    },
     gloves: GLOVE_STYLE,
     inspects: Object.fromEntries(
       KNIVES.map((def) => [
@@ -677,6 +768,7 @@ await writeFile(
   }),
 );
 await writePlayerMaterials(directory);
+await writeHopEffects(directory);
 // Shader pieces older builds compiled from; the player materials above replace them.
 for (const name of [
   "cosmetic-vertex-pars",

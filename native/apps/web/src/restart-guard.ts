@@ -1,11 +1,11 @@
-// Hold to restart (Settings → Keys, off by default; restart-hold.ts has the state machine). main.ts routes the restart
+// Hold to restart (Settings → Keys; restart-hold.ts has the state machine and when a press needs the hold). main.ts routes the restart
 // keys through RestartGuard.press(). Only *when* the existing restart fires changes: the restart itself (and what the
 // replay records) is untouched. Chat commands (!r / !b) stay instant.
 
 import type { Input } from "./input";
 import { isTextField } from "./input";
 import { RestartRing } from "./hud/restart-ring";
-import { RestartHold } from "./restart-hold";
+import { holdNeeded, RestartHold } from "./restart-hold";
 import { keyLabel, prefs, type Action } from "./ui/settings";
 
 export type GuardedAction = "restart" | "restartBonus" | "restartMain";
@@ -24,13 +24,21 @@ export class RestartGuard {
   /** The ring around the crosshair (also leave-confirm.ts's hold to leave). */
   readonly ring: RestartRing;
 
-  constructor(private o: { input: Input; fire: (a: GuardedAction) => void }) {
+  constructor(
+    private o: {
+      input: Input;
+      fire: (a: GuardedAction) => void;
+      /** Seconds on the clock of the timed run in progress; 0 when none is running. */
+      runSeconds: () => number;
+    },
+  ) {
     this.ring = new RestartRing(document.getElementById("hud")!);
   }
 
   /** input.onAction for the restart keys: true if a hold started (it fires later), false to run it now as before. */
   press(a: Action): boolean {
-    if (!prefs.get().holdRestart || !GUARDED.includes(a)) return false;
+    const p = prefs.get();
+    if (!GUARDED.includes(a) || !holdNeeded(p.holdRestart, p.holdRestartAfter, this.o.runSeconds())) return false;
     // A press that can't be held (a wheel bind: no key stays down) acts right away.
     if (!this.o.input.actionHeld(a)) return false;
     const now = performance.now();
