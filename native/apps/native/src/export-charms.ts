@@ -13,6 +13,7 @@ import { KNIVES } from "../../web/src/viewmodel/knives/index";
 import { LIVE_DESIGNS } from "../../web/src/viewmodel/hilts/live/index";
 import "../../web/src/viewmodel/charms/knife";
 import { charmFit, charmPlaces, type CharmHang } from "../../web/src/viewmodel/charms/anchors";
+import { charmClamp } from "../../web/src/viewmodel/charms/places";
 import { BOTTOM_RISE, TOP_DROP, mount, mountKey, type MountSpec } from "../../web/src/viewmodel/charms/hardware";
 import {
   CB,
@@ -34,6 +35,16 @@ function mountGeometry(m: MountSpec): THREE.BufferGeometry {
   mount(new CharmCtx(b), m);
   b.finish = null;
   return b.geometry();
+}
+
+/** The places a knife offers and the Cord and Size it clamps the sliders to at each (places.ts charmClamp). */
+function placesOf(knife: string) {
+  const range = (pommel: boolean) => {
+    const low = charmClamp(knife, pommel, CHARM_LENGTH.min, CHARM_SIZE.min);
+    const high = charmClamp(knife, pommel, CHARM_LENGTH.max, CHARM_SIZE.max);
+    return { cord: [low.cord, high.cord], size: [low.size, high.size] };
+  };
+  return { ...charmPlaces(knife), clampGuard: range(false), clampPommel: range(true) };
 }
 
 export function writeCharms(geometry: Geometry) {
@@ -118,7 +129,7 @@ export function writeCharms(geometry: Geometry) {
     topDrop: TOP_DROP,
     bottomRise: BOTTOM_RISE,
     ranges: { length: CHARM_LENGTH, size: CHARM_SIZE, swing: CHARM_SWING },
-    places: Object.fromEntries(KNIVES.map((k) => [k.id, charmPlaces(k.id)])),
+    places: Object.fromEntries(KNIVES.map((k) => [k.id, placesOf(k.id)])),
     charms,
     hangs: hangs.map((h) => JSON.parse(h)),
     holds: holds.map((h) => JSON.parse(h)),

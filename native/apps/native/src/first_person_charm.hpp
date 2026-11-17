@@ -35,6 +35,8 @@ public:
         };
         for (const auto &[id, raw] : catalogue->at("charms").items())
             defs.emplace(id, def_of(id, raw));
+        for (const auto &[knife, raw] : catalogue->at("places").items())
+            knife_places.emplace(knife, places_of(raw));
     }
 
     // The charm and its options (loadout.ts packLoadoutExt text); an unknown charm or none hides it.
@@ -43,7 +45,7 @@ public:
         const auto found = parsed ? defs.find(parsed->charm) : defs.end();
         worn = found == defs.end() ? nullptr : &found->second;
         if (worn) options = *parsed;
-        charm.set(worn, options, hardware, worn ? fit.get() : nullptr);
+        charm.set(worn, drawn_options(), hardware, worn ? fit.get() : nullptr);
     }
 
     bool shown() const { return worn && fit && charm.placed(); }
@@ -72,6 +74,7 @@ public:
         const auto key = knife + "|" + hilt + "|" + glove;
         if (key == fit_key) return;
         fit_key = key;
+        knife_in_hand = knife;
         const auto living = catalogue->at("fits").find(key);
         const auto plain = catalogue->at("fits").find(knife + "||" + glove);
         const auto &entry = living != catalogue->at("fits").end() ? living : plain;
@@ -82,7 +85,7 @@ public:
             const Surfaces surfaces{rest_skins, bind, knife_bone, knife_bone_set, mesh, hilt_corners};
             fit = std::make_unique<Fit>(make_fit(*entry, knife, hilt_pieces ? hilt : "", glove, surfaces));
         }
-        charm.set(worn, options, hardware, fit.get());
+        charm.set(worn, drawn_options(), hardware, fit.get());
     }
 
     void update(const Frame &f) {
@@ -96,7 +99,8 @@ private:
     std::map<std::string, CharmDef> defs;
     const CharmDef *worn = nullptr;
     Options options;
-    std::string fit_key;
+    std::string fit_key, knife_in_hand;
+    std::map<std::string, KnifePlaces> knife_places;
     std::unique_ptr<Fit> fit;
     KnifeCharm charm;
     inline static const std::string no_mesh;
@@ -134,6 +138,19 @@ private:
         return def;
     }
 
+    Options drawn_options() const {
+        const auto found = knife_places.find(knife_in_hand);
+        return found == knife_places.end() ? options : clamped(options, found->second);
+    }
+
+    static Clamp clamp_of(const nlohmann::json &c) {
+        return {c.at("cord").at(0), c.at("cord").at(1), c.at("size").at(0), c.at("size").at(1)};
+    }
+
+    static KnifePlaces places_of(const nlohmann::json &p) {
+        return {p.at("guard"), p.at("pommel"), clamp_of(p.at("clampGuard")), clamp_of(p.at("clampPommel"))};
+    }
+
     static Hang hang_of(const nlohmann::json &h) {
         Hang out;
         out.bone = h.at("bone");
@@ -165,9 +182,9 @@ private:
         if (const int pommel = entry.at(1); pommel >= 0) out.pommel = hang_of(hangs.at(size_t(pommel)));
         for (const auto &j : catalogue->at("holds").at(entry.at(2).get<size_t>()))
             out.joints.push_back({j.at("bone").get<int>(), v3(j.at("p"))});
-        const auto &places = catalogue->at("places").at(knife);
-        out.offers_guard = places.at("guard");
-        out.offers_pommel = places.at("pommel");
+        const auto &places = knife_places.at(knife);
+        out.offers_guard = places.guard;
+        out.offers_pommel = places.pommel;
         sample_surfaces(out, knife, hilt, glove, surfaces);
         return out;
     }

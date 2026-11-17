@@ -12,6 +12,7 @@ import { KnifeCharm } from "../../web/src/viewmodel/charms/knife";
 import { charmFit, charmPlaces, restPose, restView } from "../../web/src/viewmodel/charms/anchors";
 import { charmDef, charmMetrics } from "../../web/src/viewmodel/charms/meshes";
 import { PointCloud } from "../../web/src/viewmodel/charms/physics";
+import { charmClamp } from "../../web/src/viewmodel/charms/places";
 import type { CharmHang } from "../../web/src/viewmodel/charms/anchors";
 
 const rig = vmRig();
@@ -72,6 +73,15 @@ const RESTING: Case[] = [
     hilt: null,
     glove: "knit",
     choice: { charm: "charm-heart", charmPommel: true },
+    left: false,
+    contact: "start",
+  },
+  // Clamped: the Cleaver draws a 50% cord at 100% and a 140% charm at 120%.
+  {
+    knife: "cleaver",
+    hilt: null,
+    glove: "knit",
+    choice: { charm: "charm-bell", charmLength: 50, charmSize: 140 },
     left: false,
     contact: "start",
   },
@@ -159,6 +169,11 @@ for (const c of CASES) {
       pommel: hangOf(fit.pommel),
       joints: fit.joints.map((j) => ({ bone: rig.bone(j.bone), p: j.p })),
       places: charmPlaces(c.knife),
+      clamps: [false, true].map((pommel) => {
+        const low = charmClamp(c.knife, pommel, 50, 80);
+        const high = charmClamp(c.knife, pommel, 200, 140);
+        return [low.cord, high.cord, low.size, high.size];
+      }),
       solid: floats(fit.solid),
       hands: floats(fit.hands),
     },

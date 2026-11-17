@@ -110,8 +110,14 @@ RunResult check_run(const json &run) {
     options.size = l.value("size", 100);
     options.swing = l.value("swing", 30);
     options.pommel = l["pommel"];
+    native_charm::KnifePlaces places;
+    places.guard = run["fit"]["places"]["guard"];
+    places.pommel = run["fit"]["places"]["pommel"];
+    const auto &c = run["fit"]["clamps"];
+    places.at_guard = {c[0][0], c[0][1], c[0][2], c[0][3]};
+    places.at_pommel = {c[1][0], c[1][1], c[1][2], c[1][3]};
     native_charm::KnifeCharm charm;
-    charm.set(&def, options, {}, &fit);
+    charm.set(&def, native_charm::clamped(options, places), {}, &fit);
     for (const auto &push : run["pushes"]) {
         const auto q = v3(push["q"]);
         V3 out{};
@@ -151,6 +157,22 @@ RunResult check_run(const json &run) {
         }
     }
     return worst;
+}
+
+void check_clamps() {
+    // The Cleaver's guard: cord 100 to 200, size 80 to 120; nothing at its pommel, which it doesn't offer.
+    native_charm::KnifePlaces cleaver{true, false, {100, 200, 80, 120}, {}};
+    native_charm::Options o;
+    o.length = 50;
+    o.size = 140;
+    o.pommel = true;
+    const auto drawn = native_charm::clamped(o, cleaver);
+    assert(drawn.length == 100 && drawn.size == 120 && drawn.pommel);
+    // A knife that offers only its pommel uses the pommel's clamps whatever is saved.
+    native_charm::KnifePlaces radish{false, true, {}, {60, 70, 90, 100}};
+    o.pommel = false;
+    const auto butt = native_charm::clamped(o, radish);
+    assert(butt.length == 60 && butt.size == 100);
 }
 
 void check_options() {
@@ -300,6 +322,7 @@ int main(int argc, char **argv) {
         assert(result.whole < (contact == "none" ? exact : bounded));
     }
     check_options();
+    check_clamps();
     check_chain_properties();
     std::cout << "Charms match the website: " << oracle["runs"].size() << " runs\n";
 }

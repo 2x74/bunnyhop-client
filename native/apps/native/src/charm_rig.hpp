@@ -53,6 +53,27 @@ inline const Hang &hang_of(const Fit &fit, bool pommel) {
     return fit.guard;
 }
 
+// places.ts charmClamp: the Cord and Size a charm is drawn at on a knife, so no setting puts it into the hand or the
+// knife. Percent, inclusive.
+struct Clamp {
+    int cord_min = 0, cord_max = 1000, size_min = 0, size_max = 1000;
+};
+
+// The places a knife offers and its clamps at each.
+struct KnifePlaces {
+    bool guard = true, pommel = false;
+    Clamp at_guard, at_pommel;
+};
+
+// The options as drawn on this knife: the Cord and Size inside its clamps for the place the charm hangs at.
+inline Options clamped(Options o, const KnifePlaces &k) {
+    const bool at_pommel = k.guard ? o.pommel && k.pommel : true;
+    const auto &c = at_pommel ? k.at_pommel : k.at_guard;
+    o.length = std::clamp(o.length, c.cord_min, c.cord_max);
+    o.size = std::clamp(o.size, c.size_min, c.size_max);
+    return o;
+}
+
 // The hardware's measures (hardware.ts TOP_DROP, BOTTOM_RISE) and the cord at 100% (meshes.ts CORD_LENGTH).
 struct Hardware {
     double top_drop = .05, bottom_rise = .116, cord_length = 1.3, scale = 1.2;
