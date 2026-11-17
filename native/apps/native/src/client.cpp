@@ -1126,8 +1126,11 @@ int run(const native::Options &opt) {
     };
     auto apply_room_event = [&](const nlohmann::json &message) {
         const auto lifecycle = room.generation;
+        const bool vote_was_shown = room.vote_display.count != 0;
         const auto next = room.event(message);
         refresh_room_display(std::chrono::duration<double>(Clock::now().time_since_epoch()).count());
+        // One menu at a time: a vote coming up closes the guns menu, which would take its digits.
+        if (!vote_was_shown && room.vote_display.count != 0) gun_menu.close();
         room_bridge.voice().room(room);
         if (!room.id.empty()) {
             // Joining a room ends solo practice. Practice started in the room carries on through its events.
@@ -1737,9 +1740,9 @@ int run(const native::Options &opt) {
                         menu->evaluate_js(native::spectate_script(pick.watch));
                     return;
                 }
-                if (!practice.menu_open && !room.vote.is_null() && down && !repeat && code.size() == 6
-                    && code.starts_with("Digit")) {
-                    const int pick = code.back() - '0';
+                const auto vote_digit = native::menu_key(code, input_timeline.binds());
+                if (!practice.menu_open && !room.vote.is_null() && down && !repeat && vote_digit) {
+                    const int pick = *vote_digit;
                     if (pick > 0 && room.vote.contains("options") && size_t(pick) <= room.vote.at("options").size()) {
                         room.voted(pick - 1);
                         room_control({{"action", "vote"}, {"option", pick - 1}});
@@ -1769,7 +1772,7 @@ int run(const native::Options &opt) {
                     }
                     return;
                 }
-                if (numbered_menus.owns(code, down, room.vote_display.count != 0)) return;
+                if (numbered_menus.owns(code, down, room.vote_display.count != 0, input_timeline.binds())) return;
                 if (room.spectator_target && down && !repeat
                     && free_cameras.spectator.changes_camera(code, input_timeline.binds())) {
                     free_cameras.spectator.cycle(free_look_input);

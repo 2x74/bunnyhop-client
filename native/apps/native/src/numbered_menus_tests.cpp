@@ -89,7 +89,7 @@ struct Menus {
             return outcome;
         }
         if ((outcome.look_handled = look.key(code, true, false, settings).handled)) return outcome;
-        outcome.reached_binds = !numbered.owns(code, true, vote_shown);
+        outcome.reached_binds = !numbered.owns(code, true, vote_shown, binds);
         return outcome;
     }
 };
@@ -173,10 +173,30 @@ void test_open_menus_own_the_digits() {
     assert(!menus.digit("Digit7", true).reached_binds);
     menus.open(Menu::spectate);
     assert(!menus.digit("Digit6").reached_binds);
-    assert(!menus.numbered.owns("Digit6", false, false));
-    assert(!menus.numbered.owns("KeyW", true, true));
+    assert(!menus.numbered.owns("Digit6", false, false, menus.binds));
+    assert(!menus.numbered.owns("KeyW", true, true, menus.binds));
     menus.numbered.close_all();
-    assert(!menus.numbered.any_open() && !menus.numbered.owns("Digit6", true, false));
+    assert(!menus.numbered.any_open() && !menus.numbered.owns("Digit6", true, false, menus.binds));
+}
+
+// Voting keys (web vote-keys): the numpad's digits count, and a digit bound to move, jump or turn keeps its bind
+// while a vote or a menu is up. A digit bound to something else (a weapon slot) is still the menu's.
+void test_numpad_votes_and_movement_binds_keep_their_keys() {
+    const auto menus_owner = std::make_unique<Menus>();
+    auto &menus = *menus_owner;
+    assert(native::menu_digit("Numpad7") == 7 && native::menu_digit("Digit0") == 0);
+    assert(!native::menu_digit("NumpadAdd") && !native::menu_digit("KeyW") && !native::menu_digit("Digit"));
+    assert(!menus.digit("Numpad3", true).reached_binds);
+    auto settings = native::default_settings();
+    settings["binds"]["jump"] = native::Json::array({"Space", "Digit4"});
+    settings["binds"]["right"] = native::Json::array({"KeyD", "Numpad6"});
+    settings["binds"]["turnLeft"] = native::Json::array({"Digit8"});
+    menus.binds.rebuild(settings.at("binds"));
+    for (const char *code : {"Digit4", "Numpad6", "Digit8"}) {
+        assert(!native::menu_key(code, menus.binds));
+        assert(menus.digit(code, true).reached_binds);
+    }
+    assert(native::menu_key("Digit2", menus.binds) == 2 && !menus.digit("Digit2", true).reached_binds);
 }
 
 // !bright's menu takes the digits over the others, and gives them up to the next menu opened.
@@ -238,7 +258,7 @@ void test_copy_start_menu_owns_its_rows() {
     menus->numbered.copy_start.show(menus->board);
     menus->numbered.opened(Menu::copy_start);
     assert(!menus->guns.open && menus->numbered.chat_menu_open());
-    assert(menus->numbered.owns("Digit1", true, false));
+    assert(menus->numbered.owns("Digit1", true, false, menus->binds));
     const auto rows = menus->numbered.copy_start.rows(1920, 1080, 100);
     const auto &row = rows.rows[1];
     const auto click = menus->numbered.click(1920, 1080, 100, {rows.left + 30, row.top + row.height / 2});
@@ -258,6 +278,7 @@ int main() {
     test_each_menu_gets_its_own_digit();
     test_the_guns_key_closes_the_guns_menu();
     test_open_menus_own_the_digits();
+    test_numpad_votes_and_movement_binds_keep_their_keys();
     test_look_menu_takes_the_digits();
     test_clicks_pick_rows();
     test_race_pages_click();

@@ -331,6 +331,12 @@ void test_vote_shows_tiers() {
     assert(vote.options[0].view() == "bhop_blue" && vote.tiers[0] == 3 && vote.counts[0] == 2);
     assert(vote.options[1].view() == "bhop_a" && vote.tiers[1] == 0);
     assert(vote.options[2].view() == "Extend 10 minutes" && vote.tiers[2] == 0 && vote.counts[2] == 1);
+    assert(vote.needs[2] == 0);
+    // Past the free extends, Extend shows the votes it needs (rooms 0.0.43 voteView `needs`).
+    welcome["vote"]["options"][2]["needs"] = 3;
+    room->event(envelope(welcome));
+    room->refresh_display(2);
+    assert(room->vote_display.needs[2] == 3 && room->vote_display.needs[0] == 0);
 }
 
 // Watching a replay of another map from a room keeps the room (v0.8.0); closing it goes back to the room's map.
