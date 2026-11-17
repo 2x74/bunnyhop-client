@@ -3543,6 +3543,7 @@ int run(const native::Options &opt) {
             prev = curr;
             const BhState tutorial_pre = curr;
             BhCmd cmd{};
+            std::optional<float> live_yaw;
             if (viewer.active) {
                 if (curr.tick >= viewer.session.range.to) {
                     viewer.paused = true;
@@ -3623,6 +3624,7 @@ int run(const native::Options &opt) {
                     curr = snapshot.player;
                 } else {
                     const auto look = input.look_sample();
+                    live_yaw = cmd.yaw;
                     require(bh_step_look_v2(core.get(), &cmd, look ? &*look : nullptr, &curr),
                             core.get(),
                             "Stepping simulation");
@@ -3752,6 +3754,10 @@ int run(const native::Options &opt) {
                     trainer_settings = viewer.session.settings;
                 else
                     bh_style_settings(style.c_str(), &trainer_settings);
+                // v28+ Auto-strafe steps last tick's view; the turn judged is from it to the live mouse (session.ts).
+                std::optional<double> turn_yaw;
+                if (!viewer.active && style == "autostrafe" && trainer_settings.physics >= 28 && live_yaw)
+                    turn_yaw = *live_yaw;
                 native::feed_strafe_trainer(
                         feedback,
                         hud.preferences(),
@@ -3761,7 +3767,8 @@ int run(const native::Options &opt) {
                         style,
                         step_dt,
                         info.noclip,
-                        native::air_speed_gain(core.get())
+                        native::air_speed_gain(core.get()),
+                        turn_yaw
                 );
             }
             BhSurfaceProbe surface{};

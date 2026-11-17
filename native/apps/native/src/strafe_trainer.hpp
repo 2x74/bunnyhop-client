@@ -51,7 +51,7 @@ enum class TrainerBarBand { perfect, good, ok, low, high };
 inline const char *strafe_hint_text(StrafeHint hint) {
     switch (hint) {
         case StrafeHint::less_deadtime:
-            return "A / D";
+            return "strafe keys";
         case StrafeHint::strafe_more:
             return "turn more";
         case StrafeHint::strafe_less:
@@ -96,8 +96,12 @@ struct TrainerSample {
     // The core's AirAccelerate observation. NaN when it has nothing to judge.
     double air_speed_gain = NAN;
     double air_best_gain = NAN;
-    // The post-tick velocity's heading in degrees (the Gauge's strafe sync). NaN when the feed doesn't know it.
+    // The post-tick velocity's heading in degrees (the side a strafe turns to, the Gauge's sync). NaN when the feed
+    // doesn't know it: the side then follows the A/D key.
     double vel_yaw = NAN;
+    // Physics 28+ Auto-strafe (the style filter's lead): the next command's yaw, the live mouse, so the turn judged is
+    // from this command's yaw to it (NaN: none yet, a still mouse). Empty: the turn from the previous command's yaw.
+    std::optional<double> turn_yaw;
 };
 
 // The way the view has to turn to follow this strafe (web strafeTurn): 1 left (yaw rising), -1 right, 0 no wish. With
@@ -124,6 +128,12 @@ gauge_sync(double speed, double vel_yaw, double forward, double side, double yaw
     if (!(length > 0) || !(push > 0)) return std::nullopt;
     const double dot = speed * (std::cos(velocity) * wx + std::sin(velocity) * wy) / length;
     return std::max(0., std::min(trainer_pace_max, 100 * (1 - dot / push)));
+}
+
+// The view's turn judged on this tick (web judgedTurn), wrapped to +-180.
+inline double judged_turn(double yaw, double previous_yaw, const std::optional<double> &turn_yaw) {
+    const double d = !turn_yaw ? yaw - previous_yaw : std::isfinite(*turn_yaw) ? *turn_yaw - yaw : 0;
+    return std::fmod(std::fmod(d + 540, 360) + 360, 360) - 180;
 }
 
 inline unsigned trainer_band(double pace, double width = 10) {
@@ -195,7 +205,6 @@ inline TrainerBarView trainer_bar_view(const StrafeReading &reading) {
 
 // The Bar's hints follow its own average, and only while there is a gain to go with it.
 inline std::optional<StrafeHint> trainer_bar_hint(const StrafeReading &reading) {
-    if (reading.cue == TrainerCue::unsupported) return StrafeHint::unsupported;
     const auto value = trainer_bar_value(reading);
     if (!reading.gain || !value || std::abs(*value - trainer_target_pace) <= trainer_bar_zone) return std::nullopt;
     return *value < trainer_target_pace ? StrafeHint::strafe_more : StrafeHint::strafe_less;
@@ -281,14 +290,6 @@ class StrafeTrainer {
         if (!good) reading.hint = pace < trainer_target_pace ? StrafeHint::strafe_more : StrafeHint::strafe_less;
     }
 
-    static bool supported_style(std::string_view style) {
-        return style == "autohop" || style == "legit" || style == "scroll" || style == "hsw";
-    }
-
-    static double turn_degrees(float yaw, double previous_yaw) {
-        return std::fmod(std::fmod(yaw - previous_yaw + 540, 360) + 360, 360) - 180;
-    }
-
     static double air_push(const TrainerSample &sample) {
         return std::min({double(air_wish_cap), sample.max_speed, sample.air_accelerate * sample.max_speed * sample.dt});
     }
@@ -312,7 +313,6 @@ class StrafeTrainer {
             air_ticks_ = 0;
             return idle(TrainerCue::ready);
         }
-        if (!supported_style(sample.style)) return idle(TrainerCue::unsupported, StrafeHint::unsupported);
         if (sample.grounded || sample.on_ladder || sample.jumped) {
             if (!sample.on_ladder && air_ticks_ >= trainer_landing_min_ticks) {
                 landed_ = air_sum_ / air_ticks_;
@@ -322,9 +322,10 @@ class StrafeTrainer {
             air_ticks_ = 0;
         }
         if (sample.grounded || sample.on_ladder || sample.speed < trainer_min_speed) return idle(TrainerCue::ready);
-        const int side = (command.side > 0) - (command.side < 0);
+        // Every style: the side is the way the wish turns the velocity, so W or S strafes and a view facing back count.
+        const int side = -strafe_turn(command.forward, command.side, command.yaw, sample.vel_yaw);
         if (!side) return idle(TrainerCue::keys, StrafeHint::less_deadtime);
-        const double turn = turn_degrees(command.yaw, previous_yaw);
+        const double turn = judged_turn(command.yaw, previous_yaw, sample.turn_yaw);
         if (std::abs(turn) > trainer_turn_deadzone_degrees && ((turn > 0) - (turn < 0)) == side)
             return idle(TrainerCue::direction, StrafeHint::direction);
         const double push = air_push(sample);
@@ -339,19 +340,19 @@ class StrafeTrainer {
     // The colour is this tick's: averaging it would carry a red through a landing or a trigger.
     void feed_bar(const SsjCmd &command, const TrainerSample &sample, double previous_yaw, bool continuous) {
         if (!samples_finite(command, sample) || !std::isfinite(command.forward) || sample.interrupted || !continuous
-            || !std::isfinite(previous_yaw) || !supported_style(sample.style))
+            || !std::isfinite(previous_yaw))
             return clear_bar();
         const bool active = !sample.grounded && !sample.on_ladder && sample.speed >= trainer_min_speed
                             && (command.side != 0 || command.forward != 0);
         if (active) reading.gain = trainer_bar_gain(sample.air_speed_gain, sample.air_best_gain);
-        const double turn = turn_degrees(command.yaw, previous_yaw);
-        const int key_side = (command.side > 0) - (command.side < 0);
+        const double turn = judged_turn(command.yaw, previous_yaw, sample.turn_yaw);
+        const int key_side = -strafe_turn(command.forward, command.side, command.yaw, sample.vel_yaw);
         const int turn_sign = (turn > 0) - (turn < 0);
         const bool against = key_side && std::abs(turn) > trainer_turn_deadzone_degrees && turn_sign == key_side;
         const double push = air_push(sample);
         double bar = 0;
         if (active && !against && push > 0) {
-            // Without A or D, the turn says which way: then the side it was on when the mouse is still.
+            // Without a wish to the side, the turn says which way: then the side it was on when the mouse is still.
             const int side = key_side ? key_side : turn_sign ? -turn_sign : bar_side_ ? bar_side_ : 1;
             if (side != bar_side_) clear_bar();
             bar_side_ = side;
@@ -374,7 +375,7 @@ class StrafeTrainer {
                                  ? std::optional{std::pair{sample.speed, sample.vel_yaw}}
                                  : std::nullopt;
         if (!samples_finite(command, sample) || !std::isfinite(command.forward) || sample.interrupted || !continuous
-            || !std::isfinite(previous_yaw) || !supported_style(sample.style)) {
+            || !std::isfinite(previous_yaw)) {
             needle_ = 0;
             needle_held_ = needle_flat_ = 0;
             last_turn_ = 0;
@@ -384,7 +385,7 @@ class StrafeTrainer {
         const double push = air_push(sample);
         const bool active = !sample.grounded && !sample.on_ladder && sample.speed >= trainer_min_speed
                             && (command.side != 0 || command.forward != 0) && push > 0;
-        const double delta = turn_degrees(command.yaw, previous_yaw);
+        const double delta = judged_turn(command.yaw, previous_yaw, sample.turn_yaw);
         const int turn = -strafe_turn(command.forward, command.side, command.yaw, sample.vel_yaw);
         const bool against =
                 turn && std::abs(delta) > trainer_turn_deadzone_degrees && ((delta > 0) - (delta < 0)) == turn;
