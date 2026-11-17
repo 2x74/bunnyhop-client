@@ -1,5 +1,59 @@
 # Changelog
 
+## v0.9.3 — Native
+
+Matches website v0.0.42. Update from Settings → Updates: press Update, then Restart. Your settings, replays and maps
+are kept. On a Mac this is the first update since v0.9.0, so it also brings everything in v0.9.1 and v0.9.2 below.
+
+- Maps with smoke, like bhop_epiphany and bhop_teti, no longer lose most of their frame rate. The smoke looks the
+  same.
+- Maps download up to 20 times faster the first time. bhop_epiphany went from over three minutes to about 12
+  seconds. Loading a downloaded map is a little quicker too.
+- The bunny has the website's new shape: a jaw and a chin, a neck, a straighter stance, and with the hood down the hood
+  lies on the upper back with the ears hanging from it. Hops have more life: the legs give at each bounce, the chest
+  and arms follow, and the ears dip instead of disappearing.
+- Back items: a new Loadout tab for things worn on your back (Carrot Pack, Pinwheel, Wind-up Key, Cape, Balloon, Jet
+  Pack, Sheathed Blade and Robe). They move with you, on you and on other players, ghosts and replays.
+- The Cape takes your length and colours. The Robe is worn open or tied, in its five patterns and your colours, and
+  you see its sleeves on your own arms in first person; Settings → Ghosts & players → Robe sleeves in first person
+  turns that off.
+- Hop effects: a new Loadout tab for a small burst at your feet every time you hop. You see other players' hop effects
+  in servers, on ghosts and in replays; Settings → Ghosts & players → Hop effects turns them off.
+- New head items: the Kitsune Mask (pushed up or over your face), Spiky Hair and Long Hair, and hair highlights for
+  every hairstyle. The Half Oni Mask no longer stretches when you look up or down, and the Starfish and the Dealer's
+  Visor were rebuilt.
+- Key sounds: an optional click when you press a strafe key, left and right a little different, in four sounds. Off
+  by default: Settings → Audio → Key sounds, or !keysounds.
+- Perfect jump sound: in EZ Scroll and Legit Scroll, an optional sound on every perfect jump that rises with your
+  streak. Off by default: Settings → Audio → Perfect jump sound, or !perfsound. It replaces the quiet perfect hop
+  tick.
+- Two new strafe trainer looks: Gauge, a dial whose needle stands straight up at the best turn rate and flicks flat on a
+  mistimed strafe switch, and Arc, a thin version with the percentage under it. Settings → HUD → Strafe trainer.
+- When you spectate someone in a server you see their keys, strafe trainer, jump stats and start speed, with whichever
+  of those you have turned on for yourself. Others see yours while they watch you.
+- Lights that a map switches on and off now work. bhop_mine's tunnel is dark until you land on its first block and
+  then lights up, and your hands, weapon and other bunnies go dark and light up with it.
+- Maps that finish through a teleport get millisecond times, like every other map.
+- bhop_bistro_6 and bhop_bistro_7: brushing the edge of the gravity lift no longer leaves you floating along the
+  ceiling (physics 29). New runs on these two maps need this version.
+- Once a run has been going for 5 minutes, the restart keys need a short hold. Change the minutes or turn it off with
+  Settings → Keys → Hold after.
+- !turnspeed shows or sets how fast your turn keys turn. Push to talk is listed under Settings → Keys too, and unbind
+  and unbindall clear it.
+- When the player you're spectating leaves, you're back in your own run, and !r and the scoreboard work again.
+- Glass and other see-through brushes no longer cast solid sun shadows.
+
+Not in the desktop client yet, coming in a later update:
+
+- Practice replays: !keepreplay and the pause menu's Replays tab don't keep practice attempts here yet.
+- The Cape's length moves in 20% steps here (the website's slider moves in 5% steps); its swing follows your exact
+  length.
+- Key sounds for a player you watch and in replays.
+- In the Loadout's Hop effect tab the bunny stands still while its effect plays; on the website it hops.
+- Still missing from v0.9.2: keys held while you click back into the game don't wait for a new press. From v0.9.1:
+  bonus tracks in other styles, the strafe trainer in every style, the new notices, supporter name colours and
+  effects in the game, the LIVE mark and choosing your microphone.
+
 ## v0.9.2 — Native
 
 Matches website v0.0.41. Update from Settings → Updates: press Update, then Restart. Your settings, replays and maps

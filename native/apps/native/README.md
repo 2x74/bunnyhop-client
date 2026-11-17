@@ -9,10 +9,11 @@ window) and WebView2 on Windows. The menu bundle refuses the web game entry poin
 repository root.
 On Windows, the menu shows a still of the map behind it.
 
-The vendored game sources come from web v0.0.41 at `9e586252`, physics 28, timer rules 5. Historical
-physics 1–27 remain available for replays. Physics 28 changes only Auto-strafe (the key from this command's yaw to the
-next, the sim's view one tick behind the mouse: `crates/native-bridge/src/styles.rs`). The exact source and verifier hashes live in `upstream-manifest.json`
-and `upstream-wasm.json`.
+The vendored game sources come from web v0.0.42 at `cbd32128`, physics 29, timer rules 5, timing policy 2. Historical
+physics 1–28 remain available for replays. Physics 29 changes only bhop_bistro_6 and bhop_bistro_7 (their gravity
+lift's event clock); timing policy 2 times a finish through a teleport into the end zone where the teleport was
+touched (`crates/native-bridge/src/run_timing.rs`). The exact source and verifier hashes live in
+`upstream-manifest.json` and `upstream-wasm.json`.
 
 ## Build and play
 
