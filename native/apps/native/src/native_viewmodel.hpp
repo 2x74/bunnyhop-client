@@ -7,6 +7,7 @@
 #include "model_light.hpp"
 #include "back_slot.hpp"
 #include "hop_layer.hpp"
+#include "live_hilt_layer.hpp"
 #include <charconv>
 #include <optional>
 #include <span>
@@ -43,6 +44,8 @@ class NativeViewmodel {
                     body = "classic", bodyLook = "bunny", hatMesh;
         int finish = 0, crown = 0, camoKind = -1, camoStamp = 0, camoSheen = 0;
         bool hiltOn = false;
+        // The hilt id, kept for a living hilt's first-person pieces (live_hilt_layer.hpp).
+        std::string hiltId;
         std::array<float, 9> hiltA{}, hiltB{};
         std::array<float, 3> hiltM{};
         std::array<float, 12> camoColors{};
@@ -224,6 +227,8 @@ class NativeViewmodel {
     bool showFirstPersonRobe = true;
     native_back::FirstPersonSleeves firstPersonSleeves;
     double firstPersonSleevesAt = -1;
+    // A living hilt's first-person pieces (made with the GL objects; none in a CPU-only viewmodel).
+    std::unique_ptr<native_hilt::Layer> liveHilt;
 
     // The two-handed third-person gun hold (gun_hold.hpp): per gun data, and per actor its pose state and where its
     // muzzle was last drawn (world space), for the flash and tracer of its next shot.
@@ -462,6 +467,7 @@ class NativeViewmodel {
                         linearColor(layer.at("alt").get<uint32_t>(), out.hiltB.data() + i * 3);
                     }
                     out.hiltOn = true;
+                    out.hiltId = f[10];
                 }
                 if (f.size() > 11 && metadata.at("camos").contains(f[11])) {
                     const auto &style = metadata.at("camos").at(f[11]);
@@ -1346,6 +1352,7 @@ public:
         gl.TexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         gl.TexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         if (mode == GraphicsMode::full) gunFx = std::make_unique<NativePresentation>(gl);
+        if (mode == GraphicsMode::full) liveHilt = std::make_unique<native_hilt::Layer>(gl, hopAssetRoot);
         gl.GenTextures(1, &bonesTexture);
         gl.BindTexture(GL_TEXTURE_2D, bonesTexture);
         gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -1577,6 +1584,7 @@ public:
         actorActions.clear();
         actorAnimationStates.clear();
         firstPerson->reset();
+        if (liveHilt) liveHilt->reset();
         firstPersonWeapon = 0;
         firstPersonEntry.clear();
         clear_hop_effects();
@@ -2209,6 +2217,7 @@ public:
         input.presentation_event = presentationEvent;
         const auto &out = firstPerson->frame(input, inspectCueQueue);
         step_first_person_robe(snapshot, seconds);
+        if (active == 1) step_live_hilt(snapshot);
         if (shot && active > 1) gunFlashStarted = seconds;
         gl.Enable(GL_DEPTH_TEST);
         gl.DepthMask(GL_TRUE);
@@ -2339,6 +2348,7 @@ private:
         if (showGlow && firstPersonGlow && localGlow && localGlow->enabled)
             draw_glow(layer.entry->meshes, handsProgram, localGlow->aura, .2f);
         if (first_person_robe_worn()) draw_first_person_robe(projection, model, seconds, options);
+        if (!layer.gun) draw_live_hilt(projection, model, seconds);
         gl.FrontFace(GL_CCW);
         if (flash) draw_muzzle_flash(projection, view, seconds);
     }
@@ -2385,6 +2395,44 @@ private:
         firstPersonSleeves.update(
                 dt, {v[0], v[1], v[2]}, viewYaw, std::min(double(swayScale), sway_cap) * motionScale, leftHand
         );
+    }
+
+    // A living hilt follows the knife in hand: set with the loadout, stepped on the viewmodel's own clock and input.
+    void step_live_hilt(const BhSnapshot &snapshot) {
+        if (!liveHilt) return;
+        liveHilt->set(equipped.hiltId, equipped.knife);
+        if (!liveHilt->active()) return;
+        const auto &clock = firstPerson->frame_clock();
+        const auto &player = snapshot.player;
+        native_hilt::FrameInput in;
+        in.dt = clock.dt;
+        in.clock = clock.clock;
+        in.play.velocity = {player.velocity[0], player.velocity[1], player.velocity[2]};
+        in.play.grounded = player.grounded != 0;
+        in.play.landed = clock.landed;
+        in.play.yaw_degrees = viewYaw;
+        in.inspecting = firstPerson->inspecting();
+        // Potato and reduced motion hold the still pose (index.ts: cosmeticsStill or a motion scale under 1).
+        in.still = cosmeticsTier == 0 || motionScale < 1;
+        in.mirrored = leftHand;
+        liveHilt->update(in);
+    }
+
+    void draw_live_hilt(const native::Matrix &projection, const native::Matrix &model, double seconds) {
+        if (!liveHilt || !liveHilt->active()) return;
+        native_hilt::DrawInput in;
+        in.projection = projection;
+        in.model = model;
+        const size_t knife = size_t(previewKnifeRig.knife_handle) * 12;
+        if (knife + 12 <= layerPose.size())
+            std::copy(layerPose.begin() + long(knife), layerPose.begin() + long(knife + 12), in.knife_skin.begin());
+        in.mirror = leftHand ? -1.f : 1.f;
+        in.cosmetics_tier = cosmeticsTier;
+        in.reflection_unit = reflection_unit;
+        if (worldLook.active)
+            in.map_light =
+                    modelLight.light(groundCore, eye_light_key, worldLook.eye.data(), seconds, worldLook.exposure);
+        liveHilt->draw(in);
     }
 
     // The shot's muzzle flash at the muzzle of the gun just drawn (its silencer's tip while it's on).
