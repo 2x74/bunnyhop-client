@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { cleanLoadout, loadoutFor, packLoadout, unpackLoadout } from "../../web/src/loadout";
-import { rosterPack, withLoadoutPacks } from "./room-loadout";
+import { rosterCharm, rosterPack, withLoadoutPacks } from "./room-loadout";
 import type { ServerMsg } from "../../web/src/net/protocol";
 
 const loadout = { knife: "knife-carrot", finish: "fin-garden", glove: "glove-knit", crown: 2 };
@@ -146,4 +146,18 @@ test("unknown or broken new fields from a newer server never break the pack", ()
     rosterPack({ knife: "knife-carrot", finish: "fin-garden", glove: "glove-knit", hop: 7, capeColor: "red" }),
   ).toBe(plain);
   expect(rosterPack({ knife: "knife-carrot", finish: "fin-garden", glove: "glove-knit", future: "x" })).toBe(plain);
+});
+
+test("a charm reaches the game beside the pack, as the website packs it", () => {
+  const worn = loadoutFor({ hilt: "hilt-watcher", charm: "charm-bun", charmSwing: 60, charmPommel: true });
+  expect(rosterCharm(worn)).toBe("charm-bun;IB");
+  const join = withLoadoutPacks({ t: "join", player: { slot: 4, loadout: worn } } as unknown as ServerMsg);
+  const player = (join as unknown as { player: { pack?: string; charm?: string } }).player;
+  expect(player.pack).toBe("2;knife-carrot;fin-garden;glove-knit;;;;;;;hilt-watcher");
+  expect(player.charm).toBe("charm-bun;IB");
+  // Without a charm the field is empty, so a patch takes a charm off.
+  const plain = withLoadoutPacks({ t: "player", slot: 4, patch: { loadout: loadoutFor({}) } } as unknown as ServerMsg);
+  expect((plain as unknown as { patch: { charm?: string } }).patch.charm).toBe("");
+  // An older server's roster without charm fields: no charm.
+  expect(rosterCharm({ knife: "knife-carrot", finish: "fin-garden", glove: "glove-knit" })).toBe("");
 });

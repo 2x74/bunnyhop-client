@@ -465,8 +465,51 @@ void test_loadout_packs() {
         test_loadout_pack(pack);
 }
 
+// The charm rides beside the pack (ui/room-loadout.ts rosterCharm): read with it, taken off by a pack without one,
+// dropped past 200 bytes, and absent from an older menu's roster.
+void test_roster_charm() {
+    const auto room = std::make_unique<native::RoomState>();
+    auto welcome = easy_welcome();
+    const std::string pack = "2;knife-carrot;fin-garden;glove-knit;;;;;;;hilt-watcher";
+    welcome["players"] = J::array(
+            {{{"slot", 0}, {"name", "me"}},
+             {{"slot", 1}, {"name", "charmed"}, {"pack", pack}, {"charm", "charm-bun;IB"}},
+             {{"slot", 2}, {"name", "older"}, {"pack", pack}}}
+    );
+    room->event(envelope(welcome));
+    feed(*room, J::array({sample(100, 0)}), 1);
+    room->snapshot(
+            {{"generation", 1},
+             {"id", "test"},
+             {"snapshot",
+              {{"blocks",
+                J::array(
+                        {{{"slot", 1}, {"samples", J::array({sample(1, 0)})}},
+                         {{"slot", 2}, {"samples", J::array({sample(1, 0)})}}}
+                )}}}},
+            1
+    );
+    const auto charms = [&](double now) {
+        std::map<std::string, std::string> out;
+        for (const auto &actor : room->actors(now))
+            out[actor.id] = actor.charm;
+        return out;
+    };
+    auto worn = charms(1.01);
+    assert(worn["1"] == "charm-bun;IB" && worn["2"].empty());
+    room->event(envelope({{"t", "player"}, {"slot", 1}, {"patch", {{"name", "renamed"}}}}));
+    assert(charms(1.02)["1"] == "charm-bun;IB");
+    room->event(
+            envelope({{"t", "player"}, {"slot", 2}, {"patch", {{"pack", pack}, {"charm", std::string(201, 'x')}}}})
+    );
+    room->event(envelope({{"t", "player"}, {"slot", 1}, {"patch", {{"pack", pack}, {"charm", ""}}}}));
+    worn = charms(1.03);
+    assert(worn["1"].empty() && worn["2"].empty());
+}
+
 int main() {
     test_loadout_packs();
+    test_roster_charm();
     test_spectator_inputs();
     test_leaving_ends_spectating_them();
     test_closing_a_replay_returns_to_the_room_map();

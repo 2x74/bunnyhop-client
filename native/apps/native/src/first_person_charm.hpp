@@ -41,6 +41,10 @@ public:
 
     // The charm and its options (loadout.ts packLoadoutExt text); an unknown charm or none hides it.
     void set_options(const std::string &text) {
+        // (Called each frame while spectating: nothing to do for the same text.)
+        if (text == options_text && options_set) return;
+        options_text = text;
+        options_set = true;
         const auto parsed = unpack_options(text, length, size, swing);
         const auto found = parsed ? defs.find(parsed->charm) : defs.end();
         worn = found == defs.end() ? nullptr : &found->second;
@@ -99,7 +103,8 @@ private:
     std::map<std::string, CharmDef> defs;
     const CharmDef *worn = nullptr;
     Options options;
-    std::string fit_key, knife_in_hand;
+    std::string fit_key, knife_in_hand, options_text;
+    bool options_set = false;
     std::map<std::string, KnifePlaces> knife_places;
     std::unique_ptr<Fit> fit;
     KnifeCharm charm;

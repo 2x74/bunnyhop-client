@@ -3080,15 +3080,14 @@ public:
         if (viewmodel) viewmodel->inspect_held(value);
     }
 
-    void set_cosmetics(const std::string &value, const std::string &loadout) {
+    // The first-person look: an outfit, a packed loadout and the charm with its options (loadout.ts packLoadoutExt,
+    // which the packed loadout never carries; empty for none). Yours, a spectated player's or a replay's runner's.
+    void set_cosmetics(const std::string &value, const std::string &loadout, const std::string &charm) {
         outfit = value;
         packedLoadout = loadout;
-        if (viewmodel) viewmodel->cosmetics(value, loadout);
-    }
-
-    // The charm on your knife and its options (loadout.ts packLoadoutExt), apart from the packed loadout.
-    void set_charm(const std::string &text) {
-        if (viewmodel) viewmodel->charm_loadout(text);
+        if (!viewmodel) return;
+        viewmodel->cosmetics(value, loadout);
+        viewmodel->charm_loadout(charm);
     }
 
     void set_replay_actor(const BhSnapshot *snapshot, float yaw, float pitch, float opacity = .45f) {

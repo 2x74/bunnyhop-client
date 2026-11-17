@@ -16,6 +16,8 @@ struct Actor {
     std::string id, name;
     BhGhostFrame frame{};
     std::string outfit, loadout;
+    // The charm and its options (loadout.ts packLoadoutExt) for this player's first-person view; empty for none.
+    std::string charm;
     float opacity = .45f;
     bool silenced = false, jumped = false, inspectHeld = false, snapped = false;
     // A race ghost that cut this frame (ghost_playback.hpp GhostEventCursor::cut): its bunny first runs through its
