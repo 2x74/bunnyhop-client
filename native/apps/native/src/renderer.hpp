@@ -3080,6 +3080,11 @@ public:
         if (viewmodel) viewmodel->cosmetics(value, loadout);
     }
 
+    // The charm on your knife and its options (loadout.ts packLoadoutExt), apart from the packed loadout.
+    void set_charm(const std::string &text) {
+        if (viewmodel) viewmodel->charm_loadout(text);
+    }
+
     void set_replay_actor(const BhSnapshot *snapshot, float yaw, float pitch, float opacity = .45f) {
         if (!snapshot) {
             replayActor.reset();

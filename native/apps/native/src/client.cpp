@@ -3094,7 +3094,8 @@ int run(const native::Options &opt) {
                         player_glow = native_render::parse_glow(message.value("playerGlow", nlohmann::json(nullptr)));
                         outfit = message.value("outfit", std::string());
                         packed_loadout = message.value("packedLoadout", std::string());
-                        if (outfit.size() > 64 || packed_loadout.size() > 200)
+                        const auto charm = message.value("charmLoadout", std::string());
+                        if (outfit.size() > 64 || packed_loadout.size() > 200 || charm.size() > 200)
                             throw std::runtime_error("Invalid cosmetic selection");
                         held_knife.update(
                                 packed_loadout,
@@ -3109,6 +3110,7 @@ int run(const native::Options &opt) {
                         if (renderer) {
                             renderer->set_player_glow(player_glow);
                             renderer->set_cosmetics(outfit, held_knife.loadout());
+                            renderer->set_charm(charm);
                             renderer->set_ghost_cosmetics(ghost_cosmetic, trail_cosmetic, shape_cosmetic);
                         }
                     } else if (type == "roomEvent") {

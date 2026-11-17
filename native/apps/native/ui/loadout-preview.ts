@@ -25,6 +25,8 @@ export interface OnboardingPose {
 export interface PreviewRequest {
   thumbnail?: boolean;
   loadout: string;
+  /** The charm and its options (loadout.ts packLoadoutExt); empty or absent for none. */
+  charm?: string;
   outfit: string;
   ghost: string;
   trail?: string;

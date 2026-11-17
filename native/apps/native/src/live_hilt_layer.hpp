@@ -11,6 +11,7 @@
 #include <fstream>
 #include <optional>
 #include <string>
+#include <cstring>
 #include <vector>
 #include <zlib.h>
 
@@ -78,6 +79,29 @@ public:
         pieces.emplace(knife_bind);
         reset();
         animate(Design(*design), signals, *pieces, memory, pivots, 0);
+    }
+
+    // A design's pieces on a knife as triangle corners in bind space (a charm wraps round them), or none.
+    std::vector<float> lit_corners(const std::string &hilt, const std::string &knife) const {
+        if (metadata.is_null() || !metadata.at("designs").contains(hilt)) return {};
+        const auto &knives = metadata.at("designs").at(hilt);
+        if (!knives.contains(knife) || knives.at(knife).at("lit").is_null()) return {};
+        const auto &block = knives.at(knife).at("lit");
+        size_t stride = 0;
+        for (const auto &attribute : metadata.at("litLayout"))
+            stride += attribute.at(1).get<size_t>();
+        const auto raw = inflate(block, stride);
+        const size_t vertices = block.at("vertices"), count = block.at("indices");
+        std::vector<float> corners;
+        corners.reserve(count * 3);
+        for (size_t i = 0; i < count; i++) {
+            uint32_t index = 0;
+            std::memcpy(&index, raw.data() + vertices * stride * 4 + i * 4, 4);
+            std::array<float, 3> p{};
+            std::memcpy(p.data(), raw.data() + size_t(index) * stride * 4, 12);
+            corners.insert(corners.end(), p.begin(), p.end());
+        }
+        return corners;
     }
 
     // Back to the start: a replay seek, an export's first frame (viewmodel.ts idle()).
@@ -154,18 +178,24 @@ private:
     }
 
     // One exported block: interleaved vertices then 32-bit indices, deflated.
-    Mesh upload(const nlohmann::json &block, const nlohmann::json &layout) {
-        if (block.is_null()) return {};
+    std::vector<uint8_t> inflate(const nlohmann::json &block, size_t stride) const {
         const size_t offset = block.at("offset"), bytes = block.at("bytes");
         const size_t vertices = block.at("vertices"), indices = block.at("indices");
-        size_t stride = 0;
-        for (const auto &attribute : layout)
-            stride += attribute.at(1).get<size_t>();
         if (offset + bytes > blob.size()) throw std::runtime_error("Living hilt assets are truncated");
         std::vector<uint8_t> raw(vertices * stride * 4 + indices * 4);
         uLongf size = uLongf(raw.size());
         if (uncompress(raw.data(), &size, blob.data() + offset, uLong(bytes)) != Z_OK || size != raw.size())
             throw std::runtime_error("Living hilt assets are damaged");
+        return raw;
+    }
+
+    Mesh upload(const nlohmann::json &block, const nlohmann::json &layout) {
+        if (block.is_null()) return {};
+        const size_t vertices = block.at("vertices"), indices = block.at("indices");
+        size_t stride = 0;
+        for (const auto &attribute : layout)
+            stride += attribute.at(1).get<size_t>();
+        const auto raw = inflate(block, stride);
         Mesh mesh;
         mesh.indices = GLsizei(indices);
         gl.GenVertexArrays(1, &mesh.vao);
