@@ -33,6 +33,7 @@ import { fpRobeGeometry, fpRobeUniform } from "../../web/src/viewmodel/robe-slee
 import { bakeGunAO } from "../../web/src/viewmodel/guns/ao";
 import { writePlayerMaterials } from "./export-player-materials";
 import { writeHopEffects } from "./export-hop-effects";
+import { writeCharms } from "./export-charms";
 import { crownGeometry } from "../../web/src/player/bunny/crown";
 import { vmRig } from "../../web/src/viewmodel/rig";
 import { VmProcedural, PROC_DURATION, type VmAction } from "../../web/src/viewmodel/procedural";
@@ -655,6 +656,8 @@ function outfitPatterns(): Record<string, { kind: number[]; shape: number[]; col
   return out;
 }
 
+// The charms' meshes go in the same blob as everything else.
+const charms = writeCharms(geometry);
 await mkdir(directory, { recursive: true });
 const compressed = deflateSync(Buffer.concat(pieces), { level: 9 });
 await writeFile(resolve(directory, "viewmodels.bin.z"), compressed);
@@ -701,6 +704,7 @@ await writeFile(
       sleeveAnchor: sleeveAnchor().at,
       firstPersonRobe: fpRobeUniform(0),
     },
+    charms,
     hair: {
       hats: HAIR_HATS,
       lengthHats: LENGTH_HATS,
