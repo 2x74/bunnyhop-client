@@ -30,7 +30,10 @@ import { updatePrompt } from "./update-prompt";
 import { gauntletHub } from "../../web/src/shared-reads";
 import { discordLink } from "../../web/src/ui/community";
 import { tutorialOnHome, tutorialSub } from "./tutorial-entry";
-import { ONBOARDED_KEY } from "../../web/src/ui/account-state";
+import { ONBOARDED_KEY, openAccount } from "../../web/src/ui/account-state";
+import { dailyNow, timeLeft } from "../../web/src/daily/state";
+import { dailyHiddenByCss, homeDaily, noteDaily } from "../../web/src/ui/home-daily";
+import type { DailyView } from "../../web/src/api";
 
 export interface HomeActions {
   /** PBs and WRs on the home screen follow the selected style. */
@@ -49,6 +52,8 @@ export interface HomeActions {
   credits: () => void;
   /** Exit game: the menu's last entry. */
   quit: () => void;
+  /** Play the Daily Challenge's map from its entry, in the day's style (daily-native.ts). */
+  playDaily?: (day: string, map: string, style?: string, endsAt?: number) => void;
   /** The gauntlets (ui/gauntlets.ts), on the native menu's own screen. */
   gauntlets?: () => void;
   /** A bunnyhop.lol page the native client has no screen for (opened in the browser). */
@@ -266,6 +271,58 @@ function weeklySub(): HTMLElement {
   return el;
 }
 
+type DailyOn = Extract<DailyView, { enabled: true }>;
+const playToday = (a: HomeActions, v: DailyOn) =>
+  a.playDaily?.(v.today.day, v.today.map.name, v.today.style, v.today.endsAt);
+
+/**
+ * "Daily" on the menu, above Gauntlets (web home.ts dailyItem). The native client has no daily screen of its own, so the
+ * row plays today's map; the home block beside it shows the board's top three and opens the full board on the website.
+ */
+function dailyItem(a: HomeActions): HTMLElement {
+  const sub = h("span.cont-sub");
+  let today: DailyOn | null = null;
+  const el = item("Daily", sub, () => today && playToday(a, today));
+  el.hidden = true;
+  void dailyNow().then(
+    (v) => {
+      noteDaily(v.enabled);
+      if (!v.enabled) return;
+      today = v;
+      el.hidden = false;
+      const left = timeLeft(v.today.endsAt, Date.now() + (v.now - Date.now()));
+      if (left) sub.replaceChildren(h("b", null, v.today.map.name), h("span", null, `${left} left`));
+    },
+    () => {},
+  );
+  return el;
+}
+
+/**
+ * The top of the right side (web home.ts homeTop): the Daily Challenge block while there is one, else the maps to try.
+ * Its board link opens the day's page on bunnyhop.lol.
+ */
+function homeTop(a: HomeActions, onFirst: (name: string) => void): HTMLElement {
+  const box = h("div.home-top");
+  box.replaceChildren(mapsToTry(a, onFirst));
+  if (!api.available() || !a.playDaily || dailyHiddenByCss()) return box;
+  const actions = {
+    play: (day: string, map: string, style?: string) => a.playDaily?.(day, map, style),
+    open: (day?: string) => a.web(day ? `/daily/${day}` : "/daily"),
+    profile: (id: string) => a.profile(id),
+    save: () => openAccount("save"),
+  };
+  void dailyNow().then(
+    (v) => {
+      if (!v.enabled || !box.isConnected || dailyHiddenByCss()) return;
+      // The replaced maps to try still name the map behind the menu, which Play falls back to.
+      box.replaceChildren(homeDaily(v, actions));
+    },
+    () => {},
+  );
+  return box;
+}
+
 /** Profile (card, loadout, runs); a guest without an account yet gets the Loadout. */
 function profileItem(a: HomeActions): HTMLElement {
   return item(
@@ -354,6 +411,7 @@ export function homeScreen(a: HomeActions): HTMLElement {
     item("Play", null, play, { primary: true, hint: "Enter" }),
     learn ? item("Learn to bhop", /lessons done|Finished/.test(learnSub) ? learnSub : null, a.learn) : null,
     item("Play online", api.available() ? onlineSummary() : null, a.servers),
+    api.available() && a.playDaily ? dailyItem(a) : null,
     api.available() ? item("Gauntlets", weeklySub(), a.gauntlets ?? (() => a.web("/gauntlets"))) : null,
     last
       ? item(
@@ -374,7 +432,7 @@ export function homeScreen(a: HomeActions): HTMLElement {
   const right = h(
     "aside.home-right",
     null,
-    mapsToTry(a, (n) => (plateMap = n)),
+    homeTop(a, (n) => (plateMap = n)),
     recentRecords({ profile: a.profile }, async () => {
       // Populate the same map-name thumbnail registry the native tiles use before drawing missing pictures.
       const [records] = await Promise.all([recentWrs(), fetchMapIndex()]);

@@ -28,7 +28,7 @@ import { mapTime } from "../../web/src/map-time";
 import { NativeRunService } from "./run-service";
 import { profileDpi } from "./profile-mouse";
 import { formatTime } from "../../web/src/timer";
-import { isStyleId } from "../../web/src/styles";
+import { isStyleId, type StyleId } from "../../web/src/styles";
 import { onStyleChange, setSelectedStyle } from "../../web/src/ui/style-picker";
 import { settingsPanel, focusSettingsSection } from "./settings-panel";
 import { watchForAntipiracy } from "./antipiracy";
@@ -80,6 +80,7 @@ import { cosmeticsPanel, initCosmetics, setKnifePick } from "./cosmetics";
 import { getHeldLoadout, onHeldLoadout } from "../../web/src/player/cosmetics";
 import { creditsPanel } from "./credits";
 import { homeScreen, watchMenuMotion, LAST_MAP } from "./home-menu";
+import { NativeDaily } from "./daily-native";
 import { pauseScreen } from "./pause-menu";
 import { setGameInfo } from "../../web/src/feedback/state";
 import { latestMouseDiagnostics } from "./mouse-diagnostics";
@@ -242,7 +243,15 @@ function paintFinish(): void {
     ),
   );
 }
+const nativeDaily = new NativeDaily({ line: (line) => send({ type: "daily", line }) });
+/** Play the day's map from the Daily entry, in the day's style (the host keeps it as the selected style). */
+function playDaily(day: string, map: string, style?: string, endsAt?: number): void {
+  selectMapIn(map, nativeDaily.play(day, map, style, endsAt) as StyleId);
+}
 function selectMap(id: string): void {
+  selectMapIn(id, state.style);
+}
+function selectMapIn(id: string, style: StyleId): void {
   pickMap(id, {
     map: () => state.map,
     leaving: [
@@ -267,7 +276,7 @@ function selectMap(id: string): void {
       send({ type: "resume" });
     },
     // The host owns loading/error status and clears it when the download settles.
-    request: (map) => send({ type: "selectMap", id: map, style: state.style, track: 0 }),
+    request: (map) => send({ type: "selectMap", id: map, style, track: 0 }),
     refuse: (text) => {
       notice(text);
       logToHost(`map pick refused: ${text}`);
@@ -513,6 +522,10 @@ function render(): void {
       quit: () => exitFromMenu(false),
       web: openWeb,
       gauntlets: () => show("gauntlets"),
+      playDaily: (day, map, style, endsAt) => {
+        if (state.loading) logToHost(`daily ${map} ignored: another map is loading`);
+        else playDaily(day, map, style, endsAt);
+      },
       background: (map, pb) => {
         if (screen === "home" && !state.map) requestBackdrop(map, pb);
       },
@@ -809,6 +822,7 @@ function receive(value: unknown): void {
   if (finishChanged && !finishSummary) gauntletLine = null;
   gauntlet.onHostState();
   roomService.hostMap(state.map, !!state.loading);
+  nativeDaily.update(state.loading ? null : state.map, state.style, !!roomService.view.id);
   syncingStyle = true;
   setSelectedStyle(state.style);
   syncingStyle = false;
@@ -995,7 +1009,9 @@ const runService = new NativeRunService({
     room: currentRoom(),
     race: currentRace(identity),
     gauntlet: gauntlet.tag(identity, generation, finishSummary?.seconds ?? null),
+    daily: nativeDaily.entry(identity),
   }),
+  dailyLine: (result, run) => nativeDaily.result(result, run),
   holdGauntlet: (attempt, generation) => gauntlet.holds(attempt, generation),
   savedRunUploaded: (map) => send({ type: "hudToast", text: `Your saved run on ${map} was uploaded.`, ms: 5000 }),
   version: () => api.version(),

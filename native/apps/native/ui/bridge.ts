@@ -183,6 +183,8 @@ export type MenuMessage =
   | { type: "leaveMap" }
   /** A gauntlet attempt (gauntlet-native.ts): locks Normal/main track and practice; null id ends it. */
   | { type: "gauntlet"; id: string | null; map?: string; progress?: GauntletHudProgress }
+  /** The Daily Challenge's HUD line while on the day's map (daily-native.ts); null clears it. */
+  | { type: "daily"; line: string | null }
   /** One line on the in-game HUD's toast (gauntlet split lines). */
   | { type: "hudToast"; text: string; ms: number; tone?: "good" | "bad"; key?: "gauntlet" | "practice" }
   /** The soundtrack's previous / play-pause / next (now-playing). */

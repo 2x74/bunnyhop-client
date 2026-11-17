@@ -835,6 +835,18 @@ void test_results_toasts_and_room_widgets() {
             1.5
     );
     assert(result.status_line.view() == "Rank #1" && result.record_started == 1.5);
+    assert(result.daily_line.empty());
+    result.service(
+            {{"generation", 4},
+             {"status", "verified"},
+             {"announcer", "wr"},
+             {"rank", 1u},
+             {"daily", "Daily Challenge: 1st of 40"},
+             {"dailyGood", true}},
+            4,
+            1.5
+    );
+    assert(result.daily_line.view() == "Daily Challenge: 1st of 40" && result.daily_good);
     result.restart_bind("KeyR");
     DrawProbe result_probe;
     {
@@ -843,6 +855,7 @@ void test_results_toasts_and_room_widgets() {
     }
     // Confetti goes under the words; the hint waits two seconds.
     assert(result_probe.has("World record") && result_probe.has("+120 XP") && result_probe.has("Rank #1"));
+    assert(result_probe.has("Daily Challenge: 1st of 40"));
     assert(!result_probe.has("R to go again") && !result_probe.particle_after_text);
     DrawProbe settled_probe;
     native::draw_result(settled_probe, 1280, 720, 100, result, 3.5);

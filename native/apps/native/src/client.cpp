@@ -544,6 +544,8 @@ int run(const native::Options &opt) {
     native::LeaveHold leave_hold;
     std::string gauntlet_id, gauntlet_map;
     nlohmann::json gauntlet_progress;
+    // The Daily Challenge's line while on the day's map (ui/daily-native.ts), drawn in the gauntlet line's place.
+    std::string daily_line;
     if (!data_startup_notice.empty()) {
         hud.toasts.push(data_startup_notice, double(SDL_GetTicksNS()) / 1e9, 8);
         data_notice = data_startup_notice;
@@ -2781,6 +2783,9 @@ int run(const native::Options &opt) {
                             audio.play(id, float(gain), rate);
                     } else if (type == "gauntlet") {
                         gauntlet_action(message);
+                    } else if (type == "daily") {
+                        const auto line = message.find("line");
+                        daily_line = line != message.end() && line->is_string() ? line->get<std::string>() : "";
                     } else if (type == "restart" && core && !download.valid()) {
                         reset();
                         show_menu(false);
@@ -4311,6 +4316,7 @@ int run(const native::Options &opt) {
                     gauntlet_good = delta < 0;
                 }
             }
+            if (gauntlet_line.empty()) gauntlet_line = daily_line;
             hud.extras.flight_line.assign(
                     practice.infinite_flight.flying() ? native::InfiniteFlight::hud_line : std::string_view()
             );

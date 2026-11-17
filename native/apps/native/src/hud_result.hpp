@@ -23,6 +23,9 @@ public:
     // The submission line under the time, as on the website's result card.
     HudLabel<96> status_line;
     bool status_bad = false;
+    // The Daily Challenge's line under a verified run (ui/daily-native.ts): its place, or why it didn't count.
+    HudLabel<128> daily_line;
+    bool daily_good = false;
     double record_started = -100;
     HudLabel<48> restart_hint;
 
@@ -48,6 +51,7 @@ public:
         reward_count = 0;
         status_line.assign(pending ? "Submitting…" : "Not submitted.");
         status_bad = false;
+        daily_line.assign("");
         record_started = -100;
     }
 
@@ -96,6 +100,10 @@ public:
             if (stamp == ResultStamp::world_record && !was_record) record_started = now;
         }
         set_status_line(status, message);
+        if (status == "verified" && message.contains("daily")) {
+            daily_line.assign(json_text(message, "daily", 127));
+            daily_good = json_flag(message, "dailyGood");
+        }
         if (status == "verified" && !message.contains("rewards")
             && (message.contains("xp") || message.contains("level") || message.contains("achievements")))
             submission_rewards(message);
@@ -217,6 +225,7 @@ void draw_result(Hud &hud, int width, int height, float percent, const HudResult
     constexpr float hint_fade_seconds = .4f;
     constexpr float reward_delay_seconds = .6f;
     constexpr float reward_seconds_each = 2.4f;
+    constexpr float daily_line_spacing = 18;
     const HudGeometry geometry(width, height, percent);
     const float age = float(now - result.started);
     const float x = geometry.width / 2;
@@ -257,11 +266,16 @@ void draw_result(Hud &hud, int width, int height, float percent, const HudResult
         hud.overlay_text(x, card_top + 32, result.rewards[index].title.view(), 15, reward_gold, true);
         hud.overlay_text(x, card_top + 54, result.rewards[index].detail.view(), 12, cream, true);
     }
+    float below_card = card_top + card_height + 10;
+    if (!result.daily_line.empty()) {
+        hud.overlay_text(x, below_card, result.daily_line.view(), 13, result.daily_good ? gain_green : cream, true);
+        below_card += daily_line_spacing;
+    }
     const float hint_alpha = std::clamp((age - hint_delay_seconds) / hint_fade_seconds, 0.f, 1.f);
     if (hint_alpha > 0 && !result.restart_hint.empty()) {
         // Readable on bright skies (the website's v0.0.41 contrast fix: 90% white over the HUD's text shadow).
         const NameColor hint_color = {1, 1, 1, .9f * hint_alpha};
-        hud.overlay_text(x, card_top + card_height + 10, result.restart_hint.view(), 13, hint_color, true);
+        hud.overlay_text(x, below_card, result.restart_hint.view(), 13, hint_color, true);
     }
     hud.overlay_end(width, height);
 }

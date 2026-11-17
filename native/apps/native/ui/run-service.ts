@@ -43,12 +43,17 @@ export interface RunServiceStatus extends RunProgression {
   gauntlet?: GauntletSplitResult;
   /** A gauntlet candidate that couldn't reach the server: kept and sent again (web gauntlet/mode.ts "held"). */
   held?: boolean;
+  /** The Daily Challenge line under a verified run's result, and whether the run counted for the day. */
+  daily?: string;
+  dailyGood?: boolean;
 }
 /** Where a finished run is submitted for: a room, a race, a gauntlet attempt (?gauntlet=). */
 export interface RunContext {
   room?: string | null;
   race?: string | null;
   gauntlet?: string | null;
+  /** POST /runs?daily=: the run was played from the Daily entry (daily-native.ts). */
+  daily?: string | null;
 }
 interface BeatBody {
   sid: string | null;
@@ -68,6 +73,7 @@ export interface RunApi {
       room?: string | null;
       race?: string | null;
       gauntlet?: string | null;
+      daily?: string | null;
       mouse?: RunMouse | null;
       dispatch?: RequestDispatch;
     },
@@ -95,6 +101,8 @@ export interface RunServiceDependencies {
   verifiedBest?: () => void;
   /** The DPI the player entered in Settings (self-reported, null when unset or hidden), sent with the replay. */
   dpi?: () => number | null;
+  /** The Daily Challenge line for a verdict (daily-native.ts), or null. */
+  dailyLine?: (result: Submission, run: Identity | null) => { text: string; good: boolean } | null;
   /** Called once per finished run, with its generation: a gauntlet tag is spent here. */
   context?: (identity: Identity, generation: number) => RunContext;
   /**
@@ -674,6 +682,7 @@ export class NativeRunService {
     const progression = status === "verified" ? runProgression(result) : {};
     if (status === "verified" && result.pb) this.dependencies.verifiedBest?.();
     const announcer = result.announcer === "pb" || result.announcer === "wr" ? { announcer: result.announcer } : {};
+    const daily = this.dependencies.dailyLine?.(result, session.identity) ?? null;
     this.status(session, status, {
       ...progression,
       id: result.id,
@@ -685,6 +694,7 @@ export class NativeRunService {
       code: result.code,
       message: result.reason,
       ...(result.gauntlet ? { gauntlet: result.gauntlet } : {}),
+      ...(daily ? { daily: daily.text, dailyGood: daily.good } : {}),
     });
   }
 }
