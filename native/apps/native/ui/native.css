@@ -68,9 +68,6 @@ html.native-clock-stopped *, html.native-clock-stopped *::before, html.native-cl
 .home-update[hidden] { display: none; }
 .home-link.home-update-go { color: var(--amber); }
 
-/* Quit, last of the home screen's quiet links. */
-.home-link.home-quit { color: var(--cream-3); }
-
 /* Staff actions remain in the staff application. */
 .native-menu .rb-admin { display: none; }
 

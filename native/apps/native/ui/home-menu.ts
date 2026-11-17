@@ -3,7 +3,8 @@
 // one behind the menu first, then what to play next). Differences from the web are only where the native client has
 // its own screen or no web page: Gauntlets are the native menu's own screens, Support opens its bunnyhop.lol page in the
 // browser, the quiet links
-// under the footer carry Replays, Credits and Quit, and "Desktop app" is gone (this is it).
+// under the footer carry Replays and Credits, the menu ends with Exit game (exit-game.ts), and "Desktop app" is gone
+// (this is it).
 
 import { api, type MapSummary } from "../../web/src/api";
 import { getPB, onPBChange } from "../../web/src/pb";
@@ -46,6 +47,7 @@ export interface HomeActions {
   learn: () => void;
   replays: () => void;
   credits: () => void;
+  /** Exit game: the menu's last entry. */
   quit: () => void;
   /** The gauntlets (ui/gauntlets.ts), on the native menu's own screen. */
   gauntlets?: () => void;
@@ -306,7 +308,7 @@ function homeActs(a: HomeActions): HTMLElement {
   );
 }
 
-/** Everything else, as quiet text under them (the web's row; Replays, Credits and Quit are the native client's own). */
+/** Everything else, as quiet text under them (the web's row; Replays and Credits are the native client's own). */
 function homeLinks(a: HomeActions, learnOnMenu: boolean): HTMLElement {
   const link = (label: string, fn: () => void, cls = "") =>
     h(`button.home-link${cls}`, { type: "button", onclick: fn }, label);
@@ -322,7 +324,6 @@ function homeLinks(a: HomeActions, learnOnMenu: boolean): HTMLElement {
     link("Terms", () => a.web("/terms")),
     link("Credits", a.credits),
     versionLink(),
-    link("Quit", a.quit, ".home-quit"),
   );
 }
 
@@ -365,6 +366,7 @@ export function homeScreen(a: HomeActions): HTMLElement {
     api.available() ? item("Ranks", null, a.ranks) : null,
     item("Stats", null, a.stats),
     item("Settings", null, a.settings),
+    item("Exit game", null, a.quit),
   );
   arrowNav(menu, "button");
   menu.classList.add("hop-host");

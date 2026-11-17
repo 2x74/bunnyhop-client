@@ -102,6 +102,8 @@ import { installMenuErrorLog, logToHost } from "./menu-log";
 import { initCustomCss } from "./custom-css/custom-css";
 import { installHudTheme } from "./custom-css/hud-theme";
 import { installNativeConsole } from "./console-panel";
+import { exitGame, uploadingStatus } from "./exit-game";
+import { confirmDialog } from "../../web/src/ui/settings-transfer";
 
 import { installGamepadNavigation } from "./gamepad";
 import { maybeStartOnboarding, openOnboarding } from "./onboarding";
@@ -180,6 +182,10 @@ interface FinishSummary {
   sync?: number;
 }
 let finishSummary: FinishSummary | null = null;
+/** The host's timer status (1 while a timed run is going) and the run service's latest status: Exit game reads both. */
+let timerStatus = 0;
+let runServiceStatus: string | null = null;
+const RUN_TIMER_RUNNING = 1;
 const app = document.getElementById("menu")!;
 const status = document.getElementById("native-status")!;
 const flash = document.getElementById("native-notice")!;
@@ -429,6 +435,7 @@ function render(): void {
       resume: () => send({ type: "resume" }),
       restart: () => send({ type: "restart" }),
       leave: leaveMap,
+      quit: () => exitFromMenu(true),
       practice,
       binds: state.settings.binds,
       // (No in-place track switch on the host: the map is selected again on its main track.)
@@ -503,7 +510,7 @@ function render(): void {
       learn: () => show("tutorial"),
       replays: () => show("replays"),
       credits: () => show("credits"),
-      quit: () => send({ type: "quit" }),
+      quit: () => exitFromMenu(false),
       web: openWeb,
       gauntlets: () => show("gauntlets"),
       background: (map, pb) => {
@@ -761,7 +768,9 @@ function receive(value: unknown): void {
   if (value && typeof value === "object" && (value as { paused?: unknown }).paused === false) releaseKeepRunField();
   let finishChanged = false;
   if (value && typeof value === "object" && "timer" in value) {
-    const next = readFinish((value as { timer: unknown }).timer);
+    const timer = (value as { timer: unknown }).timer;
+    const next = readFinish(timer);
+    timerStatus = Number((timer as { status?: unknown } | null)?.status) || 0;
     finishChanged = JSON.stringify(next) !== JSON.stringify(finishSummary);
     finishSummary = next;
   }
@@ -834,7 +843,21 @@ const chatService = new NativeChatService(roomService, () => {
   send({ type: "chatAction", action: "openRoom" } as unknown as Parameters<typeof send>[0]);
   show("room");
 });
+/** Exit game (exit-game.ts): the main menu and the console never ask; the pause menu asks during a timed run. */
+function exitFromMenu(ask: boolean): void {
+  void exitGame(
+    {
+      runInProgress: () => !!state.map && timerStatus === RUN_TIMER_RUNNING,
+      uploading: () => uploadingStatus(runServiceStatus),
+      confirm: () =>
+        confirmDialog({ title: "Exit the game?", body: "The run you're on won't be saved.", confirm: "Exit game" }),
+      quit: () => send({ type: "quit" }),
+    },
+    ask,
+  );
+}
 installNativeConsole({
+  quit: () => exitFromMenu(false),
   action: (action, down) => {
     if (down !== undefined) {
       send({ type: "consoleAction", action, down });
@@ -979,6 +1002,7 @@ const runService = new NativeRunService({
   origin: () => location.origin,
   send: (message) => {
     send(message);
+    runServiceStatus = message.status;
     gauntlet.onRunStatus(message, finishSummary?.seconds ?? null);
     if (message.message) notice(message.message);
     if (message.status === "verified") refreshAccount();

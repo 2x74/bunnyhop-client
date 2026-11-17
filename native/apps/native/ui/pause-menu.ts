@@ -2,6 +2,7 @@
 // classes so style.css draws it unchanged. The rail on the left (Resume, Restart, places to go, the account), the
 // panel on the right with the map's Leaderboard and Style tabs. The last row is the web's Main menu: the host lets go of
 // the map and the home screen comes back (Backspace too, and the Main menu bind's key; neither asks, as on the web).
+// Exit game goes under it, as in the website's desktop app (exit-game.ts).
 // Practice (web menu.ts: "Practice" / "Leave practice") sits under Restart where practice works; the native client has
 // no solo chat to type !cp in, so a Checkpoints row opens the same numbered menu on the HUD.
 
@@ -26,6 +27,7 @@ import { openFeedback } from "../../web/src/feedback/state";
 import { openInbox, withInboxBadge } from "../../web/src/inbox/state";
 import { keepRunBlock } from "../../web/src/ui/keep-run";
 import { ACTIONS, keyLabel } from "../../web/src/ui/settings";
+import { powerIcon } from "./exit-game";
 
 /** The pause menu's own keys (web menu.ts PAUSE_KEYS): a Main menu bind on one of these doesn't leave from here. */
 const PAUSE_KEYS = new Set([
@@ -69,6 +71,8 @@ export interface PauseActions {
   replays: () => void;
   /** Main menu: leave the map for the home screen. */
   leave: () => void;
+  /** Exit game: quit the game (asks first during a timed run). */
+  quit: () => void;
   /** Practice mode's row, where practice works (state.practice.available); null hides it. */
   practice?: { on: boolean; toggle: () => void; checkpoints: () => void; count: number } | null;
   /** Native binds, for the rows' key hints (Practice mode, Main menu). */
@@ -108,6 +112,13 @@ function railItem(label: string, fn: (() => void) | null, o: RailOpts = {}): HTM
     h("span.ri-label", null, label, o.sub ? h("small", null, o.sub) : null),
     o.hint ? h("kbd", null, o.hint) : null,
   );
+}
+
+/** Exit game's row, with the power icon from exit-game.ts (the vendored web's icon set doesn't have it yet). */
+function exitRow(quit: () => void): HTMLElement {
+  const row = railItem("Exit game", quit);
+  row.prepend(h("span.ri-icon", { "aria-hidden": "true" }, powerIcon("1.05rem")));
+  return row;
 }
 
 /** Card-style action (web menu.ts actionCard: the Replays tab). */
@@ -489,6 +500,7 @@ export function pauseScreen(a: PauseActions): HTMLElement {
     feedback || inbox ? h("div.rail-pair", null, feedback, inbox) : null,
     h("div.rail-fill", { "aria-hidden": "true" }),
     home,
+    exitRow(a.quit),
   );
   arrowNav(rail, "button");
   rail.classList.add("hop-host");

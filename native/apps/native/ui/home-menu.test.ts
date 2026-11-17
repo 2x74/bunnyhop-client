@@ -104,6 +104,7 @@ test("home is the web title screen: menu, maps to try, footer, and native routes
       "Ranks",
       "Stats",
       "Settings",
+      "Exit game",
     ]);
     // Play is focused like the web's [data-autofocus].
     expect(await page.evaluate(() => document.activeElement?.matches(".home-item.primary"))).toBe(true);
@@ -124,7 +125,6 @@ test("home is the web title screen: menu, maps to try, footer, and native routes
       "Terms",
       "Credits",
       "What's new",
-      "Quit",
     ]);
     // Nothing to continue: Play goes straight into the first map to try (the one behind the menu), like the web.
     await page.getByRole("button", { name: "Play", exact: true }).click();
@@ -158,7 +158,10 @@ test("home is the web title screen: menu, maps to try, footer, and native routes
     await page.waitForFunction(() => document.body.dataset.screen === "support");
     expect((await messages(page)).slice(beforeSupport).filter((m) => m.type === "openExternal")).toEqual([]);
     await page.keyboard.press("Escape");
-    await page.getByRole("button", { name: "Quit", exact: true }).click();
+    // Exit game: the menu's last entry, no question on the main menu.
+    expect(await page.locator(".home-menu .home-item .mb-title").last().textContent()).toBe("Exit game");
+    expect(await page.getByRole("button", { name: "Quit", exact: true }).count()).toBe(0);
+    await page.getByRole("button", { name: "Exit game", exact: true }).click();
     expect(await last(page)).toEqual({ type: "quit" });
     await page.getByRole("button", { name: "bh_aztec", exact: false }).first().click();
     expect(await last(page)).toEqual({ type: "selectMap", id: "bh_aztec", style: "autohop", track: 0 });
@@ -263,9 +266,28 @@ test("pause is the web pause screen: resume, restart, style, main menu, and the 
     expect(await last(page)).toEqual({ type: "resume" });
     await page.keyboard.press("Escape");
     expect(await last(page)).toEqual({ type: "resume" });
-    // The web's last row: Main menu (never Quit), and Backspace does the same without asking.
+    // The web's Main menu, and Backspace does the same without asking. Exit game is the row under it.
     expect(await page.locator(".rail-list .pause-home").innerText()).toMatch(/^Main menu\s*Backspace$/);
+    expect(await page.locator(".rail-list > .rail-item .ri-label").last().textContent()).toBe("Exit game");
     expect(await page.getByRole("button", { name: "Quit", exact: true }).count()).toBe(0);
+    // A finished run: Exit game quits at once.
+    await page.getByRole("button", { name: "Exit game", exact: true }).click();
+    expect(await last(page)).toEqual({ type: "quit" });
+    // A run going: it asks once; Cancel stays, Exit game quits.
+    await page.evaluate(() => window.bunnyhopNativeMenu.onState({ timer: { status: 1, seconds: 3.5 } }));
+    const quits = async () => (await messages(page)).filter((m) => m.type === "quit").length;
+    await page.getByRole("button", { name: "Exit game", exact: true }).click();
+    await page.locator("dialog[open]").waitFor();
+    expect(await page.locator("dialog[open] .confirm-text").textContent()).toBe("The run you're on won't be saved.");
+    await page.screenshot({ path: resolve(out, "pause-exit-confirm-1280x720.png") });
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    expect(await quits()).toBe(1);
+    await page.getByRole("button", { name: "Exit game", exact: true }).click();
+    await page.locator("dialog[open] button.primary").click();
+    await page.waitForFunction(
+      () => (window as any).messages.filter((m: { type: string }) => m.type === "quit").length === 2,
+    );
+    await page.evaluate(() => window.bunnyhopNativeMenu.onState({ timer: { status: 2, seconds: 61.234 } }));
     await page.getByRole("button", { name: /^Main menu/ }).click();
     expect(await last(page)).toEqual({ type: "leaveMap" });
     await page.keyboard.press("Backspace");
@@ -533,3 +555,31 @@ test("a new signed release is offered on the home screen with one press", async 
     await browser.close();
   }
 }, 30_000);
+
+test("the console's quit and exit close the game; disconnect still goes back to the menu", async () => {
+  const { browser, page, errors } = await open();
+  try {
+    await page.evaluate(() =>
+      window.bunnyhopNativeMenu.onState({ map: "bhop_eazy", paused: true, timer: { status: 1 } }),
+    );
+    const run = async (line: string) => {
+      await page.evaluate(() => window.dispatchEvent(new CustomEvent("bunnyhop:native-console-open")));
+      await page.locator(".ncon-input").fill(line);
+      await page.locator(".ncon-input").press("Enter");
+    };
+    await run("disconnect");
+    expect(await last(page)).toEqual({ type: "leaveMap" });
+    await run("quit");
+    await page.waitForFunction(() => (window as any).messages.at(-1)?.type === "quit");
+    expect(await page.locator("dialog.confirm-dialog").count()).toBe(0);
+    const before = (await messages(page)).length;
+    await run("exit");
+    await page.waitForFunction(
+      (n) => (window as any).messages.slice(n).some((m: { type: string }) => m.type === "quit"),
+      before,
+    );
+    expect(errors).toEqual([]);
+  } finally {
+    await browser.close();
+  }
+}, 20_000);
