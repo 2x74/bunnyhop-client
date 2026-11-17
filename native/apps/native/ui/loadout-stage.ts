@@ -19,6 +19,8 @@ export interface StageLook {
   previewGlow?: boolean;
   /** The bunny turned to show its back (the Back category). */
   facing?: "front" | "back";
+  /** The Hat slot's head close-up on the website. The host draws the whole bunny for now. */
+  focus?: "body" | "head";
 }
 export type ThumbJob =
   | { key: string; kind: "knife"; knife: string; loadout: CosmeticLoadout; focus?: "hilt" }
@@ -240,6 +242,8 @@ export class LoadoutStage {
     this.look = { ...look };
     this.draw();
   }
+  /** The website builds its gun stage ahead of the Gun camo tab; the host renders guns itself. */
+  warmGuns(_soon = false): void {}
   setView(view: StageView): void {
     this.viewMode = view;
     this.draw();
