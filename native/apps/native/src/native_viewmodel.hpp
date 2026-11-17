@@ -319,12 +319,12 @@ class NativeViewmodel {
         back.id = id;
         back.kind = native_back::kind_named(kind->get<std::string>());
         const auto &options = fields.size() > options_field ? fields[options_field] : std::string();
-        back.options = id == native_back::robe_item ? native_back::unpack_robe(options) : native_back::unpack_cape(options);
+        back.options =
+                id == native_back::robe_item ? native_back::unpack_robe(options) : native_back::unpack_cape(options);
         const auto &lengths = backs.at("capeLengths");
         const int step = lengths.size() > 1 ? lengths[1].get<int>() - lengths[0].get<int>() : 5;
-        const auto fit = native_back::fit_for(
-                out.bodyLook, out.body == "feminine", out.hoodDown, out.hat == "hat-ponytail"
-        );
+        const auto fit =
+                native_back::fit_for(out.bodyLook, out.body == "feminine", out.hoodDown, out.hat == "hat-ponytail");
         const int drawn = native_back::drawn_cape_length(back.options.cape_length, step);
         back.mesh = native_back::mesh_key(id, fit, drawn, back.options.robe_tied);
         const auto rig = backs.at("rigs").find(back.mesh);
@@ -344,10 +344,12 @@ class NativeViewmodel {
         if (rig.contains("hang")) back.cape = {1, rig["hang"][0].get<float>(), rig["hang"][1].get<float>(), 0};
         if (rig.contains("robe")) {
             const auto &robe = rig.at("robe");
-            back.robe = {float(back.options.robe_pattern),
-                         robe.at("drop").get<float>(),
-                         robe.at("radius").get<float>(),
-                         robe.at("from").get<float>()};
+            back.robe = {
+                    float(back.options.robe_pattern),
+                    robe.at("drop").get<float>(),
+                    robe.at("radius").get<float>(),
+                    robe.at("from").get<float>()
+            };
         }
     }
 
@@ -676,10 +678,7 @@ class NativeViewmodel {
                 gl.GenBuffers(1, &m.extraVbos[e]);
                 gl.BindBuffer(GL_ARRAY_BUFFER, m.extraVbos[e]);
                 gl.BufferData(
-                        GL_ARRAY_BUFFER,
-                        m.vertices * 4 * sizeof(float),
-                        data.data() + m.extraOffsets[e],
-                        GL_STATIC_DRAW
+                        GL_ARRAY_BUFFER, m.vertices * 4 * sizeof(float), data.data() + m.extraOffsets[e], GL_STATIC_DRAW
                 );
             }
             if (m.indices) {
@@ -925,7 +924,9 @@ class NativeViewmodel {
     static bool own_hops(const native_render::Actor &actor) { return own_hops_id(actor.id); }
 
     native_hop::Rgb hop_color(const std::array<float, 3> &srgb) const {
-        return {native_render::srgb_linear(srgb[0]), native_render::srgb_linear(srgb[1]), native_render::srgb_linear(srgb[2])};
+        return {native_render::srgb_linear(srgb[0]),
+                native_render::srgb_linear(srgb[1]),
+                native_render::srgb_linear(srgb[2])};
     }
 
     // hop-layer.ts HopEmitter.update: a burst at the takeoff when this player hops, while hop effects show for them.
@@ -962,7 +963,8 @@ class NativeViewmodel {
         spawn.motion = motionScale < 1 ? native_hop::reduced_motion : 1;
         spawn.tint = hop_color(colors[0]);
         spawn.tint2 = hop_color(colors[1]);
-        spawn.alpha = ghost_source_of(actor) == native_render::GhostSource::none ? 1 : std::clamp(actor.opacity, 0.f, 1.f);
+        spawn.alpha =
+                ghost_source_of(actor) == native_render::GhostSource::none ? 1 : std::clamp(actor.opacity, 0.f, 1.f);
         spawn.reach = place->reach;
         if (place->reach) spawn.slope = std::array<double, 2>{float(place->slope[0]), float(place->slope[1])};
         if (hopLayer->burst(*look.hop, spawn)) hop.emitter.last_burst = seconds;
@@ -1039,9 +1041,7 @@ class NativeViewmodel {
                 anchors[side * 3 + k] = skin[k * 4] * x + skin[k * 4 + 1] * y + skin[k * 4 + 2] * z + skin[k * 4 + 3];
         }
         const auto &v = actor.frame.velocity;
-        native_back::advance_sleeves(
-                state.sleeves, anchors, {v[0], v[1], v[2]}, feetYaw, dt, snap, cosmeticsTier == 0
-        );
+        native_back::advance_sleeves(state.sleeves, anchors, {v[0], v[1], v[2]}, feetYaw, dt, snap, cosmeticsTier == 0);
         state.robe_left = native_back::sleeve_uniform(state.sleeves, 0);
         state.robe_right = native_back::sleeve_uniform(state.sleeves, 1);
     }
@@ -1569,7 +1569,8 @@ public:
             actor.attack = previewAction == "fire" && seconds == 0 ? 1 : 0;
             // "hop": a hop every preview_hop_seconds, for the hop effect.
             constexpr double preview_hop_seconds = .5, preview_frame_seconds = 1. / 60;
-            actor.jumped = previewAction == "hop" && std::fmod(seconds + 1e-6, preview_hop_seconds) < preview_frame_seconds;
+            actor.jumped =
+                    previewAction == "hop" && std::fmod(seconds + 1e-6, preview_hop_seconds) < preview_frame_seconds;
             actor.frame.view_offset_z = 64;
             // "back": from behind and a little to the left, where a back item shows.
             const float eye[3] = {
@@ -2273,8 +2274,8 @@ private:
         if (flash) draw_muzzle_flash(projection, view, seconds);
     }
 
-    // The Robe's sleeves on the forearms (viewmodel/robe-sleeves.ts): one more mesh on the hands' skeleton, in the solid
-    // material, only while the Robe is worn and Settings -> First person -> Robe sleeves is on.
+    // The Robe's sleeves on the forearms (viewmodel/robe-sleeves.ts): one more mesh on the hands' skeleton, in the
+    // solid material, only while the Robe is worn and Settings -> First person -> Robe sleeves is on.
     bool first_person_robe_worn() const {
         return showFirstPersonRobe && equipped.back.kind == native_back::Kind::robe && meshes.count(first_person_robe);
     }
@@ -2307,7 +2308,8 @@ private:
             firstPersonSleeves = {};
             return;
         }
-        const double dt = firstPersonSleevesAt < 0 || seconds < firstPersonSleevesAt ? 0 : seconds - firstPersonSleevesAt;
+        const double dt =
+                firstPersonSleevesAt < 0 || seconds < firstPersonSleevesAt ? 0 : seconds - firstPersonSleevesAt;
         firstPersonSleevesAt = seconds;
         const auto &v = snapshot.player.velocity;
         constexpr double sway_cap = 1.5;

@@ -30,7 +30,8 @@ native_hop::Spawn spawn_from(const json &j) {
             reach[k] = j["reach"][k];
         s.reach = reach;
     }
-    if (!j["slope"].is_null()) s.slope = std::array<double, 2>{j["slope"][0].get<double>(), j["slope"][1].get<double>()};
+    if (!j["slope"].is_null())
+        s.slope = std::array<double, 2>{j["slope"][0].get<double>(), j["slope"][1].get<double>()};
     return s;
 }
 
@@ -43,9 +44,7 @@ double check_bursts(const json &oracle, const native_hop::Recipes &recipes) {
         const auto seed = native_hop::hop_seed(s.x, s.z, s.t);
         assert(seed == burst["seed"].get<int32_t>());
         std::vector<native_hop::Record> records;
-        native_hop::spawn(*parts, recipes, s, seed, [&](const native_hop::Record &r) {
-            records.push_back(r);
-        });
+        native_hop::spawn(*parts, recipes, s, seed, [&](const native_hop::Record &r) { records.push_back(r); });
         const auto &want = burst["records"];
         assert(records.size() == want.size());
         for (size_t i = 0; i < records.size(); ++i)

@@ -18,6 +18,8 @@ constexpr uint64_t tick_ns = second_ns / 100;
 constexpr double tick_seconds = .01;
 constexpr float move_speed = 450;
 constexpr unsigned ghost_ticks = 600;
+// A full room: sixteen players.
+constexpr int max_actors = 16;
 constexpr unsigned scoreboard_rows = 12;
 constexpr float overlay_scale = 100;
 constexpr double chat_seconds = 1;
@@ -62,6 +64,9 @@ struct Spec {
     int width, height, frames, warmup, fps, hz, ghosts;
     bool vsync, queued, ordinary_sleep, play_priority;
     std::string low_latency;
+    // Other players instead of ghosts: solid bunnies in this outfit and packed loadout (back items, hop effects).
+    bool solid_actors;
+    std::string actor_outfit, actor_loadout;
 
     explicit Spec(const char *file) {
         std::ifstream input(file);
@@ -76,6 +81,9 @@ struct Spec {
         fps = json.value("fpsLimit", 0);
         hz = json.value("mouseHz", 2000);
         ghosts = json.value("ghosts", 3);
+        solid_actors = json.value("solidActors", false);
+        actor_outfit = json.value("actorOutfit", std::string("outfit-cream"));
+        actor_loadout = json.value("actorLoadout", std::string());
         vsync = json.value("vsync", false);
         queued = json.value("limitQueuedFrames", true);
         ordinary_sleep = json.value("ordinarySleep", false);
@@ -84,7 +92,7 @@ struct Spec {
         low_latency = json.value("lowLatency", std::string("off"));
         if (!native::valid_low_latency_mode(low_latency)) throw std::runtime_error("Invalid lowLatency");
         if (width < 64 || height < 64 || width > 4096 || height > 4096 || frames < 1 || frames > 100000 || warmup < 0
-            || warmup > 10000 || fps < 0 || fps > 10000 || hz < 125 || hz > 8000 || ghosts < 0 || ghosts > 4)
+            || warmup > 10000 || fps < 0 || fps > 10000 || hz < 125 || hz > 8000 || ghosts < 0 || ghosts > max_actors)
             throw std::runtime_error("Invalid gameplay benchmark bounds");
         std::filesystem::create_directories(std::filesystem::absolute(output).parent_path());
     }
@@ -423,9 +431,15 @@ private:
         for (size_t slot = 0; slot < actor_frames_.size(); ++slot) {
             auto &actor = actor_frames_[slot];
             actor.id = "ghost-" + std::to_string(slot);
-            actor.opacity = .5f;
-            actor.ghost_slot = int(slot);
-            actor.frame = ghost_frames_[ticks_ % ghost_ticks];
+            actor.opacity = spec_.solid_actors ? 1.f : .5f;
+            actor.ghost_slot = spec_.solid_actors ? -1 : int(slot);
+            actor.outfit = spec_.actor_outfit;
+            actor.loadout = spec_.actor_loadout;
+            // Each player a few ticks behind the last, so their hops spread over the run.
+            const unsigned tick = (ticks_ + unsigned(slot) * 7) % ghost_ticks;
+            const auto &before = ghost_frames_[(tick + ghost_ticks - 1) % ghost_ticks];
+            actor.frame = ghost_frames_[tick];
+            actor.jumped = (before.flags & 2) && !(actor.frame.flags & 2) && actor.frame.velocity[2] > 0;
             // Separate the ghosts in front of the fixed profiling camera so all draw every frame.
             constexpr float forward_distance = 150, spacing = 45;
             const double radians = view_.yaw() * native::ssj_detail::pi / 180;

@@ -9,7 +9,9 @@
 namespace native_hop {
 
 // three.js (x, y, z) is Source (x, -z, y).
-inline native::Matrix source_from_web_matrix() { return {1, 0, 0, 0, 0, 0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1}; }
+inline native::Matrix source_from_web_matrix() {
+    return {1, 0, 0, 0, 0, 0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1};
+}
 
 // The camera's view of three.js world space: rotation from the view-projection's rows, translation from the eye.
 inline native::Matrix web_model_view(const native::Matrix &view_projection, const float eye[3]) {
@@ -27,8 +29,8 @@ inline native::Matrix inverse_rigid(const native::Matrix &m) {
         for (int c = 0; c < 3; ++c)
             inverse[size_t(c * 4 + r)] = m[size_t(r * 4 + c)];
     for (int r = 0; r < 3; ++r)
-        inverse[size_t(12 + r)] = -(inverse[size_t(r)] * m[12] + inverse[size_t(4 + r)] * m[13]
-                                     + inverse[size_t(8 + r)] * m[14]);
+        inverse[size_t(12 + r)] =
+                -(inverse[size_t(r)] * m[12] + inverse[size_t(4 + r)] * m[13] + inverse[size_t(8 + r)] * m[14]);
     return native::multiply(source_from_web_matrix(), inverse);
 }
 

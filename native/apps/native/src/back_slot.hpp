@@ -129,9 +129,9 @@ struct Fit {
 
 inline Fit fit_for(std::string_view body_look, bool feminine, bool hood_down, bool ponytail) {
     Fit fit;
-    fit.profile = body_look == "plush"                                          ? "plush"
+    fit.profile = body_look == "plush"                                        ? "plush"
                   : body_look == "bune" || (body_look == "bunny" && feminine) ? "b"
-                                                                                : "a";
+                                                                              : "a";
     fit.hood_down = body_look == "bunny" && hood_down;
     fit.tail = !fit.hood_down && ponytail;
     return fit;
@@ -196,7 +196,8 @@ inline std::array<Rgb, 4> cape_tones(const Rgb &accent, std::optional<uint32_t> 
     const Rgb out = outer ? kept_tone(linear_hex(*outer)) : accent;
     const Rgb base = kept_tone(lining ? linear_hex(*lining) : ivory);
     const Rgb trim = apart(base, out, trim_contrast);
-    const Rgb inner = lining ? Rgb{base[0] * lining_shade, base[1] * lining_shade, base[2] * lining_shade} : ivory_shade;
+    const Rgb inner =
+            lining ? Rgb{base[0] * lining_shade, base[1] * lining_shade, base[2] * lining_shade} : ivory_shade;
     const float yt = luminance(trim);
     Rgb clasp = gold;
     if (lining) {
@@ -209,9 +210,8 @@ inline std::array<Rgb, 4> cape_tones(const Rgb &accent, std::optional<uint32_t> 
 }
 
 // robe-fx.ts robeTones: cloth, print, lining, collar band (linear) from the joggers' colour, the accent and the picks.
-inline std::array<Rgb, 4> robe_tones(
-        const Rgb &pants, const Rgb &accent, std::optional<uint32_t> cloth, std::optional<uint32_t> print
-) {
+inline std::array<Rgb, 4>
+robe_tones(const Rgb &pants, const Rgb &accent, std::optional<uint32_t> cloth, std::optional<uint32_t> print) {
     constexpr float print_contrast = 1.7f, band_contrast = 1.45f, lining_mix = .34f, lining_shade = .62f;
     const Rgb base = cloth ? kept_tone(linear_hex(*cloth)) : pants;
     const Rgb ink = apart(print ? kept_tone(linear_hex(*print)) : accent, base, print_contrast);
@@ -263,24 +263,24 @@ inline const Swing *swing_of(Kind kind) {
     static const Swing robe{1.3, .5, 1.2, .4, .4, 900, .36, .00022, .00016, .00018, .028, {0, .58}, .46, .016};
     static const Swing wings{2.1, .3, 1.9, .22, 0, 700, 0, 0, .00034, 0, 0, {-.5, .5}, .01, .035};
     switch (kind) {
-    case Kind::cape:
-        return &cape;
-    case Kind::balloon:
-        return &balloon;
-    case Kind::pinwheel:
-        return &pinwheel;
-    case Kind::pack:
-        return &pack;
-    case Kind::blade:
-        return &blade;
-    case Kind::key:
-        return &key;
-    case Kind::robe:
-        return &robe;
-    case Kind::wings:
-        return &wings;
-    default:
-        return nullptr;
+        case Kind::cape:
+            return &cape;
+        case Kind::balloon:
+            return &balloon;
+        case Kind::pinwheel:
+            return &pinwheel;
+        case Kind::pack:
+            return &pack;
+        case Kind::blade:
+            return &blade;
+        case Kind::key:
+            return &key;
+        case Kind::robe:
+            return &robe;
+        case Kind::wings:
+            return &wings;
+        default:
+            return nullptr;
     }
 }
 
@@ -417,16 +417,14 @@ inline void spring_swing(Motion &m, const Swing &sw, Kind kind, const Targets &t
         }
         m.tip_pitch_rate += (kt * (m.pitch - m.tip_pitch) - ct * m.tip_pitch_rate) * dh;
         m.tip_side_rate += (kt * (m.side - m.tip_side) - ct * m.tip_side_rate) * dh;
-        m.tip_pitch = std::clamp(
-                m.tip_pitch + m.tip_pitch_rate * dh, sw.pitch[0] - slack_pitch, sw.pitch[1] + slack_pitch
-        );
+        m.tip_pitch =
+                std::clamp(m.tip_pitch + m.tip_pitch_rate * dh, sw.pitch[0] - slack_pitch, sw.pitch[1] + slack_pitch);
         m.tip_side = std::clamp(m.tip_side + m.tip_side_rate * dh, -sw.side - slack_side, sw.side + slack_side);
         if (!middle) continue;
         m.mid_pitch_rate += (km * (m.pitch - m.mid_pitch) - cm * m.mid_pitch_rate) * dh;
         m.mid_side_rate += (km * (m.side - m.mid_side) - cm * m.mid_side_rate) * dh;
-        m.mid_pitch = std::clamp(
-                m.mid_pitch + m.mid_pitch_rate * dh, sw.pitch[0] - slack_pitch, sw.pitch[1] + slack_pitch
-        );
+        m.mid_pitch =
+                std::clamp(m.mid_pitch + m.mid_pitch_rate * dh, sw.pitch[0] - slack_pitch, sw.pitch[1] + slack_pitch);
         m.mid_side = std::clamp(m.mid_side + m.mid_side_rate * dh, -sw.side - slack_side, sw.side + slack_side);
     }
 }
@@ -526,55 +524,60 @@ inline Uniforms uniforms(const Motion &m, Kind kind, double speed, double cape_l
     };
     Uniforms u;
     switch (kind) {
-    case Kind::key:
-        u.back = {f(key_angle(m.spin, rate_at(key_rate, sp))), f(m.pitch), f(m.side), 0};
-        u.tip = {f(m.pitch), f(m.side), 0, 0};
-        break;
-    case Kind::jet:
-        u.back = {0, 0, 0, f(jet_idle + jet_speed * (1 - std::exp(-sp / jet_speed_scale)) + m.flare)};
-        u.tip = {0, 0, f(m.bounce), 0};
-        break;
-    case Kind::wings:
-        u.back = {0,
-                  f(wing_fold * (1 - std::exp(-m.fold / wing_fold_speed))),
-                  f(wing_turn * std::clamp(m.yaw_rate, -4., 4.)),
-                  f(m.pitch)};
-        u.tip = {f(m.tip_pitch), 0, 0, 0};
-        break;
-    case Kind::cape:
-    case Kind::blade:
-        u.back = {0, f(m.pitch), f(m.side), f(1 - std::exp(-sp / 700))};
-        u.tip = {f(m.tip_pitch), f(m.tip_side), 0, 0};
-        break;
-    case Kind::robe:
-        u.back = {f(robe_flare * (1 - std::exp(-m.fold / robe_flare_speed)) + robe_flare_hop * m.flare),
-                  f(m.pitch),
-                  f(m.side),
-                  f(1 - std::exp(-sp / 700))};
-        u.tip = {f(m.tip_pitch), f(m.tip_side), 0, 0};
-        break;
-    case Kind::balloon:
-        u.back = {f(.55 * m.tip_pitch + .6 * (m.pitch - m.tip_pitch)),
-                  f(-m.pitch),
-                  f(-m.side),
-                  f(.55 * m.tip_side + .6 * (m.side - m.tip_side))};
-        u.tip = {f(-m.tip_pitch), f(-m.tip_side), 0, 0};
-        break;
-    case Kind::pinwheel:
-    case Kind::pack:
-        u.back = {f(m.spin), f(-m.pitch), f(-m.side), 0};
-        u.tip = {f(-m.tip_pitch), f(-m.tip_side), kind == Kind::pack ? f(m.bounce) : 0, 0};
-        break;
-    default:
-        break;
+        case Kind::key:
+            u.back = {f(key_angle(m.spin, rate_at(key_rate, sp))), f(m.pitch), f(m.side), 0};
+            u.tip = {f(m.pitch), f(m.side), 0, 0};
+            break;
+        case Kind::jet:
+            u.back = {0, 0, 0, f(jet_idle + jet_speed * (1 - std::exp(-sp / jet_speed_scale)) + m.flare)};
+            u.tip = {0, 0, f(m.bounce), 0};
+            break;
+        case Kind::wings:
+            u.back = {
+                    0,
+                    f(wing_fold * (1 - std::exp(-m.fold / wing_fold_speed))),
+                    f(wing_turn * std::clamp(m.yaw_rate, -4., 4.)),
+                    f(m.pitch)
+            };
+            u.tip = {f(m.tip_pitch), 0, 0, 0};
+            break;
+        case Kind::cape:
+        case Kind::blade:
+            u.back = {0, f(m.pitch), f(m.side), f(1 - std::exp(-sp / 700))};
+            u.tip = {f(m.tip_pitch), f(m.tip_side), 0, 0};
+            break;
+        case Kind::robe:
+            u.back = {
+                    f(robe_flare * (1 - std::exp(-m.fold / robe_flare_speed)) + robe_flare_hop * m.flare),
+                    f(m.pitch),
+                    f(m.side),
+                    f(1 - std::exp(-sp / 700))
+            };
+            u.tip = {f(m.tip_pitch), f(m.tip_side), 0, 0};
+            break;
+        case Kind::balloon:
+            u.back = {
+                    f(.55 * m.tip_pitch + .6 * (m.pitch - m.tip_pitch)),
+                    f(-m.pitch),
+                    f(-m.side),
+                    f(.55 * m.tip_side + .6 * (m.side - m.tip_side))
+            };
+            u.tip = {f(-m.tip_pitch), f(-m.tip_side), 0, 0};
+            break;
+        case Kind::pinwheel:
+        case Kind::pack:
+            u.back = {f(m.spin), f(-m.pitch), f(-m.side), 0};
+            u.tip = {f(-m.tip_pitch), f(-m.tip_side), kind == Kind::pack ? f(m.bounce) : 0, 0};
+            break;
+        default:
+            break;
     }
     if (kind == Kind::robe)
         u.mid = {f(m.mid_pitch), f(m.mid_side), 0, f(m.land)};
     else if (kind == Kind::cape) {
         const double g = std::clamp((finite(cape_length) - 1) / 1.6, 0., 1.);
-        const double twist = std::clamp(
-                g * (1.4 * (m.tip_side - m.mid_side) + .9 * (m.mid_side - m.side) + .4 * m.side), -.45, .45
-        );
+        const double twist =
+                std::clamp(g * (1.4 * (m.tip_side - m.mid_side) + .9 * (m.mid_side - m.side) + .4 * m.side), -.45, .45);
         u.mid = {f(m.mid_pitch), f(m.mid_side), f(twist), f(m.land)};
     } else
         u.mid = {u.back[1], u.back[2], 0, 0};

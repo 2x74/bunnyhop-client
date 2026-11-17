@@ -164,6 +164,6 @@ int main(int argc, char **argv) {
     assert(tones < tone_tolerance);
     check_options(oracle);
     check_keys();
-    std::cout << "Back items match the website: " << oracle["runs"].size() << " motion runs, "
-              << oracle["tones"].size() << " tone pairs, " << oracle["options"].size() << " packed options\n";
+    std::cout << "Back items match the website: " << oracle["runs"].size() << " motion runs, " << oracle["tones"].size()
+              << " tone pairs, " << oracle["options"].size() << " packed options\n";
 }

@@ -90,14 +90,14 @@ inline Part part(const nlohmann::json &j) {
     if (!j.at("up").is_null()) p.up = pair(j.at("up"));
     if (!j.at("aim").is_null()) p.aim = j.at("aim").get<double>();
     const std::pair<const char *, double *> numbers[] = {
-            {"jitter", &p.jitter}, {"ease", &p.ease},       {"aspect", &p.aspect},   {"swirl", &p.swirl},
-            {"ring", &p.ring},     {"lift", &p.lift},       {"arc", &p.arc},         {"spread", &p.spread},
-            {"inherit", &p.inherit}, {"gravity", &p.gravity}, {"drag", &p.drag},     {"tilt", &p.tilt},
-            {"spin", &p.spin},     {"turn", &p.turn},       {"rock", &p.rock},       {"lean", &p.lean},
-            {"white", &p.white},   {"cool", &p.cool},       {"soft", &p.soft},       {"flicker", &p.flicker},
-            {"char", &p.char_amount}, {"alpha", &p.alpha},  {"glow", &p.glow},       {"hold", &p.hold},
-            {"pop", &p.pop},       {"over", &p.over},       {"attack", &p.attack},   {"param", &p.param},
-            {"wait", &p.wait},     {"delay", &p.delay},
+            {"jitter", &p.jitter},    {"ease", &p.ease},       {"aspect", &p.aspect}, {"swirl", &p.swirl},
+            {"ring", &p.ring},        {"lift", &p.lift},       {"arc", &p.arc},       {"spread", &p.spread},
+            {"inherit", &p.inherit},  {"gravity", &p.gravity}, {"drag", &p.drag},     {"tilt", &p.tilt},
+            {"spin", &p.spin},        {"turn", &p.turn},       {"rock", &p.rock},     {"lean", &p.lean},
+            {"white", &p.white},      {"cool", &p.cool},       {"soft", &p.soft},     {"flicker", &p.flicker},
+            {"char", &p.char_amount}, {"alpha", &p.alpha},     {"glow", &p.glow},     {"hold", &p.hold},
+            {"pop", &p.pop},          {"over", &p.over},       {"attack", &p.attack}, {"param", &p.param},
+            {"wait", &p.wait},        {"delay", &p.delay},
     };
     for (const auto &[name, field] : numbers)
         *field = j.at(name).get<double>();
@@ -284,9 +284,7 @@ int spawn(const std::vector<Part> &parts, const Recipes &recipes, const Spawn &s
         const int count = p.n == 1 ? 1 : std::max(1, int(std::floor(p.n * s.quality + .5)));
         const double arc = p.arc * pi / 180;
         const double start = p.aim ? heading + *p.aim * pi / 180 - arc / 2 : rnd.next() * pi * 2;
-        const double zeta = std::max(
-                .2, std::log(std::max(std::abs(1 - p.pop), 1e-3) / std::max(p.over, 1e-3))
-        );
+        const double zeta = std::max(.2, std::log(std::max(std::abs(1 - p.pop), 1e-3) / std::max(p.over, 1e-3)));
         const double inherit = speed > 0 ? std::min(p.inherit * speed, recipes.inherit_cap) / speed * s.motion : 0;
         const detail::PieceContext context{
                 p, s, recipes, start, inherit, zeta, count, detail::color_of(p.color, s), detail::color_of(p.color2, s)
@@ -318,8 +316,9 @@ struct Place {
 };
 
 // hop-layer.ts HopEmitter.reach: how far the floor at height z goes from (x, y) in eight directions, and the slope.
-inline std::optional<Reach>
-floor_reach(const Recipes &recipes, const GroundProbe &probe, double x, double y, double z, std::array<double, 2> &slope) {
+inline std::optional<Reach> floor_reach(
+        const Recipes &recipes, const GroundProbe &probe, double x, double y, double z, std::array<double, 2> &slope
+) {
     if (!probe) return std::nullopt;
     constexpr double side = 6, above = 8;
     const auto xa = probe(x + side, y, z + above), xb = probe(x - side, y, z + above);
@@ -411,21 +410,18 @@ struct Pose {
 struct Emitter {
     double ground_at = -1e18, ground_z = 0, last_burst = -1e18;
 
-    void reset() {
-        ground_at = last_burst = -1e18;
-    }
+    void reset() { ground_at = last_burst = -1e18; }
 
     // Before a burst: the floor it left, after `clock`'s update with `pose`. Returns where it happened, or nothing
     // (no jump, too soon after the last one).
-    std::optional<Place> takeoff(
-            const Recipes &recipes,
+    std::optional<Place>
+    takeoff(const Recipes &recipes,
             const std::vector<Part> &parts,
             const Pose &pose,
             double clock,
             bool jumped,
             const GroundProbe &probe,
-            double &back_seconds
-    ) {
+            double &back_seconds) {
         if (pose.grounded) {
             ground_at = clock;
             ground_z = pose.position[2];
