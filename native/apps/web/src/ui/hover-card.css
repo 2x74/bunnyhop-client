@@ -6,8 +6,9 @@
   width: min(23rem, calc(100vw - 16px)); color: var(--text); font: 400 var(--fs-sm)/1.35 var(--font-ui); font-variant-numeric: tabular-nums; }
 .hc-pop[hidden] { display: none; }
 .hc {
-  --u: 0.82px; --cut: 12px; --rank: var(--dim);
-  position: relative; padding: 4px; background: var(--frame, #2a3040);
+  /* The shape in the profile card's terms (profile.css .pc): band, cut, and the cut's shrink per unit of inset. */
+  --u: 0.82px; --cut: 12px; --band: 4px; --cut-w: var(--cut); --cut-h: var(--cut); --kw: -0.586; --kh: -0.586; --rank: var(--dim);
+  position: relative; padding: var(--band); background: var(--frame, #2a3040);
   clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
   filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.5));
   animation: hc-in 0.14s var(--ease-glide, ease-out) both;
@@ -17,7 +18,8 @@
 .hc-inner {
   position: relative; overflow: hidden; display: grid; gap: 0.6rem; padding: 0.8rem 0.95rem 0.75rem;
   background: var(--bg-card, linear-gradient(135deg, #1b2130 0%, #10131b 55%, #0c0e14 100%));
-  clip-path: polygon(calc(var(--cut) - 3px) 0, 100% 0, 100% calc(100% - var(--cut) + 3px), calc(100% - var(--cut) + 3px) 100%, 0 100%, 0 calc(var(--cut) - 3px));
+  --icut: calc(var(--cut) + var(--band) * var(--kw));
+  clip-path: polygon(var(--icut) 0, 100% 0, 100% calc(100% - var(--icut)), calc(100% - var(--icut)) 100%, 0 100%, 0 var(--icut));
 }
 .hc-inner > :not(.pc-glint, .pc-motes) { position: relative; }
 .hc-id { display: flex; align-items: center; gap: 0.7rem; min-width: 0; }

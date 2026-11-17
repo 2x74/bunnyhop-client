@@ -1,6 +1,7 @@
 import { appHref } from "./platform/navigation";
 import { AVATAR_RENDER_VERSION, type AvatarSpec } from "./avatar/spec";
 import type { PlayerGlow } from "./player/glow-config";
+import type { MapBgView } from "./map-bg";
 import { cleanLoadout, type CosmeticLoadout } from "./loadout";
 // Client contract for the bunnyhop.lol backend (apps/api). UI code depends only on these signatures.
 // When VITE_API_URL is unset (or the API is unreachable) callers should degrade gracefully:
@@ -250,6 +251,10 @@ export interface RunStats {
   perf: number | null;
   /** Replay views (since views began, one per network a day). */
   views: number;
+  /** Horizontal speed (u/s) at the start, the top and the mean over the run, and the mean gain (%) over its jumps: the
+   * replay viewer's numbers, stored when the run was verified (v0.0.43 on; older runs lack them). */
+  speed?: { start: number; top: number; avg: number };
+  gain?: number;
   /** What this record is worth now, before the player's total weighs their records. Left out when it has none yet. */
   points?: number;
   client?: { kind: "native" | "desktop" | "browser"; label: string };
@@ -321,6 +326,90 @@ export interface Submission {
   level?: LevelView;
   /** POST /runs?gauntlet=<attemptId> only: whether the run became the attempt's next split (apps/api src/gauntlets.ts). */
   gauntlet?: GauntletSplitResult;
+  /**
+   * The Daily Challenge (apps/api src/daily.ts): the run counts for this day. On the upload's reply only the day; once
+   * verified, your place on the day's board, of how many, and whether this run is your time of the day.
+   */
+  /** `guest`: the run is kept, and is not on the board until you have an account; `rank` of `of` is where it would be. */
+  daily?: { day: string; rank?: number; of?: number; best?: boolean; time?: number; endsAt?: number; guest?: boolean };
+}
+
+// ---------------------------------------------------------------------------------------------
+// The Daily Challenge (apps/api src/daily.ts): one map a day (16:00 UTC to 16:00 UTC), with its own board.
+
+export interface DailyMapInfo {
+  name: string;
+  tier: number | null;
+  thumbnailUrl: string | null;
+}
+export interface DailyEntry {
+  rank: number;
+  player: ApiPlayer;
+  runId: string;
+  timeMs: number;
+  time: number;
+  /** When the run arrived (ms). */
+  date: number;
+  /** false: the run's replay is gone, so there is nothing to watch (only said then). */
+  watch?: false;
+  /** false: the run itself is gone, so there is no stats card either. The time stays. */
+  stats?: false;
+}
+export interface DailyDayHead {
+  /** The day's key: the UTC date it starts on ("2026-11-17"). */
+  day: string;
+  /** "Nov 17". */
+  label: string;
+  map: DailyMapInfo;
+  /** The one style whose runs count that day (styles.ts id): "autohop" (Normal) unless staff set another. */
+  style: string;
+  startsAt: number;
+  endsAt: number;
+  /** The podium is final. */
+  closed: boolean;
+}
+/** Your time of a day and its place. `guest`: set without an account, so it isn't on the board; `rank` is where it would be. */
+export interface DailyMine {
+  rank: number;
+  runId: string;
+  timeMs: number;
+  time: number;
+  date: number;
+  guest?: boolean;
+}
+/** GET /daily: today (its top three), yesterday (its podium) and your time today. `enabled` false: no daily right now. */
+export type DailyView =
+  | { enabled: false }
+  | {
+      enabled: true;
+      /** The server's clock (ms) when it answered. */
+      now: number;
+      today: DailyDayHead & { players: number; top: DailyEntry[] };
+      yesterday: (DailyDayHead & { players: number | null; podium: DailyEntry[] }) | null;
+      me: DailyMine | null;
+      /** Taking part: the days you have finished in all (null: none yet, or signed out). */
+      progress: { days: number; improved: number; topHalf: number } | null;
+    };
+/** GET /daily/board. `podium`: a closed day's final top three accounts. */
+export interface DailyBoard extends DailyDayHead {
+  total: number;
+  offset: number;
+  entries: DailyEntry[];
+  me: DailyMine | null;
+  podium: DailyEntry[] | null;
+}
+/** GET /daily/days: the last two weeks, newest first. `older`: the month to open for the days before these. */
+export interface DailyDays {
+  days: (DailyDayHead & { players: number | null; podium: DailyEntry[] })[];
+  older?: string | null;
+}
+/** GET /daily/days?month=YYYY-MM: a month's started days, newest first, and the months to page to. */
+export interface DailyMonth extends DailyDays {
+  month: string;
+  /** "October 2026". */
+  label: string;
+  prev: string | null;
+  next: string | null;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -485,6 +574,14 @@ export interface PlayerCardView {
   cardEffect?: CardEffectId | null;
   /** v0.0.40: a supporter's hover effect (supporter-looks.ts HOVER_FX); null / absent otherwise. */
   hoverFx?: HoverFxId | null;
+  /** v0.0.43: the map background while its world record is held (map-bg.ts); null / absent otherwise. */
+  mapBg?: MapBgView | null;
+}
+
+/** GET /me/map-backgrounds: `maps` you can use now (newest record first), `choice` the stored one (`held` false = lost). */
+export interface MapBackgrounds {
+  maps: (MapBgView & { since: string })[];
+  choice: { map: string; held: boolean; hero: string | null; card: string | null; dim: number } | null;
 }
 
 /** A verified run on a profile (featured, recent PBs, replay list). */
@@ -579,6 +676,8 @@ export type CosmeticChoice = Record<"background" | "frame" | "title" | "ghost" |
   knifePool?: import("./progression").KnifePool | null;
   /** The overall Number One's title colour ("#rrggbb", ranking.ts shownRankColor); absent = the title's own. */
   rankColor?: string | null;
+  /** v0.0.43: the map whose world record you hold, shown as your card background while you hold it (map-bg.ts). */
+  mapBg?: string | null;
 };
 
 /**
@@ -648,6 +747,12 @@ export interface Profile {
    */
   social?: ProfileSocial;
   cosmetics: CosmeticChoice;
+  /**
+   * v0.0.43 (absent while the server's MAP_BG is off): the map background while its world record is held for this
+   * viewer (map-bg.ts), null = none. Your own profile: mapBgChoice, the stored map, held or not.
+   */
+  mapBg?: MapBgView | null;
+  mapBgChoice?: string | null;
   badges: string[];
   /** map: where the run that earned it was (absent when no run did: level-ups, community rewards, older records). */
   achievements: { id: string; unlockedAt: string; map?: string }[];
@@ -1337,7 +1442,7 @@ export const api = {
    * Uploads the server refuses outright (unranked map, zone/build mismatch, rate limit, ...) resolve to
    * { id: "", status: "rejected", reason, code } rather than throwing.
    */
-  async submitRun(replay: Uint8Array, opts: { room?: string | null; race?: string | null; gauntlet?: string | null; beats?: string[]; mouse?: import("./mouse-settings").MouseSettings | null; dispatch?: RequestDispatch } = {}): Promise<Submission> {
+  async submitRun(replay: Uint8Array, opts: { room?: string | null; race?: string | null; gauntlet?: string | null; daily?: string | null; beats?: string[]; mouse?: import("./mouse-settings").MouseSettings | null; dispatch?: RequestDispatch } = {}): Promise<Submission> {
     // ?room=<id>: played in a multiplayer room, so the room announces the verified result (PB / top 10 / SR / WR).
     // &race=<id>: a run for the room's race you're in (net/race.ts): the room ties it to the race.
     // ?gauntlet=<attemptId>: a run in a gauntlet attempt (gauntlet/): the reply says whether it became the next split.
@@ -1345,6 +1450,8 @@ export const api = {
     if (opts.room) q.set("room", opts.room);
     if (opts.room && opts.race) q.set("race", opts.race);
     if (opts.gauntlet) q.set("gauntlet", opts.gauntlet);
+    // ?daily=<day>: played from the Daily Challenge entry (daily/state.ts). The server decides what counts.
+    if (opts.daily) q.set("daily", opts.daily);
     const path = q.size ? `/runs?${q}` : "/runs";
     // With run-session tokens (run-clock.ts): multipart, the replay plus a `beats` field (JSON array). Without: the raw
     // bytes, as before.
@@ -1366,6 +1473,21 @@ export const api = {
   /** A run-session heartbeat (run-clock.ts): the server signs what was recorded so far. */
   async runBeat(body: { sid: string | null; map: string; track: number; style: string; tick: number; hash: string; paused: boolean; att?: [number, number, number, number] }, dispatch?: RequestDispatch): Promise<{ sid: string; token: string }> {
     return json("/runs/beat", { ...post(body, true), keepalive: true }, dispatch);
+  },
+  // --- the Daily Challenge
+  async daily(): Promise<DailyView> {
+    const r = await json<DailyView>("/daily", { cache: "no-cache" });
+    return r && r.enabled && r.today ? r : { enabled: false };
+  },
+  async dailyBoard(day: string, offset = 0, init: RequestInit = {}): Promise<DailyBoard> {
+    return json<DailyBoard>(`/daily/board?day=${encodeURIComponent(day)}${offset ? `&offset=${offset}` : ""}`, { cache: "no-cache", ...init });
+  },
+  async dailyDays(): Promise<DailyDays> {
+    const r = await json<Partial<DailyDays>>("/daily/days");
+    return { days: r.days ?? [], older: r.older ?? null };
+  },
+  async dailyMonth(month: string): Promise<DailyMonth> {
+    return json<DailyMonth>(`/daily/days?month=${encodeURIComponent(month)}`);
   },
   // --- gauntlets
   async gauntlets(): Promise<GauntletHub> {
@@ -1547,6 +1669,13 @@ export const api = {
     return { id: p.id, name: p.name, playerGlow: p.playerGlow ?? null, look: l?.loadout ? { outfit: l.outfit, loadout: l.loadout } : null };
   },
   /** The hover card's data (the server shares the public body a minute); revalidated like the profile. */
+  /**
+   * GET /me/map-backgrounds (v0.0.43, Edit card → Background): the maps whose world record you hold now, newest first,
+   * and your stored choice (held or lost). 404 while the server's MAP_BG switch is off.
+   */
+  async mapBackgrounds(): Promise<MapBackgrounds> {
+    return json<MapBackgrounds>("/me/map-backgrounds", { cache: "no-store" });
+  },
   async playerCard(id: string): Promise<PlayerCardView> {
     return json(`/players/${encodeURIComponent(id)}/card`, { cache: "no-cache" });
   },

@@ -113,6 +113,8 @@ export const PERMISSIONS = {
   "maps.read": "admin",
   /** Change a map's tier or take it off the ranked boards (retire). Every board's points follow, so the owner's call. */
   "maps.manage": "owner",
+  /** Take a map's picture off world record holders' cards, or put it back (apps/api src/map-bg.ts, migrations/0108). */
+  "maps.cardart": "admin",
   /** Pulse → what the Worker costs (D1 rows read and written today, from Cloudflare's analytics). */
   "costs.read": "admin",
   /**
@@ -182,6 +184,7 @@ const LABELS: Record<Permission, string> = {
   discord: "post to Discord or change its settings",
   "maps.read": "see the maps list",
   "maps.manage": "change map tiers or retire maps",
+  "maps.cardart": "turn a map's picture on cards off or on",
   "costs.read": "see what the servers cost",
   "analytics.read": "see player analytics",
   "progression.backfill": "pay achievement XP for achievements already held",

@@ -29,6 +29,7 @@ import { namesView, networkView, playerView, playersView } from "./players";
 import { announceView, feedbackView, setFeedbackBadge } from "./inbox";
 import { mapsView, recordsView2, supportersView } from "./boards";
 import { gauntletsView } from "./gauntlets";
+import { dailyView } from "./daily";
 import { mappersView } from "./mappers";
 import { pulseView } from "./pulse";
 import { clientsView, queryView, retentionView } from "./analytics";
@@ -117,6 +118,8 @@ const SECTIONS: Section[] = [
       { id: "maps", label: "Maps and tiers", perm: "maps.read" },
       // (The API's /admin/gauntlets is admins and the owner, like maps.read.)
       { id: "gauntlets", label: "Gauntlets", perm: "maps.read" },
+      // The Daily Challenge's schedule and pool (the API's /admin/daily is admins and the owner too).
+      { id: "daily", label: "Daily", perm: "maps.read" },
       { id: "mappers", label: "Mappers", perm: "player.marks" },
       { id: "supporters", label: "Supporters and badges", perm: "player.supporter" },
     ],
@@ -164,6 +167,7 @@ const VIEWS: Record<string, View> = {
   records: recordsView2,
   maps: mapsView,
   gauntlets: gauntletsView,
+  daily: dailyView,
   mappers: mappersView,
   supporters: supportersView,
   overview: pulseView,

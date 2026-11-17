@@ -1,0 +1,114 @@
+/* The Daily Challenge: the home block (ui/home-daily.ts) in the home tiles' and records' language, and the daily
+   screen (ui/daily.ts) on the gauntlet screens' plain page (gauntlets.css, boards.css). */
+
+/* --- home block: the map as a tile, the three fastest beside it. No card around it. */
+.home-daily { display: var(--home-daily, block); min-width: 0; }
+.home-daily-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+/* A day that isn't Normal: its style after the heading, as plain words. */
+.home-daily-style { margin-left: 0.5rem; font-family: var(--font-text); font-size: var(--fs-sm); font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--cream); }
+.home-daily-left { flex: none; padding: 0 0.15rem; font-family: var(--font-text); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; color: var(--cream-2); text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8); }
+.home-daily-body { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 0 1rem; align-items: start; }
+.home-daily-side { display: flex; flex-direction: column; min-width: 0; height: 100%; }
+.home-daily-top { display: flex; flex-direction: column; justify-content: space-around; gap: 0.3rem; margin: 0; padding: 0; list-style: none; aspect-ratio: 16 / 12.15; min-height: 0; }
+.home-daily-row { display: flex; align-items: center; gap: 0.6rem; min-width: 0; }
+.home-daily-rank { flex: none; width: 0.9rem; font-family: var(--font-ui); font-size: var(--fs-sm); font-weight: 750; font-variant-numeric: tabular-nums; text-align: center; color: var(--cream-2); text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8); }
+.home-daily-row:first-child .home-daily-rank { color: var(--wr); }
+.home-daily-av { flex: none; display: block; width: 1.75rem; height: 1.75rem; }
+.home-daily-av .home-rec-av, .home-daily-av .avatar-deco { width: 1.75rem; height: 1.75rem; }
+.home-daily-row .home-rec-whotext { flex: 1 1 auto; }
+a.home-daily-name { color: var(--cream); text-decoration: none; }
+a.home-daily-name:hover b, a.home-daily-name:focus-visible b { text-decoration: underline; text-underline-offset: 0.18em; }
+a.home-daily-name:focus-visible, .home-daily-watch:focus-visible { outline: none; }
+/* The time is the way to watch the run. The word shows on the leader's row, and on the others under the pointer or focus. */
+.home-daily-watch { display: inline-flex; align-items: baseline; gap: 0.45rem; align-self: flex-start; padding: 0; border: 0; background: none; font-size: var(--fs-sm); cursor: pointer; }
+.home-daily-watch-word { font-family: var(--font-text); font-size: var(--fs-xs); color: var(--cream-2); opacity: 0; transition: opacity var(--t-fast) var(--ease); }
+.home-daily-watch-word.lead, .home-daily-watch:hover .home-daily-watch-word, .home-daily-watch:focus-visible .home-daily-watch-word { opacity: 1; }
+.home-daily-watch:hover .home-daily-watch-word, .home-daily-watch:focus-visible .home-daily-watch-word { color: var(--amber); }
+.home-daily-watch:hover .home-daily-time, .home-daily-watch:focus-visible .home-daily-time { text-decoration: underline; text-underline-offset: 0.18em; }
+.home-daily-time { font-family: var(--font-ui); font-weight: 700; font-variant-numeric: tabular-nums; color: var(--wr); }
+.home-daily-none { display: flex; align-items: center; margin: 0; padding: 0 0.15rem; aspect-ratio: 16 / 12.15; font-family: var(--font-text); font-size: var(--fs-sm); color: var(--cream-2); text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8); }
+.home-daily-you { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.1rem 0.5rem; margin: 0.45rem 0 0; padding: 0 0.15rem; font-size: var(--fs-sm); color: var(--cream); text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8); }
+.home-daily-you span { font-weight: 650; }
+.home-daily-you small { flex-basis: 100%; font-family: var(--font-text); font-size: var(--fs-xs); color: var(--cream-2); }
+.home-daily-more { display: flex; align-items: center; gap: 0.3rem; max-width: 100%; margin: 0.7rem 0 0; padding: 0 0.15rem; border: 0; background: none; color: var(--cream-2); font-family: var(--font-text); font-size: var(--fs-sm); text-align: left; text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8); cursor: pointer; }
+.home-daily-more > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Yesterday's line with the winner as a board row shows a player: the words open that day, the name the profile. */
+div.home-daily-more { cursor: default; gap: 0.4rem; min-height: 1.5rem; }
+.home-daily-day { flex: 0 1 auto; min-width: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.home-daily-day:first-child { flex: none; }
+.home-daily-day:hover, .home-daily-day:focus-visible { outline: none; color: var(--cream); }
+.home-daily-more .rb-pwrap { flex: none; flex-wrap: nowrap; max-width: 12rem; column-gap: 0.35rem; font-size: var(--fs-sm); }
+.home-daily-more .rb-pwrap .rb-name { max-width: none; }
+.home-daily-more .rb-pwrap .nm-marks { flex: none; }
+.home-daily-more .rb-av { width: 1.25rem; height: 1.25rem; }
+.home-daily-more .rb-name { color: var(--cream); font-weight: 650; }
+.home-daily-more .country-flag { display: none; }
+button.home-daily-chev { padding: 0; border: 0; background: none; cursor: pointer; }
+div.home-daily-more:hover .home-daily-chev, button.home-daily-chev:focus-visible { outline: none; color: var(--amber); transform: translateX(2px); }
+.home-daily-more b { font-weight: 650; color: var(--cream); }
+.home-daily-more b.home-daily-time { color: var(--wr); }
+.home-daily-chev { flex: none; display: inline-flex; color: var(--cream-2); transition: transform var(--t-fast) var(--ease); }
+button.home-daily-more:hover, button.home-daily-more:focus-visible { outline: none; color: var(--cream); }
+button.home-daily-more:hover .home-daily-chev, button.home-daily-more:focus-visible .home-daily-chev { color: var(--amber); transform: translateX(2px); }
+.home-daily-wait .home-daily-map { cursor: default; }
+.home-daily-wait .home-rec-av { background: var(--ink-2); }
+@media (prefers-reduced-motion: reduce) { .home-daily-chev { transition: none; } }
+@media (max-width: 58rem) { .home-daily { width: 100%; max-width: 34rem; } }
+/* "Play" at the end of the tile's second line: the one action, said once. */
+.home-daily-map .home-tile-times { justify-content: space-between; align-items: baseline; }
+.home-daily-play { display: inline-flex; align-items: center; gap: 0.15rem; font-family: var(--font-ui); font-size: var(--fs-sm); font-weight: 750; color: var(--amber); }
+.home-daily-play .home-daily-chev { color: inherit; }
+.home-daily-map:hover .home-daily-play, .home-daily-map:focus-visible .home-daily-play { color: var(--amber-hi); }
+.home-daily-map:hover .home-daily-play .home-daily-chev, .home-daily-map:focus-visible .home-daily-play .home-daily-chev { transform: translateX(2px); }
+/* The block is shorter than the six tiles were, so the records under it keep more of their rows on short windows
+   (style.css hides them from the 4th or 5th). */
+@media (min-width: 58.01rem) and (min-height: 680px) and (max-height: 860px) { .home-right:has(#home-daily) #home-records .home-rec:nth-child(-n + 5) { display: grid; } }
+
+/* --- the daily screen */
+.panel-daily { height: calc(100vh - 7.5vh); min-height: 24rem; }
+.panel-daily .screen-head { flex: none; }
+.panel-daily > .gx { position: relative; flex: 1 1 0; min-height: 0; overflow: hidden auto; overscroll-behavior: contain; padding-right: 0.4rem; }
+.gx > p.dy-lead { margin: 0 0 var(--sp-4); }
+.dy-page { display: grid; grid-template-columns: minmax(0, 25rem) minmax(0, 1fr); gap: var(--sp-6); align-items: start; }
+@media (max-width: 52rem) { .dy-page { grid-template-columns: minmax(0, 1fr); } }
+.dy-page > .rb-state { grid-column: 1 / -1; }
+.dy-side { display: flex; flex-direction: column; gap: var(--sp-5); min-width: 0; }
+.dy-art { display: block; width: 100%; aspect-ratio: 16 / 9; border-radius: var(--r-2); background-color: var(--ink-2); }
+.dy-art::after { display: none; }
+.dy-map { display: flex; align-items: baseline; gap: 0.55rem; margin: var(--sp-3) 0 0; min-width: 0; }
+.dy-map b { min-width: 0; font-size: var(--fs-lg); font-weight: 750; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dy-style { margin: 0.3rem 0 0; color: var(--cream-2); font-size: var(--fs-sm); line-height: 1.4; }
+.dy-style b { color: var(--cream); font-weight: 700; }
+.dy-today .gx-meta { margin: 0.25rem 0 0; }
+.dy-today .gx-you { margin-top: var(--sp-2); }
+.dy-today .gx-you b { font-variant-numeric: tabular-nums; }
+.dy-progress { margin: var(--sp-2) 0 0; color: var(--cream-2); font-size: var(--fs-sm); }
+.dy-earlier[hidden], .dy-months[hidden] { display: none; }
+.dy-months { justify-content: flex-start; margin-top: var(--sp-2); }
+.dy-days { width: 100%; table-layout: fixed; }
+.dy-days th:first-child { width: 4.4rem; }
+.dy-days th:nth-child(3) { width: 9.6rem; }
+/* The fastest player, as the board's rows show one; on this narrow list the flag is left out and marks that don't fit too. */
+.dy-days td.dy-fast { overflow: hidden; }
+.dy-days td.dy-fast .rb-pwrap { column-gap: 0.4rem; }
+.dy-days td.dy-fast .country-flag { display: none; }
+.dy-days td.dy-fast .rb-name { max-width: calc(100% - 1.9rem); font-weight: 600; }
+.dy-days th.gx-go { width: 1.8rem; }
+.dy-days td.gx-title, .dy-days td.dy-names { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dy-days td.dy-day { white-space: nowrap; }
+.dy-days td.dy-day b { font-weight: 650; }
+.dy-days tr.current td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.dy-days .dy-names { color: var(--dim); }
+.dy-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem var(--sp-3); margin: 0 0 var(--sp-2); }
+.dy-head h2 { margin: 0; font-size: var(--fs-lg); font-weight: 750; }
+.dy-head span { color: var(--dim); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+.dy-board td.rb-acts { width: 1%; white-space: nowrap; text-align: right; }
+/* For a guest: one line above the page's rule, with the two ways to an account as words in the sentence. */
+.dy-guestline { margin: 0 0 var(--sp-3); color: var(--cream); font-size: var(--fs-sm); line-height: 1.5; }
+.dy-guestline[hidden], .dy.is-guest .dy-progress { display: none; }
+.dy-guestline .link-btn, .home-daily-save.link-btn { padding: 0; font-size: inherit; color: var(--amber); text-decoration: underline; text-underline-offset: 0.2em; }
+.dy-guestline .link-btn:hover, .home-daily-save.link-btn:hover { color: var(--cream); }
+.dy-guestrow td { border-top: 1px solid var(--line); }
+
+/* The profile's Daily Challenge line (ui/profile-daily.ts): the three medals with their counts. */
+.pfd { display: flex; align-items: center; gap: 0.4rem; margin: 0.6rem 0 0; color: var(--cream-2); font-size: var(--fs-sm); }

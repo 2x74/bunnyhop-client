@@ -110,8 +110,8 @@ fn bistro_6_lift_graze_ends_at_gravity_1_from_v29() {
 }
 
 #[test]
-fn v29_is_the_latest_and_lists_only_the_two_bistro_builds() {
-    assert_eq!(PHYSICS_LATEST, PHYSICS_V29);
+fn v29_lists_only_the_two_bistro_builds() {
+    assert!(PHYSICS_LATEST >= PHYSICS_V29);
     assert_eq!(map_event_clock_v29_table(), vec![("bhop_bistro_6", 0xfccd7e4e), ("bhop_bistro_7", 0x863ea0a0)]);
 }
 

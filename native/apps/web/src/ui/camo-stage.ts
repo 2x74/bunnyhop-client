@@ -24,6 +24,14 @@ import { prefs } from "./settings";
 export const STAGE_GUNS: readonly GunDef[] = GUNS.filter((g) => g.id !== "m4a1");
 let lastGun = Math.max(0, STAGE_GUNS.findIndex((g) => g.id === "ak47"));
 
+/**
+ * The first gun the stage will hold, its model built ahead (viewmodel/guns/meshes.ts keeps it): the Loadout's stage
+ * calls this in idle time, so the first click on Gun camo doesn't build it.
+ */
+export function prewarmCamoGun(): void {
+  gunModelGeometry(STAGE_GUNS[lastGun]);
+}
+
 export class CamoStage {
   private vm: GunViewmodel;
   private world = new THREE.PerspectiveCamera(73.74, 16 / 9, 1, 4000);

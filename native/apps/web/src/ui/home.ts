@@ -24,6 +24,9 @@ import { backgroundPick, featuredArtReady, markFeaturedArtReady } from "./featur
 import { fetchMapIndex, onlineMaps, prewarmMapRows, tierOf, type MapEntry } from "./maps";
 import { mapArt, observeThumbs, prefetchThumbs } from "./thumbs";
 import { recentRecords } from "./home-records";
+import { dailyHiddenByCss, dailySeen, homeDaily, homeDailyWait, noteDaily } from "./home-daily";
+import { dailyNow, dailyPlayHref, timeLeft, forgetDaily } from "../daily/state";
+import { onCssStatus } from "../custom-css";
 import { liveNow } from "./home-live";
 import { landRows } from "./land";
 import { selectedStyle } from "./style-picker";
@@ -37,7 +40,7 @@ import { gauntletHub } from "../shared-reads";
 import { discordLink } from "./community";
 import { desktopLinkShown, openDesktopApp } from "./desktop-link";
 import { openTutorial, tutorialEnabled, tutorialOnHome, tutorialSub } from "../tutorial/entry";
-import { ONBOARDED_KEY } from "./account-state";
+import { onAccountChange, ONBOARDED_KEY, openAccount } from "./account-state";
 
 export interface HomeActions {
   play: () => void;
@@ -54,10 +57,16 @@ export interface HomeActions {
   servers?: () => void;
   /** The gauntlets (ui/gauntlets.ts). */
   gauntlets?: () => void;
+  /** The Daily Challenge screen (ui/daily.ts), on a day's board. */
+  daily?: (day?: string) => void;
+  /** Play the day's map from the Daily entry (menu.ts playDaily). */
+  playDaily?: (day: string, map: string, style?: string) => void;
   /** The tutorial's place in the map list (also when the player hid it there). */
   learn?: () => void;
   /** The Support page (ui/support.ts). */
   support?: () => void;
+  /** Exit game: the desktop app only (exit-game.ts). */
+  exit?: () => void;
 }
 
 const LAST_MAP = "bunnyhop:last-map";
@@ -190,6 +199,76 @@ function mapTile(a: HomeActions, m: MapEntry, o: MapSummary | null, first: boole
   return tile;
 }
 
+/**
+ * The top of the right side: the Daily Challenge (ui/home-daily.ts) while there is one, else the maps to try as before
+ * (offline, the daily switched off on the server, or hidden with custom CSS). To bring the maps to try back for
+ * everyone, set DAILY_ON_HOME to false: nothing else changes. With the daily, Play still needs the map behind the menu
+ * for a player with nothing to continue (`onFirst`), and the block's picture is the page's largest paint.
+ */
+const DAILY_ON_HOME = true;
+const dailyActions = (a: HomeActions) => ({
+  play: (day: string, map: string, style?: string) => (a.playDaily ? a.playDaily(day, map, style) : location.assign(dailyPlayHref(day, map, style))),
+  open: (day?: string) => a.daily!(day),
+  profile: (id: string) => a.profile(id),
+  save: () => openAccount("save"),
+});
+function homeTop(a: HomeActions, onFirst: (name: string) => void): HTMLElement {
+  const box = h("div.home-top");
+  const grid = () => box.replaceChildren(mapsToTry(a, onFirst));
+  if (!DAILY_ON_HOME || !api.available() || !a.daily || dailyHiddenByCss()) return grid(), box;
+  // The block's place is held when the last visit had a daily; a first visit sees the maps to try until the answer.
+  if (dailySeen()) {
+    box.replaceChildren(homeDailyWait());
+    void backgroundPick().then((p) => p && onFirst(p.map.name));
+  } else grid();
+  void dailyNow().then(
+    (v) => {
+      noteDaily(v.enabled);
+      if (!box.isConnected && !box.firstChild) return;
+      if (!v.enabled || dailyHiddenByCss()) {
+        if (!box.querySelector(".home-grid")) grid();
+        return;
+      }
+      void backgroundPick().then((p) => p && onFirst(p.map.name));
+      box.replaceChildren(
+        homeDaily(v, dailyActions(a), markFeaturedArtReady),
+      );
+    },
+    () => {
+      markFeaturedArtReady();
+      if (!box.querySelector(".home-grid")) grid();
+    },
+  );
+  // A guest who gets an account from this screen ("Save progress"): their time is on the board now, so ask again.
+  onAccountChange(box, () => {
+    if (!box.querySelector("#home-daily")) return;
+    forgetDaily();
+    void dailyNow().then((v) => v.enabled && box.isConnected && !dailyHiddenByCss() && box.replaceChildren(homeDaily(v, dailyActions(a))), () => {});
+  });
+  // Custom CSS that turns the block off (or back on) after the screen is up.
+  onCssStatus(() => {
+    if (!box.isConnected) return;
+    const off = dailyHiddenByCss();
+    if (off && !box.querySelector(".home-grid")) grid();
+    else if (!off && box.querySelector(".home-grid")) void dailyNow().then((v) => v.enabled && box.replaceChildren(homeDaily(v, dailyActions(a))), () => {});
+  });
+  return box;
+}
+
+/** The time left today under Daily on the menu; nothing without a daily. */
+function dailySub(): HTMLElement {
+  const el = h("span.cont-sub");
+  void dailyNow().then(
+    (v) => {
+      if (!v.enabled) return;
+      const left = timeLeft(v.today.endsAt, Date.now() + (v.now - Date.now()));
+      if (left) el.replaceChildren(h("b", null, v.today.map.name), h("span", null, `${left} left`));
+    },
+    () => {},
+  );
+  return el;
+}
+
 // --- progression: profile entry + "Next up" (T1 → T2 → ... suggestions from your clears)
 
 /** Profile (card, loadout, runs). The card shows level and rank; the menu row is just the word. */
@@ -214,6 +293,14 @@ function weeklySub(): HTMLElement {
     },
     () => {},
   );
+  return el;
+}
+
+/** "Daily" on the menu, above Gauntlets: shown once the server says there is a daily (and at once when the last visit had one). */
+function dailyItem(a: HomeActions): HTMLElement {
+  const el = item("Daily", dailySub(), () => a.daily!());
+  el.hidden = !dailySeen();
+  void dailyNow().then((v) => (el.hidden = !v.enabled), () => (el.hidden = true));
   return el;
 }
 
@@ -292,6 +379,8 @@ export function homeScreen(a: HomeActions): HTMLElement {
     item(online ? "Play solo" : "Play", null, play, { primary: true, lead: !online, hint: online ? undefined : "Enter", slug: "play" }),
     // Progress only ("2 of 4 lessons done"); a fresh tutorial needs no caption.
     learn ? item("Learn to bhop", /lessons done|Finished/.test(learnSub) ? learnSub : null, () => openTutorial(a.pick)) : null,
+    // The Daily Challenge, only while there is one (dailyItem fills in when the answer says so).
+    a.daily && DAILY_ON_HOME && api.available() ? dailyItem(a) : null,
     a.gauntlets ? item("Gauntlets", weeklySub(), a.gauntlets) : null,
     last ? item("Continue", h("span.cont-sub", null, h("b", null, last), lastPB ? h("span", null, formatTime(lastPB.time)) : null), () => a.pick(last)) : null,
     api.available() ? profileItem(a) : a.loadout ? loadoutItem(a.loadout) : null,
@@ -299,17 +388,18 @@ export function homeScreen(a: HomeActions): HTMLElement {
     a.stats ? item("Stats", null, a.stats) : null,
     // (Controls and "how to bhop": Settings → Keys links them; the tutorial teaches the rest.)
     item("Settings", null, a.settings),
+    a.exit ? item("Exit game", null, a.exit) : null,
   );
   arrowNav(menu, "button");
   menu.classList.add("hop-host");
   hopIndicator(menu, ".home-item", { inset: 4, rest: () => menu.querySelector<HTMLElement>(".home-item.primary") });
   // The maps to try, then who is streaming right now (ui/home-live.ts, only while someone is) and the recent world
   // records (ui/home-records.ts) under them: online only.
-  const right = h("aside.home-right", null, mapsToTry(a, (n) => (plateMap = n)), liveNow({ profile: (id) => a.profile(id) }), recentRecords({ profile: (id) => a.profile(id) }));
+  const right = h("aside.home-right", null, homeTop(a, (n) => (plateMap = n)), liveNow({ profile: (id) => a.profile(id) }), recentRecords({ profile: (id) => a.profile(id) }));
   // Right arrow from the menu goes to the maps to try (the grid takes its own arrows, and Left back).
   menu.addEventListener("keydown", (e) => {
     if (e.key !== "ArrowRight" || !(document.activeElement as HTMLElement)?.closest(".home-menu")) return;
-    const t = right.querySelector<HTMLElement>(".home-grid button:not([disabled]):not([hidden])");
+    const t = right.querySelector<HTMLElement>(".home-grid button:not([disabled]):not([hidden]), .home-daily button:not([disabled]):not([hidden])");
     if (t) (e.preventDefault(), e.stopPropagation(), t.focus());
   }, { capture: true });
   // Prefetch the map list (and, once idle, the slow-to-load thumbnails and the list's rows) so Play opens instantly.

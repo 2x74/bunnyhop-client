@@ -11,6 +11,7 @@ import { celebrate } from "./ui/unlocks";
 import { RANK_GROUPS } from "./ranking";
 import { currentRace, currentRoom, voiceAfterRoomLine } from "./net/presence";
 import { currentGauntlet, heldByGauntlet } from "./gauntlet/state";
+import { currentDaily } from "./daily/state";
 import type { SubmissionView } from "./hud";
 import { noteSubmittedRun } from "./feedback/state";
 import { largePBReplays, syncPBs, rejectPBForRun } from "./pb";
@@ -21,6 +22,7 @@ import { toast } from "./notify";
 import { failureOf, holdDelayMs, holds, LEGACY_UPLOAD_LIMIT, legacyCandidate, legacyScanKey, TRACKING_SINCE_KEY, type StoredUpload } from "./uploads";
 import { uploadStore } from "./upload-store";
 import { retryStored } from "./upload-retry";
+import { holdExitFor } from "./exit-game";
 
 /**
  * Delay before each status poll. Most runs are verified 2-5 s after upload, so the first seconds poll often; long runs
@@ -61,11 +63,12 @@ export async function submitAndTrack(
   }
   onStatus({ status: "submitting" });
   const gauntlet = currentGauntlet(run);
-  const stored = run ? await keepUntilUploaded(bytes, { ...run, gauntlet }) : null;
+  // (Exit game waits a moment for these two: exit-game.ts.)
+  const stored = run ? await holdExitFor(keepUntilUploaded(bytes, { ...run, gauntlet })) : null;
   let sub: Submission;
   const room = currentRoom();
   try {
-    sub = await api.submitRun(bytes, { room, race: currentRace(run), gauntlet, beats: run?.beats, mouse: run?.mouse });
+    sub = await holdExitFor(api.submitRun(bytes, { room, race: currentRace(run), gauntlet, daily: currentDaily(run), beats: run?.beats, mouse: run?.mouse }));
   } catch {
     if (!stored) {
       onStatus({ status: "error", reason: "leaderboard offline" });

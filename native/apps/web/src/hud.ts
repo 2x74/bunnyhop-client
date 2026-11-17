@@ -318,6 +318,8 @@ export class Hud {
   private gauntletDelta = h("span.hud-g-delta");
   private gauntletEl = h("div.hud-gauntlet", null, this.gauntletText, this.gauntletDelta);
   private gauntletShown = "";
+  /** The Daily Challenge's line (setDaily), in the gauntlet line's place and look. */
+  private dailyEl = h("div.hud-gauntlet.hud-daily");
   /** Edge glow (P12): its element and the bucket last written. */
   private glowEl: HTMLElement | null = null;
   private glowStep = -1;
@@ -1004,6 +1006,14 @@ export class Hud {
     this.gauntlet = p;
     this.gauntletShown = "";
     this.placeGauntlet();
+  }
+
+  /** The Daily Challenge's line under the map line (daily/mode.ts); null removes it. */
+  setDaily(text: string | null): void {
+    if (text === null) return void this.dailyEl.remove();
+    if (this.dailyEl.textContent !== text) this.dailyEl.textContent = text;
+    const host = this.p.hud.layout.map.on ? this.els.map : this.els.timer;
+    if (this.dailyEl.parentElement !== host) host.append(this.dailyEl);
   }
 
   /** The line sits under the map line (top left by default), or under the timer when the map line is off. */

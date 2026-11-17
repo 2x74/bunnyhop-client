@@ -120,6 +120,12 @@ const VPHYSICS_INSET: f32 = 0.5;
 /// playable space on e.g. bhop_badges_mini reaches y = -16000). Leaves room for the eye-height
 /// point queries the movement code makes above the origin.
 const OUT_OF_WORLD: f32 = movement::MAX_COORDINATE - 80.0;
+/// v30: the line on x and y. Source never removes a player for position (CBaseEntity::IsInWorld is for grenades); the
+/// margin only keeps the movement crate's point queries, which sit at the origin's x / y, inside its +-MAX_COORDINATE
+/// check for one tick of motion. Sealed catalogue maps keep a player's centre within 16,336 (bhop_aphrodite,
+/// bhop_epiphany2, bhop_pharma), and bhop_hex's last teleport is at y 16,330-16,350. z keeps `OUT_OF_WORLD` (the eye
+/// height queries above the origin).
+const OUT_OF_WORLD_XY_V30: f32 = movement::MAX_COORDINATE - 32.0;
 /// Guard against output loops (A fires B fires A with zero delay).
 const MAX_EVENTS_PER_TICK: usize = 4096;
 /// Events into a tick at which `service_events` first looks for loops it can skip (then at every doubling): well above
@@ -195,7 +201,7 @@ pub const PHYSICS_V16: u32 = 16;
 /// slope or a ledge no longer depends on where inside a tick the player meets it.
 pub const PHYSICS_V17: u32 = 17;
 /// The version new recordings use.
-pub const PHYSICS_LATEST: u32 = PHYSICS_V29;
+pub const PHYSICS_LATEST: u32 = PHYSICS_V30;
 /// v18: ladder surface properties, preserving historical replay behavior.
 pub const PHYSICS_V18: u32 = 18;
 /// v19: scoped map mechanics (template instances and explicit velocity scripts). No new movement fix bits.
@@ -247,6 +253,17 @@ pub const PHYSICS_V28: u32 = 28;
 /// outputs on EventQueueFix's clock, as v23 does for the kz_ maps, so a short touch of their gravity lift can't leave the
 /// player at gravity -1. Every other map plays exactly as on v28. No new fix bits.
 pub const PHYSICS_V29: u32 = 29;
+/// v30 (research/PHYSICS-30.md). No new fix bits: every change is gated on the version number.
+/// - Low Gravity as CS:S timer servers run it (`Settings::style_gravity`): a non-800 `Settings::gravity` means sv_gravity
+///   800 and a player gravity multiplier of gravity / 800, which shavit-core's PreThinkPost puts back each tick when the
+///   multiplier reads 1 or 0 or the player just left a ladder (`Game::style_gravity_rule`). A map's own gravity changes
+///   (lifts, slams, zones) keep their full strength instead of being halved. 800 x 0.5 and 400 x 1 are the same float,
+///   so a Low Gravity run that never meets a map value, a ladder or a falling prop moves exactly as on v29.
+/// - The out-of-world line moves to 16,352 on x and y (`OUT_OF_WORLD_XY_V30`); z stays at 16,304.
+/// - Per-map: bhop_iso's checkpoint chains (`map_fixes::PLAYER_IO`, `min_physics` 30); bhop_4triedsame on EventQueueFix's
+///   clock with its overflowing output delay (`EVENT_CLOCK_V30`); bhop_theory_hard tests triggers with the previous
+///   tick's hull (`STALE_TOUCH_HULL_V30`). Every other map and style plays exactly as on v29.
+pub const PHYSICS_V30: u32 = 30;
 /// Command bit 25: stock ground jump, without the 1.5-unit landfix lift (physics 27+ only).
 /// The state is carried on every command, so replay seeking and mid-run toggles need no side channel.
 pub const IN_NO_LANDFIX: u32 = 1 << 25;
@@ -501,6 +518,26 @@ pub fn map_event_clock_v29_table() -> Vec<(&'static str, u32)> {
     map_fixes::EVENT_CLOCK_V29.iter().map(|m| (m.map, m.fingerprint)).collect()
 }
 
+/// The map a parsed entity lump matches in `game/map_fixes.rs` `EVENT_CLOCK_V30` (tests, tools).
+pub fn map_event_clock_v30_for(entities: &[Entity]) -> Option<&'static str> {
+    map_fixes::event_clock_v30(map_fixes::entity_fingerprint(entities)).map(|m| m.map)
+}
+
+/// The map a parsed entity lump matches in `game/map_fixes.rs` `STALE_TOUCH_HULL_V30` (tests, tools).
+pub fn map_stale_touch_hull_v30_for(entities: &[Entity]) -> Option<&'static str> {
+    map_fixes::stale_touch_hull_v30(map_fixes::entity_fingerprint(entities)).map(|m| m.map)
+}
+
+/// The fingerprints `STALE_TOUCH_HULL_V30` pins, by map (tests, tools).
+pub fn map_stale_touch_hull_v30_table() -> Vec<(&'static str, u32)> {
+    map_fixes::STALE_TOUCH_HULL_V30.iter().map(|m| (m.map, m.fingerprint)).collect()
+}
+
+/// The fingerprints `EVENT_CLOCK_V30` pins, by map (tests, tools).
+pub fn map_event_clock_v30_table() -> Vec<(&'static str, u32)> {
+    map_fixes::EVENT_CLOCK_V30.iter().map(|m| (m.map, m.fingerprint)).collect()
+}
+
 /// The fingerprints `EVENT_CLOCK_V23` pins, by map (tests: every entry matches its BSP).
 pub fn map_event_clock_v23_table() -> Vec<(&'static str, u32)> {
     map_fixes::EVENT_CLOCK_V23.iter().map(|m| (m.map, m.fingerprint)).collect()
@@ -567,7 +604,7 @@ pub fn physics_fixes(version: u32) -> Option<u32> {
         PHYSICS_V15 => Some(PHYSICS_FIX_V15),
         PHYSICS_V16 => Some(PHYSICS_FIX_V16),
         PHYSICS_V17 => Some(PHYSICS_FIX_V17),
-        PHYSICS_V18 | PHYSICS_V19 | PHYSICS_V20 | PHYSICS_V21 | PHYSICS_V22 | PHYSICS_V23 | PHYSICS_V24 | PHYSICS_V25 | PHYSICS_V26 | PHYSICS_V27 | PHYSICS_V28 | PHYSICS_V29 => Some(PHYSICS_FIX_ALL),
+        PHYSICS_V18 | PHYSICS_V19 | PHYSICS_V20 | PHYSICS_V21 | PHYSICS_V22 | PHYSICS_V23 | PHYSICS_V24 | PHYSICS_V25 | PHYSICS_V26 | PHYSICS_V27 | PHYSICS_V28 | PHYSICS_V29 | PHYSICS_V30 => Some(PHYSICS_FIX_ALL),
         v if v & !PHYSICS_DIAG_FIXES == PHYSICS_DIAG && v & PHYSICS_DIAG_FIXES & !PHYSICS_FIX_ALL == 0 => Some(v & PHYSICS_DIAG_FIXES),
         _ => None,
     }
@@ -622,6 +659,17 @@ impl Settings {
         physics_fixes(self.physics_version).unwrap_or(0)
     }
 
+    /// v30 Low Gravity (`PHYSICS_V30`): a style gravity other than 800 is sv_gravity 800 with this player gravity
+    /// multiplier (400 -> 0.5), as bhoptimer's style setting `gravity` is. None before v30 and at 800 (every other style).
+    pub fn style_gravity(&self) -> Option<f32> {
+        ((PHYSICS_V30..=PHYSICS_LATEST).contains(&self.physics_version) && self.gravity != 800.0).then(|| self.gravity / 800.0)
+    }
+
+    /// The world's sv_gravity: 800 under `style_gravity`, else `gravity` as recorded (Low Gravity's 400 before v30).
+    pub fn sv_gravity(&self) -> f32 {
+        if self.style_gravity().is_some() { 800.0 } else { self.gravity }
+    }
+
     /// World-trace collision rules: the engine's (`TraceRules::default()`) before v25, the v25 ramp fix after.
     pub fn trace_rules(&self) -> playsrc_collision::TraceRules {
         let v25 = (PHYSICS_V25..=PHYSICS_LATEST).contains(&self.physics_version);
@@ -645,7 +693,7 @@ impl Settings {
             css_stamina: self.stamina,
             friction: self.friction,
             stop_speed: self.stop_speed,
-            gravity: self.gravity,
+            gravity: self.sv_gravity(),
             maximum_velocity: 3500.0, // sv_maxvelocity
             server_max_speed: 320.0,
             // CS:S ClipVelocity leaves clipped velocity 1/32 u/s away from the plane (tools/parity measurement).
@@ -1471,6 +1519,9 @@ pub struct Game {
     pub gravity_scale: f32,
     /// player_speedmod `ModifySpeed` (lagged movement value).
     pub speed_scale: f32,
+    /// v30 Low Gravity (`Settings::style_gravity`): the move type shavit-core's PreThinkPost saw on the previous command
+    /// (`iLastMoveType`), for its "just left a ladder" clause. Walk otherwise.
+    think_mode: movement::Mode,
     last_angles: [f32; 3],
     /// Scratch: hit identities touched by this tick's move.
     contacts: Vec<u64>,
@@ -1543,9 +1594,10 @@ pub struct Game {
     /// The map is in `map_fixes::SIGNED_DOOR_TRAVEL`: from physics v15 (`PHYSICS_FIX_MAP_DOOR_TRAVEL`) its movers use
     /// Source's signed travel. Fixed at load.
     map_signed_door_travel: bool,
-    /// The map is in `map_fixes::PLAYER_IO`: from physics v16 (`PHYSICS_FIX_MAP_PLAYER_IO`) the player keeps and fires
-    /// its own outputs and filters answer TestActivator. Fixed at load.
-    map_player_io: bool,
+    /// The map's `map_fixes::PLAYER_IO` entry's first physics version (16, bhop_iso 30): from there (with
+    /// `PHYSICS_FIX_MAP_PLAYER_IO`) the player keeps and fires its own outputs and filters answer TestActivator. Fixed at
+    /// load.
+    map_player_io: Option<u32>,
     /// The map is in `map_fixes::NONLINEAR_OBJECTIVES`: its scripted triggers (entity, role); from physics v16
     /// (`PHYSICS_FIX_MAP_PLAYER_IO`) `game/vscript.rs` runs their scripts. Empty elsewhere. Fixed at load.
     script_triggers: Vec<(usize, vscript::ScriptRole)>,
@@ -1565,6 +1617,13 @@ pub struct Game {
     map_event_clock_v24: bool,
     /// v29: `map_fixes::EVENT_CLOCK_V29`.
     map_event_clock_v29: bool,
+    /// v30: `map_fixes::EVENT_CLOCK_V30` (also `queue_delay`'s overflow rule).
+    map_event_clock_v30: bool,
+    /// v30: `map_fixes::STALE_TOUCH_HULL_V30`.
+    map_stale_touch_hull: bool,
+    /// The player's collision bounds as PostThink left them (crouched or standing): the duck state at the start of this
+    /// step; standing after a respawn. Read by `touch_hull` on `STALE_TOUCH_HULL_V30` maps.
+    collision_crouched: bool,
     /// v23: the entity fingerprint, kept for `map_fixes::teleport_target_v23`.
     map_fingerprint: u32,
     /// Exact reviewed build in map_fixes::LOGIC_CASE_V23: from physics v23 its logic_case and target rewrites run.
@@ -1680,7 +1739,7 @@ impl Game {
         };
         let map_max_velocity = map_fixes::max_velocity(&entities);
         let map_signed_door_travel = map_fixes::signed_door_travel(&entities).is_some();
-        let map_player_io = map_fixes::player_io(&entities).is_some();
+        let map_player_io = map_fixes::player_io(&entities).map(|m| m.min_physics);
         let script_triggers = vscript::script_triggers(&entities);
         // v25 exact builds (`map_fixes::BUILDS_V25`): entity CRC, then a digest of entities, outputs and brush collision.
         let map_build_v25 = map_fixes::build_v25(bsp, &entities, &outputs);
@@ -1692,6 +1751,8 @@ impl Game {
         let map_event_clock = map_fixes::event_clock_v23(map_fingerprint).is_some();
         let map_event_clock_v24 = map_fixes::event_clock_v24(map_fingerprint).is_some();
         let map_event_clock_v29 = map_fixes::event_clock_v29(map_fingerprint).is_some();
+        let map_event_clock_v30 = map_fixes::event_clock_v30(map_fingerprint).is_some();
+        let map_stale_touch_hull = map_fixes::stale_touch_hull_v30(map_fingerprint).is_some();
         let map_logic_case = map_fixes::logic_case_v23(&entities).is_some();
         let cs_deleted_props = map_fixes::cs_deleted_props_v24(&entities, map_fingerprint);
         let end_touch_outputs = map_fixes::end_touch_outputs_v24(&entities, map_fingerprint);
@@ -1769,6 +1830,7 @@ impl Game {
             health: MAX_HEALTH,
             gravity_scale: 1.0,
             speed_scale: 1.0,
+            think_mode: movement::Mode::Walk,
             last_angles: spawn.1,
             contacts: Vec::new(),
             restart_point: None,
@@ -1818,6 +1880,9 @@ impl Game {
             map_event_clock,
             map_event_clock_v24,
             map_event_clock_v29,
+            map_event_clock_v30,
+            map_stale_touch_hull,
+            collision_crouched: false,
             map_fingerprint,
             map_logic_case,
             cs_deleted_props,
@@ -1865,6 +1930,12 @@ impl Game {
             || (self.settings.physics_fixes() ^ settings.physics_fixes())
             & (PHYSICS_FIX_DOOR_START_OPEN | PHYSICS_FIX_TRAIN_SPAWN | PHYSICS_FIX_MAP_DOOR_TRAVEL)
             != 0;
+        // v30 Low Gravity: a settings change without a restart swaps the style multiplier the player holds for the new
+        // one (a map's own value stays). Before v30 both are None and nothing changes.
+        let (old_style, new_style) = (self.settings.style_gravity(), settings.style_gravity());
+        if old_style != new_style && self.gravity_scale == old_style.unwrap_or(1.0) {
+            self.gravity_scale = new_style.unwrap_or(1.0);
+        }
         self.settings = settings;
         self.config = Configuration {
             fixes: self.rules.movement_fixes(settings),
@@ -2067,7 +2138,10 @@ impl Game {
         self.touch_crouched = false;
         self.arms = weapons::Arms::default();
         self.health = MAX_HEALTH;
-        self.gravity_scale = 1.0;
+        self.collision_crouched = false;
+        // v30 Low Gravity: shavit's restart / StartTimer SetEntityGravity(style gravity). 1.0 elsewhere.
+        self.gravity_scale = self.settings.style_gravity().unwrap_or(1.0);
+        self.think_mode = movement::Mode::Walk;
         self.speed_scale = 1.0;
         self.forced_duck = false;
         self.auto_movement_disabled = false;
@@ -2254,6 +2328,8 @@ impl Game {
     }
 
     pub fn step(&mut self, cmd: Cmd) -> Result<(), String> {
+        // The collision bounds the last command's PostThink set (`touch_hull`).
+        self.collision_crouched = self.state.crouch.uses_crouched_hull();
         self.timing_teleport = None;
         self.timing_move = None;
         // Infinite flights (physics v24, game/flight.rs): a flight tick replaces the rest; a landing steps on below.
@@ -2282,7 +2358,7 @@ impl Game {
 
         // Fell out of the world (or a non-finite state): Source would kill the player.
         if self.state.position.iter().chain(&self.state.velocity).any(|v| !v.is_finite())
-            || self.state.position.iter().any(|v| v.abs() > OUT_OF_WORLD)
+            || self.out_of_world(self.state.position)
         {
             self.die();
         }
@@ -2296,11 +2372,17 @@ impl Game {
             self.events |= EVENT_EDGEBUG;
         }
         let was_grounded = self.state.ground.is_some();
-        let clean_before = before_events.position == self.state.position
+        // Display only (the strafe trainer's gain, `air_speed_gain`): the AirAccelerate gain is horizontal, so a style's
+        // gravity (Low Gravity's 400, or v30's 800 x 0.5) doesn't spoil it. Jump stats (`jumpstats_valid`, which the
+        // anticheat reads) keep the gravity gate: `jumpstats_valid == gain_valid && gravity 800 && multiplier 1`.
+        let normal_gravity = |g: &Self| g.gravity_scale == 1.0 || Some(g.gravity_scale) == g.settings.style_gravity();
+        let clean_move = before_events.position == self.state.position
             && before_events.velocity == self.state.velocity
             && self.state.water_level == 0 && self.state.base_velocity == [0.0; 3]
-            && self.gravity_scale == 1.0 && self.speed_scale == 1.0 && self.settings.gravity == 800.0
+            && normal_gravity(self) && self.speed_scale == 1.0
             && self.state.ground.is_none_or(|g| g.support.is_none_or(|hit| hit_entity(hit).is_none()) && g.normal[2] >= 0.99 && g.jump_factor == 1.0);
+        let clean_before = clean_move && self.gravity_scale == 1.0 && self.settings.gravity == 800.0;
+        let mut gain_valid = false;
         // bhoptimer shavit-core OnPlayerRunCmd: keep IN_JUMP, clear m_nOldButtons' jump bit before movement.
         // CheckJumpButton can then jump before friction if Duck or SetupMove categorizes ground this tick.
         // Do not rearm scroll, ladder jumps or swimming; no change to raw button edges / last_buttons.
@@ -2340,6 +2422,8 @@ impl Game {
             self.in_use = false;
             self.rebuild_solid();
         }
+        // v30 Low Gravity: shavit-core's PreThinkPost, after PreThink and before the move.
+        self.style_gravity_rule();
 
         self.contacts.clear();
         let pre_velocity = self.state.velocity;
@@ -2418,11 +2502,13 @@ impl Game {
             if result.jump_velocity != [0.0; 3] {
                 self.events |= EVENT_JUMPED;
             }
-            self.jumpstats_valid = clean_before && result.state.water_level == 0
+            let clean_result = result.state.water_level == 0
                 && result.state.base_velocity == [0.0; 3] && result.mover_result.is_none()
                 // CheckJumpButton adds 0.15 to the view's step smoothing even on a flat takeoff.
                 && result.climbed_step <= if result.jump_velocity != [0.0; 3] { 0.15 } else { 0.0 }
                 && result.contacts.iter().all(|c| c.normal[2] >= 0.99);
+            self.jumpstats_valid = clean_before && clean_result;
+            gain_valid = clean_move && clean_result;
             if !result.move_collided && result.prevented_collision.is_none() {
                 self.air_speed_gain = result.air_speed_gain;
             }
@@ -2490,11 +2576,13 @@ impl Game {
             self.game_ui_think(cmd, pressed);
         }
         self.untouch_triggers();
-        self.jumpstats_valid &= self.state.position == after_movement.position
+        let clean_after = self.state.position == after_movement.position
             && self.state.velocity == after_movement.velocity && self.state.base_velocity == [0.0; 3]
-            && self.gravity_scale == 1.0 && self.speed_scale == 1.0
+            && normal_gravity(self) && self.speed_scale == 1.0
             && self.state.ground.is_none_or(|g| g.support.is_none_or(|hit| hit_entity(hit).is_none()) && g.normal[2] >= 0.99 && g.jump_factor == 1.0);
-        if !self.jumpstats_valid || self.state.ground.is_some() || self.state.mode != movement::Mode::Walk {
+        self.jumpstats_valid &= clean_after && self.gravity_scale == 1.0;
+        gain_valid &= clean_after;
+        if !gain_valid || self.state.ground.is_some() || self.state.mode != movement::Mode::Walk {
             self.air_speed_gain = None;
         }
         self.tick += 1;
@@ -2595,6 +2683,28 @@ impl Game {
         (forward, side)
     }
 
+    /// v30 Low Gravity (`Settings::style_gravity`), shavit-core.sp `PreThinkPost` (bhoptimer master): on a WALK or
+    /// ISOMETRIC command, a player multiplier that reads 1 or 0, or any value right after a LADDER command, becomes the
+    /// style's; anything else a map set (a lift's -1.9, a slam's 40, a 0.35 zone) is kept. The move type is remembered
+    /// every command. `service_events` ran first, so a map's "gravity 1" that lands this tick is the style's before
+    /// this tick's move, as the event queue runs at the end of the server frame and PreThinkPost at the next command.
+    fn style_gravity_rule(&mut self) {
+        let Some(style) = self.settings.style_gravity() else { return };
+        let mode = self.state.mode;
+        if matches!(mode, movement::Mode::Walk | movement::Mode::Isometric)
+            && (self.gravity_scale == 1.0 || self.gravity_scale == 0.0 || self.think_mode == movement::Mode::Ladder)
+        {
+            self.gravity_scale = style;
+        }
+        self.think_mode = mode;
+    }
+
+    /// Past the kill line: |x|, |y| or |z| beyond `OUT_OF_WORLD`, or from v30 |x| or |y| beyond `OUT_OF_WORLD_XY_V30`.
+    fn out_of_world(&self, p: [f32; 3]) -> bool {
+        let xy = if (PHYSICS_V30..=PHYSICS_LATEST).contains(&self.settings.physics_version) { OUT_OF_WORLD_XY_V30 } else { OUT_OF_WORLD };
+        p[0].abs() > xy || p[1].abs() > xy || p[2].abs() > OUT_OF_WORLD
+    }
+
     fn die(&mut self) {
         self.respawn_player();
         self.events |= EVENT_TELEPORTED | EVENT_RESPAWNED;
@@ -2628,7 +2738,7 @@ impl Game {
             }
         }
         for (target, input, param, delay) in queued {
-            let fire_time = self.io_time + delay.max(0.0);
+            let fire_time = self.io_time + self.queue_delay(delay, activator);
             self.seq += 1;
             self.queue.push(QueuedEvent {
                 fire_time,
@@ -2642,9 +2752,27 @@ impl Game {
         }
     }
 
-    /// v16: the player's own outputs and filter tests run on this map (`map_fixes::PLAYER_IO`, `PHYSICS_FIX_MAP_PLAYER_IO`).
+    /// The delay an output is queued with (negative: 0). On `EVENT_CLOCK_V30` maps from v30, a player-activated delay that
+    /// eventqueuefix's tick conversion overflows (`RoundToCeil((delay - FLT_EPSILON) / tick interval)` at 2^31 or more:
+    /// INT_MIN) fires on the next command, as a 0 delay does (`map_fixes::EVENT_CLOCK_V30`).
+    fn queue_delay(&self, delay: f32, activator: Actor) -> f32 {
+        let delay = delay.max(0.0);
+        if activator == Actor::Player
+            && self.map_event_clock_v30
+            && (PHYSICS_V30..=PHYSICS_LATEST).contains(&self.settings.physics_version)
+            && !(((delay - f32::EPSILON) / self.settings.tick_interval).ceil() < 2_147_483_648.0)
+        {
+            return 0.0;
+        }
+        delay
+    }
+
+    /// v16: the player's own outputs and filter tests run on this map (`map_fixes::PLAYER_IO`, `PHYSICS_FIX_MAP_PLAYER_IO`),
+    /// from the entry's `min_physics` (bhop_iso: v30). Like `MaxVelocity::min_physics`, diagnostic versions with the fix
+    /// bit pass the version check.
     fn player_io(&self) -> bool {
-        (self.map_player_io && self.settings.physics_fixes() & PHYSICS_FIX_MAP_PLAYER_IO != 0)
+        (self.map_player_io.is_some_and(|min| self.settings.physics_version >= min)
+            && self.settings.physics_fixes() & PHYSICS_FIX_MAP_PLAYER_IO != 0)
             || (self.mechanics_on() && self.map_mechanics.is_some_and(|m| m.player_io()))
     }
 
@@ -2668,7 +2796,7 @@ impl Game {
         }
         self.extra.player_outputs.retain(|o| o.times != 0);
         for (target, input, param, delay) in queued {
-            let fire_time = self.io_time + delay.max(0.0);
+            let fire_time = self.io_time + self.queue_delay(delay, activator);
             self.seq += 1;
             self.queue.push(QueuedEvent { fire_time, seq: self.seq, target, input, param, activator, caller: Actor::Player });
         }
@@ -2695,6 +2823,9 @@ impl Game {
                 return 0;
             }
             if self.map_event_clock_v29 && (PHYSICS_V29..=PHYSICS_LATEST).contains(&self.settings.physics_version) {
+                return 0;
+            }
+            if self.map_event_clock_v30 && (PHYSICS_V30..=PHYSICS_LATEST).contains(&self.settings.physics_version) {
                 return 0;
             }
             // TIME_TO_TICKS(sv_clockcorrection_msecs 60 ms), minus the command being run.
@@ -3668,7 +3799,23 @@ impl Game {
             }
         }
         self.touch_origin = self.state.position;
-        self.touch_crouched = self.state.crouch.uses_crouched_hull();
+        self.touch_crouched = self.touch_hull_crouched();
+    }
+
+    /// The box the player's own touch pass (`in_touch`: ProcessImpacts, and RNGFix's PostThink pre-hook) tests triggers
+    /// with: on `STALE_TOUCH_HULL_V30` maps from v30 the collision bounds of the last PostThink (`collision_crouched`), as
+    /// in CS:S; elsewhere, and for pushers' touches after PostThink, the hull after this command's duck change.
+    fn touch_hull(&self) -> Hull {
+        if self.touch_hull_crouched() { self.policy.crouched_hull } else { self.policy.standing_hull }
+    }
+
+    /// Whether `touch_hull` is the crouched hull.
+    fn touch_hull_crouched(&self) -> bool {
+        if self.in_touch && self.map_stale_touch_hull && (PHYSICS_V30..=PHYSICS_LATEST).contains(&self.settings.physics_version) {
+            self.collision_crouched
+        } else {
+            self.state.crouch.uses_crouched_hull()
+        }
     }
 
     /// PhysicsTouchTriggers after the player's move (CMoveHelperServer::ProcessImpacts).
@@ -3683,7 +3830,7 @@ impl Game {
     /// that were not refreshed happens at the end of the frame (`untouch_triggers`). Returns true if the player
     /// died.
     fn touch_triggers_at(&mut self) -> bool {
-        self.touch_triggers_in(self.state.position, self.current_hull(), false)
+        self.touch_triggers_in(self.state.position, self.touch_hull(), false)
     }
 
     /// The touch pass of `touch_triggers_at` for the triggers overlapping `hull` at `position`; with `new_only`, only
@@ -3881,7 +4028,8 @@ impl Game {
         let trace = |hull: Hull| scene.trace_filtered(origin, below, hull, mask, &[]).ok();
         let hit = |t: &Trace| t.fraction < 1.0 || t.start_solid || t.all_solid;
         let standable = |t: &Trace| t.normal.is_some_and(|n| n[2] >= self.config.standable_normal);
-        let hull = self.current_hull();
+        // RNGFix reads m_vecMins / m_vecMaxs, the collision bounds, which PostThink hasn't updated yet.
+        let hull = self.touch_hull();
         let Some(full) = trace(hull).filter(hit) else { return };
         // The ground the player officially landed on: the full hull, else TracePlayerBBoxForGround's quadrants.
         let landing = if standable(&full) {
@@ -4463,6 +4611,7 @@ impl Game {
             health: self.health,
             gravity_scale: self.gravity_scale,
             speed_scale: self.speed_scale,
+            think_mode: self.think_mode,
             last_angles: self.last_angles,
             restart_point: self.restart_point,
             restart_names: self.restart_names.clone(),
@@ -4514,6 +4663,7 @@ impl Game {
         self.health = s.health;
         self.gravity_scale = s.gravity_scale;
         self.speed_scale = s.speed_scale;
+        self.think_mode = s.think_mode;
         self.last_angles = s.last_angles;
         self.restart_point = s.restart_point;
         self.restart_names.clone_from(&s.restart_names);
@@ -4562,6 +4712,10 @@ impl Game {
         bytes.extend_from_slice(self.player_class.as_bytes());
         for v in [self.health, self.gravity_scale, self.speed_scale] {
             bytes.extend_from_slice(&v.to_le_bytes());
+        }
+        // v30 Low Gravity only, so every other digest keeps its bytes.
+        if self.settings.style_gravity().is_some() {
+            bytes.push(self.think_mode as u8);
         }
         for v in self.state.base_velocity {
             bytes.extend_from_slice(&v.to_le_bytes());
@@ -4613,6 +4767,7 @@ pub struct GameState {
     health: f32,
     gravity_scale: f32,
     speed_scale: f32,
+    think_mode: movement::Mode,
     last_angles: [f32; 3],
     restart_point: Option<([f32; 3], f32)>,
     restart_names: Option<(String, String)>,

@@ -1,0 +1,67 @@
+/* A world record holder's map as the card background (v0.0.43, ui/card.ts and ui/hover-card.ts mapBgLayer;
+   apps/web/src/map-bg.ts). Layer order inside the content box: the picture (.pc-mapbg, first child) with its scrim
+   (::after), then the peak and supporter layers, then the content. The scrim is darkest where text sits (the top band:
+   brand, level, name; the bottom: badges and footer) and lighter through the middle where the boxes carry their own
+   fill; --map-dim is the map's own flat dim (maps/index.json cardDim, more for bright renders). The picture's box is
+   the content box, so nothing moves while it loads: it fades in over the card's own background, and if it fails the
+   card simply keeps that background. Custom CSS hook: .pc-mapbg (and .pc-wrline / .hc-wrline for the record line). */
+.pc-mapbg, .hc-inner > .pc-mapbg.pc-mapbg { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.pc-mapbg-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 50% 50%; opacity: 0; transition: opacity 0.35s ease-out; }
+.pc-mapbg-img.on { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .pc-mapbg-img { transition: none; } }
+body.potato .pc-mapbg-img { transition: none; }
+.pc-mapbg::after {
+  content: ""; position: absolute; inset: 0;
+  background:
+    linear-gradient(180deg, rgba(7, 9, 13, 0.7) 0%, rgba(7, 9, 13, 0.42) 30%, rgba(7, 9, 13, 0.24) 55%, rgba(7, 9, 13, 0.52) 82%, rgba(7, 9, 13, 0.74) 100%),
+    linear-gradient(90deg, rgba(7, 9, 13, 0.42) 0%, rgba(7, 9, 13, 0) 60%),
+    rgba(7, 9, 13, var(--map-dim, 0.3));
+}
+
+/* The card over a picture: the hop arcs off, secondary text lifted (the values the bright supporter backgrounds use),
+   boxes darker and frosted, a dark shadow under the free text. */
+.pc-has-mapbg .pc-art { display: none; }
+.pc.pc-has-mapbg, .hc.pc-has-mapbg { --dim: #cfd6e2; --faint: #b4bccb; }
+.pc-has-mapbg .pc-stats > div, .pc-has-mapbg .pc-feat-tile { background: rgba(6, 8, 12, 0.7); backdrop-filter: blur(calc(10 * var(--u))) saturate(0.85); }
+.pc-has-mapbg .pc-band { background: rgba(6, 8, 12, 0.7); backdrop-filter: blur(calc(10 * var(--u))); }
+.pc-has-mapbg .pc-badges .badge-chip { background: rgba(6, 8, 12, 0.66); backdrop-filter: blur(calc(8 * var(--u))); }
+.pc-has-mapbg .pc-title { background: color-mix(in srgb, var(--rank) 16%, rgba(6, 8, 12, 0.7)); }
+.pc-has-mapbg .pc-head, .pc-has-mapbg .pc-who, .pc-has-mapbg .pc-feat-empty {
+  text-shadow: 0 0 calc(2 * var(--u)) rgba(0, 0, 0, 0.7), 0 calc(1 * var(--u)) calc(8 * var(--u)) rgba(0, 0, 0, 0.75);
+}
+.pc-has-mapbg .pc-xp { background: rgba(255, 255, 255, 0.22); }
+
+/* The record line: the right end of the badges row (empty on every card). The map shortens, the time never does. */
+.pc-has-mapbg .pc-badges { align-items: center; min-width: 0; }
+.pc-wrline { margin-left: auto; min-width: 0; flex: 0 1 auto; display: inline-flex; align-items: baseline; gap: calc(6 * var(--u));
+  font-size: calc(17 * var(--u)); padding: calc(3 * var(--u)) calc(12 * var(--u)); border-radius: 999px; white-space: nowrap; color: var(--text);
+  background: rgba(6, 8, 12, 0.6); backdrop-filter: blur(calc(8 * var(--u))); }
+.pc-wrline > * { flex: none; }
+.pc-wrline b { color: var(--accent-ink); background: var(--accent); padding: 0 calc(6 * var(--u)); border-radius: calc(4 * var(--u)); font-weight: 800; }
+.pc-wrline-map { flex: 0 1 auto !important; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 750; }
+.pc-wrline-style, .pc-wrline-time { color: var(--dim); }
+.pc-wrline[data-run] { cursor: pointer; }
+
+/* Mini profile: the rows sit on the picture with no boxes, so the scrim is a little darker overall. */
+.hc.pc-has-mapbg .pc-mapbg::after {
+  background:
+    linear-gradient(180deg, rgba(7, 9, 13, 0.7) 0%, rgba(7, 9, 13, 0.6) 45%, rgba(7, 9, 13, 0.76) 100%),
+    linear-gradient(90deg, rgba(7, 9, 13, 0.3) 0%, rgba(7, 9, 13, 0) 65%),
+    rgba(7, 9, 13, var(--map-dim, 0.3));
+}
+.hc.pc-has-mapbg .hc-inner > :not(.pc-mapbg, .pc-glint, .pc-motes) { text-shadow: 0 0 2px rgba(0, 0, 0, 0.7), 0 1px 6px rgba(0, 0, 0, 0.75); }
+.hc.pc-has-mapbg .hc-top { border-top-color: rgba(255, 255, 255, 0.14); }
+/* The rank's name sits on the picture with no box: lifted toward white like the title (a red Grandmaster over a bright map). */
+.hc.pc-has-mapbg .hc-group { color: color-mix(in oklab, var(--rank) 80%, #ffffff); }
+.hc-wrline { display: flex; justify-content: flex-end; align-items: baseline; gap: 0.3em; min-width: 0; font-size: 0.8em; color: var(--dim); margin-top: -0.2rem; white-space: nowrap; }
+.hc-wrline > * { flex: none; }
+.hc-wrline b { color: var(--accent-ink); background: var(--accent); padding: 0 0.3em; border-radius: 3px; font-weight: 800; }
+.hc-wrline .pc-wrline-map { color: var(--text); }
+
+/* Edit card → Background: the maps you hold (ui/card-editor.ts mapBgSection), in the picker's own rows. */
+/* (Two classes: the swatch is also a .pf-sw-card, whose `background` shorthand in profile.css sets the size back to
+   auto and the place to the top left, and which sheet comes later depends on the import order. With one class here
+   the 480x270 picture was drawn at full size in a 46 px box: a flat patch of its top left corner.) */
+.pf-sw.pf-sw-map { background-size: cover; background-position: center; background-color: #10131b; }
+.ce .ce-map-q { display: block; width: calc(100% - 0.9rem); box-sizing: border-box; margin: 0.15rem 0.45rem 0.35rem; padding: 0.35rem 0.6rem; font-size: var(--fs-sm); }
+.ce-maps-all { margin: 0.2rem 0 0 0.45rem; }

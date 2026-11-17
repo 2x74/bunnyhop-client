@@ -24,8 +24,10 @@ export type ReplayLoss = "noclip" | "teleport" | "speed";
 export class PracticeAttempt {
   /** Practice mode is on: every attempt is practice, also after a restart. */
   mode = false;
-  /** Why this attempt is practice ("mode", or the first tool used), or null for a clean attempt. */
-  private why: "mode" | PracticeUse | null = null;
+  /** Why this attempt is practice ("mode", a tick at another timescale, or the first tool used), or null for a clean attempt. */
+  private why: "mode" | "timescale" | PracticeUse | null = null;
+  /** The slowest timescale (timescale.ts) a tick of this attempt ran at. */
+  private slowest = 1;
   /** A tool or practice spawn moved the player outside the simulation this attempt, also in practice mode. */
   private moved = false;
   private lost: ReplayLoss | null = null;
@@ -37,7 +39,22 @@ export class PracticeAttempt {
 
   /** The tool that made this attempt practice, if it wasn't practice mode. */
   get tool(): PracticeUse | null {
-    return this.why === "mode" ? null : this.why;
+    return this.why === "mode" || this.why === "timescale" ? null : this.why;
+  }
+
+  /** The slowest timescale this attempt ran at (1: never slowed); practice replays are labelled with it. */
+  get timescale(): number {
+    return this.slowest;
+  }
+
+  /**
+   * A tick ran at `scale`. Practice mode is the only place a scale other than 1 is allowed (timescale.ts); this is the
+   * second guard: such an attempt is practice whatever else happens, until the next reset.
+   */
+  ticked(scale: number): void {
+    if (scale === 1) return;
+    this.slowest = Math.min(this.slowest, scale);
+    this.why ??= "timescale";
   }
 
   /** The player's place wasn't reached by movement alone this attempt: noclip, a checkpoint teleport or a practice spawn. */
@@ -93,6 +110,7 @@ export class PracticeAttempt {
   reset(): boolean {
     const exited = this.why !== null && !this.mode;
     this.why = this.mode ? "mode" : null;
+    this.slowest = 1;
     this.moved = false;
     this.lost = null;
     return exited;

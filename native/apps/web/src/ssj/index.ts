@@ -22,6 +22,8 @@ import "../ui/settings.css";
 import { DEFAULT_JHUD, JHUD_BANDS, JhudTracker, type JhudBand, type JhudReport } from "./jhud";
 import { SSJ_FIELDS, SsjTracker, ssjItems, ssjPassesGain, ssjText, type SsjField, type SsjMode, type SsjReport, type SsjState, StartPreTracker } from "./stats";
 import { ssjNodes } from "./view";
+import { GainLogs, GainLogTracker, logsCommand } from "./logs";
+import type { GainLogReport } from "../net/protocol";
 import { dismissOutside } from "../ui/dismiss";
 
 const P = () => prefs.get().hud.ssj;
@@ -40,6 +42,9 @@ export class LiveSsj {
    * 6th jump's, and the start prespeed.
    */
   relay: ((r: { kind: 1 | 2; ssj: SsjReport & { jss: number | null } } | { kind: 3; speed: number | null }) => void) | null = null;
+  /** Gain logs (logs.ts): six-jump windows without turn-bind jumps, to the session (its line, and a room's relay). */
+  private logs = new GainLogTracker();
+  gainLog: ((r: GainLogReport) => void) | null = null;
 
   constructor(private report: (r: SsjReport) => void, private reportStartPre: (speed: number | null) => void = () => {}, private reportJhud: (r: JhudReport | null) => void = () => {}) {
     prefs.watch((p) => this.tracker.setMode(p.hud.ssj.mode));
@@ -49,6 +54,7 @@ export class LiveSsj {
   reset(state: PlayerState | null): void {
     this.tracker.reset();
     this.sixths.reset();
+    this.logs.reset();
     this.startPre.reset();
     this.reportStartPre(null);
     this.relay?.({ kind: 3, speed: null });
@@ -86,8 +92,16 @@ export class LiveSsj {
     const six = this.sixths.tick(pre, cmd, { jumped: (events & EVENT_JUMPED) !== 0, ...o });
     if (j && this.jhud.lastSsj) this.relay?.({ kind: 1, ssj: { ...this.jhud.lastSsj, jss: j.jss } });
     if (six) this.relay?.({ kind: 2, ssj: { ...six, jss: null } });
+    const log = this.logs.tick(pre, cmd, { jumped: (events & EVENT_JUMPED) !== 0, ...o });
+    if (log) this.gainLog?.(log);
   }
 }
+
+/** Gain logs (!logs, logs.ts): the console and local chat lines. */
+export const gainLogs = new GainLogs(() => prefs.get().hud.logs, {
+  console: (text) => printConsole(text),
+  chat: (text, items) => void postLocalLine(text, ssjNodes(items, false)),
+});
 
 /**
  * A report in the console, always (so earlier jumps can be read back with the chat off), and in the chat if Chat is on
@@ -149,6 +163,21 @@ export function ssjRows(): HTMLElement[] {
         check(FIELD_LABELS[f][0], () => P().fields[f], (v) => up((p) => (p.hud.ssj.fields[f] = v)), { desc: FIELD_LABELS[f][1], keywords: `ssj jump stats ${f}` }),
       ),
     ),
+    toggle("Gain logs in servers", () => prefs.get().hud.logs.others, (v) => up((p) => (p.hud.logs.others = v)), {
+      hint: "!logs",
+      desc: "Every 6 jumps, a line in chat when someone in the server, you included, gets 85% gain or more over those jumps. Normal style only, and jumps turned with turn binds don't count. Each player's game works the numbers out.",
+      keywords: "gain logs log spj strafes per jump sync six jumps average chat server others everyone",
+    }),
+    toggle("All my gain logs", () => prefs.get().hud.logs.own, (v) => up((p) => (p.hud.logs.own = v)), {
+      hint: "!logs me",
+      desc: "Your own line every 6 jumps, whatever the gain, in any style and solo too.",
+      keywords: "gain logs log spj strafes per jump sync six jumps average chat own mine",
+    }),
+    range("Gain logs from", () => prefs.get().hud.logs.minGain, (v) => up((p) => (p.hud.logs.minGain = Math.round(v))), {
+      min: 0, max: 100, step: 5, unit: "%",
+      desc: "Only lines with at least this gain. At 0 you get every line of yours, and the server's 85% for everyone's. !logs 90 sets it from chat.",
+      keywords: "gain logs filter minimum threshold",
+    }),
   ];
 }
 
@@ -255,5 +284,19 @@ registerChatCommand({
     const min = Math.round(n);
     up((p) => ((p.hud.ssj.minGain = min), (p.hud.ssj.chat = true)));
     ctx.reply(min > 0 ? `Jump stats in chat: only jumps with ${min}% gain or more.` : "Jump stats in chat: every jump.");
+  },
+});
+registerChatCommand({
+  name: "logs",
+  args: "[on|off|me|%]",
+  help: "gain logs",
+  about: "every 6 jumps, a chat line with gain, strafes per jump and sync; in servers everyone's at 85% or more show. !logs off turns them off, !logs me shows only yours, !logs 90 only lines with 90% gain or more.",
+  group: "more",
+  where: "both",
+  run: (ctx, arg) => {
+    const r = logsCommand(arg, prefs.get().hud.logs);
+    if (!r) return void ctx.reply("Usage: !logs [on|off|me|gain %], e.g. !logs 85");
+    up((p) => (p.hud.logs = r.next));
+    ctx.reply(r.reply);
   },
 });

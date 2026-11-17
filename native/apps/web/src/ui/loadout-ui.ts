@@ -44,6 +44,9 @@ export function finishBackground(id: string | null | undefined): string {
   switch (f.kind) {
     case "sunset":
       return "radial-gradient(ellipse 40% 18% at 52% 46%, rgba(255, 222, 210, 0.55), transparent), linear-gradient(90deg, #fcd54d 0%, #fb8452 28%, #ef4f80 52%, #9442c8 78%, #3e48b8 100%)";
+    case "sunray":
+      // The Daily Challenge's knife finish (lane v43/daily): a sun at the guard, rays, peach to indigo.
+      return "radial-gradient(circle at 4% 50%, #ffcc42 0 9%, #fff0bc 9% 11.5%, transparent 12%), repeating-conic-gradient(from 60deg at 4% 50%, rgba(255, 222, 128, 0.5) 0 4deg, transparent 4deg 10deg), linear-gradient(90deg, #ffb870 0%, #f0736b 40%, #5a4a8e 78%, #38387f 100%)";
     case "ember":
       return "radial-gradient(circle at 30% 45%, #ffb43a 0 12%, transparent 32%), radial-gradient(circle at 70% 55%, #f0561a 0 18%, transparent 40%), radial-gradient(circle at 88% 30%, #ffcf5a 0 8%, transparent 22%), linear-gradient(90deg, #2a0d08, #7a1606 60%, #3a120a)";
     case "tigerlily":

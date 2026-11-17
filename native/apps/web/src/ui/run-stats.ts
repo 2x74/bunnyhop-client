@@ -5,9 +5,9 @@
 // src/run-stats.ts). Rows opt in with data-run (the run id) and data-run-title (the card's heading); bindRunStats on a
 // board's root does the rest. Clicks on the row are untouched (a hold that opened the card eats its own click).
 //
-// One card at a time, in the top layer (a manual popover, so it shows above the board's modal dialog), placed under
-// the row or above it, clear of the columns the row marks .rs-keep (Time and Gap stay readable in the rows it covers),
-// never off-screen. It never takes the pointer. Cards are fetched on first show and kept per run
+// One card at a time, in the top layer (a manual popover, so it shows above the board's modal dialog), opened at the
+// pointer like a tooltip (under the row for keyboard focus and a touch hold), never off-screen. It never takes the
+// pointer. Cards are fetched on first show and kept per run
 // for the page's life; a run without one (old, not public, offline) shows nothing. Rows may carry data-run-points (the
 // board read's points for the record), which replaces the card's slower number.
 
@@ -98,6 +98,13 @@ export function statsRows(s: RunStats): { run: [string, string][]; setup: [strin
   if (s.jumps != null) run.push(["Jumps", num(s.jumps)]);
   if (s.strafes != null) run.push(["Strafes", num(s.strafes)]);
   if (s.sync != null) run.push(["Sync", `${num(s.sync, 1)}%`]);
+  // Speed and gain as the replay viewer shows them (stored at verification since v0.0.43; older runs have none).
+  if (s.gain !== undefined) run.push(["Gain", `${num(s.gain, 1)}%`]);
+  if (s.speed) {
+    run.push(["Start speed", `${num(s.speed.start)} u/s`]);
+    run.push(["Top speed", `${num(s.speed.top)} u/s`]);
+    run.push(["Average speed", `${num(s.speed.avg)} u/s`]);
+  }
   // (Not on autohop styles: holding jump makes every hop perfect.)
   if (s.perf != null && !styleDef(s.style)?.autohop) run.push(["Perfect hops", `${num(s.perf, 1)}%`]);
   run.push(["Replay views", num(s.views ?? 0)]);
@@ -174,45 +181,45 @@ function cardEl(): HTMLElement {
   return card;
 }
 
-type Span = { left: number; right: number };
+/** How far from the pointer's tip the card's corner sits (clear of the cursor's arrow). */
+const PTR_X = 14;
+const PTR_Y = 18;
 
 /**
- * The card's left edge for a row whose kept columns span `keep`: as far right as the row's last cell (`tail`, its left
- * edge) when the card fits right of the kept columns; else beside the row on its left; else left of the kept columns.
- * No kept columns, or no room anywhere (a phone): centred on `x`, inside the viewport.
+ * Where the card goes for a pointer at (x, y): below and right of it, like a tooltip; left of it when there's no room
+ * on the right, above it when there's none below; always inside the viewport.
  */
-export function cardLeft(w: number, vw: number, x: number, row: Span, tail: number, keep: Span | null): number {
-  const max = Math.max(EDGE, vw - EDGE - w);
-  if (keep && keep.right + GAP <= max) return Math.max(keep.right + GAP, Math.min(max, tail));
-  if (keep && row.left - GAP - w >= EDGE) return row.left - GAP - w;
-  if (keep && keep.left - GAP - w >= EDGE) return keep.left - GAP - w;
-  return Math.min(Math.max(EDGE, x - w / 2), max);
+export function cardAtPointer(w: number, ht: number, vw: number, vh: number, x: number, y: number): { left: number; top: number } {
+  const maxL = Math.max(EDGE, vw - EDGE - w);
+  const maxT = Math.max(EDGE, vh - EDGE - ht);
+  const left = x + PTR_X <= maxL ? x + PTR_X : x - PTR_X - w;
+  const top = y + PTR_Y <= maxT ? y + PTR_Y : y - PTR_X - ht;
+  return { left: Math.min(Math.max(EDGE, left), maxL), top: Math.min(Math.max(EDGE, top), maxT) };
 }
 
 /**
- * Under the row, or above it when there's no room below (level with it when the card is wholly beside it); x from
- * cardLeft; always inside the viewport.
+ * At the pointer (cardAtPointer). Without one (keyboard focus, a touch hold: `y` null): under the row, or above it
+ * when there's no room below, centred on `x`; always inside the viewport.
  */
-function place(el: HTMLElement, row: HTMLElement, x: number): void {
-  const anchor = row.getBoundingClientRect();
+function place(el: HTMLElement, row: HTMLElement, x: number, y: number | null): void {
   const w = el.offsetWidth;
   const ht = el.offsetHeight;
+  const vw = document.documentElement.clientWidth;
   const vh = document.documentElement.clientHeight;
-  // The cells that are showing (a narrow board hides some), and the span of the ones marked .rs-keep.
-  const cells = [...row.children].map((c) => [c, c.getBoundingClientRect()] as const).filter(([, r]) => r.width);
-  const kept = cells.filter(([c]) => c.classList.contains("rs-keep")).map(([, r]) => r);
-  const keep = kept.length ? { left: Math.min(...kept.map((r) => r.left)), right: Math.max(...kept.map((r) => r.right)) } : null;
-  const left = cardLeft(w, document.documentElement.clientWidth, x, anchor, cells.at(-1)?.[1].left ?? anchor.right, keep);
-  const below = anchor.bottom + GAP;
-  const above = anchor.top - GAP - ht;
-  const beside = left + w <= anchor.left || left >= anchor.right;
-  const top = beside ? Math.min(Math.max(EDGE, anchor.top), Math.max(EDGE, vh - EDGE - ht)) : below + ht <= vh - EDGE ? below : above >= EDGE ? above : Math.max(EDGE, vh - EDGE - ht);
-  el.style.left = `${Math.round(left)}px`;
-  el.style.top = `${Math.round(top)}px`;
+  let at: { left: number; top: number };
+  if (y !== null) at = cardAtPointer(w, ht, vw, vh, x, y);
+  else {
+    const anchor = row.getBoundingClientRect();
+    const below = anchor.bottom + GAP;
+    const above = anchor.top - GAP - ht;
+    at = { left: Math.min(Math.max(EDGE, x - w / 2), Math.max(EDGE, vw - EDGE - w)), top: below + ht <= vh - EDGE ? below : above >= EDGE ? above : Math.max(EDGE, vh - EDGE - ht) };
+  }
+  el.style.left = `${Math.round(at.left)}px`;
+  el.style.top = `${Math.round(at.top)}px`;
 }
 
-/** What's shown or about to be: the row, where to put the card, when the pointer last moved on the row, and a token so a stale load doesn't draw. */
-let current: { row: HTMLElement; x: number; seq: number; at: number } | null = null;
+/** What's shown or about to be: the row, where the pointer is (`y` null without one), when it last moved on the row, and a token so a stale load doesn't draw. */
+let current: { row: HTMLElement; x: number; y: number | null; seq: number; at: number } | null = null;
 let seq = 0;
 let timer: ReturnType<typeof setTimeout> | null = null;
 /** The row whose card was closed with Escape: it stays closed until the pointer leaves the row. */
@@ -229,14 +236,14 @@ export function hideRunStats(): void {
   }
 }
 
-function show(row: HTMLElement, x: number): void {
+function show(row: HTMLElement, x: number, y: number | null): void {
   const id = row.dataset.run;
   // Not while a menu is open (a row's ⋯, ui/row-menu.ts): the card would cover it.
   if (!id || !row.isConnected || document.querySelector(".sm-menu")) return;
   const title = row.dataset.runTitle ?? "";
   const pts = livePoints(row);
   const my = ++seq;
-  current = { row, x, seq: my, at: 0 };
+  current = { row, x, y, seq: my, at: 0 };
   const el = cardEl();
   const draw = (nodes: Node[]) => {
     if (current?.seq !== my || !row.isConnected) return;
@@ -244,7 +251,7 @@ function show(row: HTMLElement, x: number): void {
     el.hidden = false;
     if (canPopover && !el.matches(":popover-open")) el.showPopover();
     row.setAttribute("aria-describedby", el.id);
-    place(el, row, current.x);
+    place(el, row, current.x, current.y);
   };
   let settled = false;
   void load(id).then((s) => {
@@ -260,17 +267,17 @@ function show(row: HTMLElement, x: number): void {
 }
 
 /** Shows the row's card once `ms` have passed since the pointer last moved on it (`current.at`). */
-function schedule(row: HTMLElement, x: number, ms: number): void {
+function schedule(row: HTMLElement, x: number, y: number | null, ms: number): void {
   if (current?.row === row || muted === row) return;
   hideRunStats();
-  current = { row, x, seq: ++seq, at: performance.now() };
+  current = { row, x, y, seq: ++seq, at: performance.now() };
   const wait = (left: number) => {
     timer = setTimeout(() => {
       timer = null;
       if (current?.row !== row) return;
       const rest = current.at + ms - performance.now();
       if (rest > 1) wait(rest);
-      else show(row, current.x);
+      else show(row, current.x, current.y);
     }, left);
   };
   wait(ms);
@@ -321,8 +328,8 @@ export function bindRunStats(root: HTMLElement): void {
       if (current && e.type === "pointerover") hideRunStats(); // a header or a gap
     } else if (current?.row === row) {
       // Until it shows, the card follows the pointer along the row and waits for it to rest.
-      if (timer !== null && pointerMoved(e)) Object.assign(current, { x: e.clientX, at: performance.now() });
-    } else if (pointerMoved(e)) schedule(row, e.clientX, SHOW_MS);
+      if (timer !== null && pointerMoved(e)) Object.assign(current, { x: e.clientX, y: e.clientY, at: performance.now() });
+    } else if (pointerMoved(e)) schedule(row, e.clientX, e.clientY, SHOW_MS);
     else if (current) hideRunStats(); // the rows scrolled or were replaced under a resting pointer
   };
   root.addEventListener("pointerover", hover);
@@ -338,7 +345,7 @@ export function bindRunStats(root: HTMLElement): void {
     const row = rowOf(e.target);
     if (!row || !(e.target as Element).matches(":focus-visible")) return;
     const r = (e.target as Element).getBoundingClientRect();
-    schedule(row, r.left + r.width / 2, FOCUS_MS);
+    schedule(row, r.left + r.width / 2, null, FOCUS_MS);
   });
   root.addEventListener("focusout", (e) => {
     const row = rowOf(e.target);
@@ -366,7 +373,7 @@ export function bindRunStats(root: HTMLElement): void {
         hold = null;
         eat = row;
         hideRunStats();
-        show(row, x);
+        show(row, x, null);
       }, HOLD_MS),
     };
   });

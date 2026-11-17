@@ -29,7 +29,7 @@ import { torsoFacePointFor, torsoPointFor, torsoProfile, type BunnyBody, type Bu
 import type { BunnyLook } from "./look";
 import { ensureHeadwear } from "../hat-detail";
 import type { BackKind, BackRig } from "../back-fx";
-import { CAPE_ITEM, CAPE_LENGTH, capeLengthOf, ROBE_ITEM } from "../../progression";
+import { CAPE_ITEM, CAPE_LENGTH, capeLengthOf, MEDAL_DEFAULT, MEDAL_ITEM, medalCodeOf, medalOf, ROBE_ITEM } from "../../progression";
 import { buildRobe } from "./robe";
 
 const fixed = (color: number): Paint => ({ code: 0, color });
@@ -52,6 +52,7 @@ export const BACK_KIND: Readonly<Record<string, BackKind>> = {
   "back-blade": "blade",
   "back-pinwheel": "pinwheel",
   [ROBE_ITEM]: "robe",
+  [MEDAL_ITEM]: "medal",
 };
 
 /** A back item this build can draw. */
@@ -71,17 +72,18 @@ export const ponytailRest = (back: string | null | undefined, bunny: boolean): n
  * raised hood (Plush, Bun-E), down the middle of the upper back: like the lowered hood, it takes that place, and the
  * items that would be in its way sit low.
  */
-export type BackFit = { profile: "a" | "b" | "plush"; hood: BunnyHood; tail?: true; len?: number; tied?: true };
+export type BackFit = { profile: "a" | "b" | "plush"; hood: BunnyHood; tail?: true; len?: number; tied?: true; medal?: number };
 /** `capeLength`: the Cape's length (loadout.capeLength, a percent); it is part of the fit only when not the default. */
 /** `tied`: the Robe worn tied (loadout.robeTied); part of the fit only then. */
-export function backFit(look: BunnyLook, body: BunnyBody, hood: BunnyHood, hat?: string | null, capeLength?: number | null, tied?: boolean | null): BackFit {
+/** `medal`: the Daily Medal's look (loadout.medal, progression.ts medalCode); part of the fit only when it has one. */
+export function backFit(look: BunnyLook, body: BunnyBody, hood: BunnyHood, hat?: string | null, capeLength?: number | null, tied?: boolean | null, medal?: number | null): BackFit {
   const profile = look === "plush" ? "plush" : look === "bune" || (look === "bunny" && body === "feminine") ? "b" : "a";
   const h = look === "bunny" ? hood : "up";
   const len = capeLengthOf(capeLength);
-  return { profile, hood: h, ...(h === "up" && hat === "hat-ponytail" ? { tail: true as const } : {}), ...(len !== null && len !== CAPE_LENGTH.default ? { len } : {}), ...(tied ? { tied: true as const } : {}) };
+  return { profile, hood: h, ...(h === "up" && hat === "hat-ponytail" ? { tail: true as const } : {}), ...(len !== null && len !== CAPE_LENGTH.default ? { len } : {}), ...(tied ? { tied: true as const } : {}), ...(medalCodeOf(medal) !== null ? { medal: medal! } : {}) };
 }
 /** (Only the Cape reads the length: the other items share a geometry whatever it is.) */
-export const backKey = (id: string, f: BackFit): string => `${id}|${f.profile}|${f.hood}${f.tail ? "|tail" : ""}${f.len && id === CAPE_ITEM ? `|l${f.len}` : ""}${f.tied && id === ROBE_ITEM ? "|tied" : ""}`;
+export const backKey = (id: string, f: BackFit): string => `${id}|${f.profile}|${f.hood}${f.tail ? "|tail" : ""}${f.len && id === CAPE_ITEM ? `|l${f.len}` : ""}${f.tied && id === ROBE_ITEM ? "|tied" : ""}${f.medal !== undefined && id === MEDAL_ITEM ? `|m${f.medal}` : ""}`;
 
 /**
  * Where each item sits and how big it is: the numbers to change when the body does. (The items read the hoodie's
@@ -120,6 +122,10 @@ export const BACK_FITS: Readonly<Record<string, { up: BackPlace; down?: BackPlac
   "back-pinwheel": { up: { at: [7.4, 46.5], s: 1.14 }, to: [10.9, 73.4] },
   // The Robe (robe.ts): the neck edge's height. The rest of its cut is taken from the build's own torso and arms.
   [ROBE_ITEM]: { up: { at: [0, 63.6], s: 1 } },
+  // The Daily Medal hangs on the CHEST: the disc's middle, over the drawstrings' ends (it hides their tips). The hood
+  // and a ponytail are on the other side of the body, so it has one place; `to` is where its ribbon comes out from
+  // under the hood on each side ([x, z]).
+  [MEDAL_ITEM]: { up: { at: [0, 53.0], s: 1 }, to: [3.3, 62.6] },
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -1184,8 +1190,120 @@ const BUILD: Record<string, (f: BackFit) => THREE.BufferGeometry> = {
   "back-jetpack": jetpack,
   "back-blade": blade,
   "back-pinwheel": pinwheel,
+  [MEDAL_ITEM]: medal,
   [ROBE_ITEM]: (f) => buildRobe({ profile: f.profile, hood: f.hood, tied: !!f.tied, neck: BACK_FITS[ROBE_ITEM].up.at[1] + (BACK_FITS[ROBE_ITEM].lift?.[f.profile] ?? 0) }).geometry,
 };
+
+/** The Daily Medal's metals (rank-crown colours, hat-detail.ts: metal): [face, dark, bright] and the stone of its last step. */
+const MEDAL_TONES = {
+  gold: [0xffcf3d, 0xc8891e, 0xffe08a, 0xe0213b],
+  silver: [0xdfe6f0, 0x8f9bb0, 0xf7fafd, 0x2a6df0],
+  bronze: [0xd9934e, 0x8f5a2e, 0xf2b885, 0x18b85a],
+} as const;
+/** The ribbon: the menu's ink with the game's amber down its middle (hat-detail.ts: fabric). */
+const MEDAL_RIBBON = 0x26304f, MEDAL_STRIPE = 0xffb43c;
+
+/**
+ * Daily Medal: a struck medal on a ribbon round the neck, lying on the chest over the hoodie's drawstrings. A thick disc
+ * with a raised, chamfered rim and a suspension bar; the ribbon comes out from under the hood either side of the neck
+ * and meets at the bar in a V. The face is the count's (the name badge's six steps, progression.ts MEDAL_STEPS), each
+ * step adding to the last so more of a medal is more to look at from across a room: a boss; a raised ring; eight rays;
+ * a scalloped edge that widens the whole medal; a star on the boss; a stone set in the star and a second stripe on the
+ * ribbon. The disc and the lower ribbon swing off the chest as one hanging chain (code 1 with chain weights; BackKind
+ * "medal").
+ */
+function medal(f: BackFit): THREE.BufferGeometry {
+  const c = ctxFor(f);
+  const { b } = c;
+  const { metal, step } = medalOf(f.medal ?? MEDAL_DEFAULT);
+  const [FACE, DARK, BRIGHT, STONE] = MEDAL_TONES[metal].map(fixed);
+  const RIBBON = fixed(MEDAL_RIBBON), STRIPE = fixed(MEDAL_STRIPE), PIPING = fixed(0xf3ecdc);
+  const F = fitOf(c, MEDAL_ITEM);
+  const R = 3.1, T = 0.95, OFF = 0.85;
+  // The disc lies on the chest: its face looks along the chest's own normal there.
+  const [pc, N] = torsoFront(c, F.x, F.z);
+  const C = add(pc, scale(N, OFF));
+  const [, right, up] = frame(N, [1, 0, 0]);
+  const W0 = c.W(C), W = () => W0;
+  const bar = add(C, scale(up, R + 0.55));
+  // The ribbon leaves the body below the collar bones; from there down it hangs free.
+  const zTop = F.z2, zFree = F.z2 - 2.2;
+  const top: V3 = torsoFront(c, 0, zFree)[0];
+  const wOf = (p: V3) => Math.pow(clamp01((zFree - p[2]) / Math.max(zFree - bar[2], 0.1)), 1.15);
+  part(c, { code: 1, w: wOf }, () => {
+    for (const sx of [1, -1]) {
+      // From under the hood down the chest to the bar: on the hoodie at first, standing off it as it nears the medal.
+      const K = 12;
+      const path: V3[] = [], out: V3[] = [];
+      // Above where it comes out from under a raised hood it goes on up to the side of the neck, so with the hood down
+      // (the neck bare above the collar) it is still a ribbon round the neck and not two ends on the chest.
+      for (const [x, z] of [[F.x2 - 1.0, zTop + 2.6], [F.x2 - 0.45, zTop + 1.3]]) {
+        const [p, n] = torsoFront(c, sx * x, z);
+        path.unshift(add(p, scale(n, 0.1)));
+        out.unshift(n);
+      }
+      path.reverse(), out.reverse();
+      for (let i = 0; i <= K; i++) {
+        const t = i / K;
+        const [p, n] = torsoFront(c, sx * F.x2 * (1 - t) + sx * 0.55 * t, zTop + (bar[2] - zTop) * t);
+        const lift = 0.1 + (OFF - 0.25) * t * t;
+        path.push(i === K ? add(bar, scale(right, sx * 0.55)) : add(p, scale(n, lift)));
+        out.push(i === K ? N : n);
+      }
+      const L = path.length - 1;
+      const band = (w: number, t: number, raise: number, paint: Paint, shift = 0) => {
+        const rows = path.map((p, i) => {
+          const d = norm(sub(path[Math.min(L, i + 1)], path[Math.max(0, i - 1)]));
+          const n = out[i], a = norm(cross(n, d));
+          const o = add(add(p, scale(n, raise + t / 2)), scale(a, shift));
+          return [add(add(o, scale(a, w / 2)), scale(n, t / 2)), add(add(o, scale(a, -w / 2)), scale(n, t / 2)), add(add(o, scale(a, -w / 2)), scale(n, -t / 2)), add(add(o, scale(a, w / 2)), scale(n, -t / 2))];
+        });
+        // Skinned like the hoodie where it lies on it, going over to the medal's own bone weights where it hangs.
+        b.surface(rows, { paint: () => paint, weight: (p) => mixW([c.W(p), 1 - wOf(p)], [W0, wOf(p)]), flat: true, capStart: paint, capEnd: paint });
+      };
+      band(1.9, 0.22, 0, RIBBON);
+      // Ivory piping down both edges: it keeps the ribbon's shape on a dark hoodie, where the ink would be lost.
+      for (const s of [0.86, -0.86]) band(0.2, 0.08, 0.22, PIPING, s);
+      if (step < 5) band(0.62, 0.08, 0.22, STRIPE);
+      else for (const s of [0.36, -0.36]) band(0.36, 0.08, 0.22, STRIPE, s);
+    }
+  });
+  part(c, { code: 1, w: () => 1 }, () => {
+    // The suspension bar the ribbon is sewn round, and its lug down to the rim.
+    plate(b, ring(bar, right, up, 1.55, 0.5, 14, 5), N, 0.6, 0.14, { face: FACE, bevel: BRIGHT, rim: DARK }, W);
+    plate(b, ring(add(C, scale(up, R + 0.05)), right, up, 0.5, 0.42, 10, 4), N, 0.5, 0.1, { face: FACE, bevel: BRIGHT, rim: DARK }, W);
+    // From the fourth step the medal has a scalloped edge: twelve lobes behind the rim, which make it wider.
+    if (step >= 3)
+      for (let k = 0; k < 12; k++) {
+        const a = (k / 12) * Math.PI * 2 + Math.PI / 12;
+        const q = add(C, add(scale(right, Math.cos(a) * (R + 0.12)), scale(up, Math.sin(a) * (R + 0.12))));
+        plate(b, ring(add(q, scale(N, -0.12)), right, up, 0.78, 0.78, 8), N, 0.55, 0.14, { face: FACE, bevel: BRIGHT, rim: DARK }, W);
+      }
+    // The disc: a dark back, a chamfered edge, a raised rim and the face sunk inside it.
+    const h = T / 2, IN = R - 0.62;
+    turned(b, C, N, [[-h, 0], [-h, R - 0.16], [-h + 0.16, R], [h - 0.16, R], [h, R - 0.16], [h, IN], [h - 0.26, IN - 0.14], [h - 0.26, 0]], (j) => [DARK, DARK, FACE, BRIGHT, BRIGHT, DARK, FACE][j], W, 32, right);
+    const face = add(C, scale(N, h - 0.26));
+    const onFace = (r: number, a: number, lift = 0): V3 => add(face, add(scale(right, Math.cos(a) * r), add(scale(up, Math.sin(a) * r), scale(N, lift))));
+    // A raised ring from the second step.
+    if (step >= 1) turned(b, face, N, [[0, 1.86], [0.2, 1.8], [0.2, 1.5], [0, 1.44]], (j) => [DARK, BRIGHT, DARK][j], W, 28, right);
+    // Eight rays from the third, between the ring and the rim.
+    if (step >= 2)
+      for (let k = 0; k < 8; k++) {
+        const a = (k / 8) * Math.PI * 2 + Math.PI / 8, tan = add(scale(right, -Math.sin(a)), scale(up, Math.cos(a))), rad = add(scale(right, Math.cos(a)), scale(up, Math.sin(a)));
+        const m = onFace(2.14, a, 0.1);
+        plate(b, [add(m, add(scale(rad, 0.3), scale(tan, 0.16))), add(m, add(scale(rad, 0.3), scale(tan, -0.16))), add(m, add(scale(rad, -0.26), scale(tan, -0.07))), add(m, add(scale(rad, -0.26), scale(tan, 0.07)))], N, 0.2, 0.05, { face: BRIGHT, rim: DARK }, W);
+      }
+    // The middle: a flat boss with a sunk centre, like a coin's; from the fifth step a five-pointed star, and at the last a
+    // stone set in it.
+    if (step >= 4) {
+      const pts = Array.from({ length: 10 }, (_, i) => onFace(i % 2 ? 0.52 : 1.3, Math.PI / 2 + (i / 10) * Math.PI * 2, 0.16));
+      plate(b, pts, N, 0.32, 0.08, { face: BRIGHT, bevel: FACE, rim: DARK }, W);
+      if (step >= 5) b.surface(b.ellipsoidRows(add(face, scale(N, 0.3)), [0.5, 0.5, 0.34], N, right, 12, 4, 0, Math.PI / 2), { paint: () => STONE, weight: W });
+    } else turned(b, face, N, [[0, 1.18], [0.3, 1.0], [0.3, 0.62], [0.16, 0.5], [0.16, 0]], (j) => [DARK, BRIGHT, DARK, FACE][j], W, 24, right);
+  });
+  b.scaleSection(0, top, F.s);
+  return finish(c, { pivot: top, pivot2: top, axis: [1, 0, 0] });
+}
 
 const cache = new Map<string, THREE.BufferGeometry>();
 /**

@@ -19,6 +19,7 @@
 //     counters start over for the next window (see onJump).
 
 import { formatTime } from "../timer";
+import { IN_LEFT, IN_RIGHT } from "../turn-binds";
 
 export type SsjMode = "sixth" | "every" | "everySixth";
 export const SSJ_MODES: readonly SsjMode[] = ["sixth", "every", "everySixth"];
@@ -123,11 +124,25 @@ const len2 = (x: number, y: number) => f(Math.sqrt(f(f(x * x) + f(y * y))));
 /** SourcePawn RoundToFloor(x * 100.0 + 0.5) / 100.0. */
 const round2 = (v: number) => f(Math.floor(f(f(v * 100) + 0.5)) / 100);
 
+/**
+ * The raw sums of the window a jump closed (SsjTracker.lastWindow; the gain logs add up their own windows from them,
+ * ssj/logs.ts). `binds`: sampled ticks that turned with a turn bind (+left or +right held, not both: turn-binds.ts).
+ */
+export interface SsjWindow {
+  ticks: number;
+  rawGain: number;
+  synced: number;
+  strafes: number;
+  binds: number;
+}
+
 export class SsjTracker {
   /** Jump number of the current chain (0 = none yet). */
   jump = 0;
   /** The last tick went into the jump's stats (the JHUD's JSS covers the same ticks, jhud.ts). */
   sampled = false;
+  /** The window as it stood at the last counted jump, before the mode cleared it (null until one). */
+  lastWindow: SsjWindow | null = null;
   private mode: SsjMode;
   private groundTicks = 0;
   private strafeTicks = 0;
@@ -138,6 +153,7 @@ export class SsjTracker {
   private dx = 0;
   private dy = 0;
   private strafes = 0;
+  private binds = 0;
   private prevButtons = 0;
   private initialSpeed = 0;
   private initialHeight = 0;
@@ -176,7 +192,7 @@ export class SsjTracker {
   private clearWindow(): void {
     this.strafeTicks = this.syncedTicks = 0;
     this.rawGain = this.trajectory = this.dx = this.dy = 0;
-    this.strafes = 0;
+    this.strafes = this.binds = 0;
   }
 
   /** One tick: `pre` is the state before it, `cmd` the command stepped. Returns the report if the mode shows this jump. */
@@ -207,6 +223,7 @@ export class SsjTracker {
   private sample(pre: SsjState, cmd: SsjCmd): void {
     this.sampled = true;
     this.strafeTicks++;
+    if (!(cmd.buttons & IN_LEFT) !== !(cmd.buttons & IN_RIGHT)) this.binds++;
     const vx = pre.velocity[0];
     const vy = pre.velocity[1];
     this.dx = f(this.dx + f(vx * TICK));
@@ -236,6 +253,7 @@ export class SsjTracker {
     // A second jump event with no air tick since the last one is ignored (the plugin's double-fire guard).
     if (this.jump > 0 && this.strafeTicks <= 0) return null;
     const n = ++this.jump;
+    this.lastWindow = { ticks: this.strafeTicks, rawGain: this.rawGain, synced: this.syncedTicks, strafes: this.strafes, binds: this.binds };
     const mode = this.mode;
     const speed = len2(pre.velocity[0], pre.velocity[1]);
     const z = pre.position[2];

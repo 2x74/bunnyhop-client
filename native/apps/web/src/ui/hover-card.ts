@@ -25,7 +25,7 @@ import { fmtPoints, topPercent } from "../ranking";
 import { tierLabel } from "../tiers";
 import { formatTime } from "../timer";
 import { avatarEl } from "./card";
-import { cardLayers, watchCardFx } from "./card-fx";
+import { cardLayers, frameLayers, watchCardFx } from "./card-fx";
 import { decorated } from "./avatar-deco";
 import { enterHoverFx, followPointer, tiltLight } from "./hover-fx";
 import { hoverFxOf } from "../supporter-looks";
@@ -36,6 +36,7 @@ import { liveMark, nameAttrs, nameMarks } from "./marks";
 import { liveOf } from "../live";
 import { pointerMoved, watchPointer } from "./pointer-moved";
 import { hideRunStats } from "./run-stats";
+import { MAP_BG_CLASS, mapBgLayer, mapBgSrc, wrLine } from "./card-mapbg";
 import "./hover-card.css";
 
 type Who = { id: string; name: string; avatarUrl: string | null } & PlayerMarks;
@@ -119,13 +120,18 @@ export function hoverCardBody(p: Who, v: PlayerCardView): HTMLElement {
   // A supporter's hover effect (ui/hover-fx.ts) draws in their colour too.
   const fx = hoverFxOf(v.hoverFx);
   const sx = fx && !peak.style.includes("--sx") ? `--sx:${nameColorHex(p.nameColor) ?? SUPPORTER_FX}` : "";
+  // v0.0.43: a world record holder's map as the background (ui/card-mapbg.ts), the 480x270 render at this size.
+  const mapBg = v.mapBg ?? null;
+  const mapSrc = mapBgSrc(mapBg, true);
   const card = h(
-    `div.hc.pc-frame-${frame}.pc-bg-${bg}${peak.cls}`,
+    `div.hc.pc-frame-${frame}.pc-bg-${bg}${peak.cls}${mapSrc ? `.${MAP_BG_CLASS}` : ""}`,
     { style: [`--rank:${r.group.color}`, peak.style, sx].filter(Boolean).join(";"), "data-hfx": fx ?? undefined },
+    frameLayers(frame),
     peak.aura,
     h(
       "div.hc-inner",
       null,
+      mapBg && mapSrc ? mapBgLayer(mapBg, mapSrc) : null,
       ...peak.inner,
       h(
         "div.hc-id",
@@ -162,8 +168,10 @@ export function hoverCardBody(p: Who, v: PlayerCardView): HTMLElement {
             ),
           )
         : h("p.hc-empty", null, "No ranked runs yet"),
+      mapBg && mapSrc ? wrLine(mapBg, "hc-wrline") : null,
       fx === "tilt" ? tiltLight() : null,
     ),
+    h("div.pc-rim", { "aria-hidden": "true" }),
   );
   // Its moving layers (peak, supporter) pause off screen; let go when the card is replaced (ui/avatar-deco.ts).
   watchCardFx(card);
@@ -178,7 +186,21 @@ let stopFollow: (() => void) | null = null;
 /** The pointer's last spot over a name, where Tilt starts from. */
 let lastPointer: { x: number; y: number } | null = null;
 
+/**
+ * A player's picture and name are two targets with a gap between them: the card waits this long after the pointer
+ * leaves one before it hides, and stays if the pointer has reached the other (or come back) by then. It was dropped and
+ * shown again a third of a second later on every such move.
+ */
+const LEAVE_MS = 90;
+let leaveTimer: ReturnType<typeof setTimeout> | null = null;
+const stay = (): void => {
+  if (leaveTimer !== null) clearTimeout(leaveTimer);
+  leaveTimer = null;
+};
+const showing = (): boolean => !!card && !card.hidden;
+
 export function hideHoverCard(): void {
+  stay();
   if (timer !== null) clearTimeout(timer);
   timer = null;
   stopFollow?.();
@@ -188,6 +210,8 @@ export function hideHoverCard(): void {
   if (card && !card.hidden) {
     card.hidden = true;
     if (canPopover && card.matches(":popover-open")) card.hidePopover();
+    // Nothing is kept in a hidden card: its picture, layers and off-screen watch go with it.
+    card.replaceChildren();
   }
 }
 
@@ -223,7 +247,7 @@ function show(el: Element): void {
     stopFollow?.();
     stopFollow = null;
     enterHoverFx(body, fx, parseFloat(pop.style.top) < anchor.top ? "12px 100%" : "12px 0");
-    if (fx === "tilt" || v.cardEffect === "foil") stopFollow = followPointer(body, { lean: fx === "tilt" ? pop : null, from: lastPointer });
+    if (fx === "tilt" || v.cardEffect === "foil" || v.cosmetics.frame === "frame-holo") stopFollow = followPointer(body, { lean: fx === "tilt" ? pop : null, from: lastPointer });
   });
 }
 
@@ -237,7 +261,16 @@ function bind(): void {
   if (bound) return;
   bound = true;
   const schedule = (el: Element) => {
-    if (current?.el === el || blocked(el)) return;
+    if (current?.el === el) return stay();
+    if (blocked(el)) return;
+    // The same player's other target while their card is up: the card stays, described by the new target.
+    if (current && showing() && who.get(current.el)?.id === who.get(el)?.id) {
+      stay();
+      current.el.removeAttribute("aria-describedby");
+      current = { el, seq: current.seq };
+      el.setAttribute("aria-describedby", card!.id);
+      return;
+    }
     hideHoverCard();
     current = { el, seq: ++seq };
     timer = setTimeout(() => {
@@ -259,7 +292,11 @@ function bind(): void {
   document.addEventListener("pointermove", hover);
   document.addEventListener("pointerout", (e) => {
     const el = targetOf(e.target);
-    if (el && current?.el === el && !targetOf(e.relatedTarget)) hideHoverCard();
+    if (!el || current?.el !== el || targetOf(e.relatedTarget)) return;
+    // A card that is up lingers a moment (LEAVE_MS); one still on its way is dropped at once.
+    if (!showing()) return hideHoverCard();
+    stay();
+    leaveTimer = setTimeout(hideHoverCard, LEAVE_MS);
   });
   document.addEventListener("focusin", (e) => {
     const el = targetOf(e.target);

@@ -21,6 +21,8 @@ import * as THREE from "three";
 import { EVENT_JUMPED, EVENT_TELEPORTED, traceRay, type Core, type PlayerState } from "../core";
 import type { Input, UserCmd } from "../input";
 import { isTextField } from "../input";
+import { closeGunPicker, menuKey } from "../weapon-commands";
+import { ballotSpec, voteHintDue } from "./ballot";
 import { voice } from "../voice/client";
 import { can } from "../moderation/staff";
 import type { RunSession } from "../session";
@@ -39,14 +41,16 @@ import { RemotePlayers, remoteTime, slotColor } from "./players";
 import { registerRoomActions, roomLineShown, roomUrl, setRoomPresence } from "./presence";
 import { copyLobbyInvite, lobbyInviteUrl } from "./lobby";
 import { allowLeave, resumePlay } from "../play-lock";
-import { spectateSlot } from "../social/spectate";
+import { spectateSlot, welcomeSpectate, type WelcomeSpectate } from "../social/spectate";
 import { spectatorsOf } from "./spectators";
 import { buttonsOf, InputFeed, InputRecorder, jhudOf, shownSsj } from "./spectate-input";
-import { ssjChat } from "../ssj";
+import { gainLogs, ssjChat } from "../ssj";
+import { logsWanted } from "../ssj/logs";
+import { voicePeople } from "../voice/people";
+import { friendsView } from "../social/state";
 import {
   CLOSE,
   IR_START_PRE,
-  isExtend,
   SAMPLE_TICKS,
   SEND_TICKS,
   SF_CROUCHED,
@@ -70,6 +74,7 @@ import {
   type Nomination,
   type PoolEntry,
   type RoomInfo,
+  type GainLogReport,
   type RosterPlayer,
   type ServerMsg,
   type VoteView,
@@ -126,6 +131,9 @@ export class Multiplayer {
   private vote: VoteView | null = null;
   private myVote: number | null = null;
   private voteHidden = -1;
+  /** The last vote shown, and the one whose ballot carries the number keys hint. */
+  private voteSeen = -1;
+  private voteHint = -1;
   /** Last map-change countdown second beeped. */
   private lastCountdown = -1;
   private rtv = { count: 0, needed: 1 };
@@ -151,6 +159,14 @@ export class Multiplayer {
   private lastSample: NetSample | null = null;
   // Spectating
   private spectating: number | null = null;
+  /** A welcome came on this page already: the next one follows a dropped connection (net/room.ts reconnects). */
+  private welcomed = false;
+  /** Reconnect attempts since the connection was last open (the banner waits out the first, quick one). */
+  private lostSeq: number | null = null;
+  /** Back after a drop while the one you watch hasn't come back yet: watch them again if they do before `until`. */
+  private rewatch: { id: string; until: number } | null = null;
+  /** How long a spectator waits for the watched player to come back after both dropped (a room restart). */
+  private static readonly REWATCH_MS = 25_000;
   private spec: SpectatorCamera | null = null;
   private specMode: SpectatorMode = "eye";
   /** The last in-eye / chase spectator view: free look starts from it. */
@@ -170,6 +186,11 @@ export class Multiplayer {
   private practiceAt = -Infinity;
   /** The room takes input blocks (welcome room.inputs, 0.0.42); older rooms refuse them. */
   private roomInputs = false;
+  /** Gain logs (0.0.43): the room's bar (welcome room.logs; null: an older room), your window waiting for the next
+   * state batch, and the bar last asked of the room ({ t: "logs" }; undefined: nothing yet on this connection). */
+  private roomLogs: number | null = null;
+  private pendingLog: GainLogReport | null = null;
+  private logsSent: number | null | undefined = undefined;
   /** Your HUD feed for your spectators (sent while someone watches), and the watched player's while you spectate. */
   private inputs = new InputRecorder();
   private watchFeed = new InputFeed();
@@ -197,6 +218,10 @@ export class Multiplayer {
     const hud = o.session.hud;
     hud.tap = { tick: (cmd, state, events, t) => this.inputs.hudTick(cmd, state, events, t), reset: () => this.inputs.hudReset() };
     o.session.jumpStatsRelay = (r) => this.inputs.report(r);
+    o.session.gainLogRelay = (r) => {
+      if (this.roomLogs !== null) this.pendingLog = r;
+    };
+    prefs.watch(() => this.syncLogs());
     const root = document.getElementById("hud")!;
     this.chat = new ChatBox(hud.chatEl);
     hud.els.chat.classList.remove("empty");
@@ -244,11 +269,18 @@ export class Multiplayer {
       });
     };
     releaseCursorOnClose(this.menu, () => o.input.recapture());
+    const closed = this.menu.onHide;
+    this.menu.onHide = () => {
+      closed();
+      // The map vote comes back when a menu that took its place (!spec, !nominate, !race) closes; 0 hides it for good.
+      setTimeout(() => !this.menu.open && this.vote && this.showVote());
+    };
     this.conn = new RoomConnection(o.serverId, () => o.session.selectedStyle, {
       message: (m) => this.onMessage(m),
       snapshot: (s, now) => {
         for (const b of s.blocks) if (b.slot !== this.you) this.players.feed(b.slot, b.meta, b.samples, now, b.weapon, b.silenced);
         for (const x of s.inputs ?? []) if (x.slot === this.spectating) this.watchFeed.push(x.input, now);
+        for (const l of s.logs ?? []) this.showLog(l.slot, l.log);
       },
       status: (s, detail) => this.onStatus(s, detail),
     });
@@ -355,8 +387,25 @@ export class Multiplayer {
       this.syncPractice();
       const t = this.o.session.timer;
       const timer = t.status === "running" ? TIMER_RUNNING : t.status === "finished" ? TIMER_FINISHED : t.inStart ? TIMER_START : TIMER_IDLE;
-      this.conn.flushSamples({ style: styleIndex(this.o.session.runStyle), track: t.track, timer, timerTicks: t.ticks() }, this.weapon, this.silenced, this.inputs.on ? this.inputs.take() : null);
+      this.conn.flushSamples({ style: styleIndex(this.o.session.runStyle), track: t.track, timer, timerTicks: t.ticks() }, this.weapon, this.silenced, this.inputs.on ? this.inputs.take() : null, this.pendingLog);
+      this.pendingLog = null;
     }
+  }
+
+  /** Asks the room for other players' gain logs at your bar, or for none, when that changed (and after each welcome). */
+  private syncLogs(): void {
+    if (this.roomLogs === null || this.status !== "open") return;
+    const want = logsWanted(prefs.get().hud.logs, this.roomLogs);
+    if (want === this.logsSent) return;
+    this.logsSent = want;
+    this.conn.send({ t: "logs", min: want });
+  }
+
+  /** Another player's gain log from the room: never from someone you muted or blocked (ssj/logs.ts formats it). */
+  private showLog(slot: number, log: GainLogReport): void {
+    const p = slot === this.you ? null : this.players.players.get(slot)?.info;
+    if (!p || voicePeople.muted(p.id) || friendsView()?.blocked.some((b) => b.id === p.id)) return;
+    gainLogs.other(log, p.name);
   }
 
   /**
@@ -551,11 +600,18 @@ export class Multiplayer {
 
   private onStatus(s: RoomStatus, detail?: string): void {
     this.status = s;
-    if (s === "reconnecting") this.banner.set("Connection lost", detail ?? "Reconnecting…");
+    // A blip is usually back within a second (net/room.ts retryDelay): the banner only for one that isn't.
+    if (s === "reconnecting") {
+      const shown = (this.lostSeq = (this.lostSeq ?? 0) + 1);
+      setTimeout(() => this.status === "reconnecting" && this.lostSeq === shown && this.banner.set("Connection lost", detail ?? "Reconnecting…"), shown > 1 ? 0 : 1500);
+    }
     else if (s === "closed") {
       setRoomPresence(null);
       if (!this.navigating) this.banner.set("Disconnected", detail ? `${detail} · Esc → Servers` : "Esc → Servers to rejoin");
-    } else if (s === "open" && !this.change) this.banner.set(null);
+    } else if (s === "open") {
+      this.lostSeq = null;
+      if (!this.change) this.banner.set(null);
+    }
   }
 
   private readonly giftBatches = new Set<string>();
@@ -564,6 +620,10 @@ export class Multiplayer {
     const now = performance.now();
     switch (m.t) {
       case "welcome": {
+        const resumed = this.welcomed;
+        this.welcomed = true;
+        // Whom you were watching, by player id (the room keeps slots across a drop, but a slot is only a slot).
+        const watched = this.spectating === null ? null : (this.rewatch?.id ?? this.players.players.get(this.spectating)?.info.id ?? null);
         this.you = m.you;
         this.room = m.room;
         this.host = m.room.host ?? null;
@@ -580,6 +640,10 @@ export class Multiplayer {
         this.practiceSent = false;
         this.practiceAt = -Infinity;
         this.roomInputs = m.room.inputs === 1;
+        this.roomLogs = typeof m.room.logs === "number" ? m.room.logs : null;
+        gainLogs.roomBar = this.roomLogs;
+        this.logsSent = undefined;
+        this.syncLogs();
         const own = m.players.find(p => p.slot === this.you);
         if (own?.id === lastKnownMe()?.id) setPlayerGlow(own?.playerGlow ?? null);
         for (const [slot, meta] of Object.entries(m.metas)) this.players.setMeta(Number(slot), meta, now);
@@ -587,15 +651,22 @@ export class Multiplayer {
         this.sendHeldKnife();
         this.teleported = true;
         this.lastSample = null;
-        if (this.spectating !== null) {
-          // A reconnect starts you as a player again (slots may have changed): drop the old spectate target.
-          this.setSpecMode("eye");
-          this.spectating = null;
-          document.body.classList.remove("mp-spectating");
-          this.specBar.set(null);
-          this.o.session.hud.setSpectated(null);
+        const spec: WelcomeSpectate = this.spectating !== null && watched === null ? { k: "end" } : welcomeSpectate(m.players, watched, resumed, this.you);
+        if (spec.k === "keep") {
+          // Back after a dropped connection while watching someone who is still here: keep watching them (the room
+          // starts every connection as a player, so it is told again).
+          this.rewatch = null;
+          this.spectating = spec.slot;
           this.endWatchFeed();
-        }
+          this.spec?.snap();
+          this.conn.send({ t: "spec", target: spec.slot });
+          this.refreshSpecBar();
+        } else if (spec.k === "wait") {
+          // Not here yet: they dropped too (a room restart drops everyone). Wait a little for them.
+          this.rewatch = { id: spec.id, until: performance.now() + Multiplayer.REWATCH_MS };
+          this.endWatchFeed();
+          this.refreshSpecBar();
+        } else if (spec.k === "end") this.endSpectate();
         if (m.map.name !== this.o.map) return this.goto(m.map.name);
         voice.welcome(m.room);
         setRoomPresence({ id: m.room.id, name: m.room.name });
@@ -603,7 +674,7 @@ export class Multiplayer {
         this.race.room.onState(m.roomRace ?? null);
         this.race.connected();
         this.setChange(m.change);
-        this.chat.add({ kind: "local", text: `Connected to ${m.room.name} (${m.players.length}/${m.room.maxPlayers}) · ${m.map.name}. ${bindLabel("chat") ?? "Settings → Keys →"} chat · Tab scores · N spectate · type rtv / nominate / timeleft` });
+        if (!resumed) this.chat.add({ kind: "local", text: `Connected to ${m.room.name} (${m.players.length}/${m.room.maxPlayers}) · ${m.map.name}. ${bindLabel("chat") ?? "Settings → Keys →"} chat · Tab scores · N spectate · type rtv / nominate / timeleft` });
         if (m.room.private) this.lobbyIntro(m.room.id);
         if (this.specOnJoin) {
           // Straight from the friends list: watching before the first sample goes out, so you never spawn.
@@ -618,6 +689,15 @@ export class Multiplayer {
       }
       case "join":
         this.players.upsert(m.player);
+        if (this.rewatch && this.spectating !== null) {
+          // The one you watched before both connections dropped is back: watch them again (the room was told nothing).
+          if (m.player.id === this.rewatch.id) {
+            this.rewatch = null;
+            this.spectating = m.player.slot;
+            this.conn.send({ t: "spec", target: m.player.slot });
+            this.refreshSpecBar();
+          } else if (m.player.slot === this.spectating) this.endSpectate();
+        }
         if (!m.quiet) {
           this.chat.add({ kind: "server", text: `${m.player.name} joined${m.player.rank ? ` (${m.player.rank.name})` : ""}.` });
           sfx("player_join");
@@ -892,7 +972,7 @@ export class Multiplayer {
   // Keys
 
   private keydown(e: KeyboardEvent): void {
-    if (this.chat.isOpen || !this.o.input.locked || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (this.chat.isOpen || !this.o.input.locked || e.ctrlKey || e.metaKey || e.altKey || isTextField(e.target)) return;
     if (cursorHeld() && this.menu.open && e.code === "Escape") return this.menu.hide();
     if (e.code === "Tab") {
       e.preventDefault();
@@ -903,10 +983,12 @@ export class Multiplayer {
       return;
     }
     if (e.repeat) return;
-    const digit = /^(?:Digit|Numpad)(\d)$/.exec(e.code);
-    if (digit && this.menu.open) {
+    // Number row or numpad: the open menu's (a map vote: your vote, again to change it). A digit bound to a move, jump
+    // or turn keeps doing that instead (menuDigit).
+    const digit = menuKey(e, this.o.input);
+    if (digit !== null && this.menu.open) {
       e.preventDefault();
-      this.menu.key(Number(digit[1]));
+      this.menu.key(digit);
       return;
     }
     // (The chat key is an action, Settings -> Keys: onAction.) Bound actions keep their keys (rebinding N wins).
@@ -932,22 +1014,29 @@ export class Multiplayer {
     const v = this.vote;
     if (!v || v.id === this.voteHidden) return;
     const first = this.menu.id.current !== "vote";
-    const spec = {
-      title: v.kind === "rtv" ? "Rock the vote: next map" : "Vote for the next map",
-      items: v.options.map((o, i) => ({
-        label: isExtend(o) ? `Extend map (+${o.minutes} min)` : o.map,
-        detail: `${!isExtend(o) && o.tier ? `${tierLabel(o.tier)} · ` : ""}${v.counts[i] ?? 0}`,
-        selected: this.myVote === i,
-      })),
-      footer: `${Math.max(0, Math.ceil((this.conn.toLocal(v.endsAt) - Date.now()) / 1000))} s left · ${v.counts.reduce((a, b) => a + b, 0)}/${this.players.players.size} voted`,
-      exit: "Hide",
-      onPick: (i: number) => {
-        this.myVote = i;
-        this.conn.send({ t: "vote", option: i });
-        this.showVote();
+    if (v.id !== this.voteSeen) {
+      this.voteSeen = v.id;
+      // One numbered menu at a time: the guns menu would sit on the ballot and take its digits.
+      closeGunPicker();
+      if (voteHintDue()) this.voteHint = v.id;
+    }
+    const spec = ballotSpec(
+      {
+        vote: v,
+        myVote: this.myVote,
+        hint: v.id === this.voteHint,
+        secondsLeft: Math.ceil((this.conn.toLocal(v.endsAt) - Date.now()) / 1000),
+        players: this.players.players.size,
       },
-      onExit: () => (this.voteHidden = v.id),
-    };
+      {
+        vote: (i) => {
+          this.myVote = i;
+          this.conn.send({ t: "vote", option: i });
+          this.showVote();
+        },
+        hide: () => (this.voteHidden = v.id),
+      },
+    );
     if (first) this.menu.show("vote", spec);
     else this.menu.update("vote", spec);
   }
@@ -1082,6 +1171,7 @@ export class Multiplayer {
 
   private startSpectate(slot: number): void {
     if (slot === this.you || !this.players.players.has(slot)) return;
+    this.rewatch = null; // (a choice of your own replaces waiting for the one you watched before a drop)
     const was = this.spectating;
     this.spectating = slot;
     document.body.classList.add("mp-spectating");
@@ -1109,7 +1199,20 @@ export class Multiplayer {
     if (next !== this.spectating) this.startSpectate(next);
   }
 
+  /** Stops watching without touching your run (the connection moved on: see the welcome). */
+  private endSpectate(): void {
+    this.rewatch = null;
+    if (this.spectating === null) return;
+    this.setSpecMode("eye");
+    this.spectating = null;
+    document.body.classList.remove("mp-spectating");
+    this.specBar.set(null);
+    this.o.session.hud.setSpectated(null);
+    this.endWatchFeed();
+  }
+
   private stopSpectating(): void {
+    this.rewatch = null;
     if (this.spectating === null) return;
     this.setSpecMode("eye");
     this.spectating = null;
@@ -1158,6 +1261,7 @@ export class Multiplayer {
   }
 
   private refreshUi(now: number): void {
+    if (this.rewatch && now > this.rewatch.until) this.endSpectate();
     // Map change countdown.
     if (this.change && !this.navigating) {
       const s = Math.max(0, Math.ceil((this.conn.toLocal(this.change.at) - Date.now()) / 1000));

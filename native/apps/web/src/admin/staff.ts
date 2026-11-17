@@ -12,7 +12,7 @@ import type { StaffRole } from "../progression";
 /** Log actions the server can reverse (apps/api src/admin-tools.ts UNDOABLE). */
 const UNDOABLE = new Set([
   "mute", "ban", "shadow", "unshadow", "integrity-clear", "integrity-reopen", "verify", "unverify", "creator-set", "creator-clear", "badge-grant", "badge-revoke",
-  "supporter-grant", "supporter-revoke", "network-ban", "run-invalidate", "block-term", "unblock-term", "ban-name", "map-tier", "map-retire", "map-unretire",
+  "supporter-grant", "supporter-revoke", "network-ban", "run-invalidate", "block-term", "unblock-term", "ban-name", "map-tier", "map-retire", "map-unretire", "map-card-art-off", "map-card-art-on",
   "avatar-block", "avatar-unblock",
 ]);
 
@@ -112,7 +112,7 @@ function modLine(e: ModRow, withTarget: boolean): HTMLTableRowElement {
   );
 }
 
-const ACTIONS = ["kick", "ban", "unban", "mute", "unmute", "map", "extend", "mapvote", "rename", "ban-name", "unban-name", "block-term", "block-term-suggest", "block-term-dismiss", "unblock-term", "admin-add", "admin-remove", "mod-add", "mod-remove", "verify", "unverify", "creator-set", "creator-clear", "badge-grant", "badge-revoke", "links-clear", "avatar-block", "avatar-unblock", "shadow", "unshadow", "grant-wings", "revoke-wings", "network-ban", "network-unban", "run-reverify", "run-invalidate", "integrity-clear", "integrity-reopen", "integrity-approve", "integrity-auto-close", "feedback-status", "feedback-note", "feedback-reply", "player-message", "player-warn", "broadcast-send", "broadcast-stop", "supporter-grant", "supporter-revoke", "supporter-amount", "map-tier", "map-retire", "map-unretire", "lobby-close"];
+const ACTIONS = ["kick", "ban", "unban", "mute", "unmute", "map", "extend", "mapvote", "rename", "ban-name", "unban-name", "block-term", "block-term-suggest", "block-term-dismiss", "unblock-term", "admin-add", "admin-remove", "mod-add", "mod-remove", "verify", "unverify", "creator-set", "creator-clear", "badge-grant", "badge-revoke", "links-clear", "avatar-block", "avatar-unblock", "shadow", "unshadow", "grant-wings", "revoke-wings", "network-ban", "network-unban", "run-reverify", "run-invalidate", "integrity-clear", "integrity-reopen", "integrity-approve", "integrity-auto-close", "feedback-status", "feedback-note", "feedback-reply", "player-message", "player-warn", "broadcast-send", "broadcast-stop", "supporter-grant", "supporter-revoke", "supporter-amount", "map-tier", "map-retire", "map-unretire", "map-card-art-off", "map-card-art-on", "lobby-close"];
 
 export const logView: View = async (root, params) => {
   const rs = await rooms();

@@ -75,6 +75,7 @@ import { H2H_COLORS, HeadToHead, makeSide, sideCore, slowGraphics, type H2HLayou
 import { defaultLayout, layoutParam } from "../h2h/layout";
 import { h2hUrl, openHeadToHead, runIdFromText } from "./request";
 import { ApiError, type RunInfo } from "../api";
+import { rememberSoloStats, SoloPanel, soloStatsShown } from "./solo-panel";
 import "./h2h.css";
 
 export interface ViewerHost {
@@ -253,6 +254,9 @@ export class ReplayViewer implements ExportSource {
   private h2hBtns: { side: HTMLButtonElement; stacked: HTMLButtonElement; ghost: HTMLButtonElement; swap: HTMLButtonElement; stats: HTMLButtonElement; early: HTMLButtonElement } | null = null;
   private h2hGroup: HTMLElement;
   private h2hOnly: HTMLElement[] = [];
+  /** One run's panel under its view (viewer/solo-panel.ts): made when first shown. */
+  private solo: SoloPanel | null = null;
+  private soloStats = soloStatsShown();
   private speedTrigger!: HTMLButtonElement;
   private camTrigger!: HTMLButtonElement;
   private layoutTrigger!: HTMLButtonElement;
@@ -369,7 +373,7 @@ export class ReplayViewer implements ExportSource {
             ["N / P", "next / previous map (watching a gauntlet)"],
             ["G", "side by side, stacked or ghost (head to head)"],
             ["X", "swap the runs (head to head)"],
-            ["S", "panels on / off (head to head)"],
+            ["S", "stats panel on / off (not in free roam)"],
             ["J", "next jump (Shift: previous)"],
             ["Esc", "close"],
           ] as const
@@ -409,8 +413,8 @@ export class ReplayViewer implements ExportSource {
       stacked: btn("Stacked", "The two views top and bottom (G)", () => this.setH2HLayout("stacked"), ".rv-pop-item"),
       ghost: btn("Ghost", "One view, the other run as a ghost (G)", () => this.setH2HLayout("ghost"), ".rv-pop-item"),
       swap: btn("Swap", "Swap the runs (X)", () => this.swapH2H(), ".rv-chip.rv-quiet"),
-      stats: btn("Stats", "The panels under the views (S)", () => this.toggleStats(), ".rv-pop-item.rv-toggle"),
-      early: btn("Early switches", "In each panel, the share of key switches made before the mouse turns", () => this.toggleEarly(), ".rv-pop-item.rv-toggle"),
+      stats: btn("Stats", "Sync, gain, strafes and strafe timing under the view (S)", () => this.toggleStats(), ".rv-pop-item.rv-toggle"),
+      early: btn("Early switches", "In the Stats panel, the share of key switches made before the mouse turns", () => this.toggleEarly(), ".rv-pop-item.rv-toggle"),
     };
     this.h2hBtns = h2hBtns;
     // Small menus: a trigger and its list, one open at a time; a click outside or on a choice closes it.
@@ -449,7 +453,7 @@ export class ReplayViewer implements ExportSource {
     this.compareBtn.classList.add("rv-quiet");
     // Not in head to head (one run's tools): compare, practice, the file, report.
     this.soloOnly = [compareWrap, bhrBtn];
-    this.h2hOnly = [h2hBtns.stats, h2hBtns.early];
+    this.h2hOnly = [];
     const more = pop(moreTrigger, [this.hudBtn, this.weaponBtn, h2hBtns.stats, h2hBtns.early, this.cleanBtn, this.practiceBtn, bhrBtn, this.reportBtn, helpItem], ".rv-pop-right");
     for (const e of this.h2hOnly) e.hidden = true;
     const views = h("div.rv-group.rv-views", null, pop(this.speedTrigger, this.speedBtns), pop(this.camTrigger, [...this.camBtns.values()]), this.h2hGroup);
@@ -533,6 +537,7 @@ export class ReplayViewer implements ExportSource {
         const next = new URL(sourceRunId ? (req.h2h ? h2hUrl(sourceRunId, req.h2h.runId) : viewerUrl({ runId: sourceRunId })) : viewerUrl({ bytes }, replay.header.map), appHref());
         if (deep.tick !== null) next.searchParams.set("t", String(deep.tick));
         if (deep.jump !== null) next.searchParams.set("jump", String(deep.jump));
+        if (deep.stats) next.searchParams.set("stats", "1");
         location.href = next.pathname + next.search;
         return;
       }
@@ -575,6 +580,11 @@ export class ReplayViewer implements ExportSource {
       if (req.h2h) {
         await this.openH2H(req.h2h.runId, my, layoutParam(view));
         return;
+      }
+      // The admin's links open with the Stats panel (?stats=1), for this open only: S still toggles and remembers.
+      if (deep.stats && !this.soloStats) {
+        this.soloStats = true;
+        this.updateControls();
       }
       // A deep link starts paused at that tick (?t=) or half a second before that jump (?jump=, from the admin).
       const data = this.player!.data;
@@ -731,6 +741,8 @@ export class ReplayViewer implements ExportSource {
     this.arms?.dispose();
     this.arms = null;
     this.clearH2H();
+    this.solo?.dispose();
+    this.solo = null;
     this.clearCompare();
     this.player?.dispose();
     this.trailHistory.clear();
@@ -917,10 +929,15 @@ export class ReplayViewer implements ExportSource {
     this.weaponBtn.title = `Weapon in hand, ${this.firstPerson ? "in-eye" : "third person"} (V)`;
     this.freeHint.hidden = this.rig.mode !== "free" || document.pointerLockElement === this.stage;
     const hb = this.h2hBtns;
+    if (hb) {
+      hb.stats.classList.toggle("on", this.h2h ? this.h2h.panelsOn : this.soloStats);
+      hb.early.classList.toggle("on", this.h2h ? this.h2h.showEarly : earlyShown());
+      // The early number lives in the panel: nothing to switch while the panel is off.
+      hb.early.hidden = !(this.h2h ? this.h2h.panelsOn : this.soloStats);
+    }
+    this.root.classList.toggle("rv-solo-stats", this.soloStats && !this.h2h);
     if (hb && this.h2h) {
       for (const l of ["side", "stacked", "ghost"] as const) hb[l].classList.toggle("on", this.h2h.layout === l);
-      hb.stats.classList.toggle("on", this.h2h.panelsOn);
-      hb.early.classList.toggle("on", this.h2h.showEarly);
       this.layoutTrigger.textContent = { side: "Side by side", stacked: "Stacked", ghost: "Ghost" }[this.h2h.layout];
     }
     const c = this.compare;
@@ -1043,6 +1060,7 @@ export class ReplayViewer implements ExportSource {
     const end = od.endTick ? d.startTick + ((od.endTick - od.startTick) * od.interval) / d.interval : null;
     this.timeline.setCompare(end, o.color, g.delta);
     this.timeline.setEnd(hh.end);
+    this.solo?.hide();
     this.root.classList.add("rv-h2h");
     this.root.style.setProperty("--run-main", hh.main.color);
     this.h2hGroup.hidden = false;
@@ -1113,20 +1131,33 @@ export class ReplayViewer implements ExportSource {
 
   /** Head to head's "early" number in each panel: off unless the player turns it on (remembered). */
   private toggleEarly(): void {
-    if (!this.h2h) return;
-    this.h2h.showEarly = !this.h2h.showEarly;
+    const on = !(this.h2h ? this.h2h.showEarly : earlyShown());
+    if (this.h2h) this.h2h.showEarly = on;
     try {
-      localStorage.setItem(EARLY_KEY, this.h2h.showEarly ? "1" : "0");
+      localStorage.setItem(EARLY_KEY, on ? "1" : "0");
     } catch {
       /* private mode */
     }
     this.updateControls();
   }
 
+  /** The panels: head to head's (on until turned off), or the one run's (off until turned on, remembered). */
   private toggleStats(): void {
-    if (!this.h2h) return;
-    this.h2h.panelsOn = !this.h2h.panelsOn;
+    if (this.h2h) this.h2h.panelsOn = !this.h2h.panelsOn;
+    else {
+      this.soloStats = !this.soloStats;
+      rememberSoloStats(this.soloStats);
+      if (!this.soloStats) this.hideSolo();
+    }
     this.updateControls();
+  }
+
+  /** The one run's panel off: the view takes the whole window again. */
+  private hideSolo(): void {
+    if (this.solo?.hide()) {
+      this.hud.el.hidden = !this.hudOn;
+      this.host.resize();
+    }
   }
 
   /** J / Shift+J: the primary's next / previous jump in the timed run. */
@@ -1555,6 +1586,11 @@ export class ReplayViewer implements ExportSource {
       // Head to head: the views over the area the panel leaves (viewer/h2h.ts), then the stats.
       const below = this.clean ? 0 : this.panel.offsetHeight;
       this.h2h.draw(this.t, vdt, below, this.rig.mode, (t, s) => this.render(t, s, this.rig), this.hudOn);
+    } else if (this.soloStats && this.replay) {
+      // One run with its panel (viewer/solo-panel.ts): the view above it.
+      this.solo ??= new SoloPanel({ renderer: this.host.renderer, camera: this.host.camera, root: this.root, hud: this.hud.el });
+      const name = this.owner ?? this.replay.header.player ?? "";
+      this.solo.draw(this.replay, d, name, this.t, this.clean ? 0 : this.panel.offsetHeight, this.hudOn, earlyShown(), () => this.render(this.t, vdt, this.rig));
     } else this.render(this.t, vdt, this.rig);
     this.sound.frame(d, Math.min(this.t, d.n), this.playing && !this.timeline.scrubbing, this.speed);
     if (this.hudOn) this.hud.update(d, Math.min(this.t, d.n), this.deltaAt(Math.min(this.t, d.n)), this.speedDiffAt(Math.min(this.t, d.n)));
@@ -1952,7 +1988,9 @@ export class ReplayViewer implements ExportSource {
         this.swapH2H();
         return true;
       case "KeyS":
-        if (!this.h2h) return false;
+        // One run in free roam: S flies backwards (viewer/cameras.ts), so the panel is the More menu's there.
+        if (!this.h2h && this.rig.mode === "free") return false;
+        if (e.repeat) return true;
         this.toggleStats();
         return true;
       case "KeyJ":

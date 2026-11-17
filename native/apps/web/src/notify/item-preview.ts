@@ -40,6 +40,8 @@ export interface PreviewSpec {
   cape?: { length?: number | null; color?: string | null; lining?: string | null };
   /** back, the Robe: its owner's pattern (1 .. 4), whether it is tied, and its colours ("#rrggbb"); absent = the default robe. */
   robe?: { pattern?: number | null; tied?: boolean; color?: string | null; print?: string | null };
+  /** back, the Daily Medal: its owner's metal and count step (progression.ts medalCode); absent = the plainest medal. */
+  medal?: number;
   /** ghost / trail / frame / card / plaque accent. */
   color?: string;
   /** trail: its shape ("shape-*" cosmetic id; absent = the ribbon). */

@@ -95,6 +95,13 @@ export const CAMO_STYLE: Readonly<Record<string, CamoStyle>> = {
   // ribbons: base, ribbon, second ribbon, sparkles; p = warp, frequency, width, sparkle density.
   "camo-flare": S("ribbons", [0x1c1218, 0xe0479f, 0xff9a3c, 0xffd0e8], 5.0, "gloss", [2.2, 1, 0.16, 0]),
 
+  // --- The Daily Challenge's day cycle (progression.ts DAILY_LADDER), earned by taking part.
+  // First Light (5 dailies): the horizon before sunrise, thin lines of orange and gold along a pre-dawn indigo gun.
+  // (stripes paints its first colour as the thin line between the two wide ones: indigo is the wide one here.)
+  "camo-first-light": S("stripes", [0xff8a4a, 0x2b2f5e, 0xffd45e, 0], 1.25, "coat", [0.3, 0, 0.24, 1]),
+  // Midnight Sun (100 dailies): a sun that doesn't set, gold and ember ribbons over deep navy with a few stars.
+  "camo-midnight-sun": S("ribbons", [0x0f1430, 0xffc23d, 0xff6f4a, 0xfff3c4], 4.4, "gloss", [2.0, 1.15, 0.15, 0.035]),
+
   // --- Supporter (one per set).
   "camo-geode": S("facets", [0x2a1f5c, 0x7a5ce8, 0x1d6b74, 0x5ff2df], 0.9, "gloss"),
   "camo-highroller": S("argyle", [0x0f5a3a, 0x111114, 0xe0b13a, 0], 1.3, "coat"),

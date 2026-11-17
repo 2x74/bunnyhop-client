@@ -2,7 +2,7 @@
 // waits for the viewer's own role (myProfile().role, decided by the server) and renders nothing otherwise.
 //   - adminLink(userId): "Open in admin" on player cards, "Admin" on leaderboard rows (/admin#/player/<id>, a new tab);
 //   - replayDeepLink(): ?t=<tick> or ?jump=<n> on a replay URL, read once when the viewer opens (the admin's Watch
-//     buttons link to the flagged jump);
+//     buttons link to the flagged jump), and ?stats=1 (the admin's replay links: the Stats panel on for that open);
 //   - staffButton(): the shield left of the bell in the menu dock (social/dock.ts) that opens /admin in the same window
 //     (the desktop client has no tabs; the panel's rail has Back to game), with what is waiting for staff
 //     (GET /admin/waiting, at most every WAITING_EVERY_MS);
@@ -110,13 +110,13 @@ export function staffButton(): { el: HTMLButtonElement; refresh: () => void } {
 }
 
 /** ?t=<tick> / ?jump=<n> on the page URL (a replay link), read before the viewer rewrites the URL. */
-export function replayDeepLink(href = appHref()): { tick: number | null; jump: number | null } {
+export function replayDeepLink(href = appHref()): { tick: number | null; jump: number | null; stats: boolean } {
   const q = new URL(href).searchParams;
   const num = (k: string) => {
     const v = Number(q.get(k));
     return q.has(k) && Number.isFinite(v) && v >= 0 ? Math.floor(v) : null;
   };
-  return { tick: num("t"), jump: num("jump") };
+  return { tick: num("t"), jump: num("jump"), stats: q.get("stats") === "1" };
 }
 
 /** The n-th jump (1-based) of the timed run as a replay tick (jumps counted from the start zone, like the analysis). */

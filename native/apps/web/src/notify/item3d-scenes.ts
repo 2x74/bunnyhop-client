@@ -10,7 +10,7 @@
 
 import * as THREE from "three";
 import { cleanLoadout, DEFAULT_LOADOUT, gloveStyle, hiltSkin, loadoutFor } from "../loadout";
-import { achievement } from "../progression";
+import { MEDAL_ITEM, achievement } from "../progression";
 import { colourway, paletteOf } from "../player/bunny/palettes";
 import { hatGeometry, headwearKey } from "../player/bunny/hats";
 import { backFit, backGeometry, backRigOf } from "../player/bunny/backs";
@@ -197,7 +197,7 @@ function hatScene(spec: PreviewSpec): ItemScene {
 
 function backScene(spec: PreviewSpec): ItemScene {
   // As the standard bunny wears it with the hood up, seen from behind; the accent parts in your colourway.
-  const geo = spec.back ? backGeometry(spec.back, backFit("bunny", "classic", "up", null, spec.cape?.length, spec.robe?.tied)) : null;
+  const geo = spec.back ? backGeometry(spec.back, backFit("bunny", "classic", "up", null, spec.cape?.length, spec.robe?.tied, spec.medal)) : null;
   if (!geo) throw new Error(`no back item ${spec.back}`);
   const { scene, pivot } = base();
   const u = playerUniforms();
@@ -220,7 +220,8 @@ function backScene(spec: PreviewSpec): ItemScene {
   mesh.frustumCulled = false;
   // Bunny model space (z up, the back toward +y) -> three (y up, the back toward the camera).
   const holder = new THREE.Group();
-  holder.rotation.set(-Math.PI / 2, 0, Math.PI, "YXZ");
+  // (The Daily Medal hangs on the chest: it is seen from the front.)
+  holder.rotation.set(-Math.PI / 2, 0, spec.back === MEDAL_ITEM ? 0 : Math.PI, "YXZ");
   mesh.position.copy(geo.boundingBox!.getCenter(new THREE.Vector3())).multiplyScalar(-1);
   holder.add(mesh);
   pivot.add(holder);

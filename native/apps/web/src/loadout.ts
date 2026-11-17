@@ -14,7 +14,7 @@
 // - Wire forms: the room roster carries the object (`CosmeticLoadout`, JSON), replays carry `packLoadout()` text in an
 //   optional trailer (replay.ts). Both are read leniently: anything unknown falls back to the defaults, never an error.
 
-import { CAPE_ITEM, CAPE_LENGTH, capeHexOf, capeLengthOf, ROBE_ITEM, robePatternOf, cosmetic, DEFAULT_COSMETICS, HAIR_HATS, HAIR_LENGTH, LENGTH_HATS, MASK_HAT, hairLengthOf, highlightHexOf, type CosmeticSlot, type KnifePool } from "./progression";
+import { CAPE_ITEM, CAPE_LENGTH, capeHexOf, capeLengthOf, heldMetals, MEDAL_CODES, MEDAL_ITEM, medalCode, medalCodeOf, ROBE_ITEM, robePatternOf, cosmetic, DEFAULT_COSMETICS, HAIR_HATS, HAIR_LENGTH, LENGTH_HATS, MASK_HAT, hairLengthOf, highlightHexOf, type CosmeticSlot, type KnifePool, type MedalCounts } from "./progression";
 export { HAIR_LENGTH, LENGTH_HATS, hairLengthOf };
 export type { KnifePool };
 
@@ -70,6 +70,12 @@ export interface CosmeticLoadout {
   robeTied?: true;
   robeColor?: number;
   robePrint?: number;
+  /**
+   * The Daily Medal's look (progression.ts medalCode: metal and count step in one number, 0 .. MEDAL_CODES - 1), only
+   * while the medal is on the back. Not a choice: like the crown it is worked out where the loadout is made, from the
+   * medals the player holds. Absent (a writer that didn't know them) = bronze at its first step.
+   */
+  medal?: number;
   /**
    * The ponytail's length (a whole percent of the built length, progression.ts HAIR_LENGTH), only while the Ponytail is
    * the hat (LENGTH_HATS) and not the default. Absent = 100. Older readers drop it and draw the built length.
@@ -176,7 +182,7 @@ export const DEFAULT_LOADOUT: CosmeticLoadout = Object.freeze({ knife: DEFAULT_K
  * Shader finish designs (viewmodel/finishes/shader.ts FINISH_CODE): one per finish, each a fixed design baked into its
  * GLSL. "founder": Founder's Gold, the owner's finish (role-held in progression.ts).
  */
-export type FinishKind = "none" | "sunset" | "ember" | "tigerlily" | "nebula" | "dewweb" | "frost" | "heartbeet" | "fourleaf" | "founder" | "geode" | "rift" | "spectrum" | "goldleaf" | "aurora" | "contour" | "meteor" | "hourglass" | "lantern" | "wildflower" | "tally" | "devgrid" | "emerald" | "ruby" | "sapphire" | "pearl" | "chromatic" | "chrome" | "ruler" | "linework";
+export type FinishKind = "none" | "sunset" | "ember" | "tigerlily" | "nebula" | "dewweb" | "frost" | "heartbeet" | "fourleaf" | "founder" | "geode" | "rift" | "spectrum" | "goldleaf" | "aurora" | "contour" | "meteor" | "hourglass" | "lantern" | "wildflower" | "tally" | "devgrid" | "emerald" | "ruby" | "sapphire" | "pearl" | "chromatic" | "chrome" | "ruler" | "linework" | "sunray";
 
 export interface FinishStyle {
   kind: FinishKind;
@@ -218,6 +224,8 @@ export const FINISH_STYLE: Record<string, FinishStyle> = {
   // Contributor (progression.ts ROLE_SETS): Workbench's Ruler, Draftsman's Linework.
   "fin-ruler": { kind: "ruler" },
   "fin-linework": { kind: "linework" },
+  // The Daily Challenge's day-cycle set (progression.ts DAILY_LADDER).
+  "fin-sunray": { kind: "sunray" },
 };
 
 /** Render data of a finish id (retired ids resolve to their replacement; unknown -> the plain carrot). */
@@ -421,7 +429,7 @@ const slotId = (slot: CosmeticSlot, v: unknown, fallback: string): string => {
  * fall back to the defaults, retired ids read as their replacement). Unlocks are checked where choices are saved and
  * read (the API).
  */
-export function loadoutFor(choice: { knife?: unknown; finish?: unknown; glove?: unknown; hilt?: unknown; hat?: unknown; body?: unknown; hairColor?: unknown; hairLength?: unknown; hairHighlight?: unknown; maskOn?: unknown; camo?: unknown; hop?: unknown; hopTrail?: unknown; trail?: unknown; back?: unknown; capeLength?: unknown; capeColor?: unknown; capeLining?: unknown; robePattern?: unknown; robeTied?: unknown; robeColor?: unknown; robePrint?: unknown } | null | undefined, crown: 1 | 2 | 3 | null = null): CosmeticLoadout {
+export function loadoutFor(choice: { knife?: unknown; finish?: unknown; glove?: unknown; hilt?: unknown; hat?: unknown; body?: unknown; hairColor?: unknown; hairLength?: unknown; hairHighlight?: unknown; maskOn?: unknown; camo?: unknown; hop?: unknown; hopTrail?: unknown; trail?: unknown; back?: unknown; capeLength?: unknown; capeColor?: unknown; capeLining?: unknown; robePattern?: unknown; robeTied?: unknown; robeColor?: unknown; robePrint?: unknown; medal?: unknown; medalMetal?: unknown } | null | undefined, crown: 1 | 2 | 3 | null = null, medals: MedalCounts | null = null): CosmeticLoadout {
   const c = choice ?? {};
   const l: CosmeticLoadout = { knife: slotId("knife", c.knife, DEFAULT_KNIFE), finish: slotId("finish", c.finish, DEFAULT_FINISH), glove: slotId("glove", c.glove, DEFAULT_GLOVE) };
   // Absent = the knife's own hilt; only a real skin is carried (so every older reader and writer stays the same).
@@ -455,6 +463,14 @@ export function loadoutFor(choice: { knife?: unknown; finish?: unknown; glove?: 
     if (length !== null && length !== CAPE_LENGTH.default) l.capeLength = length;
     if (outer) l.capeColor = parseInt(outer.slice(1), 16);
     if (lining) l.capeLining = parseInt(lining.slice(1), 16);
+  }
+  if (back === MEDAL_ITEM) {
+    // From the medals held and the saved pick where the loadout is made (the API, the Loadout); a carried loadout
+    // already has its code.
+    const code = medals ? medalCode(c.medalMetal, medals) : medalCodeOf(c.medal);
+    if (code !== null) l.medal = code;
+    // Its owner holds no medal any more (the podium rolled forward): like the name badge, it is gone.
+    if (medals && !heldMetals(medals).length) (delete l.back, delete l.medal);
   }
   if (back === ROBE_ITEM) {
     const pattern = robePatternOf(c.robePattern), cloth = capeHexOf(c.robeColor), print = capeHexOf(c.robePrint);
@@ -546,7 +562,7 @@ export function packLoadout(l: CosmeticLoadout): string {
   const outfit = outfitId(l.outfit);
   const hilt = l.hilt && l.hilt !== DEFAULT_HILT ? l.hilt : "";
   const hop = l.hop ? (l.hopTrail ? `${l.hop}:${l.hopTrail.replace(/^trail-/, "")}` : l.hop) : "";
-  const tail: (string | number)[] = [l.crown ?? "", l.hat ?? "", l.body === "body-b" ? l.body : "", outfit ?? "", l.hairColor !== undefined ? hairHex(l.hairColor).slice(1) : "", l.hairLength ?? "", hilt, l.camo ?? "", hop, l.back ?? "", l.back === ROBE_ITEM ? packRobe(l) : packCape(l), packHead(l)];
+  const tail: (string | number)[] = [l.crown ?? "", l.hat ?? "", l.body === "body-b" ? l.body : "", outfit ?? "", l.hairColor !== undefined ? hairHex(l.hairColor).slice(1) : "", l.hairLength ?? "", hilt, l.camo ?? "", hop, l.back ?? "", l.back === ROBE_ITEM ? packRobe(l) : l.back === MEDAL_ITEM ? packMedal(l) : packCape(l), packHead(l)];
   while (tail.length && tail[tail.length - 1] === "") tail.pop();
   return [PACK_VERSION, l.knife, l.finish, l.glove, ...tail].join(";");
 }
@@ -562,6 +578,20 @@ const b64 = (n: number, digits: number) => Array.from({ length: digits }, (_, i)
 const unb64 = (s: string): number => [...s].reduce((n, ch) => (n < 0 || B64.indexOf(ch) < 0 ? -1 : n * 64 + B64.indexOf(ch)), 0);
 const grid18 = (c: number) => (Math.round(((c >> 16) / 255) * 63) << 12) | (Math.round((((c >> 8) & 255) / 255) * 63) << 6) | Math.round(((c & 255) / 255) * 63);
 const ungrid18 = (n: number) => (Math.round((((n >> 12) & 63) * 255) / 63) << 16) | (Math.round((((n >> 6) & 63) * 255) / 63) << 8) | Math.round(((n & 63) * 255) / 63);
+/**
+ * The Daily Medal's look in the trailer's 15th field: one character, the medal code (progression.ts medalCode: metal and
+ * count step, 18 values) in B64. "" when the loadout has none. The field is the back item's own (the Cape's takes up to
+ * eight characters there), so the medal makes no trailer longer than the longest there already was.
+ */
+export function packMedal(l: CosmeticLoadout): string {
+  return l.back === MEDAL_ITEM && l.medal !== undefined && l.medal >= 0 && l.medal < MEDAL_CODES ? B64[l.medal] : "";
+}
+/** Inverse of packMedal: {} for an empty, malformed or out-of-range field (the default medal). */
+export function unpackMedal(s: string | null | undefined): { medal?: number } {
+  if (!s || s.length !== 1) return {};
+  const code = B64.indexOf(s);
+  return code >= 0 && code < MEDAL_CODES ? { medal: code } : {};
+}
 export function packCape(l: CosmeticLoadout): string {
   if (l.back !== CAPE_ITEM || (l.capeLength === undefined && l.capeColor === undefined && l.capeLining === undefined)) return "";
   const head = (l.capeLength ?? CAPE_LENGTH.default) - CAPE_LENGTH.min + (l.capeColor !== undefined ? 256 : 0) + (l.capeLining !== undefined ? 512 : 0);
@@ -640,7 +670,7 @@ export function unpackLoadout(s: string | null | undefined): CosmeticLoadout | n
   if (!s || s.length > 200) return null;
   const f = s.split(";");
   if (f[0] === "2" && f.length >= 4) {
-    const l = cleanLoadout({ knife: f[1], finish: f[2], glove: f[3], crown: f[4] ? Number(f[4]) : null, hat: f[5], body: f[6], hairColor: f[8] ? `#${f[8]}` : undefined, hairLength: f[9] && /^\d+$/.test(f[9]) ? Number(f[9]) : undefined, hilt: f[10] || undefined, camo: f[11], ...hopField(f[12]), back: f[13], ...(f[13] === ROBE_ITEM ? unpackRobe(f[14]) : unpackCape(f[14])), ...unpackHead(f[15]) })!;
+    const l = cleanLoadout({ knife: f[1], finish: f[2], glove: f[3], crown: f[4] ? Number(f[4]) : null, hat: f[5], body: f[6], hairColor: f[8] ? `#${f[8]}` : undefined, hairLength: f[9] && /^\d+$/.test(f[9]) ? Number(f[9]) : undefined, hilt: f[10] || undefined, camo: f[11], ...hopField(f[12]), back: f[13], ...(f[13] === ROBE_ITEM ? unpackRobe(f[14]) : f[13] === MEDAL_ITEM ? unpackMedal(f[14]) : unpackCape(f[14])), ...unpackHead(f[15]) })!;
     const outfit = outfitId(f[7]);
     return outfit ? { ...l, outfit } : l;
   }

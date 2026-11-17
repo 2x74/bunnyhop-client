@@ -55,11 +55,13 @@ import { mapTime, type MapTimes } from "./map-time";
 import { holdReload, runEnded } from "./update";
 import { TUTORIAL_MAP } from "./tutorial/data";
 import { practiceReason } from "./practice";
+import { timescaleLabel } from "./practice-mode/timescale";
 import { finishRoute, PracticeAttempt, practiceFlipLine, practiceSpawnLine, practiceSpawnToast, practiceStartLine, type PracticeUse } from "./practice-mode/attempt";
 import { loadTimer, type TimerSnapshot } from "./practice-mode/checkpoints";
 import { seedRecording, SegmentLog, type SegmentMark } from "./practice-mode/segments";
 import { practiceReplays, withFinalCheckpoint, type PracticeReplayMeta } from "./practice-mode/replays";
-import { LiveSsj, ssjChat } from "./ssj";
+import { gainLogs, LiveSsj, ssjChat } from "./ssj";
+import { GAIN_LOG_STYLES, type GainLogReport } from "./net/protocol";
 import { LiveMovementStats } from "./movement-stats";
 import { neutralCommand } from "./freecam";
 
@@ -144,6 +146,15 @@ export class RunSession {
   set jumpStatsRelay(fn: LiveSsj["relay"]) {
     this.ssj.relay = fn;
   }
+  /** A room that relays gain logs gets this player's (net/mp.ts): Normal style and no practice only (GAIN_LOG_STYLES). */
+  gainLogRelay: ((r: GainLogReport) => void) | null = null;
+  /** A six-jump gain log (ssj/logs.ts): your own line, and the room's copy when it's one the room passes on. */
+  private gainLog(r: GainLogReport): void {
+    const practice = this.practicing;
+    const toRoom = !practice && GAIN_LOG_STYLES.has(this.runStyle);
+    gainLogs.own(r, { practice, autostrafe: this.runStyle === "autostrafe" }, toRoom);
+    if (toRoom) this.gainLogRelay?.(r);
+  }
   readonly view = new ZoneView();
   zones: ZoneSet | null = null;
   timer: RunTimer;
@@ -199,6 +210,8 @@ export class RunSession {
   private practiceStartHint: "off" | "armed" | "said" = "off";
   /** The pause menu's Practice item (main.ts sets it where practice mode is available). */
   practiceMenu: (() => MenuActions["practice"]) | null = null;
+  /** The timescale the frame loop runs at now (practice-mode/timescale.ts; main.ts sets it every frame). */
+  timescale = 1;
   /** This attempt ran scripted commands (the debug hook's script / run): never submitted or saved as a PB. Per attempt. */
   private scripted = false;
   /** Sticky for this RunSession, including restarts and disabling the local sampler. */
@@ -251,6 +264,7 @@ export class RunSession {
   private physics!: MapPhysics;
 
   private constructor(private o: SessionInit) {
+    this.ssj.gainLog = (r) => this.gainLog(r);
     this.selectedStyle = this.runStyle = o.style;
     this.runDef = styleDef(o.style);
     this.settings = styleSettings(o.style);
@@ -1145,7 +1159,8 @@ export class RunSession {
 
   private async keepPracticeReplay(replay: Replay, bytes: Uint8Array, when: { time: number | null; at: number | null }): Promise<PracticeReplayMeta | null> {
     const h = replay.header;
-    const kept = await practiceReplays.keep(bytes, { map: h.map, style: replayStyle(h), track: h.track ?? 0, ...when, teleports: replay.segments?.length ?? 0 });
+    const scale = this.prac.timescale;
+    const kept = await practiceReplays.keep(bytes, { map: h.map, style: replayStyle(h), track: h.track ?? 0, ...when, teleports: replay.segments?.length ?? 0, ...(scale < 1 ? { scale } : {}) });
     await this.refreshMenu();
     return kept;
   }
@@ -1161,6 +1176,11 @@ export class RunSession {
   /** This attempt is practice through practice mode or a practice tool (never submitted; turn binds work). */
   get practicing(): boolean {
     return this.prac.practice;
+  }
+
+  /** A tick is about to run at `scale` (main.ts): one at another scale than 1 makes the attempt practice (attempt.ts ticked). */
+  practiceTicked(scale: number): void {
+    this.prac.ticked(scale);
   }
 
   /** Turns practice mode on (this attempt becomes practice) or off (the caller restarts right after). */
@@ -1383,7 +1403,10 @@ export class RunSession {
     else if (this.segmenting) this.hud.setPractice(`Segmented${loads ? ` · ${loads} load${loads === 1 ? "" : "s"}` : ""}`, true);
     // Infinite's noclip counts (the flight is recorded and simulated): a quiet line while flying.
     else if (this.flying && !this.unranked) this.hud.setPractice("Noclip", true);
-    else this.hud.setPractice(this.unranked && this.o.map !== TUTORIAL_MAP ? (this.practiceNoclip || this.flying ? "Practice · noclip" : "Practice") : null, false, this.onPracticeSpawn ? practiceSpawnLine(clearStartKey()) : null);
+    else {
+      const slow = this.timescale === 1 ? "" : ` · ${timescaleLabel(this.timescale)}`;
+      this.hud.setPractice(this.unranked && this.o.map !== TUTORIAL_MAP ? (this.practiceNoclip || this.flying ? "Practice · noclip" : "Practice") + slow : null, false, this.onPracticeSpawn ? practiceSpawnLine(clearStartKey()) : null);
+    }
     const pb = getPB(this.o.map, this.styleFor(t.track), t.track);
     const splitTotal = t.splitTotal();
     const lastSplit = t.splits[t.splits.length - 1];

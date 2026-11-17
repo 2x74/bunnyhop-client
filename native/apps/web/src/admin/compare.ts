@@ -135,7 +135,7 @@ function boardTable(x: CompareData): HTMLElement {
         { class: r.user_id === x.run.user_id ? "hl" : "" },
         h("td", { class: "num" }, i + 1),
         h("td", null, playerLink(r.user_id, r.name)),
-        h("td", { class: "num" }, h("a", { href: `/replay/${encodeURIComponent(r.id)}`, target: "_blank", rel: "noopener" }, fmtTime(r.time))),
+        h("td", { class: "num" }, h("a", { href: `/replay/${encodeURIComponent(r.id)}?stats=1`, target: "_blank", rel: "noopener" }, fmtTime(r.time))),
         cols.map((m) => h("td", { class: "num" }, METRIC_INFO[m].show(r[m], r.tick_interval || tick))),
         h("td", { class: "num faint" }, r.analyzer ?? "–"),
       ),

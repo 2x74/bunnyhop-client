@@ -11,7 +11,8 @@ import { h } from "./dom";
 import { avatarImg, pictureOf } from "./avatar";
 import { setKnifePool, setLoadout } from "../player/cosmetics";
 import { loadoutFor } from "../loadout";
-import { crownOf, heldRanks } from "../progression";
+import { crownOf, heldRanks, MEDAL_ITEM } from "../progression";
+import { medalCountsOf } from "../creators";
 
 /** Opens the account panel (ui/account-panel.ts, loaded on demand with the name rules and blocklist). */
 export function openAccount(section: "name" | "save" | "password" | null = null): void {
@@ -108,7 +109,8 @@ export function myProfile(): Promise<Profile | null> {
     if (glowRevision === playerGlowRevision()) setPlayerGlow(prof?.mine ? prof.player.playerGlow ?? null : null);
     if (prof?.mine) {
       setKnifePool(prof.cosmetics.knifePool ?? null);
-      setLoadout(loadoutFor(prof.cosmetics, crownOf(heldRanks([prof.rank, ...prof.styles]))));
+      // (The Daily Medal's face comes from the medals on the profile's marks, like the name badge.)
+      setLoadout(loadoutFor(prof.cosmetics, crownOf(heldRanks([prof.rank, ...prof.styles])), prof.cosmetics.back === MEDAL_ITEM ? medalCountsOf(prof.player.special) : null));
     }
   });
   return p;
@@ -154,8 +156,12 @@ export function accountChanged(user?: User | null): void {
   void myProfile();
 }
 
-/** Runs fn on every account change while `owner` is in the document. */
-export function onAccountChange(owner: Element, fn: () => void): void {
+/**
+ * Runs fn on every account change while `owner` is in the document. Without `signal` the listener (and what fn holds:
+ * usually the whole screen) is only let go at the first account change after `owner` left; a screen that knows when it
+ * closes passes a signal and is let go then.
+ */
+export function onAccountChange(owner: Element, fn: () => void, signal?: AbortSignal): void {
   let seen = false;
   const handler = () => {
     if (!owner.isConnected) {
@@ -166,5 +172,5 @@ export function onAccountChange(owner: Element, fn: () => void): void {
     fn();
   };
   requestAnimationFrame(() => (seen ||= owner.isConnected));
-  window.addEventListener(EVENT, handler);
+  window.addEventListener(EVENT, handler, { signal });
 }

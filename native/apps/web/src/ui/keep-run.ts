@@ -46,11 +46,25 @@ function end(): void {
   block = null;
 }
 
+/** Another offer speaks for this finish (the Daily Challenge's: ui/daily-guest.ts). */
+let stoodDown = false;
+/**
+ * One ask at a time: the Daily Challenge's offer for a guest's run takes this one's place for that finish, on the end
+ * card and in the pause menu. "Keep this run" comes back with the next first finish or PB that has no other offer.
+ */
+export function keepRunStandDown(): void {
+  stoodDown = true;
+  pending = false;
+  block?.remove();
+  block = null;
+}
+
 /** A verified first finish or PB: the end card's line, for a guest who hasn't said no. */
 export async function keepRunOffer(): Promise<string | null> {
+  stoodDown = false;
   if (!api.available() || WAVEDASH || dismissed()) return null;
   const u = await me();
-  if (u?.provider !== "guest") return null;
+  if (u?.provider !== "guest" || stoodDown) return null;
   pending = true;
   return LINE;
 }

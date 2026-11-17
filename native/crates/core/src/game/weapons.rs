@@ -1176,7 +1176,7 @@ impl Game {
             let delay = self.entities[i].float("pressuredelay").unwrap_or(0.0);
             self.seq += 1;
             self.queue.push(QueuedEvent {
-                fire_time: self.io_time + delay.max(0.0),
+                fire_time: self.io_time + self.queue_delay(delay, Actor::Player),
                 seq: self.seq,
                 target: Arc::from("!self"),
                 input: Arc::from("break"),

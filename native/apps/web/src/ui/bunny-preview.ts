@@ -30,6 +30,11 @@ export interface BunnyLook {
   veil?: boolean;
   /** Solid: "back" turns it round to show what's on its back (the Back tab); it still turns slowly and drags. */
   facing?: "front" | "back";
+  /**
+   * Solid: "head" brings the camera in on the head and shoulders (the Loadout's Hat slot: a hat was a small part of
+   * the whole bunny); it eases there and back.
+   */
+  focus?: "body" | "head";
 }
 
 const R = 42; // hop circle radius (units)
@@ -50,6 +55,9 @@ const HOP_REACH = 36;
 const HOP_SPEED = 250;
 /** The frame's height over what's framed (a little room above the hat and under the feet). */
 const MARGIN = 1.16;
+/** Focus "head": the frame starts this far up the body (its feet 0, its top 1) and its reach round the middle shrinks to this. */
+const HEAD_FROM = 0.42;
+const HEAD_REACH = 0.68;
 const D2R = Math.PI / 180;
 const _dir = new THREE.Vector3();
 const _up = new THREE.Vector3();
@@ -75,6 +83,8 @@ export class BunnyScene {
   private turn = 0;
   private turnV = 0;
   private face = 0;
+  /** Solid: how far the camera is in on the head (0 the whole body, 1 the head; eased toward `focus`). */
+  private zoom = 0;
   /**
    * Solid: the posed body's box (bunny/model.ts bodyBox, model space, eased): where its middle sits off the model's
    * origin (cx, cy), how far it reaches from there, its feet and its top (hat included).
@@ -227,6 +237,7 @@ export class BunnyScene {
       // Round to the back (from three-quarters behind), or back to the front, over about half a second.
       const want = this.look.facing === "back" ? 160 : 0;
       this.face += (want - this.face) * (this.reduced ? 1 : 1 - Math.exp(-Math.max(dt, 1e-4) * 7));
+      this.zoom += ((this.look.focus === "head" ? 1 : 0) - this.zoom) * (this.reduced ? 1 : 1 - Math.exp(-Math.max(dt, 1e-4) * 6));
       this.model.setState(this.standPose());
       this.model.update(Math.max(dt, 1e-4));
       this.centre(dt);
@@ -305,7 +316,8 @@ export class BunnyScene {
     } else {
       // The body as it turns (a cylinder about its middle: the framing holds still while it turns), hat and ears in.
       const b = this.body;
-      this.frame(SOLID_PITCH, b ? b.reach : 24, b ? b.z0 : 0, b ? b.z1 : 80);
+      const z0 = b ? b.z0 : 0, z1 = b ? b.z1 : 80, k = this.zoom;
+      this.frame(SOLID_PITCH, (b ? b.reach : 24) * (1 - (1 - HEAD_REACH) * k), z0 + (z1 - z0) * HEAD_FROM * k, z1);
     }
     r.render(this.scene, cam);
   }

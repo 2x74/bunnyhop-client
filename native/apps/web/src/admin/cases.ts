@@ -23,6 +23,7 @@ import { caseProps, loadThread, timeline, type ThreadData } from "./thread";
 import { pinnedLine } from "./notes";
 import { markSeen } from "./seen";
 import { compareSection, type CompareData } from "./compare";
+import { SCORE_TITLE, scoringRule, whyText } from "./rule-words";
 
 /** The daily sweep's rules (apps/api src/ac-player-rules.ts), for the Stop re-flags dialog. */
 const SWEEP_RULES = ["key-shape-repeat", "key-follows-mouse-repeat", "counted-yaw-missing", "missing-beats-repeat", "pooled-review", "gain-jump", "legit-jumps"];
@@ -153,11 +154,14 @@ export function bestWindow(rows: JumpRow[]): Set<number> {
 
 const pc = (v: number | null | undefined, digits = 1) => (v === null || v === undefined ? "–" : `${(v * 100).toFixed(digits)}%`);
 
-/** A replay link at a jump (the viewer's ?jump=, viewer/viewer.ts). Rejected runs open in the game with a staff session. */
+/**
+ * A replay link at a jump (the viewer's ?jump=, viewer/viewer.ts), with the Stats panel on (?stats=1: the strafe strip,
+ * A / D lanes and switch offsets). Rejected runs open in the game with a staff session.
+ */
 const watchHref = (run: { run_id?: string; id?: string; status: string }, jump?: number) => {
   const id = encodeURIComponent(run.run_id ?? run.id ?? "");
-  const j = jump ? `jump=${jump}` : "";
-  return run.status === "verified" ? `/replay/${id}${j ? `?${j}` : ""}` : `/?replay=run:${id}${j ? `&${j}` : ""}`;
+  const q = `stats=1${jump ? `&jump=${jump}` : ""}`;
+  return run.status === "verified" ? `/replay/${id}?${q}` : `/?replay=run:${id}&${q}`;
 };
 
 // Small caches for this page: a case's player, a run's analysis, a board's WR time.
@@ -202,9 +206,11 @@ function evidenceBlock(lists: Evidence[][]): HTMLElement {
   const blatant = all.filter((e) => e.blatant);
   const scored = all.filter((e) => !e.blatant && !e.review).sort((a, b) => b.weight - a.weight);
   const review = all.filter((e) => e.review && !e.blatant);
+  const top = scoringRule(all);
   return h(
     "div",
     { class: "evidence" },
+    top ? h("p", { class: "ev case-why" }, h("b", null, "Why: "), whyText(top)) : null,
     blatant.map((e) => h("p", { class: "ev blatant" }, e.text)),
     scored.map((e) => h("p", { class: "ev" }, e.text)),
     review.length ? h("details", { class: "ev-review" }, h("summary", null, plural(review.length, "review note")), review.map((e) => h("p", { class: "ev faint" }, e.text))) : null,
@@ -393,7 +399,7 @@ export const casesView: View = async (root, params) => {
       h(
         "header",
         { class: "case-head" },
-        h("div", { class: "case-verdict" }, verdict, h("span", { class: `case-score ${p.score >= 90 ? "hi" : p.score >= 70 ? "mid" : ""}` }, String(p.score))),
+        h("div", { class: "case-verdict" }, verdict, h("span", { class: `case-score ${p.score >= 90 ? "hi" : p.score >= 70 ? "mid" : ""}`, title: SCORE_TITLE }, String(p.score))),
         h(
           "div",
           { class: "case-who" },

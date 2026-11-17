@@ -34,11 +34,14 @@ import { ProfileHistory } from "./ui/profile-history";
 import { profileScreen, type ProfileActions, type ProfileOpen, type ProfileTab } from "./ui/profile";
 import { leaveRanksUrl, ranksScreen } from "./ui/ranks";
 import { gauntletResult, gauntletScreen, gauntletsScreen, leaveGauntletUrl, type GauntletScreens } from "./ui/gauntlets";
+import { dailyScreen, leaveDailyUrl } from "./ui/daily";
+import { dailyPlayHref } from "./daily/state";
 import { STYLE_DEFS, STYLE_LINES, styleForTrack, styleLabel, trackStyleLocked, type StyleId } from "./styles";
 import { chatCommands } from "./chat-commands";
 import { helpPanelGroups } from "./chat-help";
 import { trackName } from "./zones";
 import type { PracticeReplayMeta } from "./practice-mode/replays";
+import { TIMESCALE_STEPS, timescaleLabel } from "./practice-mode/timescale";
 import { roomHeader, serverBrowser } from "./ui/servers";
 import { onRoomPresence, roomActions, roomPresence } from "./net/presence";
 import { audioCredits, sfx, uiOpen, uiSound } from "./audio";
@@ -49,6 +52,7 @@ import { takePasswordReset } from "./ui/account-password";
 import { lastVerifiedRun, runUrl, shareWithToast } from "./ui/share";
 import { accountChanged, onboardingMaybeNeeded, openAccount, setReplayIntro } from "./ui/account-state";
 import { keepRunBlock } from "./ui/keep-run";
+import { dailyGuestBlock } from "./ui/daily-guest";
 import { openFeedback } from "./feedback/state";
 import { openInbox, withInboxBadge } from "./inbox/state";
 import { versionButton } from "./ui/changelog";
@@ -65,7 +69,9 @@ import { hopIndicator } from "./ui/hop";
 import { setBackdropFrozen } from "./ui/backdrop";
 import { openTutorial, TUTORIAL_BOARD, TUTORIAL_MAP, tutorialPrompt } from "./tutorial/entry";
 import { dismissKey, mascot, toast as notifyToast } from "./notify";
-import { allowLeave, modalOpen } from "./play-lock";
+import { allowLeave, attemptInProgress, modalOpen } from "./play-lock";
+import { exitGame, exitGameShown } from "./exit-game";
+import { confirmDialog } from "./ui/settings-transfer";
 import { stopMenuWork, menuIdleAllowed } from "./ui/menu-work";
 
 // The intro (ui/onboarding.ts) loads on demand: first visits, ?intro=1, or "Replay the intro" in the account panel.
@@ -93,7 +99,7 @@ export interface MenuActions {
   onLoadReplay: (file: File) => void;
   /** Practice mode (practice-mode/controller.ts): the rail's Practice item. Null where it isn't available (rooms, the
    * tutorial). */
-  practice?: { on: boolean; toggle: () => void } | null;
+  practice?: { on: boolean; toggle: () => void; timescale?: { value: number; set: (scale: number) => void } | null } | null;
   /** Asked at each draw: clears the start point and restarts, when this attempt is on one that doesn't count (session.ts onPracticeSpawn). */
   clearStart?: () => (() => void) | null;
   /** Asked at each draw: this map's practice replays kept on this device, newest first (practice-mode/replays.ts). */
@@ -103,7 +109,7 @@ export interface MenuActions {
   onClearPracticeReplays?: () => void;
 }
 
-type Screen = "home" | "maps" | "settings" | "controls" | "pause" | "loading" | "profile" | "ranks" | "servers" | "support" | "stats" | "gauntlets" | "gauntlet";
+type Screen = "home" | "maps" | "settings" | "controls" | "pause" | "loading" | "profile" | "ranks" | "servers" | "support" | "stats" | "gauntlets" | "gauntlet" | "daily";
 
 interface ShellHooks {
   /** Request pointer lock (resume play). */
@@ -133,6 +139,8 @@ const S = {
   ranksPage: 1,
   /** The gauntlet screen's gauntlet, and the attempt whose result it shows (ui/gauntlets.ts). */
   gauntlet: { slug: "", attempt: null } as { slug: string; attempt: string | null },
+  /** The daily screen's day (ui/daily.ts); null: today. */
+  dailyDay: null as string | null,
   /** Map the browser previews when it opens (a /maps/<name> link). */
   mapsFocus: null as string | null,
   /** Current map's tier (pause menu + loading screen). undefined = not looked up yet. */
@@ -249,10 +257,13 @@ function build(s: Screen | undefined): HTMLElement | null {
         ranks: () => openRanks("all"),
         servers: () => push("servers"),
         gauntlets: api.available() ? () => push("gauntlets") : undefined,
+        daily: api.available() ? (day) => openDaily(day ?? null) : undefined,
+        playDaily,
         support: () => push("support"),
         stats: () => push("stats"),
         // The tutorial lives at the top of the map list (tutorial/learn.ts): the home link opens the list on it.
         learn: () => ((S.mapsFocus = TUTORIAL_MAP), push("maps")),
+        exit: exitGameShown() ? () => void exitFromMenu() : undefined,
       });
     case "stats": {
       const tabs = h("div.pf-tabs-host");
@@ -291,6 +302,8 @@ function build(s: Screen | undefined): HTMLElement | null {
     }
     case "gauntlets":
       return h("section.panel.panel-wide.panel-gauntlets", null, header("Gauntlets"), gauntletsScreen(gauntletActions()));
+    case "daily":
+      return h("section.panel.panel-wide.panel-daily", null, header("Daily Challenge"), dailyScreen(S.dailyDay, { open: openDaily, play: playDaily }));
     case "gauntlet": {
       const g = S.gauntlet;
       // (The title is the gauntlet's once it has loaded.)
@@ -340,16 +353,18 @@ function prewarmLoadoutStartSoon(): void {
   const go = () => {
     if (S.inGame || startPrewarmed || !menuIdleAllowed()) return;
     startPrewarmed = true;
-    void Promise.all([import("./player/bunny/prebuild"), import("./player/cosmetics"), import("./viewmodel/knives/index"), import("./viewmodel/knives/carrot"), import("./loadout"), import("./progression")])
-      .then(([pre, cos, knives, c, lo, prog]) => {
+    void Promise.all([import("./player/bunny/prebuild"), import("./player/cosmetics"), import("./viewmodel/knives/index"), import("./viewmodel/knives/carrot"), import("./loadout"), import("./support-page")])
+      .then(([pre, cos, knives, c, lo, support]) => {
         const build = () => {
           if (S.inGame || !menuIdleAllowed()) return;
           const l = cos.getLoadout();
           const knife = knives.knifeById(l.knife) ?? c.carrot;
           void pre.prebuildLoadoutStart(cos.getOutfit(), l, knife, lo.gloveStyle(l.glove).style, c.carrot);
-          // Support's first look: the first supporter set on your knife and body (ui/support.ts setLook).
-          const sup = prog.SUPPORTER_LOOK;
-          void pre.prebuildLoadoutStart(sup.outfit, { ...l, finish: sup.finish, glove: sup.glove, hat: sup.hat }, knife, lo.gloveStyle(sup.glove).style, c.carrot);
+          // What the Support page's Loadout opens wearing: the first Supporter item of each slot, on your own knife
+          // (support-page.ts startLoadout, the same list ui/support-loadout.ts starts from).
+          const sup = support.startLoadout();
+          const glove = sup.glove ?? l.glove;
+          void pre.prebuildLoadoutStart(sup.outfit ?? cos.getOutfit(), { ...l, finish: sup.finish ?? l.finish, glove, hat: sup.hat ?? l.hat }, knife, lo.gloveStyle(glove).style, c.carrot);
         };
         build();
         // The account's own loadout and colourway often arrive after this (its profile loads): those too (cached
@@ -375,6 +390,7 @@ function render(dir: "in" | "out" = "in", animate = false): void {
   // them stacks on top of their address, so Back returns there).
   if (s !== "ranks" && s !== "profile") leaveRanksUrl();
   if (s !== "gauntlets" && s !== "gauntlet" && s !== "profile") leaveGauntletUrl();
+  if (s !== "daily" && s !== "profile") leaveDailyUrl();
   const seq = ++renderSeq;
   const r = root();
   // Into a map: no view transition (it holds the page while it captures); the screen you were on takes off under the
@@ -432,6 +448,7 @@ function pickMap(name: string): void {
   url.searchParams.set("map", name);
   url.searchParams.delete("replay");
   url.searchParams.delete("server"); // picking a map yourself leaves the multiplayer room
+  url.searchParams.delete("daily"); // ... and the Daily Challenge's entry (daily/mode.ts)
   // In game the page reloads into the map: the menu takes off while the next page is fetched (no wait added).
   if (!reducedMotion()) root().classList.add("nav-leave");
   location.href = url.toString();
@@ -531,6 +548,18 @@ export function goToMainMenu(): void {
   location.href = url.toString();
 }
 
+/**
+ * Exit game (exit-game.ts; the desktop app only): the main menu's last entry and the pause menu's last row. During a
+ * timed run it asks once, in the game's yes / no dialog, since the run would be lost; the main menu never asks.
+ */
+function exitFromMenu(): Promise<boolean> {
+  return exitGame({
+    runInProgress: attemptInProgress,
+    confirm: () => confirmDialog({ title: "Exit the game?", body: "The run you're on won't be saved.", confirm: "Exit game" }),
+    allowLeave,
+  });
+}
+
 const bindHint = (a: Action) => {
   const c = prefs.get().binds[a]?.[0];
   return c ? keyLabel(c) : undefined;
@@ -591,7 +620,29 @@ function styleTab(a: MenuActions, track: number): HTMLElement {
         nextTrack ? h("p.style-note", null, `${nextTrack} goes to the next track in game.`) : null,
       )
     : null;
-  return h("div.pp-style", null, styles, trackGroup);
+  return h("div.pp-style", null, styles, trackGroup, a.practice?.on && a.practice.timescale ? timescaleGroup(a.practice.timescale) : null);
+}
+
+/** Practice timescale (practice-mode/timescale.ts), in practice mode only: the Track row's buttons; the menu stays up. */
+function timescaleGroup(t: { value: number; set: (scale: number) => void }): HTMLElement {
+  const buttons = TIMESCALE_STEPS.map((v) =>
+    h("button.track-btn", { type: "button", "data-v": String(v), onclick: () => (t.set(v), paint()) }, timescaleLabel(v)),
+  );
+  const paint = () => {
+    for (const b of buttons) {
+      const on = Number(b.dataset.v) === t.value;
+      b.classList.toggle("on", on);
+      b.setAttribute("aria-pressed", String(on));
+    }
+  };
+  paint();
+  return h(
+    "div.pp-group",
+    null,
+    h("h3.pp-group-title", null, "Timescale"),
+    h("div.track-list", { role: "group", "aria-label": "Timescale" }, ...buttons),
+    h("p.style-note", null, "Slows the game down while practice mode is on. !timescale picks any speed from 0.1."),
+  );
 }
 
 function replaysTab(a: MenuActions, pb: ReturnType<typeof getPB>): HTMLElement {
@@ -642,6 +693,7 @@ function practiceSection(a: MenuActions): HTMLElement | null {
         m.track ? trackName(m.track) : "",
         m.time === null ? (m.at === null ? "Before the start" : `At ${formatTime(m.at)}`) : "",
         m.teleports ? `${m.teleports} teleport${m.teleports === 1 ? "" : "s"}` : "",
+        m.scale ? `Timescale ${timescaleLabel(m.scale)}` : "",
       ].filter(Boolean).join(", ");
       return listRow(m.time === null ? "Not finished" : formatTime(m.time), watch, { sub: sub || undefined, detail: when(m.savedAt) });
     }),
@@ -823,13 +875,15 @@ function pauseScreen(): HTMLElement {
   const panel = h(
     "section.pause-panel",
     { "aria-label": "Pause menu panel" },
-    keepRunBlock(),
+    // One ask at a time: the Daily Challenge's offer for a guest's run (ui/daily-guest.ts), else "Keep this run".
+    dailyGuestBlock() ?? keepRunBlock(),
     h("header.pp-head", null, tabBar),
     panelBody,
   );
 
   // --- the rail: Play / Resume and the run's own actions, then places to go, then Main menu as the last row (pinned
-  // above the account, well away from Play, in its own colour: it leaves the map and ends the run)
+  // above the account, well away from Play, in its own colour: it leaves the map and ends the run), and in the desktop app
+  // Exit game under it
   const homeKey = mainMenuKeys();
   const home = railItem("Main menu", goToMainMenu, { hint: keyLabel(homeKey[1] ?? homeKey[0]), icon: "leave" });
   home.classList.add("pause-home");
@@ -866,6 +920,7 @@ function pauseScreen(): HTMLElement {
     feedback || inbox ? h("div.rail-pair", null, feedback, inbox) : null,
     h("div.rail-fill", { "aria-hidden": "true" }),
     home,
+    exitGameShown() ? railItem("Exit game", () => void exitFromMenu(), { icon: "power" }) : null,
   );
   arrowNav(rail, "button");
   rail.classList.add("hop-host");
@@ -1177,6 +1232,7 @@ function openRoute(r: NavRequest): void {
   } else if (r.screen === "gauntlets") {
     if (top() !== "gauntlets") push("gauntlets");
   } else if (r.screen === "gauntlet") openGauntlet(r.slug, r.attempt ?? null);
+  else if (r.screen === "daily") openDaily(r.day ?? null);
   else if (top() !== "servers") push("servers");
 }
 
@@ -1208,6 +1264,34 @@ function openGauntlet(slug: string, attempt: string | null): void {
   S.gauntlet = { slug, attempt };
   if (top() === "gauntlet") render("in", true);
   else push("gauntlet");
+}
+
+/** The Daily Challenge screen (ui/daily.ts) on a day's board; replaces itself when it is already showing. */
+function openDaily(day: string | null): void {
+  S.dailyDay = day;
+  if (top() === "daily") render("in", true);
+  else push("daily");
+}
+
+/**
+ * Plays the day's map from the Daily entry: the map with ?daily=<day> (main.ts runs it in the day's style, daily/mode.ts
+ * tags its runs). A day that isn't Normal carries its style in the address. From the home screen the page goes on into
+ * the map; in game it loads the map again.
+ */
+function playDaily(day: string, map: string, style?: string): void {
+  localStorage.setItem(LAST_MAP, map);
+  dropRouteParams();
+  const url = new URL(dailyPlayHref(day, map, style), location.origin);
+  if (S.pickResolve) {
+    const r = S.pickResolve;
+    S.pickResolve = null;
+    history.pushState(null, "", url);
+    r(map);
+    return;
+  }
+  allowLeave();
+  if (!reducedMotion()) root().classList.add("nav-leave");
+  location.href = url.toString();
 }
 
 function gauntletActions(): GauntletScreens {

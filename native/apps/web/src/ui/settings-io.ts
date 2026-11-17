@@ -194,6 +194,7 @@ const RULES: [string, Rule][] = [
   ["hud.keys.idle", color],
   ["hud.ssj.mode", { oneOf: ["sixth", "every", "everySixth"] }],
   ["hud.ssj.minGain", { range: [0, 100], int: true }],
+  ["hud.logs.minGain", { range: [0, 100], int: true }],
   ["hud.jhud.speedColors", { range: [1, 16], int: true }],
   ["hud.jhud.cutoff", { range: [0, 30], int: true }],
   ["hud.jhud.colors.*", color],

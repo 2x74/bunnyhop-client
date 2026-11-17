@@ -12,6 +12,11 @@
 /* Jumps, strafes and sync live in each run's panel: not twice. */
 #rv.rv-h2h .rv-hud .hud-el[data-el="stats"], #rv.rv-h2h .rv-hud .hud-el[data-el="sync"] { display: none; }
 
+/* One run with its Stats panel (viewer/solo-panel.ts): the same solid footer, and the panel's numbers not twice. */
+#rv.rv-solo-stats .rv-panel { background: var(--ink-0); box-shadow: 0 -1px 0 var(--line); z-index: 3; }
+#rv.rv-solo-stats .rv-hud { --hs: calc(var(--hud-scale, 1) * var(--h2h-hud, 1)); }
+#rv.rv-solo-stats .rv-hud .hud-el[data-el="stats"], #rv.rv-solo-stats .rv-hud .hud-el[data-el="sync"] { display: none; }
+
 /* Each run's panel (drawn by viewer/h2h-panel.ts) */
 #rv canvas.h2h-panel { position: absolute; display: block; pointer-events: none; }
 #rv canvas.h2h-panel[hidden] { display: none; }
