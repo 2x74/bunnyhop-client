@@ -1,5 +1,6 @@
 #include "online.hpp"
 #include "download_stats.hpp"
+#include "download_retry.hpp"
 #include "data_location.hpp"
 #include "map_prefetch.hpp"
 #include <future>
@@ -16,6 +17,32 @@ int main() {
             std::exit(1);
         }
     };
+    using native::valid_download_range;
+    check(valid_download_range("bytes 4-9/10", 4, 6, 10), "valid resume rejected");
+    check(valid_download_range("bytes 4-9/10", 4, 2, 10), "interrupted resume prefix rejected");
+    for (const auto range :
+         {"bytes 0-9/10",
+          "bytes 4-8/10",
+          "bytes 4-10/10",
+          "bytes 4-9/*",
+          "bytes 4-9/11",
+          "bytes 4-9/10 trailing",
+          "bytes 4-3/10",
+          "garbage"})
+        check(!valid_download_range(range, 4, 6, 10), "unsafe resume accepted");
+    check(!valid_download_range("bytes 4-9/10", 4, 7, 10), "oversized range body accepted");
+    const native::DownloadPrefix prefix{4};
+    check(prefix.accept(206, "bytes 4-9/10", 6, 10, true), "resume rejected");
+    check(!prefix.accept(200, "", 6, 10, true), "ignored range appended");
+    check(!prefix.accept(206, "bytes 4-9/10", 6, 10, false), "compressed range appended");
+    check(native::transient_download_error(CURLE_PARTIAL_FILE, 200), "dropped body not retried");
+    check(native::transient_download_error(CURLE_HTTP2_STREAM, 0), "HTTP2 stream failure not retried");
+    check(native::transient_download_error(CURLE_HTTP_RETURNED_ERROR, 503), "503 not retried");
+    check(!native::transient_download_error(CURLE_HTTP_RETURNED_ERROR, 404), "404 retried");
+    check(!native::transient_download_error(CURLE_PEER_FAILED_VERIFICATION, 0), "TLS failure retried");
+    check(!native::transient_download_error(CURLE_ABORTED_BY_CALLBACK, 200), "cancel retried");
+    check(native::download_attempts == 3 && native::download_retry_delay(1).count() == 500,
+          "retry budget or backoff changed");
     native::DownloadStats stats;
     const native::DownloadSample sample{1024, 4096, 0.5, 0.1, 1, CURL_HTTP_VERSION_2_0};
     auto worker = std::async(std::launch::async, [&] {
