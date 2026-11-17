@@ -862,6 +862,12 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME native_gain_logs COMMAND bunnyhop-native-gain-logs-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/src/gain_log_vectors.json")
+    add_executable(bunnyhop-native-paint-store-tests src/paint_store_tests.cpp)
+    target_include_directories(bunnyhop-native-paint-store-tests PRIVATE include vendor src)
+    target_link_libraries(bunnyhop-native-paint-store-tests PRIVATE bunnyhop_core_native Threads::Threads)
+    target_compile_options(bunnyhop-native-paint-store-tests PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
+    add_test(NAME native_paint_store COMMAND bunnyhop-native-paint-store-tests)
     # Golden vectors from the web's TimedInput; regenerate with native/tools/timed-input/generate-vectors.ts.
     add_executable(bunnyhop-native-timed-input-parity-tests src/timed_input_parity_tests.cpp)
     target_include_directories(bunnyhop-native-timed-input-parity-tests PRIVATE include vendor src)

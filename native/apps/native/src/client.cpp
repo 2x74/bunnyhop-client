@@ -103,6 +103,7 @@
 #include "free_cameras.hpp"
 #include "menu_cursor.hpp"
 #include "numbered_menus.hpp"
+#include "paint_store.hpp"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_opengl.h>
 #include <algorithm>
@@ -277,6 +278,8 @@ int run(const native::Options &opt) {
     bool captured = false, focused = true, running = true, menu_ready = false, resume_wanted = false;
     // Settings and other small JSON files are written off the frame loop.
     native::JsonFileWriter json_writer;
+    // +paint marks kept per map across restarts (paint_store.hpp).
+    native::PaintStore paint_store(cache / "paint");
     auto preferences = startup_data.settings;
     native::MenuState menu_state;
     native::MenuRoomState room_menu_state;
@@ -967,6 +970,7 @@ int run(const native::Options &opt) {
         replay_compare.clear();
         replay_compare_import.reset();
         copy_starts.reset();
+        if (renderer) paint_store.flush(renderer->paint_marks(), json_writer);
         game.leave(practice);
         tutorial_runner.lesson.reset();
         viewer.active = false;
@@ -1055,7 +1059,11 @@ int run(const native::Options &opt) {
                                                       : std::make_unique<native::Renderer>(gl, next.core.get(), assets);
         next_renderer->set_map_identity(id, detail.is_object() ? detail.value("sha256", std::string()) : std::string());
         next_renderer->load_map_volumes(data_location::from_utf8(path));
+        if (renderer) paint_store.flush(renderer->paint_marks(), json_writer);
         game.install(std::move(next.core), std::move(next_renderer), practice, audio);
+        // Smoke and frame-count runs neither read nor write saved paint (no BSP hash, nothing saved).
+        const bool keeps_paint = !opt.frames && opt.runtime_smoke.empty() && detail.is_object();
+        paint_store.load(id, keeps_paint ? detail.value("sha256", std::string()) : "", renderer->paint_marks());
         map_audio.start(core.get(), data_location::from_utf8(path), data_location::from_utf8(content));
         // The pause screen shows this map itself, never the home tour.
         if (backdrop) backdrop->release();
@@ -4242,6 +4250,7 @@ int run(const native::Options &opt) {
             renderer->surface_tools_frame(
                     curr, input, simulation_active && captured && !viewer.active && !spectator, spectator.has_value()
             );
+            paint_store.frame(renderer->paint_marks(), double(SDL_GetTicksNS()) / run_second_ns, json_writer);
             renderer->landing_context(
                     spectator.has_value() || practice.noclip || practice.infinite_flight.flying(),
                     practice.active || tutorial_practice(),
@@ -4810,6 +4819,7 @@ int run(const native::Options &opt) {
         );
         frame_diagnostics.mark(native::FrameDiagnostics::kSleep, SDL_GetTicksNS());
     }
+    if (renderer) paint_store.flush(renderer->paint_marks(), json_writer);
     save_window();
     if (!opt.frames && opt.runtime_smoke.empty()) {
         run_history.persist(json_writer, cache, activity, double(SDL_GetTicksNS()) / run_second_ns, true);

@@ -215,6 +215,14 @@ private:
     std::array<float, 4> color_{1, .251f, .251f, 1};
     double last_seconds_ = -1;
     std::optional<SurfaceHit> last_hit_;
+    // Counts placed and cleared marks, so the saved copy (paint_store.hpp) knows when to write.
+    uint64_t revision_ = 0;
+
+    void append(const Mark &mark) {
+        marks_[next_] = mark;
+        next_ = (next_ + 1) % capacity;
+        count_ = std::min(count_ + 1, capacity);
+    }
 
     static size_t clip(std::span<const Vec3> input, std::span<Vec3> output, const Vec3 &normal, float limit) {
         size_t count = 0;
@@ -356,6 +364,7 @@ public:
         next_ = (next_ + 1) % capacity;
         count_ = std::min(count_ + 1, capacity);
         last_hit_ = hit;
+        ++revision_;
         return true;
     }
 
@@ -379,10 +388,26 @@ public:
 
     size_t count() const { return count_; }
 
+    uint64_t revision() const { return revision_; }
+
+    // Every mark, oldest first (the ring's next slot is the oldest once it is full).
+    template <class Visit>
+    void each_mark(Visit &&visit) const {
+        const size_t first = count_ == capacity ? next_ : 0;
+        for (size_t index = 0; index < count_; ++index)
+            visit(marks_[(first + index) % capacity]);
+    }
+
+    // A saved mark, back after a restart: placed as if just stamped, without counting as a change.
+    void restore(const Mark &mark) {
+        if (mark.count) append(mark);
+    }
+
     void clear() {
         count_ = next_ = 0;
         last_seconds_ = -1;
         last_hit_.reset();
+        ++revision_;
     }
 };
 }  // namespace native_render

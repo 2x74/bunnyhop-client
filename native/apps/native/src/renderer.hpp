@@ -1764,6 +1764,9 @@ public:
                 {"msaaRestartRequired", false}};
     }
 
+    // The +paint marks, for their saved copy (paint_store.hpp).
+    native_render::Paint &paint_marks() { return paint; }
+
     nlohmann::json surface_tools_state() {
         return {{"paintMarks", paint.count()},
                 {"measurePoints", measure.count()},
