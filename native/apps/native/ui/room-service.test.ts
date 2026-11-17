@@ -606,7 +606,7 @@ test("gain logs: asked for at the room's bar, yours rides the next state batch, 
     commands: unknown[] = [],
     batches: unknown[][] = [];
   const shown: string[] = [];
-  let bar: number | null = null;
+  const room = { bar: null as number | null };
   const transport: RoomTransport = {
     send: (value) => commands.push(value),
     pushSample: () => {},
@@ -618,7 +618,7 @@ test("gain logs: asked for at the room's bar, yours rides the next state batch, 
     connect: (_id, h) => (handlers.push(h), transport),
     send: () => {},
     gainLogs: {
-      roomBar: (value) => void (bar = value),
+      roomBar: (value) => void (room.bar = value),
       wanted: (roomBar) => roomBar,
       other: (log, name) => void shown.push(`${name} ${log.gain}`),
       hidden: (id) => id === "muted",
@@ -638,7 +638,7 @@ test("gain logs: asked for at the room's bar, yours rides the next state batch, 
       { slot: 3, id: "muted", name: "Muted", style: "autohop" } as never,
     ];
     handlers[0].message(start);
-    expect(bar).toBe(85);
+    expect(room.bar).toBe(85);
     expect(commands).toContainEqual({ t: "logs", min: 85 });
     expect(service.relayLog(log)).toBe(true);
     const batch = {
@@ -654,10 +654,10 @@ test("gain logs: asked for at the room's bar, yours rides the next state batch, 
     expect(batches.at(-1)?.[4]).toBeNull();
     // Lines from the room: by name, never your own slot's or a muted player's.
     const logs = [0, 2, 3].map((slot) => ({ slot, log }));
-    handlers[0].snapshot({ ...decodeSnapshot(Buffer.from(SNAPSHOT_0036, "base64"))!, logs } as Snapshot);
+    handlers[0].snapshot({ ...decodeSnapshot(Buffer.from(SNAPSHOT_0036, "base64"))!, logs } as Snapshot, 0);
     expect(shown).toEqual(["Ana 91.5"]);
   } finally {
     service.leave();
   }
-  expect(bar).toBeNull();
+  expect(room.bar).toBeNull();
 });
