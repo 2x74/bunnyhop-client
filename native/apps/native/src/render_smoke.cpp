@@ -445,6 +445,10 @@ int main(int argc, char **argv) {
             if (visibleActor) {
                 visibleActor->inspect = i == 0 && actorAction == "inspect" ? 1 : 0;
                 visibleActor->attack = i == 0 && actorAction == "fire" ? 1 : 0;
+                // "hop": the actor takes off ten frames before the capture (once its model is ready), so the
+                // picture shows its hop effect's burst.
+                constexpr int hop_frames_before_capture = 10;
+                visibleActor->jumped = actorAction == "hop" && i == std::max(0, frames - hop_frames_before_capture);
                 renderer.set_room_actors({*visibleActor});
             }
             renderer.draw(width, height, eye, input, &snapshot, time);
