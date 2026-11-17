@@ -10,6 +10,22 @@ const DESIGN_HELPERS: Record<string, string[]> = {
   bloom: ["flowerOf"],
 };
 
+const DESIGN_NAMES = Object.keys(DESIGN_HELPERS).join("|");
+/**
+ * Which design a module path is, whatever the platform spells it: Bun hands Windows paths with backslashes and a
+ * drive letter (D:\a\...\designs\clockwork.ts), others with slashes, and a module URL may come as file:///D:/...
+ * The filter decides in Bun's loader, so it must accept both separators and any case (Windows paths are not
+ * case-sensitive); designOf then names the design from the same normalised spelling.
+ */
+export const DESIGN_FILTER = new RegExp(`[\\\\/]hilts[\\\\/]live[\\\\/]designs[\\\\/](${DESIGN_NAMES})\\.ts$`, "i");
+export function designOf(path: string): string | undefined {
+  let normal = path;
+  if (/^file:/i.test(normal)) normal = decodeURIComponent(normal.replace(/^file:\/*/i, "/"));
+  normal = normal.replace(/\\/g, "/").toLowerCase();
+  const match = normal.match(new RegExp(`/hilts/live/designs/(${DESIGN_NAMES})\\.ts$`));
+  return match?.[1];
+}
+
 let registered = false;
 function exposeHelpers(): void {
   if (registered) return;
@@ -17,8 +33,9 @@ function exposeHelpers(): void {
   Bun.plugin({
     name: "live-hilt-helpers",
     setup(build) {
-      build.onLoad({ filter: /hilts\/live\/designs\/(clockwork|deep|storm|bloom)\.ts$/ }, async (args) => {
-        const design = args.path.match(/designs\/(\w+)\.ts$/)![1];
+      build.onLoad({ filter: DESIGN_FILTER }, async (args) => {
+        const design = designOf(args.path);
+        if (!design) throw new Error(`Living hilt helpers: ${args.path} passed the filter but names no design`);
         const source = await Bun.file(args.path).text();
         return { contents: `${source}\nexport { ${DESIGN_HELPERS[design].join(", ")} };\n`, loader: "ts" };
       });

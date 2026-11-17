@@ -667,6 +667,9 @@ if(BUILD_TESTING)
             COMMAND "${BUN_EXECUTABLE}" apps/native/src/live-hilts-oracle.ts "${LIVE_HILTS_ORACLE}")
         set_tests_properties(native_live_hilts_oracle PROPERTIES
             WORKING_DIRECTORY "${BUNNYHOP_ROOT}" FIXTURES_SETUP live_hilts_oracle TIMEOUT 60)
+        add_test(NAME native_live_hilt_paths
+            COMMAND "${BUN_EXECUTABLE}" test apps/native/src/live-hilt-modules.test.ts)
+        set_tests_properties(native_live_hilt_paths PROPERTIES WORKING_DIRECTORY "${BUNNYHOP_ROOT}" TIMEOUT 60)
         add_test(NAME native_live_hilts COMMAND bunnyhop-native-live-hilts-tests "${LIVE_HILTS_ORACLE}")
         set_tests_properties(native_live_hilts PROPERTIES FIXTURES_REQUIRED live_hilts_oracle)
         set(CHARMS_ORACLE "${CMAKE_CURRENT_BINARY_DIR}/charms-oracle.json")
