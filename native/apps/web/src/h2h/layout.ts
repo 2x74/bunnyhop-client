@@ -96,6 +96,14 @@ export function h2hRects(layout: H2HLayout, w: number, h: number, p: number): H2
   };
 }
 
+/** A single replay with its panel (viewer/solo-panel.ts): the view, and the panel across the bottom, `p` tall. */
+export function soloRects(w: number, h: number, p: number): { view: Rect; panel: Rect } {
+  const W = Math.max(2, Math.round(w));
+  const H = Math.max(2, Math.round(h));
+  const P = Math.max(0, Math.min(Math.round(p), H - 1));
+  return { view: { x: 0, y: 0, w: W, h: H - P }, panel: { x: 0, y: H - P, w: W, h: P } };
+}
+
 /** A rectangle scaled (an export renders at the frame size times supersampling). */
 export function scaleRect(r: Rect, k: number): Rect {
   const x = Math.round(r.x * k);

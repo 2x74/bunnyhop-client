@@ -381,7 +381,7 @@ export const PHYSICS_V16 = 16;
 /** RNGFix parity: uphill / downhill inclines, edge bugs, trigger jumping and telehops as on RNGFix servers. */
 export const PHYSICS_V17 = 17;
 /** The physics version new runs are played and recorded with. */
-export const PHYSICS_VERSION = 29;
+export const PHYSICS_VERSION = 30;
 /** Climbable surface properties used by bhop_synthetic_fix. */
 export const PHYSICS_V18 = 18;
 /** Scoped entity makers and known velocity-script equivalents. */
@@ -405,6 +405,8 @@ export const PHYSICS_V27 = 27;
 export const PHYSICS_V28 = 28;
 /** Per-map only (map_fixes.rs EVENT_CLOCK_V29): bhop_bistro_6 and bhop_bistro_7 run player outputs on EventQueueFix's clock, so a short touch of the gravity lift can't leave the player floating. Every other map plays as v28. */
 export const PHYSICS_V29 = 29;
+/** Low Gravity as bhoptimer runs it (gravity 400 in the header = sv_gravity 800 x player gravity 0.5, map gravity at full strength), the out-of-world line at 16,352 on x / y, and per-map: bhop_iso's checkpoint chains, bhop_4triedsame's booster (EventQueueFix clock), bhop_theory_hard's trigger touch with the previous tick's hull. Everything else plays as v29. */
+export const PHYSICS_V30 = 30;
 /** Versions this code knows (the wasm build must support them too, see Core.setSettings). */
 export const isPhysicsVersion = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= PHYSICS_V1 && (v as number) <= PHYSICS_VERSION;
 

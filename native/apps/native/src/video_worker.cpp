@@ -285,7 +285,7 @@ struct LoadedJob {
     GameSession::PreparedMap map;
     ReplaySession session;
     VideoOptions options;
-    std::string loadout, outfit;
+    std::string loadout, outfit, charm;
 };
 
 LoadedJob load_job(const Spec &spec, const Job &job, Control &control) {
@@ -300,7 +300,7 @@ LoadedJob load_job(const Spec &spec, const Job &job, Control &control) {
     BhSettings settings{};
     bh_default_settings(&settings);
     LoadedJob loaded{
-            GameSession::prepare(bsp, content, settings, detail), {}, parse_video_options(job.options), {}, {}
+            GameSession::prepare(bsp, content, settings, detail), {}, parse_video_options(job.options), {}, {}, {}
     };
     loaded.session = ReplaySession::open(loaded.map.core.get(), job.replay, loaded.options.full_recording);
     if (loaded.session.info.value("map", std::string()) != job.map)
@@ -311,6 +311,8 @@ LoadedJob load_job(const Spec &spec, const Job &job, Control &control) {
     const auto &packed = loaded.session.info.value("packedLoadout", Json());
     loaded.loadout = packed.is_string() ? packed.get<std::string>() : std::string();
     loaded.outfit = native_render::packed_outfit(loaded.loadout).value_or(spec.outfit);
+    const auto &charm = loaded.session.info.value("packedLoadoutExt", Json());
+    loaded.charm = charm.is_string() ? charm.get<std::string>() : std::string();
     return loaded;
 }
 
@@ -357,7 +359,7 @@ void run_job(const Spec &spec, const Job &job, Gl &gl, const VideoAvailability &
     auto renderer = std::make_unique<Renderer>(gl, loaded.map.core.get(), spec.assets);
     configure_renderer(*renderer, spec.settings, options);
     renderer->set_zones(loaded.map.zones);
-    renderer->set_cosmetics(loaded.outfit, loaded.loadout);
+    renderer->set_cosmetics(loaded.outfit, loaded.loadout, loaded.charm);
     NativeHud hud(gl, spec.assets);
     hud.preferences(export_hud_settings(spec.settings, options));
     const uint32_t total = loaded.session.range.total;

@@ -19,6 +19,8 @@ struct VoteDisplay {
     std::array<unsigned, 9> counts{};
     // The map's tier for a map option (0: an Extend, or a map without a tier), shown as "[T3 | votes]".
     std::array<int, 9> tiers{};
+    // Extend past the free extends: the votes it needs (60% of the room), shown as "2 of 3 needed". 0: plain count.
+    std::array<unsigned, 9> needs{};
     size_t count = 0;
     double ends_at = 0;
     int choice = -1;
@@ -52,14 +54,19 @@ void draw_vote(Hud &hud, int width, int height, float percent, const VoteDisplay
         );
         HudLabel<8> tier;
         if (vote.tiers[i] > 0) format_tier_label(tier, vote.tiers[i]);
+        HudLabel<32> tally;
+        if (vote.needs[i])
+            tally.format("%u of %u needed", vote.counts[i], vote.needs[i]);
+        else
+            tally.format("%u", vote.counts[i]);
         text.format(
-                "%zu. %.*s  [%s%s%u]%s",
+                "%zu. %.*s  [%s%s%s]%s",
                 i + 1,
                 int(vote.options[i].view().size()),
                 vote.options[i].view().data(),
                 tier.view().data(),
                 vote.tiers[i] > 0 ? " | " : "",
-                vote.counts[i],
+                tally.view().data(),
                 chosen ? "  <" : ""
         );
         hud.overlay_text(
@@ -130,6 +137,10 @@ class RoomState {
         if (p.contains("pack") && p["pack"].is_string()) {
             peer.actor.loadout = p["pack"].get<std::string>();
             if (peer.actor.loadout.size() > max_pack_bytes) peer.actor.loadout.clear();
+            // The charm rides beside the pack (loadout.ts packLoadoutExt); a menu or server without it sends none.
+            const auto charm = p.find("charm");
+            peer.actor.charm = charm != p.end() && charm->is_string() ? charm->get<std::string>() : std::string();
+            if (peer.actor.charm.size() > max_pack_bytes) peer.actor.charm.clear();
         } else if (p.contains("loadout")) {
             if (p["loadout"].is_object()) {
                 const auto &l = p["loadout"];
@@ -284,8 +295,10 @@ public:
             if (option.contains("map")) {
                 vote_display.options[index].assign(json_text(option, "map"));
                 vote_display.tiers[index] = json_value(option, "tier", 0);
-            } else
+            } else {
                 vote_display.options[index].format("Extend %u minutes", json_value(option, "minutes", 0u));
+                vote_display.needs[index] = json_value(option, "needs", 0u);
+            }
             if (counts != vote.end() && counts->is_array() && index < counts->size()
                 && (*counts)[index].is_number_unsigned())
                 vote_display.counts[index] = (*counts)[index].get<unsigned>();

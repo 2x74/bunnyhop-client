@@ -78,12 +78,15 @@ export type MenuMessage =
   | { type: "ready"; origin: string; webglContexts: number; webglAttempts: number }
   | { type: "resume" | "restart" | "quit" }
   | { type: "prefetchMap"; map: string | null; sha?: string }
-  | { type: "selectMap"; id: string; style?: StyleId; track?: number }
+  /** `remember: false`: play this map in `style` without making it the saved style (the Daily's style of the day). */
+  | { type: "selectMap"; id: string; style?: StyleId; track?: number; remember?: false }
   | { type: "style"; id: StyleId }
   | {
       type: "cosmetics";
       outfit: string;
       packedLoadout: string;
+      /** The charm and its options (loadout.ts packLoadoutExt), which the packed loadout never carries. */
+      charmLoadout?: string;
       ghostId?: string;
       trailId?: string;
       shapeId?: string;
@@ -183,6 +186,8 @@ export type MenuMessage =
   | { type: "leaveMap" }
   /** A gauntlet attempt (gauntlet-native.ts): locks Normal/main track and practice; null id ends it. */
   | { type: "gauntlet"; id: string | null; map?: string; progress?: GauntletHudProgress }
+  /** The Daily Challenge's HUD line while on the day's map (daily-native.ts); null clears it. */
+  | { type: "daily"; line: string | null }
   /** One line on the in-game HUD's toast (gauntlet split lines). */
   | { type: "hudToast"; text: string; ms: number; tone?: "good" | "bad"; key?: "gauntlet" | "practice" }
   /** The soundtrack's previous / play-pause / next (now-playing). */
@@ -673,6 +678,8 @@ declare global {
       onState: (value: unknown) => void;
       onAuth: (value?: unknown) => void;
       onRunEvent: (value: unknown) => void;
+      /** One six-jump gain log window from the game (gain_logs.hpp gain_log_script). */
+      onGainLog?: (value: unknown) => void;
       version: number;
       open?: (screen: string, focus?: string) => void;
       /** The host left the map (every leave_map, also its own Main menu bind): stop the room, the gauntlet and their timers now. */

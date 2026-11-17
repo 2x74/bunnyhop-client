@@ -18,7 +18,7 @@ import {
   getKnifePool,
   setKnifePool,
 } from "../../web/src/player/cosmetics";
-import { hairHex, loadoutFor, packLoadout } from "../../web/src/loadout";
+import { hairHex, loadoutFor, packLoadout, packLoadoutExt } from "../../web/src/loadout";
 import { h } from "../../web/src/ui/dom";
 import { send } from "./bridge";
 export interface CosmeticApi {
@@ -181,6 +181,7 @@ function sendCosmetics(): void {
     type: "cosmetics",
     outfit: getOutfit(),
     packedLoadout: packLoadout(getLoadout()),
+    charmLoadout: packLoadoutExt(getLoadout()),
     ghostId: getGhostCosmetics().ghostId,
     trailId: getGhostCosmetics().trailId,
     shapeId: getGhostCosmetics().shapeId,

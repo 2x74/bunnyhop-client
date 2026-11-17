@@ -72,6 +72,7 @@ export const SLOT_NAMES: Record<CosmeticSlot, string> = {
   camo: "Gun camo",
   back: "Back",
   hop: "Hop effect",
+  charm: "Charm",
 };
 
 /**

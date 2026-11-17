@@ -245,8 +245,11 @@ export function openGiftDialog(o: GiftDialogOptions = {}): void {
   }).catch((error: unknown) => { if (dialog.isConnected) status.textContent = error instanceof Error ? error.message : "Couldn't load your gift credits."; });
 }
 
-/** The Support page's gift credits: the balance, the button to send them, and progress to the next Gifter badge. */
-export function giftWalletPanel(): HTMLElement {
+/**
+ * The Support page's gift credits: the balance, the button to send them, and progress to the next Gifter badge.
+ * `signal`: its owner closed. Without one it stops listening the first time a gift is sent after it left the page.
+ */
+export function giftWalletPanel(signal?: AbortSignal): HTMLElement {
   const amount = h("strong.gift-credit-amount", null, giftCreditCoin(), "Gift credits");
   const progress = h("progress.gift-tier-progress", { max: 1, value: 0, "aria-label": "Progress to the next Gifter badge" });
   const goal = h("span.gift-tier-goal");
@@ -270,7 +273,7 @@ export function giftWalletPanel(): HTMLElement {
     open.disabled = false;
   }).catch(() => {if(generation!==accountGeneration()||seq!==refreshSeq)return;track.hidden = true; detail.hidden = false; detail.textContent = "Couldn't load your gift credits."; open.disabled = false; });};
   const changed = () => { if (!panel.isConnected) window.removeEventListener("bunnyhop:gifts-changed", changed); else refresh(); };
-  window.addEventListener("bunnyhop:gifts-changed", changed);
+  window.addEventListener("bunnyhop:gifts-changed", changed, { signal });
   onAccountChange(panel,refresh);
   refresh();
   return panel;

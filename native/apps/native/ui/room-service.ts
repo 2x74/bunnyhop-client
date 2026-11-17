@@ -19,6 +19,7 @@ import {
   type PoolEntry,
   type RaceView,
   type RoomRaceView,
+  type GainLogReport,
 } from "../../web/src/net/protocol";
 import { nativeChatDecoration } from "./chat-decoration";
 import { announceLine, roomChatLines, type RoomChatLine } from "./room-chat-lines";
@@ -39,7 +40,13 @@ export interface RoomTransport {
   rtt?: number;
   send(message: ClientMsg | PracticeMsg): void;
   pushSample(sample: NetSample): void;
-  flushSamples(meta: Omit<NetMeta, "ping">, weapon?: number | null, silenced?: boolean, input?: NetInput | null): void;
+  flushSamples(
+    meta: Omit<NetMeta, "ping">,
+    weapon?: number | null,
+    silenced?: boolean,
+    input?: NetInput | null,
+    log?: GainLogReport | null,
+  ): void;
   close(code?: number): void;
   /** Voice chat (voice-relay.ts): VOICE_DOWN frames in, VOICE_UP packets out. */
   onVoice?: ((buf: ArrayBuffer) => void) | null;
@@ -58,6 +65,19 @@ interface Dependencies {
   heldKnife?: () => { knife: string; finish: string };
   /** Voice chat is on in settings (voiceEnabled). */
   voiceEnabled?: () => boolean;
+  /** Gain logs (gain-logs-native.ts): the room's bar, other players' lines, and the bar to ask the room for. */
+  gainLogs?: RoomGainLogs;
+}
+/** What the room side of gain logs needs (the website's ssj/logs.ts GainLogs, through gain-logs-native.ts). */
+export interface RoomGainLogs {
+  /** The room's bar while in a room that relays gain logs (the welcome's room.logs), else null. */
+  roomBar(bar: number | null): void;
+  /** Other players' lines at your bar, or none (null): what { t: "logs" } asks for. */
+  wanted(roomBar: number): number | null;
+  /** Another player's line, by name. */
+  other(log: GainLogReport, name: string): void;
+  /** Hidden players: voice-muted or blocked. */
+  hidden(id: string): boolean;
 }
 /** At most one practice message this often, so restarts on a practice spawn send the latest state (net/mp.ts). */
 const PRACTICE_SEND_MS = 600;
@@ -306,6 +326,15 @@ export class NativeRoomService {
   private pendingSnapshot: Snapshot | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private connectionEpoch = 0;
+  /**
+   * Gain logs (0.0.43): the room's bar (null: an older room), your window waiting for the next state batch, and the
+   * bar last asked of the room (undefined: nothing yet on this connection).
+   */
+  private roomLogs: number | null = null;
+  private pendingLog: GainLogReport | null = null;
+  private logsSent: number | null | undefined = undefined;
+  /** The connection the last welcome came on: a second welcome on it is the socket reconnecting by itself. */
+  private welcomedEpoch = -1;
   private pendingMap: string | null = null;
   private changeTimer: ReturnType<typeof setTimeout> | null = null;
   private audioMapSecond = -1;
@@ -396,7 +425,10 @@ export class NativeRoomService {
         if (current()) this.message(message);
       },
       snapshot: (snapshot) => {
-        if (current() && validSnapshot(snapshot)) this.queueSnapshot(snapshot);
+        if (!current() || !validSnapshot(snapshot)) return;
+        // Gain log lines ride on whichever snapshot carried them: shown now, as coalescing keeps only the newest.
+        for (const entry of snapshot.logs ?? []) this.showLog(entry.slot, entry.log);
+        this.queueSnapshot(snapshot);
       },
       status: (status, detail) => {
         if (!current()) return;
@@ -453,6 +485,9 @@ export class NativeRoomService {
     this.transport?.close();
     this.transport = null;
     this.pendingMap = null;
+    this.roomLogs = null;
+    this.pendingLog = null;
+    this.dependencies.gainLogs?.roomBar(null);
     if (this.changeTimer) clearTimeout(this.changeTimer);
     this.changeTimer = null;
     if (this.timer) clearInterval(this.timer);
@@ -523,6 +558,28 @@ export class NativeRoomService {
     this.transport.send(message);
     return true;
   }
+  /** Your gain log window for the room, sent with the next state batch (only a room that relays them). */
+  relayLog(log: GainLogReport): boolean {
+    if (this.roomLogs === null || this.view.status !== "open") return false;
+    this.pendingLog = log;
+    return true;
+  }
+  /** Asks the room for other players' gain logs at your bar, or for none, when that changed (and after each welcome). */
+  syncLogs(): void {
+    const logs = this.dependencies.gainLogs;
+    if (!logs || this.roomLogs === null || !this.transport || this.view.status !== "open") return;
+    const want = logs.wanted(this.roomLogs);
+    if (want === this.logsSent) return;
+    this.logsSent = want;
+    this.transport.send({ t: "logs", min: want });
+  }
+  /** Another player's gain log from the room: never your own, nor from someone you muted or blocked. */
+  private showLog(slot: number, log: GainLogReport): void {
+    const logs = this.dependencies.gainLogs;
+    const player = slot === this.view.you ? null : this.view.players.find((p) => p.slot === slot);
+    if (!logs || !player || logs.hidden(player.id)) return;
+    logs.other(log, player.name);
+  }
   /**
    * One batch of your movement from the game (room_pose.hpp), sent on arrival. The game paces batches by simulated
    * ticks, so the hidden page's throttled timers never delay them.
@@ -543,7 +600,8 @@ export class NativeRoomService {
     const weapon = uint(pose.weapon, 25) ? pose.weapon : null;
     // Older rooms refuse a state message with an input block: only a room whose welcome says so gets one.
     const input = this.view.room?.inputs === 1 ? poseInput(pose.input) : null;
-    this.transport.flushSamples(meta, weapon, pose.silenced === true, input);
+    this.transport.flushSamples(meta, weapon, pose.silenced === true, input, this.pendingLog);
+    this.pendingLog = null;
     // The page timer that also drives the countdown cues can be throttled while the page is hidden.
     this.audioCountdown();
     return true;
@@ -623,7 +681,8 @@ export class NativeRoomService {
     const lines = this.chatLines(message);
     // Compare before updating room state, so vote refreshes and reconnects
     // cannot duplicate a cue. Identity fencing above rejects stale sockets.
-    if (message.t === "join") this.cue("player_join");
+    // A quiet join is a player coming back after a dropped connection or a map change: no sound.
+    if (message.t === "join" && !message.quiet) this.cue("player_join");
     else if (message.t === "chat" && message.slot !== undefined && message.slot !== this.view.you) this.cue("chat");
     else if (message.t === "gift" && !this.audioGifts.has(message.batchId)) {
       this.audioGifts.add(message.batchId);
@@ -670,6 +729,12 @@ export class NativeRoomService {
       this.cue(a.kind === "wr" || a.kind === "sr" ? "shine" : "chat");
     }
     if (message.t === "welcome") {
+      // After a reconnect, keep watching the same player (by id; their slot may have changed): web net/mp.ts.
+      const resumed = this.welcomedEpoch === this.connectionEpoch;
+      this.welcomedEpoch = this.connectionEpoch;
+      const me = this.view.players.find((p) => p.slot === this.view.you);
+      const watchedId =
+        resumed && me?.spec != null ? (this.view.players.find((p) => p.slot === me.spec)?.id ?? null) : null;
       this.view.status = "open";
       this.view.room = message.room;
       this.view.map = message.map.name;
@@ -692,6 +757,13 @@ export class NativeRoomService {
       // A new connection: the room knows nothing of practice yet (the next batch says so if it is).
       this.practiceSent = false;
       this.practiceAt = -Infinity;
+      const again = watchedId ? message.players.find((p) => p.id === watchedId && p.slot !== message.you) : undefined;
+      if (again) this.command({ t: "spec", target: again.slot });
+      this.roomLogs = typeof message.room.logs === "number" ? message.room.logs : null;
+      this.dependencies.gainLogs?.roomBar(this.roomLogs);
+      this.logsSent = undefined;
+      this.pendingLog = null;
+      this.syncLogs();
     } else if (message.t === "join") {
       this.view.players = this.view.players.filter((p) => p.slot !== message.player.slot);
       if (this.view.players.length < 64) this.view.players.push(message.player);

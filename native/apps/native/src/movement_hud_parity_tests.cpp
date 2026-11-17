@@ -107,6 +107,12 @@ void check_trainer(
           ) < 1e-9,
           where + " trainer marker");
     check((!reading.has_pace || rounded < 40) == expected.at("dim"), where + " trainer dim");
+    // The Bar's own average and the Gauge's needle, as the website's reading has them.
+    check(bool(reading.bar) == (expected.contains("bar") && !expected.at("bar").is_null()), where + " trainer bar");
+    if (reading.bar) check(std::abs(*reading.bar - expected.at("bar").get<double>()) < 1e-9, where + " trainer bar");
+    if (expected.contains("gauge"))
+        check(reading.gauge && std::abs(*reading.gauge - expected.at("gauge").get<double>()) < 1e-9,
+              where + " trainer gauge");
     const auto landing = trainer.take_landing();
     check(bool(landing) == !expected.at("landing").is_null(), where + " landing available");
     if (landing) check(std::abs(*landing - expected.at("landing").get<double>()) < 1e-9, where + " landing pace");
@@ -228,8 +234,21 @@ BhState check_trainer_tick(
     physics.air_accelerate = sample.at("airAccelerate");
     BhState trainer_state = post;
     trainer_state.events = (flags.jumped ? 2u : 0u) | (flags.teleported ? 1u : 0u);
+    // Auto-strafe's live-mouse yaw (null: NaN, none yet); absent in the other styles.
+    std::optional<double> turn_yaw;
+    if (sample.contains("turnYaw"))
+        turn_yaw = sample.at("turnYaw").is_null() ? NAN : sample.at("turnYaw").get<double>();
     native::feed_strafe_trainer(
-            feedback, prefs, trainer_state, cmd, physics, style, sample.at("dt"), sample.at("interrupted"), {NAN, NAN}
+            feedback,
+            prefs,
+            trainer_state,
+            cmd,
+            physics,
+            style,
+            sample.at("dt"),
+            sample.at("interrupted"),
+            {NAN, NAN},
+            turn_yaw
     );
     check_trainer(feedback.strafe_trainer.reading, tick, feedback.strafe_trainer, where);
     return trainer_state;
@@ -321,7 +340,7 @@ int main(int argc, char **argv) {
             check_text(report_from(item.at("report")), item.at("expected"), "format boundary");
         for (const auto &item : data.at("offsets")) {
             const auto &value = item.at("report");
-            check(native::offset_text({value.at("ticks"), value.at("overlap"), value.at("gap")}).view()
+            check(native::offset_text({value.at("ticks"), value.at("overlap"), value.at("gap"), std::nullopt}).view()
                           == item.at("text").get<std::string>(),
                   "offset boundary");
         }

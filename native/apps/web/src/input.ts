@@ -20,7 +20,7 @@ import { DEFAULT_TURN_SPEED, IN_LEFT, IN_RIGHT, IN_TURN_FAST, TURN_HOLD_BITS, tu
 import { resolveNullBinds } from "./null-binds";
 import { WRelease, type WReleaseContext } from "./w-release";
 import { keyForCode } from "./console/names";
-import { mixesMoveAndTurn, MOVE_TURN_REFUSAL, runPress, runRelease, type Aliases, type ChainOps } from "./console/bind-run";
+import { heldActions, mixesMoveAndTurn, MOVE_TURN_REFUSAL, runPress, runRelease, TURN_ACTIONS, type Aliases, type ChainOps } from "./console/bind-run";
 import { noteLockPath } from "./lock-path";
 
 /**
@@ -1078,6 +1078,19 @@ export class Input {
       setCursorFree(false);
       if (!(await this.lock())) endFreeCursorAsPause();
     });
+  }
+
+  /**
+   * `code` moves the player: a movement key (forward, back, strafes, jump, duck, use), a turn bind, Hold jump, or a
+   * command bind that holds one of those. A numbered menu (a room's map vote) leaves such a key to its bind, so a
+   * player who put jump on 3 still jumps with it while a vote is up.
+   */
+  movesPlayer(code: string): boolean {
+    if (this.codeBits.has(code)) return true;
+    const a = this.codeAction.get(code);
+    if (a && (TURN_ACTIONS.has(a) || a === "jumpToggle")) return true;
+    const cmd = this.cmdCodes.get(code);
+    return cmd !== undefined && heldActions(cmd, this.aliases).some((h) => ACTION_BITS[h] !== undefined || TURN_ACTIONS.has(h) || h === "jumpToggle");
   }
 
   /** True if `code` is bound to any action. */

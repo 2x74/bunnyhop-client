@@ -41,6 +41,8 @@ public:
                    outfit = job.value("outfit", std::string("outfit-cream")),
                    ghost = job.value("ghost", std::string("ghost-gold"));
         if (packed.size() > 512 || outfit.size() > 80 || ghost.size() > 80) return {};
+        const auto charm = job.value("charm", std::string());
+        if (charm.size() > 200) return {};
         const auto trail = job.value("trail", std::string("trail-gold"));
         if (trail.size() > 80) return {};
         models.trail_cosmetics(trail);
@@ -63,13 +65,15 @@ public:
         }
         const auto weapon = job.value("weapon", 17u);
         if (weapon < 2 || weapon > 25) return {};
-        const auto next =
-                onboarding ? view : outfit + ";" + packed + ";" + view + ";" + ghost + ";" + std::to_string(weapon);
+        const auto next = onboarding ? view
+                                     : outfit + ";" + packed + ";" + charm + ";" + view + ";" + ghost + ";"
+                                               + std::to_string(weapon);
         const bool changed = signature != next;
         if (changed) {
             signature = next;
             models.reset_presentation();
             models.cosmetics(outfit, packed);
+            models.charm_loadout(charm);
             inspect = 0;
             started = now;
         }

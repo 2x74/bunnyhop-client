@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { cleanLoadout, loadoutFor, packLoadout, unpackLoadout } from "../../web/src/loadout";
-import { rosterPack, withLoadoutPacks } from "./room-loadout";
+import { rosterCharm, rosterPack, withLoadoutPacks } from "./room-loadout";
 import type { ServerMsg } from "../../web/src/net/protocol";
 
 const loadout = { knife: "knife-carrot", finish: "fin-garden", glove: "glove-knit", crown: 2 };
@@ -77,6 +77,22 @@ const WEBSITE_PACKS: [Record<string, unknown>, string][] = [
     },
     "2;knife-carrot;fin-garden;glove-knit;;hat-kitsune-mask;;;;;;;;back-robe;cb8dhTX_;f",
   ],
+  // v0.0.43: the Daily Challenge's finish and camos, the Daily Medal with and without its look, the living hilts. A
+  // charm never enters the pack (it rides in its own roster fields and the replay's continuation trailer).
+  [{ finish: "fin-sunray", camo: "camo-first-light" }, "2;knife-carrot;fin-sunray;glove-knit;;;;;;;;camo-first-light"],
+  [
+    { camo: "camo-midnight-sun", back: "back-medal", medal: 13 },
+    "2;knife-carrot;fin-garden;glove-knit;;;;;;;;camo-midnight-sun;;back-medal;d",
+  ],
+  [{ back: "back-medal" }, "2;knife-carrot;fin-garden;glove-knit;;;;;;;;;;back-medal"],
+  [
+    { hilt: "hilt-watcher", charm: "charm-bun", charmSwing: 60, charmPommel: true },
+    "2;knife-carrot;fin-garden;glove-knit;;;;;;;hilt-watcher",
+  ],
+  [
+    { knife: "knife-karrotbit", hilt: "hilt-frostrune", charm: "charm-toadstool", charmLength: 200, charmSize: 140 },
+    "2;knife-karrotbit;fin-garden;glove-knit;;;;;;;hilt-frostrune",
+  ],
 ];
 
 test("players wearing the new items reach the game byte for byte", () => {
@@ -130,4 +146,18 @@ test("unknown or broken new fields from a newer server never break the pack", ()
     rosterPack({ knife: "knife-carrot", finish: "fin-garden", glove: "glove-knit", hop: 7, capeColor: "red" }),
   ).toBe(plain);
   expect(rosterPack({ knife: "knife-carrot", finish: "fin-garden", glove: "glove-knit", future: "x" })).toBe(plain);
+});
+
+test("a charm reaches the game beside the pack, as the website packs it", () => {
+  const worn = loadoutFor({ hilt: "hilt-watcher", charm: "charm-bun", charmSwing: 60, charmPommel: true });
+  expect(rosterCharm(worn)).toBe("charm-bun;IB");
+  const join = withLoadoutPacks({ t: "join", player: { slot: 4, loadout: worn } } as unknown as ServerMsg);
+  const player = (join as unknown as { player: { pack?: string; charm?: string } }).player;
+  expect(player.pack).toBe("2;knife-carrot;fin-garden;glove-knit;;;;;;;hilt-watcher");
+  expect(player.charm).toBe("charm-bun;IB");
+  // Without a charm the field is empty, so a patch takes a charm off.
+  const plain = withLoadoutPacks({ t: "player", slot: 4, patch: { loadout: loadoutFor({}) } } as unknown as ServerMsg);
+  expect((plain as unknown as { patch: { charm?: string } }).patch.charm).toBe("");
+  // An older server's roster without charm fields: no charm.
+  expect(rosterCharm({ knife: "knife-carrot", finish: "fin-garden", glove: "glove-knit" })).toBe("");
 });

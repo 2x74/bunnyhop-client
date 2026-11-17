@@ -160,7 +160,7 @@ function geometryScenarios(): Scenario[] {
     scripted("keys let go", [...repeat(8, [1, -1]), ...repeat(4, [1, 0])]),
     scripted("teleport clears a red", [...repeat(8, [1, -1, onLoss]), [1, -1, { interrupted: true, ...onLoss }]]),
     scripted("tick gap clears a red", [...repeat(8, [1, -1, onLoss]), [1, -1, { gap: 5, ...onLoss }]]),
-    scripted("unsupported style", repeat(4, [1, 1]), { style: "wonly" }),
+    scripted("W-Only style", repeat(4, [1, 1]), { style: "wonly" }),
     scripted("last jump", [
       ...repeat(6, [0.9, 1]),
       [0, 1, { grounded: true }],
@@ -406,8 +406,8 @@ async function gateScenarios(bar: BarCore): Promise<Scenario[]> {
 async function gainScenarios(bar: BarCore): Promise<Scenario[]> {
   const core = await bar.create();
   core.loadMapPhysics(gateMap([], []));
-  const begin = (speed: number) => {
-    core.setSettings(settings(bar.defaults));
+  const begin = (speed: number, extra: object = {}) => {
+    core.setSettings({ ...settings(bar.defaults), ...extra });
     core.reset();
     bar.setPosition(core, 0, 0, HIGH, 0);
     core.x.set_velocity(speed, 0, 0);
@@ -439,8 +439,8 @@ async function gainScenarios(bar: BarCore): Promise<Scenario[]> {
   const alongVelocity = (Math.atan2(velocity[1], velocity[0]) * 180) / Math.PI;
   lossToGain.push(coreTick(core, bar, { forward: 0, side: SIDE_SPEED, yaw: alongVelocity }));
 
-  const sweep = (smoothing: number): Scenario => {
-    begin(SPEED);
+  const sweep = (smoothing: number, extra: object = {}, name = `core sweep, smoothing ${smoothing}`): Scenario => {
+    begin(SPEED, extra);
     const ticks: Tick[] = [coreTick(core, bar, { forward: 0, side: 0, yaw: 0 })];
     let yaw = 0;
     for (let i = 0; i < 80; i++) {
@@ -449,7 +449,7 @@ async function gainScenarios(bar: BarCore): Promise<Scenario[]> {
       yaw -= Math.sign(side) * ideal(ticks[ticks.length - 1].speed) * pace;
       ticks.push(coreTick(core, bar, { forward: 0, side, yaw }));
     }
-    return { name: `core sweep, smoothing ${smoothing}`, smoothing, ticks };
+    return { name, smoothing, ticks };
   };
 
   return [
@@ -459,6 +459,8 @@ async function gainScenarios(bar: BarCore): Promise<Scenario[]> {
     sweep(1),
     sweep(8),
     sweep(20),
+    // Low Gravity (styles.ts: gravity 400, v30's sv_gravity 800 x 0.5): the core judges its gain too (physics 30).
+    sweep(8, { gravity: 400 }, "core: Low Gravity sweep"),
   ];
 }
 
@@ -477,6 +479,10 @@ function requireCoreFacts(
   const fast = named("core: D at 180%").at(-1)!;
   if (fast.band !== "ok" || !(fast.delta! > 0) || Math.abs(fast.bar! - 180) > 1) {
     throw new Error(`D at 180%: ${JSON.stringify(fast)}`);
+  }
+  const lowGravity = named("core: Low Gravity sweep").slice(1);
+  if (lowGravity.filter((tick) => tick.band !== "low").length < lowGravity.length - 4) {
+    throw new Error(`Low Gravity gain: ${lowGravity.map((tick) => tick.band).join(" ")}`);
   }
   const bands = named("core: loss, then gain").map((tick) => tick.band);
   if (!bands.includes("high") || bands.at(-1) === "high" || bands.indexOf("high") > bands.lastIndexOf("perfect")) {
@@ -518,7 +524,7 @@ function runScenario(web: BarWeb, scenario: Scenario) {
     view.render(trainer.reading, trainer.lastJump);
     const rail = view.el.children[0] as ViewElement;
     const fill = rail.children[3] as ViewElement;
-    const reading = view.el.children[1] as ViewElement;
+    const reading = view.el.children.at(-1) as ViewElement; // rail, Arc dial, Gauge face, reading
     return {
       in: tick,
       delta: tick.delta,
@@ -566,7 +572,7 @@ function previews(web: BarWeb) {
       band: view.el.dataset.band,
       edge: view.el.dataset.edge,
       fill: Number.parseFloat(fill.style.transform.slice("scaleX(".length)),
-      hint: ((view.el.children[1] as ViewElement).children[1] as ViewElement).textContent,
+      hint: ((view.el.children.at(-1) as ViewElement).children[1] as ViewElement).textContent,
     };
   });
 }

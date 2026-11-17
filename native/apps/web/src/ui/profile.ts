@@ -7,6 +7,7 @@ import { rowMenu } from "./row-menu";
 import { profileSocial } from "./profile-social";
 import { openFeedback } from "../feedback/state";
 import { profileGauntlets } from "./profile-gauntlets";
+import { profileDaily } from "./profile-daily";
 import { profileMapper } from "./profile-mapper";
 import { playerStatsSection, type PlayerStats } from "./stats-screen";
 import { withReplayViews } from "./replay-views";
@@ -49,7 +50,7 @@ import { focusEquipped, localModel, loadoutView, profileModel } from "./loadout-
 import { cardEditor, Loadout, NewTracker, type CardEditor } from "./card-editor";
 import { isCardPart, isLoadoutCategory, profileTarget, type CardPart, type ProfileTab } from "./cosmetic-slots";
 import { communityConfig } from "./community";
-import { playerCard, viewsLabel, type SupporterLook } from "./card";
+import { playerCard, updatePlayerCard, viewsLabel, type SupporterLook } from "./card";
 import { topPoints } from "./profile-points";
 import { profileCompare } from "./profile-compare";
 import { profileRankHistory } from "./profile-rank-history";
@@ -226,11 +227,34 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
   let cardPreview: Partial<CosmeticChoice> | null = null;
   /** A supporter's name look hovered in Edit card → Name, over what's saved (undefined: what's saved). */
   let namePreview: SupporterLook | undefined;
+  /** A flag hovered in Edit card → Flag (undefined: the saved one). */
+  let flagPreview: string | null | undefined;
   let cardRaf = 0;
   let entered = false;
+  /** Edit card is open: the card shows an empty slot where a flag would go (ui/card.ts flagSlot). */
+  let editing = false;
+  /**
+   * v0.0.43: the map background the card shows (ui/card-mapbg.ts). undefined: the profile's own (someone else's
+   * profile, or the server's switch is off). On your own: a hovered map in Edit card, none while a background is
+   * hovered, else the map you picked while you hold it (the profile's, or the editor's list just after picking).
+   */
+  const shownMapBg = () => {
+    if (!p.mine || p.mapBg === undefined) return undefined;
+    if (cardPreview && "mapBg" in cardPreview) return lo.heldMap((cardPreview as { mapBg?: string | null }).mapBg);
+    if (cardPreview && "background" in cardPreview) return null;
+    const want = lo.choice.mapBg ?? null;
+    if (!want) return null;
+    return p.mapBg?.map === want ? p.mapBg : lo.heldMap(want);
+  };
   const drawCard = () => {
     cardRaf = 0;
-    cardSlot.replaceChildren(playerCard(p, { cosmetics: { ...lo.choice, ...cardPreview }, badges: lo.shownBadges(), featured, nameLook: namePreview, enter: !entered }));
+    // Once the card is up it is redrawn in place (ui/card.ts updatePlayerCard): a preview or a save changes what differs
+    // and nothing else, so the avatar, the running layers and the tilt are never rebuilt under the player's eyes.
+    // (editor: declared below; the card is first drawn before it exists.)
+    const o = { cosmetics: { ...lo.choice, ...cardPreview }, badges: lo.shownBadges(), featured, nameLook: namePreview, mapBg: shownMapBg(), country: flagPreview, flagSlot: editing };
+    const stage = cardSlot.firstElementChild as HTMLElement | null;
+    if (entered && stage?.classList.contains("pc-stage")) updatePlayerCard(stage, p, o);
+    else cardSlot.replaceChildren(playerCard(p, { ...o, enter: !entered }));
     // The card's three runs are the featured runs (no list repeating them below, UI audit 11-05): each plays its replay.
     for (const tile of cardSlot.querySelectorAll<HTMLElement>(".pc-feat-tile[data-run]")) {
       const run = known.get(tile.dataset.run!) ?? featured.find((r) => r.runId === tile.dataset.run);
@@ -242,7 +266,10 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
     entered = true;
   };
   drawCard();
-  lo.on(drawCard);
+  // A save reports several times in a row (saving, saved, the echo): one redraw per frame is enough.
+  lo.on(() => {
+    if (!cardRaf) cardRaf = requestAnimationFrame(drawCard);
+  });
 
   const r = p.rank;
   // (Rank, points and level are on the card: no tiles repeating them. The card's level has its XP bar.)
@@ -367,8 +394,13 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
     if (!p.mine) return;
     if (on && editor) return void (part && editor.select(part));
     if (!on && !editor) return;
+    if (!on) editor?.close();
     cardPreview = null;
     namePreview = undefined;
+    flagPreview = undefined;
+    editing = on;
+    // While editing, the editor has the page's whole width (profile.css .pf-layout[data-editing]).
+    layout.toggleAttribute("data-editing", on);
     drawCard();
     if (on) {
       editor = cardEditor(p, lo, news, {
@@ -405,14 +437,27 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
           p.rank.group.color = hex ?? rankGroupById(p.rank.group.id).color;
           if (!cardRaf) cardRaf = requestAnimationFrame(drawCard);
         },
+        onFlagPreview: (code) => {
+          flagPreview = code;
+          if (!cardRaf) cardRaf = requestAnimationFrame(drawCard);
+        },
+        onFlag: (code) => {
+          p.player.country = code;
+          flagPreview = undefined;
+          refreshMyProfile();
+          drawCard();
+        },
         done: () => setEditing(false),
       });
       hero.classList.add("editing");
       cardSlot.after(editor.el);
       requestAnimationFrame(() => editor?.el.querySelector<HTMLElement>(".ce-part.on")?.focus({ preventScroll: true }));
     } else {
-      editor?.el.remove();
+      // Closed first: removing the editor ends focus inside it, and nothing tried on may come back onto the card.
+      const was = editor;
       editor = null;
+      was?.close();
+      was?.el.remove();
       hero.classList.remove("editing");
       editBtn?.focus({ preventScroll: true });
     }
@@ -422,10 +467,16 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
     if (!editBtn) return;
     editBtn.replaceChildren("Edit card", news.pendingIn(cardIds) > 0 ? newDot("new card items") : "");
   }
+  /** The record behind the card's map background (its WR line plays it), as a run card. */
+  function wrRun(id: string): RunCard | null {
+    const m = p.mapBg?.runId === id ? p.mapBg : null;
+    if (!m) return null;
+    return { runId: m.runId, map: m.map, tier: null, style: m.style, track: 0, ticks: Math.round(m.time * 100), time: m.time, jumps: 0, strafes: 0, sync: 0, date: "", rank: 1, players: null, points: null, pb: true, views: 0 };
+  }
   /** A card run tile (outside Edit card): its replay. */
   function watchTile(target: EventTarget | null): boolean {
-    const id = (target as Element | null)?.closest?.<HTMLElement>(".pc-feat-tile[data-run]")?.dataset.run;
-    const run = id ? (known.get(id) ?? featured.find((r) => r.runId === id)) : null;
+    const id = (target as Element | null)?.closest?.<HTMLElement>(".pc-feat-tile[data-run], .pc-wrline[data-run]")?.dataset.run;
+    const run = id ? (known.get(id) ?? featured.find((r) => r.runId === id) ?? wrRun(id)) : null;
     if (!run) return false;
     a.watch(run, p.player.name);
     return true;
@@ -580,7 +631,7 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
       : null;
     const { points, gauntlets, stats } = early;
     Object.assign(early, { points: undefined, gauntlets: undefined, stats: undefined });
-    const ov = h("div.pf-ov", null, next, recent, topPoints(p, points), profileMapper(p), profileGauntlets(p.player.id, gauntlets), playerStatsSection(p.player.id, { compact: true, early: stats }));
+    const ov = h("div.pf-ov", null, next, recent, topPoints(p, points), profileMapper(p), profileGauntlets(p.player.id, gauntlets), profileDaily(p.player), playerStatsSection(p.player.id, { compact: true, early: stats }));
     scrollCue(ov);
     return ov;
   }
@@ -651,11 +702,11 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
     return el;
   }
   function select(t: ProfileTab): void {
+    // Edit card has the whole width (v0.0.43): any tab, Overview too, is the way back out of it.
+    if (editor) setEditing(false);
     if (t === tab && panel.childElementCount) return;
     tab = t;
     a.onTab?.(t);
-    // The Loadout takes the whole width (no card): leave edit mode first.
-    if (t === "loadout") setEditing(false);
     panel.setAttribute("aria-labelledby", `pf-tab-${t}`);
     panel.dataset.tab = t;
     layout.dataset.tab = t;
@@ -706,6 +757,8 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
     if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || e.repeat || t instanceof HTMLInputElement || t instanceof HTMLSelectElement) return;
     const k = e.key.toLowerCase();
     if (k !== "q" && k !== "e") return;
+    // In Edit card they step through the card's parts, as they step the Loadout's slots.
+    if (editor) return editor.step(k === "e" ? 1 : -1);
     const i = tabs.findIndex(([x]) => x === tab);
     select(tabs[(i + (k === "e" ? 1 : -1) + tabs.length) % tabs.length][0]);
     focusTab();

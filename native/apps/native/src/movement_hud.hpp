@@ -259,7 +259,8 @@ inline void feed_strafe_trainer(
         std::string_view style,
         double interval,
         bool interrupted,
-        BhAirSpeedGain gain
+        BhAirSpeedGain gain,
+        std::optional<double> turn_yaw = std::nullopt
 ) {
     if (!prefs.trainer_enabled) {
         feedback.strafe_trainer.reset();
@@ -282,15 +283,18 @@ inline void feed_strafe_trainer(
              bool(state.events & jump),
              gain.delta,
              gain.best,
-             std::atan2(double(state.velocity[1]), double(state.velocity[0])) * 180 / ssj_detail::pi}
+             std::atan2(double(state.velocity[1]), double(state.velocity[0])) * 180 / ssj_detail::pi,
+             turn_yaw}
     );
     feedback.strafe_reading = feedback.strafe_trainer.reading;
 }
 
+// `streak`: how many offsets in a row had these ticks before this one, as CS:S shows it (-1 (0), -1 (1), ...).
 struct OffsetReport {
     int ticks = 0;
     bool overlap = false;
     bool gap = false;
+    std::optional<int> streak;
 };
 
 inline HudLabel<> offset_text(const OffsetReport &reading) {
@@ -299,9 +303,15 @@ inline HudLabel<> offset_text(const OffsetReport &reading) {
         ticks.format("−%d", -reading.ticks);
     else
         ticks.format("%s%d", reading.ticks > 0 ? "+" : "", reading.ticks);
+    if (reading.streak) {
+        HudLabel<32> streak;
+        streak.format(" (%d)", *reading.streak);
+        ticks.append(streak.view());
+    }
+    // Website movement-stats offsetText: "Offset −1 (2) key early, gap".
     HudLabel<> result;
     result.format(
-            "Offset %s (%s%s)",
+            "Offset %s %s%s",
             ticks.bytes.data(),
             reading.ticks < 0   ? "key early"
             : reading.ticks > 0 ? "key late"
@@ -333,9 +343,21 @@ class OffsetTracker {
     std::optional<std::pair<int64_t, int>> turn_at_;
     bool overlap_ = false;
     bool gap_ = false;
+    // The last offset and its streak carry on over landings and resets, until forget().
+    std::optional<int> last_;
+    int streak_ = 0;
 
 public:
-    void reset() { *this = {}; }
+    void reset() {
+        const auto last = last_;
+        const int streak = streak_;
+        *this = {};
+        last_ = last;
+        streak_ = streak;
+    }
+
+    // A restart: the streak starts over too.
+    void forget() { *this = {}; }
 
     std::optional<OffsetReport> feed(const BhCmd &cmd, const BhState &state, std::string_view style) {
         const bool manual = style == "autohop" || style == "legit" || style == "scroll" || style == "hsw";
@@ -363,7 +385,10 @@ public:
         if (key_at_ && tick_ - key_at_->first >= 20) key_at_.reset();
         if (turn_at_ && tick_ - turn_at_->first >= 20) turn_at_.reset();
         if (!key_at_ || !turn_at_ || key_at_->second != turn_at_->second) return std::nullopt;
-        OffsetReport result{int(key_at_->first - turn_at_->first), overlap_, gap_};
+        const int ticks = int(key_at_->first - turn_at_->first);
+        streak_ = last_ == ticks ? streak_ + 1 : 0;
+        last_ = ticks;
+        OffsetReport result{ticks, overlap_, gap_, streak_};
         key_at_.reset();
         turn_at_.reset();
         overlap_ = false;
@@ -458,7 +483,7 @@ public:
 
 private:
     void clear_observation() {
-        offsets_.reset();
+        offsets_.forget();
         first_.reset();
         longjump_.reset();
         start_pre_.reset();

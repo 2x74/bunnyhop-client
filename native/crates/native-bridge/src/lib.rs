@@ -47,7 +47,7 @@ pub use replay::{
     bh_replay_seek, bh_replay_step, bh_replay_stop,
 };
 mod recording;
-pub use recording::{bh_record_cosmetic, bh_record_inspect, bh_record_loadout};
+pub use recording::{bh_record_cosmetic, bh_record_inspect, bh_record_loadout, bh_record_loadout_ext};
 mod practice;
 mod flight;
 pub use flight::{BhFlightState, bh_flight_set, bh_flight_state};

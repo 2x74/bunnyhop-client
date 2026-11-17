@@ -48,6 +48,7 @@ for (const path of [
   "hud/strafe-trainer.ts",
   "hud/strafe-trainer-view.ts",
   "movement-stats/stats.ts",
+  "turn-binds.ts",
 ]) {
   put(
     path,
@@ -76,7 +77,13 @@ class Element {
   replaceChildren(...children) { this.children = children; }
   set textContent(text) { this.children = [text]; }
   get textContent() { return this.children.map(child => typeof child === 'string' ? child : child.textContent).join(''); }
+  setAttribute(key, value) { this.attributes[key] = value; }
+  // The Gauge and Arc looks are SVG: their transforms are drawn, never read back here.
+  querySelector() { return new Element(); }
+  createSVGTransform() { return { setRotate() {} }; }
+  transform = { baseVal: { appendItem() {} } };
 }
+globalThis.document = { createElementNS: (ns, tag) => { const el = new Element(); el.tag = tag; return el; } };
 export function h(tag, props, ...children) { const el = new Element(children); el.tag = tag; return el; }
 `,
 );
@@ -320,6 +327,12 @@ function scenario(style: string, mode: string) {
       style,
       interrupted: info.teleported || info.noclip,
       jumped,
+      // hud.ts: the post-tick velocity's heading. Every style's trainer takes its side from it.
+      velYaw: (Math.atan2(post.velocity[1], post.velocity[0]) * 180) / Math.PI,
+      // Physics 28+ Auto-strafe (session.ts): the live mouse's yaw, one tick ahead of the stepped view; NaN before one.
+      ...(style === "autostrafe"
+        ? { turnYaw: index % 50 === 7 ? NaN : Math.fround(cmd.yaw + (side < 0 ? 1 : -1) * rate * 3) }
+        : {}),
     };
     post.onLadder = sample.onLadder;
     coach.smoothing = index < 200 ? 8 : 3;
@@ -340,7 +353,7 @@ function scenario(style: string, mode: string) {
     });
     view.render(coach.reading);
     const rail = view.el.children[0] as Element,
-      reading = view.el.children[1] as Element;
+      reading = view.el.children.at(-1) as Element; // rail, Arc dial, Gauge face, reading
     const marker = rail.children[2] as Element;
     const report = tracker.tick(pre, cmd, info),
       startPre = preTracker.tick(pre, info);
@@ -470,9 +483,21 @@ writeFileSync(
       web: { commit, hashes },
       core: { sha256: createHash("sha256").update(wasmBytes).digest("hex") },
       bar: await barVectors(barWeb, barCore),
-      scenarios: ["autohop", "scroll", "legit", "hsw", "wonly"].flatMap((style) =>
-        ["sixth", "every", "everySixth"].map((mode) => scenario(style, mode)),
-      ),
+      // Every style (web styles.ts STYLES): the trainer runs in all of them.
+      scenarios: [
+        "autohop",
+        "legit",
+        "scroll",
+        "wonly",
+        "sideways",
+        "hsw",
+        "backwards",
+        "adonly",
+        "lowgrav",
+        "segmented",
+        "infinite",
+        "autostrafe",
+      ].flatMap((style) => ["sixth", "every", "everySixth"].map((mode) => scenario(style, mode))),
       palettes,
       defaults: ssj.DEFAULT_SSJ,
       perf: perfCases,
@@ -492,4 +517,4 @@ writeFileSync(
     }) + "\n",
   ),
 );
-console.log(`15 scenarios, 9000 ticks -> ${output}`);
+console.log(`36 scenarios, 21600 ticks -> ${output}`);

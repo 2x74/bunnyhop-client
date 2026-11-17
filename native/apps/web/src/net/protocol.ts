@@ -28,6 +28,8 @@
 //     16 samples
 //     then (0.0.42) an optional input block, only to a room whose welcome says `room.inputs` (older rooms refuse any
 //     state message longer than its samples), and only while someone spectates the sender.
+//     then (0.0.43) an optional gain log, only to a room whose welcome says `room.logs`: u8 STATE_LOG_MARK (an input
+//     block starts with its tick count, never this), then a GainLogReport (LOG_REPORT_BYTES, layout at writeLog).
 //
 //   input block (0.0.42): the sender's per-tick HUD feed since its last batch, for its spectators' HUD (keys, strafe
 //   trainer, jump stats, JHUD). Everything in it is in the player's replay, or computed from it.
@@ -68,6 +70,8 @@
 //                  silencer on (USP, physics v7); an entry not listed has it off. Sent with EXT_WEAPONS when any is on.
 //     EXT_INPUT (0.0.42): u8 slot, then that player's input block as they sent it. Only in the snapshots sent to the
 //                  players spectating that slot (one per input block in the flush), after the other extensions.
+//     EXT_LOG (0.0.43): gain logs, other players' six-jump lines: (u8 slot, GainLogReport) entries. Only to sockets that
+//                  asked for them ({ t: "logs" }), so older clients never get one.
 //
 // Weapons (physics v5 guns, research/WEAPONS.md): the held weapon is the core's weapon id (core.ts WEAPON_IDS: 0 none,
 // 1 knife, 2+ guns). Clients report it in the state header (byte 2, reserved and 0 before 0.0.11, so old rooms ignore
@@ -147,6 +151,60 @@ export const EXT_WEAPONS = 1;
 export const EXT_SILENCED = 2;
 /** Snapshot extension (0.0.42): a watched player's input block, to their spectators only (see the layout above). */
 export const EXT_INPUT = 3;
+/** Snapshot extension (0.0.43): other players' gain logs, to the sockets that asked for them (see the layout above). */
+export const EXT_LOG = 4;
+
+/**
+ * A gain log (0.0.43, ssj/logs.ts): the sender's last six jumps as their game counted them (jumps that turned with a
+ * turn bind left out). Client-reported, display only: the room checks the ranges (gainLogValid), never the truth.
+ */
+export interface GainLogReport {
+  /** The window's last jump (6, 12, 18 ...). */
+  jump: number;
+  /** Jumps counted (the window's six less the ones turned with a bind). */
+  jumps: number;
+  /** Gain %, 0 to 100 (ssj/stats.ts, as SSJ counts it). */
+  gain: number;
+  /** Sync %, 0 to 100. */
+  sync: number;
+  /** W / A / S / D presses in the air over the counted jumps. */
+  strafes: number;
+  /** Air ticks sampled over the counted jumps. */
+  ticks: number;
+}
+/** u16 jump, u8 jumps, f32 gain, f32 sync, u16 strafes, u16 ticks. */
+export const LOG_REPORT_BYTES = 15;
+/** The state message's gain log tail starts with this byte (an input block's first byte is 1..MAX_INPUT_TICKS). */
+export const STATE_LOG_MARK = 0xf0;
+/** Fewest jumps a log counts (the rest of the six may have turned with a bind; more than that and there's no line). */
+export const LOG_MIN_JUMPS = 4;
+/** A log needs more than this many air ticks per counted jump (the CS:S gain logs' 300 ticks over 6 jumps at 100 tick). */
+export const LOG_AIR_TICKS_PER_JUMP = 50;
+/**
+ * Styles whose jumps make gain logs in a room (0.0.43, owner: "it should be just normal"): the room relays nothing else,
+ * and nothing from a practice attempt.
+ */
+export const GAIN_LOG_STYLES: ReadonlySet<string> = new Set<StyleId>(["autohop"]);
+
+/** Whether a reported gain log is in range: what the room relays (else it drops it). */
+export function gainLogValid(r: GainLogReport): boolean {
+  const int = (v: number, lo: number, hi: number) => Number.isInteger(v) && v >= lo && v <= hi;
+  const pct = (v: number) => Number.isFinite(v) && v >= 0 && v <= 100;
+  return int(r.jump, 6, 0xffff) && r.jump % 6 === 0 && int(r.jumps, LOG_MIN_JUMPS, 6) && pct(r.gain) && pct(r.sync) && int(r.strafes, 0, r.jumps * 20) && int(r.ticks, r.jumps * LOG_AIR_TICKS_PER_JUMP + 1, 6000);
+}
+
+function writeLog(dv: DataView, o: number, r: GainLogReport): void {
+  dv.setUint16(o, Math.max(0, Math.min(0xffff, r.jump)), true);
+  dv.setUint8(o + 2, Math.max(0, Math.min(255, r.jumps)));
+  dv.setFloat32(o + 3, r.gain, true);
+  dv.setFloat32(o + 7, r.sync, true);
+  dv.setUint16(o + 11, Math.max(0, Math.min(0xffff, r.strafes)), true);
+  dv.setUint16(o + 13, Math.max(0, Math.min(0xffff, r.ticks)), true);
+}
+
+function readLog(dv: DataView, o: number): GainLogReport {
+  return { jump: dv.getUint16(o, true), jumps: dv.getUint8(o + 2), gain: dv.getFloat32(o + 3, true), sync: dv.getFloat32(o + 7, true), strafes: dv.getUint16(o + 11, true), ticks: dv.getUint16(o + 13, true) };
+}
 
 export const INPUT_HEADER_BYTES = 24;
 /** A tick record without the turn yaw; with it, INPUT_TURN_BYTES. */
@@ -158,8 +216,8 @@ export const MAX_INPUT_REPORTS = 8;
 const MAX_REPORT_BYTES = 64;
 const MAX_TICK_BYTES = 32;
 export const MAX_INPUT_BYTES = INPUT_HEADER_BYTES + MAX_INPUT_TICKS * MAX_TICK_BYTES + MAX_INPUT_REPORTS * (3 + MAX_REPORT_BYTES);
-/** Largest state message a room that takes input blocks accepts. */
-export const MAX_STATE_INPUT_BYTES = STATE_HEADER_BYTES + MAX_SAMPLES * SAMPLE_BYTES + MAX_INPUT_BYTES;
+/** Largest state message a room that takes input blocks accepts (and, 0.0.43, a gain log). */
+export const MAX_STATE_INPUT_BYTES = STATE_HEADER_BYTES + MAX_SAMPLES * SAMPLE_BYTES + MAX_INPUT_BYTES + 1 + LOG_REPORT_BYTES;
 /** cl_forwardspeed / cl_sidespeed: the only non-zero moves a keyboard command has (input.ts). */
 export const MOVE_SPEED = 450;
 
@@ -273,6 +331,8 @@ export interface StateMsg {
   silenced: boolean;
   /** The input block (0.0.42), checked for shape, as sent; null when there is none. */
   input: Uint8Array | null;
+  /** A gain log (0.0.43), as sent (not range-checked: gainLogValid); null or absent when there is none. */
+  log?: GainLogReport | null;
 }
 
 /** One tick of a watched player's HUD feed (input block record). */
@@ -336,6 +396,8 @@ export interface Snapshot {
   blocks: SnapshotBlock[];
   /** EXT_INPUT (0.0.42): input blocks of the player you spectate, in arrival order. */
   inputs?: { slot: number; input: NetInput }[];
+  /** EXT_LOG (0.0.43): other players' gain logs. */
+  logs?: { slot: number; log: GainLogReport }[];
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -385,13 +447,19 @@ export function sampleInWorld(s: Pick<NetSample, "x" | "y" | "z">): boolean {
 
 /**
  * `weapon`: the weapon id in hand (core.ts WEAPON_IDS), null = don't report one; `silenced`: its silencer is on;
- * `input`: an encoded input block (encodeInput), only for a room that takes them.
+ * `input`: an encoded input block (encodeInput), only for a room that takes them; `log`: a gain log (0.0.43), only for
+ * a room that relays them.
  */
-export function encodeState(meta: NetMeta, samples: readonly NetSample[], weapon: number | null = null, silenced = false, input: Uint8Array | null = null): Uint8Array<ArrayBuffer> {
+export function encodeState(meta: NetMeta, samples: readonly NetSample[], weapon: number | null = null, silenced = false, input: Uint8Array | null = null, log: GainLogReport | null = null): Uint8Array<ArrayBuffer> {
   const n = Math.min(samples.length, MAX_SAMPLES);
-  const buf = new Uint8Array(STATE_HEADER_BYTES + n * SAMPLE_BYTES + (input?.length ?? 0));
+  const end = STATE_HEADER_BYTES + n * SAMPLE_BYTES + (input?.length ?? 0);
+  const buf = new Uint8Array(end + (log ? 1 + LOG_REPORT_BYTES : 0));
   if (input) buf.set(input, STATE_HEADER_BYTES + n * SAMPLE_BYTES);
   const dv = new DataView(buf.buffer);
+  if (log) {
+    dv.setUint8(end, STATE_LOG_MARK);
+    writeLog(dv, end + 1, log);
+  }
   const base = n ? samples[0].tick >>> 0 : 0;
   dv.setUint8(0, MSG_STATE);
   dv.setUint8(1, n);
@@ -419,8 +487,20 @@ export function decodeState(data: ArrayBuffer | Uint8Array): StateMsg | null {
   const n = dv.getUint8(1);
   const end = STATE_HEADER_BYTES + n * SAMPLE_BYTES;
   if (n < 1 || n > MAX_SAMPLES || u8.length < end) return null;
-  const input = u8.length > end ? u8.subarray(end) : null;
-  if (input && !inputShapeOk(input)) return null;
+  // After the samples: an input block, then a gain log (0.0.43), each optional; nothing else.
+  let o = end;
+  let input: Uint8Array | null = null;
+  if (o < u8.length && u8[o] !== STATE_LOG_MARK) {
+    const len = inputBlockLength(u8.subarray(o));
+    if (len < 0) return null;
+    input = u8.subarray(o, o + len);
+    o += len;
+  }
+  let log: GainLogReport | null = null;
+  if (o < u8.length) {
+    if (u8[o] !== STATE_LOG_MARK || u8.length !== o + 1 + LOG_REPORT_BYTES) return null;
+    log = readLog(dv, o + 1);
+  }
   const meta: NetMeta = { style: dv.getUint8(3), track: dv.getUint8(4), timer: dv.getUint8(5), ping: dv.getUint16(6, true), timerTicks: dv.getUint32(8, true) };
   if (meta.style >= WIRE_STYLES.length || meta.timer > TIMER_FINISHED || meta.track > 64) return null;
   const base = dv.getUint32(12, true);
@@ -434,7 +514,7 @@ export function decodeState(data: ArrayBuffer | Uint8Array): StateMsg | null {
     samples.push(readSample(dv, o, base));
   }
   const wb = dv.getUint8(2);
-  return { meta, samples, weapon: readWeaponByte(wb), silenced: readSilencedByte(wb), input };
+  return log ? { meta, samples, weapon: readWeaponByte(wb), silenced: readSilencedByte(wb), input, log } : { meta, samples, weapon: readWeaponByte(wb), silenced: readSilencedByte(wb), input };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -448,19 +528,25 @@ const codeMove = (c: number) => (c === 1 ? MOVE_SPEED : c === 2 ? -MOVE_SPEED : 
  * reserved byte 0. The values aren't checked (display only, like the samples' flags); the room relays it as it came.
  */
 export function inputShapeOk(u8: Uint8Array): boolean {
-  if (u8.length < INPUT_HEADER_BYTES) return false;
+  return inputBlockLength(u8) === u8.length;
+}
+
+/** The length of the well-formed input block `u8` starts with (inputShapeOk), or -1. */
+function inputBlockLength(u8: Uint8Array): number {
+  if (u8.length < INPUT_HEADER_BYTES) return -1;
   const n = u8[0];
   const rec = u8[1];
   const nr = u8[2];
-  if (n < 1 || n > MAX_INPUT_TICKS || rec < INPUT_TICK_BYTES || rec > MAX_TICK_BYTES || nr > MAX_INPUT_REPORTS || u8[3] !== 0) return false;
+  if (n < 1 || n > MAX_INPUT_TICKS || rec < INPUT_TICK_BYTES || rec > MAX_TICK_BYTES || nr > MAX_INPUT_REPORTS || u8[3] !== 0) return -1;
   let o = INPUT_HEADER_BYTES + n * rec;
+  if (o > u8.length) return -1;
   for (let k = 0; k < nr; k++) {
-    if (o + 3 > u8.length) return false;
+    if (o + 3 > u8.length) return -1;
     const len = u8[o + 2];
-    if (u8[o + 1] >= n || len > MAX_REPORT_BYTES) return false;
+    if (u8[o + 1] >= n || len > MAX_REPORT_BYTES || o + 3 + len > u8.length) return -1;
     o += 3 + len;
   }
-  return o === u8.length;
+  return o;
 }
 
 export function encodeInput(input: NetInput): Uint8Array<ArrayBuffer> {
@@ -576,6 +662,20 @@ export function inputExtension(slot: number, input: Uint8Array): Uint8Array<Arra
   return out;
 }
 
+/** EXT_LOG for a snapshot (0.0.43): gain logs as (slot, report) entries, appended after the snapshot's other extensions. */
+export function logExtension(logs: readonly { slot: number; log: GainLogReport }[]): Uint8Array<ArrayBuffer> {
+  const out = new Uint8Array(3 + logs.length * (1 + LOG_REPORT_BYTES));
+  const dv = new DataView(out.buffer);
+  out[0] = EXT_LOG;
+  dv.setUint16(1, logs.length * (1 + LOG_REPORT_BYTES), true);
+  logs.forEach((l, k) => {
+    const o = 3 + k * (1 + LOG_REPORT_BYTES);
+    out[o] = l.slot;
+    writeLog(dv, o + 1, l.log);
+  });
+  return out;
+}
+
 // ---------------------------------------------------------------------------------------------
 // MSG_SNAPSHOT
 
@@ -683,6 +783,7 @@ export function decodeSnapshot(data: ArrayBuffer | Uint8Array): Snapshot | null 
   }
   // Extensions (0.0.11+): skipped when unknown; a truncated one ends the reading (the blocks stay good).
   let inputs: Snapshot["inputs"];
+  let logs: Snapshot["logs"];
   while (o + 3 <= u8.length) {
     const type = dv.getUint8(o);
     const len = dv.getUint16(o + 1, true);
@@ -705,10 +806,11 @@ export function decodeSnapshot(data: ArrayBuffer | Uint8Array): Snapshot | null 
     else if (type === EXT_INPUT && len > 1) {
       const input = decodeInput(u8.subarray(o + 1, o + len));
       if (input) (inputs ??= []).push({ slot: dv.getUint8(o), input });
-    }
+    } else if (type === EXT_LOG)
+      for (let k = 0; k + 1 + LOG_REPORT_BYTES <= len; k += 1 + LOG_REPORT_BYTES) (logs ??= []).push({ slot: dv.getUint8(o + k), log: readLog(dv, o + k + 1) });
     o += len;
   }
-  return inputs ? { serverTime: dv.getUint32(2, true), blocks, inputs } : { serverTime: dv.getUint32(2, true), blocks };
+  return { serverTime: dv.getUint32(2, true), blocks, ...(inputs ? { inputs } : {}), ...(logs ? { logs } : {}) };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -829,6 +931,11 @@ export interface RoomInfo {
    * an older room, which refuses them, so send none.
    */
   inputs?: number;
+  /**
+   * (0.0.43) The room relays gain logs (state message tail, EXT_LOG), and this is its gain bar: the lines it shows
+   * everyone are at or above it. Absent: an older room, so send none and ask for none.
+   */
+  logs?: number;
 }
 
 export interface MapInfo {
@@ -844,8 +951,14 @@ export interface PoolEntry {
   tier: number | null;
 }
 
-export type VoteOption = { map: string; tier: number | null } | { extend: true; minutes: number };
-export const isExtend = (o: VoteOption): o is { extend: true; minutes: number } => "extend" in o;
+/**
+ * A ballot option. Extend's `needs` (0.0.43): it wins only with this many votes (the room's 60% bar, once the map's free
+ * extends are used). Absent: it wins by plurality like a map. Older clients ignore it and show the option as before.
+ */
+export type VoteOption = { map: string; tier: number | null } | { extend: true; minutes: number; needs?: number };
+export const isExtend = (o: VoteOption): o is { extend: true; minutes: number; needs?: number } => "extend" in o;
+/** The ballot's count beside Extend: "2", or with its bar "2 of 3 needed". */
+export const extendTally = (o: { needs?: number }, count: number): string => (o.needs ? `${count} of ${o.needs} needed` : String(count));
 
 export interface VoteView {
   id: number;
@@ -1034,7 +1147,13 @@ export type ClientMsg =
    * Voice: staff or a private lobby's host mutes (`on`) or unmutes a player's voice for this room. `minutes` absent:
    * the room's default. The room checks who may; everyone gets the roster's `voiceMuted` patch.
    */
-  | { t: "voiceMute"; slot: number; on: boolean; minutes?: number };
+  | { t: "voiceMute"; slot: number; on: boolean; minutes?: number }
+  /**
+   * (0.0.43) Gain logs: send me other players' lines with at least `min` % gain (EXT_LOG), or none (null). Sent after
+   * every welcome of a room that says `logs` and on change; without it the room sends this socket none. Older servers
+   * drop it.
+   */
+  | { t: "logs"; min: number | null };
 
 /** Validates a client control frame. Returns null for anything malformed (the room drops it). */
 export function parseClientMsg(text: string): ClientMsg | null {
@@ -1064,6 +1183,8 @@ export function parseClientMsg(text: string): ClientMsg | null {
       return typeof o.on === "boolean" ? { t: "practice", on: o.on } : null;
     case "voice":
       return typeof o.listen === "boolean" ? { t: "voice", listen: o.listen } : null;
+    case "logs":
+      return o.min === null ? { t: "logs", min: null } : typeof o.min === "number" && o.min >= 0 && o.min <= 100 ? { t: "logs", min: o.min } : null;
     case "voiceMute":
       return uint(o.slot, 255) && typeof o.on === "boolean" && (o.minutes === undefined || uint(o.minutes, 7 * 24 * 60) && o.minutes > 0)
         ? { t: "voiceMute", slot: o.slot, on: o.on, ...(o.minutes !== undefined ? { minutes: o.minutes as number } : {}) }
@@ -1104,6 +1225,22 @@ export const CLOSE = {
   ABUSE: 4008,
   /** A private lobby that has closed (or never existed): the invite is dead. */
   LOBBY_CLOSED: 4009,
+  /**
+   * The room heard nothing from this socket for too long (0.0.43, apps/api rooms/room.ts LIVENESS_MS): it closes it
+   * as dead and holds the player's place. Not final: a client that is still there reconnects.
+   */
+  TIMED_OUT: 4010,
+  /** Client, 3000-3999 (not a room code, so the room holds the place): this socket stopped answering (net/room.ts). */
+  STALE: 3001,
   /** Client leaving on purpose. */
   LEAVE: 4000,
 } as const;
+
+/**
+ * A close someone chose: a normal closure (1000) or one of the room's own codes (4000-4999: a leave, a map change, a
+ * kick). Anything else (1001 going away, 1005 no status, 1006 abnormal, 1011/1012 server restart) is a dropped
+ * connection the client reconnects after (net/room.ts), and the room holds the player's place for it.
+ */
+export function deliberateClose(code: number): boolean {
+  return code === 1000 || (code >= 4000 && code <= 4999);
+}

@@ -11,7 +11,7 @@
 import { nameColorHex, type NameColorId } from "../creators";
 import { hopKeyframes } from "../notify/spring";
 import { HOVER_FX_MS, type HoverFxId } from "../supporter-looks";
-import { SUPPORTER_FX } from "./card-fx";
+import { setPointer, SUPPORTER_FX } from "./card-fx";
 import { h } from "./dom";
 
 const HFX_MS = HOVER_FX_MS;
@@ -69,8 +69,8 @@ export function enterHoverFx(card: HTMLElement, fx: HoverFxId | null, nameAt = "
 }
 
 /**
- * Follows the pointer while it moves (Tilt and Foil): --mx / --my on `card` (0..1 across it, clamped; Foil's band and
- * Tilt's light read them) and, with `lean`, `leanEl` turned toward the pointer (its side nearest the pointer comes
+ * Follows the pointer while it moves (Tilt, Foil, a Holo frame): --mx / --my on `card`'s pointer layers (0..1 across it,
+ * clamped; card-fx.ts setPointer) and, with `lean`, `leanEl` turned toward the pointer (its side nearest the pointer comes
  * forward, at most `deg`). One write per animation frame. Returns the stop.
  */
 export function followPointer(card: HTMLElement, o: { lean?: HTMLElement | null; deg?: number; from?: { x: number; y: number } | null } = {}): () => void {
@@ -85,8 +85,7 @@ export function followPointer(card: HTMLElement, o: { lean?: HTMLElement | null;
     const r = card.getBoundingClientRect();
     if (!r.width || !r.height) return;
     const fx = (x - r.left) / r.width, fy = (y - r.top) / r.height;
-    card.style.setProperty("--mx", (Math.max(0, Math.min(1, fx))).toFixed(3));
-    card.style.setProperty("--my", (Math.max(0, Math.min(1, fy))).toFixed(3));
+    setPointer(card, Math.max(0, Math.min(1, fx)), Math.max(0, Math.min(1, fy)));
     if (o.lean) o.lean.style.transform = `perspective(700px) rotateX(${(clamp(fy * 2 - 1, 1.5) * deg * 0.5).toFixed(2)}deg) rotateY(${(-clamp(fx * 2 - 1, 1) * deg).toFixed(2)}deg)`;
   };
   const move = (e: PointerEvent) => {

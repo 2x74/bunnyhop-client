@@ -912,8 +912,9 @@ impl Game {
             return None;
         }
         let dt = self.settings.tick_interval;
-        // VPhysics max speed (k_flMaxVelocity 2000 in vphysics).
-        let vz = (f.vz - self.settings.gravity * dt).max(-2000.0);
+        // VPhysics max speed (k_flMaxVelocity 2000 in vphysics). Bodies fall at sv_gravity, whatever the player's
+        // multiplier (v30 Low Gravity: 800; Low Gravity's 400 before v30).
+        let vz = (f.vz - self.settings.sv_gravity() * dt).max(-2000.0);
         let want = -vz * dt;
         let probes = f.probes.clone();
         let hier = self.hierarchy(i);

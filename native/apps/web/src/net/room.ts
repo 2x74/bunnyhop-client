@@ -3,6 +3,7 @@
 
 import { api } from "../api";
 import { MSG_VOICE_DOWN } from "./voice-wire";
+import { noteDrop, noteReconnect } from "./room-health";
 import {
   CLOSE,
   decodeSnapshot,
@@ -12,6 +13,7 @@ import {
   parseServerMsg,
   PROTOCOL_VERSION,
   type ClientMsg,
+  type GainLogReport,
   type NetInput,
   type NetMeta,
   type NetSample,
@@ -28,8 +30,25 @@ export interface RoomHandlers {
 }
 
 const PING_MS = 2000;
+/**
+ * Nothing from the room for this long while our own timers run on time (pings go out every PING_MS and the room's
+ * runtime answers each at once): the connection is dead even if the browser hasn't noticed. A dead TCP path can take
+ * the OS from ~20 s (Windows) to many minutes to report, while the room and everyone in it look frozen.
+ */
+export const SILENT_MS = 10_000;
 /** Close codes after which reconnecting is pointless. */
 const FINAL = new Set<number>([CLOSE.REPLACED, CLOSE.FULL, CLOSE.NO_MAPS, CLOSE.KICKED, CLOSE.BANNED, CLOSE.ABUSE, CLOSE.LEAVE, CLOSE.MAP_CHANGE, CLOSE.LOBBY_CLOSED]);
+
+/**
+ * How long to wait before connecting again after the `attempt`th drop in a row (0 = the first): a quarter second
+ * first (most drops are blips, and the room holds the player's place for 20 s: apps/api rooms/room.ts
+ * RESUME_GRACE_MS), then 1, 2, 4, 8 s up to 15 s, each with up to half again of jitter so a room that restarts isn't
+ * hit by everyone at the same instant.
+ */
+export function retryDelay(attempt: number, rnd: () => number = Math.random): number {
+  const base = attempt <= 0 ? 250 : Math.min(15_000, 1000 * 2 ** Math.min(4, attempt - 1));
+  return Math.min(15_000, Math.round(base * (1 + rnd() * 0.5)));
+}
 
 export class RoomConnection {
   private ws: WebSocket | null = null;
@@ -37,6 +56,13 @@ export class RoomConnection {
   private pingSent = 0;
   private retry = 0;
   private stopped = false;
+  /** performance.now() when the current socket opened (0: not open yet). */
+  private openedAt = 0;
+  /** The socket that's opening follows a drop (not the page's first connection). */
+  private resuming = false;
+  /** performance.now() of the last frame from the room, and of the last ping tick (staleness check). */
+  private lastRx = 0;
+  private lastTick = 0;
   private pending: NetSample[] = [];
   /** Smoothed round trip (ms). */
   rtt = 0;
@@ -46,10 +72,13 @@ export class RoomConnection {
   /** Counters for the dev overlay / load test. */
   readonly stats = { sent: 0, sentBytes: 0, recv: 0, recvBytes: 0 };
 
+  /** `socketUrl`, `timing`: where to connect and how often to ping / when to give up (tests); the defaults otherwise. */
   constructor(
     readonly id: string,
     private style: () => string,
     private h: RoomHandlers,
+    private socketUrl: () => string = () => api.roomSocketUrl(id, PROTOCOL_VERSION, style()),
+    private timing = { pingMs: PING_MS, silentMs: SILENT_MS },
   ) {
     this.open();
   }
@@ -72,7 +101,7 @@ export class RoomConnection {
   private open(): void {
     let url: string;
     try {
-      url = api.roomSocketUrl(this.id, PROTOCOL_VERSION, this.style());
+      url = this.socketUrl();
     } catch {
       this.setStatus("closed", "Multiplayer needs the online API");
       return;
@@ -81,13 +110,14 @@ export class RoomConnection {
     ws.binaryType = "arraybuffer";
     this.ws = ws;
     ws.onopen = () => {
-      this.retry = 0;
+      this.openedAt = this.lastRx = this.lastTick = performance.now();
       this.ping();
       clearInterval(this.pingTimer);
-      this.pingTimer = window.setInterval(() => this.ping(), PING_MS);
+      this.pingTimer = window.setInterval(() => this.tick(), this.timing.pingMs);
     };
     ws.onmessage = (e) => {
       const now = performance.now();
+      this.lastRx = now;
       if (typeof e.data === "string") {
         this.stats.recv++;
         this.stats.recvBytes += e.data.length;
@@ -95,6 +125,10 @@ export class RoomConnection {
         const m = parseServerMsg(e.data);
         if (!m) return;
         if (m.t === "welcome") {
+          // In: the backoff starts over (not on open: a room that accepts and drops at once is retried slowly).
+          this.retry = 0;
+          if (this.resuming) noteReconnect();
+          this.resuming = false;
           this.clockOffset = m.now - (Date.now() - this.rtt / 2);
           this.setStatus("open");
         }
@@ -109,19 +143,50 @@ export class RoomConnection {
         if (s) this.h.snapshot(s, now);
       }
     };
-    ws.onclose = (e) => {
-      clearInterval(this.pingTimer);
-      this.ws = null;
-      if (this.stopped || FINAL.has(e.code)) {
-        this.stopped = true;
-        this.setStatus("closed", e.reason || undefined);
-        return;
+    ws.onclose = (e) => this.closed(e.code, e.reason);
+  }
+
+  /** The socket is gone (closed, or given up on as stale): reconnect unless it was meant. */
+  private closed(code: number, reason: string): void {
+    clearInterval(this.pingTimer);
+    this.ws = null;
+    const age = this.openedAt ? performance.now() - this.openedAt : 0;
+    this.openedAt = 0;
+    if (this.stopped || FINAL.has(code)) {
+      this.stopped = true;
+      this.setStatus("closed", reason || undefined);
+      return;
+    }
+    // Network blip / room restart: quickly at first, then backing off (retryDelay).
+    noteDrop(code, reason, age);
+    this.resuming = true;
+    const wait = retryDelay(this.retry++);
+    this.setStatus("reconnecting", wait < 1000 ? "Reconnecting…" : `Reconnecting in ${Math.round(wait / 1000)} s…`);
+    setTimeout(() => !this.stopped && this.open(), wait);
+  }
+
+  /**
+   * Every PING_MS: gives up on a socket the room has been silent on for SILENT_MS, else pings. Only when the timer ran
+   * on time: a throttled (hidden) or stalled page can't tell silence from its own lateness, and its messages may still
+   * be queued behind this tick.
+   */
+  private tick(): void {
+    const now = performance.now();
+    const onTime = now - this.lastTick < this.timing.pingMs * 2;
+    this.lastTick = now;
+    const ws = this.ws;
+    if (onTime && ws && ws.readyState === WebSocket.OPEN && now - this.lastRx > this.timing.silentMs) {
+      // Don't wait for a close handshake a dead path can't finish: let it go and connect again now. (The close frame
+      // says STALE in case it does arrive: the room holds the place, and the new socket takes it over.)
+      ws.onopen = ws.onmessage = ws.onclose = null;
+      try {
+        ws.close(CLOSE.STALE, "stale");
+      } catch {
+        /* already closing */
       }
-      // Network blip / room restart: back off 1, 2, 4 ... 15 s.
-      const wait = Math.min(15_000, 1000 * 2 ** Math.min(4, this.retry++));
-      this.setStatus("reconnecting", `Reconnecting in ${Math.round(wait / 1000)} s…`);
-      setTimeout(() => !this.stopped && this.open(), wait);
-    };
+      return this.closed(CLOSE.STALE, "no answer from the room");
+    }
+    this.ping();
   }
 
   private ping(): void {
@@ -167,13 +232,16 @@ export class RoomConnection {
     if (this.pending.length > MAX_SAMPLES) this.pending.shift();
   }
 
-  /** `weapon`: the weapon id in hand (core.ts WEAPON_IDS), null = not reported; `input`: for a room that takes it. */
-  flushSamples(meta: Omit<NetMeta, "ping">, weapon: number | null = null, silenced = false, input: NetInput | null = null): void {
+  /**
+   * `weapon`: the weapon id in hand (core.ts WEAPON_IDS), null = not reported; `input`: for a room that takes it; `log`:
+   * a gain log, for a room that relays them (0.0.43).
+   */
+  flushSamples(meta: Omit<NetMeta, "ping">, weapon: number | null = null, silenced = false, input: NetInput | null = null, log: GainLogReport | null = null): void {
     if (!this.pending.length) return;
     const samples = this.pending;
     this.pending = [];
     if (!this.open_) return;
-    const bytes = encodeState({ ...meta, ping: Math.round(this.rtt) }, samples, weapon, silenced, input && encodeInput(input));
+    const bytes = encodeState({ ...meta, ping: Math.round(this.rtt) }, samples, weapon, silenced, input && encodeInput(input), log);
     this.ws!.send(bytes);
     this.stats.sent++;
     this.stats.sentBytes += bytes.length;

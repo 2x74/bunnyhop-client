@@ -331,6 +331,12 @@ void test_vote_shows_tiers() {
     assert(vote.options[0].view() == "bhop_blue" && vote.tiers[0] == 3 && vote.counts[0] == 2);
     assert(vote.options[1].view() == "bhop_a" && vote.tiers[1] == 0);
     assert(vote.options[2].view() == "Extend 10 minutes" && vote.tiers[2] == 0 && vote.counts[2] == 1);
+    assert(vote.needs[2] == 0);
+    // Past the free extends, Extend shows the votes it needs (rooms 0.0.43 voteView `needs`).
+    welcome["vote"]["options"][2]["needs"] = 3;
+    room->event(envelope(welcome));
+    room->refresh_display(2);
+    assert(room->vote_display.needs[2] == 3 && room->vote_display.needs[0] == 0);
 }
 
 // Watching a replay of another map from a room keeps the room (v0.8.0); closing it goes back to the room's map.
@@ -407,13 +413,18 @@ void test_spectator_inputs() {
     assert(played == 1);  // slot 2's block isn't the watched player's
 }
 
-// Real packs with the v0.0.42 fields, as the website packs them (ui/room-loadout.test.ts pins the same bytes).
-const std::array<std::string, 4> website_packs = {
+// Real packs with the v0.0.42 and v0.0.43 fields, as the website packs them (ui/room-loadout.test.ts pins the same
+// bytes): back items and their options, head options, the Daily items and the Daily Medal's look, a living hilt.
+const std::array<std::string, 8> website_packs = {
         "2;knife-carrot;fin-garden;glove-knit;;hat-ponytail;;;2fa59a;150;;;hop-ring:sky;back-balloon;;-z",
         "2;knife-carrot;fin-garden;glove-knit;;;;;;;;;;back-cape;dgN8b___",
         "2;knife-carrot;fin-garden;glove-knit;;hat-kitsune-mask;;;;;;;;back-robe;cb8dhTX_;f",
         "2;knife-karrotbit;fin-dewweb;glove-garden-tulip;3;hat-ponytail;body-b;;f29bbf;260;hilt-oak;camo-carrot-patch;"
         "hop-crystals:rose;back-cape;ewN8b48d;-z",
+        "2;knife-carrot;fin-sunray;glove-knit;;;;;;;;camo-first-light",
+        "2;knife-carrot;fin-garden;glove-knit;;;;;;;;camo-midnight-sun;;back-medal;d",
+        "2;knife-carrot;fin-garden;glove-knit;;;;;;;;;;back-medal",
+        "2;knife-karrotbit;fin-garden;glove-knit;;;;;;;hilt-frostrune",
 };
 
 // The menu's pack of a roster loadout (ui/room-loadout.ts) is drawn as sent, new fields and all; a pack past 200 bytes
@@ -460,8 +471,51 @@ void test_loadout_packs() {
         test_loadout_pack(pack);
 }
 
+// The charm rides beside the pack (ui/room-loadout.ts rosterCharm): read with it, taken off by a pack without one,
+// dropped past 200 bytes, and absent from an older menu's roster.
+void test_roster_charm() {
+    const auto room = std::make_unique<native::RoomState>();
+    auto welcome = easy_welcome();
+    const std::string pack = "2;knife-carrot;fin-garden;glove-knit;;;;;;;hilt-watcher";
+    welcome["players"] = J::array(
+            {{{"slot", 0}, {"name", "me"}},
+             {{"slot", 1}, {"name", "charmed"}, {"pack", pack}, {"charm", "charm-bun;IB"}},
+             {{"slot", 2}, {"name", "older"}, {"pack", pack}}}
+    );
+    room->event(envelope(welcome));
+    feed(*room, J::array({sample(100, 0)}), 1);
+    room->snapshot(
+            {{"generation", 1},
+             {"id", "test"},
+             {"snapshot",
+              {{"blocks",
+                J::array(
+                        {{{"slot", 1}, {"samples", J::array({sample(1, 0)})}},
+                         {{"slot", 2}, {"samples", J::array({sample(1, 0)})}}}
+                )}}}},
+            1
+    );
+    const auto charms = [&](double now) {
+        std::map<std::string, std::string> out;
+        for (const auto &actor : room->actors(now))
+            out[actor.id] = actor.charm;
+        return out;
+    };
+    auto worn = charms(1.01);
+    assert(worn["1"] == "charm-bun;IB" && worn["2"].empty());
+    room->event(envelope({{"t", "player"}, {"slot", 1}, {"patch", {{"name", "renamed"}}}}));
+    assert(charms(1.02)["1"] == "charm-bun;IB");
+    room->event(
+            envelope({{"t", "player"}, {"slot", 2}, {"patch", {{"pack", pack}, {"charm", std::string(201, 'x')}}}})
+    );
+    room->event(envelope({{"t", "player"}, {"slot", 1}, {"patch", {{"pack", pack}, {"charm", ""}}}}));
+    worn = charms(1.03);
+    assert(worn["1"].empty() && worn["2"].empty());
+}
+
 int main() {
     test_loadout_packs();
+    test_roster_charm();
     test_spectator_inputs();
     test_leaving_ends_spectating_them();
     test_closing_a_replay_returns_to_the_room_map();

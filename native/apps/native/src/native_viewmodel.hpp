@@ -7,6 +7,8 @@
 #include "model_light.hpp"
 #include "back_slot.hpp"
 #include "hop_layer.hpp"
+#include "live_hilt_layer.hpp"
+#include "first_person_charm.hpp"
 #include <charconv>
 #include <optional>
 #include <span>
@@ -43,6 +45,8 @@ class NativeViewmodel {
                     body = "classic", bodyLook = "bunny", hatMesh;
         int finish = 0, crown = 0, camoKind = -1, camoStamp = 0, camoSheen = 0;
         bool hiltOn = false;
+        // The hilt id, kept for a living hilt's first-person pieces (live_hilt_layer.hpp).
+        std::string hiltId;
         std::array<float, 9> hiltA{}, hiltB{};
         std::array<float, 3> hiltM{};
         std::array<float, 12> camoColors{};
@@ -168,6 +172,11 @@ class NativeViewmodel {
         return {parts->names.data(), parts->count};
     }
 
+    bool holds_gun(const native_render::Actor &actor) const {
+        const auto &gun = weapons[std::min(size_t(actor.frame.weapon), weapons.size() - 1)];
+        return !actor.emptyHand && !gun.empty() && gun != "knife";
+    }
+
     std::array<std::array<float, 3>, 2> previewTrail{{{1, .761f, .239f}, {1, .761f, .239f}}};
     bool previewTrailVisible = true;
     std::vector<std::string> actorNames;
@@ -219,6 +228,14 @@ class NativeViewmodel {
     bool showFirstPersonRobe = true;
     native_back::FirstPersonSleeves firstPersonSleeves;
     double firstPersonSleevesAt = -1;
+    // A living hilt's first-person pieces (made with the GL objects; none in a CPU-only viewmodel).
+    std::unique_ptr<native_hilt::Layer> liveHilt;
+    // The charm on the knife in first person (first_person_charm.hpp), its bones' texture and this frame's model-space
+    // bones and player velocity.
+    std::unique_ptr<native_charm::FirstPersonCharm> firstPersonCharm;
+    GLuint charmBonesTexture = 0;
+    std::vector<float> charmModelBones;
+    std::array<double, 3> firstPersonVelocity{};
 
     // The two-handed third-person gun hold (gun_hold.hpp): per gun data, and per actor its pose state and where its
     // muzzle was last drawn (world space), for the flash and tracer of its next shot.
@@ -356,14 +373,15 @@ class NativeViewmodel {
         back.id = id;
         back.kind = native_back::kind_named(kind->get<std::string>());
         const auto &options = fields.size() > options_field ? fields[options_field] : std::string();
-        back.options =
-                id == native_back::robe_item ? native_back::unpack_robe(options) : native_back::unpack_cape(options);
+        back.options = id == native_back::robe_item    ? native_back::unpack_robe(options)
+                       : id == native_back::medal_item ? native_back::unpack_medal(options)
+                                                       : native_back::unpack_cape(options);
         const auto &lengths = backs.at("capeLengths");
         const int step = lengths.size() > 1 ? lengths[1].get<int>() - lengths[0].get<int>() : 5;
         const auto fit =
                 native_back::fit_for(out.bodyLook, out.body == "feminine", out.hoodDown, out.hat == "hat-ponytail");
         const int drawn = native_back::drawn_cape_length(back.options.cape_length, step);
-        back.mesh = native_back::mesh_key(id, fit, drawn, back.options.robe_tied);
+        back.mesh = native_back::mesh_key(id, fit, drawn, back.options.robe_tied, back.options.medal);
         const auto rig = backs.at("rigs").find(back.mesh);
         if (rig == backs.at("rigs").end() || !meshes.count(back.mesh)) {
             back = {};
@@ -456,6 +474,7 @@ class NativeViewmodel {
                         linearColor(layer.at("alt").get<uint32_t>(), out.hiltB.data() + i * 3);
                     }
                     out.hiltOn = true;
+                    out.hiltId = f[10];
                 }
                 if (f.size() > 11 && metadata.at("camos").contains(f[11])) {
                     const auto &style = metadata.at("camos").at(f[11]);
@@ -1059,6 +1078,7 @@ class NativeViewmodel {
         step.tied = worn.options.robe_tied;
         native_back::advance(state.motion, step);
         state.uniforms = native_back::uniforms(state.motion, worn.kind, speed, step.cape_length);
+        if (worn.kind == native_back::Kind::medal && holds_gun(actor)) native_back::hold_medal_flat(state.uniforms);
         state.cape = worn.cape;
         if (worn.cape[0] > .5f) {
             const bool grounded = actor.frame.flags & 2;
@@ -1339,6 +1359,14 @@ public:
         gl.TexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         gl.TexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         if (mode == GraphicsMode::full) gunFx = std::make_unique<NativePresentation>(gl);
+        if (mode == GraphicsMode::full) liveHilt = std::make_unique<native_hilt::Layer>(gl, hopAssetRoot);
+        if (mode == GraphicsMode::full) {
+            firstPersonCharm = std::make_unique<native_charm::FirstPersonCharm>(metadata);
+            gl.GenTextures(1, &charmBonesTexture);
+            gl.BindTexture(GL_TEXTURE_2D, charmBonesTexture);
+            gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        }
         gl.GenTextures(1, &bonesTexture);
         gl.BindTexture(GL_TEXTURE_2D, bonesTexture);
         gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -1535,6 +1563,11 @@ public:
         previewLoadout = packed;
     }
 
+    // The charm and its options (loadout.ts packLoadoutExt text); empty for none.
+    void charm_loadout(const std::string &text) {
+        if (firstPersonCharm) firstPersonCharm->set_options(text);
+    }
+
     void set_sway(float value) {
         if (std::isfinite(value)) swayScale = std::clamp(value, 0.f, 2.f);
     }
@@ -1570,6 +1603,8 @@ public:
         actorActions.clear();
         actorAnimationStates.clear();
         firstPerson->reset();
+        if (liveHilt) liveHilt->reset();
+        if (firstPersonCharm) firstPersonCharm->reset();
         firstPersonWeapon = 0;
         firstPersonEntry.clear();
         clear_hop_effects();
@@ -2202,6 +2237,9 @@ public:
         input.presentation_event = presentationEvent;
         const auto &out = firstPerson->frame(input, inspectCueQueue);
         step_first_person_robe(snapshot, seconds);
+        if (active == 1) step_live_hilt(snapshot);
+        const auto &velocity = snapshot.player.velocity;
+        firstPersonVelocity = {velocity[0], velocity[1], velocity[2]};
         if (shot && active > 1) gunFlashStarted = seconds;
         gl.Enable(GL_DEPTH_TEST);
         gl.DepthMask(GL_TRUE);
@@ -2332,6 +2370,8 @@ private:
         if (showGlow && firstPersonGlow && localGlow && localGlow->enabled)
             draw_glow(layer.entry->meshes, handsProgram, localGlow->aura, .2f);
         if (first_person_robe_worn()) draw_first_person_robe(projection, model, seconds, options);
+        if (!layer.gun) draw_live_hilt(projection, model, seconds);
+        if (!layer.gun) draw_first_person_charm(layer, projection, native::model_matrix(turn), seconds, options);
         gl.FrontFace(GL_CCW);
         if (flash) draw_muzzle_flash(projection, view, seconds);
     }
@@ -2378,6 +2418,142 @@ private:
         firstPersonSleeves.update(
                 dt, {v[0], v[1], v[2]}, viewYaw, std::min(double(swayScale), sway_cap) * motionScale, leftHand
         );
+    }
+
+    // A living hilt follows the knife in hand: set with the loadout, stepped on the viewmodel's own clock and input.
+    void step_live_hilt(const BhSnapshot &snapshot) {
+        if (!liveHilt) return;
+        liveHilt->set(equipped.hiltId, equipped.knife);
+        if (!liveHilt->active()) return;
+        const auto &clock = firstPerson->frame_clock();
+        const auto &player = snapshot.player;
+        native_hilt::FrameInput in;
+        in.dt = clock.dt;
+        in.clock = clock.clock;
+        in.play.velocity = {player.velocity[0], player.velocity[1], player.velocity[2]};
+        in.play.grounded = player.grounded != 0;
+        in.play.landed = clock.landed;
+        in.play.yaw_degrees = viewYaw;
+        in.inspecting = firstPerson->inspecting();
+        // Potato and reduced motion hold the still pose (index.ts: cosmeticsStill or a motion scale under 1).
+        in.still = cosmeticsTier == 0 || motionScale < 1;
+        in.mirrored = leftHand;
+        liveHilt->update(in);
+    }
+
+    void draw_live_hilt(const native::Matrix &projection, const native::Matrix &model, double seconds) {
+        if (!liveHilt || !liveHilt->active()) return;
+        native_hilt::DrawInput in;
+        in.projection = projection;
+        in.model = model;
+        const size_t knife = size_t(previewKnifeRig.knife_handle) * 12;
+        if (knife + 12 <= layerPose.size())
+            std::copy(layerPose.begin() + long(knife), layerPose.begin() + long(knife + 12), in.knife_skin.begin());
+        in.mirror = leftHand ? -1.f : 1.f;
+        in.cosmetics_tier = cosmeticsTier;
+        in.reflection_unit = reflection_unit;
+        if (worldLook.active)
+            in.map_light =
+                    modelLight.light(groundCore, eye_light_key, worldLook.eye.data(), seconds, worldLook.exposure);
+        liveHilt->draw(in);
+    }
+
+    // The knife's idle at rest (its first frame: the website's rest pose for a charm's fit), or none.
+    std::span<const float> rest_skins(const Entry &entry) const {
+        const Clip *idle = clip(entry, "idle");
+        if (!idle || idle->offset + entry.bones * 12 > data.size()) return {};
+        return {data.data() + idle->offset, entry.bones * 12};
+    }
+
+    std::optional<native_charm::MeshView> charm_mesh_view(const std::string &name) const {
+        const auto found = meshes.find(name);
+        if (found == meshes.end()) return std::nullopt;
+        const auto &m = found->second;
+        native_charm::MeshView view;
+        view.vertices = {data.data() + m.offset, m.vertices * vertex_floats};
+        view.stride = vertex_floats;
+        view.indices.resize(m.indices);
+        std::memcpy(view.indices.data(), data.data() + m.indexOffset, m.indices * 4);
+        return view;
+    }
+
+    // The charm swung from the knife as drawn this frame, then drawn in the knife's material on its own six bones.
+    void draw_first_person_charm(
+            const native_vm::ViewmodelLayer &layer,
+            const native::Matrix &projection,
+            const native::Matrix &turn,
+            double seconds,
+            BindOptions options
+    ) {
+        if (!firstPersonCharm || !firstPersonCharm->charm_def()) return;
+        const std::set<int> knife_bones(previewKnifeRig.knife.begin(), previewKnifeRig.knife.end());
+        firstPersonCharm->hold(
+                equipped.knife,
+                equipped.hiltId,
+                equipped.glove,
+                rest_skins(*layer.entry),
+                previewKnifeRig.bind,
+                previewKnifeRig.knife_handle,
+                knife_bones,
+                [&](const std::string &name) { return charm_mesh_view(name); },
+                [&](const std::string &hilt, const std::string &knife) {
+                    return liveHilt ? liveHilt->lit_corners(hilt, knife) : std::vector<float>{};
+                }
+        );
+        step_first_person_charm(layer);
+        if (!firstPersonCharm->shown()) return;
+        options.mirror = 1;
+        options.offset = {};
+        options.glow = nullptr;
+        options.poseTexture = charm_bones_texture();
+        const float eye[3] = {};
+        const auto &program = bind(equipped, projection, turn, eye, seconds, options);
+        world_light_uniforms(program, eye_light_key, worldLook.eye.data(), seconds, worldLook.exposure, true);
+        mesh(firstPersonCharm->charm_def()->mesh);
+        if (!firstPersonCharm->mount_mesh().empty()) mesh(firstPersonCharm->mount_mesh());
+        gl.ActiveTexture(GL_TEXTURE0);
+        gl.BindTexture(GL_TEXTURE_2D, bonesTexture);
+    }
+
+    void step_first_person_charm(const native_vm::ViewmodelLayer &layer) {
+        const auto &skins = *layer.pose;
+        const auto &bind = previewKnifeRig.bind;
+        const size_t bones = std::min(skins.size(), bind.size()) / 12;
+        charmModelBones.resize(bones * 12);
+        // The website's charm reads the posed bones in model space: skinning matrix times bind.
+        for (size_t b = 0; b < bones; b++) {
+            const auto world = native_charm::rig_detail::concat(skins.data() + b * 12, bind.data() + b * 12);
+            std::copy(world.begin(), world.end(), charmModelBones.begin() + long(b * 12));
+        }
+        const auto &clock = firstPerson->frame_clock();
+        native_charm::Frame f;
+        f.dt = clock.dt;
+        f.clock = clock.clock;
+        f.velocity = firstPersonVelocity;
+        f.yaw = viewYaw;
+        f.pitch = viewPitch;
+        f.bones = &charmModelBones;
+        std::copy(layer.view.begin(), layer.view.end(), f.view.begin());
+        f.offset = {offsetY, leftHand ? offsetX : -offsetX, offsetZ};
+        f.left = leftHand;
+        f.knife_bone = previewKnifeRig.knife_handle;
+        firstPersonCharm->update(f);
+    }
+
+    // The charm's bones as the player programs read them: three rows of a 3x4 per bone.
+    GLuint charm_bones_texture() {
+        const auto &bones = firstPersonCharm->bones();
+        std::array<float, native_charm::bone_count * 12> rows{};
+        for (size_t b = 0; b < native_charm::bone_count; b++)
+            for (size_t r = 0; r < 3; r++)
+                for (size_t c = 0; c < 4; c++)
+                    rows[b * 12 + r * 4 + c] = bones[b * 16 + c * 4 + r];
+        gl.ActiveTexture(GL_TEXTURE0);
+        gl.BindTexture(GL_TEXTURE_2D, charmBonesTexture);
+        gl.TexImage2D(
+                GL_TEXTURE_2D, 0, GL_RGBA32F, 3, GLsizei(native_charm::bone_count), 0, GL_RGBA, GL_FLOAT, rows.data()
+        );
+        return charmBonesTexture;
     }
 
     // The shot's muzzle flash at the muzzle of the gun just drawn (its silencer's tip while it's on).

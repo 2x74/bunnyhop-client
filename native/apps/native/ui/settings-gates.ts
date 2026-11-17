@@ -104,6 +104,10 @@ const ROWS: Record<string, Gate> = {
   "hud/Strafe trainer/Jump sound": needs("hudStrafeTrainerSound"),
   "hud/Jump stats/Chat": needs("hudSsjChat"),
   "hud/Jump stats/Only gain from": needs("hudSsjMinGain"),
+  // Gain logs: the game counts the windows, the menu shows and relays them (gain-logs-native.ts).
+  "hud/Jump stats/Gain logs in servers": menuOnly,
+  "hud/Jump stats/All my gain logs": menuOnly,
+  "hud/Jump stats/Gain logs from": menuOnly,
   "hud/Jump stats/HUD": needs("jumpStats"),
   "hud/Jump stats/Jumps": needs("jumpStatsMode", "jumpStatsInterval"),
   "hud/Jump stats/Speed": needs("hudSsjFieldsSpeed"),

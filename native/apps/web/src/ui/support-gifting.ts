@@ -1,5 +1,6 @@
 // The Support page's Gifting tab (ui/support.ts): your gift credits and the button to send them on the left, the
 // Gifter badge on the right. The badge preview uses the in-game name renderer; trying a tier never equips or saves it.
+// Made when the tab is first opened (the wallet is read then, not when the page opens).
 
 import { GIFTER_TIERS } from "../creators";
 import { h } from "./dom";
@@ -13,7 +14,8 @@ const PRISM_SETS: [string, string, string][] = [
   ["#51d9a4", "#7fcfff", "#7592ff"],
 ];
 
-export function supportGifting(o: { name: () => string; again: HTMLElement }): HTMLElement {
+/** `signal`: aborted when the page closes (the wallet stops listening for gifts sent elsewhere). */
+export function supportGifting(o: { name: () => string; again: HTMLElement; signal?: AbortSignal }): HTMLElement {
   let selected = 0;
   let colors = PRISM_SETS[0];
   const sample = h("div.sp-gift-sample", { "aria-live": "polite" });
@@ -57,7 +59,7 @@ export function supportGifting(o: { name: () => string; again: HTMLElement }): H
       null,
       h("p.sp-lead", null, "Give another player permanent Supporter."),
       h("p", null, "Your first $5 makes you a supporter. Every full $5 after that is a gift credit, past donations included."),
-      giftWalletPanel(),
+      giftWalletPanel(o.signal),
       h("p", null, "You can also gift from a player's profile, from the pause menu on a server, or with !gift in chat. Guests and offline players can receive gifts."),
       o.again,
     ),

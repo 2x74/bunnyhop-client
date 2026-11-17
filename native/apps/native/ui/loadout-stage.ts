@@ -4,7 +4,7 @@ import { VisiblePreviews } from "./visible-previews";
 import { StageFrames } from "./stage-frames";
 import authored from "./authored-previews.json";
 import { COSMETICS, cosmetic } from "../../web/src/progression";
-import { packLoadout, type CosmeticLoadout } from "../../web/src/loadout";
+import { packLoadout, packLoadoutExt, type CosmeticLoadout } from "../../web/src/loadout";
 import { requestPreview, cancelPreview, nativePreviewAvailable, type PreviewRequest } from "./loadout-preview";
 import type { PreviewSpec } from "../../web/src/notify/item-preview";
 import type { PlayerGlow } from "../../web/src/player/glow-config";
@@ -19,6 +19,10 @@ export interface StageLook {
   previewGlow?: boolean;
   /** The bunny turned to show its back (the Back category). */
   facing?: "front" | "back";
+  /** The Hat slot's head close-up on the website. The host draws the whole bunny for now. */
+  focus?: "body" | "head";
+  /** The Charm slot's close-up on the hilt and its charm on the website; the host keeps its knife view. */
+  charm?: boolean;
 }
 export type ThumbJob =
   | { key: string; kind: "knife"; knife: string; loadout: CosmeticLoadout; focus?: "hilt" }
@@ -240,6 +244,8 @@ export class LoadoutStage {
     this.look = { ...look };
     this.draw();
   }
+  /** The website builds its gun stage ahead of the Gun camo tab; the host renders guns itself. */
+  warmGuns(_soon = false): void {}
   setView(view: StageView): void {
     this.viewMode = view;
     this.draw();
@@ -319,6 +325,7 @@ export class LoadoutStage {
   private stageRequest(): PreviewRequest {
     return {
       loadout: packLoadout(this.shown),
+      charm: packLoadoutExt(this.shown),
       outfit: this.look.outfit ?? "outfit-cream",
       ghost: this.look.ghost ?? "ghost-gold",
       trail: this.look.trail ?? "trail-gold",
@@ -421,6 +428,7 @@ export class LoadoutStage {
         const request = requestPreview(
           {
             loadout: packLoadout(loadout),
+            charm: packLoadoutExt(loadout),
             outfit: spec?.outfit ?? this.look.outfit ?? "outfit-cream",
             ghost: (spec?.kind === "ghost" && colourItem("ghost", spec)) || this.look.ghost || "ghost-gold",
             trail: (spec?.kind === "trail" && colourItem("trail", spec)) || this.look.trail || "trail-gold",

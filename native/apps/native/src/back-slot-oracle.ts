@@ -14,7 +14,15 @@ import {
 import { advanceSleeves, robeTones, sleeveMotion, sleeveUniform } from "../../web/src/player/robe-fx";
 import { RobeSleeves } from "../../web/src/viewmodel/robe-sleeves";
 import { playerUniforms } from "../../web/src/player/materials";
-import { packCape, packRobe, unpackCape, unpackRobe, type CosmeticLoadout } from "../../web/src/loadout";
+import {
+  packCape,
+  packMedal,
+  packRobe,
+  unpackCape,
+  unpackMedal,
+  unpackRobe,
+  type CosmeticLoadout,
+} from "../../web/src/loadout";
 
 interface Step {
   velocity: [number, number, number];
@@ -44,22 +52,36 @@ function movementStream(): Step[] {
   return steps;
 }
 
-const KINDS: BackKind[] = ["key", "pinwheel", "cape", "balloon", "jet", "wings", "pack", "blade", "robe"];
+const KINDS: BackKind[] = ["key", "pinwheel", "cape", "balloon", "jet", "wings", "pack", "blade", "robe", "medal"];
 const steps = movementStream();
 const runs = [];
+/** The variants each kind runs: the Cape's lengths, the Robe open and tied, the Daily Medal bare and under a gun. */
+function variantsOf(kind: BackKind): number[] {
+  if (kind === "cape") return [1, 1.8, 2.6];
+  return kind === "robe" || kind === "medal" ? [0, 1] : [1];
+}
 for (const kind of KINDS)
-  for (const variant of kind === "cape" ? [1, 1.8, 2.6] : kind === "robe" ? [0, 1] : [1]) {
+  for (const variant of variantsOf(kind)) {
     const motion = backMotion();
     const len = kind === "cape" ? variant : 1;
     const tied = kind === "robe" && variant === 1;
+    const gun = kind === "medal" && variant === 1;
     const uniforms: number[][] = [];
     for (const step of steps) {
       advanceBack(motion, kind, step.velocity, step.yaw, step.jumped, step.dt, step.snap, false, len, tied);
       const speed = Math.hypot(step.velocity[0], step.velocity[1]);
       const back = backUniform(motion, kind, speed);
-      uniforms.push([...back, ...backUniformTip(motion, kind), ...backUniformMid(motion, kind, back, len)]);
+      const tip = backUniformTip(motion, kind);
+      // As player/bunny/model.ts holds the medal under a gun.
+      if (gun) {
+        back[1] = 0;
+        tip[0] = 0;
+        back[2] *= 0.4;
+        tip[1] *= 0.4;
+      }
+      uniforms.push([...back, ...tip, ...backUniformMid(motion, kind, back, len)]);
     }
-    runs.push({ kind, len, tied, uniforms });
+    runs.push({ kind, len, tied, gun, uniforms });
   }
 
 const sleeves = sleeveMotion();
@@ -108,9 +130,20 @@ const fields = [
     { field, robe: true },
   ]),
 ];
+const medals = [
+  "",
+  "0",
+  "c",
+  "h",
+  "i",
+  "z",
+  "00",
+  "!",
+  ...[0, 7, 17].map((medal) => packMedal({ back: "back-medal", medal } as CosmeticLoadout)),
+].map((field) => ({ field, value: unpackMedal(field) }));
 const options = fields.map(({ field, robe }) => ({ field, robe, value: robe ? unpackRobe(field) : unpackCape(field) }));
 
 await writeFile(
   process.argv[2],
-  JSON.stringify({ steps, runs, sleeveUniforms, fpSleeveUniforms, accent, pants, tones, options }),
+  JSON.stringify({ steps, runs, sleeveUniforms, fpSleeveUniforms, accent, pants, tones, options, medals }),
 );

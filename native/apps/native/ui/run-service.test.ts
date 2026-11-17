@@ -952,3 +952,31 @@ test("native style pickers and chat style commands offer Segmented", () => {
   expect(styleAt(8)).toBe("segmented");
   for (const alias of ["seg", "segment", "segmented"]) expect(styleByName(alias)).toBe("segmented");
 });
+
+test("a Daily entry run is submitted for its day and its verdict carries the day's line", async () => {
+  const statuses: RunServiceStatus[] = [];
+  const options: Parameters<RunApi["submitRun"]>[1][] = [];
+  const service = new NativeRunService({
+    api: {
+      runBeat: async () => ({ sid: "session", token: "t0" }),
+      submitRun: async (_bytes, sent) => {
+        options.push(sent);
+        return { id: "daily-run", status: "verified", daily: { day: "2026-11-17", rank: 3, of: 40 } };
+      },
+      submission: async () => ({ id: "daily-run", status: "verified" }),
+    },
+    version: async () => allowed,
+    origin: () => "https://bunnyhop.lol",
+    send: (status) => statuses.push(status),
+    context: (run) => ({ daily: run.map === "bhop_eazy" ? "2026-11-17" : null }),
+    dailyLine: (result) => (result.daily ? { text: `place ${result.daily.rank}`, good: true } : null),
+  });
+  await reset(service);
+  await service.receive(beat(1, 0));
+  await service.receive(finish(1));
+  expect(options[0].daily).toBe("2026-11-17");
+  const verdict = statuses.at(-1)!;
+  expect(verdict.status).toBe("verified");
+  expect(verdict.daily).toBe("place 3");
+  expect(verdict.dailyGood).toBe(true);
+});

@@ -45,6 +45,20 @@ export const GLYPHS: Record<string, string> = {
   // Gauntlets (progression.ts GAUNTLET_ACHIEVEMENTS), one glyph each (alternatives: tools/gauntlets/mark-options.ts).
   // A route from a start dot to a finish flag; maps stacked up; MINI; a grid of maps, the last one ticked; podium
   // steps with a 1; a calendar page with a 1; 20; an hourglass.
+  // The Daily Challenge (progression.ts DAILY_ACHIEVEMENTS): a sun; a sun rising over the days finished; the two effort
+  // ones; podium steps under a sun; a sun with the wins in it.
+  d_sun: P("M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6") + `<circle cx="12" cy="12" r="4.4" fill="currentColor"/>`,
+  d_5: P("M7 8.2a5 5 0 0 1 10 0M12 1.6v1.4M5.6 3.6l1 1M18.4 3.6l-1 1") + `<text x="12" y="20.6" text-anchor="middle" font-size="10.5" font-weight="800" fill="currentColor" font-family="ui-sans-serif, system-ui, sans-serif">5</text>`,
+  d_15: P("M7 8.2a5 5 0 0 1 10 0M12 1.6v1.4M5.6 3.6l1 1M18.4 3.6l-1 1") + `<text x="12" y="20.6" text-anchor="middle" font-size="10.5" font-weight="800" fill="currentColor" font-family="ui-sans-serif, system-ui, sans-serif">15</text>`,
+  d_30: P("M7 8.2a5 5 0 0 1 10 0M12 1.6v1.4M5.6 3.6l1 1M18.4 3.6l-1 1") + `<text x="12" y="20.6" text-anchor="middle" font-size="10.5" font-weight="800" fill="currentColor" font-family="ui-sans-serif, system-ui, sans-serif">30</text>`,
+  d_60: P("M7 8.2a5 5 0 0 1 10 0M12 1.6v1.4M5.6 3.6l1 1M18.4 3.6l-1 1") + `<text x="12" y="20.6" text-anchor="middle" font-size="10.5" font-weight="800" fill="currentColor" font-family="ui-sans-serif, system-ui, sans-serif">60</text>`,
+  d_100: P("M7 8.2a5 5 0 0 1 10 0M12 1.6v1.4M5.6 3.6l1 1M18.4 3.6l-1 1") + `<text x="12" y="20.6" text-anchor="middle" font-size="9" font-weight="800" fill="currentColor" font-family="ui-sans-serif, system-ui, sans-serif">100</text>`,
+  // Second Wind: a sun with an arrow turning back up to it. Upper Half: a board's rows, the top half filled.
+  d_better: P("M5 16.5a8 8 0 0 1 13-6.2M18.5 5.5v5h-5") + `<circle cx="9.5" cy="16.5" r="2.6" fill="currentColor"/>`,
+  d_half: P("M4 15.5h16M4 19.5h16") + `<path d="M4 4.2h16v3H4zM4 9.2h16v3H4z" fill="currentColor"/>`,
+  d_podium: P("M3 20.5h18M4 20.5v-4.5h5.3v4.5M9.3 20.5v-8h5.4v8M14.7 20.5v-6H20v6") + `<circle cx="12" cy="6" r="2.6" fill="currentColor"/>`,
+  d_win: P("M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6M12 6.2a5.8 5.8 0 1 0 0 11.6 5.8 5.8 0 0 0 0-11.6z") + `<text x="12" y="14.9" text-anchor="middle" font-size="8" font-weight="800" fill="currentColor" font-family="ui-sans-serif, system-ui, sans-serif">1</text>`,
+  d_10: P("M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6M12 6.2a5.8 5.8 0 1 0 0 11.6 5.8 5.8 0 0 0 0-11.6z") + `<text x="12" y="14.4" text-anchor="middle" font-size="6.4" font-weight="800" fill="currentColor" font-family="ui-sans-serif, system-ui, sans-serif">10</text>`,
   g_route: P("M4.5 19.5c4 0 4-6 8-6 2 0 3.5-1 3.5-3M16 10V3.5l4.5 2.2L16 8") + `<circle cx="4.5" cy="19.5" r="1.8" fill="currentColor"/>`,
   g_stack: P("M12 3.5 3.5 8 12 12.5 20.5 8zM3.5 12 12 16.5 20.5 12M3.5 16 12 20.5 20.5 16"),
   g_mini: textGlyph("MINI", 7.4),

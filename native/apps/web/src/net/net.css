@@ -51,6 +51,8 @@
 .mm-label { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mm-detail { color: var(--dim); font-variant-numeric: tabular-nums; font-size: 0.88em; white-space: nowrap; }
 .mm-footer { margin-top: 0.45em; color: var(--dim); font-size: 0.85em; }
+.mm-hint { margin-top: 0.45em; font-size: 0.85em; }
+.mm-hint + .mm-footer { margin-top: 0.15em; }
 
 /* Above the default chat spot (bottom-left, growing upwards): centred at 50% the vote menu covered the chat lines. */
 #mp-menu { top: 40%; }

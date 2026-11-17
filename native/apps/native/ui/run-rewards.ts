@@ -48,6 +48,7 @@ const SLOT_NAMES: Record<CosmeticSlot, string> = {
   body: "player model",
   back: "back item",
   hop: "hop effect",
+  charm: "charm",
 };
 
 const encoder = new TextEncoder();

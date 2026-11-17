@@ -402,7 +402,7 @@ export const CARD_BORDERS: readonly { id: CardBorderId; name: string }[] = [
   { id: "pulse", name: "Pulse" },
   // Dashes in the name colour walking round the frame.
   { id: "stride", name: "Stride" },
-  // A vine along the frame, leaves at the two cut corners swaying a little.
+  // A vine along the frame, with leaves.
   { id: "vine", name: "Vine" },
   // The frame as a lit tube in the name colour, with a rare flicker.
   { id: "neon", name: "Neon" },
@@ -414,7 +414,7 @@ export type CardEffectId = "hops" | "embers" | "stars" | "aurora" | "rain" | "sn
 export const CARD_EFFECTS: readonly { id: CardEffectId; name: string }[] = [
   // Dotted hop arcs drifting across the card, like a run's jumps.
   { id: "hops", name: "Hops" },
-  // Sparks rising from the bottom edge.
+  // Sparks rising.
   { id: "embers", name: "Embers" },
   // Small stars fading in and out.
   { id: "stars", name: "Stars" },

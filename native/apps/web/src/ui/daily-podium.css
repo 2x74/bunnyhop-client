@@ -1,0 +1,40 @@
+/* The Daily Challenge page's podium (ui/daily-podium.ts): a 16:9 frame where the map's picture was, and one row of
+   captions under it. The frame's size never depends on what is in it, so nothing on the page moves when the scene
+   arrives, a bunny changes or a place is empty. */
+.dyp { display: block; margin: 0; min-width: 0; }
+.dyp-frame { position: relative; aspect-ratio: 16 / 9; overflow: hidden; border-radius: var(--r-2); background: var(--ink-2); }
+.dyp-frame > .dy-art { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 0; }
+.dyp-canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; opacity: 0; transition: opacity 0.22s var(--ease); pointer-events: none; }
+.dyp[data-state="live"] .dyp-canvas, .dyp[data-state="still"] .dyp-canvas { opacity: 1; }
+/* An earlier day says which day it is, on the picture. */
+.dyp-day { position: absolute; z-index: 1; left: 0.65rem; top: 0.5rem; max-width: calc(100% - 1.3rem); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-sm); font-weight: 650; color: var(--cream); text-shadow: 0 1px 8px rgba(0, 0, 0, 0.85); pointer-events: none; }
+
+/* Captions, left to right as the bunnies stand (2nd, 1st, 3rd), each under its step (the side padding puts the three
+   columns' middles where the scene's camera puts the steps'). Three short lines: the name in the player's own name
+   style with their marks, the place's medal with the time, and the play button that watches the run. The row keeps its
+   height when a place is empty. */
+.dyp-caps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; min-height: 4.3rem; margin: 0.45rem 0 0; padding: 0 4%; list-style: none; }
+.dyp-cap { display: flex; flex-direction: column; align-items: center; min-width: 0; padding: 0 0.2rem; }
+/* One line, like a leaderboard row's name cell (boards.css .rb-pwrap): marks that don't fit beside the name wrap onto a
+   second line that is never shown, so the first ones stay and nothing is squeezed. */
+.dyp-who { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; column-gap: 0.25rem; row-gap: 1rem; max-width: 100%; min-width: 0; height: 1.3rem; overflow: hidden; font-size: var(--fs-sm); }
+.dyp-who .nm-marks { display: contents; }
+.dyp-who .nm-marks > * { flex: none; }
+a.dyp-name { flex: 0 1 auto; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 650; line-height: 1.3rem; color: var(--cream); text-decoration: none; }
+a.dyp-name:hover, a.dyp-name:focus-visible { text-decoration: underline; text-underline-offset: 0.18em; }
+a.dyp-name:focus-visible { outline: none; border-radius: 2px; box-shadow: 0 0 0 2px var(--accent); }
+.dyp-run { display: flex; align-items: center; justify-content: center; gap: 0.3rem; max-width: 100%; height: 1.15rem; font-size: var(--fs-sm); white-space: nowrap; }
+.dyp-medal { flex: none; display: block; width: 0.95rem; height: 0.95rem; }
+.dyp-medal svg { display: block; width: 100%; height: 100%; }
+.dyp-time { font-family: var(--font-num); font-weight: 700; font-variant-numeric: tabular-nums; color: var(--cream); }
+.dyp-cap[data-place="1"] .dyp-time { color: var(--wr); }
+/* The play button: a 28 px target around a small disc with the game's play triangle (ui/icons.ts), amber under the
+   pointer or focus like the replay viewer's (viewer.css .rv-play). */
+.dyp-play { flex: none; display: grid; place-items: center; width: 1.75rem; height: 1.75rem; margin: 0; padding: 0; border: 0; border-radius: var(--r-round); background: none; color: var(--cream-2); cursor: pointer; }
+.dyp-play .icon { box-sizing: content-box; width: 0.6rem; height: 0.6rem; padding: 0.3rem 0.26rem 0.3rem 0.34rem; border-radius: var(--r-round); background: var(--ink-3); transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease); }
+.dyp-play .icon path { fill: currentColor; }
+.dyp-play:hover .icon, .dyp-play:focus-visible .icon { background: var(--amber); color: var(--amber-ink); }
+.dyp-play:focus-visible { outline: none; }
+.dyp-play:focus-visible .icon { box-shadow: var(--ring); }
+.dyp-play:active .icon { transform: translateY(1px); }
+@media (prefers-reduced-motion: reduce) { .dyp-canvas, .dyp-play .icon { transition: none; } }

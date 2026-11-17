@@ -9,6 +9,7 @@ import { state, send } from "./bridge";
 import { installPrefsBridge, sendNativeSettings } from "./prefs-bridge";
 import { splitCommands } from "../../web/src/console/parse";
 import { nativeVoiceHost, runVoiceLine, takeVoiceLines, unbindVoice, voiceConfigLines } from "./voice-console";
+import { isQuitCommand } from "./exit-game";
 import "./native-console.css";
 
 export interface NativeConsoleHooks {
@@ -18,6 +19,8 @@ export interface NativeConsoleHooks {
   maps(): Promise<string[]>;
   menu(): boolean;
   notice(text: string): void;
+  /** `quit` / `exit`: close the game. */
+  quit(): void;
 }
 
 let view: NativeConsole | null = null;
@@ -191,6 +194,8 @@ class NativeConsole {
     const voiceAnswer = runVoiceLine(voiceHost, line);
     if (voiceAnswer !== null) return this.print(voiceAnswer);
     for (const command of splitCommands(line)) {
+      // (The website's console sends quit to the main menu: a browser tab can't close itself. This is a game.)
+      if (isQuitCommand(command)) return hooks?.quit();
       const before = this.updates;
       this.runner.run(command);
       const unbound = unbindVoice(voiceHost, command, this.updates !== before);

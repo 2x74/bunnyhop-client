@@ -751,7 +751,7 @@ export class BunnyModel implements PlayerModelImpl {
   /** The back item for the loadout, fitted to the build and the hood (backs.ts backFit). */
   private setBack(): void {
     const id = this.loadout?.back;
-    const geo = id ? backGeometry(id, backFit(this.bodyLook, this.loadout?.body === "body-b" ? "feminine" : "classic", this.hood, this.loadout?.hat, this.loadout?.capeLength, this.loadout?.robeTied)) : null;
+    const geo = id ? backGeometry(id, backFit(this.bodyLook, this.loadout?.body === "body-b" ? "feminine" : "classic", this.hood, this.loadout?.hat, this.loadout?.capeLength, this.loadout?.robeTied, this.loadout?.medal)) : null;
     if (this.back?.geometry === geo) return;
     this.back?.removeFromParent();
     this.back = null;
@@ -1044,8 +1044,12 @@ export class BunnyModel implements PlayerModelImpl {
       const bm = this.backMotion;
       advanceBack(bm, backKind, this.vel, s.yaw, jumped, dt, snap, cosmeticsStill(), (this.loadout?.capeLength ?? 100) / 100, !!this.loadout?.robeTied);
       const ub = backUniform(bm, backKind, hypot2(this.vel[0], this.vel[1]));
+      const ut = backUniformTip(bm, backKind);
+      // The Daily Medal under a gun: both forearms are across the chest in front of it, so it stays lying on the chest
+      // (it would swing out into them) and only slides a little.
+      if (backKind === "medal" && this.gun) (ub[1] = 0), (ut[0] = 0), (ub[2] *= 0.4), (ut[1] *= 0.4);
       this.uniforms.uBack.value.fromArray(ub);
-      this.uniforms.uBackTip.value.fromArray(backUniformTip(bm, backKind));
+      this.uniforms.uBackTip.value.fromArray(ut);
       this.uniforms.uBackMid.value.fromArray(backUniformMid(bm, backKind, ub, (this.loadout?.capeLength ?? 100) / 100));
       // A long cape lies on the ground only while there is ground under the feet: in the air it hangs free (the
       // floor comes back up under it over the landing).

@@ -164,6 +164,25 @@ impl Reader<'_> {
         }
     }
 }
+impl Reader<'_> {
+    /// The loadout's continuation (replay.ts readLoadoutExt): its text, or None when absent or malformed.
+    fn loadout_ext(&mut self) -> Option<String> {
+        let at = self.at;
+        let result = (|| {
+            if self.u32()? != crate::recording::LOADOUT_EXT_MAGIC {
+                return Err("absent continuation".to_string());
+            }
+            self.str8()
+        })();
+        match result {
+            Ok(out) => Some(out),
+            Err(_) => {
+                self.at = at;
+                None
+            }
+        }
+    }
+}
 impl Decoded {
     pub fn load(path: &Path) -> Result<Self, String> {
         let mut bytes = Vec::new();
@@ -487,6 +506,8 @@ impl Decoded {
             })();
             parse.map_err(|e| format!("bad segment loads: {e}"))?;
         }
+        // Read only beside a loadout trailer (replay.ts decodeRaw: withLoadoutExt on a loadout).
+        let packed_loadout_ext = r.loadout_ext().filter(|_| packed_loadout.is_some());
         if !segments.is_empty() && style != "segmented" {
             return Err("only Segmented runs load checkpoints".into());
         }
@@ -502,6 +523,9 @@ impl Decoded {
         let mut metadata: serde_json::Value =
             serde_json::from_slice(info.as_bytes()).map_err(|e| e.to_string())?;
         metadata["segmentLoads"] = segments.len().into();
+        if let Some(ext) = packed_loadout_ext {
+            metadata["packedLoadoutExt"] = ext.into();
+        }
         metadata["segmentTicks"] = json!(segments.iter().map(|load| load.tick).collect::<Vec<_>>());
         if let Some(rates) = turn_speed {
             metadata["turnSpeed"] = rates;

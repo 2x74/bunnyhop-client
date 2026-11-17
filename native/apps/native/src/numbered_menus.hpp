@@ -16,6 +16,30 @@
 
 namespace native {
 
+// The digit a numbered menu reads from a key, number row or numpad (web weapon-commands.ts menuDigit).
+inline std::optional<int> menu_digit(std::string_view code) {
+    constexpr std::string_view row = "Digit", pad = "Numpad";
+    const bool on_row = code.size() == row.size() + 1 && code.starts_with(row);
+    const bool on_pad = code.size() == pad.size() + 1 && code.starts_with(pad);
+    if (!on_row && !on_pad) return std::nullopt;
+    const char digit = code.back();
+    if (digit < '0' || digit > '9') return std::nullopt;
+    return digit - '0';
+}
+
+// A key bound to move, jump, duck, use or turn keeps its bind while a menu is up (web input.ts movesPlayer), so a vote
+// never takes a strafe or jump key mid-run. Attack binds still vote, as a weapon slot does.
+inline bool moves_player(const std::string &code, const BindTable &binds) {
+    constexpr uint32_t moving = forward | back | left | right | jump | duck | use | turn_left | turn_right;
+    return (binds.of(code) & moving) != 0 || binds.is_bound("jumpToggle", code);
+}
+
+// A digit for a numbered menu: a menu key that isn't bound to moving.
+inline std::optional<int> menu_key(const std::string &code, const BindTable &binds) {
+    if (moves_player(code, binds)) return std::nullopt;
+    return menu_digit(code);
+}
+
 struct NumberedMenus {
     enum class Menu { guns, triggers, race, spectate, checkpoints, look, copy_start };
 
@@ -101,9 +125,8 @@ struct NumberedMenus {
     }
 
     // Whether a digit press belongs to a menu on screen rather than to a bind. Key releases still reach the binds.
-    bool owns(std::string_view code, bool down, bool vote_shown) const {
-        const bool digit = code.size() == 6 && code.starts_with("Digit");
-        return digit && down && (vote_shown || any_open());
+    bool owns(const std::string &code, bool down, bool vote_shown, const BindTable &binds) const {
+        return menu_key(code, binds) && down && (vote_shown || any_open());
     }
 
 private:

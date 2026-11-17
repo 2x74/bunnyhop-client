@@ -136,7 +136,8 @@ test("recent WRs use native replay/profile routes, player bunnies and map-name t
     expect(fixture.requests).toHaveLength(1);
     expect(fixture.requests[0].path).toBe("/api/records/wrs?limit=6");
     expect(fixture.requests[0].cookie).toContain("bh_session=records-fixture");
-    expect(await page.locator(".home-right > :first-child").getAttribute("class")).toBe("home-grid");
+    // Without a Daily Challenge the top of the right side is the maps to try.
+    expect(await page.locator(".home-right > .home-top > :first-child").getAttribute("class")).toBe("home-grid");
     expect(await page.locator(".home-right > :last-child").getAttribute("class")).toBe("home-records");
     const first = page.locator(".home-rec").first();
     expect(await first.locator(".home-rec-map b").textContent()).toBe("bhop_eazy");

@@ -25,6 +25,8 @@ interface MapRow {
   wr: { name: string; userId: string; time: number | null } | null;
   flags: number;
   feedback: number;
+  /** v0.0.43: false = the map's picture is off on world record holders' cards (absent from older APIs). */
+  cardArt?: boolean;
 }
 
 type Filter = "all" | "ranked" | "unranked" | "retired" | "flags";
@@ -32,6 +34,7 @@ type Filter = "all" | "ranked" | "unranked" | "retired" | "flags";
 export const mapsView: View = async (root, params) => {
   const r = await api<{ maps: MapRow[] }>("/admin/maps");
   const manage = may("maps.manage");
+  const art = may("maps.cardart");
   const q = h("input", { type: "search", placeholder: "map name", value: params.get("q") ?? "", "aria-label": "Find a map" });
   let filter = (params.get("show") as Filter) || "all";
   let tierF = params.get("tier") ?? "";
@@ -81,6 +84,27 @@ export const mapsView: View = async (root, params) => {
     paint();
   };
 
+  // v0.0.43: the map's picture on world record holders' cards (apps/api src/map-bg.ts), off or back on.
+  const setCardArt = async (m: MapRow) => {
+    const off = m.cardArt !== false;
+    const v = await ask({
+      title: off ? `Take ${m.name}'s picture off cards?` : `Put ${m.name}'s picture back on cards?`,
+      text: off
+        ? "Players holding its world record show their own card background again, at once. Their pick is kept. Logged."
+        : "Its record holders who picked it show the map again. Logged.",
+      fields: off ? [{ name: "reason", label: "Why", kind: "text" }] : [],
+      confirm: off ? "Take it off" : "Put it back",
+      danger: off,
+    });
+    if (!v) return;
+    const res = await act<{ cardArt: boolean }>("/admin/maps/card-art", { map: m.name, off, reason: v.reason || null }, off ? `${m.name} is off cards` : `${m.name} is back on cards`, {
+      run: async () => (await undoCall("/admin/maps/card-art", { map: m.name, off: !off }, "Undone")) && reroute(),
+    });
+    if (!res) return;
+    m.cardArt = res.cardArt;
+    paint();
+  };
+
   const row = (m: MapRow) => {
     const tierCell = manage
       ? (() => {
@@ -94,12 +118,12 @@ export const mapsView: View = async (root, params) => {
       { "data-map": m.name, class: m.retired ? "retired" : "" },
       h("td", null, h("span", { class: "map-line" }, mapArt(m.name), h("a", { class: "map-name", href: `/maps/${encodeURIComponent(m.name)}`, target: "_blank", rel: "noopener" }, m.name)), m.title && m.title !== m.name ? h("div", { class: "faint" }, m.title) : null),
       h("td", null, tierCell),
-      h("td", null, state(m)),
+      h("td", null, state(m), m.cardArt === false ? [" ", badge("off cards", "")] : null),
       h("td", { class: "num" }, m.finishers ? n(m.finishers) : h("span", { class: "faint" }, "0")),
       h("td", null, m.wr ? [h("span", { class: "t-run" }, fmtTime(m.wr.time)), " ", playerLink(m.wr.userId, m.wr.name)] : h("span", { class: "faint" }, "—")),
       h("td", { class: "num" }, m.flags ? h("a", { class: "warn-text", href: `#/runs?map=${encodeURIComponent(m.name)}` }, String(m.flags)) : h("span", { class: "faint" }, "0")),
       h("td", { class: "num" }, m.feedback ? h("a", { href: `#/feedback?map=${encodeURIComponent(m.name)}&status=open` }, String(m.feedback)) : h("span", { class: "faint" }, "0")),
-      h("td", { class: "acts" }, h("span", { class: "hover-acts" }, manage ? h("button", { class: `small ghost${m.retired ? "" : " danger-text"}`, onclick: () => void setRetired(m) }, m.retired ? "Put back…" : "Retire…") : null, h("a", { class: "btn small ghost", href: `/?map=${encodeURIComponent(m.name)}`, target: "_blank", rel: "noopener" }, glyph("play"), "Play"))),
+      h("td", { class: "acts" }, h("span", { class: "hover-acts" }, manage ? h("button", { class: `small ghost${m.retired ? "" : " danger-text"}`, onclick: () => void setRetired(m) }, m.retired ? "Put back…" : "Retire…") : null, art && m.cardArt !== undefined ? h("button", { class: "small ghost", onclick: () => void setCardArt(m), title: "The map's picture on world record holders' cards" }, m.cardArt ? "Off cards…" : "On cards…") : null, h("a", { class: "btn small ghost", href: `/?map=${encodeURIComponent(m.name)}`, target: "_blank", rel: "noopener" }, glyph("play"), "Play"))),
     );
   };
   const visible = () => {

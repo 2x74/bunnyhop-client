@@ -82,19 +82,21 @@ export async function sideCore(wasm: Uint8Array, bsp: Pick<MapFile, "stream" | "
   return c;
 }
 
-/** Everything head to head computes once per run. */
-export function makeSide(o: { runId: string; info: RunInfo; replay: Replay; bytes: Uint8Array; core: Core; player: ReplayPlayer; look: ArmsLook; color: string }): H2HSide {
-  const d = o.player.data;
-  const keys = strafeKeysOf(replayStyle(o.replay.header));
+/** A run's strafe timing, mouse turns and jumps: what its panel draws (viewer/h2h-panel.ts). */
+export function runPanelStats(replay: Replay, d: RunData): Pick<H2HSide, "timing" | "turns" | "jumps" | "gain"> {
+  const keys = strafeKeysOf(replayStyle(replay.header));
   const jumps = jumpRows(replaySsj(d, "every"), d.startTick, d.endTick, d.interval);
   return {
-    ...o,
-    name: o.info.player.name || o.replay.header.player || "unknown",
     timing: keys ? strafeTiming(runStrafeInput(d, keys)) : null,
     turns: mouseTurns(Array.from({ length: d.n }, (_, i) => d.view[(i + 1) * 2]), d.n),
     jumps,
     gain: meanGain(jumps),
   };
+}
+
+/** Everything head to head computes once per run. */
+export function makeSide(o: { runId: string; info: RunInfo; replay: Replay; bytes: Uint8Array; core: Core; player: ReplayPlayer; look: ArmsLook; color: string }): H2HSide {
+  return { ...o, name: o.info.player.name || o.replay.header.player || "unknown", ...runPanelStats(o.replay, o.player.data) };
 }
 
 /** Slow graphics: software rendering, or a Potato preset (Settings → Graphics: Lowest / Low). They start in ghost view. */

@@ -20,8 +20,10 @@ import { h } from "./dom";
 import { nameAttrs, nameMarks } from "./marks";
 import { adminLink } from "../staff-lens";
 import { decorated } from "./avatar-deco";
-import { cardLayers, watchCardFx } from "./card-fx";
+import { cardLayers, frameLayers, setPointer, watchCardFx } from "./card-fx";
 import type { CardBorderId, CardEffectId } from "../supporter-looks";
+import type { MapBgView } from "../map-bg";
+import { MAP_BG_CLASS, mapBgLayer, mapBgSrc, wrLine } from "./card-mapbg";
 
 /** Everything Edit card previews of a supporter's look over the saved one. */
 export type SupporterLook = NameLook & { avatarDeco?: import("../supporter-looks").AvatarDecoId | null; cardBorder?: CardBorderId | null; cardEffect?: CardEffectId | null; hoverFx?: import("../supporter-looks").HoverFxId | null };
@@ -56,6 +58,18 @@ export interface CardOverrides {
   featured?: RunCard[];
   /** The card's first appearance on a screen: it rises in and a sheen sweeps across it once. */
   enter?: boolean;
+  /**
+   * v0.0.43: the map background to show (Edit card's preview of a held map, or null for none) instead of the profile's
+   * own `mapBg` (undefined: the profile's).
+   */
+  mapBg?: MapBgView | null;
+  /**
+   * v0.0.43, Edit card → Flag: the flag to show instead of the profile's own (a hovered one; null: none). undefined:
+   * the profile's.
+   */
+  country?: string | null;
+  /** Edit card: with no flag, an empty outline where the flag goes, so it can be clicked like the card's other parts. */
+  flagSlot?: boolean;
 }
 
 export function fmtHours(seconds: number): string {
@@ -123,7 +137,8 @@ export function peakLayers(peak: PeakTier | null): { cls: string; style: string;
   };
 }
 
-export function playerCard(p: Profile, o: CardOverrides = {}): HTMLElement {
+/** The card's element (.pc), nothing attached to it yet. */
+function buildCard(p: Profile, o: CardOverrides): HTMLElement {
   const c = { ...DEFAULT_COSMETICS, ...p.cosmetics, ...o.cosmetics };
   const hatDef = cosmetic(c.hat);
   const hat = hatDef?.slot === "hat" && HAT_SVG[hatDef.id] ? hatDef : null;
@@ -140,15 +155,25 @@ export function playerCard(p: Profile, o: CardOverrides = {}): HTMLElement {
   const staff = p.player.staff !== undefined ? p.player.staff : staffBadgeOf(p.role);
   /** A supporter's name look (Edit card → Name previews over what's saved). */
   const look = nameAttrs({ nameColor: p.player.nameColor, nameEffect: p.player.nameEffect, nameColor2: p.player.nameColor2, nameFont: p.player.nameFont, nameStyle: p.player.nameStyle, ...o.nameLook }, undefined, p.player.name);
+  // A world record holder's map as the background (ui/card-mapbg.ts): only while the API says the record is held.
+  const mapBg = o.mapBg !== undefined ? o.mapBg : (p.mapBg ?? null);
+  const mapSrc = mapBgSrc(mapBg);
+  // The profile flag before the name: a card part in edit mode (data-part), with an empty slot there when none is set.
+  const flag = countryFlag(o.country !== undefined ? o.country : p.player.country) ?? (o.flagSlot ? h("span.pc-flag-empty", { title: "Add a flag" }) : null);
+  flag?.setAttribute("data-part", "flag");
+  const avatar = decorated(avatarEl(p.player), sl, { animate: true, watch: false });
+  avatar.setAttribute("data-part", "avatar");
 
   // data-part: the parts the owner's card editor picks by clicking them (ui/profile.ts).
   const card = h(
-    `div.pc.pc-frame-${(c.frame ?? "frame-plain").replace(/^frame-/, "")}.pc-bg-${(c.background ?? "bg-night").replace(/^bg-/, "")}${peak.cls}`,
+    `div.pc.pc-frame-${(c.frame ?? "frame-plain").replace(/^frame-/, "")}.pc-bg-${(c.background ?? "bg-night").replace(/^bg-/, "")}${peak.cls}${mapSrc ? `.${MAP_BG_CLASS}` : ""}`,
     { style: `--rank:${rank.group.color}${peak.style ? `;${peak.style}` : ""}`, "data-part": "frame" },
+    frameLayers(c.frame),
     peak.aura,
     h(
       "div.pc-inner",
       { "data-part": "background" },
+      mapBg && mapSrc ? mapBgLayer(mapBg, mapSrc) : null,
       h("div.pc-art", { "aria-hidden": "true" }),
       ...peak.inner,
       h(
@@ -167,7 +192,7 @@ export function playerCard(p: Profile, o: CardOverrides = {}): HTMLElement {
       h(
         "div.pc-id",
         null,
-        decorated(avatarEl(p.player), sl, { animate: true, watch: false }),
+        avatar,
         h(
           "div.pc-who",
           null,
@@ -178,7 +203,7 @@ export function playerCard(p: Profile, o: CardOverrides = {}): HTMLElement {
             "div.pc-nameline",
             // Earlier names (the API's previousNames), shown on hover or focus of the name line (profile.css).
             p.player.previousNames?.length ? { "data-prev": `Previously known as ${p.player.previousNames.join(", ")}`, tabindex: "0" } : null,
-            countryFlag(p.player.country),
+            flag,
             h(
               "div.pc-name",
               {
@@ -187,7 +212,8 @@ export function playerCard(p: Profile, o: CardOverrides = {}): HTMLElement {
                   .join(";"),
                 class: look.class,
                 "data-nm-font": look["data-nm-font"],
-                "data-part": p.supporterSettings ? "name" : undefined,
+                // (Everyone's since v0.0.43: a player who isn't a supporter can try the looks on.)
+                "data-part": "name",
               },
               p.player.name,
             ),
@@ -270,7 +296,7 @@ export function playerCard(p: Profile, o: CardOverrides = {}): HTMLElement {
         null,
         ...(featured.length ? featured.map(featTile) : [h("div.pc-feat-empty", null, "No ranked runs yet")]),
       ),
-      h("div.pc-badges", { "data-part": "badges" }, ...badges.map(badgeChip)),
+      h("div.pc-badges", { "data-part": "badges" }, ...badges.map(badgeChip), mapBg && mapSrc ? wrLine(mapBg, "pc-wrline", true) : null),
       h(
         "footer.pc-band",
         null,
@@ -282,42 +308,142 @@ export function playerCard(p: Profile, o: CardOverrides = {}): HTMLElement {
       h("div.pc-sheen", { "aria-hidden": "true" }),
       o.enter ? h("div.pc-sweep", { "aria-hidden": "true" }) : null,
     ),
+    // The frame's rim (ui/card-fx.css .pc-rim): a lit outer edge and a shaded inner one, over whatever runs in the band.
+    h("div.pc-rim", { "aria-hidden": "true" }),
   );
+  return card;
+}
+
+export function playerCard(p: Profile, o: CardOverrides = {}): HTMLElement {
+  const card = buildCard(p, o);
   watchCardFx(card);
   const stage = h(`div.pc-stage${o.enter ? ".pc-enter" : ""}`, null, card);
   tilt(stage, card);
   return stage;
 }
 
-/** Pointer tilt (max 4°) + sheen, one write per frame; nothing on touch, with reduced motion or on the Potato preset. */
+/**
+ * Redraws a card that is on screen (`stage`: what playerCard returned) for new data or overrides, in place: the new
+ * card is built and only its differences are carried onto the old one (morph, below). Whatever didn't change
+ * keeps its node, so the avatar isn't loaded and decoded again, the layers that are running don't start over, and the
+ * tilt, the pointer light and keyboard focus stay where they are. Use it wherever a card follows a picker (Edit card,
+ * the Support page) instead of replacing the card with a new one.
+ */
+export function updatePlayerCard(stage: HTMLElement, p: Profile, o: CardOverrides = {}): HTMLElement {
+  const card = stage.querySelector<HTMLElement>(":scope > .pc");
+  if (!card) return stage;
+  morph(card, buildCard(p, { ...o, enter: false }), true);
+  // Layers may have arrived on a card that had none: the off-screen pause takes it (once more is harmless).
+  watchCardFx(card);
+  return stage;
+}
+
+/** State the page put on a live card, which a redraw must not take away. */
+const LIVE_CLASSES = ["is-live", "fx-off"];
+const POINTER_LAYER = ".pc-sheen, .pc-holo, .pc-sfx-foil";
+const clockOf = (style: string | null): string | null => /--fx-t:[^;]+/.exec(style ?? "")?.[0] ?? null;
+const keyOf = (n: Node): string => (n instanceof Element ? `${n.tagName}.${n.classList[0] ?? ""}.${n.getAttribute("data-run") ?? ""}` : `#${n.nodeType}`);
+
+/** Makes `a` (on screen) the same as `b` (just built), touching only what differs and never moving a node that stays. */
+function morph(a: Element, b: Element, root = false): void {
+  const live = root ? LIVE_CLASSES.filter((c) => a.classList.contains(c)) : [];
+  const keepStyle = !root && a.matches(POINTER_LAYER);
+  for (const { name } of [...a.attributes]) if (!b.hasAttribute(name) && !(keepStyle && name === "style")) a.removeAttribute(name);
+  for (const { name, value } of [...b.attributes]) {
+    let v = value;
+    if (name === "style") {
+      // A running layer keeps the clock it started on (a new delay would jump it), and the card its tilt.
+      const was = clockOf(a.getAttribute("style")), now = clockOf(v);
+      if (was && now) v = v.replace(now, was);
+      const tf = root ? (a as HTMLElement).style.transform : "";
+      if (tf) v = `${v};transform:${tf}`;
+    }
+    if (a.getAttribute(name) !== v) a.setAttribute(name, v);
+  }
+  for (const c of live) a.classList.add(c);
+  // Children: each new one takes the old node of its kind if there is one (tag, first class, run), else itself.
+  const olds = [...a.childNodes];
+  const used = new Set<Node>();
+  const want = [...b.childNodes].map((nb) => {
+    const k = keyOf(nb);
+    const hit = olds.find((n) => !used.has(n) && keyOf(n) === k);
+    if (!hit) return nb;
+    used.add(hit);
+    if (hit instanceof Element) morph(hit, nb as Element);
+    else if (hit.nodeValue !== nb.nodeValue) hit.nodeValue = nb.nodeValue;
+    return hit;
+  });
+  for (const n of olds) if (!used.has(n)) a.removeChild(n);
+  // What stayed is still in its old order: only new nodes (and the rare reordered one) are inserted.
+  let at: Node | null = a.firstChild;
+  for (const n of want) {
+    if (n === at) at = at.nextSibling;
+    else a.insertBefore(n, at);
+  }
+}
+
+/**
+ * Pointer tilt (max 4°) + sheen, one write per frame; nothing on touch, with reduced motion or on the Potato preset.
+ * The pointer's place is taken against the stage's box (never transformed, so the tilt doesn't move its own
+ * reference), measured once when the pointer arrives and again only after a scroll or a resize: reading it every frame
+ * forced a style and layout pass each time (the card sits in a size container, and its tilt is easing). The tilt is
+ * written as the card's transform and the pointer's place on the pointer layers alone (card-fx.ts setPointer): neither
+ * restyles the card's content.
+ */
 const TILT = 4;
 function tilt(stage: HTMLElement, card: HTMLElement): void {
   if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   let raf = 0;
-  let px = 0.5;
-  let py = 0.5;
+  let x = 0;
+  let y = 0;
+  let box: DOMRect | null = null;
+  let watching = false;
+  const stale = () => {
+    box = null;
+    if (!stage.isConnected) unwatch();
+  };
+  const watch = () => {
+    if (watching) return;
+    watching = true;
+    addEventListener("scroll", stale, { capture: true, passive: true });
+    addEventListener("resize", stale, { passive: true });
+  };
+  const unwatch = () => {
+    watching = false;
+    removeEventListener("scroll", stale, { capture: true });
+    removeEventListener("resize", stale);
+  };
   const apply = () => {
     raf = 0;
-    card.style.setProperty("--rx", `${(0.5 - py) * 2 * TILT}deg`);
-    card.style.setProperty("--ry", `${(px - 0.5) * 2 * TILT}deg`);
-    card.style.setProperty("--mx", String(px));
-    card.style.setProperty("--my", String(py));
+    box ??= stage.getBoundingClientRect();
+    if (!box.width || !box.height) return;
+    const px = Math.max(0, Math.min(1, (x - box.left) / box.width));
+    const py = Math.max(0, Math.min(1, (y - box.top) / box.height));
+    card.style.transform = `rotateX(${((0.5 - py) * 2 * TILT).toFixed(2)}deg) rotateY(${((px - 0.5) * 2 * TILT).toFixed(2)}deg)`;
+    setPointer(card, px, py);
   };
-  stage.addEventListener("pointermove", (e) => {
-    if (e.pointerType === "touch" || document.body.classList.contains("potato")) return;
-    const r = card.getBoundingClientRect();
-    px = (e.clientX - r.left) / r.width;
-    py = (e.clientY - r.top) / r.height;
-    // will-change only while the pointer is on the card (is-live).
-    card.classList.add("is-live");
-    raf ||= requestAnimationFrame(apply);
-  });
+  stage.addEventListener(
+    "pointermove",
+    (e) => {
+      if (e.pointerType === "touch" || document.body.classList.contains("potato")) return;
+      x = e.clientX;
+      y = e.clientY;
+      // will-change only while the pointer is on the card (is-live).
+      if (!card.classList.contains("is-live")) {
+        card.classList.add("is-live");
+        box = null;
+        watch();
+      }
+      raf ||= requestAnimationFrame(apply);
+    },
+    { passive: true },
+  );
   stage.addEventListener("pointerleave", () => {
     if (raf) cancelAnimationFrame(raf);
     raf = 0;
+    unwatch();
     card.classList.remove("is-live");
-    card.style.setProperty("--rx", "0deg");
-    card.style.setProperty("--ry", "0deg");
+    card.style.transform = "";
   });
 }
 

@@ -49,6 +49,18 @@ html.native-clock-stopped *, html.native-clock-stopped *::before, html.native-cl
 .rail-pair .rail-item:has(.ib-badge:not([hidden])) > .ri-icon { display: none; }
 .rail-pair .ri-label:has(> .ib-badge:not([hidden])) { flex-direction: row; align-items: center; gap: 0.4rem; white-space: nowrap; overflow: hidden; }
 .rail-pair .ri-label > .ib-badge { position: static; transform: none; flex: none; order: -1; margin: 0; }
+/* The native pause rail has more rows than the website's (Checkpoints, Replays, Exit game). With practice on, the web's
+   row heights ran past the rail and cut off its last rows: on tall screens it keeps the regular height instead of the
+   roomier one, and under 760 px it uses the short screens' tighter one. */
+@media (min-height: 760px) and (min-width: 52.01rem) {
+  .pause .rail-item { padding-top: 0.34rem; padding-bottom: 0.34rem; }
+  .pause .rail-item.primary { padding-top: 0.55rem; padding-bottom: 0.5rem; }
+  .pause .rail-sep { margin-top: 0.25rem; margin-bottom: 0.25rem; }
+}
+@media (max-height: 759.98px) {
+  .pause .rail-item { padding-top: 0.3rem; padding-bottom: 0.3rem; }
+  .pause .rail-sep { margin-top: 0.18rem; margin-bottom: 0.18rem; }
+}
 
 /* The finished run (host timer) under the pause screen's map name. */
 #native-finish-result:empty { display: none; }
@@ -67,9 +79,6 @@ html.native-clock-stopped *, html.native-clock-stopped *::before, html.native-cl
 .home-update { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0.2rem 1.15rem; color: var(--cream); font-size: var(--fs-sm); }
 .home-update[hidden] { display: none; }
 .home-link.home-update-go { color: var(--amber); }
-
-/* Quit, last of the home screen's quiet links. */
-.home-link.home-quit { color: var(--cream-3); }
 
 /* Staff actions remain in the staff application. */
 .native-menu .rb-admin { display: none; }

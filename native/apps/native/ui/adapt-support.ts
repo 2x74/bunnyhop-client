@@ -2,11 +2,15 @@
 export function adaptSupportSource(input: string, checkoutPath: string, bridgePath: string): string {
   const from = "        location.href = (await api.supportCheckout(dollars() * 100)).url;";
   if (input.split(from).length !== 2) throw new Error("Native support checkout anchor changed");
-  input = input.replace(
-    "  const model = previewModel(() => supporter);",
-    `  const model = previewModel(() => supporter);
-  const nativeCheckout=new SupportCheckout({checkout:cents=>api.supportCheckout(cents,profileWriteGuard(lastKnownMe()?.id??"")),openExternal,generation:accountGeneration,alive:()=>!disposed&&root.isConnected});`,
-  );
+  // The controller sits right after the screen's own disposed flag, which its alive() check reads.
+  const screen = "export function supportScreen(o: SupportScreenOpts): HTMLElement {";
+  const flag = "\n  let disposed = false;\n";
+  const at = input.indexOf(flag, input.indexOf(screen));
+  if (input.split(screen).length !== 2 || at < 0) throw new Error("Native support controller anchor changed");
+  input =
+    input.slice(0, at + flag.length) +
+    `  const nativeCheckout=new SupportCheckout({checkout:cents=>api.supportCheckout(cents,profileWriteGuard(lastKnownMe()?.id??"")),openExternal,generation:accountGeneration,alive:()=>!disposed&&root.isConnected});\n` +
+    input.slice(at + flag.length);
   if (!input.includes("const nativeCheckout=")) throw new Error("Native support controller anchor changed");
   input = input.replace(
     from,

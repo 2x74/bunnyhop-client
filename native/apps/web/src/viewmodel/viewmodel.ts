@@ -32,6 +32,7 @@
 import * as THREE from "three";
 import { playerUniforms, solidMaterial, type PlayerUniforms } from "../player/materials";
 import { RobeSleeves } from "./robe-sleeves";
+import { KnifeCharm } from "./charms/knife";
 import { colourway, paletteOf } from "../player/bunny/palettes";
 import { getHeldLoadout, getOutfit, getPlayerGlow, onHeldLoadout, onOutfit } from "../player/cosmetics";
 import { PlayerGlowShell } from "../player/glow";
@@ -64,6 +65,7 @@ import { angleMatrix } from "./math";
 import { HandIdle } from "./idle";
 import { poseLeftThumb } from "./leftthumb";
 import { VIEWMODEL_BOB } from "./defaults";
+import { LiveHilt } from "./hilts/live/index";
 
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
 
@@ -142,6 +144,10 @@ export class Viewmodel {
   private glow: PlayerGlowShell;
   /** The Robe's sleeves over the arms while it is worn (robe-sleeves.ts): nothing otherwise. */
   private robe: RobeSleeves;
+  /** The charm hanging from the knife while one is worn (charms/: v0.0.43): nothing otherwise. */
+  private charm: KnifeCharm;
+  /** A living hilt's pieces while one is held (hilts/live/index.ts): nothing otherwise. */
+  readonly live: LiveHilt;
   /** The Loadout's stage: the glow being edited (a preview, a supporter's or not); undefined = your own. */
   glowOverride: import("../player/glow-config").PlayerGlow | null | undefined = undefined;
   private skeleton: DirectSkeleton;
@@ -216,6 +222,8 @@ export class Viewmodel {
     // Its own near-fade (off: the hands are at the camera, which the third-person fade hides) and full opacity.
     this.glow = new PlayerGlowShell(this.root, { ...this.uniforms, uNearFade: { value: new THREE.Vector2(0, 0) }, uOpacity: { value: 1 } }, { width: 0.16, strength: 0.6 });
     this.robe = new RobeSleeves(this.root, this.skeleton, this.uniforms);
+    this.charm = new KnifeCharm(this.scene);
+    this.live = new LiveHilt(this.root, this.skeleton, this.uniforms);
     this.root.matrixAutoUpdate = false;
     this.scene.add(this.root);
     this.proc = new VmProcedural(this.r);
@@ -247,6 +255,7 @@ export class Viewmodel {
     if (k === this.knifeDef && this.knifeHold && this.mesh.geometry === this.geometryFor(k)) return;
     this.knifeDef = k;
     this.knifeHold = null;
+    this.charm.set(this.loadout, k);
     this.refreshLook();
   }
 
@@ -272,6 +281,7 @@ export class Viewmodel {
     this.loadout = l;
     this.refreshLook();
     this.robe.set(l, prefs.get().firstPersonRobe);
+    this.charm.set(l, this.knifeDef);
   }
 
   /** Shows a finish spec instead of the loadout's (dev lab, previews); undefined goes back to the loadout. */
@@ -291,6 +301,7 @@ export class Viewmodel {
     const g = this.geometryFor(this.knifeDef);
     if (this.mesh.geometry !== g) this.mesh.geometry = g;
     ensureViewmodelLayout(this.mesh.geometry);
+    this.live.set(this.loadout.hilt, this.knifeDef ?? carrot);
     // The first-person detail shading (finishes/detail.ts); the scene reflection only runs for reflective hardware or a
     // painted finish (its metallic / glossy parts; the metal finishes, 22+, keep their own capture alive).
     const look = applyLoadoutUniforms(this.uniforms, this.loadout, this.finishOverride, true);
@@ -438,6 +449,7 @@ export class Viewmodel {
     this.holsterT = Infinity;
     this.handIdle.reset();
     this.feelState.reset();
+    this.live.reset();
     this.inspects.reset();
     this.now = 0;
     this.nextPrimary = this.nextSecondary = 0;
@@ -446,6 +458,7 @@ export class Viewmodel {
     this.play = { seq: -1, cycle: 0, prevSeq: -1, prevCycle: 0, fade: 0, fadeT: 0 };
     this.setAction("idle");
     this.inspects.cancel("draw");
+    this.charm.reset();
   }
 
   /** Attack buttons pressed this frame (taps shorter than a frame still count). */
@@ -591,7 +604,13 @@ export class Viewmodel {
     this.handIdle.update(dt, this.action === "idle" && !this.inspects.active);
     this.pose(dt);
     this.feel(dt, s);
+    this.live.update(dt, this.now, s, this.inspects.active, prefs.get().viewmodel.hand === "left");
     if (this.robe.worn) this.robe.update(dt, s, Math.min(1.5, prefs.get().viewmodel.sway) * motionScale(), prefs.get().viewmodel.hand === "left");
+    if (this.charm.worn) {
+      // The charm swings from where the knife is drawn (render()'s feel, offsets and mirror).
+      const vp = prefs.get().viewmodel, left = vp.hand === "left";
+      this.charm.update(dt, s, this.W, this.r, this.lowering ? this.lowered(this.holsterT / KNIFE_HOLSTER) : this.V, [vp.y, left ? vp.x : -vp.x, vp.z], left, this.now);
+    }
     this.lastUpdateMs = performance.now() - t0;
   }
 
@@ -716,6 +735,7 @@ export class Viewmodel {
     this.robe.set(this.loadout, p.firstPersonRobe);
     this.glow.set(this.glowOverride === undefined ? getPlayerGlow() : this.glowOverride, p.firstPersonGlow, false);
     this.glow.sync([this.mesh], true, this.mesh.renderOrder);
+    this.charm.draw(cam, this.conv, this.mesh.material as THREE.Material, true);
     const auto = renderer.autoClear;
     renderer.autoClear = false;
     renderer.clearDepth();
@@ -746,6 +766,8 @@ export class Viewmodel {
     for (const u of this.unsub) u();
     this.glow.dispose();
     this.robe.dispose();
+    this.charm.dispose();
+    this.live.dispose();
     (this.mesh.material as THREE.Material).dispose();
     this.skeleton.dispose();
   }

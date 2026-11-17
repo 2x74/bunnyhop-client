@@ -6,7 +6,7 @@
 
 import { isTextField } from "../input";
 import type { MenuSpec, NumberMenu } from "../net/hud";
-import { closeGunPicker, gunPickerOpen } from "../weapon-commands";
+import { closeGunPicker, gunPickerOpen, menuKey } from "../weapon-commands";
 import type { PracticeMenuView } from "./controller";
 
 /**
@@ -25,11 +25,11 @@ export function practiceMenuView(): PracticeMenuView {
   const onKey = (e: KeyboardEvent) => {
     if (!menu?.open || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
     if (isTextField(e.target) || document.body.classList.contains("menu-open") || gunPickerOpen() || roomMenuOpen(menu)) return;
-    const d = /^(?:Digit|Numpad)(\d)$/.exec(e.code);
-    if (!d) return;
+    const d = menuKey(e);
+    if (d === null) return;
     e.preventDefault();
     e.stopImmediatePropagation();
-    menu.key(Number(d[1]));
+    menu.key(d);
   };
   return {
     get open() {

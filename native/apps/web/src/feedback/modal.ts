@@ -25,6 +25,7 @@ import { modal } from "../ui/account-panel";
 import { h } from "../ui/dom";
 import { prefs } from "../ui/settings";
 import { currentRoom } from "../net/presence";
+import { roomHealth } from "../net/room-health";
 import { gameInfo, lastSubmittedRun, recentErrors, type FeedbackCategory, type FeedbackOpen, type ReportTarget } from "./state";
 import "./feedback.css";
 import { backdropFrame } from "../ui/backdrop";
@@ -137,7 +138,8 @@ export function gameContext(fps: number | null): Record<string, unknown> {
   return {
     ...(game ?? { inGame: false }),
     ...(runId ? { runId } : {}),
-    ...(room ? { room } : {}),
+    // In a room: how its connection held up on this map (net/room-health.ts: reconnects, the last drop's close code).
+    ...(room ? { room, roomNet: roomHealth() } : {}),
     screen: document.body.dataset.screen || null,
     page: pageUrl(),
     webBuild: script,

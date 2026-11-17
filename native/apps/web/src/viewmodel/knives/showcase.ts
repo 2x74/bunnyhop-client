@@ -20,6 +20,7 @@ import { KnifeCtx } from "./ctx";
 import { warmPrograms } from "../../graphics/warm-programs";
 import { KnifeHold } from "./hold";
 import type { KnifeDef } from "./types";
+import { LiveHilt, liveIdOfSkin } from "../hilts/live/index";
 
 interface Built {
   geo: THREE.BufferGeometry;
@@ -89,6 +90,10 @@ export class KnifeShowcase {
   private W: Float32Array;
   private S = new Float32Array(12);
   private cur: Built | null = null;
+  /** A living hilt's pieces (hilts/live), in the knife's frame like the knife; still unless tick() runs. */
+  private live: LiveHilt;
+  private liveId: string | undefined;
+  private liveT = 0;
 
   constructor() {
     const r = vmRig();
@@ -105,6 +110,7 @@ export class KnifeShowcase {
     this.mesh.bind(sk, new THREE.Matrix4());
     this.mesh.frustumCulled = false;
     this.root.add(this.mesh);
+    this.live = new LiveHilt(this.mesh, this.skeleton, this.uniforms, true);
     // Knife-local skinning: bone j's knife-local bind BL_j = inv(bind_Knife_Handle) * bind_j.
     const kb = r.bone("Knife_Handle");
     const invKb = new Float32Array(12);
@@ -174,6 +180,7 @@ export class KnifeShowcase {
     this.mesh.position.copy(this.cur.center).multiplyScalar(-1);
     this.hold = new KnifeHold(k, vmRig());
     this.pose();
+    this.live.set(this.liveId, k);
   }
 
   /** Colourway accent / palette (guards and grips that follow your colours), like the viewmodel. */
@@ -196,6 +203,8 @@ export class KnifeShowcase {
     setHiltUniforms(this.uniforms, skin);
     this.hilt = !!skin;
     this.mesh.material = this.material(this.code, this.hilt);
+    this.liveId = liveIdOfSkin(skin);
+    if (this.knife) this.live.set(this.liveId, this.knife);
   }
 
   /**
@@ -245,7 +254,14 @@ export class KnifeShowcase {
     this.skeleton.update();
   }
 
+  /** Animates a living hilt's idle (its clock only, no play): call per frame while the close-up is up. */
+  tick(dt: number): void {
+    this.liveT += dt;
+    this.live.update(dt, this.liveT, { velocity: [0, 0, 0], grounded: true, landed: 0, yaw: 0 }, false, false);
+  }
+
   dispose(): void {
+    this.live.dispose();
     for (const m of this.mats.values()) m.dispose();
     this.mats.clear();
     this.skeleton.dispose();

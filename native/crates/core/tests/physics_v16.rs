@@ -177,7 +177,7 @@ fn lego3_coins_open_from_v16() {
 #[cfg_attr(ci, ignore = "map library")]
 #[test]
 fn other_maps_are_not_in_the_table() {
-    assert_eq!(map_player_io_table(), ["bhop_synthetic_fix", "bhop_wonderland", "bhop_lego3"]);
+    assert_eq!(map_player_io_table(), ["bhop_synthetic_fix", "bhop_wonderland", "bhop_lego3", "bhop_iso"]);
     // bhop_lego / bhop_space / kz_bhop_minimal use TestActivator too, and bhop_synthetic (the older build) the same
     // potion room: none of them is in the table, so v16 plays them exactly like v15.
     for map in ["bhop_eazy", "bhop_montana_fix", "bhop_lego", "bhop_space", "kz_bhop_minimal", "bhop_synthetic"] {

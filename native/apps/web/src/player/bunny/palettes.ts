@@ -77,6 +77,13 @@ export const COLOURWAYS: Record<string, Colourway> = {
   // Cartographer (150 maps): Palmera Plaza. Teal hoodie, pink trim, violet pants, a sunset-orange accent.
   // Ran the Gauntlet: the old developer texture. Grey hoodie, dev-orange trim, stripes and gloves.
   "outfit-devgrid": { hoodie: 0x8f9296, trim: 0xf08a24, pants: 0x4d5054, pantsTrim: 0xf08a24, shoe: 0xdadcdf, face: 0x151515, glove: 0xf08a24, detail: 0xffffff, accent: 0xffffff },
+  // The Daily Challenge's day cycle (progression.ts DAILY_LADDER), earned by taking part.
+  // Daybreak (the first daily): a peach hoodie with coral trim over pre-dawn indigo pants, a low-sun gold visor.
+  "outfit-daybreak": { hoodie: 0xffa86e, trim: 0xf2704f, pants: 0x2b2f5e, pantsTrim: 0x474d92, shoe: 0xfff0dc, face: 0x1a1630, glove: 0x2b2f5e, detail: 0xfff3c4, accent: 0xffd45e },
+  // Noon (30 dailies): sun-yellow hoodie, white trim, clear-sky blue pants and visor.
+  "outfit-noon": { hoodie: 0xffd84a, trim: 0xffffff, pants: 0x3f9fe0, pantsTrim: 0xffffff, shoe: 0xffffff, face: 0x10283d, glove: 0xffffff, detail: 0xffffff, accent: 0x7fd0ff },
+  // Dusk (60 dailies): violet hoodie with a sunset-coral trim, night pants edged in the last orange light.
+  "outfit-dusk": { hoodie: 0x6a3f9e, trim: 0xff6f61, pants: 0x1c1638, pantsTrim: 0xff9a3c, shoe: 0xf3e6f5, face: 0x0d0a1c, glove: 0x3a2466, detail: 0xffd9c2, accent: 0xff9a3c },
   // Trick or Treat (October): pumpkin hoodie, night-plum pants, vine-green gloves, a candle-glow visor.
   "outfit-pumpkin": { hoodie: 0xe0701c, trim: 0xb8550f, pants: 0x2a1f36, pantsTrim: 0x3d2a4a, shoe: 0x2e2622, face: 0x120904, glove: 0x3d6b2a, detail: 0xffe08a, accent: 0xffb43c },
   // v0.0.37, the top tiers (progression.ts tier_7 / tier_8 / tier_9 / tier_10), in the tier colours.

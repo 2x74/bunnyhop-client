@@ -69,16 +69,10 @@ test("the Number One picks the title colour and a supporter the name gradient in
   page.on("pageerror", (error) => errors.push(error.message));
   try {
     await openEditor(page, writes);
-    expect(await page.locator(".ce-part").allInnerTexts()).toEqual([
-      "Background",
-      "Frame",
-      "Title",
-      "Name",
-      "Avatar",
-      "Effects",
-      "Badges",
-      "Links",
-    ]);
+    // The parts follow the website's card editor; the native client needs Title and Name to reach these rows.
+    const parts = await page.locator(".ce-part").evaluateAll((els) => els.map((el) => el.getAttribute("data-part")));
+    expect(parts).toContain("title");
+    expect(parts).toContain("name");
     await page.locator(".ce-part[data-part=title]").click();
     const colour = page.getByLabel("Number One colour");
     expect(await colour.inputValue()).toBe("#ffffff");

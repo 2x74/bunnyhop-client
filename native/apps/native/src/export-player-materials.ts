@@ -28,7 +28,7 @@ const ATTRIBUTE_LOCATIONS: Record<string, number> = {
   backfx: 11,
 };
 
-const VERTEX_PRELUDE = `
+export const VERTEX_PRELUDE = `
 #define USE_SKINNING
 layout(location=0) in vec3 position;
 layout(location=1) in vec3 normal;
@@ -43,7 +43,7 @@ out vec2 vAuraCoord;
 out vec3 vGunCamo;
 `;
 
-const FRAGMENT_PRELUDE = `
+export const FRAGMENT_PRELUDE = `
 uniform mat4 viewMatrix;
 uniform vec3 cameraPosition;
 out vec4 fragColor;
@@ -112,7 +112,7 @@ const BEGIN_VERTEX = `
   }
 `;
 
-const VERTEX_CHUNKS: Record<string, string> = {
+export const VERTEX_CHUNKS: Record<string, string> = {
   common: COMMON,
   skinning_pars_vertex: SKINNING_PARS,
   beginnormal_vertex: BEGIN_NORMAL,
@@ -138,12 +138,12 @@ const VERTEX_CHUNKS: Record<string, string> = {
 `,
 };
 
-const FRAGMENT_CHUNKS: Record<string, string> = {
+export const FRAGMENT_CHUNKS: Record<string, string> = {
   tonemapping_fragment: "",
   colorspace_fragment: "  fragColor.rgb = nativeEncode(fragColor.rgb);\n",
 };
 
-function replaceChunks(source: string, chunks: Record<string, string>): string {
+export function replaceChunks(source: string, chunks: Record<string, string>): string {
   return source.replace(/^[ \t]*#include <(\w+)>[ \t]*$/gm, (_line, name: string) => {
     const chunk = chunks[name];
     if (chunk === undefined) throw new Error(`No native replacement for three.js chunk <${name}>`);
@@ -151,15 +151,15 @@ function replaceChunks(source: string, chunks: Record<string, string>): string {
   });
 }
 
-function nativeAttributes(source: string): string {
+export function nativeAttributes(source: string, locations: Record<string, number> = ATTRIBUTE_LOCATIONS): string {
   return source.replace(/^([ \t]*)attribute (\w+) (\w+);/gm, (_line, indent: string, type: string, name: string) => {
-    const location = ATTRIBUTE_LOCATIONS[name];
+    const location = locations[name];
     if (location === undefined) throw new Error(`No native location for attribute ${name}`);
     return `${indent}layout(location=${location}) in ${type} ${name};`;
   });
 }
 
-function glsl330(source: string, stage: "vertex" | "fragment"): string {
+export function glsl330(source: string, stage: "vertex" | "fragment"): string {
   return source
     .replace(/\bvarying\b/g, stage === "vertex" ? "out" : "in")
     .replace(/\btexture2D\b/g, "texture")

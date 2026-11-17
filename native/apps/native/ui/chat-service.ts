@@ -26,6 +26,7 @@ import { state, send } from "./bridge";
 import { openGiftDialog } from "../../web/src/ui/gifting";
 import { openReport } from "./report";
 import { setNativeChatSink } from "./chat-hud";
+import { parseTimescale } from "../../web/src/practice-mode/timescale";
 import { registerStrafeTrainerCommand } from "./chat-features";
 import { registerMapLookCommands } from "./map-looks";
 import type { NativeRoomService } from "./room-service";
@@ -63,6 +64,8 @@ export type ChatAction =
       action: "paint" | "clearPaint" | "paintOptions" | "measure" | "clearMeasure" | "lastLj" | "triggerMenu";
     }
   | { type: "chatAction"; action: "movementStat"; stat: "offsets" | "fjt" | "lj" | "jhud"; on?: boolean }
+  /** !timescale (the host keeps the scale and its practice-only rule, practice_timescale.hpp); no value: the status. */
+  | { type: "chatAction"; action: "timescale"; value?: number }
   /** The jump stats chat line on or off, and the least gain (0-100 %) a jump needs for a line. */
   | { type: "chatAction"; action: "ssjChat"; on: boolean; minGain?: number };
 export interface NativeChatLine {
@@ -142,6 +145,23 @@ export class NativeChatService {
               emit({ type: "chatAction", action: "weapon", weapon, weaponId: weaponByName(weapon) });
           },
         });
+      registerChatCommand({
+        name: "timescale",
+        aliases: ["ts"],
+        args: "[0.1-1]",
+        help: "slow motion in practice",
+        about:
+          "slows the game down in practice mode, from 0.1 to 1. The timer shows game time. It goes back to 1 when you leave practice.",
+        group: "practice",
+        where: "both",
+        // Like the other practice commands, a room keeps it in its chat log ("log").
+        run: (ctx, arg) => {
+          const value = arg.trim() ? parseTimescale(arg) : undefined;
+          if (value === null) ctx.reply("Use !timescale 0.1 to 1, like !timescale 0.5");
+          else emit({ type: "chatAction", action: "timescale", ...(value === undefined ? {} : { value }) });
+          return "log";
+        },
+      });
       registerChatCommand({
         name: "gun",
         aliases: ["give", "guns", "weapons"],

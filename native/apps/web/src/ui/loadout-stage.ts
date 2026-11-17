@@ -54,7 +54,7 @@ import { loadoutFor } from "../loadout";
 import { menuIdleAllowed, onMenuMapStart } from "./menu-work";
 import { loadThumb, saveThumb } from "./thumb-store";
 import { playerLookTier } from "../player/look-tier";
-import { CamoStage } from "./camo-stage";
+import { CamoStage, prewarmCamoGun } from "./camo-stage";
 import { softwareContext } from "../gfx-auto";
 import { sharedRenderer } from "../shared-gl";
 
@@ -64,7 +64,10 @@ export type StageView = "fp" | "close" | "bunny" | "ghost" | "hop" | "gun" | "gu
 const bunnyView = (v: StageView) => v === "bunny" || v === "ghost" || v === "hop";
 const gunView = (v: StageView) => v === "gun" || v === "gunside";
 /** What the bunny views dress the bunny in (the knife, gloves and hat come from the loadout). */
-export type StageLook = Pick<BunnyLook, "outfit" | "ghost" | "trail" | "shape" | "veil" | "playerGlow" | "previewGlow" | "facing">;
+export type StageLook = Pick<BunnyLook, "outfit" | "ghost" | "trail" | "shape" | "veil" | "playerGlow" | "previewGlow" | "facing" | "focus"> & {
+  /** The Charm slot: the first-person view comes in on the hilt and the charm hanging from it (targetRect). */
+  charm?: boolean;
+};
 
 /** Thumbnail size in device pixels (16:10). */
 export const THUMB_W = 384;
@@ -85,6 +88,8 @@ const FINISH_CODES = [...new Set(Object.values(FINISH_CODE))];
 const knifeProgram = (l: CosmeticLoadout): string => `${FINISH_CODE[specOf(l).kind] ?? 0}|${hiltSkin(l.hilt) ? 1 : 0}`;
 /** The shortest frame the stage draws (~62 fps, as the menu background: attract.ts). */
 const FRAME_MIN_MS = 1000 / 62;
+/** Thumbnails drawn and waiting to be read back at once (gpuFree). Each read costs a frame about 1.5 ms of copying. */
+const READS_AT_ONCE = 2;
 /** Seconds of the idle sequence the hero loops (see drawFirstPerson). */
 const IDLE_LOOP = 4.6;
 
@@ -555,9 +560,13 @@ export class LoadoutStage {
   private serial(): boolean {
     return !parallelCompile(this.renderer);
   }
-  /** Whether a thumbnail may start a GPU step now (see compiling). */
+  /**
+   * Whether a thumbnail may start a GPU step now (see compiling). Where programs compile in parallel (any hardware GL)
+   * READS_AT_ONCE thumbnails may be in flight: each has its own pixel buffer and they share the frame's fence, so a slot
+   * opened for the first time fills in half the frames. One at a time without it (SwiftShader), as before.
+   */
   private gpuFree(): boolean {
-    return !this.reading && !(this.serial() && this.compiling);
+    return this.serial() ? !this.reading && !this.compiling : this.reading < READS_AT_ONCE;
   }
 
   /** Compiles the next queued thumbnail's programs that aren't ready (one at a time); their thumbnails draw after. */
@@ -838,8 +847,11 @@ export class LoadoutStage {
   // -------------------------------------------------------------------------------------------
   // Framing
 
-  /** Screen bounds (fractions of the virtual 16:9 screen) of a viewmodel's blade, the rest of its knife, its right hand. */
-  private measure(vm: Viewmodel): { blade: Rect | null; knife: Rect | null; hand: Rect | null } {
+  /**
+   * Screen bounds (fractions of the virtual 16:9 screen) of a viewmodel's blade, the rest of its knife, its right hand,
+   * and the charm hanging from the knife when one is worn (a box round its centre the size it is drawn at).
+   */
+  private measure(vm: Viewmodel): { blade: Rect | null; knife: Rect | null; hand: Rect | null; charm: Rect | null } {
     const r = this.renderer;
     const cam = vm.camera;
     cam.clearViewOffset();
@@ -874,7 +886,17 @@ export class LoadoutStage {
       }
       return Number.isFinite(x0) ? [x0, y0, x1, y1] : null;
     };
-    return { blade: bounds(s.blade), knife: bounds(s.knife), hand: bounds(s.hand) };
+    // The charm (viewmodel/charms): its centre is kept in the eye's frame; conv takes that frame to the camera's.
+    let charm: Rect | null = null;
+    const inner = vm as unknown as { charm: { worn: boolean; rig: { centre: [number, number, number] } }; conv: THREE.Matrix4 };
+    if (inner.charm.worn) {
+      v.set(...inner.charm.rig.centre).applyMatrix4(inner.conv).applyMatrix4(cam.matrixWorld).project(cam);
+      const fx = (v.x + 1) / 2, fy = (1 - v.y) / 2;
+      // (About 110 px tall on a 1080p screen at size 100: the charms' own measure.)
+      const ry = 0.06 * ((this.shown.charmSize ?? 100) / 100), rx = (ry * 9) / 16;
+      if (v.z <= 1 && Number.isFinite(fx) && Number.isFinite(fy)) charm = [fx - rx, fy - ry, fx + rx, fy + ry];
+    }
+    return { blade: bounds(s.blade), knife: bounds(s.knife), hand: bounds(s.hand), charm };
   }
 
   /** Points the viewmodel camera at `rect` (fractions of the virtual 16:9 screen) for a w x h viewport. */
@@ -888,8 +910,23 @@ export class LoadoutStage {
   private targetRect(): Rect {
     const v = prefs.get().viewmodel;
     const k = knifeOf(this.shown.knife);
-    const key = `${k.id}|${v.hand}|${v.fov}|${v.x}|${v.y}|${v.z}|${this.probe.animSource}|${this.w}x${this.h}`;
+    // The Charm slot comes in on the hilt and the charm: framed where this charm hangs on this knife and hilt.
+    const l = this.shown;
+    const charm = this.look.charm && l.charm ? `|charm:${l.charm}:${l.charmLength ?? ""}:${l.charmSize ?? ""}:${l.charmPommel ? "p" : "g"}:${l.hilt ?? ""}` : "";
+    const key = `${k.id}|${v.hand}|${v.fov}|${v.x}|${v.y}|${v.z}|${this.probe.animSource}|${this.w}x${this.h}${charm}`;
     let rect = this.boundsCache.get(key);
+    if (!rect && charm) {
+      this.probe.setKnife(vmKnife(k));
+      this.probe.setLoadout(l);
+      this.probe.seek("idle", 0);
+      // A second of stillness first: the charm comes to rest where it hangs (its cord starts out straight).
+      for (let i = 0; i < 60; i++) this.probe.update(1 / 60, still(0, 0), NO_ATTACK);
+      const m = this.measure(this.probe);
+      this.probe.seek("idle", 0);
+      const b = union(m.charm, onScreen(m.knife)) ?? union(m.knife, m.hand);
+      // Nearly twice as close as the knife's own framing: the charm is a tenth of the screen tall in game.
+      if (b) this.boundsCache.set(key, (rect = fit(pad(b, 0.5, 0.45), this.w / this.h, 0.36, [0.5, 0.52])));
+    }
     if (!rect) {
       this.probe.setKnife(vmKnife(k));
       this.probe.setLoadout(this.shown);
@@ -1049,6 +1086,8 @@ export class LoadoutStage {
     const bob = this.reduced ? 0 : Math.sin(this.t * 0.9) * 0.025;
     const q = knifeBasis().premultiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(this.tilt + bob, this.spin, 0.16, "XYZ")));
     this.show.root.quaternion.copy(q);
+    // A living hilt's idle (viewmodel/hilts/live: it holds itself still under reduced motion and Potato).
+    this.show.tick(dt);
     const cam = this.closeCam;
     cam.aspect = this.w / this.h;
     const tv = Math.tan(THREE.MathUtils.degToRad(cam.fov / 2));
@@ -1166,6 +1205,29 @@ export class LoadoutStage {
       void this.show.precompile(this.renderer, this.closeCam, FINISH_CODES, !!hiltSkin(this.shown.hilt), go).catch(() => {});
     });
   }
+
+  /**
+   * The Gun camo stage's parts, built ahead of the click that opens it: its gun's model, then the hands that hold it
+   * (both are kept by their own modules, per gun and glove). Built inside that click they held it up for 80 ms (0.3 s
+   * at 4x CPU). The view asks for this when the player heads for Gun camo (the pointer or the focus reaches its entry:
+   * `soon`, a task each), or is on a slot next to it (in idle time). Only then: it is one long step, and most visits
+   * never open the guns. The stage made here is thrown away: one kept alive would follow every display() from then on
+   * (a glove hovered would re-pose a gun nobody is looking at).
+   */
+  warmGuns(soon = false): void {
+    if (this.gunsWarm || this.guns || this.disposed) return;
+    this.gunsWarm = true;
+    const later = (fn: () => void) => (soon ? setTimeout(fn, 0) : ric(fn));
+    const ok = () => !this.disposed && !this.guns && this.canvas.isConnected && menuIdleAllowed();
+    later(() => {
+      if (!ok()) return void (this.gunsWarm = false);
+      prewarmCamoGun();
+      later(() => {
+        if (ok()) new CamoStage(this.shown).dispose();
+      });
+    });
+  }
+  private gunsWarm = false;
 
   /** Pending thumbnails: dropped (their tiles are gone with the view). */
   private dropThumbs(): void {

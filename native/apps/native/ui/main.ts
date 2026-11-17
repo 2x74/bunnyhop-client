@@ -28,7 +28,7 @@ import { mapTime } from "../../web/src/map-time";
 import { NativeRunService } from "./run-service";
 import { profileDpi } from "./profile-mouse";
 import { formatTime } from "../../web/src/timer";
-import { isStyleId } from "../../web/src/styles";
+import { isStyleId, type StyleId } from "../../web/src/styles";
 import { onStyleChange, setSelectedStyle } from "../../web/src/ui/style-picker";
 import { settingsPanel, focusSettingsSection } from "./settings-panel";
 import { watchForAntipiracy } from "./antipiracy";
@@ -52,7 +52,7 @@ import { installTutorialProgress } from "./tutorial-entry";
 import { watchGauntletSplit } from "./gauntlet-watch";
 import { NativeRoomService } from "./room-service";
 import { RoomConnection } from "../../web/src/net/room";
-import { installVoicePeople } from "./voice-people";
+import { installVoicePeople, voicePeople } from "./voice-people";
 import { leaveRoomBefore } from "./room-message-policy";
 import { setRoomPresence, setRaceTag, currentRoom, currentRace } from "../../web/src/net/presence";
 import { serverBrowser } from "../../web/src/ui/servers";
@@ -64,7 +64,7 @@ import { NativeChatService } from "./chat-service";
 import { RoomAccountBoundary } from "./room-account";
 import { installNativeUiAudio } from "./audio";
 import { initDock } from "../../web/src/social/dock";
-import { initSocial, refreshFriends, setPlaying, setWatching } from "../../web/src/social/state";
+import { friendsView, initSocial, refreshFriends, setPlaying, setWatching } from "../../web/src/social/state";
 import { ranksScreen, leaveRanksUrl } from "../../web/src/ui/ranks";
 import { statsScreen } from "../../web/src/ui/stats-screen";
 import { profilePanel } from "./profile-panel";
@@ -80,6 +80,10 @@ import { cosmeticsPanel, initCosmetics, setKnifePick } from "./cosmetics";
 import { getHeldLoadout, onHeldLoadout } from "../../web/src/player/cosmetics";
 import { creditsPanel } from "./credits";
 import { homeScreen, watchMenuMotion, LAST_MAP } from "./home-menu";
+import { NativeDaily } from "./daily-native";
+import { NativeGainLogs } from "./gain-logs-native";
+import { gainLogs } from "../../web/src/ssj";
+
 import { pauseScreen } from "./pause-menu";
 import { setGameInfo } from "../../web/src/feedback/state";
 import { latestMouseDiagnostics } from "./mouse-diagnostics";
@@ -102,6 +106,8 @@ import { installMenuErrorLog, logToHost } from "./menu-log";
 import { initCustomCss } from "./custom-css/custom-css";
 import { installHudTheme } from "./custom-css/hud-theme";
 import { installNativeConsole } from "./console-panel";
+import { exitGame, uploadingStatus } from "./exit-game";
+import { confirmDialog } from "../../web/src/ui/settings-transfer";
 
 import { installGamepadNavigation } from "./gamepad";
 import { maybeStartOnboarding, openOnboarding } from "./onboarding";
@@ -180,6 +186,10 @@ interface FinishSummary {
   sync?: number;
 }
 let finishSummary: FinishSummary | null = null;
+/** The host's timer status (1 while a timed run is going) and the run service's latest status: Exit game reads both. */
+let timerStatus = 0;
+let runServiceStatus: string | null = null;
+const RUN_TIMER_RUNNING = 1;
 const app = document.getElementById("menu")!;
 const status = document.getElementById("native-status")!;
 const flash = document.getElementById("native-notice")!;
@@ -236,7 +246,20 @@ function paintFinish(): void {
     ),
   );
 }
+const nativeDaily = new NativeDaily({ line: (line) => send({ type: "daily", line }) });
+/** Play the day's map from the Daily entry, in the day's style (the host keeps it as the selected style). */
+/** The player's own style while the Daily plays in the day's: the next map goes back to it (web: the page's style). */
+let styleBeforeDaily: StyleId | null = null;
+function playDaily(day: string, map: string, style?: string, endsAt?: number): void {
+  styleBeforeDaily ??= state.style;
+  selectMapIn(map, nativeDaily.play(day, map, style, endsAt) as StyleId, false);
+}
 function selectMap(id: string): void {
+  const style = styleBeforeDaily ?? state.style;
+  styleBeforeDaily = null;
+  selectMapIn(id, style);
+}
+function selectMapIn(id: string, style: StyleId, remember = true): void {
   pickMap(id, {
     map: () => state.map,
     leaving: [
@@ -261,7 +284,7 @@ function selectMap(id: string): void {
       send({ type: "resume" });
     },
     // The host owns loading/error status and clears it when the download settles.
-    request: (map) => send({ type: "selectMap", id: map, style: state.style, track: 0 }),
+    request: (map) => send({ type: "selectMap", id: map, style, track: 0, ...(remember ? {} : { remember: false }) }),
     refuse: (text) => {
       notice(text);
       logToHost(`map pick refused: ${text}`);
@@ -429,6 +452,7 @@ function render(): void {
       resume: () => send({ type: "resume" }),
       restart: () => send({ type: "restart" }),
       leave: leaveMap,
+      quit: () => exitFromMenu(true),
       practice,
       binds: state.settings.binds,
       // (No in-place track switch on the host: the map is selected again on its main track.)
@@ -503,9 +527,13 @@ function render(): void {
       learn: () => show("tutorial"),
       replays: () => show("replays"),
       credits: () => show("credits"),
-      quit: () => send({ type: "quit" }),
+      quit: () => exitFromMenu(false),
       web: openWeb,
       gauntlets: () => show("gauntlets"),
+      playDaily: (day, map, style, endsAt) => {
+        if (state.loading) logToHost(`daily ${map} ignored: another map is loading`);
+        else playDaily(day, map, style, endsAt);
+      },
       background: (map, pb) => {
         if (screen === "home" && !state.map) requestBackdrop(map, pb);
       },
@@ -761,7 +789,9 @@ function receive(value: unknown): void {
   if (value && typeof value === "object" && (value as { paused?: unknown }).paused === false) releaseKeepRunField();
   let finishChanged = false;
   if (value && typeof value === "object" && "timer" in value) {
-    const next = readFinish((value as { timer: unknown }).timer);
+    const timer = (value as { timer: unknown }).timer;
+    const next = readFinish(timer);
+    timerStatus = Number((timer as { status?: unknown } | null)?.status) || 0;
     finishChanged = JSON.stringify(next) !== JSON.stringify(finishSummary);
     finishSummary = next;
   }
@@ -800,6 +830,7 @@ function receive(value: unknown): void {
   if (finishChanged && !finishSummary) gauntletLine = null;
   gauntlet.onHostState();
   roomService.hostMap(state.map, !!state.loading);
+  nativeDaily.update(state.loading ? null : state.map, state.style, !!roomService.view.id);
   syncingStyle = true;
   setSelectedStyle(state.style);
   syncingStyle = false;
@@ -812,7 +843,15 @@ function chatKeyLabel(): string | null {
   const code = state.settings.binds.chat?.[0];
   return code ? keyLabel(code) : null;
 }
+const nativeGainLogs = new NativeGainLogs(
+  gainLogs,
+  { relayLog: (log) => roomService.relayLog(log) },
+  () => prefs.get().hud.logs,
+);
 const roomService = new NativeRoomService({
+  gainLogs: nativeGainLogs.roomSide(
+    (id) => voicePeople.muted(id) || !!friendsView()?.blocked.some((blocked) => blocked.id === id),
+  ),
   chatKey: chatKeyLabel,
   heldKnife: getHeldLoadout,
   connect: (id, handlers) => new RoomConnection(id, () => state.style, handlers),
@@ -830,11 +869,27 @@ const roomService = new NativeRoomService({
   send,
 });
 onHeldLoadout(() => roomService.heldKnifeChanged());
+// !logs, cl_logs and Settings change the bar the room is asked for.
+prefs.watch(() => roomService.syncLogs());
 const chatService = new NativeChatService(roomService, () => {
   send({ type: "chatAction", action: "openRoom" } as unknown as Parameters<typeof send>[0]);
   show("room");
 });
+/** Exit game (exit-game.ts): the main menu and the console never ask; the pause menu asks during a timed run. */
+function exitFromMenu(ask: boolean): void {
+  void exitGame(
+    {
+      runInProgress: () => !!state.map && timerStatus === RUN_TIMER_RUNNING,
+      uploading: () => uploadingStatus(runServiceStatus),
+      confirm: () =>
+        confirmDialog({ title: "Exit the game?", body: "The run you're on won't be saved.", confirm: "Exit game" }),
+      quit: () => send({ type: "quit" }),
+    },
+    ask,
+  );
+}
 installNativeConsole({
+  quit: () => exitFromMenu(false),
   action: (action, down) => {
     if (down !== undefined) {
       send({ type: "consoleAction", action, down });
@@ -972,13 +1027,16 @@ const runService = new NativeRunService({
     room: currentRoom(),
     race: currentRace(identity),
     gauntlet: gauntlet.tag(identity, generation, finishSummary?.seconds ?? null),
+    daily: nativeDaily.entry(identity),
   }),
+  dailyLine: (result, run) => nativeDaily.result(result, run),
   holdGauntlet: (attempt, generation) => gauntlet.holds(attempt, generation),
   savedRunUploaded: (map) => send({ type: "hudToast", text: `Your saved run on ${map} was uploaded.`, ms: 5000 }),
   version: () => api.version(),
   origin: () => location.origin,
   send: (message) => {
     send(message);
+    runServiceStatus = message.status;
     gauntlet.onRunStatus(message, finishSummary?.seconds ?? null);
     if (message.message) notice(message.message);
     if (message.status === "verified") refreshAccount();
@@ -1023,6 +1081,7 @@ window.bunnyhopNativeMenu = {
   onActivity: (value) => activityService.receive(value),
   onState: receive,
   onAuth: refreshAccount,
+  onGainLog: (value) => nativeGainLogs.own(value),
   onRunEvent: (value) => {
     void runService.receive(value);
   },

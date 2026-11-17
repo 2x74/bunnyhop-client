@@ -103,6 +103,7 @@
 #include "free_cameras.hpp"
 #include "menu_cursor.hpp"
 #include "numbered_menus.hpp"
+#include "paint_store.hpp"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_opengl.h>
 #include <algorithm>
@@ -277,6 +278,8 @@ int run(const native::Options &opt) {
     bool captured = false, focused = true, running = true, menu_ready = false, resume_wanted = false;
     // Settings and other small JSON files are written off the frame loop.
     native::JsonFileWriter json_writer;
+    // +paint marks kept per map across restarts (paint_store.hpp).
+    native::PaintStore paint_store(cache / "paint");
     auto preferences = startup_data.settings;
     native::MenuState menu_state;
     native::MenuRoomState room_menu_state;
@@ -342,6 +345,8 @@ int run(const native::Options &opt) {
             std::cerr << "Window bounds: " << e.what() << '\n';
         }
     };
+    // The charm and its options (loadout.ts packLoadoutExt), from the menu beside the packed loadout.
+    std::string charm_loadout;
     std::string selected_style = opt.style, active_style = opt.style, outfit, packed_loadout,
                 ghost_cosmetic = "ghost-default", trail_cosmetic = "trail-none", shape_cosmetic = "shape-ribbon";
     // The style the player last picked starts the next launch too (saved_style.hpp); --style wins for that launch.
@@ -544,6 +549,8 @@ int run(const native::Options &opt) {
     native::LeaveHold leave_hold;
     std::string gauntlet_id, gauntlet_map;
     nlohmann::json gauntlet_progress;
+    // The Daily Challenge's line while on the day's map (ui/daily-native.ts), drawn in the gauntlet line's place.
+    std::string daily_line;
     if (!data_startup_notice.empty()) {
         hud.toasts.push(data_startup_notice, double(SDL_GetTicksNS()) / 1e9, 8);
         data_notice = data_startup_notice;
@@ -740,7 +747,8 @@ int run(const native::Options &opt) {
                 active_style,
                 replay_player,
                 configured_turns,
-                held_knife.loadout()
+                held_knife.loadout(),
+                charm_loadout
         );
         run_history.select(map_id, active_track, active_style, double(SDL_GetTicksNS()) / run_second_ns);
     };
@@ -802,7 +810,7 @@ int run(const native::Options &opt) {
             renderer->reset_presentation();
             scope.reset();
             renderer->set_viewmodel_weapon(std::nullopt);
-            renderer->set_cosmetics(outfit, held_knife.loadout());
+            renderer->set_cosmetics(outfit, held_knife.loadout(), charm_loadout);
         }
         audio.reset();
         hud.reset_history(true);
@@ -965,6 +973,7 @@ int run(const native::Options &opt) {
         replay_compare.clear();
         replay_compare_import.reset();
         copy_starts.reset();
+        if (renderer) paint_store.flush(renderer->paint_marks(), json_writer);
         game.leave(practice);
         tutorial_runner.lesson.reset();
         viewer.active = false;
@@ -1053,7 +1062,11 @@ int run(const native::Options &opt) {
                                                       : std::make_unique<native::Renderer>(gl, next.core.get(), assets);
         next_renderer->set_map_identity(id, detail.is_object() ? detail.value("sha256", std::string()) : std::string());
         next_renderer->load_map_volumes(data_location::from_utf8(path));
+        if (renderer) paint_store.flush(renderer->paint_marks(), json_writer);
         game.install(std::move(next.core), std::move(next_renderer), practice, audio);
+        // Smoke and frame-count runs neither read nor write saved paint (no BSP hash, nothing saved).
+        const bool keeps_paint = !opt.frames && opt.runtime_smoke.empty() && detail.is_object();
+        paint_store.load(id, keeps_paint ? detail.value("sha256", std::string()) : "", renderer->paint_marks());
         map_audio.start(core.get(), data_location::from_utf8(path), data_location::from_utf8(content));
         // The pause screen shows this map itself, never the home tour.
         if (backdrop) backdrop->release();
@@ -1088,7 +1101,7 @@ int run(const native::Options &opt) {
         next_knife_event = pending_replay.empty() ? native::KnifePoolEvent::map : native::KnifePoolEvent::none;
         reset();
         apply_preferences();
-        renderer->set_cosmetics(outfit, held_knife.loadout());
+        renderer->set_cosmetics(outfit, held_knife.loadout(), charm_loadout);
         renderer->set_ghost_cosmetics(ghost_cosmetic, trail_cosmetic, shape_cosmetic);
         apply_room_mode(room_modes.map_loaded(map_id, room.spectator_target.has_value(), epoch_ms()));
     };
@@ -1126,8 +1139,11 @@ int run(const native::Options &opt) {
     };
     auto apply_room_event = [&](const nlohmann::json &message) {
         const auto lifecycle = room.generation;
+        const bool vote_was_shown = room.vote_display.count != 0;
         const auto next = room.event(message);
         refresh_room_display(std::chrono::duration<double>(Clock::now().time_since_epoch()).count());
+        // One menu at a time: a vote coming up closes the guns menu, which would take its digits.
+        if (!vote_was_shown && room.vote_display.count != 0) gun_menu.close();
         room_bridge.voice().room(room);
         if (!room.id.empty()) {
             // Joining a room ends solo practice. Practice started in the room carries on through its events.
@@ -1242,7 +1258,9 @@ int run(const native::Options &opt) {
                                                 : std::string();
             viewer.runner_outfit = native_render::packed_outfit(runner_loadout).value_or(outfit);
             viewer.runner_loadout = runner_loadout;
-            renderer->set_cosmetics(viewer.runner_outfit, runner_loadout);
+            const auto runner_charm = viewer.session.info.value("packedLoadoutExt", nlohmann::json());
+            viewer.runner_charm = runner_charm.is_string() ? runner_charm.get<std::string>() : std::string();
+            renderer->set_cosmetics(viewer.runner_outfit, runner_loadout, viewer.runner_charm);
             viewer.begin(path);
             replay_timeline.request(path, viewer.id);
             recorder.clear(true);
@@ -1737,9 +1755,9 @@ int run(const native::Options &opt) {
                         menu->evaluate_js(native::spectate_script(pick.watch));
                     return;
                 }
-                if (!practice.menu_open && !room.vote.is_null() && down && !repeat && code.size() == 6
-                    && code.starts_with("Digit")) {
-                    const int pick = code.back() - '0';
+                const auto vote_digit = native::menu_key(code, input_timeline.binds());
+                if (!practice.menu_open && !room.vote.is_null() && down && !repeat && vote_digit) {
+                    const int pick = *vote_digit;
                     if (pick > 0 && room.vote.contains("options") && size_t(pick) <= room.vote.at("options").size()) {
                         room.voted(pick - 1);
                         room_control({{"action", "vote"}, {"option", pick - 1}});
@@ -1769,7 +1787,7 @@ int run(const native::Options &opt) {
                     }
                     return;
                 }
-                if (numbered_menus.owns(code, down, room.vote_display.count != 0)) return;
+                if (numbered_menus.owns(code, down, room.vote_display.count != 0, input_timeline.binds())) return;
                 if (room.spectator_target && down && !repeat
                     && free_cameras.spectator.changes_camera(code, input_timeline.binds())) {
                     free_cameras.spectator.cycle(free_look_input);
@@ -2584,6 +2602,20 @@ int run(const native::Options &opt) {
                         else if (action == "triggerMenu") {
                             trigger_menu.toggle();
                             numbered_menus.opened(native::NumberedMenus::Menu::triggers);
+                        } else if (action == "timescale") {
+                            const native::TimescaleContext context{
+                                    practice.mode,
+                                    !room.id.empty(),
+                                    map_id == native::TutorialRunner::map_id,
+                                    !gauntlet_id.empty(),
+                                    active_style == "segmented"
+                            };
+                            const auto value = message.find("value");
+                            const auto reply = value != message.end() && value->is_number()
+                                                       ? practice.timescale.set(value->get<double>(), context)
+                                                       : practice.timescale.status(context);
+                            chat.push(reply, "", "local", epoch_ms() / 1000.);
+                            menu_state.reset();
                         } else if (action == "movementStat") {
                             preferences = native::patch_settings(
                                     preferences, native::movement_stat_patch(preferences, message)
@@ -2778,6 +2810,9 @@ int run(const native::Options &opt) {
                             audio.play(id, float(gain), rate);
                     } else if (type == "gauntlet") {
                         gauntlet_action(message);
+                    } else if (type == "daily") {
+                        const auto line = message.find("line");
+                        daily_line = line != message.end() && line->is_string() ? line->get<std::string>() : "";
                     } else if (type == "restart" && core && !download.valid()) {
                         reset();
                         show_menu(false);
@@ -2810,7 +2845,8 @@ int run(const native::Options &opt) {
                             throw std::runtime_error("Gauntlets are Normal style on the main track.");
                         tutorial_runner.stopped = false;
                         selected_style = style;
-                        if (gauntlet_id.empty()) remember_style();
+                        // The Daily plays in the day's style without making it the saved one (ui/main.ts playDaily).
+                        if (gauntlet_id.empty() && message.value("remember", true)) remember_style();
                         active_track = message.value("track", 0u);
                         if (active_track > 64) throw std::runtime_error("Invalid track");
                         pending_replay.clear();
@@ -3094,7 +3130,8 @@ int run(const native::Options &opt) {
                         player_glow = native_render::parse_glow(message.value("playerGlow", nlohmann::json(nullptr)));
                         outfit = message.value("outfit", std::string());
                         packed_loadout = message.value("packedLoadout", std::string());
-                        if (outfit.size() > 64 || packed_loadout.size() > 200)
+                        charm_loadout = message.value("charmLoadout", std::string());
+                        if (outfit.size() > 64 || packed_loadout.size() > 200 || charm_loadout.size() > 200)
                             throw std::runtime_error("Invalid cosmetic selection");
                         held_knife.update(
                                 packed_loadout,
@@ -3108,7 +3145,7 @@ int run(const native::Options &opt) {
                             throw std::runtime_error("Invalid ghost cosmetic");
                         if (renderer) {
                             renderer->set_player_glow(player_glow);
-                            renderer->set_cosmetics(outfit, held_knife.loadout());
+                            renderer->set_cosmetics(outfit, held_knife.loadout(), charm_loadout);
                             renderer->set_ghost_cosmetics(ghost_cosmetic, trail_cosmetic, shape_cosmetic);
                         }
                     } else if (type == "roomEvent") {
@@ -3514,15 +3551,25 @@ int run(const native::Options &opt) {
         input_frame_ms = frame_seconds * 1000;
         const double step_dt = viewer.active ? viewer.session.range.tick_interval : dt;
         const uint64_t tick_ns = uint64_t(std::llround(step_dt * 1e9));
+        const native::TimescaleContext timescale_context{
+                practice.mode,
+                !room.id.empty(),
+                map_id == native::TutorialRunner::map_id,
+                !gauntlet_id.empty(),
+                active_style == "segmented"
+        };
+        const double timescale = practice.timescale.frame(timescale_context);
         input_scheduler.frame(
-                mouse_pump_start, simulation_active, tick_ns, viewer.active ? viewer.speed : 1, opt.frames != 0
+                mouse_pump_start, simulation_active, tick_ns, viewer.active ? viewer.speed : timescale, opt.frames != 0
         );
         frame_diagnostics.mark(native::FrameDiagnostics::kOther, SDL_GetTicksNS());
         uint64_t &sim_ns = input_scheduler.sim_ns;
         input_timeline.begin_frame(input, simulation_active, now_ns);
         while (input_scheduler.due(tick_ns)) {
             const double counts_before = input.yaw_counts;
-            input_timeline.take_tick(input, sim_ns, tick_ns, opt.frames != 0);
+            input_scheduler.place_tick(tick_ns);
+            if (!viewer.active && timescale != 1) practice.slowed = true;
+            input_timeline.take_tick(input, sim_ns, input_scheduler.real_tick_ns(tick_ns), opt.frames != 0);
             const double mouse_counts = input.yaw_counts - counts_before;
             // A track-style switch restarts facing where this tick's mouse motion turned the view, and drops the
             // tick's command (website session.ts command).
@@ -3543,6 +3590,7 @@ int run(const native::Options &opt) {
             prev = curr;
             const BhState tutorial_pre = curr;
             BhCmd cmd{};
+            std::optional<float> live_yaw;
             if (viewer.active) {
                 if (curr.tick >= viewer.session.range.to) {
                     viewer.paused = true;
@@ -3623,6 +3671,7 @@ int run(const native::Options &opt) {
                     curr = snapshot.player;
                 } else {
                     const auto look = input.look_sample();
+                    live_yaw = cmd.yaw;
                     require(bh_step_look_v2(core.get(), &cmd, look ? &*look : nullptr, &curr),
                             core.get(),
                             "Stepping simulation");
@@ -3741,6 +3790,14 @@ int run(const native::Options &opt) {
                     }
                     if (const auto report = feedback.ssj_sixth.tick(pre, ssj_cmd, info))
                         feed_reports.sixth_jump = native::spectate_input::Jump{*report, {}};
+                    // Your six-jump gain log: the menu shows it and passes it to a room (ui/gain-logs-native.ts).
+                    const auto log = feedback.gain_logs.tick(pre, ssj_cmd, info);
+                    if (log && !viewer.active && menu && menu_ready)
+                        menu->evaluate_js(
+                                native::gain_log_script(
+                                        *log, active_style, !practice.counts() || turn_admission.local_only
+                                )
+                        );
                 }
                 hud.jhud.expire(curr.tick);
                 if (timing.update_flags & 1) ghost_compare.restart();  // started
@@ -3752,6 +3809,10 @@ int run(const native::Options &opt) {
                     trainer_settings = viewer.session.settings;
                 else
                     bh_style_settings(style.c_str(), &trainer_settings);
+                // v28+ Auto-strafe steps last tick's view; the turn judged is from it to the live mouse (session.ts).
+                std::optional<double> turn_yaw;
+                if (!viewer.active && style == "autostrafe" && trainer_settings.physics >= 28 && live_yaw)
+                    turn_yaw = *live_yaw;
                 native::feed_strafe_trainer(
                         feedback,
                         hud.preferences(),
@@ -3761,7 +3822,8 @@ int run(const native::Options &opt) {
                         style,
                         step_dt,
                         info.noclip,
-                        native::air_speed_gain(core.get())
+                        native::air_speed_gain(core.get()),
+                        turn_yaw
                 );
             }
             BhSurfaceProbe surface{};
@@ -3894,12 +3956,13 @@ int run(const native::Options &opt) {
                         run_state.seconds,
                         double(SDL_GetTicksNS()) / 1e9,
                         hud.extras.personal_best,
-                        !practice.active && !turn_admission.local_only
+                        practice.counts() && !turn_admission.local_only
                 );
-            if (practice.active && !viewer.active && run_state.status == 2 && !recorder.ended) {
+            const bool practice_attempt = !practice.counts();
+            if (practice_attempt && !viewer.active && run_state.status == 2 && !recorder.ended) {
                 recorder.ended = true;
             }
-            if (!practice.active && !viewer.active && run_state.status == 2 && !recorder.ended) {
+            if (!practice_attempt && !viewer.active && run_state.status == 2 && !recorder.ended) {
                 recorder.ended = true;
                 if (!recorder.path.empty()) {
                     try {
@@ -4057,7 +4120,7 @@ int run(const native::Options &opt) {
                             hud, feedback, room.watched_feed, target->frame.tick, watched_style, steady_seconds
                     );
                     camera_input.set_angles(target->frame.pitch, target->frame.yaw);
-                    renderer->set_cosmetics(target->outfit, target->loadout);
+                    renderer->set_cosmetics(target->outfit, target->loadout, target->charm);
                     renderer->set_player_glow(target->playerGlow);
                     renderer->set_viewmodel_weapon(target->frame.weapon);
                     actors.erase(
@@ -4219,6 +4282,7 @@ int run(const native::Options &opt) {
             renderer->surface_tools_frame(
                     curr, input, simulation_active && captured && !viewer.active && !spectator, spectator.has_value()
             );
+            paint_store.frame(renderer->paint_marks(), double(SDL_GetTicksNS()) / run_second_ns, json_writer);
             renderer->landing_context(
                     spectator.has_value() || practice.noclip || practice.infinite_flight.flying(),
                     practice.active || tutorial_practice(),
@@ -4301,6 +4365,7 @@ int run(const native::Options &opt) {
                     gauntlet_good = delta < 0;
                 }
             }
+            if (gauntlet_line.empty()) gauntlet_line = daily_line;
             hud.extras.flight_line.assign(
                     practice.infinite_flight.flying() ? native::InfiniteFlight::hud_line : std::string_view()
             );
@@ -4786,6 +4851,7 @@ int run(const native::Options &opt) {
         );
         frame_diagnostics.mark(native::FrameDiagnostics::kSleep, SDL_GetTicksNS());
     }
+    if (renderer) paint_store.flush(renderer->paint_marks(), json_writer);
     save_window();
     if (!opt.frames && opt.runtime_smoke.empty()) {
         run_history.persist(json_writer, cache, activity, double(SDL_GetTicksNS()) / run_second_ns, true);

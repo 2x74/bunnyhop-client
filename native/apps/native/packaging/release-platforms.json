@@ -1,5 +1,7 @@
 {
   "schema": 1,
-  "version": "0.9.3",
-  "absentPlatforms": []
+  "version": "0.9.4",
+  "absentPlatforms": [
+    "darwin/arm64"
+  ]
 }

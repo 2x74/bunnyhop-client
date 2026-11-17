@@ -37,7 +37,7 @@ export { HILT_FRAGMENT_ALBEDO, HILT_FRAGMENT_LIGHT } from "../hilts/glsl";
 export { GLOVE_FRAGMENT_ALBEDO, GLOVE_FRAGMENT_LIGHT } from "../gloves/glsl";
 
 /** `#define FINISH n` per design (0 = no finish code at all). */
-export const FINISH_CODE: Record<FinishKind, number> = { none: 0, sunset: 1, ember: 2, tigerlily: 3, nebula: 4, dewweb: 5, frost: 6, heartbeet: 7, fourleaf: 8, founder: 9, geode: 10, rift: 11, spectrum: 12, goldleaf: 13, aurora: 14, contour: 15, meteor: 16, hourglass: 17, lantern: 18, wildflower: 19, tally: 20, devgrid: 21, emerald: 22, ruby: 23, sapphire: 24, pearl: 25, chromatic: 26, chrome: 27, ruler: 28, linework: 29 };
+export const FINISH_CODE: Record<FinishKind, number> = { none: 0, sunset: 1, ember: 2, tigerlily: 3, nebula: 4, dewweb: 5, frost: 6, heartbeet: 7, fourleaf: 8, founder: 9, geode: 10, rift: 11, spectrum: 12, goldleaf: 13, aurora: 14, contour: 15, meteor: 16, hourglass: 17, lantern: 18, wildflower: 19, tally: 20, devgrid: 21, emerald: 22, ruby: 23, sapphire: 24, pearl: 25, chromatic: 26, chrome: 27, ruler: 28, linework: 29, sunray: 30 };
 
 /** One finished item, as the shader sees it: which design. */
 export interface FinishSpec {
@@ -735,6 +735,23 @@ vec3 finishAlbedo(float u, float v, vec2 P, out float metal, out float sparkle, 
   float grid = 1.0 - smoothstep(0.5, 1.5, min(dl.x, dl.y));
   c = mix(c, mix(vec3(1.0), vec3(0.85, 0.86, 0.88), grey), grid * 0.85);
   metal = 0.2;
+  return c * c;
+#elif FINISH == 30
+  // SUNRAY (the Daily Challenge's day-cycle set): the sun coming up at the guard. A gold disc with a pale rim, soft
+  // rays fanning out along the blade, over a sky that runs from warm peach by the sun to pre-dawn indigo at the tip.
+  vec2 sq = vec2(P.x - 2.3, P.y);
+  float sr = length(sq);
+  float sa = atan(sq.y, max(sq.x, 1e-4));
+  float sky = smoothstep(0.5, 8.2, sr);
+  vec3 c = mix(vec3(1.0, 0.72, 0.44), vec3(0.94, 0.45, 0.42), smoothstep(0.0, 0.42, sky));
+  c = mix(c, vec3(0.22, 0.22, 0.50), smoothstep(0.38, 1.0, sky));
+  float ray = smoothstep(0.2, 0.7, 0.5 + 0.5 * cos(sa * 34.0)) * smoothstep(8.6, 1.0, sr) * smoothstep(0.72, 1.0, sr);
+  c = mix(c, vec3(1.0, 0.87, 0.50), ray * 0.5);
+  float disc = 1.0 - smoothstep(0.60, 0.68, sr);
+  float rim = (1.0 - smoothstep(0.68, 0.80, sr)) * (1.0 - disc);
+  c = mix(c, vec3(1.0, 0.94, 0.74), rim * 0.85);
+  c = mix(c, vec3(1.0, 0.80, 0.26), disc);
+  metal = mix(0.6, 0.82, disc);
   return c * c;
 #elif FINISH == 28
   // RULER (Workbench, contributors): teal anodised steel with a fine brushed grain, and a brass rule over one half of

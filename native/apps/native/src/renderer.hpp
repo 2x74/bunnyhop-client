@@ -31,6 +31,12 @@
 #include "texture_motion.hpp"
 #include "brush_fades.hpp"
 #include <span>
+// Standard headers the viewmodel's own headers use: it is included inside namespace native below.
+#include <cstring>
+#include <functional>
+#include <map>
+#include <set>
+#include <tuple>
 #include "nlohmann/json.hpp"
 #include <filesystem>
 #include <chrono>
@@ -1764,6 +1770,9 @@ public:
                 {"msaaRestartRequired", false}};
     }
 
+    // The +paint marks, for their saved copy (paint_store.hpp).
+    native_render::Paint &paint_marks() { return paint; }
+
     nlohmann::json surface_tools_state() {
         return {{"paintMarks", paint.count()},
                 {"measurePoints", measure.count()},
@@ -3074,10 +3083,14 @@ public:
         if (viewmodel) viewmodel->inspect_held(value);
     }
 
-    void set_cosmetics(const std::string &value, const std::string &loadout) {
+    // The first-person look: an outfit, a packed loadout and the charm with its options (loadout.ts packLoadoutExt,
+    // which the packed loadout never carries; empty for none). Yours, a spectated player's or a replay's runner's.
+    void set_cosmetics(const std::string &value, const std::string &loadout, const std::string &charm) {
         outfit = value;
         packedLoadout = loadout;
-        if (viewmodel) viewmodel->cosmetics(value, loadout);
+        if (!viewmodel) return;
+        viewmodel->cosmetics(value, loadout);
+        viewmodel->charm_loadout(charm);
     }
 
     void set_replay_actor(const BhSnapshot *snapshot, float yaw, float pitch, float opacity = .45f) {

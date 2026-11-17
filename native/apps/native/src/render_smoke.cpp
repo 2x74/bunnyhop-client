@@ -307,7 +307,7 @@ int main(int argc, char **argv) {
         input.set_angles(pitch, yaw);
         native::Renderer renderer(gl, core.get());
         renderer.set_viewmodel_visible(!worldOnly && weapon < 0);
-        renderer.set_cosmetics(outfit, loadout);
+        renderer.set_cosmetics(outfit, loadout, {});
         renderer.set_water_quality(waterQuality == "refracted" ? 1 : 0);
         renderer.set_flashlight(flashlight);
         renderer.set_triggers_visible(triggers);

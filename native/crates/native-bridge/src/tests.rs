@@ -388,6 +388,7 @@ fn check_surface_replay(ctx: *mut BhContext, fixture: &Fixture, command: BhCmd, 
             cosmetic: vec![],
             inspect: vec![],
             packed_loadout: None,
+            packed_loadout_ext: None,
             segments: Vec::new(),
         };
         let path = fixture.file("surface.bhr", &data.encode_raw().unwrap());
@@ -742,6 +743,12 @@ fn no_evidence_recording_exports_frozen_bhr_and_all_versions_match_shared_encode
                 bh_record_loadout(c, c"2;knife-carrot;fin-garden;glove-knit".as_ptr()),
                 1
             );
+            // A charm on the later formats (loadout.ts packLoadoutExt's text): the shared encoder must write the same
+            // BHLX trailer; the rest carry none, and their files stay as before.
+            let charm = version >= 9;
+            if charm {
+                assert_eq!(bh_record_loadout_ext(c, c"charm-bun;IB".as_ptr()), 1);
+            }
             assert_eq!(bh_record_inspect(c, 3), 1);
             assert_eq!(bh_record_inspect(c, 1), 1);
             let mut state = BhState::default();
@@ -904,12 +911,29 @@ fn no_evidence_recording_exports_frozen_bhr_and_all_versions_match_shared_encode
                 vec![replay::CosmeticEvent { tick: 40, kind: 1 }]
             );
             assert_eq!(decoded.inspect.len(), 4);
-            assert!(serde_json::from_slice::<serde_json::Value>(decoded.info.as_bytes()).unwrap()["packedLoadout"].as_str().is_some());
+            let info = serde_json::from_slice::<serde_json::Value>(decoded.info.as_bytes()).unwrap();
+            assert!(info["packedLoadout"].as_str().is_some());
+            let bhlx = crate::recording::LOADOUT_EXT_MAGIC.to_le_bytes();
+            let at = raw.windows(4).position(|w| w == bhlx);
+            if charm {
+                assert_eq!(info["packedLoadoutExt"], "charm-bun;IB");
+                // Last of all: the magic, the length, the text.
+                assert_eq!(at, Some(raw.len() - 4 - 1 - "charm-bun;IB".len()));
+                // Cut short, it is dropped and the replay still plays.
+                let cut = replay::Decoded::parse(&raw[..raw.len() - 3]).unwrap();
+                let cut_info = serde_json::from_slice::<serde_json::Value>(cut.info.as_bytes()).unwrap();
+                assert!(cut_info.get("packedLoadoutExt").is_none());
+            } else {
+                assert_eq!(at, None);
+                assert!(info.get("packedLoadoutExt").is_none());
+            }
             for len in [0, 4, 8, raw.len() / 3] {
                 assert!(replay::Decoded::parse(&raw[..len]).is_err());
             }
             // Broken optional presentation data is discarded, preserving playable movement.
-            let mut malformed = raw[..raw.len() - 12].to_vec();
+            // (Before the charm's trailer, which comes last.)
+            let charm_trailer = if charm { 4 + 1 + "charm-bun;IB".len() } else { 0 };
+            let mut malformed = raw[..raw.len() - charm_trailer - 12].to_vec();
             malformed.pop();
             assert!(
                 replay::Decoded::parse(&malformed)
@@ -1089,6 +1113,7 @@ fn counted_telemetry_matches_shared_recorder_rebases_and_decoder() {
             cosmetic: vec![],
             inspect: vec![],
             packed_loadout: None,
+            packed_loadout_ext: None,
             segments: Vec::new(),
         };
         let path = fixture.0.join(format!("{case}.bhr"));

@@ -64,6 +64,8 @@ export const ACTION_WORDS: Record<string, [string, string]> = {
   "map-tier": ["Changed a tier", "warn"],
   "map-retire": ["Retired a map", "warn"],
   "map-unretire": ["Put a map back", "ok"],
+  "map-card-art-off": ["Took a map off cards", "warn"],
+  "map-card-art-on": ["Put a map back on cards", "ok"],
   "lobby-close": ["Closed a lobby", "bad"],
 };
 
@@ -145,6 +147,8 @@ export function detailSentence(action: string, raw: string | null, room?: string
       break;
     case "map-retire":
     case "map-unretire":
+    case "map-card-art-off":
+    case "map-card-art-on":
       if (s("map")) parts.push(`${s("map")}.`);
       break;
     case "lobby-close":

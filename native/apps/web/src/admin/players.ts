@@ -342,7 +342,7 @@ export const playerView: View = async (root, _params, [id]) => {
         can && !s
           ? h("button", {
               onclick: async () => {
-                const v = await ask({ title: `Make ${u.name} a supporter?`, text: "They get the supporter sets, the badge, a name colour and the reserved slot until it's revoked.", fields: [{ name: "amount", label: "Amount in dollars (0 for a gift)", kind: "number", value: "0" }, { name: "reason", label: "Reason", kind: "text" }], confirm: "Make supporter" });
+                const v = await ask({ title: `Make ${u.name} a supporter?`, text: "They get the Supporter items, the badge, a name colour and the reserved slot until it's revoked.", fields: [{ name: "amount", label: "Amount in dollars (0 for a gift)", kind: "number", value: "0" }, { name: "reason", label: "Reason", kind: "text" }], confirm: "Make supporter" });
                 const cents = v ? dollarsToCents(v.amount) : null;
                 if (v && cents === null) return toast("Amount: dollars, like 5 or 12.50", true);
                 if (v) await post({ action: "supporter-grant", reason: v.reason || null, amountCents: cents }, "Supporter given", { action: "supporter-revoke", reason: "undo" });

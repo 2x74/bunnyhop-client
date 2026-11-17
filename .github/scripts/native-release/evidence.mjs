@@ -8,7 +8,9 @@ import { configuredAbsentPlatforms } from './platform-policy.mjs';
 
 export const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const MAX_ARCHIVE_BYTES = 512 * 1024 * 1024;
-export const MAX_EVIDENCE_BYTES = 160 * 1024;
+// Sized for three platforms' parity reports (about 68 KiB each at physics 30) plus headroom.
+export const MAX_EVIDENCE_BYTES = 384 * 1024;
+export const MAX_PARITY_REPORT_BYTES = 128 * 1024;
 // Stat before reading JSON/checksums; stream large archives/traces in bounded chunks.
 function readBounded(path, maximum) {
   const stat = lstatSync(path);
@@ -122,7 +124,7 @@ export function collectEvidence(directory, context, needs) {
     const sums = [[report.archive, report.sha256], [reports[0], sha256(bytes)]].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([file, digest]) => `${digest}  ${file}\n`).join('');
     requireThat(readBounded(join(root, 'SHA256SUMS'), 4096).toString('utf8') === sums, 'Package checksums differ');
     const parityName = parityArtifactName(target, context.runId, context.runAttempt), parityRoot = join(directory, parityName);
-    const parityBytes = readBounded(join(parityRoot, 'parity-report.json'), 64 * 1024);
+    const parityBytes = readBounded(join(parityRoot, 'parity-report.json'), MAX_PARITY_REPORT_BYTES);
     const parityReport = validateParityReport(JSON.parse(parityBytes), platform, context);
     requireThat(readdirSync(parityRoot).sort().join('\0') === ['parity-report.json', ...parityReport.files.map(f => f.name)].sort().join('\0'), 'Unexpected parity artifact files');
     let total = 0;

@@ -131,7 +131,13 @@ impl Game {
 
         let mut p = position;
         let mut v = velocity;
-        let mut g = self.settings.gravity * self.gravity_scale;
+        // v30 Low Gravity: sv_gravity 800 times the multiplier, and a multiplier of 1 or 0 is the style's by the next
+        // command (`Game::style_gravity_rule`).
+        let style_scale = |scale: f32| match self.settings.style_gravity() {
+            Some(style) if scale == 1.0 || scale == 0.0 => style,
+            _ => scale,
+        };
+        let mut g = self.settings.sv_gravity() * style_scale(self.gravity_scale);
         let mut elapsed = 0.0f32;
         let mut stuck = 0;
         // The plane the last step clipped against, and whether the path slides along it (gravity presses into it).
@@ -198,7 +204,7 @@ impl Game {
             if let Some((_, scale)) = gravity_change {
                 // CTriggerGravity: the player's gravity multiplier (0 / non-finite = normal), from here on.
                 let scale = if scale == 0.0 || !scale.is_finite() { 1.0 } else { scale.clamp(-100.0, 100.0) };
-                g = self.settings.gravity * scale;
+                g = self.settings.sv_gravity() * style_scale(scale);
             }
             if f >= 1.0 {
                 stuck = 0;

@@ -2,50 +2,61 @@ import { appLocation } from "../platform/navigation";
 import { playerGlowControls } from "./player-glow-controls";
 // The Support page (menu screen "support"; ui/nav.ts { screen: "support" }, /?support): supporting bunnyhop.lol (one-time
 // payments through Stripe Checkout, src/stripe.ts in the API; "Coming soon" while the API has no Stripe key) and
-// everything supporters get, to try on now. Opened from the main menu's footer, the pause menu's support link, the About
-// page and any locked supporter item's "Supporter item" (loadout-view.ts goalText).
-// One screen, no scrolling at desktop sizes; its tabs sit in the screen header (menu.ts passes the slot, as for the
-// profile): perks, gifting previews, and Top supporters.
+// everything supporters get, to look at and try on. Opened from the main menu's footer, the pause menu's support link,
+// the About page and any locked supporter item's "Supporter item" (loadout-view.ts goalText).
 //
-//   ┌ the ask (or the thanks) ───────┬ Knife  Finish … Hat  Back  Ghost  Trail  Hop effect ────────────┐
-//   │ two short lines, the amount    │ the Loadout's own stage (ui/loadout-view.ts  │ the slot's item    │
-//   │ and the Support button         │ in preview mode, supporter items only: drag  │ from each set      │
-//   │ your card in each set, fanned  │ to turn; nothing is equipped or saved),      │ Your name | Your   │
-//   │ (the picked one in front),     │ dressed and lit in the picked set; trying an │ card: the name and │
-//   │ the sets' names under it       │ item on picks its set                        │ card looks         │
-//   │                                │                                              │ player glow        │
-//   │ the other perks in a sentence  │                                              │                    │
-//   └────────────────────────────────┴──────────────────────────────────────────────┴────────────────────┘
+// Five tabs in the screen header (menu.ts passes the slot, as for the profile), one section each:
 //
-// A supporter (GET /me/supporter: a payment or an admin's grant) gets a thank-you and links to their Loadout and Edit card
-// instead, and their "Show me in Top supporters" switch on that tab. The previews follow the game's settings: Potato
-// mode holds the animated ones still (viewmodel/finishes/shader.ts setCosmeticsStill), reduced motion stops the name
-// effects (ui/marks.css), and both hold the decorations, borders and card effects still (avatar-deco.css, card-fx.css).
+//   What you get     the ask (or the thanks) and, under it, what a Supporter gets as five plain rows that open the
+//                    section they are about; beside it your own card, fading through Supporter designs
+//   Loadout          what you wear and use in the game, slot by slot, on the Loadout's own stage (support-loadout.ts)
+//   Player card      your card, large, and a row of choices for each card and name look (support-card.ts)
+//   Gifting          gift credits, Support again, the Gifter badge (support-gifting.ts)
+//   Top supporters   the list, and a supporter's switch to be on it
+//
+// What goes in the Loadout and Player card sections is read from the catalogue (support-page.ts), and
+// test/support-page.test.ts fails when a Supporter item or look has no place in them.
+//
+// Each section has its own room: a tab's panel fills the screen and, where its content can outgrow that, scrolls inside
+// itself. Nothing is fitted into a fixed box next to something else that grows (how the v0.0.42 page lost its item
+// grid). The Loadout and Player card sections are built the first time they are opened and then kept, hidden, so the
+// stage keeps its WebGL context (the page's only one) and the picks stay.
+//
+// The ask stays at the top for everyone (owner, 2026-11-17). A supporter (GET /me/supporter: a payment, a gift or an
+// admin's grant) is thanked there and offered the same form: giving again adds gift credits (the server's rule,
+// src/gifting.ts giftCreditsEarned: the first $5 a player gives is their own Supporter, every full $5 after it is one
+// credit), with the credits they hold and the way to Gifting under it. What an amount gives is worked out from the
+// wallet the server reports (GET /me/gifts) and said under the amount before they pay. Their "Show me in Top
+// supporters" switch is on that tab; Open Loadout and Edit card are in the sections. The previews follow the game's
+// settings: Potato mode holds the animated ones still (viewmodel/finishes/shader.ts setCosmeticsStill), reduced motion
+// stops the name effects (ui/marks.css), and both hold the decorations, borders and card effects still
+// (avatar-deco.css, card-fx.css).
 
 import { WAVEDASH } from "../platform/env";
 import { wavedashCopy } from "../platform/wavedash";
 import "./support.css";
-import { api, lastKnownMe, type MySupport, type Profile, type TopSupporter, type User } from "../api";
-import { NAME_COLORS, peakOf, type NameColorId } from "../creators";
+import { api, lastKnownMe, type MySupport, type TopSupporter, type User } from "../api";
+import { GIFT_CENTS, giftCreditsGained, type GiftWallet } from "../gifting";
 import { askOf, supportStatus } from "../support-ask";
-import { lookSaver, PREVIEW_LOOK, savedPicks, type LookPicks } from "../support-look";
-import { nameStyleShown } from "../supporter-looks";
-import { COSMETICS, cosmetic, DEFAULT_COSMETICS, supporterItem, SUPPORTER_MIN_USD, SUPPORTER_SETS, type SupporterSetId } from "../progression";
-import { UNRANKED } from "../ranking";
-import { uiSound } from "../audio/ui";
-import { getLoadout, getPlayerGlow, playerGlowRevision, setPlayerGlow } from "../player/cosmetics";
+import { lookSaver, savedPicks } from "../support-look";
+import { SUPPORT_EXTRAS, supportLoadoutCount } from "../support-page";
+import { SUPPORTER_MIN_USD } from "../progression";
+import { getPlayerGlow, playerGlowRevision, setPlayerGlow } from "../player/cosmetics";
 import { discordLink } from "./community";
-import { me, myProfile, openAccount, accountGeneration, onAccountChange } from "./account-state";
-import { playerCard, type SupporterLook } from "./card";
+import { giftCreditCoin } from "./gifting";
+import { me, openAccount, accountGeneration, onAccountChange } from "./account-state";
 import { h } from "./dom";
-import { hopIndicator } from "./hop";
-import { loadoutView, type LoadoutChoice, type LoadoutModel } from "./loadout-view";
+import { icon } from "./icons";
 import { nameAttrs, supporterMark } from "./marks";
 import { navigate } from "./nav";
 import { scrollCue } from "./scroll-cue";
+import { cardOwner, cardSection, cardShowcase, lookState, type CardSection } from "./support-card";
 import { profileWriteGuard } from "./profile-write";
 import { supportGifting } from "./support-gifting";
-import { borderChoices, cardEffectChoices, cardFxSwatch, COLOUR_CHOICES, DECO_CHOICES, decoSwatch, EFFECT_CHOICES, FONT_CHOICES, HOVER_FX_CHOICES, hoverFxSwatch, nameSample, styleChoices } from "./supporter-pickers";
+import { loadoutSection, type LoadoutSection } from "./support-loadout";
+// The look rows' choices and swatches are Edit card's, one implementation (ui/supporter-pickers.ts: FONT_CHOICES,
+// DECO_CHOICES, borderChoices, cardEffectChoices, HOVER_FX_CHOICES and the rest), drawn by ui/support-card.ts.
+export { previewModel } from "./support-loadout";
 
 /**
  * Back from Stripe's payment page (/?support=thanks, src/stripe.ts success_url): read at load, before menu.ts tidies the
@@ -59,73 +70,6 @@ const THANKS_POLL_MS = 90_000;
 /** A coffee cup with a small heart over it: the footer button's mark (ours, inline). */
 export const SUPPORT_ICON = `<svg viewBox="0 0 24 24" aria-hidden="true" width="1.1em" height="1.1em"><path d="M4.5 10.5h11v4.2a4.8 4.8 0 0 1-4.8 4.8H9.3a4.8 4.8 0 0 1-4.8-4.8z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M15.5 11.8h1.3a2.3 2.3 0 0 1 0 4.6h-1.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M10 8.6c-1.7-1.1-2.8-2-2.8-3.2a1.5 1.5 0 0 1 2.8-.7 1.5 1.5 0 0 1 2.8.7c0 1.2-1.1 2.1-2.8 3.2z" fill="currentColor"/></svg>`;
 
-/** A set's look on the preview (your own knife, so the finish shows on it). */
-function setLook(id: SupporterSetId): LoadoutChoice {
-  const st = SUPPORTER_SETS.find((x) => x.id === id) ?? SUPPORTER_SETS[0];
-  // The set's gun camo and hop effect (progression.ts: every Supporter set has one of each).
-  const camo = COSMETICS.find((c) => c.slot === "camo" && c.set === st.id)?.id ?? null;
-  // (No set has a back item: the Back tab's supporter items are standalone.)
-  const hop = COSMETICS.find((c) => c.slot === "hop" && c.set === st.id)?.id ?? null;
-  return { body: getLoadout().body ?? "body-a", knife: getLoadout().knife ?? DEFAULT_COSMETICS.knife, camo, hop, shape: DEFAULT_COSMETICS.shape, back: null, ...st.look };
-}
-
-/** The Loadout's model for trying the set on: every supporter item shown and clickable, nothing saved. */
-export function previewModel(mine: () => boolean): LoadoutModel & { changed(): void; onEquip(fn: (id: string | null) => void): void; dress(look: Partial<LoadoutChoice>): void } {
-  const choice = setLook(SUPPORTER_SETS[0].id);
-  const fns = new Set<() => void>();
-  const equipped = new Set<(id: string | null) => void>();
-  return {
-    userId: null,
-    choice: () => ({ ...choice }),
-    crown: () => null,
-    owns: (c) => supporterItem(c),
-    lock: () => ({ hint: "Supporter item", goal: "Supporter item", fraction: null }),
-    earned: () => (mine() ? "Yours" : ""),
-    setHairColor: (hex) => {
-      choice.hairColor = hex;
-      fns.forEach((f) => f());
-    },
-    setHairLength: (n) => {
-      choice.hairLength = n;
-      fns.forEach((f) => f());
-    },
-    setHairHighlight: (hex) => {
-      choice.hairHighlight = hex;
-      fns.forEach((f) => f());
-    },
-    setMaskOn: (on) => {
-      choice.maskOn = on;
-      fns.forEach((f) => f());
-    },
-    setCape: (patch) => {
-      Object.assign(choice, patch);
-      fns.forEach((f) => f());
-    },
-    // Support previews items only (the pool row is hidden: previewOnly).
-    knifePool: () => null,
-    setKnifePool: () => {},
-    equip: (slot, id) => {
-      choice[slot] = id;
-      equipped.forEach((f) => f(id));
-      fns.forEach((f) => f());
-    },
-    status: () => ({ kind: "idle", text: "" }),
-    isNew: () => false,
-    see: () => {},
-    clearIndicators: () => {},
-    on: (fn) => (fns.add(fn), () => fns.delete(fn)),
-    /** Something the captions read changed (we learned the player is a supporter). */
-    changed: () => fns.forEach((f) => f()),
-    /** An item was tried on (the page follows its set). */
-    onEquip: (fn) => void equipped.add(fn),
-    /** Puts a set's look on (the card deck's pick): every slot at once, one redraw. */
-    dress: (look) => {
-      Object.assign(choice, look);
-      fns.forEach((f) => f());
-    },
-  };
-}
-
 export interface SupportScreenOpts {
   /** The Loadout / Edit card (menu.ts): for supporters, instead of the ask. */
   loadout: () => void;
@@ -134,7 +78,7 @@ export interface SupportScreenOpts {
   tabsHost: HTMLElement;
 }
 
-type SupportTab = "page" | "gifting" | "top";
+type SupportTab = "page" | "loadout" | "card" | "gifting" | "top";
 /** Back from a profile opened from Top supporters: open on that tab again. */
 let reopenTop = false;
 
@@ -144,52 +88,34 @@ export function supportScreen(o: SupportScreenOpts): HTMLElement {
   let disposed = false;
   let pendingTimer = 0;
   let mySupport: MySupport | null = null;
-  const model = previewModel(() => supporter);
-  const look = lookState();
-
-  // --- every supporter item, grouped by set (loadout-view.ts), on the Loadout's own stage. The set picked in the card
-  // deck dresses the stage in its look and lights it; trying an item on picks its set (the stage keeps what you tried).
-  let set: SupporterSetId = SUPPORTER_SETS[0].id;
   let signedInAs: { provider: string } | null = null;
-  const setHost = h("div.sp-set", { "data-set": set });
-  const pickSet = (next: SupporterSetId, dress: boolean) => {
-    if (next === set) return;
-    set = setHost.dataset.set = next;
-    deck.show(next);
-    if (dress) model.dress(SUPPORTER_SETS.find((x) => x.id === next)?.look ?? {});
-  };
-  const deck = cardDeck(look, () => signedInAs, (id) => pickSet(id, true));
-  model.onEquip((id) => {
-    const next = cosmetic(id)?.set;
-    if (next) pickSet(next, false);
-  });
-  let loadout: HTMLElement;
-  const glowEditor = playerGlowControls({ root: () => root, preview: () => {
-    model.changed(); loadout?.dispatchEvent(new Event("playerglowpreview"));
-  } });
-  loadout = loadoutView(model, { only: supporterItem, previewOnly: true, slot: "outfit", playerGlow: () => glowEditor.get() });
-  setHost.append(loadout);
-  // Your name's look and the glow controls sit under the items, beside the stage.
-  const side = h("div.sp-side");
-  const grid = loadout.querySelector<HTMLElement>(".lo-grid");
-  const gridWatch: { disconnect(): void }[] = [];
-  if (grid) {
-    grid.replaceWith(side);
-    side.append(grid);
-    // Slots with more items than fit (Hat, Finish) scroll; a soft edge says there's more until the end is reached.
-    const more = () => grid.classList.toggle("sp-more", grid.scrollTop + grid.clientHeight < grid.scrollHeight - 4);
-    grid.addEventListener("scroll", more, { passive: true });
-    const items = new MutationObserver(() => requestAnimationFrame(more));
-    const size = new ResizeObserver(more);
-    items.observe(grid, { childList: true });
-    size.observe(grid);
-    gridWatch.push(items, size);
-  }
+  // A supporter's gift wallet (GET /me/gifts): what they have given so far and the credits they hold. null until it
+  // answers; the ask then says nothing it can't work out from it.
+  let wallet: GiftWallet | null = null;
+  /**
+   * The lines that say what the typed amount gives, and the standing row: redrawn when the wallet answers. Each says
+   * whether it is still on the page (one that isn't is dropped).
+   */
+  const walletDrawn = new Set<() => boolean>();
+  // Everything the page listens for outside itself is let go the moment it closes.
+  const closed = new AbortController();
+  const look = lookState();
+  const owner = cardOwner(look, () => signedInAs);
 
-  // --- a supporter's pickers are their real look: seeded from the saved one (drawAsk) and saved a moment after the
+  let loadout: LoadoutSection | null = null;
+  let card: CardSection | null = null;
+  const glowEditor = playerGlowControls({ root: () => root, preview: () => loadout?.glowChanged() });
+  const setSupporter = (yes: boolean) => {
+    if (supporter === yes) return;
+    supporter = yes;
+    loadout?.supporter(yes);
+    card?.supporter(yes);
+  };
+
+  // --- a supporter's look rows are their real look: seeded from the saved one (drawAsk) and saved a moment after the
   // last pick (POST /me/supporter, as Edit card does), one request at a time, each against the server's last answer
   // (support-look.ts lookSaver). A failed save puts the saved look back. Everyone else's picks only dress the cards.
-  const nameStatus = h("span.pf-status");
+  const nameStatus = h("span.pf-status", { role: "status", "aria-live": "polite" });
   let fadeTimer = 0;
   const status = (text: string, kind = "") => {
     clearTimeout(fadeTimer);
@@ -211,20 +137,10 @@ export function supportScreen(o: SupportScreenOpts): HTMLElement {
   });
   look.on(() => saver.edit(look));
 
-  side.append(lookPickers(look, nameStatus, deck), glowEditor.panel);
-  const perksLine = perks();
-  const page = h("div.sp", { role: "tabpanel", "aria-labelledby": "sp-tab-page" }, h("div.sp-col", null, ask, deck.el, perksLine), setHost);
-  // ← → flip the cards when nothing else is listening for them (focus on the page, not in a field or the item grid).
-  const arrows = (e: KeyboardEvent) => {
-    if (disposed) return removeEventListener("keydown", arrows);
-    if ((e.key !== "ArrowLeft" && e.key !== "ArrowRight") || e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || page.hidden || !root.isConnected || root.closest("[inert]")) return;
-    const t = document.activeElement;
-    if (t && t !== document.body && !t.closest(".sp-col")) return;
-    if (t instanceof HTMLInputElement || t?.closest(".sp-pick")) return;
-    e.preventDefault();
-    deck.step(e.key === "ArrowRight" ? 1 : -1);
-  };
-  addEventListener("keydown", arrows);
+  // --- the first tab: the ask, what you get, and your card fading through designs
+  const what = whatYouGet((t, part) => select(t, part));
+  const col = h("div.sp-col", null, ask, what);
+  const page = h("div.sp", { role: "tabpanel", "aria-labelledby": "sp-tab-page" }, col, cardShowcase(look, owner, closed.signal).el);
   // Supporting again lives on the Gifting tab: past the first $5, more support means more gift credits.
   const again = h("div.sp-again", { hidden: true });
 
@@ -232,22 +148,36 @@ export function supportScreen(o: SupportScreenOpts): HTMLElement {
   const readSupport = () => {
     const revision = playerGlowRevision();
     const editRevision = glowEditor.revision();
-    return api.mySupport().then(s => ({ s, revision, editRevision }));
+    const generation = accountGeneration();
+    return api.mySupport().then(async (s) => {
+      // A supporter's ask says what giving again gets them, which is worked out from their gift wallet: read with
+      // the status, so the ask is drawn once, whole. A wallet that fails or is slow doesn't hold it back (the ask
+      // then says the rule in general and fills in when the wallet answers: loadWallet).
+      if (s.supporter) {
+        const w = await Promise.race([api.giftWallet().catch(() => null), new Promise<null>((r) => setTimeout(() => r(null), 1500))]);
+        if (w && generation === accountGeneration()) wallet = w;
+      }
+      return { s, revision, editRevision };
+    });
+  };
+  /** The answer takes the placeholder's place (drawPending): the ask and the rows under it come in together. */
+  const arrive = () => {
+    if (!ask.classList.contains("pending")) return;
+    ask.classList.replace("pending", "arrive");
+    col.classList.replace("pending", "arrive");
+    ask.inert = false;
   };
   const drawAsk = (s: MySupport | null, revision = playerGlowRevision(), editRevision = glowEditor.revision()) => {
     if (disposed) return;
     clearTimeout(pendingTimer);
-    // The first answer replaces the placeholder (drawPending): it fades in where the placeholder held its place.
-    if (ask.classList.contains("pending")) ask.classList.replace("pending", "arrive");
-    perksLine.style.visibility = "";
+    arrive();
     mySupport = s;
     const glowCurrent = revision === playerGlowRevision();
     const preserveGlowEdits = editRevision !== glowEditor.revision();
     const nextGlow = glowCurrent ? s?.supporter?.playerGlow ?? null : getPlayerGlow();
     if (s && glowCurrent && !preserveGlowEdits) setPlayerGlow(nextGlow);
     const since = s?.supporter ? new Date(s.supporter.since).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : null;
-    if (supporter !== !!since) (supporter = !!since), model.changed();
-    perksLine.hidden = !!since;
+    setSupporter(!!since);
     glowEditor.seed(nextGlow, preserveGlowEdits);
     if (since && s?.supporter && !saver.seeded) {
       const own = s.supporter;
@@ -261,19 +191,13 @@ export function supportScreen(o: SupportScreenOpts): HTMLElement {
       // Back from paying again: the payment adds to their total (the webhook credits it within seconds).
       const paidAgain = backFromCheckout;
       backFromCheckout = false;
-      ask.replaceChildren(
-        h("p.sp-lead", null, paidAgain ? "Thank you again!" : "Thanks for supporting bunnyhop.lol."),
-        h("p", null, paidAgain ? "Your payment went through. Any new gift credits show up on Gifting." : `Supporter since ${since}.`),
-        h(
-          "div.sp-actions",
-          null,
-          h("button.btn.primary", { type: "button", onclick: o.loadout, "data-autofocus": "" }, "Open Loadout"),
-          h("button.btn", { type: "button", onclick: o.editCard }, "Edit card"),
-        ),
-      );
-      // Supporting again (any amount from the minimum): Stripe Checkout like the first time; it adds to their Top
-      // supporters total and their gift credits (src/stripe.ts credits every payment).
-      if (s?.payments) again.replaceChildren(h("h3.sp-h", null, "Support again"), h("p", null, "Any amount adds to your total, and every full $5 is another gift credit."), ...payForm(s.minUsd || SUPPORTER_MIN_USD, "Support", false));
+      const min = s?.minUsd || SUPPORTER_MIN_USD;
+      ask.replaceChildren(...supporterAsk(since, paidAgain, !!s?.payments, min, standing()));
+      // (Read with the status as a rule; here when that read was slow, and again after a payment as its credits land.)
+      if (paidAgain) loadWallet([2000, 5000, 10000]);
+      else if (!wallet) loadWallet();
+      // The same form on the Gifting tab, beside the credits it adds to.
+      if (s?.payments) again.replaceChildren(h("h3.sp-h", null, "Support again"), h("p", null, giveAgainRule()), ...payForm(min, "Support", false));
       return;
     }
     if (s?.payments) return drawPay(s);
@@ -292,15 +216,73 @@ export function supportScreen(o: SupportScreenOpts): HTMLElement {
   };
   // Payments open: an amount (whole dollars, the minimum by default) and a button to Stripe's page. Guests save their
   // account first: a guest lives in one browser, and the perks must stay with the player.
+  const payAsk = (min: number, guest: boolean): HTMLElement[] => [
+    h("p.sp-lead", null, "Support bunnyhop.lol"),
+    h("p", null, `Pay once, $${min} or more. It covers the servers, and the game stays free: nothing you buy helps you play. Every $5 after the first is a gift for another player.`),
+    ...(guest ? [h("div.sp-actions", null, h("button.btn.primary", { type: "button", onclick: () => openAccount("save") }, "Save your account to support"))] : payForm(min, "Support")),
+  ];
   const drawPay = (s: MySupport) => {
     if (backFromCheckout) return drawPaid();
-    const min = s.minUsd || SUPPORTER_MIN_USD;
-    const guest = signedInAs?.provider === "guest";
-    ask.replaceChildren(
-      h("p.sp-lead", null, "Support bunnyhop.lol"),
-      h("p", null, `Pay once, $${min} or more. It covers the servers, and the game stays free: nothing you buy helps you play. Every $5 after the first is a gift for another player.`),
-      ...(guest ? [h("div.sp-actions", null, h("button.btn.primary", { type: "button", onclick: () => openAccount("save") }, "Save your account to support"))] : payForm(min, "Support")),
-    );
+    ask.replaceChildren(...payAsk(s.minUsd || SUPPORTER_MIN_USD, signedInAs?.provider === "guest"));
+  };
+  // --- a supporter's ask: thanked, and offered the same form. What giving again gets is the server's rule, said from
+  // the wallet it reports (never from a guess: without a wallet the sentence is the general one and the line under
+  // the amount stays empty).
+  const dollar = `$${GIFT_CENTS / 100}`;
+  /** The rule in a sentence, as it applies to this player now. */
+  const giveAgainRule = (): string =>
+    wallet && wallet.donationCents < GIFT_CENTS
+      ? `The first ${dollar} you give counts as your own. Every full ${dollar} after it is a gift credit, and each one makes another player a Supporter for good.`
+      : `Every full ${dollar} is a gift credit, and each one makes another player a Supporter for good.`;
+  const supporterAsk = (since: string, paidAgain: boolean, payments: boolean, min: number, standingRow: HTMLElement): HTMLElement[] => {
+    const rule = h("p", null, paidAgain ? "Your payment went through. New gift credits show up here in a few seconds." : payments ? `Supporter since ${since}. You can give again whenever you like. ${giveAgainRule()}` : `Supporter since ${since}.`);
+    if (!paidAgain && payments) walletDrawn.add(() => (rule.isConnected ? ((rule.textContent = `Supporter since ${since}. You can give again whenever you like. ${giveAgainRule()}`), true) : false));
+    return [h("p.sp-lead", null, paidAgain ? "Thank you again!" : "Thanks for supporting bunnyhop.lol."), rule, ...(payments ? payForm(min, "Support") : []), standingRow];
+  };
+  /** Where they stand: the gift credits they hold, and the way to Gifting. */
+  const standing = (): HTMLElement => {
+    const credits = h("span.sp-standing-n");
+    const draw = () => {
+      const n = wallet?.credits;
+      credits.replaceChildren(giftCreditCoin(), n === undefined ? "Gift credits" : `${n} gift credit${n === 1 ? "" : "s"}`);
+      return credits.isConnected;
+    };
+    draw();
+    walletDrawn.add(draw);
+    return h("div.sp-standing", null, credits, h("button.link-btn", { type: "button", onclick: () => select("gifting") }, "Gifting", icon("chevronRight", { size: "0.9em" })));
+  };
+  /** Reads the wallet (again after each of `later` ms: a payment's credits land with the webhook) and redraws what shows it. */
+  const loadWallet = (later: number[] = []) => {
+    const generation = accountGeneration();
+    const read = () =>
+      void api.giftWallet().then(
+        (w) => {
+          if (disposed || generation !== accountGeneration()) return;
+          wallet = w;
+          for (const draw of [...walletDrawn]) if (!draw()) walletDrawn.delete(draw);
+        },
+        () => {},
+      );
+    read();
+    for (const ms of later)
+      setTimeout(() => {
+        if (!disposed) read();
+      }, ms);
+  };
+  addEventListener("bunnyhop:gifts-changed", () => supporter && loadWallet(), { signal: closed.signal });
+  /**
+   * What `dollars` gives, said under the amount before the player pays. A supporter's is worked out from their wallet
+   * (empty until it has answered); a first payment starts from nothing given.
+   */
+  const gainOf = (dollars: number): string => {
+    const credit = (n: number) => `${n} gift credit${n === 1 ? "" : "s"}`;
+    if (!supporter) {
+      const n = giftCreditsGained(0, dollars * 100);
+      return n ? `$${dollars} makes you a Supporter and gives you ${credit(n)}.` : `$${dollars} makes you a Supporter.`;
+    }
+    if (!wallet) return "";
+    const n = giftCreditsGained(wallet.donationCents, dollars * 100);
+    return n ? `$${dollars} gives you ${credit(n)}.` : `$${dollars} counts as your own first ${dollar}: no gift credit yet.`;
   };
   /** An amount (whole dollars, `min` by default) and a button to Stripe's page, plus the error line. */
   const payForm = (min: number, label: string, primary = true): HTMLElement[] => {
@@ -313,12 +295,17 @@ export function supportScreen(o: SupportScreenOpts): HTMLElement {
       ];
     const amount = h("input.es-input.sp-amount", { type: "number", min: String(min), max: "1000", step: "1", value: String(min), inputmode: "numeric", "aria-label": "Amount in US dollars" }) as HTMLInputElement;
     const err = h("p.sp-err", { role: "alert", hidden: true });
+    const gain = h("p.sp-gain", { "aria-live": "polite" });
     const btn = h(`button.btn${primary ? ".primary" : ""}`, { type: "button" }, label) as HTMLButtonElement;
     const dollars = () => Number(amount.value);
     const valid = () => Number.isInteger(dollars()) && dollars() >= min && dollars() <= 1000;
+    const drawGain = () => ((gain.textContent = valid() ? gainOf(dollars()) : ""), gain.isConnected);
+    drawGain();
+    walletDrawn.add(drawGain);
     amount.addEventListener("input", () => {
       btn.disabled = !valid();
       err.hidden = true;
+      drawGain();
     });
     const pay = async () => {
       if (!valid()) return;
@@ -335,7 +322,7 @@ export function supportScreen(o: SupportScreenOpts): HTMLElement {
     };
     btn.addEventListener("click", () => void pay());
     amount.addEventListener("keydown", (e) => e.key === "Enter" && void pay());
-    return [h("div.sp-actions", null, h("label.sp-dollars", null, h("span", { "aria-hidden": "true" }, "$"), amount), btn), err];
+    return [h("div.sp-actions", null, h("label.sp-dollars", null, h("span", { "aria-hidden": "true" }, "$"), amount), btn), gain, err];
   };
 
   // Back from a payment: thanks at once, and the supporter view as soon as the webhook has made it so.
@@ -350,25 +337,23 @@ export function supportScreen(o: SupportScreenOpts): HTMLElement {
       );
     check();
   };
-  // Until GET /me/support answers, the ask's place is held (the payments-open copy, unseen) rather than drawn as
-  // "Supporting opens soon" and then swapped for the real state a moment later: payments are open on the live site,
-  // and a supporter gets a thank-you there instead, so that first frame was wrong for everyone.
+  // Until GET /me/support answers, nothing of the ask is drawn as if it were known: not "Supporting opens soon"
+  // (payments are open on the live site), not the form (a supporter gets another). The column waits unseen, the ask
+  // and the rows under it, and comes in once, in its final place: nothing in it moves afterwards. The card beside it
+  // doesn't wait for this.
   const drawPending = () => {
     clearTimeout(pendingTimer);
     ask.classList.add("pending");
     ask.classList.remove("arrive");
-    perksLine.style.visibility = "hidden";
-    ask.replaceChildren(
-      h("p.sp-lead", null, "Support bunnyhop.lol"),
-      h("p", null, `Pay once, $${SUPPORTER_MIN_USD} or more. It covers the servers, and the game stays free: nothing you buy helps you play. Every $5 after the first is a gift for another player.`),
-      h("div.sp-actions", null, h("button.btn.primary", { type: "button", tabindex: "-1" }, "Support")),
-    );
+    col.classList.add("pending");
+    col.classList.remove("arrive");
+    ask.inert = true;
+    ask.replaceChildren(...payAsk(SUPPORTER_MIN_USD, false));
     // Fetch has no deadline: a stalled /me or /me/supporter must not leave this blank forever.
     // Keep waiting for the real answer, without guessing whether payments are open or this player supports us.
     pendingTimer = window.setTimeout(() => {
       if (disposed) return;
-      ask.classList.replace("pending", "arrive");
-      perksLine.style.visibility = "";
+      arrive();
       ask.replaceChildren(...failedAsk());
     }, 8000);
   };
@@ -407,54 +392,96 @@ export function supportScreen(o: SupportScreenOpts): HTMLElement {
   let top: TopSupporter[] | "failed" | null = null;
   const drawTopPage = () => topPage.replaceChildren(...(mySupport?.supporter ? [boardSwitch(mySupport)] : []), topList(top));
 
-  const giftingPage = supportGifting({ name: () => look.name, again });
-  look.on(() => giftingPage.dispatchEvent(new Event("support-preview-refresh")));
+  // --- the sections, made when first opened
+  /** To the ask, from a section's button: the first tab, the amount (or whatever the ask offers) focused. */
+  const toAsk = () => {
+    select("page");
+    ask.querySelector<HTMLElement>("input:not([disabled]), button:not([disabled])")?.focus({ preventScroll: true });
+  };
+  const askLabel = () => `Support from $${mySupport?.minUsd || SUPPORTER_MIN_USD}`;
+  const build: Record<Exclude<SupportTab, "page">, (part?: string) => HTMLElement> = {
+    loadout: (part) => {
+      loadout = loadoutSection({
+        isSupporter: () => supporter,
+        glow: { panel: glowEditor.panel, get: () => glowEditor.get() },
+        toAsk,
+        askLabel,
+        openLoadout: (slot) => (slot ? navigate({ screen: "loadout", slot }) : o.loadout()),
+        slot: part,
+      });
+      return loadout.el;
+    },
+    card: () => {
+      card = cardSection({ look, owner, status: nameStatus, toAsk, askLabel, editCard: o.editCard });
+      card.supporter(supporter);
+      return card.el;
+    },
+    gifting: () => {
+      const el = supportGifting({ name: () => look.name, again, signal: closed.signal });
+      look.on(() => !el.hidden && el.dispatchEvent(new Event("support-preview-refresh")));
+      return el;
+    },
+    top: () => topPage,
+  };
+  const panels: Partial<Record<SupportTab, HTMLElement>> = { page };
   const root = h("div.sp-screen", null, page);
   let mounted = false;
   const cleanup = new MutationObserver(() => {
     mounted ||= root.isConnected;
     if (!mounted || root.isConnected) return;
     disposed = true;
+    closed.abort();
+    loadout?.closed();
     clearTimeout(pendingTimer);
     glowEditor.dispose();
     saver.reset();
     clearTimeout(fadeTimer);
-    gridWatch.forEach((w) => w.disconnect());
     cleanup.disconnect();
   });
   cleanup.observe(document.body, { childList: true, subtree: true });
+
   let tab: SupportTab = "page";
   const tabs: [SupportTab, string][] = [
     ["page", "What you get"],
+    ["loadout", "Loadout"],
+    ["card", "Player card"],
     ["gifting", "Gifting"],
     ...(api.available() ? [["top", "Top supporters"] as [SupportTab, string]] : []),
   ];
   const tabBar = h("div.pf-tabs", { role: "tablist", "aria-label": "Support" });
   scrollCue(tabBar, "x");
+  // The tabs are made once; a switch only moves the mark (and keeps the focus where it was).
+  const tabButtons = tabs.map(([t, label]) => h("button.pf-tab", { type: "button", role: "tab", id: `sp-tab-${t}`, onclick: () => select(t) }, label));
+  tabBar.append(...tabButtons);
   const drawTabs = () =>
-    tabBar.replaceChildren(
-      ...tabs.map(([t, label]) =>
-        h(
-          `button.pf-tab${t === tab ? ".on" : ""}`,
-          { type: "button", role: "tab", id: `sp-tab-${t}`, "aria-selected": String(t === tab), tabindex: t === tab ? "0" : "-1", onclick: () => select(t) },
-          label,
-        ),
-      ),
-    );
-  const select = (t: SupportTab) => {
-    if (t === tab) return;
-    tab = t;
-    drawTabs();
-    if (t === "top") drawTopPage();
-    // The page stays built (the stage keeps its WebGL context): only hidden while the list shows.
-    page.hidden = t !== "page";
-    if (t === "top") root.append(topPage);
-    else topPage.remove();
-    if (t === "gifting") {
-      root.append(giftingPage);
-      giftingPage.dispatchEvent(new Event("support-preview-refresh"));
-    } else giftingPage.remove();
-  };
+    tabs.forEach(([t], i) => {
+      tabButtons[i].classList.toggle("on", t === tab);
+      tabButtons[i].setAttribute("aria-selected", String(t === tab));
+      tabButtons[i].tabIndex = t === tab ? 0 : -1;
+    });
+  /** Opens a tab; `part`: where in it (the Player glow in the Loadout, the name rows on the Player card). */
+  function select(t: SupportTab, part?: string): void {
+    if (t !== tab) {
+      tab = t;
+      drawTabs();
+      root.dataset.tab = t;
+      let panel = panels[t];
+      if (!panel) {
+        // (A section made for a part of it opens there: the Loadout on its Player glow.)
+        panel = panels[t] = build[t as Exclude<SupportTab, "page">](part);
+        root.append(panel);
+      }
+      // Every panel that was made stays in the page (the Loadout's stage keeps its WebGL context, the picks stay):
+      // only the one asked for shows.
+      for (const [key, el] of Object.entries(panels)) el.hidden = key !== t;
+      if (t === "top") drawTopPage();
+      if (t === "card") card?.shown();
+      if (t === "gifting") panel.dispatchEvent(new Event("support-preview-refresh"));
+    }
+    if (!part) return;
+    if (t === "loadout") loadout?.show(part);
+    if (t === "card") panels.card?.querySelector<HTMLElement>(`.sp-group[aria-label="${part}"]`)?.scrollIntoView({ block: "start" });
+  }
   tabBar.addEventListener("keydown", (e) => {
     const i = tabs.findIndex(([t]) => t === tab);
     const j = e.key === "ArrowRight" ? i + 1 : e.key === "ArrowLeft" ? i - 1 : null;
@@ -464,6 +491,7 @@ export function supportScreen(o: SupportScreenOpts): HTMLElement {
     tabBar.querySelector<HTMLElement>(".pf-tab.on")?.focus();
   });
   drawTabs();
+  root.dataset.tab = tab;
   o.tabsHost.append(tabBar);
   if (api.available()) {
     void api.supporters().then(
@@ -478,12 +506,37 @@ export function supportScreen(o: SupportScreenOpts): HTMLElement {
     saver.reset();
     status("");
     signedInAs = null;
-    supporter = false; drawPending();
-    deck.reload();
+    wallet = null;
+    setSupporter(false);
+    drawPending();
+    owner.reload();
     loadAsk((u) => look.set({ name: u?.name ?? "Your name" }));
-  });
+  }, closed.signal);
   reopenTop = false;
   return root;
+}
+
+/**
+ * What a Supporter gets, under the ask: a row for each section of the page (the count is the catalogue's own), and the
+ * things with nothing to show for them in a sentence (support-page.ts SUPPORT_EXTRAS).
+ */
+function whatYouGet(open: (tab: SupportTab, part?: string) => void): HTMLElement {
+  const gift = `$${GIFT_CENTS / 100}`;
+  const rows: [string, () => void][] = [
+    [`${supportLoadoutCount()} items to wear and use in the game`, () => open("loadout")],
+    ["Frames, borders and effects for your player card", () => open("card")],
+    ["Colours, effects and fonts for your name", () => open("card", "Name")],
+    ["A glow around your bunny", () => open("loadout", "glow")],
+    [`A gift for another player with every ${gift} after your first`, () => open("gifting")],
+  ];
+  const extras = [...SUPPORT_EXTRAS];
+  const last = extras.pop();
+  return h(
+    "div.sp-what",
+    null,
+    h("div.list-rows", null, ...rows.map(([text, go]) => h("button.list-row", { type: "button", onclick: go }, h("span.lr-text", null, text), icon("chevronRight", { size: "1rem" })))),
+    h("p.sp-also", null, `Also ${extras.join(", ")} and ${last}.`),
+  );
 }
 
 /** A supporter's "Show me in Top supporters" switch (also the About page's thank-you list). */
@@ -527,271 +580,6 @@ function topList(top: TopSupporter[] | "failed" | null): HTMLElement {
       );
     }),
   );
-}
-
-// ---------------------------------------------------------------------------------------------
-// The look the cards and the pickers share: the name's colour, effect and font, the avatar decoration and the card's
-// border and effect (support-look.ts). For everyone else a preview; for a supporter their real look, saved on every
-// pick (supportScreen, like Edit card).
-
-interface Look extends LookPicks {
-  /** A supporter's own look: the saved gradient colour (null = the automatic paler shade), not the preview's pick. */
-  own: { color2: NameColorId | null } | null;
-  /** The player's own name ("Your name" until we know it). */
-  name: string;
-  on(fn: () => void): void;
-  set(p: Partial<LookPicks & Pick<Look, "name">>): void;
-}
-
-function lookState(): Look {
-  const fns: (() => void)[] = [];
-  const l: Look = {
-    ...PREVIEW_LOOK,
-    own: null,
-    name: "Your name",
-    on: (fn) => void fns.push(fn),
-    set: (p) => (Object.assign(l, p), fns.forEach((f) => f())),
-  };
-  return l;
-}
-
-/** The look as the card reads it: a gradient's second colour is the next colour along (never the same one). */
-function lookAttrs(l: LookPicks & Partial<Pick<Look, "own">>): SupporterLook {
-  const more = { nameFont: l.font, nameStyle: l.style, avatarDeco: l.deco, cardBorder: l.border, cardEffect: l.cardEffect, hoverFx: l.hoverFx };
-  if (l.own) return { nameColor: l.color, nameEffect: l.effect, nameColor2: l.own.color2, ...more };
-  const i = NAME_COLORS.findIndex((c) => c.id === l.color);
-  const color2 = NAME_COLORS[(i + 2) % NAME_COLORS.length].id;
-  return { nameColor: l.color, nameEffect: l.effect, nameColor2: color2, ...more };
-}
-
-// ---------------------------------------------------------------------------------------------
-// Your card, three times: the real player card (yours when signed in; without a profile, a fresh card under your name)
-// in each set's frame, background, title and hat, with your name in the picked look. Held like a hand of cards: the
-// picked set's card in front, the others fanned behind it in set order, and the sets' names under them (click a name or
-// a card, or ← →; the landing dot marks the pick). A swap slides the fan and hops the new card to the front (transforms
-// and opacity only; instant under Potato and reduced motion).
-
-interface Deck {
-  el: HTMLElement;
-  /** Shows a set's card in front (no-op when it already is). */
-  show(id: SupporterSetId): void;
-  /** One step left or right (arrow keys), wrapping round. */
-  step(by: -1 | 1): void;
-  /** The account changed: read the profile again. */
-  reload(): void;
-  /** Whose card it is: the avatar the decoration pickers wear, and the peak (T7+) whose layers "None" keeps. */
-  player(): Profile["player"];
-}
-
-const quietMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches || document.body.classList.contains("potato");
-
-/** A card for someone with no profile to show (a guest the API doesn't know, offline): their name, a fresh start. */
-function freshProfile(name: string, provider: string | null): Profile {
-  const zeros = [0, 0, 0, 0, 0, 0];
-  return {
-    player: { id: "", name, avatarUrl: null, provider: provider ?? "", since: new Date().toISOString(), supporter: true },
-    mine: true,
-    level: { level: 1, xp: 0, into: 0, need: 100, fraction: 0 },
-    rank: { scope: "all", points: 0, rank: null, ranked: 0, records: 0, wrs: 0, top10s: 0, group: { id: UNRANKED.id, name: UNRANKED.name, color: UNRANKED.color } },
-    styles: [],
-    stats: { clearsByTier: zeros, rankedByTier: zeros, maps: 0, pbs: 0, wrs: 0, top10s: 0, bonuses: 0, runs: 0, jumps: 0, seconds: 0, playtime: 0, replayViews: 0, styleMaps: {}, clearedMaps: [] },
-    cosmetics: { ...DEFAULT_COSMETICS } as Profile["cosmetics"],
-    badges: [],
-    achievements: [],
-    progress: null,
-    featured: [],
-  } as unknown as Profile;
-}
-
-function cardDeck(l: Look, who: () => { provider: string } | null, pick: (id: SupporterSetId) => void): Deck {
-  let profile: Profile | null = null;
-  let sel = 0;
-  const fan = h("div.sp-deck", { "data-sel": "0" });
-  const cards = SUPPORTER_SETS.map((st, i) => {
-    const hop = h("div.sp-deck-hop");
-    const card = h("div.sp-deck-card", { "data-set": st.id, "data-d": String(i) }, hop);
-    // A card behind the front one: hover lifts it a little, a click brings it forward.
-    card.addEventListener("pointerenter", (e) => e.pointerType !== "touch" && i !== sel && uiSound("ui_hover"));
-    card.addEventListener("pointerdown", (e) => e.button === 0 && i !== sel && uiSound("ui_press"));
-    card.addEventListener("click", () => i !== sel && pick(st.id));
-    fan.append(card);
-    return { st, card, hop };
-  });
-  const names = h("div.sp-pick.hop-host", { role: "tablist", "aria-label": "Supporter cards" });
-  const tabs = SUPPORTER_SETS.map((st, i) =>
-    h("button.sp-pick-name", { type: "button", role: "tab", "aria-selected": String(i === 0), tabindex: i === 0 ? "0" : "-1", onclick: () => pick(st.id) }, st.name),
-  );
-  names.append(...tabs);
-  // The dot measures its row once it's on screen (the page is built before it's mounted).
-  let tries = 0;
-  const dot = () => (names.isConnected ? void hopIndicator(names, ".sp-pick-name", { axis: "x", selected: ".on", inset: 9 }) : ++tries < 120 && requestAnimationFrame(dot));
-  requestAnimationFrame(dot);
-  names.addEventListener("keydown", (e) => {
-    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
-    e.preventDefault();
-    deck.step(e.key === "ArrowRight" ? 1 : -1);
-    tabs[sel].focus();
-  });
-
-  const draw = () => {
-    const p = profile ?? freshProfile(l.name, who()?.provider ?? null);
-    const base: Profile = { ...p, player: { ...p.player, supporter: true } };
-    for (const { st, hop } of cards) {
-      const title = st.items.find((id) => id.startsWith("title-")) ?? "title-supporter";
-      const c = { ...base.cosmetics, title, frame: `frame-${st.id}`, background: `bg-${st.id}`, hat: st.look.hat };
-      hop.replaceChildren(playerCard(base, { cosmetics: c, nameLook: lookAttrs(l) }));
-    }
-  };
-  const place = () => {
-    fan.dataset.sel = String(sel);
-    cards.forEach(({ card }, i) => {
-      card.dataset.d = String(i - sel);
-      card.setAttribute("aria-hidden", String(i !== sel));
-    });
-    tabs.forEach((t, i) => {
-      t.classList.toggle("on", i === sel);
-      t.setAttribute("aria-selected", String(i === sel));
-      t.tabIndex = i === sel ? 0 : -1;
-    });
-  };
-  const deck: Deck = {
-    el: h("div.sp-cards", null, h("div.sp-deck-wrap", null, fan), names),
-    show: (id) => {
-      const i = SUPPORTER_SETS.findIndex((x) => x.id === id);
-      if (i < 0 || i === sel) return;
-      sel = i;
-      place();
-      // The new front card hops up out of the fan and lands.
-      if (!quietMotion())
-        cards[i].hop.animate(
-          [
-            { transform: "none", easing: "cubic-bezier(.33,1,.68,1)" },
-            { transform: "translateY(-7%)", offset: 0.45, easing: "cubic-bezier(.32,0,.67,0)" },
-            { transform: "none" },
-          ],
-          { duration: 260 },
-        );
-    },
-    step: (by) => pick(SUPPORTER_SETS[(sel + by + SUPPORTER_SETS.length) % SUPPORTER_SETS.length].id),
-    reload: () => {
-      profile = null;
-      draw();
-      load();
-    },
-    player: () => (profile ?? freshProfile(l.name, who()?.provider ?? null)).player,
-  };
-  let loads = 0;
-  const load = () => {
-    const n = ++loads;
-    if (api.available())
-      void myProfile().then((p) => {
-        if (!p || n !== loads) return;
-        profile = p;
-        l.set({ name: p.player.name });
-      });
-  };
-  l.on(draw);
-  draw();
-  place();
-  load();
-  return deck;
-}
-
-// ---------------------------------------------------------------------------------------------
-// Your look, beside the stage above the player glow: two views under one heading, so the column keeps its height.
-//   Your name: colour, effect and font.   Your card: avatar decoration, card border, card effect and hover effect.
-// The choices and swatches are Edit card's (ui/supporter-pickers.ts); every pick shows on the cards at once.
-
-function lookPickers(l: Look, status: HTMLElement, deck: Pick<Deck, "player">): HTMLElement {
-  let view: "name" | "card" = "name";
-  const tabs = h("div.sp-look-tabs", { role: "tablist", "aria-label": "Your look" });
-  const body = h("div.sp-look", { role: "tabpanel" });
-  /** One row of choices: a radio group of swatch buttons, its label (Your card's rows) beside it. */
-  const row = <T extends string | null>(label: string, shown: string | null, choices: { id: T; name: string }[], cur: T, look: (id: T) => HTMLElement, pick: (id: T) => void) =>
-    h(
-      "div.sp-look-row",
-      null,
-      shown ? h("span.sp-look-label", { "aria-hidden": "true" }, shown) : null,
-      h(
-        "div.sp-look-opts",
-        { role: "radiogroup", "aria-label": label },
-        ...choices.map((c) =>
-          h(`button.sp-look-i${cur === c.id ? ".on" : ""}`, { type: "button", role: "radio", "aria-checked": String(cur === c.id), "aria-label": c.name, title: c.name, "data-id": c.id ?? "none", onclick: () => pick(c.id) }, look(c.id)),
-        ),
-      ),
-    );
-  const draw = () => {
-    // A pick redraws the rows: keep focus on the same choice for keyboard players.
-    const active = document.activeElement;
-    const at = active && body.contains(active) ? [...body.querySelectorAll("button")].indexOf(active as HTMLButtonElement) : -1;
-    // A tab switch (pointer or keys) redraws the tabs too: focus moves to the selected one (Sol R2).
-    const onTab = !!active && tabs.contains(active);
-    tabs.replaceChildren(
-      ...(["name", "card"] as const).map((v) =>
-        h(`button.sp-look-tab${v === view ? ".on" : ""}`, { type: "button", role: "tab", "aria-selected": String(v === view), tabindex: v === view ? "0" : "-1", "data-view": v, onclick: () => {
-          if (v !== view) (view = v), draw();
-          // Also where a click doesn't focus a button (Safari): keep focus on the tab, as the arrow keys do.
-          tabs.querySelector<HTMLElement>(".sp-look-tab.on")?.focus({ preventScroll: true });
-        } }, v === "name" ? "Your name" : "Your card"),
-      ),
-    );
-    const attrs = lookAttrs(l);
-    if (view === "name") {
-      const colours = h("div.sp-colours", { role: "radiogroup", "aria-label": "Name colour" });
-      colours.append(
-        ...COLOUR_CHOICES.map((c) =>
-          h(`button.sp-swatch${l.color === c.id ? ".on" : ""}`, { type: "button", role: "radio", "aria-checked": String(l.color === c.id), "aria-label": c.name, title: c.name, style: `--sw:${c.hex}`, onclick: () => l.set({ color: c.id }) }),
-        ),
-      );
-      const effects = h(
-        "div.sp-fx",
-        { role: "radiogroup", "aria-label": "Name effect" },
-        ...EFFECT_CHOICES.map((e) => {
-          const a = nameAttrs({ ...attrs, nameEffect: e.id }, "#eef1f6");
-          return h(
-            `button.sp-fx-i${l.effect === e.id ? ".on" : ""}`,
-            { type: "button", role: "radio", "aria-checked": String(l.effect === e.id), onclick: () => l.set({ effect: e.id }) },
-            h("span.sp-fx-s", { "aria-hidden": "true", style: a.style, class: a.class }, "Aa"),
-            e.name,
-          );
-        }),
-      );
-      // v0.0.40: bold / italic in the cuts the picked font has (none: no row); a pick the font lacks shows as Plain.
-      const styles = styleChoices(l.font);
-      const shown = nameStyleShown(l.font, l.style);
-      body.replaceChildren(
-        colours,
-        effects,
-        row("Name font", null, FONT_CHOICES, l.font, (id) => nameSample({ ...attrs, nameFont: id }), (id) => l.set({ font: id })),
-        ...(styles.length ? [row("Bold and italic", null, styles, shown, (id) => nameSample({ ...attrs, nameStyle: id }), (id) => l.set({ style: id }))] : []),
-      );
-    } else {
-      const player = deck.player();
-      const peak = peakOf(player.special);
-      body.replaceChildren(
-        row("Avatar decoration", "Avatar", DECO_CHOICES, l.deco, (id) => decoSwatch(player, id, l.color), (id) => l.set({ deco: id })),
-        row("Card border", "Border", borderChoices(peak), l.border, (id) => cardFxSwatch(peak, id, null, l.color), (id) => l.set({ border: id })),
-        row("Card effect", "Effect", cardEffectChoices(peak), l.cardEffect, (id) => cardFxSwatch(peak, null, id, l.color), (id) => l.set({ cardEffect: id })),
-        row("Hover effect", "Hover", HOVER_FX_CHOICES, l.hoverFx, (id) => hoverFxSwatch(id, l.color), (id) => l.set({ hoverFx: id })),
-      );
-    }
-    if (at >= 0) body.querySelectorAll("button")[at]?.focus({ preventScroll: true });
-    if (onTab) tabs.querySelector<HTMLElement>(".sp-look-tab.on")?.focus({ preventScroll: true });
-  };
-  tabs.addEventListener("keydown", (e) => {
-    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
-    e.preventDefault();
-    view = view === "name" ? "card" : "name";
-    draw();
-  });
-  l.on(draw);
-  draw();
-  return h("div.sp-name", null, h("div.sp-look-head", null, tabs, status), body);
-}
-
-/** The rest, in a sentence. */
-function perks(): HTMLElement {
-  return h("p.sp-perks", null, "You also get name fonts, avatar decorations, card borders and effects, an effect on your mini profile, a heart by your name, a reserved spot on full servers and a place in Top supporters.");
 }
 
 export const openSupport = () => navigate({ screen: "support" });

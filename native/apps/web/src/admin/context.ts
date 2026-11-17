@@ -202,7 +202,7 @@ export function logLinks(e: Pick<ModRow, "action" | "details">): HTMLElement[] {
   const fb = str(d.feedback);
   if (fb) out.push(h("a", { class: "log-link", href: `#/feedback/${encodeURIComponent(fb)}` }, "ticket"));
   const runs = [d.run, d.runId, ...(Array.isArray(d.runs) ? d.runs : []), ...(Array.isArray(d.ids) && /^(run|integrity)-/.test(e.action) ? d.ids : [])].map(str).filter((x): x is string => !!x);
-  if (runs[0]) out.push(h("a", { class: "log-link", href: `#/runs?id=${encodeURIComponent(runs[0])}` }, runs.length > 1 ? `run (of ${runs.length})` : "run"), h("a", { class: "log-link", href: `/replay/${encodeURIComponent(runs[0])}`, target: "_blank", rel: "noopener" }, "replay"));
+  if (runs[0]) out.push(h("a", { class: "log-link", href: `#/runs?id=${encodeURIComponent(runs[0])}` }, runs.length > 1 ? `run (of ${runs.length})` : "run"), h("a", { class: "log-link", href: `/replay/${encodeURIComponent(runs[0])}?stats=1`, target: "_blank", rel: "noopener" }, "replay"));
   const map = str(d.map);
   if (map) out.push(h("a", { class: "log-link", href: `/maps/${encodeURIComponent(map)}`, target: "_blank", rel: "noopener" }, map));
   return out;
@@ -227,7 +227,7 @@ export function runLinkRows(runs: PlayerDetail["runs"], max = 6): HTMLElement[] 
           h("span", { class: "faint", title: when(r.created_at) }, ago(r.created_at)),
           clientTag(r.client),
           h("span", { class: "spacer" }),
-          r.status === "verified" ? h("a", { class: "log-link", href: `/replay/${encodeURIComponent(r.id)}`, target: "_blank", rel: "noopener" }, "replay") : null,
+          r.status === "verified" ? h("a", { class: "log-link", href: `/replay/${encodeURIComponent(r.id)}?stats=1`, target: "_blank", rel: "noopener" }, "replay") : null,
           h("a", { class: "log-link", href: `/maps/${encodeURIComponent(r.map)}`, target: "_blank", rel: "noopener" }, "map"),
         ),
       ),

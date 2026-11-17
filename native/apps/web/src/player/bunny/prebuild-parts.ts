@@ -36,7 +36,7 @@ export function bunnyParts(outfit: string | null | undefined, l: CosmeticLoadout
   const hood: BunnyHood = hoodOf(look, l.hat);
   const hat = look !== "tek" && isHat(l.hat) ? headwearKey(l.hat!, look, l) : null;
   const crown = look !== "tek" && !hat && l.crown ? l.crown : null;
-  const fit = backFit(look, body, hood, l.hat, l.capeLength, l.robeTied);
+  const fit = backFit(look, body, hood, l.hat, l.capeLength, l.robeTied, l.medal);
   const back = isBack(l.back) ? { id: l.back!, fit, key: backKey(l.back!, fit) } : null;
   return { key: bunnyGeometryKey(knife, glove, look, body, hood), knife, glove, look, body, hood, hat, crown, back };
 }

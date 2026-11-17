@@ -1,5 +1,6 @@
 // Head to head's per-run panel (viewer/h2h.ts): the same panel under each run's view, drawn with the 2D canvas so the
-// screen and the MP4 export show exactly the same thing.
+// screen and the MP4 export show exactly the same thing. A single replay shows the same panel under its view when the
+// player turns Stats on (viewer/solo-panel.ts).
 //
 //   name  time                         sync  gain  strafes  (early)    one line, numbers like the HUD's stats line
 //   ~~~~~~~~~~~~~~~~~|~~~~~~~~~~~~~~~~                                  the run's speed, the playhead
@@ -13,7 +14,10 @@ import type { Rect } from "../h2h/layout";
 import { countWord } from "../hud/time-face";
 import { formatTime } from "../timer";
 import type { H2HSide } from "./h2h";
-import { finalRunTime } from "./player";
+import { finalRunTime, type RunData } from "./player";
+
+/** What a panel needs of a run: head to head's sides, and the one run of a single replay (viewer/solo-panel.ts). */
+export type PanelRun = Pick<H2HSide, "name" | "color" | "timing" | "turns" | "jumps"> & { player: { data: RunData } };
 
 /** The panel's design height: sizes below are in these units (a panel drawn 130 px tall uses them as pixels). */
 export const PANEL_UNITS = 130;
@@ -35,7 +39,7 @@ export interface PanelScale {
   turn: number;
 }
 
-export function panelScale(sides: readonly H2HSide[]): PanelScale {
+export function panelScale(sides: readonly PanelRun[]): PanelScale {
   let span = 1;
   let maxSpeed = 100;
   const turns: number[] = [];
@@ -50,7 +54,7 @@ export function panelScale(sides: readonly H2HSide[]): PanelScale {
 }
 
 /** The headline numbers at the run's tick `at` (they follow playback; at the finish, the run's), HUD style: [value, word]. */
-export function panelNumbers(s: H2HSide, at: number, showEarly = false): [string, string][] {
+export function panelNumbers(s: PanelRun, at: number, showEarly = false): [string, string][] {
   const d = s.player.data;
   const i = Math.max(0, Math.min(d.endTick || d.n, Math.floor(at)));
   let gain = 0;
@@ -69,7 +73,7 @@ export function panelNumbers(s: H2HSide, at: number, showEarly = false): [string
 }
 
 /** Draws run `s`'s panel into `r` at run time `tau` (seconds since its timer started). */
-export function drawPanel(g: CanvasRenderingContext2D, r: Rect, s: H2HSide, tau: number, sc: PanelScale, early = false): void {
+export function drawPanel(g: CanvasRenderingContext2D, r: Rect, s: PanelRun, tau: number, sc: PanelScale, early = false): void {
   // Wide (under a view): one line of name, time and numbers. Tall (beside a view): name and time, then the numbers.
   const tall = r.h > r.w * 0.5;
   const u = tall ? Math.min(r.w / 380, r.h / 200) : r.h / PANEL_UNITS;
@@ -169,7 +173,7 @@ export function drawPanel(g: CanvasRenderingContext2D, r: Rect, s: H2HSide, tau:
 }
 
 /** The mouse turn per tick as bars (up = turning left), A over D as two lanes, reversals dashed, switch offsets. */
-function drawStrip(g: CanvasRenderingContext2D, s: H2HSide, r: Rect, at: number, turnScale: number, u: number): void {
+function drawStrip(g: CanvasRenderingContext2D, s: PanelRun, r: Rect, at: number, turnScale: number, u: number): void {
   const d = s.player.data;
   if (!s.timing) return;
   g.save();
