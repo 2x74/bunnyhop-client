@@ -1,12 +1,16 @@
 #include "atomic_replace.hpp"
 #include "data_location.hpp"
+#include "download_stats.hpp"
+#include "download_retry.hpp"
 #include "json_fields.hpp"
 #include "online.hpp"
 #include "bunnyhop_native.h"
 #include <curl/curl.h>
 #include <algorithm>
+#include <cctype>
 #include <exception>
 #include <fstream>
+#include <iostream>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -20,7 +24,7 @@ namespace {
 constexpr size_t MiB = 1024 * 1024;
 const std::string origin = "https://bunnyhop.lol";
 // This slow for this long counts as stalled. There's no limit on a whole transfer: the largest map has to be able to
-// finish on a slow line, and a retry would start it again from nothing.
+// finish on a slow line. Immutable objects resume decoded prefixes after transient failures.
 constexpr long stalled_bytes_per_second = 1024;
 constexpr long stall_window_seconds = 30;
 constexpr long connect_timeout_seconds = 15;
@@ -29,10 +33,38 @@ constexpr long connect_timeout_seconds = 15;
 constexpr size_t content_workers = 8;
 using Bytes = std::vector<uint8_t>;
 
+thread_local DownloadStats *download_stats = nullptr;
+
+struct DownloadStatsScope {
+    DownloadStats *previous = download_stats;
+
+    explicit DownloadStatsScope(DownloadStats *stats) { download_stats = stats; }
+
+    ~DownloadStatsScope() { download_stats = previous; }
+};
+
+void record_request(CURL *handle, size_t decoded_bytes) {
+    if (!download_stats) return;
+    DownloadSample sample;
+    curl_off_t bytes = 0;
+    curl_easy_getinfo(handle, CURLINFO_SIZE_DOWNLOAD_T, &bytes);
+    sample.bytes = uint64_t(std::max<curl_off_t>(0, bytes));
+    sample.decoded_bytes = decoded_bytes;
+    curl_easy_getinfo(handle, CURLINFO_TOTAL_TIME, &sample.seconds);
+    curl_easy_getinfo(handle, CURLINFO_STARTTRANSFER_TIME, &sample.first_byte_seconds);
+    curl_easy_getinfo(handle, CURLINFO_NUM_CONNECTS, &sample.connections);
+    curl_easy_getinfo(handle, CURLINFO_HTTP_VERSION, &sample.protocol);
+    download_stats->request(sample);
+}
+
 struct Response {
     Bytes bytes;
     size_t limit;
     bool oversized = false;
+    std::string range;
+    bool identity = true;
+    size_t offset = 0, total_limit = 0;
+    long status = 0;
 };
 
 size_t receive(char *data, size_t size, size_t count, void *opaque) noexcept {
@@ -41,6 +73,8 @@ size_t receive(char *data, size_t size, size_t count, void *opaque) noexcept {
         r.oversized = true;
         return 0;
     }
+    if (r.offset && (r.status != 206 || !r.identity || !valid_download_range(r.range, r.offset, 0, r.total_limit)))
+        return 0;
     const auto length = size * count;
     if (length > r.limit - r.bytes.size()) {
         r.oversized = true;
@@ -54,9 +88,39 @@ size_t receive(char *data, size_t size, size_t count, void *opaque) noexcept {
     return length;
 }
 
+size_t receive_header(char *data, size_t size, size_t count, void *opaque) noexcept {
+    if (size && count > SIZE_MAX / size) return 0;
+    auto &response = *static_cast<Response *>(opaque);
+    try {
+        std::string line(data, size * count);
+        std::transform(line.begin(), line.end(), line.begin(), [](unsigned char c) { return std::tolower(c); });
+        if (line.starts_with("http/")) {
+            response.range.clear();
+            response.identity = true;
+            const auto space = line.find(' ');
+            response.status = 0;
+            if (space != std::string::npos)
+                std::from_chars(line.data() + space + 1, line.data() + line.size(), response.status);
+        }
+        const auto colon = line.find(':');
+        if (colon != std::string::npos) {
+            auto value = line.substr(colon + 1);
+            const auto begin = value.find_first_not_of(" \t");
+            value = begin == std::string::npos ? "" : value.substr(begin);
+            value.erase(value.find_last_not_of(" \t\r\n") + 1);
+            if (line.starts_with("content-range:")) response.range = value;
+            if (line.starts_with("content-encoding:")) response.identity = value.empty() || value == "identity";
+        }
+        return size * count;
+    } catch (...) {
+        return 0;
+    }
+}
+
 struct Transfer {
     const std::atomic_bool *cancel;
     LoadProgressCallback progress;
+    size_t offset = 0;
 };
 
 int transfer(void *context, curl_off_t total, curl_off_t received, curl_off_t, curl_off_t) noexcept {
@@ -67,8 +131,8 @@ int transfer(void *context, curl_off_t total, curl_off_t received, curl_off_t, c
             t.progress(
                     {"download",
                      "Downloading map data",
-                     uint64_t(std::max<curl_off_t>(0, received)),
-                     uint64_t(std::max<curl_off_t>(0, total))}
+                     t.offset + uint64_t(std::max<curl_off_t>(0, received)),
+                     total > 0 ? t.offset + uint64_t(total) : 0}
             );
     } catch (...) {
         return 1;
@@ -86,21 +150,28 @@ CURL *thread_handle() {
     return handle.get();
 }
 
-Bytes fetch(
-        const std::string &url, size_t limit, const std::atomic_bool *cancel, const LoadProgressCallback &progress = {}
+void fetch_attempt(
+        const std::string &url,
+        const std::atomic_bool *cancel,
+        const LoadProgressCallback &progress,
+        Response &r,
+        size_t offset,
+        CURLcode &result,
+        long &status
 ) {
     if (cancel && cancel->load()) throw std::runtime_error("Map download cancelled");
-    Transfer transfer_state{cancel, progress};
+    Transfer transfer_state{cancel, progress, offset};
     CURL *const handle = thread_handle();
     if (!handle) throw std::runtime_error("Cannot initialize HTTPS");
-    Response r{{}, limit};
     char error[CURL_ERROR_SIZE]{};
     curl_easy_setopt(handle, CURLOPT_URL, url.c_str());
     curl_easy_setopt(handle, CURLOPT_USERAGENT, "bunnyhop-native/0.1");
     curl_easy_setopt(handle, CURLOPT_PROTOCOLS_STR, "https");
     curl_easy_setopt(handle, CURLOPT_FOLLOWLOCATION, 0L);
     curl_easy_setopt(handle, CURLOPT_FAILONERROR, 1L);
-    curl_easy_setopt(handle, CURLOPT_ACCEPT_ENCODING, "");
+    curl_easy_setopt(handle, CURLOPT_ACCEPT_ENCODING, offset ? "identity" : "");
+    const auto range = std::to_string(offset) + "-";
+    if (offset) curl_easy_setopt(handle, CURLOPT_RANGE, range.c_str());
     curl_easy_setopt(handle, CURLOPT_CONNECTTIMEOUT, connect_timeout_seconds);
     curl_easy_setopt(handle, CURLOPT_LOW_SPEED_LIMIT, stalled_bytes_per_second);
     curl_easy_setopt(handle, CURLOPT_LOW_SPEED_TIME, stall_window_seconds);
@@ -108,25 +179,79 @@ Bytes fetch(
     curl_easy_setopt(handle, CURLOPT_ERRORBUFFER, error);
     curl_easy_setopt(handle, CURLOPT_WRITEFUNCTION, receive);
     curl_easy_setopt(handle, CURLOPT_WRITEDATA, &r);
+    curl_easy_setopt(handle, CURLOPT_HEADERFUNCTION, receive_header);
+    curl_easy_setopt(handle, CURLOPT_HEADERDATA, &r);
     curl_easy_setopt(handle, CURLOPT_NOPROGRESS, 0L);
     curl_easy_setopt(handle, CURLOPT_XFERINFOFUNCTION, transfer);
     curl_easy_setopt(handle, CURLOPT_XFERINFODATA, &transfer_state);
-    const auto result = curl_easy_perform(handle);
-    long status = 0;
+    result = curl_easy_perform(handle);
+    record_request(handle, r.bytes.size());
     curl_easy_getinfo(handle, CURLINFO_RESPONSE_CODE, &status);
     if (cancel && cancel->load()) throw std::runtime_error("Map download cancelled");
-    if (r.oversized) throw std::runtime_error("Hosted map data exceeds size budget");
-    if (status >= 500 && status <= 599)
-        throw DownloadNetworkError("Map server temporarily unavailable (HTTP " + std::to_string(status) + ")");
-    if (result != CURLE_OK && result != CURLE_HTTP_RETURNED_ERROR)
-        throw DownloadNetworkError(
-                "Network unavailable: " + std::string(error[0] ? error : curl_easy_strerror(result))
-        );
-    if (result != CURLE_OK || status != 200)
-        throw std::runtime_error(
-                "Download " + url + ": " + (error[0] ? std::string(error) : "HTTP " + std::to_string(status))
-        );
-    return std::move(r.bytes);
+}
+
+void retry_wait(unsigned attempt, const std::atomic_bool *cancel) {
+    const auto deadline = std::chrono::steady_clock::now() + download_retry_delay(attempt);
+    do {
+        if (cancel && cancel->load()) throw std::runtime_error("Map download cancelled");
+        std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    } while (std::chrono::steady_clock::now() < deadline);
+}
+
+Bytes fetch(
+        const std::string &url,
+        size_t limit,
+        const std::atomic_bool *cancel,
+        const LoadProgressCallback &progress = {},
+        bool resumable = false
+) {
+    Bytes bytes;
+    for (unsigned attempt = 0; attempt < download_attempts; ++attempt) {
+        Response response{{}, limit - bytes.size(), false, {}, true};
+        const DownloadPrefix prefix{bytes.size()};
+        response.offset = prefix.size;
+        response.total_limit = limit;
+        CURLcode result = CURLE_OK;
+        long status = 0;
+        fetch_attempt(url, cancel, progress, response, prefix.size, result, status);
+        const bool accepted = prefix.accept(status, response.range, response.bytes.size(), limit, response.identity);
+        if (response.oversized && (!prefix.size || accepted))
+            throw std::runtime_error("Hosted map data exceeds size budget");
+        const auto received = response.bytes.size();
+        if (accepted) {
+            if (prefix.size)
+                bytes.insert(bytes.end(), response.bytes.begin(), response.bytes.end());
+            else
+                bytes = std::move(response.bytes);
+        }
+        // An ignored or malformed range is discarded and retried as a full compressed download.
+        const bool fallback = prefix.size && !accepted && (status == 200 || status == 206 || status == 416);
+        if (fallback || (!resumable && result != CURLE_OK)) bytes.clear();
+        if (accepted && result == CURLE_OK) {
+            if (prefix.size && !valid_download_range(response.range, prefix.size, received, limit))
+                throw std::runtime_error("Incomplete resumed download");
+            if (prefix.size) {
+                const auto slash = response.range.find('/');
+                if (std::stoull(response.range.substr(slash + 1)) != bytes.size())
+                    throw std::runtime_error("Incomplete resumed download");
+            }
+            return bytes;
+        }
+        if (attempt + 1 < download_attempts && (fallback || transient_download_error(result, status))) {
+            if (download_stats) download_stats->retried();
+            retry_wait(attempt, cancel);
+            continue;
+        }
+        if (transient_download_error(result, status))
+            throw DownloadNetworkError(
+                    "Download failed after " + std::to_string(attempt + 1) + " attempts (HTTP " + std::to_string(status)
+                    + "): " + curl_easy_strerror(result)
+            );
+        if (result != CURLE_OK && result != CURLE_HTTP_RETURNED_ERROR)
+            throw DownloadNetworkError("Network unavailable: " + std::string(curl_easy_strerror(result)));
+        throw std::runtime_error("Download " + url + ": HTTP " + std::to_string(status));
+    }
+    throw DownloadNetworkError("Download retry budget exhausted");
 }
 
 Bytes get(
@@ -135,7 +260,9 @@ Bytes get(
         const std::atomic_bool *cancel,
         const LoadProgressCallback &progress = {}
 ) {
-    return fetch(origin + route, limit, cancel, progress);
+    return fetch(
+            origin + route, limit, cancel, progress, route.starts_with("/api/bsp/") || route.starts_with("/content/")
+    );
 }
 
 bool hash_id(const std::string &s) {
@@ -161,7 +288,9 @@ bool file_matches(const std::filesystem::path &path, const std::string &sha, siz
     if (error || size > max_size) return false;
     std::ifstream stream(path, std::ios::binary);
     Bytes bytes((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
-    return bytes.size() == size && hash(bytes) == sha;
+    const bool matches = bytes.size() == size && hash(bytes) == sha;
+    if (matches && download_stats) download_stats->cached();
+    return matches;
 }
 
 void report_cached(const LoadProgressCallback &progress, uint64_t size, bool offline) {
@@ -186,6 +315,7 @@ asset(const std::filesystem::path &cache,
         return file;
     }
     if (offline) throw std::runtime_error("Cached map data is missing or corrupt; reconnect and retry");
+    if (download_stats) download_stats->missing();
     const auto bytes = fetch ? fetch(route, max_size, cancel, progress) : get(route, max_size, cancel, progress);
     if (cancel && cancel->load()) throw std::runtime_error("Map download cancelled");
     if (bytes.size() > max_size) throw std::runtime_error("Downloaded content exceeds size budget");
@@ -303,6 +433,8 @@ struct MapTransfer {
     const DownloadFetch &fetch;
     bool offline = false;
     LoadProgress current;
+    DownloadStats *stats = nullptr;
+    size_t workers_started = 0;
 
     void emit(LoadProgress value) const {
         value.offline = offline;
@@ -464,6 +596,7 @@ struct MapTransfer {
             ContentRun &run,
             size_t worker
     ) {
+        DownloadStatsScope scope(stats);
         try {
             const ContentObject *active = nullptr;
             const LoadProgressCallback transfer = [&](const LoadProgress &value) {
@@ -492,6 +625,7 @@ struct MapTransfer {
         ContentRun run;
         run.files_total = files.size();
         const size_t workers = std::min(content_workers, objects.size());
+        workers_started = workers;
         run.in_flight.assign(workers, 0);
         {
             WorkerThreads threads;
@@ -553,8 +687,27 @@ DownloadedMap download_map(
         const LoadProgressCallback &detail_progress,
         const DownloadFetch &fetch
 ) {
+    DownloadStats stats;
+    DownloadStatsScope scope(&stats);
     MapTransfer transfer{id, cache, progress, cancel, limits, detail_progress, fetch, false, {}};
-    return transfer.run();
+    transfer.stats = &stats;
+    const auto report = [&](bool complete) noexcept {
+        try {
+            auto summary = stats.summary(id, complete, transfer.workers_started);
+            summary["curl"] = curl_version();
+            // One insertion keeps concurrent map summaries together in the existing scrubbed log.
+            std::cerr << "Download speed: " + summary.dump() + "\n";
+        } catch (...) {
+        }
+    };
+    try {
+        auto result = transfer.run();
+        report(true);
+        return result;
+    } catch (...) {
+        report(false);
+        throw;
+    }
 }
 
 // Optional Valve sound content stays in the verified object cache, outside the
