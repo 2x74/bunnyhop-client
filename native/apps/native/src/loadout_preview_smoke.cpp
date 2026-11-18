@@ -92,6 +92,11 @@ int main(int argc, char **argv) {
         capture("bunny-rotated", 14.2);
         job["view"] = "ghost";
         capture("ghost", 15);
+        // The Hop effect tab: the bunny hops with its effect, which builds the hop shader.
+        job["view"] = "hop";
+        job["loadout"] = "2;knife-bayonet;fin-sunset;glove-sport-pandora;;;;;;;;;hop-embers";
+        capture("hop", 15.05);
+        job["loadout"] = "2;knife-bayonet;fin-sunset;glove-sport-pandora";
         job["view"] = "onboarding";
         job["inspect"] = 0;
         job["stage"] = {
