@@ -10,6 +10,7 @@
 #include "live_hilt_layer.hpp"
 #include "first_person_charm.hpp"
 #include <charconv>
+#include <iostream>
 #include <optional>
 #include <span>
 #ifndef BUNNYHOP_NATIVE_ASSET_ROOT
@@ -219,6 +220,8 @@ class NativeViewmodel {
 
     std::optional<native_hop::Recipes> hopRecipes;
     std::unique_ptr<native_hop::Layer> hopLayer;
+    // Set when the driver rejected the hop shader; looks keep pointing into hopRecipes, so it stays loaded.
+    bool hopLayerFailed = false;
     std::unordered_map<std::string, ActorHop> actorHops;
     std::filesystem::path hopAssetRoot;
     // Settings: other players' hop effects (yours always show), and the Potato and reduced-motion scales.
@@ -994,7 +997,7 @@ class NativeViewmodel {
     void hop_update(const native_render::Actor &actor, const Look &look, double seconds, bool snapped) {
         auto found = actorHops.find(actor.id);
         if (snapped && found != actorHops.end()) release_hop(found->second);
-        if (!look.hop || !hopRecipes || (!own_hops(actor) && !showOtherHops)) return;
+        if (!look.hop || !hopRecipes || hopLayerFailed || (!own_hops(actor) && !showOtherHops)) return;
         auto &hop = actorHops[actor.id];
         if (hopLayer && hop.slot >= 0) hopLayer->set_clock(hop.slot, seconds);
         native_hop::Pose pose;
@@ -1032,12 +1035,25 @@ class NativeViewmodel {
     }
 
     bool claim_hop(ActorHop &hop) {
-        if (!hopLayer) hopLayer = std::make_unique<native_hop::Layer>(gl, *hopRecipes, hopAssetRoot);
+        if (!hopLayer && !make_hop_layer()) return false;
         if (hop.slot >= 0) return true;
         const auto slot = hopLayer->claim();
         if (!slot) return false;
         hop.slot = *slot;
         return true;
+    }
+
+    // The layer is made on the first hop effect, often another player's in a server. A driver that rejects its shader
+    // turns hop effects off for the session instead of closing the game.
+    bool make_hop_layer() {
+        try {
+            hopLayer = std::make_unique<native_hop::Layer>(gl, *hopRecipes, hopAssetRoot);
+            return true;
+        } catch (const std::exception &error) {
+            std::cerr << "Bunnyhop native: hop effects off, " << error.what() << '\n';
+            hopLayerFailed = true;
+            return false;
+        }
     }
 
     void release_hop(ActorHop &hop) {

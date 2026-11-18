@@ -4,6 +4,7 @@
 // website's GLSL with three.js's names swapped for native ones.
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { assertPortable, renameReserved } from "./glsl-portable";
 import {
   HOP_EXITS,
   HOP_FRAME_CAP,
@@ -85,7 +86,8 @@ const ATTRIBUTES = ["iA", "iB", "iC", "iD", "iE", "iF", "iG", "iH", "iI", "iJ", 
 function literal(source: string, name: string): string {
   const found = source.match(new RegExp(`const ${name} = /\\* glsl \\*/ \x60([\\s\\S]*?)\x60;`))?.[1];
   if (!found) throw new Error(`Missing upstream hop shader ${name}`);
-  return found.replaceAll("${HOP_SLOTS}", String(HOP_SLOTS));
+  // The website's fragment shader names a value `char`, which NVIDIA's compiler rejects (glsl-portable.ts).
+  return renameReserved(found.replaceAll("${HOP_SLOTS}", String(HOP_SLOTS)));
 }
 
 /**
@@ -153,6 +155,8 @@ export async function writeHopEffects(directory: string): Promise<void> {
     effects: Object.fromEntries(Object.entries(HOP_FX).map(([id, def]) => [id, def.parts.map(part)])),
   };
   await writeFile(resolve(directory, "hop-fx.json"), JSON.stringify(recipes));
-  await writeFile(resolve(directory, "hop-vertex.glsl"), vertexShader(literal(layer, "VERTEX")));
-  await writeFile(resolve(directory, "hop-fragment.glsl"), fragmentShader(literal(layer, "FRAGMENT")));
+  const vertex = assertPortable("hop-vertex.glsl", vertexShader(literal(layer, "VERTEX")));
+  const fragment = assertPortable("hop-fragment.glsl", fragmentShader(literal(layer, "FRAGMENT")));
+  await writeFile(resolve(directory, "hop-vertex.glsl"), vertex);
+  await writeFile(resolve(directory, "hop-fragment.glsl"), fragment);
 }

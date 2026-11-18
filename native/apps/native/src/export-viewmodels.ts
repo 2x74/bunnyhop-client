@@ -33,6 +33,7 @@ import { fpRobeGeometry, fpRobeUniform } from "../../web/src/viewmodel/robe-slee
 import { bakeGunAO } from "../../web/src/viewmodel/guns/ao";
 import { writePlayerMaterials } from "./export-player-materials";
 import { writeHopEffects } from "./export-hop-effects";
+import { assertPortableDirectory } from "./glsl-portable";
 import { writeCharms } from "./export-charms";
 import { crownGeometry } from "../../web/src/player/bunny/crown";
 import { vmRig } from "../../web/src/viewmodel/rig";
@@ -797,6 +798,7 @@ for (const name of [
   "glow-fragment",
 ])
   await rm(resolve(directory, name + ".glsl"), { force: true });
+await assertPortableDirectory(directory);
 console.log(
   `native original meshes/poses/cosmetics: ${(byteOffset / 1048576).toFixed(1)} MiB native data, ${(compressed.byteLength / 1048576).toFixed(1)} MiB packaged -> ${directory}`,
 );
