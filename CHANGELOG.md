@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.9.5 — Native
+
+Matches website v0.0.43. Update from Settings → Updates: press Update, then Restart.
+
+- Fixed a crash on NVIDIA graphics cards when someone with a hop effect jumped, most often right after joining a
+  server. The game logged "Shader compilation failed" and closed. If a graphics driver can't build the hop effect
+  now, hop effects turn off for that session instead.
+- Hop effects show in the Loadout preview on NVIDIA cards (the same fault left the preview without them).
+- Loadout: only the item list scrolls, so the preview stays in view while you browse.
+
 ## v0.9.4 — Native
 
 Matches website v0.0.43. Update from Settings → Updates: press Update, then Restart. Your settings, replays and maps
