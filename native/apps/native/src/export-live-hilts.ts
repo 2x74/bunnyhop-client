@@ -6,6 +6,7 @@
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { deflateSync } from "node:zlib";
+import { assertPortable } from "./glsl-portable";
 import { loadLiveHilts } from "./live-hilt-modules";
 import {
   FRAGMENT_CHUNKS,
@@ -179,10 +180,13 @@ await writeFile(
     designs,
   }),
 );
-await writeFile(resolve(directory, "live-hilt-vertex.glsl"), lit.vertex);
-await writeFile(resolve(directory, "live-hilt-fragment.glsl"), lit.fragment);
-await writeFile(resolve(directory, "live-glow-vertex.glsl"), glow.vertex);
-await writeFile(resolve(directory, "live-glow-fragment.glsl"), glow.fragment);
+for (const [name, source] of [
+  ["live-hilt-vertex.glsl", lit.vertex],
+  ["live-hilt-fragment.glsl", lit.fragment],
+  ["live-glow-vertex.glsl", glow.vertex],
+  ["live-glow-fragment.glsl", glow.fragment],
+] as const)
+  await writeFile(resolve(directory, name), assertPortable(name, source));
 console.log(
   `native living hilts: ${LIVE_DESIGNS.length} designs on ${KNIVES.length} knives, at most ${triangles} triangles, ` +
     `${(byteOffset / 1048576).toFixed(1)} MiB packed`,
