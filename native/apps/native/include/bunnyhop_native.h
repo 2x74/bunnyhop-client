@@ -527,6 +527,8 @@ int bh_replay_load(BhContext *ctx, const char *path);
 const char *bh_replay_info(BhContext *ctx, size_t *byte_count);
 int bh_replay_step(BhContext *ctx, BhSnapshot *out);
 int bh_replay_seek(BhContext *ctx, uint32_t tick, BhSnapshot *out);
+/* Keep keyframes for the loaded replay (up to 128 MiB) so seeks are quick: for the viewer. Off after each load. */
+int bh_replay_keyframes(BhContext *ctx, int enabled);
 /* bh_replay_seek in slices: at most max_ticks toward tick. 1 = there, 2 = stopped short (out holds where; call
    again), 0 = error. */
 int bh_replay_seek_toward(BhContext *ctx, uint32_t tick, uint32_t max_ticks, BhSnapshot *out);

@@ -1,6 +1,7 @@
 //! Saved replay states for seeking (web viewer/player.ts keyframes). A seek restores the nearest keyframe at or before
 //! its tick and steps on from there instead of replaying the run from tick 0. Game::restore_state is bit-exact, and
-//! every tick stepped is still checked against the replay's checkpoints.
+//! every tick stepped is still checked against the replay's checkpoints. Only a viewer that seeks around turns them on
+//! (bh_replay_keyframes): a replay played straight through, for an export or a score, keeps none.
 use super::*;
 
 /// One a second at 100 tick, as on the web.
@@ -34,6 +35,7 @@ pub(crate) struct Keyframes {
     interval: u32,
     bytes: usize,
     pub(crate) budget_bytes: usize,
+    pub(crate) enabled: bool,
 }
 
 impl Default for Keyframes {
@@ -43,6 +45,7 @@ impl Default for Keyframes {
             interval: FIRST_INTERVAL_TICKS,
             bytes: 0,
             budget_bytes: BUDGET_BYTES,
+            enabled: false,
         }
     }
 }
@@ -67,7 +70,7 @@ impl Keyframes {
 
     /// Saves the state after `tick` when it falls on the interval and isn't saved yet.
     pub fn capture(&mut self, tick: u32, m: &Map) {
-        if tick == 0 || tick % self.interval != 0 {
+        if !self.enabled || tick == 0 || tick % self.interval != 0 {
             return;
         }
         let at = self.frames.partition_point(|k| k.tick < tick);

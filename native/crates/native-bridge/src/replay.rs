@@ -771,6 +771,18 @@ pub unsafe extern "C" fn bh_replay_seek(
         })
     }
 }
+/// Keeps keyframes for the loaded replay from now on (replay_keyframes.rs), so seeks back and forth are quick. For a
+/// viewer; up to 128 MiB.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bh_replay_keyframes(ctx: *mut BhContext, enabled: c_int) -> c_int {
+    unsafe {
+        call(ctx, |c| {
+            let playback = c.map()?.playback.as_mut().ok_or("no replay loaded")?;
+            playback.keyframes.enabled = enabled != 0;
+            Ok(())
+        })
+    }
+}
 /// bh_replay_seek in slices: steps at most `max_ticks` toward `tick` and returns 1 there, 2 when it stopped short (out
 /// holds the state where it stopped; call again to go on), 0 on error. Lets a long seek run across frames.
 #[unsafe(no_mangle)]

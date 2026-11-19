@@ -1253,6 +1253,7 @@ int run(const native::Options &opt) {
         } else {
             try {
                 viewer.session = native::ReplaySession::open(core.get(), path, full_recording);
+                bh_replay_keyframes(core.get(), 1);
             } catch (const std::exception &error) {
                 reset();
                 throw std::runtime_error(std::string("Loading native replay: ") + error.what());

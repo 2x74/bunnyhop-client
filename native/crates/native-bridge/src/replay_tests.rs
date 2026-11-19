@@ -441,6 +441,7 @@ fn replay_seeks_through_keyframes_match_playing_from_the_start() {
             let c = bh_create();
             assert_eq!(bh_load_map(c, map.as_ptr(), ptr::null()), 1);
             assert_eq!(bh_replay_load(c, replay.as_ptr()), 1);
+            assert_eq!(bh_replay_keyframes(c, 1), 1);
             (*c).map.as_mut().unwrap().playback.as_mut().unwrap().keyframes.budget_bytes = budget;
             // Forward from the start, back through keyframes, on from where playback is, and the ends.
             for tick in [2_999, 120, 2_400, 2_450, 2_399, 0, 3_000, 1_777, 1_778, 101, 99, 2_000] {
@@ -461,6 +462,7 @@ fn replay_seeks_through_keyframes_match_playing_from_the_start() {
         let c = bh_create();
         assert_eq!(bh_load_map(c, map.as_ptr(), ptr::null()), 1);
         assert_eq!(bh_replay_load(c, replay.as_ptr()), 1);
+        assert_eq!(bh_replay_keyframes(c, 1), 1);
         let mut slices = 0;
         loop {
             let result = bh_replay_seek_toward(c, 2_900, 250, &mut snapshot);
@@ -474,6 +476,9 @@ fn replay_seeks_through_keyframes_match_playing_from_the_start() {
         assert_eq!((snapshot.player.tick, slices), (2_900, 12));
         assert_eq!(bh_replay_seek_toward(c, 3_001, 250, &mut snapshot), 0);
         bh_destroy(c);
+        // Played straight through without asking, a replay keeps no keyframes.
+        assert_eq!(bh_replay_seek(reference, TICKS as u32, &mut snapshot), 1);
+        assert_eq!((*reference).map.as_ref().unwrap().playback.as_ref().unwrap().keyframes.len(), 0);
         bh_destroy(reference);
     }
 }
@@ -487,6 +492,7 @@ fn replay_checkpoint_mismatch_still_stops_playback_at_its_tick() {
         let c = bh_create();
         assert_eq!(bh_load_map(c, map.as_ptr(), ptr::null()), 1);
         assert_eq!(bh_replay_load(c, replay.as_ptr()), 1);
+        assert_eq!(bh_replay_keyframes(c, 1), 1);
         let playback = (*c).map.as_mut().unwrap().playback.as_mut().unwrap();
         let checkpoint = playback.data.checkpoints.iter_mut().find(|c| c.0 == 301).unwrap();
         checkpoint.1[0] += 1.0;

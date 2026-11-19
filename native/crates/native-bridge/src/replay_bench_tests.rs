@@ -21,6 +21,7 @@ fn replay_bench() {
         eprintln!("map load {:?}", started.elapsed());
         let started = Instant::now();
         assert_eq!(bh_replay_load(c, replay.as_ptr()), 1, "{}", error(c));
+        assert_eq!(bh_replay_keyframes(c, 1), 1);
         let playback = || (*c).map.as_ref().unwrap().playback.as_ref().unwrap();
         let ticks = playback().data.commands.len() as u32;
         let checkpoints = playback().data.checkpoints.len();
