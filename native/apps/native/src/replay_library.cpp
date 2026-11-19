@@ -13,7 +13,13 @@ constexpr size_t replay_list_limit = 500;
 
 // Imported BHRs contain ticks, not a score. Re-time them on the worker when the
 // matching map is cached; never alter the replay bytes or block the frame loop.
-std::optional<int64_t> replay_score(
+struct ReplayScore {
+    // The replay was played through (its map is cached and it loaded); only then is the result worth keeping.
+    bool played = false;
+    std::optional<int64_t> ms;
+};
+
+ReplayScore replay_score(
         BhContext *core,
         const std::filesystem::path &cache,
         const std::filesystem::path &replay,
@@ -25,30 +31,37 @@ std::optional<int64_t> replay_score(
         || map.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
                    != std::string::npos
         || hash.size() != 64 || hash.find_first_not_of("0123456789abcdef") != std::string::npos) {
-        return std::nullopt;
+        return {};
     }
     const auto directory = cache / "maps" / hash;
     const auto bsp = directory / (map + ".bsp");
     if (!std::filesystem::is_regular_file(bsp)) {
-        return std::nullopt;
+        return {};
     }
     if (!bh_load_map(core, data_location::utf8(bsp).c_str(), data_location::utf8(directory / "content").c_str())
         || !bh_replay_load(core, data_location::utf8(replay).c_str())) {
-        return std::nullopt;
+        return {};
     }
     BhSnapshot state{};
     BhRunState run{};
-    if (!bh_replay_seek(core, info.at("endTick").get<uint32_t>(), &state) || !bh_run_state(core, &run)
-        || run.status != 2) {
-        return std::nullopt;
+    if (!bh_replay_seek(core, info.at("endTick").get<uint32_t>(), &state) || !bh_run_state(core, &run)) {
+        return {true, std::nullopt};
     }
-    return score_ms(run.seconds);
+    if (run.status != 2) return {true, std::nullopt};
+    return {true, score_ms(run.seconds)};
+}
+
+std::string file_digest(const std::filesystem::path &path, std::uintmax_t max_bytes) {
+    char digest[65] = {};
+    if (!bh_sha256_file(data_location::utf8(path).c_str(), max_bytes, digest)) return {};
+    return digest;
 }
 }  // namespace
 
-ReplayLibrary::ReplayLibrary(std::filesystem::path cache)
+ReplayLibrary::ReplayLibrary(std::filesystem::path cache, const nlohmann::json &identity)
     : replays_(cache / "replays")
     , vault_(cache / "run-vault")
+    , scores_(cache / "run-vault" / "scores.json", identity)
     , worker_([this] { work(); }) {
 }
 
@@ -194,14 +207,7 @@ void ReplayLibrary::scan(Update &update) {
             if (summary.is_object() && summary.value("timingPolicy", Json(nullptr)) == timing_policy) {
                 info["timeMs"] = summary.at("timeMs");
             }
-            if (!info.contains("timeMs")) {
-                if (!core) core.reset(bh_create());
-                if (core) {
-                    if (const auto ms = replay_score(core.get(), replays_.parent_path(), path, info)) {
-                        info["timeMs"] = *ms;
-                    }
-                }
-            }
+            if (!info.contains("timeMs") && !cached->second.scored) score(core, path, cached->second);
             const auto ms = info.contains("timeMs") ? info.at("timeMs").get<int64_t>() : legacy_replay_ms(info);
             Json listed = {
                     {"id", id},
@@ -226,6 +232,26 @@ void ReplayLibrary::scan(Update &update) {
     }
     std::erase_if(headers_, [&seen](const auto &entry) { return !seen.contains(entry.first); });
     update.replays = std::move(list);
+    scores_.save();
+}
+
+// A replay without a finish summary: its score from the cache, or worked out by playing it through and then kept.
+void ReplayLibrary::score(
+        std::unique_ptr<BhContext, decltype(&bh_destroy)> &core, const std::filesystem::path &path, CachedHeader &cached
+) {
+    const auto digest = file_digest(path, replay_max_bytes);
+    if (const auto known = digest.empty() ? std::nullopt : scores_.find(digest)) {
+        if (known->ms) cached.info["timeMs"] = *known->ms;
+        cached.scored = true;
+        return;
+    }
+    if (!core) core.reset(bh_create());
+    if (!core) return;
+    const auto result = replay_score(core.get(), replays_.parent_path(), path, cached.info);
+    if (result.ms) cached.info["timeMs"] = *result.ms;
+    if (!result.played) return;
+    cached.scored = true;
+    if (!digest.empty()) scores_.store(digest, {result.ms});
 }
 
 }  // namespace native

@@ -536,7 +536,7 @@ int run(const native::Options &opt) {
     auto &last_requested_map = map_download.requested;
     auto &load_progress = map_download.progress;
     std::string error;
-    native::ReplayLibrary replay_library(cache);
+    native::ReplayLibrary replay_library(cache, identity);
     native::RunVault run_vault(cache / "run-vault");
     native::updates::Host updater(cache, default_root, identity, native::executable_path());
     recorder.diagnostics.set_client_version(identity.value("version", std::string("local")));
