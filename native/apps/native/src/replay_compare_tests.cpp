@@ -41,7 +41,7 @@ int main(int argc, char **argv) {
             throw std::runtime_error(bh_last_error(core.get()));
         }
         const auto before = snapshot_bytes(core.get());
-        if (native::render_menu_message_limit("replayCompare", 16384) != 12 * 1024 * 1024
+        if (native::render_menu_message_limit("replayCompare", 16384) != native::kMenuReplayMessageBytes
             || native::render_menu_message_limit("settings", 16384) != 16384) {
             throw std::runtime_error("Compare base64 message limit mismatch");
         }

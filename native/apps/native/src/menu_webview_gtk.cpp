@@ -10,7 +10,9 @@
 #include <utility>
 
 namespace {
-constexpr size_t max_message_bytes = 12 * 1024 * 1024;
+// A 16 MiB replay (the server's upload cap) as base64 in a JSON message, from the Replays list or a leaderboard.
+constexpr size_t max_message_bytes = 24 * 1024 * 1024;
+constexpr size_t max_queued_bytes = 32 * 1024 * 1024;
 constexpr size_t max_messages = 128;
 constexpr const char *bridge_world = "bunnyhop-trusted-menu";
 
@@ -65,7 +67,7 @@ struct MenuState {
         for (const auto &message : messages)
             queued += message.size();
         if (value.size() <= max_message_bytes && messages.size() < max_messages
-            && queued + value.size() <= 16 * 1024 * 1024)
+            && queued + value.size() <= max_queued_bytes)
             messages.push_back(std::move(value));
         else
             std::cerr << "Menu message dropped: the queue is full\n";

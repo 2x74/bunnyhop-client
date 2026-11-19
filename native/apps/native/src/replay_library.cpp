@@ -7,7 +7,8 @@
 
 namespace native {
 namespace {
-constexpr std::uintmax_t replay_max_bytes = 8 * 1024 * 1024;
+// What the core reads (replay.rs MAX_FILE_BYTES): a replay saved at the 24-hour recording cap still lists.
+constexpr std::uintmax_t replay_max_bytes = 64 * 1024 * 1024;
 constexpr size_t replay_list_limit = 500;
 
 // Imported BHRs contain ticks, not a score. Re-time them on the worker when the

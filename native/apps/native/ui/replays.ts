@@ -57,7 +57,8 @@ export const gauntletWatchDeps: GauntletWatchDeps = {
   cancelPrefetch: () => send({ type: "prefetchMap", map: null }),
 };
 
-const MAX_BYTES = 8 << 20;
+/** The server's upload cap (apps/api replay-io.ts MAX_REPLAY_BYTES): every ranked replay fits. */
+const MAX_BYTES = 16 << 20;
 let selectedGhostSlot = 0;
 import { base64Bytes } from "./base64";
 export { base64Bytes };
@@ -75,7 +76,7 @@ export function sendReplay(
   ghostSlot = selectedGhostSlot,
   source: "pb" | "wr" | "custom" = "custom",
 ): void {
-  if (!bytes.length || bytes.length > MAX_BYTES) throw new Error("Replay must be between 1 byte and 8 MiB.");
+  if (!bytes.length || bytes.length > MAX_BYTES) throw new Error("Replay must be between 1 byte and 16 MiB.");
   if (action === "play" && !preserveWatch) playing();
   send({
     type: "replayData",
@@ -355,7 +356,7 @@ export function replayPanel(notice: (value: string) => void): HTMLElement {
     const file = input.files?.[0];
     if (!file) return;
     try {
-      if (file.size > MAX_BYTES) throw new Error("Replay exceeds 8 MiB.");
+      if (file.size > MAX_BYTES) throw new Error("Replay exceeds 16 MiB.");
       sendReplay(new Uint8Array(await file.arrayBuffer()), mode, file.name);
       notice(`Loading ${file.name}…`);
     } catch (error) {

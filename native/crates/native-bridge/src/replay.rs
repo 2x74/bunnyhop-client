@@ -5,6 +5,8 @@ use serde_json::json;
 use std::io::Read;
 /// A 24-hour replay (recording::MAX_COMMANDS) at up to 15 bytes a tick, decompressed. Real runs use about 11.
 const MAX_BYTES: usize = 256 << 20;
+/// A 24-hour replay as stored: real runs compress to about 3 bytes a tick, 26 MiB at the cap.
+const MAX_FILE_BYTES: usize = 64 << 20;
 /// Every recording the native recorder can write (recording::MAX_COMMANDS, 24 hours at 100 tick).
 const MAX_COMMANDS: usize = recording::MAX_COMMANDS as usize;
 #[derive(Clone)]
@@ -191,11 +193,11 @@ impl Decoded {
         let mut bytes = Vec::new();
         std::fs::File::open(path)
             .map_err(|e| format!("{}: {e}", path.display()))?
-            .take((32 << 20) + 1)
+            .take(MAX_FILE_BYTES as u64 + 1)
             .read_to_end(&mut bytes)
             .map_err(|e| e.to_string())?;
-        if bytes.len() > 32 << 20 {
-            return Err("compressed replay exceeds 32 MiB".into());
+        if bytes.len() > MAX_FILE_BYTES {
+            return Err(format!("compressed replay exceeds {} MiB", MAX_FILE_BYTES >> 20));
         }
         let raw = if bytes.starts_with(&[0x1f, 0x8b]) {
             let mut raw = Vec::new();
@@ -208,7 +210,7 @@ impl Decoded {
             bytes
         };
         if raw.len() > MAX_BYTES {
-            return Err("decoded replay exceeds 128 MiB".into());
+            return Err(format!("decoded replay exceeds {} MiB", MAX_BYTES >> 20));
         }
         Self::parse(&raw)
     }
