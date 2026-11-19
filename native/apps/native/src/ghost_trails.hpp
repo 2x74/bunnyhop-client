@@ -128,7 +128,8 @@ struct GhostPath {
     }
 
     void load(BhContext *core, uint32_t handle, const nlohmann::json &info, GhostSource kind) {
-        constexpr uint32_t maximum_ticks = 180000;
+        // The core's ghost limit (segments.rs MAX_LOG_TICKS, 4 hours at 100 tick): a PB past 30 minutes still races.
+        constexpr uint32_t maximum_ticks = 1'440'000;
         const uint32_t total = info.value("totalTicks", 0u);
         if (!total || total > maximum_ticks) {
             throw std::runtime_error("Ghost path exceeds supported tick count");

@@ -104,6 +104,30 @@ int main() {
         check(!imports.accepts(wire, ghosts, "fixture", "autohop", 0), "old map generation accepted");
         check(native::menu_message_limit("raceGhost") == native::kMenuReplayMessageBytes,
               "race replay bodies are truncated at the normal menu message limit");
+        // A PB longer than 30 minutes still races: 31 minutes standing in the start zone, then the run.
+        constexpr unsigned long_wait_ticks = 186'000;
+        check(bh_reset(live.get()) && bh_set_position(live.get(), 10, 20, 65, 0), "long fixture restart failed");
+        check(bh_record_begin(live.get(), "", "autohop", "test", 100), "long fixture recorder failed");
+        BhCmd still{};
+        for (unsigned tick = 0; tick < long_wait_ticks; ++tick)
+            check(bh_step(live.get(), &still, &state), "long fixture wait failed");
+        run = {};
+        for (unsigned tick = 0; tick < 4096 && run.status != 2; ++tick)
+            check(bh_step(live.get(), &command, &state) && bh_run_state(live.get(), &run), "long fixture tick failed");
+        const auto long_replay = (directory / "long.bhr").string();
+        if (run.status != 2 || !bh_record_end(live.get()) || !bh_record_write_bhr(live.get(), long_replay.c_str()))
+            throw std::runtime_error(std::string("long fixture: ") + bh_last_error(live.get()));
+        auto long_request = request;
+        long_request.update({{"ghostSlot", 1}, {"id", "long.bhr"}});
+        imports.request(long_request, map, directory.string(), directory, decode);
+        const auto long_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (!ghosts.slots[1].loaded() && chat.error.empty() && std::chrono::steady_clock::now() < long_deadline) {
+            imports.poll(ghosts, live.get(), &renderer, 0, "autohop", chat, 0);
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        if (!chat.error.empty()) throw std::runtime_error(chat.error);
+        check(ghosts.slots[1].loaded() && renderer.paths[1].frames.size() > long_wait_ticks,
+              "a ghost longer than 30 minutes did not load");
         std::filesystem::remove_all(directory);
         std::cout << "Background race ghost, live recorder, exact events, source and map generation passed\n";
         return 0;
