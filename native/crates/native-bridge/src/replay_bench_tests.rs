@@ -160,6 +160,21 @@ fn recording_memory_bench() {
             (after - before) / 1024,
             (after - before) as f64 * 1024.0 / ticks as f64
         );
+        // The same recording stopped at a cap of that length, then written.
+        (*c).map.as_mut().unwrap().record_command_limit = ticks + 1;
+        assert_eq!(bh_step(c, &BhCmd::default(), &mut s), 1);
+        let output = fixture.0.join("capped.bhr");
+        let output_c = CString::new(output.to_str().unwrap()).unwrap();
+        let started = Instant::now();
+        assert_eq!(bh_record_write_capped_bhr(c, output_c.as_ptr()), 1);
+        eprintln!(
+            "capped BHR written in {:?}: {} KiB",
+            started.elapsed(),
+            std::fs::metadata(&output).unwrap().len() >> 10
+        );
+        let started = Instant::now();
+        let decoded = replay::Decoded::load(&output).unwrap();
+        eprintln!("decoded {} commands in {:?}", decoded.commands.len(), started.elapsed());
         bh_destroy(c);
     }
 }
