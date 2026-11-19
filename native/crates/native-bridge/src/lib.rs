@@ -44,7 +44,7 @@ mod replay;
 pub use replay::{
     BhGhostFrame, BhReplayEvents, bh_ghost_events, bh_ghost_frame, bh_ghost_free, bh_ghost_info,
     bh_ghost_load, bh_replay_events, bh_replay_header, bh_replay_info, bh_replay_load,
-    bh_replay_seek, bh_replay_step, bh_replay_stop,
+    bh_replay_seek, bh_replay_seek_toward, bh_replay_step, bh_replay_stop,
 };
 mod recording;
 pub use recording::{bh_record_cosmetic, bh_record_inspect, bh_record_loadout, bh_record_loadout_ext};
@@ -54,6 +54,7 @@ pub use flight::{BhFlightState, bh_flight_set, bh_flight_state};
 mod segments;
 pub use segments::{bh_segment_loads, bh_record_options_read_v29};
 pub use practice::bh_segment_restore;
+mod replay_keyframes;
 mod surfaces;
 pub use surfaces::{BhSurfaceProbe, bh_surface_at};
 mod run;

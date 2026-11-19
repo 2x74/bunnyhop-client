@@ -381,3 +381,123 @@ fn legacy_and_fractional_look_apis_record_the_filtered_command() {
         bh_destroy(c);
     }
 }
+
+/// A replay of `ticks` commands that jump, strafe and turn on a floor, written as a capped recording.
+unsafe fn moving_replay(fixture: &Fixture, map: &CString, ticks: u64) -> CString {
+    let zones = timer_zones();
+    let output = fixture.0.join("moving.bhr");
+    let output = CString::new(output.to_str().unwrap()).unwrap();
+    unsafe {
+        let c = bh_create();
+        assert_eq!(bh_load_map(c, map.as_ptr(), ptr::null()), 1);
+        let options = BhRunOptions { rules: 1, ..BhRunOptions::default() };
+        assert_eq!(bh_run_configure(c, &options, zones.as_ptr(), zones.len()), 1);
+        assert_eq!(bh_reset(c), 1);
+        (*c).map.as_mut().unwrap().record_command_limit = ticks;
+        assert_eq!(bh_record_identity(c, c"bunnyhop-native/test".as_ptr()), 1);
+        assert_eq!(bh_record_begin(c, ptr::null(), c"autohop".as_ptr(), c"test".as_ptr(), 7), 1);
+        let mut state = BhState::default();
+        for tick in 0..ticks {
+            let side = if (tick / 37) % 2 == 0 { 450.0 } else { -450.0 };
+            let cmd = BhCmd {
+                forward: if tick % 300 < 200 { 450.0 } else { 0.0 },
+                side,
+                yaw: (tick as f32 * 0.7) % 360.0,
+                pitch: 0.0,
+                buttons: if tick % 50 < 25 { 2 } else { 0 },
+            };
+            assert_eq!(bh_step(c, &cmd, &mut state), 1);
+        }
+        assert_eq!(bh_record_write_capped_bhr(c, output.as_ptr()), 1);
+        bh_destroy(c);
+    }
+    output
+}
+
+unsafe fn snapshot_bytes(c: *mut BhContext) -> Vec<u8> {
+    unsafe { (*c).map.as_ref().unwrap().game.snapshot_bytes() }
+}
+
+#[test]
+fn replay_seeks_through_keyframes_match_playing_from_the_start() {
+    const TICKS: u64 = 3_000;
+    let fixture = Fixture::new();
+    let map = fixture.file("ground.bsp", &ground_bsp(&[]));
+    unsafe {
+        let replay = moving_replay(&fixture, &map, TICKS);
+        let reference = bh_create();
+        assert_eq!(bh_load_map(reference, map.as_ptr(), ptr::null()), 1);
+        assert_eq!(bh_replay_load(reference, replay.as_ptr()), 1);
+        let mut snapshot = BhSnapshot::default();
+        assert_eq!(bh_replay_seek(reference, 0, &mut snapshot), 1);
+        let mut expected = vec![snapshot_bytes(reference)];
+        for _ in 0..TICKS {
+            assert_eq!(bh_replay_step(reference, &mut snapshot), 1);
+            expected.push(snapshot_bytes(reference));
+        }
+        assert_ne!(expected[0], expected[TICKS as usize], "the replay moves");
+        // A small budget thins the keyframes while seeking; the states must not change.
+        for budget in [usize::MAX, 20_000] {
+            let c = bh_create();
+            assert_eq!(bh_load_map(c, map.as_ptr(), ptr::null()), 1);
+            assert_eq!(bh_replay_load(c, replay.as_ptr()), 1);
+            (*c).map.as_mut().unwrap().playback.as_mut().unwrap().keyframes.budget_bytes = budget;
+            // Forward from the start, back through keyframes, on from where playback is, and the ends.
+            for tick in [2_999, 120, 2_400, 2_450, 2_399, 0, 3_000, 1_777, 1_778, 101, 99, 2_000] {
+                assert_eq!(bh_replay_seek(c, tick, &mut snapshot), 1);
+                assert_eq!(snapshot.player.tick, tick);
+                assert!(snapshot_bytes(c) == expected[tick as usize], "seek to {tick}, budget {budget}");
+                if tick < TICKS as u32 {
+                    assert_eq!(bh_replay_step(c, &mut snapshot), 1);
+                    assert!(snapshot_bytes(c) == expected[tick as usize + 1], "step after {tick}");
+                }
+            }
+            let keyframes = &(*c).map.as_ref().unwrap().playback.as_ref().unwrap().keyframes;
+            assert!(keyframes.len() > 1);
+            assert!(budget == usize::MAX || keyframes.interval() > 100, "{} bytes", keyframes.bytes());
+            bh_destroy(c);
+        }
+        // In slices, as the viewer seeks a fresh replay: each stop is the state playing would have there.
+        let c = bh_create();
+        assert_eq!(bh_load_map(c, map.as_ptr(), ptr::null()), 1);
+        assert_eq!(bh_replay_load(c, replay.as_ptr()), 1);
+        let mut slices = 0;
+        loop {
+            let result = bh_replay_seek_toward(c, 2_900, 250, &mut snapshot);
+            assert!(result == 1 || result == 2);
+            assert!(snapshot_bytes(c) == expected[snapshot.player.tick as usize], "slice at {}", snapshot.player.tick);
+            slices += 1;
+            if result == 1 {
+                break;
+            }
+        }
+        assert_eq!((snapshot.player.tick, slices), (2_900, 12));
+        assert_eq!(bh_replay_seek_toward(c, 3_001, 250, &mut snapshot), 0);
+        bh_destroy(c);
+        bh_destroy(reference);
+    }
+}
+
+#[test]
+fn replay_checkpoint_mismatch_still_stops_playback_at_its_tick() {
+    let fixture = Fixture::new();
+    let map = fixture.file("ground.bsp", &ground_bsp(&[]));
+    unsafe {
+        let replay = moving_replay(&fixture, &map, 500);
+        let c = bh_create();
+        assert_eq!(bh_load_map(c, map.as_ptr(), ptr::null()), 1);
+        assert_eq!(bh_replay_load(c, replay.as_ptr()), 1);
+        let playback = (*c).map.as_mut().unwrap().playback.as_mut().unwrap();
+        let checkpoint = playback.data.checkpoints.iter_mut().find(|c| c.0 == 301).unwrap();
+        checkpoint.1[0] += 1.0;
+        let mut snapshot = BhSnapshot::default();
+        assert_eq!(bh_replay_seek(c, 300, &mut snapshot), 1);
+        assert_eq!(bh_replay_seek(c, 400, &mut snapshot), 0);
+        let error = std::ffi::CStr::from_ptr(bh_last_error(c)).to_str().unwrap();
+        assert_eq!(error, "replay checkpoint mismatch at tick 301");
+        // From a keyframe before it, the same tick fails again.
+        assert_eq!(bh_replay_seek(c, 450, &mut snapshot), 0);
+        assert_eq!(bh_replay_seek(c, 250, &mut snapshot), 1);
+        bh_destroy(c);
+    }
+}

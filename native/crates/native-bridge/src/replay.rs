@@ -45,6 +45,7 @@ pub struct Playback {
     pub data: Decoded,
     pub index: usize,
     pub error: Option<String>,
+    pub(crate) keyframes: replay_keyframes::Keyframes,
 }
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -599,15 +600,20 @@ impl Map {
         };
         self.check_replay(d)
     }
+    // Checkpoints and loads are in tick order (the format stores tick deltas): find this tick's by binary search, as
+    // a scan of every checkpoint on every tick made long replays play and seek several times slower.
     fn check_replay(&self, d: &Decoded) -> Result<(), String> {
-        for load in d.segments.iter().filter(|load| load.tick == self.game.tick) {
+        let tick = self.game.tick;
+        let loads = &d.segments[d.segments.partition_point(|load| load.tick < tick)..];
+        for load in loads.iter().take_while(|load| load.tick == tick) {
             if load.position.iter().zip(self.game.state.position)
                 .chain(load.velocity.iter().zip(self.game.state.velocity))
                 .any(|(a, b)| a.to_bits() != b.to_bits()) {
                 return Err(format!("segment load mismatch at tick {}", load.tick));
             }
         }
-        for (t, p, v) in d.checkpoints.iter().filter(|c| c.0 == self.game.tick) {
+        let checkpoints = &d.checkpoints[d.checkpoints.partition_point(|c| c.0 < tick)..];
+        for (t, p, v) in checkpoints.iter().take_while(|c| c.0 == tick) {
             if p.iter()
                 .zip(self.game.state.position)
                 .chain(v.iter().zip(self.game.state.velocity))
@@ -617,6 +623,42 @@ impl Map {
             }
         }
         Ok(())
+    }
+    /// Plays the replay's next command, checks it and keeps a keyframe when one is due.
+    fn play_replay_tick(&mut self, p: &mut Playback) -> Result<(), String> {
+        let cmd = *p.data.commands.get(p.index).ok_or("replay finished")?;
+        self.advance_canonical(cmd, None, false, next_yaw(&p.data.commands, p.index))?;
+        p.index += 1;
+        if let Err(error) = self.check_replay(&p.data) {
+            p.error = Some(error.clone());
+            return Err(error);
+        }
+        p.keyframes.capture(p.index as u32, self);
+        Ok(())
+    }
+    /// Brings playback toward after `tick`, stepping at most `max_ticks`: on from where it is unless a keyframe is
+    /// nearer, otherwise from that keyframe or the start. Returns whether it got there.
+    fn seek_replay(&mut self, p: &mut Playback, tick: usize, max_ticks: usize) -> Result<bool, String> {
+        let nearest = p.keyframes.latest(tick as u32).map_or(0, |k| k.tick as usize);
+        let resume = p.error.is_none() && self.game.tick as usize == p.index && (nearest..=tick).contains(&p.index);
+        if !resume {
+            p.error = None;
+            match p.keyframes.latest(tick as u32) {
+                Some(keyframe) => {
+                    keyframe.restore(self);
+                    p.index = keyframe.tick as usize;
+                }
+                None => {
+                    self.prepare_replay(&p.data)?;
+                    p.index = 0;
+                }
+            }
+        }
+        let stop = tick.min(p.index.saturating_add(max_ticks));
+        while p.index < stop {
+            self.play_replay_tick(p)?;
+        }
+        Ok(p.index == tick)
     }
     fn ghost_frame(&self, cmd: BhCmd) -> BhGhostFrame {
         BhGhostFrame {
@@ -651,6 +693,7 @@ pub unsafe extern "C" fn bh_replay_load(ctx: *mut BhContext, path: *const c_char
                 data: d,
                 index: 0,
                 error: None,
+                keyframes: Default::default(),
             });
             c.settings = settings;
             c.style_id = style;
@@ -693,13 +736,7 @@ pub unsafe extern "C" fn bh_replay_step(ctx: *mut BhContext, out: *mut BhSnapsho
                 if let Some(error) = &p.error {
                     return Err(error.clone());
                 }
-                let cmd = *p.data.commands.get(p.index).ok_or("replay finished")?;
-                m.advance_canonical(cmd, None, false, next_yaw(&p.data.commands, p.index))?;
-                p.index += 1;
-                if let Err(error) = m.check_replay(&p.data) {
-                    p.error = Some(error.clone());
-                    return Err(error);
-                }
+                m.play_replay_tick(&mut p)?;
                 output(out, BhSnapshot::from(&m.game))
             })();
             m.playback = Some(p);
@@ -724,22 +761,46 @@ pub unsafe extern "C" fn bh_replay_seek(
                 if tick as usize > p.data.commands.len() {
                     return Err("seek outside replay".into());
                 }
-                m.prepare_replay(&p.data)?;
-                p.index = 0;
-                p.error = None;
-                for i in 0..tick as usize {
-                    m.advance_canonical(p.data.commands[i], None, false, next_yaw(&p.data.commands, i))?;
-                    p.index = i + 1;
-                    if let Err(error) = m.check_replay(&p.data) {
-                        p.error = Some(error.clone());
-                        return Err(error);
-                    }
-                }
+                m.seek_replay(&mut p, tick as usize, usize::MAX)?;
                 output(out, BhSnapshot::from(&m.game))
             })();
             m.playback = Some(p);
             result
         })
+    }
+}
+/// bh_replay_seek in slices: steps at most `max_ticks` toward `tick` and returns 1 there, 2 when it stopped short (out
+/// holds the state where it stopped; call again to go on), 0 on error. Lets a long seek run across frames.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bh_replay_seek_toward(
+    ctx: *mut BhContext,
+    tick: u32,
+    max_ticks: u32,
+    out: *mut BhSnapshot,
+) -> c_int {
+    let mut arrived = false;
+    let ok = unsafe {
+        call(ctx, |c| {
+            if out.is_null() {
+                return Err("null output".into());
+            }
+            let m = c.map()?;
+            let mut p = m.playback.take().ok_or("no replay loaded")?;
+            let result = (|| {
+                if tick as usize > p.data.commands.len() {
+                    return Err("seek outside replay".into());
+                }
+                arrived = m.seek_replay(&mut p, tick as usize, max_ticks.max(1) as usize)?;
+                output(out, BhSnapshot::from(&m.game))
+            })();
+            m.playback = Some(p);
+            result
+        })
+    };
+    match (ok, arrived) {
+        (0, _) => 0,
+        (_, true) => 1,
+        _ => 2,
     }
 }
 #[unsafe(no_mangle)]

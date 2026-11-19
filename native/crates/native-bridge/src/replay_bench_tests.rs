@@ -13,31 +13,67 @@ fn replay_bench() {
     let (map, replay) = spec.split_once(':').unwrap();
     let map = CString::new(map).unwrap();
     let replay = CString::new(replay).unwrap();
+    let error = |c| unsafe { std::ffi::CStr::from_ptr(bh_last_error(c)).to_string_lossy().into_owned() };
     unsafe {
         let c = bh_create();
         let started = Instant::now();
-        assert_eq!(bh_load_map(c, map.as_ptr(), ptr::null()), 1, "{:?}", std::ffi::CStr::from_ptr(bh_last_error(c)));
+        assert_eq!(bh_load_map(c, map.as_ptr(), ptr::null()), 1, "{}", error(c));
         eprintln!("map load {:?}", started.elapsed());
         let started = Instant::now();
-        assert_eq!(bh_replay_load(c, replay.as_ptr()), 1, "{:?}", std::ffi::CStr::from_ptr(bh_last_error(c)));
-        let ticks = (*c).map.as_ref().unwrap().playback.as_ref().unwrap().data.commands.len() as u32;
-        let checkpoints = (*c).map.as_ref().unwrap().playback.as_ref().unwrap().data.checkpoints.len();
+        assert_eq!(bh_replay_load(c, replay.as_ptr()), 1, "{}", error(c));
+        let playback = || (*c).map.as_ref().unwrap().playback.as_ref().unwrap();
+        let ticks = playback().data.commands.len() as u32;
+        let checkpoints = playback().data.checkpoints.len();
         eprintln!("replay load {:?}: {ticks} ticks, {checkpoints} checkpoints", started.elapsed());
+        // Positions from playing the whole replay once, to check every seek against.
         let mut out = BhSnapshot::default();
-        for fraction in [0.1, 0.5, 0.9, 1.0, 0.5] {
-            let tick = (ticks as f64 * fraction) as u32;
-            let started = Instant::now();
-            assert_eq!(bh_replay_seek(c, tick, &mut out), 1, "{:?}", std::ffi::CStr::from_ptr(bh_last_error(c)));
-            eprintln!("seek {fraction} (tick {tick}) {:?}", started.elapsed());
-        }
         assert_eq!(bh_replay_seek(c, 0, &mut out), 1);
+        let mut positions = vec![out.player.position];
         let started = Instant::now();
-        let steps = ticks.min(20_000);
-        for _ in 0..steps {
-            assert_eq!(bh_replay_step(c, &mut out), 1);
+        for _ in 0..ticks {
+            assert_eq!(bh_replay_step(c, &mut out), 1, "{}", error(c));
+            positions.push(out.player.position);
         }
         let elapsed = started.elapsed();
-        eprintln!("step {steps} ticks {elapsed:?} ({:.2} us/tick)", elapsed.as_secs_f64() * 1e6 / steps as f64);
+        eprintln!(
+            "played {ticks} ticks in {elapsed:?} ({:.2} us/tick); keyframes {} every {} ticks, {} MiB",
+            elapsed.as_secs_f64() * 1e6 / ticks as f64,
+            playback().keyframes.len(),
+            playback().keyframes.interval(),
+            playback().keyframes.bytes() >> 20
+        );
+        // Again with every keyframe already kept: the simulation alone.
+        assert_eq!(bh_replay_seek(c, 0, &mut out), 1);
+        let started = Instant::now();
+        for _ in 0..ticks {
+            assert_eq!(bh_replay_step(c, &mut out), 1);
+        }
+        eprintln!("replayed in {:?}", started.elapsed());
+        let mut slowest = std::time::Duration::ZERO;
+        let mut total = std::time::Duration::ZERO;
+        let mut seed = 0x2545_f491_u32;
+        let seeks = 200;
+        for _ in 0..seeks {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            let tick = seed % (ticks + 1);
+            let started = Instant::now();
+            assert_eq!(bh_replay_seek(c, tick, &mut out), 1, "{}", error(c));
+            let elapsed = started.elapsed();
+            slowest = slowest.max(elapsed);
+            total += elapsed;
+            let expected = positions[tick as usize];
+            assert!(out.player.position.iter().zip(expected).all(|(a, b)| a.to_bits() == b.to_bits()), "tick {tick}");
+        }
+        eprintln!("{seeks} random seeks: mean {:?}, slowest {slowest:?}", total / seeks);
+        // Seeks onto keyframes: the restore alone.
+        let interval = playback().keyframes.interval();
+        let started = Instant::now();
+        for i in 0..20 {
+            assert_eq!(bh_replay_seek(c, interval * (1 + (i * 7) % (ticks / interval - 1)), &mut out), 1);
+        }
+        eprintln!("restore {:?}", started.elapsed() / 20);
         bh_destroy(c);
     }
 }
