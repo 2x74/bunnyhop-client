@@ -43,7 +43,7 @@ pub use v29::{
 mod replay;
 pub use replay::{
     BhGhostFrame, BhReplayEvents, bh_ghost_events, bh_ghost_frame, bh_ghost_free, bh_ghost_info,
-    bh_ghost_load, bh_replay_events, bh_replay_header, bh_replay_info, bh_replay_load,
+    bh_ghost_load, bh_ghost_stream, bh_replay_events, bh_replay_header, bh_replay_info, bh_replay_load,
     bh_replay_keyframes, bh_replay_seek, bh_replay_seek_toward, bh_replay_step, bh_replay_stop,
 };
 mod recording;

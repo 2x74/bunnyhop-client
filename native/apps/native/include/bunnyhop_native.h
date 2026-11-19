@@ -563,6 +563,20 @@ const char *bh_ghost_info(BhContext *ctx, uint32_t handle, size_t *byte_count);
 int bh_ghost_frame(BhContext *ctx, uint32_t handle, uint32_t tick, BhGhostFrame *out);
 int bh_ghost_free(BhContext *ctx, uint32_t handle);
 int bh_ghost_events(BhContext *ctx, uint32_t handle, uint32_t from, uint32_t to, BhReplayEvents *out);
+/* Each tick's ghost frame and its events (as bh_ghost_events over (tick - 1, tick]), in tick order; return 0 to stop.
+ */
+typedef int (*BhGhostSink)(void *data, const BhGhostFrame *frame, const BhReplayEvents *events);
+/* A ghost played through and handed to sink tick by tick, nothing kept: for comparison ghosts up to the 24-hour cap.
+   Returns the ghost's info JSON (as bh_ghost_info), borrowed until the next call; NULL on error. */
+const char *bh_ghost_stream(
+        BhContext *ctx,
+        const char *path,
+        BhCancel cancel,
+        void *cancel_data,
+        BhGhostSink sink,
+        void *sink_data,
+        size_t *byte_count
+);
 
 /* Trigger/clip overlay volumes in native entity/model coordinates, read-only and safe during runs.
  * JSON array: {kind,entity,model,flags,planes:[[nx,ny,nz,d],...]}; nullable entity/model = world.

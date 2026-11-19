@@ -75,6 +75,30 @@ fn replay_bench() {
             assert_eq!(bh_replay_seek(c, interval * (1 + (i * 7) % (ticks / interval - 1)), &mut out), 1);
         }
         eprintln!("restore {:?}", started.elapsed() / 20);
+        // A comparison ghost: loaded and read tick by tick as the client did, and streamed.
+        let started = Instant::now();
+        let handle = bh_ghost_load(c, replay.as_ptr());
+        assert_ne!(handle, 0, "{}", error(c));
+        let loaded = started.elapsed();
+        let started = Instant::now();
+        let mut events = BhReplayEvents::default();
+        for tick in 0..=ticks {
+            assert_eq!(bh_ghost_events(c, handle, tick.max(1) - 1, tick, &mut events), 1);
+        }
+        eprintln!("ghost load {loaded:?}, then per-tick events {:?}", started.elapsed());
+        assert_eq!(bh_ghost_free(c, handle), 1);
+        unsafe extern "C" fn count(data: *mut c_void, _: *const BhGhostFrame, e: *const BhReplayEvents) -> c_int {
+            let counts = unsafe { &mut *data.cast::<(u64, u64)>() };
+            counts.0 += 1;
+            counts.1 += u64::from(unsafe { (*e).cosmetic != 0 || (*e).inspect_signal != 0 });
+            1
+        }
+        let mut counts = (0u64, 0u64);
+        let started = Instant::now();
+        let sink_data = (&raw mut counts).cast();
+        let info = bh_ghost_stream(c, replay.as_ptr(), None, ptr::null_mut(), Some(count), sink_data, ptr::null_mut());
+        assert!(!info.is_null(), "{}", error(c));
+        eprintln!("ghost stream {:?}: {} frames, {} ticks with events", started.elapsed(), counts.0, counts.1);
         bh_destroy(c);
     }
 }
@@ -151,7 +175,8 @@ fn recording_memory_bench() {
             data.looks.iter().filter(|l| l.is_some()).count()
         );
         // macOS compresses idle pages, so its resident size undercounts; `footprint` includes them.
-        if let Ok(out) = std::process::Command::new("footprint").args(["-p", &std::process::id().to_string()]).output() {
+        let pid = std::process::id().to_string();
+        if let Ok(out) = std::process::Command::new("footprint").args(["-p", &pid]).output() {
             let text = String::from_utf8_lossy(&out.stdout);
             text.lines().filter(|l| l.contains("phys_footprint")).for_each(|l| eprintln!("{}", l.trim()));
         }

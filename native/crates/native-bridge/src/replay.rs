@@ -837,73 +837,21 @@ pub unsafe extern "C" fn bh_ghost_load_cancellable(
                 return Err("ghost exceeds frame limit".into());
             }
             let m = c.map()?;
-            if m.recorder.is_some() {
-                return Err("load ghosts before beginning live recording".into());
-            }
             if m.ghosts.iter().filter(|g| g.is_some()).count() >= 4 {
                 return Err("at most four ghosts per map".into());
             }
-            check_cancel(cancel, data)?;
-            let bytes = std::fs::read(&m.map_path).map_err(|e| e.to_string())?;
-            if recording::sha(&bytes) != m.map_sha256 {
-                return Err("BSP changed since map load".into());
-            }
-            check_cancel(cancel, data)?;
-            let bsp = bunnyhop_core::parse_bsp(&bytes)?;
-            drop(bytes);
-            let source = if m.root.is_some() {
-                Some(vfs::Source::loose("content", m.physics_files.clone()))
-            } else {
-                bunnyhop_core::content::cached_physics_content(&m.map_path)
+            let mut frames = Vec::with_capacity(d.commands.len() + 1);
+            let info = m.simulate_ghost(&d, cancel, data, |frame| {
+                frames.push(frame);
+                Ok(())
+            })?;
+            let ghost = Ghost {
+                info: CString::new(info.to_string()).map_err(|error| error.to_string())?,
+                frames,
+                cosmetic: d.cosmetic,
+                inspect: d.inspect,
+                commands: d.commands,
             };
-            check_cancel(cancel, data)?;
-            let ghost_game = Game::load_with_content(&bsp, source)?;
-            drop(bsp);
-            check_cancel(cancel, data)?;
-            let saved = std::mem::replace(&mut m.game, ghost_game);
-            let timer = m.timer.clone();
-            let filter = m.filter.clone();
-            let cmd = m.last_command;
-            let jump_observation = m.jump_observation;
-            let result = (|| {
-                check_cancel(cancel, data)?;
-                m.prepare_replay(&d)?;
-                let first = d.commands.first().copied().unwrap_or(BhCmd {
-                    yaw: m.game.teleport_angles[1],
-                    pitch: m.game.teleport_angles[0],
-                    ..BhCmd::default()
-                });
-                let mut frames = Vec::with_capacity(d.commands.len() + 1);
-                frames.push(m.ghost_frame(first));
-                for (i, &cmd) in d.commands.iter().enumerate() {
-                    check_cancel(cancel, data)?;
-                    m.advance_canonical(cmd, None, false, next_yaw(&d.commands, i))?;
-                    m.check_replay(&d)?;
-                    frames.push(m.ghost_frame(cmd));
-                }
-                let mut info: serde_json::Value = serde_json::from_slice(d.info.as_bytes())
-                    .map_err(|error| error.to_string())?;
-                if let Some(timer) = &m.timer {
-                    if timer.state.status == 2 {
-                        info["timeMs"] = json!(timer.time_ms());
-                        info["timingPolicy"] = json!(run_timing::POLICY);
-                    }
-                }
-                Ok::<_, String>(Ghost {
-                    info: CString::new(info.to_string()).map_err(|error| error.to_string())?,
-                    frames,
-                    cosmetic: d.cosmetic,
-                    inspect: d.inspect,
-                    commands: d.commands,
-                })
-            })();
-            m.game = saved;
-            m.timer = timer;
-            m.filter = filter;
-            m.last_command = cmd;
-            m.jump_observation = jump_observation;
-            m.transforms_dirty = true;
-            let ghost = result?;
             let index = m
                 .ghosts
                 .iter()
@@ -919,6 +867,153 @@ pub unsafe extern "C" fn bh_ghost_load_cancellable(
         })
     };
     handle
+}
+/// Receives each tick's ghost frame and its events (bh_ghost_events over the tick before it) from bh_ghost_stream, in
+/// tick order. Returning 0 stops the stream.
+pub type BhGhostSink =
+    Option<unsafe extern "C" fn(*mut c_void, *const BhGhostFrame, *const BhReplayEvents) -> c_int>;
+/// A ghost path played through and handed to `sink` tick by tick, without keeping it here: for a comparison ghost,
+/// which its caller stores compactly, up to a recording's 24-hour cap. Returns the ghost's info JSON (as
+/// bh_ghost_info), borrowed until the next call; NULL on error.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bh_ghost_stream(
+    ctx: *mut BhContext,
+    path: *const c_char,
+    cancel: BhCancel,
+    cancel_data: *mut c_void,
+    sink: BhGhostSink,
+    sink_data: *mut c_void,
+    count: *mut usize,
+) -> *const c_char {
+    let mut result = ptr::null();
+    let _ = unsafe { output(count, 0) };
+    unsafe {
+        call(ctx, |c| {
+            let sink = sink.ok_or("null ghost sink")?;
+            check_cancel(cancel, cancel_data)?;
+            let d = Decoded::load(Path::new(string(path)?))?;
+            if d.commands.len() as u64 > recording::MAX_COMMANDS {
+                return Err("ghost exceeds frame limit".into());
+            }
+            let mut events = EventCursor::new(&d.cosmetic, &d.inspect);
+            let info = c.map()?.simulate_ghost(&d, cancel, cancel_data, |frame| {
+                let tick_events = events.at(frame.tick);
+                if sink(sink_data, &frame, &tick_events) == 0 {
+                    return Err("ghost stream stopped".into());
+                }
+                Ok(())
+            })?;
+            c.replay_header = CString::new(info.to_string()).map_err(|error| error.to_string())?;
+            if !count.is_null() {
+                output(count, c.replay_header.as_bytes().len())?;
+            }
+            result = c.replay_header.as_ptr();
+            Ok(())
+        })
+    };
+    result
+}
+/// bh_ghost_events for each tick in turn, (tick - 1, tick], in one pass over the event lists (in tick order).
+pub(crate) struct EventCursor<'a> {
+    cosmetic: &'a [CosmeticEvent],
+    inspect: &'a [CosmeticEvent],
+    next_cosmetic: usize,
+    next_inspect: usize,
+    held: bool,
+}
+impl<'a> EventCursor<'a> {
+    pub fn new(cosmetic: &'a [CosmeticEvent], inspect: &'a [CosmeticEvent]) -> Self {
+        Self { cosmetic, inspect, next_cosmetic: 0, next_inspect: 0, held: false }
+    }
+    /// Ticks must not go backwards between calls.
+    pub fn at(&mut self, tick: u32) -> BhReplayEvents {
+        let mut out = BhReplayEvents::default();
+        while let Some(e) = self.cosmetic.get(self.next_cosmetic).filter(|e| e.tick <= tick) {
+            if e.tick == tick && tick > 0 {
+                out.cosmetic = u32::from(e.kind);
+            }
+            self.next_cosmetic += 1;
+        }
+        while let Some(e) = self.inspect.get(self.next_inspect).filter(|e| e.tick <= tick) {
+            match e.kind {
+                3 | 4 => self.held = e.kind == 3,
+                1 | 2 if e.tick == tick && tick > 0 => out.inspect_signal = u32::from(e.kind),
+                _ => {}
+            }
+            self.next_inspect += 1;
+        }
+        out.inspect_held = u32::from(self.held);
+        out
+    }
+}
+impl Map {
+    /// Plays a replay on a fresh copy of this map's game, leaving the live game, timer and filter as they were, and
+    /// hands each tick's ghost frame to `frame`. Returns the replay's info with its finish time.
+    fn simulate_ghost(
+        &mut self,
+        d: &Decoded,
+        cancel: BhCancel,
+        data: *mut c_void,
+        mut frame: impl FnMut(BhGhostFrame) -> Result<(), String>,
+    ) -> Result<serde_json::Value, String> {
+        if self.recorder.is_some() {
+            return Err("load ghosts before beginning live recording".into());
+        }
+        check_cancel(cancel, data)?;
+        let bytes = std::fs::read(&self.map_path).map_err(|e| e.to_string())?;
+        if recording::sha(&bytes) != self.map_sha256 {
+            return Err("BSP changed since map load".into());
+        }
+        check_cancel(cancel, data)?;
+        let bsp = bunnyhop_core::parse_bsp(&bytes)?;
+        drop(bytes);
+        let source = if self.root.is_some() {
+            Some(vfs::Source::loose("content", self.physics_files.clone()))
+        } else {
+            bunnyhop_core::content::cached_physics_content(&self.map_path)
+        };
+        check_cancel(cancel, data)?;
+        let ghost_game = Game::load_with_content(&bsp, source)?;
+        drop(bsp);
+        check_cancel(cancel, data)?;
+        let saved = std::mem::replace(&mut self.game, ghost_game);
+        let timer = self.timer.clone();
+        let filter = self.filter.clone();
+        let cmd = self.last_command;
+        let jump_observation = self.jump_observation;
+        let result = (|| {
+            check_cancel(cancel, data)?;
+            self.prepare_replay(d)?;
+            let first = d.commands.first().copied().unwrap_or(BhCmd {
+                yaw: self.game.teleport_angles[1],
+                pitch: self.game.teleport_angles[0],
+                ..BhCmd::default()
+            });
+            frame(self.ghost_frame(first))?;
+            for (i, &cmd) in d.commands.iter().enumerate() {
+                check_cancel(cancel, data)?;
+                self.advance_canonical(cmd, None, false, next_yaw(&d.commands, i))?;
+                self.check_replay(d)?;
+                frame(self.ghost_frame(cmd))?;
+            }
+            let mut info: serde_json::Value =
+                serde_json::from_slice(d.info.as_bytes()).map_err(|error| error.to_string())?;
+            if let Some(timer) = &self.timer {
+                if timer.state.status == 2 {
+                    info["timeMs"] = json!(timer.time_ms());
+                    info["timingPolicy"] = json!(run_timing::POLICY);
+                }
+            }
+            Ok::<_, String>(info)
+        })();
+        self.game = saved;
+        self.timer = timer;
+        self.filter = filter;
+        self.last_command = cmd;
+        self.jump_observation = jump_observation;
+        self.transforms_dirty = true;
+        result
+    }
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bh_ghost_info(
@@ -1006,7 +1101,7 @@ pub unsafe extern "C" fn bh_ghost_free(ctx: *mut BhContext, handle: u32) -> c_in
     }
 }
 
-fn events(
+pub(crate) fn events(
     cosmetic: &[CosmeticEvent],
     inspect: &[CosmeticEvent],
     from: u32,

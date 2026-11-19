@@ -507,3 +507,104 @@ fn replay_checkpoint_mismatch_still_stops_playback_at_its_tick() {
         bh_destroy(c);
     }
 }
+
+#[test]
+fn ghost_event_cursor_matches_events_tick_by_tick() {
+    let event = |tick, kind| replay::CosmeticEvent { tick, kind };
+    let cosmetic = [event(0, 1), event(2, 1), event(2, 2), event(5, 1), event(9, 2)];
+    let inspect = [event(0, 3), event(1, 1), event(3, 4), event(3, 2), event(4, 3), event(4, 1), event(8, 4)];
+    let mut cursor = replay::EventCursor::new(&cosmetic, &inspect);
+    for tick in 0..12 {
+        let expected = replay::events(&cosmetic, &inspect, tick.max(1) - 1, tick);
+        assert_eq!(cursor.at(tick), expected, "tick {tick}");
+    }
+}
+
+/// What a ghost stream hands its sink, kept for checking.
+#[derive(Default)]
+struct Streamed {
+    frames: Vec<BhGhostFrame>,
+    events: Vec<BhReplayEvents>,
+}
+
+unsafe extern "C" fn keep_streamed(
+    data: *mut std::ffi::c_void,
+    frame: *const BhGhostFrame,
+    events: *const BhReplayEvents,
+) -> std::ffi::c_int {
+    unsafe {
+        let streamed = &mut *data.cast::<Streamed>();
+        streamed.frames.push(*frame);
+        streamed.events.push(*events);
+    }
+    1
+}
+
+unsafe fn stream_ghost(c: *mut BhContext, replay: &CString) -> (Streamed, serde_json::Value) {
+    let mut streamed = Streamed::default();
+    let mut bytes = 0;
+    unsafe {
+        let info = bh_ghost_stream(
+            c,
+            replay.as_ptr(),
+            None,
+            ptr::null_mut(),
+            Some(keep_streamed),
+            (&mut streamed as *mut Streamed).cast(),
+            &mut bytes,
+        );
+        assert!(!info.is_null(), "{:?}", std::ffi::CStr::from_ptr(bh_last_error(c)));
+        let info = serde_json::from_slice(std::slice::from_raw_parts(info.cast::<u8>(), bytes)).unwrap();
+        (streamed, info)
+    }
+}
+
+#[test]
+fn streamed_ghost_matches_a_loaded_ghost_and_keeps_nothing() {
+    let fixture = Fixture::new();
+    let map = fixture.file("ground.bsp", &ground_bsp(&[]));
+    unsafe {
+        let replay = moving_replay(&fixture, &map, 2_000);
+        let c = bh_create();
+        assert_eq!(bh_load_map(c, map.as_ptr(), ptr::null()), 1);
+        let handle = bh_ghost_load(c, replay.as_ptr());
+        assert_ne!(handle, 0);
+        let (streamed, info) = stream_ghost(c, &replay);
+        assert_eq!(streamed.frames.len(), 2_001);
+        for (tick, (frame, events)) in streamed.frames.iter().zip(&streamed.events).enumerate() {
+            let mut loaded = BhGhostFrame::default();
+            assert_eq!(bh_ghost_frame(c, handle, tick as u32, &mut loaded), 1);
+            assert_eq!(format!("{frame:?}"), format!("{loaded:?}"), "frame {tick}");
+            let mut expected = BhReplayEvents::default();
+            let from = (tick as u32).max(1) - 1;
+            assert_eq!(bh_ghost_events(c, handle, from, tick as u32, &mut expected), 1);
+            assert_eq!(*events, expected, "events at {tick}");
+        }
+        let mut count = 0;
+        let loaded_info = bh_ghost_info(c, handle, &mut count);
+        let loaded_info: serde_json::Value =
+            serde_json::from_slice(std::slice::from_raw_parts(loaded_info.cast::<u8>(), count)).unwrap();
+        assert_eq!(info, loaded_info);
+        // The stream left no ghost behind: only the loaded one holds a handle.
+        assert_eq!((*c).map.as_ref().unwrap().ghosts.iter().flatten().count(), 1);
+        bh_destroy(c);
+    }
+}
+
+/// A minute in a debug build: `cargo test --release -p bunnyhop-native-bridge streamed_ghost -- --ignored`.
+#[test]
+#[ignore]
+fn streamed_ghost_goes_past_the_loaded_ghost_limit() {
+    let ticks = segments::MAX_LOG_TICKS as u64 + 100;
+    let fixture = Fixture::new();
+    let map = fixture.file("ground.bsp", &ground_bsp(&[]));
+    unsafe {
+        let replay = moving_replay(&fixture, &map, ticks);
+        let c = bh_create();
+        assert_eq!(bh_load_map(c, map.as_ptr(), ptr::null()), 1);
+        assert_eq!(bh_ghost_load(c, replay.as_ptr()), 0);
+        let (streamed, info) = stream_ghost(c, &replay);
+        assert_eq!((streamed.frames.len() as u64, info["totalTicks"].as_u64()), (ticks + 1, Some(ticks)));
+        bh_destroy(c);
+    }
+}
