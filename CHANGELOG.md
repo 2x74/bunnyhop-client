@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.9.6 — Native
+
+Matches website v0.0.43. Update from Settings → Updates: press Update, then Restart.
+
+- Runs up to 8 hours count on the leaderboard. Before, the game stopped recording after 30 minutes and the run was
+  lost when you finished.
+- Runs past 8 hours are saved to your replays but can't go on the leaderboard. The game tells you when you pass
+  8 hours. Recording stops at 24 hours, and what was recorded is kept.
+- If a run can't reach the server, the game tries again over the next few hours, also after a restart, and tells
+  you when it's uploaded.
+- Replays: jumping to any point in a long replay is close to instant (a 19-minute replay took about 4 seconds before).
+  Replays open without the wait, and long replays get a full timeline.
+- You can race ghosts and compare against replays longer than 30 minutes.
+
 ## v0.9.5 — Native
 
 Matches website v0.0.43. Update from Settings → Updates: press Update, then Restart.

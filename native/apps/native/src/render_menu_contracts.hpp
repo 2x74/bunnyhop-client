@@ -4,11 +4,11 @@
 #include "replay_timeline.hpp"
 #include <fstream>
 #include "atomic_replace.hpp"
+#include "menu_messages.hpp"
 
 namespace native {
 inline size_t render_menu_message_limit(const std::string &type, size_t fallback) {
-    constexpr size_t replay_message_bytes = 12 * 1024 * 1024;
-    return type == "replayCompare" ? replay_message_bytes : fallback;
+    return type == "replayCompare" ? kMenuReplayMessageBytes : fallback;
 }
 
 inline bool surface_chat_action(std::string_view action) {

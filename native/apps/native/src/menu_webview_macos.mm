@@ -7,7 +7,9 @@
 #include <utility>
 
 namespace {
-constexpr size_t max_message_bytes = 12 * 1024 * 1024;
+// A 16 MiB replay (the server's upload cap) as base64 in a JSON message, from the Replays list or a leaderboard.
+constexpr size_t max_message_bytes = 24 * 1024 * 1024;
+constexpr size_t max_queued_bytes = 32 * 1024 * 1024;
 constexpr size_t max_messages = 128;
 bool game_origin(NSURL *url) {
     return [url.scheme.lowercaseString isEqualToString:@"https"] &&
@@ -32,7 +34,7 @@ struct MenuState {
         for (const auto &message : messages)
             queued += message.size();
         if (!data || data.length > max_message_bytes || messages.size() >= max_messages ||
-            queued + data.length > 16 * 1024 * 1024) {
+            queued + data.length > max_queued_bytes) {
             std::cerr << "Menu message dropped: the queue is full\n";
             return;
         }

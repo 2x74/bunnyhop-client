@@ -15,8 +15,8 @@ export class ReplayCache {
     }
     const body = this.fetch(id)
       .then((bytes) => {
-        if (bytes.byteLength === 0 || bytes.byteLength > 8 << 20)
-          throw new Error("Replay must be between 1 byte and 8 MiB.");
+        if (bytes.byteLength === 0 || bytes.byteLength > 16 << 20)
+          throw new Error("Replay must be between 1 byte and 16 MiB.");
         return bytes;
       })
       .catch((error) => {

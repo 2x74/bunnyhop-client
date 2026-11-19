@@ -464,6 +464,49 @@ void test_replay_library_cache() {
     assert(vault.read("saved.bhr").is_object());
 }
 
+// An imported replay is scored once per build: the next launch reads the score instead of playing the replay again.
+void test_replay_scores_persist() {
+    Fixture fixture;
+    const auto source = fixture.record("source.bhr", true, true);
+    std::filesystem::create_directories(fixture.directory / "replays");
+    std::filesystem::copy_file(source, fixture.directory / "replays" / "imported.bhr");
+    BhRunState expected{};
+    check(bh_run_state(fixture.core.get(), &expected), fixture.core.get());
+    const auto map_cache = fixture.directory / "maps" / fixture.header(source).at("mapSha256").get<std::string>();
+    std::filesystem::create_directories(map_cache / "content");
+    std::filesystem::copy_file(fixture.directory / "fixture.bsp", map_cache / "fixture.bsp");
+    std::filesystem::copy(
+            fixture.directory / "models", map_cache / "content" / "models", std::filesystem::copy_options::recursive
+    );
+    const nlohmann::json release = {
+            {"build", "bunnyhop-native/0123456789abcdef"}, {"wasm", "bunnyhop-web/abcdef012345"}
+    };
+    const auto listed_ms = [&](const nlohmann::json &identity) {
+        native::ReplayLibrary library(fixture.directory, identity);
+        library.refresh();
+        library.flush();
+        const auto update = library.take();
+        assert(update && update->errors.empty() && update->replays->size() == 1);
+        return update->replays->at(0).at("timeMs").get<int64_t>();
+    };
+    const auto played = native::score_ms(expected.seconds);
+    assert(listed_ms(release) == played);
+    const auto scores_file = fixture.directory / "run-vault" / "scores.json";
+    auto scores = nlohmann::json::parse(std::ifstream(scores_file));
+    assert(scores.size() == 1);
+    // A score that playing could never give: the next launch reading it shows the replay wasn't played again.
+    constexpr int64_t remembered = 4242;
+    scores.begin().value()["ms"] = remembered;
+    std::ofstream(scores_file) << scores.dump();
+    assert(listed_ms(release) == remembered);
+    // Another build plays it again; a dev build neither reads nor writes the cache.
+    auto next = release;
+    next["build"] = "bunnyhop-native/fedcba9876543210";
+    assert(listed_ms(next) == played);
+    assert(listed_ms({{"build", "bunnyhop-native/local"}, {"wasm", ""}}) == played);
+    assert(nlohmann::json::parse(std::ifstream(scores_file)).size() == 2);
+}
+
 void test_restart_placement_and_recorded_names() {
     Fixture fixture;
     for (const std::string map : {"bhop_shutdown", "bhop_japan"}) {
@@ -643,6 +686,7 @@ int main() {
     test_restart_placement_and_recorded_names();
     test_invalid_start_point_preserves_default_spawn();
     test_replay_library_cache();
+    test_replay_scores_persist();
     test_recording_options_roundtrip();
     test_null_binds_recorded_in_header();
     test_w_release_recorded_in_header();

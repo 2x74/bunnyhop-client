@@ -57,6 +57,8 @@ struct RunRecorder {
             const nlohmann::json &play = nlohmann::json::object(),
             const nlohmann::json &mouse = nlohmann::json::object()
     ) const;
+    // A finish past the ranked length: saved locally, never uploaded, so it carries no replay bytes.
+    static nlohmann::json too_long_finish_event(uint32_t track);
 };
 
 }  // namespace native

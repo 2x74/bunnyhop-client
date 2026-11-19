@@ -40,7 +40,7 @@ const SEEK_SECONDS = 5;
 const FINE_SEEK_SECONDS = 1;
 /** How long a seek waits for the host to show it before the host's tick counts again. */
 const PENDING_SEEK_MS = 1500;
-const MAX_REPLAY_BYTES = 8 << 20;
+const MAX_REPLAY_BYTES = 16 << 20;
 /** Seeking to a jump starts this long before it, like the website's ?jump= links. */
 const JUMP_LEAD_SECONDS = 0.5;
 const HELP: readonly [string, string][] = [
@@ -631,7 +631,7 @@ export class ReplayViewer {
   private async compareFile(file: File | undefined): Promise<void> {
     if (!file) return;
     await this.compareWith("custom", async () => {
-      if (file.size > MAX_REPLAY_BYTES) throw new Error("Replay exceeds 8 MiB.");
+      if (file.size > MAX_REPLAY_BYTES) throw new Error("Replay exceeds 16 MiB.");
       return { bytes: new Uint8Array(await file.arrayBuffer()), name: file.name.replace(/\.bhr$/, "") };
     });
   }
@@ -736,7 +736,7 @@ export class ReplayViewer {
     const tick = this.shownTick();
     const now = formatTime(shownSeconds(range, playback, tick));
     const total = formatTime(range.ticks * range.interval);
-    this.timeEl.textContent = `${now} / ${total}`;
+    this.timeEl.textContent = `${now} / ${total}${playback.seeking ? " · Seeking" : ""}`;
     this.tickEl.textContent = `tick ${tick}`;
     this.timeline.setHead(tick, `${now} of ${total}`);
   }

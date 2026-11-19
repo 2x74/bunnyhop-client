@@ -3,6 +3,7 @@ import { styleByName } from "../../web/src/chat-commands";
 import { styleAt, styleIndex } from "../../web/src/net/protocol";
 import { STYLE_DEFS, isStyleId, styleSettings } from "../../web/src/styles";
 import {
+  MAX_REPLAY_BYTES,
   NativeRunService,
   nativeBuildAllowed,
   replayBytes,
@@ -383,12 +384,25 @@ describe("native run service, mocked network only", () => {
     expect(nativeBuildAllowed({ wasm: identity.wasm, native: [entry, entry] }, identity, Date.now())).toBe(false);
     expect(() => replayBytes("invalid*base64")).toThrow();
   });
-  test("valid replay at the eight MiB upload boundary decodes", () => {
-    const encoded = Buffer.alloc(8 << 20, 120).toString("base64");
+  test("valid replay at the 16 MiB upload boundary decodes", () => {
+    expect(MAX_REPLAY_BYTES).toBe(16 << 20);
+    const encoded = Buffer.alloc(16 << 20, 120).toString("base64");
     const bytes = replayBytes(encoded);
-    expect(bytes.length).toBe(8 << 20);
+    expect(bytes.length).toBe(16 << 20);
     expect(bytes[bytes.length - 1]).toBe(120);
-    expect(() => replayBytes(Buffer.alloc((8 << 20) + 1).toString("base64"))).toThrow();
+    expect(() => replayBytes(Buffer.alloc((16 << 20) + 1).toString("base64"))).toThrow();
+  });
+  test("a run past 8 hours is kept locally and never uploaded", async () => {
+    const f = fixture();
+    await reset(f.service);
+    const first = f.service.receive(beat(1, 0));
+    f.requests[0].resolve({ sid: "session", token: "t0" });
+    await first;
+    const { replayBase64: _bytes, ...withoutBytes } = finish(1);
+    await f.service.receive({ ...withoutBytes, tooLong: true });
+    expect(f.uploads).toEqual([]);
+    expect(f.statuses.at(-1)).toMatchObject({ status: "kept", local: true });
+    expect(f.statuses.at(-1)?.message).toContain("over 8 hours");
   });
 });
 

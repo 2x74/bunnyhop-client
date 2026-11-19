@@ -113,7 +113,13 @@ nlohmann::json RunRecorder::finish_event(
             {"timingPolicy", timing_policy},
             {"diagnostics", diagnostics.serialize(play)},
             {"mouse", mouse},
+            // The archive's name for the replay: where a failed upload is sent again from (pending_uploads.hpp).
+            {"replayId", data_location::utf8(data_location::from_utf8(path).filename())},
             {"replayBase64", base64(bytes)}};
+}
+
+nlohmann::json RunRecorder::too_long_finish_event(uint32_t track) {
+    return {{"type", "finish"}, {"track", track}, {"tooLong", true}};
 }
 
 }  // namespace native

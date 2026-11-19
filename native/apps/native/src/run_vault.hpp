@@ -89,6 +89,7 @@ class RunVault {
 
 public:
     static constexpr size_t max_summary_bytes = 64 * 1024;
+    static constexpr double max_summary_seconds = 2 * 86400;
 
     explicit RunVault(
             std::filesystem::path root,
@@ -116,8 +117,9 @@ public:
 
     static J sanitize(const J &raw) {
         if (!raw.is_object()) return nullptr;
-        const auto time = number(raw, "time", 86400);
-        const auto time_ms = number(raw, "timeMs", 86400000, true);
+        // Up to two days: a recording saved at the 24-hour cap (run_length.hpp) at the slowest tick rate.
+        const auto time = number(raw, "time", max_summary_seconds);
+        const auto time_ms = number(raw, "timeMs", max_summary_seconds * 1000, true);
         const auto track = number(raw, "track", 64, true);
         const auto jumps = number(raw, "jumps", 1000000000, true);
         const auto strafes = number(raw, "strafes", 1000000000, true);
@@ -147,6 +149,10 @@ public:
                 {"eligible", raw.value("eligible", J(false)) == true},
                 {"verified", false}
         };
+        // Past the ranked length (run_length.hpp), and a recording saved where it stopped at the cap without a finish.
+        // Only written when true, so other summaries stay as they were.
+        if (raw.value("rankedTooLong", J(false)) == true) clean["rankedTooLong"] = true;
+        if (raw.value("unfinished", J(false)) == true) clean["unfinished"] = true;
         // The runner's shape, fit and FOV (runner_view.hpp), for watching the replay as it was played.
         if (const auto view = read_runner_view(raw.value("view", J()))) clean["view"] = runner_view_json(*view);
         return clean;

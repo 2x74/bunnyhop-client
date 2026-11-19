@@ -28,7 +28,9 @@ using Microsoft::WRL::ComPtr;
 namespace {
 constexpr wchar_t menu_url[] = L"https://bunnyhop.lol/__native_menu__/index.html";
 constexpr UINT auth_close_message = WM_APP + 0x4b2;
-constexpr size_t max_message_bytes = 12 * 1024 * 1024;
+// A 16 MiB replay (the server's upload cap) as base64 in a JSON message, from the Replays list or a leaderboard.
+constexpr size_t max_message_bytes = 24 * 1024 * 1024;
+constexpr size_t max_queued_bytes = 32 * 1024 * 1024;
 
 std::wstring wide(const std::string &s) {
     if (s.empty()) return {};
@@ -158,7 +160,7 @@ struct MenuWebView::Impl {
             size_t bytes = 0;
             for (const auto &m : messages)
                 bytes += m.size();
-            if (text.size() <= max_message_bytes && messages.size() < 128 && bytes + text.size() <= 16 * 1024 * 1024)
+            if (text.size() <= max_message_bytes && messages.size() < 128 && bytes + text.size() <= max_queued_bytes)
                 messages.push_back(std::move(text));
             else
                 std::cerr << "Menu message dropped: the queue is full\n";

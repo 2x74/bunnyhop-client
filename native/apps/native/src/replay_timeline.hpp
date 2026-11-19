@@ -133,7 +133,9 @@ inline ReplayTimelineData build_replay_timeline(
     if (!raw) throw std::runtime_error("Missing timeline replay metadata");
     const auto info = nlohmann::json::parse(raw, raw + bytes);
     const uint32_t total = info.at("totalTicks");
-    constexpr uint32_t maximum_ticks = 1440000, maximum_bins = 4096;
+    // Every replay the core reads: a recording saved at its 24-hour cap (recording.rs MAX_COMMANDS). The worker is
+    // cancelled when the viewer moves on; an 8-hour run on a busy map takes it about two minutes.
+    constexpr uint32_t maximum_ticks = 8'640'000, maximum_bins = 4096;
     if (total > maximum_ticks) throw std::runtime_error("Timeline exceeds replay tick limit");
     ReplayTimelineData timeline;
     timeline.step = std::max(1u, (total + maximum_bins) / maximum_bins);

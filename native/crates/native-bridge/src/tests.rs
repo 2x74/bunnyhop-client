@@ -21,6 +21,8 @@ mod map_props;
 mod hard_maps;
 #[path = "material_overrides_tests.rs"]
 mod material_overrides;
+#[path = "replay_bench_tests.rs"]
+mod replay_bench;
 
 struct Fixture(PathBuf);
 impl Fixture {
@@ -1013,24 +1015,46 @@ fn record_mutation_and_cap_cannot_export_invalid_runs() {
         let output = CString::new(fixture.0.join("invalid.bhr").to_str().unwrap()).unwrap();
         assert_eq!(bh_record_write_bhr(c, output.as_ptr()), 0);
         assert_eq!(bh_reset(c), 1);
+        // The ranked limit is eight hours at 100 tick and the cap 24 hours. Stepping that many ticks here would take
+        // minutes, so the cap is lowered below.
+        assert_eq!((recording::RANKED_MAX_COMMANDS, recording::MAX_COMMANDS), (2_880_000, 8_640_000));
+        assert_eq!(bh_record_ranked_commands(), recording::RANKED_MAX_COMMANDS);
+        assert_eq!((*c).map.as_ref().unwrap().record_command_limit, recording::MAX_COMMANDS);
+        let limit = 1_000;
+        (*c).map.as_mut().unwrap().record_command_limit = limit;
         assert_eq!(
             bh_record_begin(c, ptr::null(), c"autohop".as_ptr(), c"test".as_ptr(), 100),
             1
         );
-        for _ in 0..recording::MAX_COMMANDS {
+        for _ in 0..limit - 1 {
             assert_eq!(bh_step(c, &BhCmd::default(), &mut s), 1);
         }
         assert_eq!(bh_run_state(c, &mut run), 1);
-        assert_eq!(
-            (run.recording, run.recording_valid, run.total_commands),
-            (0, 0, recording::MAX_COMMANDS)
-        );
+        assert_eq!((run.recording, run.recording_valid, run.total_commands), (1, 1, limit - 1));
+        assert_eq!(bh_step(c, &BhCmd::default(), &mut s), 1);
+        assert_eq!(bh_run_state(c, &mut run), 1);
+        assert_eq!((run.recording, run.recording_valid, run.total_commands), (0, 0, limit));
         let mut n = 0;
         let summary = bh_record_summary_json(c, &mut n);
         let summary: serde_json::Value =
             serde_json::from_slice(std::slice::from_raw_parts(summary.cast::<u8>(), n)).unwrap();
         assert_eq!(summary["reason"], "command_limit");
         assert_eq!(bh_record_write_bhr(c, output.as_ptr()), 0);
+        // Stopping at the cap keeps everything played, written as a replay without a finish.
+        let data = (*c).map.as_ref().unwrap().capped_record.as_ref().unwrap();
+        assert!(data.commands.capacity() <= limit as usize && data.looks.capacity() <= limit as usize);
+        let capped = fixture.0.join("capped.bhr");
+        let capped_path = CString::new(capped.to_str().unwrap()).unwrap();
+        assert_eq!(bh_record_write_capped_bhr(c, capped_path.as_ptr()), 1);
+        let decoded = replay::Decoded::load(&capped).unwrap();
+        let info: serde_json::Value = serde_json::from_slice(decoded.info.as_bytes()).unwrap();
+        assert_eq!((decoded.commands.len(), info["endTick"].as_u64()), (limit as usize, Some(0)));
+        assert_eq!(decoded.checkpoints.last().unwrap().0, limit as u32);
+        assert_eq!(bh_record_write_capped_bhr(c, capped_path.as_ptr()), 0);
+        assert_eq!(bh_replay_load(c, capped_path.as_ptr()), 1);
+        let mut snapshot = BhSnapshot::default();
+        assert_eq!(bh_replay_seek(c, limit as u32, &mut snapshot), 1);
+        assert_eq!(snapshot.player.tick, limit as u32);
         bh_destroy(c);
     }
 }

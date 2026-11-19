@@ -9,6 +9,7 @@ namespace native {
 void ReplayPlayer::begin(const std::filesystem::path &file) {
     runner_view.reset();
     preroll.clear();
+    seeker.cancel();
     active = true;
     paused = false;
     speed = 1;
@@ -22,6 +23,11 @@ void ReplayPlayer::begin(const std::filesystem::path &file) {
     hud = true;
     ui_open = false;
     view_continuous_ = false;
+}
+
+void ReplayPlayer::seek_to_start() {
+    const uint32_t from = session.range.from;
+    seeker.start(from, replay_preroll_start(from, session.range.tick_interval));
 }
 
 void ReplayPlayer::viewer_ui(const nlohmann::json &message) {
@@ -91,6 +97,7 @@ nlohmann::json ReplayPlayer::state(uint32_t tick, double seconds, double fallbac
     auto result = session.state(active, id, tick, paused, speed, camera.mode, seconds, fallback_interval);
     result["weapon"] = weapon_shown();
     result["hud"] = hud;
+    result["seeking"] = seeker.seeking();
     result["loop"] = loop ? nlohmann::json{{"from", loop->from}, {"to", loop->to}} : nlohmann::json(nullptr);
     return result;
 }

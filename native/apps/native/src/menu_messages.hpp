@@ -9,7 +9,10 @@ constexpr std::size_t kMenuMessageBytes = 16 * 1024;
 constexpr std::size_t kMenuRoomMessageBytes = 128 * 1024;
 // A settings file saved through the host (menu_files.hpp), with JSON escaping.
 constexpr std::size_t kMenuFileMessageBytes = 2 * 1024 * 1024;
-constexpr std::size_t kMenuReplayMessageBytes = 12 * 1024 * 1024;
+// A 16 MiB replay (the server's upload cap) as base64, with the message around it.
+constexpr std::size_t kMenuReplayMessageBytes = 24 * 1024 * 1024;
+// A run waiting to upload (pending_uploads.hpp): its heartbeat tokens, up to 12 MiB.
+constexpr std::size_t kMenuPendingUploadBytes = 13 * 1024 * 1024;
 
 // The largest message of each type the host accepts from the menu.
 inline std::size_t menu_message_limit(const std::string &type) {
@@ -17,6 +20,7 @@ inline std::size_t menu_message_limit(const std::string &type) {
         return kMenuReplayMessageBytes;
     if (type == "roomSnapshot" || type == "roomEvent" || type == "voicePeople") return kMenuRoomMessageBytes;
     if (type == "file") return kMenuFileMessageBytes;
+    if (type == "pendingUpload") return kMenuPendingUploadBytes;
     return kMenuMessageBytes;
 }
 

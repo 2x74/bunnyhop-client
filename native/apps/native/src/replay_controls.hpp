@@ -138,7 +138,8 @@ void draw_replay_controls(
         double interval,
         bool paused,
         double speed,
-        const std::string &camera
+        const std::string &camera,
+        bool seeking = false
 ) {
     tick = std::clamp(tick, controls.first_tick, total) - controls.first_tick;
     total -= controls.first_tick;
@@ -153,9 +154,10 @@ void draw_replay_controls(
     std::snprintf(
             label,
             sizeof(label),
-            "Replay  %.2fs / %.2fs   %.2gx   %s   Space pause | Tab camera control | Esc menu",
+            "Replay  %.2fs / %.2fs%s   %.2gx   %s   Space pause | Tab camera control | Esc menu",
             tick * interval,
             total * interval,
+            seeking ? "   Seeking" : "",
             speed,
             camera.c_str()
     );
@@ -193,13 +195,55 @@ inline uint32_t compare_tick(
 }  // namespace native
 
 namespace native {
-// The compare handle never enters the live replay/reset pipeline; loading it preserves playback and recording state.
+// A compare ghost's frame: BhGhostFrame without its tick (the index), with the same values. 40 bytes a tick instead of
+// 48, which matters at a recording's 24-hour cap (8.64M ticks).
+struct CompareFrame {
+    float position[3], velocity[3];
+    float yaw, pitch, view_offset_z;
+    uint16_t flags, weapon;
+
+    static CompareFrame from(const BhGhostFrame &frame) {
+        CompareFrame out{};
+        std::copy_n(frame.position, 3, out.position);
+        std::copy_n(frame.velocity, 3, out.velocity);
+        out.yaw = frame.yaw;
+        out.pitch = frame.pitch;
+        out.view_offset_z = frame.view_offset_z;
+        out.flags = uint16_t(frame.flags);
+        out.weapon = uint16_t(frame.weapon);
+        return out;
+    }
+
+    BhGhostFrame ghost(uint32_t tick) const {
+        BhGhostFrame out{};
+        std::copy_n(position, 3, out.position);
+        std::copy_n(velocity, 3, out.velocity);
+        out.yaw = yaw;
+        out.pitch = pitch;
+        out.view_offset_z = view_offset_z;
+        out.tick = tick;
+        out.flags = flags;
+        out.weapon = weapon;
+        return out;
+    }
+};
+
+static_assert(sizeof(CompareFrame) == 40);
+
+// A tick where the compared runner swung, signalled an inspect, or started or stopped holding it. Most ticks have none,
+// so only these are kept.
+struct CompareEvent {
+    uint32_t tick = 0;
+    BhReplayEvents events{};
+};
+
+// The compare ghost never enters the live replay/reset pipeline; loading it preserves playback and recording state.
+// It is streamed from the core (bh_ghost_stream) and kept here, up to a recording's 24-hour cap.
 class ReplayCompare {
 public:
     struct Prepared {
-        std::vector<BhGhostFrame> frames;
-        // Each tick's swing and inspect, for after the compare handle is gone.
-        std::vector<BhReplayEvents> events;
+        std::vector<CompareFrame> frames;
+        std::vector<CompareEvent> events;
         native_render::Actor actor;
         uint32_t start = 0, end = 0, playback_start = 0;
         double interval = 1. / 64;
@@ -207,22 +251,30 @@ public:
     };
 
 private:
-    std::vector<BhGhostFrame> frames_;
-    std::vector<BhReplayEvents> events_;
+    std::vector<CompareFrame> frames_;
+    std::vector<CompareEvent> events_;
     native_render::GhostEventCursor event_ticks_;
-    BhContext *core_ = nullptr;
-    uint32_t handle_ = 0, start_ = 0, end_ = 0, playback_start_ = 0;
+    uint32_t start_ = 0, end_ = 0, playback_start_ = 0;
     double interval_ = 1. / 64;
     bool finished_ = false;
     native_render::Actor actor_;
 
+    // As the per-tick events over ticks (from, to] would combine: the last swing and inspect signal, and whether
+    // inspect is held at `to`.
     BhReplayEvents prepared_events(uint32_t from, uint32_t to) const {
         BhReplayEvents out{};
-        for (uint32_t tick = from + 1; tick <= to && tick < events_.size(); ++tick) {
-            if (events_[tick].cosmetic) out.cosmetic = events_[tick].cosmetic;
-            if (events_[tick].inspect_signal) out.inspect_signal = events_[tick].inspect_signal;
-            out.inspect_held = events_[tick].inspect_held;
+        if (to <= from || size_t(from) + 1 >= frames_.size()) return out;
+        to = std::min(to, uint32_t(frames_.size() - 1));
+        const auto after = [](uint32_t tick, const CompareEvent &event) {
+            return tick < event.tick;
+        };
+        auto at = std::upper_bound(events_.begin(), events_.end(), from, after);
+        const auto last = std::upper_bound(at, events_.end(), to, after);
+        for (; at != last; ++at) {
+            if (at->events.cosmetic) out.cosmetic = at->events.cosmetic;
+            if (at->events.inspect_signal) out.inspect_signal = at->events.inspect_signal;
         }
+        if (last != events_.begin()) out.inspect_held = std::prev(last)->events.inspect_held;
         return out;
     }
 
@@ -232,25 +284,63 @@ private:
         actor_.inspectHeld = false;
         const auto range = event_ticks_.advance(at, moving, actor_.snapped);
         if (!range) return;
-        BhReplayEvents events{};
-        if (!events_.empty())
-            events = prepared_events(range->first, range->second);
-        else if (!bh_ghost_events(core_, handle_, range->first, range->second, &events))
-            return;
+        const auto events = prepared_events(range->first, range->second);
         actor_.attack = events.cosmetic;
         actor_.inspect = events.inspect_signal;
         actor_.inspectHeld = events.inspect_held != 0;
     }
 
+    struct Stream {
+        std::vector<CompareFrame> &frames;
+        std::vector<CompareEvent> &events;
+        uint32_t held = 0;
+    };
+
+    static int keep(void *data, const BhGhostFrame *frame, const BhReplayEvents *events) {
+        auto &stream = *static_cast<Stream *>(data);
+        stream.frames.push_back(CompareFrame::from(*frame));
+        if (events->cosmetic || events->inspect_signal || events->inspect_held != stream.held)
+            stream.events.push_back({frame->tick, *events});
+        stream.held = events->inspect_held;
+        return 1;
+    }
+
+    // The replay's header, checked against the playback before the ghost is played through.
+    static nlohmann::json matching_header(BhContext *core, const std::string &path, const nlohmann::json &playback) {
+        size_t length = 0;
+        const auto *raw = bh_replay_header(core, path.c_str(), &length);
+        if (!raw) throw std::runtime_error(bh_last_error(core));
+        auto info = nlohmann::json::parse(raw, raw + length);
+        if (info.at("map") != playback.at("map") || info.at("track") != playback.at("track")
+            || info.at("style") != playback.at("style")) {
+            throw std::runtime_error("Compare ghost must match replay map, track and style");
+        }
+        return info;
+    }
+
+    void adopt_info(const nlohmann::json &info, native_render::GhostSource source, const nlohmann::json &playback) {
+        actor_ = {};
+        actor_.id = "ghost-compare";
+        actor_.name = info.contains("player") && info.at("player").is_string() ? info.at("player").get<std::string>()
+                                                                               : "Compare";
+        actor_.loadout = info.contains("packedLoadout") && info.at("packedLoadout").is_string()
+                                 ? info.at("packedLoadout").get<std::string>()
+                                 : std::string();
+        actor_.outfit = "outfit-cream";
+        actor_.opacity = .55f;
+        actor_.source = source;
+        playback_start_ = playback.value("startTick", 0u);
+        start_ = info.value("startTick", 0u);
+        end_ = info.value("endTick", info.value("totalTicks", 0u));
+        finished_ = end_ > start_;
+        if (end_ <= start_) end_ = info.value("totalTicks", 0u);
+        interval_ = info.at("settings").value("tickInterval", 1. / 64);
+    }
+
 public:
     void clear() {
-        if (core_ && handle_) {
-            bh_ghost_free(core_, handle_);
-        }
-        core_ = nullptr;
-        handle_ = 0;
-        frames_.clear();
-        events_.clear();
+        frames_ = {};
+        events_ = {};
         event_ticks_.reset();
     }
 
@@ -261,64 +351,40 @@ public:
          const nlohmann::json &playback,
          const std::atomic_bool *cancel = nullptr) {
         clear();
-        const uint32_t handle = bh_ghost_load_cancellable(
-                core, path.c_str(), cancel ? replay_cancelled : nullptr, const_cast<std::atomic_bool *>(cancel)
+        const auto header = matching_header(core, path, playback);
+        std::vector<CompareFrame> frames;
+        std::vector<CompareEvent> events;
+        frames.reserve(size_t(header.value("totalTicks", 0u)) + 1);
+        Stream stream{frames, events};
+        size_t length = 0;
+        const auto *raw = bh_ghost_stream(
+                core,
+                path.c_str(),
+                cancel ? replay_cancelled : nullptr,
+                const_cast<std::atomic_bool *>(cancel),
+                &ReplayCompare::keep,
+                &stream,
+                &length
         );
-        if (!handle) {
-            throw std::runtime_error(bh_last_error(core));
-        }
-        try {
-            size_t length = 0;
-            const auto *raw = bh_ghost_info(core, handle, &length);
-            if (!raw) {
-                throw std::runtime_error("Missing compare ghost metadata");
-            }
-            const auto info = nlohmann::json::parse(raw, raw + length);
-            if (info.at("map") != playback.at("map") || info.at("track") != playback.at("track")
-                || info.at("style") != playback.at("style")) {
-                throw std::runtime_error("Compare ghost must match replay map, track and style");
-            }
-            actor_ = {};
-            actor_.id = "ghost-compare";
-            actor_.name = info.contains("player") && info.at("player").is_string()
-                                  ? info.at("player").get<std::string>()
-                                  : "Compare";
-            actor_.loadout = info.contains("packedLoadout") && info.at("packedLoadout").is_string()
-                                     ? info.at("packedLoadout").get<std::string>()
-                                     : std::string();
-            actor_.outfit = "outfit-cream";
-            actor_.opacity = .55f;
-            actor_.source = source;
-            playback_start_ = playback.value("startTick", 0u);
-            start_ = info.value("startTick", 0u);
-            end_ = info.value("endTick", info.value("totalTicks", 0u));
-            finished_ = end_ > start_;
-            if (end_ <= start_) end_ = info.value("totalTicks", 0u);
-            const auto &settings = info.at("settings");
-            interval_ = settings.value("tickInterval", 1. / 64);
-            core_ = core;
-            handle_ = handle;
-        } catch (...) {
-            bh_ghost_free(core, handle);
-            throw;
-        }
+        if (!raw) throw std::runtime_error(bh_last_error(core));
+        adopt_info(nlohmann::json::parse(raw, raw + length), source, playback);
+        events.shrink_to_fit();
+        frames_ = std::move(frames);
+        events_ = std::move(events);
     }
 
     const native_render::Actor *sample(uint32_t tick, double interval) {
-        if (!active()) {
-            return nullptr;
-        }
-        const uint32_t at = compare_tick(tick, playback_start_, interval, start_, end_, interval_);
-        if (!frames_.empty()) {
-            actor_.frame = frames_[std::min(size_t(at), frames_.size() - 1)];
-        } else if (!bh_ghost_frame(core_, handle_, at, &actor_.frame)) {
-            return nullptr;
-        }
+        if (!active()) return nullptr;
+        const uint32_t at = std::min(
+                compare_tick(tick, playback_start_, interval, start_, end_, interval_), uint32_t(frames_.size() - 1)
+        );
+        actor_.frame = frames_[at].ghost(at);
         play_events(at, tick >= playback_start_ && at < end_);
         return &actor_;
     }
 
-    Prepared detach(const std::atomic_bool *cancel = nullptr) {
+    // Hands the loaded ghost over (from a worker to the frame loop) without copying it.
+    Prepared detach(const std::atomic_bool * = nullptr) {
         Prepared result;
         result.actor = actor_;
         result.start = start_;
@@ -326,18 +392,8 @@ public:
         result.playback_start = playback_start_;
         result.interval = interval_;
         result.finished = finished_;
-        result.frames.resize(size_t(end_) + 1);
-        result.events.resize(size_t(end_) + 1);
-        for (uint32_t tick = 0; tick <= end_; ++tick) {
-            if (cancel && cancel->load(std::memory_order_relaxed)) {
-                clear();
-                return {};
-            }
-            if (!bh_ghost_frame(core_, handle_, tick, &result.frames[tick])) {
-                throw std::runtime_error("Could not prepare compare path");
-            }
-            bh_ghost_events(core_, handle_, tick ? tick - 1 : 0, tick, &result.events[tick]);
-        }
+        result.frames = std::move(frames_);
+        result.events = std::move(events_);
         clear();
         return result;
     }
@@ -400,7 +456,7 @@ public:
                 {"delta", difference ? nlohmann::json(*difference) : nlohmann::json(nullptr)}};
     }
 
-    bool active() const { return handle_ != 0 || !frames_.empty(); }
+    bool active() const { return !frames_.empty(); }
 
     nlohmann::json state() const {
         if (!active()) {

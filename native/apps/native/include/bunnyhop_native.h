@@ -178,6 +178,11 @@ int bh_record_loadout_ext(BhContext *ctx, const char *packed_loadout_ext);
 int bh_record_identity(BhContext *ctx, const char *client_build);
 /* Writes a new gzip .bhr from retained native commands/checkpoints. Requires an ended, valid, finished run. */
 int bh_record_write_bhr(BhContext *ctx, const char *path);
+/* A recording stopped at the length cap (summary reason "command_limit"): every tick played, no finish. Released
+   once written. */
+int bh_record_write_capped_bhr(BhContext *ctx, const char *path);
+/* The most commands a recording may hold and still be ranked (eight hours at 100 tick). */
+uint64_t bh_record_ranked_commands(void);
 /* FNV-1a fold of canonical commands [from_index,to_index), as shared run-hash.ts. */
 int bh_record_fold(BhContext *ctx, uint32_t hash, size_t from_index, size_t to_index, uint32_t *out_hash);
 /* Last recording summary JSON; available after end/invalidation. */
@@ -522,6 +527,11 @@ int bh_replay_load(BhContext *ctx, const char *path);
 const char *bh_replay_info(BhContext *ctx, size_t *byte_count);
 int bh_replay_step(BhContext *ctx, BhSnapshot *out);
 int bh_replay_seek(BhContext *ctx, uint32_t tick, BhSnapshot *out);
+/* Keep keyframes for the loaded replay (up to 128 MiB) so seeks are quick: for the viewer. Off after each load. */
+int bh_replay_keyframes(BhContext *ctx, int enabled);
+/* bh_replay_seek in slices: at most max_ticks toward tick. 1 = there, 2 = stopped short (out holds where; call
+   again), 0 = error. */
+int bh_replay_seek_toward(BhContext *ctx, uint32_t tick, uint32_t max_ticks, BhSnapshot *out);
 /* Stop replay mode; current game state/settings remain available for a normal restart. */
 int bh_replay_stop(BhContext *ctx);
 
@@ -553,6 +563,20 @@ const char *bh_ghost_info(BhContext *ctx, uint32_t handle, size_t *byte_count);
 int bh_ghost_frame(BhContext *ctx, uint32_t handle, uint32_t tick, BhGhostFrame *out);
 int bh_ghost_free(BhContext *ctx, uint32_t handle);
 int bh_ghost_events(BhContext *ctx, uint32_t handle, uint32_t from, uint32_t to, BhReplayEvents *out);
+/* Each tick's ghost frame and its events (as bh_ghost_events over (tick - 1, tick]), in tick order; return 0 to stop.
+ */
+typedef int (*BhGhostSink)(void *data, const BhGhostFrame *frame, const BhReplayEvents *events);
+/* A ghost played through and handed to sink tick by tick, nothing kept: for comparison ghosts up to the 24-hour cap.
+   Returns the ghost's info JSON (as bh_ghost_info), borrowed until the next call; NULL on error. */
+const char *bh_ghost_stream(
+        BhContext *ctx,
+        const char *path,
+        BhCancel cancel,
+        void *cancel_data,
+        BhGhostSink sink,
+        void *sink_data,
+        size_t *byte_count
+);
 
 /* Trigger/clip overlay volumes in native entity/model coordinates, read-only and safe during runs.
  * JSON array: {kind,entity,model,flags,planes:[[nx,ny,nz,d],...]}; nullable entity/model = world.

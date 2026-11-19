@@ -26,6 +26,7 @@ import { accountGeneration } from "../../web/src/ui/account-state";
 import { countJump, recordMapPlayed } from "../../web/src/ui/stats";
 import { mapTime } from "../../web/src/map-time";
 import { NativeRunService } from "./run-service";
+import { nativeUploadStore } from "./pending-upload-host";
 import { profileDpi } from "./profile-mouse";
 import { formatTime } from "../../web/src/timer";
 import { isStyleId, type StyleId } from "../../web/src/styles";
@@ -1032,6 +1033,7 @@ const runService = new NativeRunService({
   dailyLine: (result, run) => nativeDaily.result(result, run),
   holdGauntlet: (attempt, generation) => gauntlet.holds(attempt, generation),
   savedRunUploaded: (map) => send({ type: "hudToast", text: `Your saved run on ${map} was uploaded.`, ms: 5000 }),
+  uploads: nativeUploadStore,
   version: () => api.version(),
   origin: () => location.origin,
   send: (message) => {

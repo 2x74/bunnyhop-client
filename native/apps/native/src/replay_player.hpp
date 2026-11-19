@@ -2,6 +2,7 @@
 #include "replay_session.hpp"
 #include "replay_controls.hpp"
 #include "replay_camera.hpp"
+#include "replay_seeker.hpp"
 #include <algorithm>
 #include <cmath>
 #include "runner_view.hpp"
@@ -18,6 +19,7 @@ struct ReplayPlayer {
     ReplaySession session;
     ReplayControls controls;
     ReplayCamera camera;
+    ReplaySeeker seeker;
     std::string id;
     std::filesystem::path path;
     // The runner's look, shown on the player model in third person.
@@ -39,6 +41,8 @@ struct ReplayPlayer {
     std::vector<PrerollFrame> preroll;
 
     void begin(const std::filesystem::path &file);
+    // After ReplaySession::Seek::later: playback reaches the shown range's start over the next frames.
+    void seek_to_start();
     void action(ReplayControls::Action action, uint32_t tick, Input &camera_controls);
     nlohmann::json state(uint32_t tick, double seconds, double fallback_interval) const;
 

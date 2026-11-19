@@ -124,7 +124,7 @@ for (const [name, offset, value, error] of [
 }
 const nOffset = 8 + 1 + Buffer.byteLength(replay.header.map) + 32 + 8 * 4 + 2 * 4;
 for (const [name, n, error] of [
-  ["command-limit", 2_000_001, "command limit"],
+  ["command-limit", 8_640_001, "command limit"],
   ["impossible-command-body", 1_000_000, "truncated replay commands"],
 ] as const) {
   const raw = encodeRaw(replay);

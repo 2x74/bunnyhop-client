@@ -111,6 +111,11 @@ export type MenuMessage =
       name?: string;
     }
   | { type: "replays"; action: "list" }
+  /** Runs waiting to upload (pending-upload-host.ts); answers are bunnyhop:native-upload-store events. */
+  | { type: "pendingUpload"; action: "save"; id: string; record: import("./pending-uploads").PendingUpload }
+  | { type: "pendingUpload"; action: "remove"; id: string }
+  | { type: "pendingUpload"; action: "list"; request: string }
+  | { type: "pendingUpload"; action: "replay"; id: string; request: string }
   /** Clears the player's paint on the loaded map (renderer.hpp tool_message). */
   | { type: "paint"; action: "clear" }
   /** Sets an aimed measurement point or clears the measurement (renderer.hpp tool_message). */
@@ -501,6 +506,10 @@ export interface LocalRunSummary {
   finishedAt: number;
   client: string;
   localPb: boolean;
+  /** Longer than the leaderboard's 8 hours: saved here, never uploaded. */
+  rankedTooLong?: boolean;
+  /** Saved where recording stopped at its 24-hour cap, without a finish. */
+  unfinished?: boolean;
   eligible?: boolean;
   verified?: false;
 }
@@ -553,6 +562,8 @@ export interface PlaybackState {
   rangeTotalTicks?: number;
   elapsedSeconds?: number;
   fullRecording?: boolean;
+  /** A seek is stepping through a part of the replay that hasn't played yet (replay_seeker.hpp). */
+  seeking?: boolean;
   camera?: ReplayCamera;
   seconds?: number;
   tickInterval?: number;
@@ -1326,7 +1337,7 @@ export function applyState(value: unknown): boolean {
       );
   if (next.playback && typeof next.playback === "object") {
     const playback = next.playback as Record<string, unknown>;
-    for (const key of ["active", "paused", "fullRecording"] as const) {
+    for (const key of ["active", "paused", "fullRecording", "seeking"] as const) {
       if (typeof playback[key] === "boolean") state.playback[key] = playback[key];
     }
     const numbers = [

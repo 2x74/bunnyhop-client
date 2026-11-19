@@ -26,7 +26,7 @@ let requested: string | null = null;
 /** Your PB replay on the requested map (backgroundPick), sent with it. */
 let requestedReplay: { runId: string; bytes: Uint8Array } | null = null;
 let sent: string | null | undefined;
-const MAX_REPLAY = 8 << 20;
+const MAX_REPLAY = 16 << 20;
 const key = (map: string | null) => `${map ?? ""}|${requestedReplay?.runId ?? ""}`;
 let artMap: string | null = null;
 let source: "scene" | "static" | null = null;

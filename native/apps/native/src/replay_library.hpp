@@ -1,9 +1,12 @@
 #pragma once
 #include "run_vault.hpp"
 #include "data_location.hpp"
+#include "replay_scores.hpp"
+#include "bunnyhop_native.h"
 #include <condition_variable>
 #include <deque>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <thread>
 
@@ -28,7 +31,8 @@ public:
         size_t decoded = 0;
     };
 
-    explicit ReplayLibrary(std::filesystem::path cache);
+    // `identity`: the release manifest's build and wasm, which key the scores of imported replays (replay_scores.hpp).
+    explicit ReplayLibrary(std::filesystem::path cache, const nlohmann::json &identity = nullptr);
     ~ReplayLibrary();
     ReplayLibrary(const ReplayLibrary &) = delete;
     ReplayLibrary &operator=(const ReplayLibrary &) = delete;
@@ -53,10 +57,13 @@ private:
         std::uintmax_t size;
         std::filesystem::file_time_type modified;
         nlohmann::json info;
+        // A replay without a summary had its score looked up or worked out (whether or not it has one).
+        bool scored = false;
     };
 
     std::filesystem::path replays_;
     RunVault vault_;
+    ReplayScoreCache scores_;
     std::map<std::filesystem::path, CachedHeader> headers_;
     std::mutex mutex_;
     std::condition_variable wake_;
@@ -72,6 +79,10 @@ private:
     void work();
     void execute(const Job &job, Update &update);
     void scan(Update &update);
+    void
+    score(std::unique_ptr<BhContext, decltype(&bh_destroy)> &core,
+          const std::filesystem::path &path,
+          CachedHeader &cached);
 };
 
 }  // namespace native

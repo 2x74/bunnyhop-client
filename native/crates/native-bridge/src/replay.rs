@@ -3,8 +3,12 @@
 use super::*;
 use serde_json::json;
 use std::io::Read;
-const MAX_BYTES: usize = 128 << 20;
-const MAX_COMMANDS: usize = 2_000_000;
+/// A 24-hour replay (recording::MAX_COMMANDS) at up to 15 bytes a tick, decompressed. Real runs use about 11.
+const MAX_BYTES: usize = 256 << 20;
+/// A 24-hour replay as stored: real runs compress to about 3 bytes a tick, 26 MiB at the cap.
+const MAX_FILE_BYTES: usize = 64 << 20;
+/// Every recording the native recorder can write (recording::MAX_COMMANDS, 24 hours at 100 tick).
+const MAX_COMMANDS: usize = recording::MAX_COMMANDS as usize;
 #[derive(Clone)]
 pub struct Spawn {
     position: [f32; 3],
@@ -43,6 +47,7 @@ pub struct Playback {
     pub data: Decoded,
     pub index: usize,
     pub error: Option<String>,
+    pub(crate) keyframes: replay_keyframes::Keyframes,
 }
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -188,11 +193,11 @@ impl Decoded {
         let mut bytes = Vec::new();
         std::fs::File::open(path)
             .map_err(|e| format!("{}: {e}", path.display()))?
-            .take((32 << 20) + 1)
+            .take(MAX_FILE_BYTES as u64 + 1)
             .read_to_end(&mut bytes)
             .map_err(|e| e.to_string())?;
-        if bytes.len() > 32 << 20 {
-            return Err("compressed replay exceeds 32 MiB".into());
+        if bytes.len() > MAX_FILE_BYTES {
+            return Err(format!("compressed replay exceeds {} MiB", MAX_FILE_BYTES >> 20));
         }
         let raw = if bytes.starts_with(&[0x1f, 0x8b]) {
             let mut raw = Vec::new();
@@ -205,7 +210,7 @@ impl Decoded {
             bytes
         };
         if raw.len() > MAX_BYTES {
-            return Err("decoded replay exceeds 128 MiB".into());
+            return Err(format!("decoded replay exceeds {} MiB", MAX_BYTES >> 20));
         }
         Self::parse(&raw)
     }
@@ -597,15 +602,20 @@ impl Map {
         };
         self.check_replay(d)
     }
+    // Checkpoints and loads are in tick order (the format stores tick deltas): find this tick's by binary search, as
+    // a scan of every checkpoint on every tick made long replays play and seek several times slower.
     fn check_replay(&self, d: &Decoded) -> Result<(), String> {
-        for load in d.segments.iter().filter(|load| load.tick == self.game.tick) {
+        let tick = self.game.tick;
+        let loads = &d.segments[d.segments.partition_point(|load| load.tick < tick)..];
+        for load in loads.iter().take_while(|load| load.tick == tick) {
             if load.position.iter().zip(self.game.state.position)
                 .chain(load.velocity.iter().zip(self.game.state.velocity))
                 .any(|(a, b)| a.to_bits() != b.to_bits()) {
                 return Err(format!("segment load mismatch at tick {}", load.tick));
             }
         }
-        for (t, p, v) in d.checkpoints.iter().filter(|c| c.0 == self.game.tick) {
+        let checkpoints = &d.checkpoints[d.checkpoints.partition_point(|c| c.0 < tick)..];
+        for (t, p, v) in checkpoints.iter().take_while(|c| c.0 == tick) {
             if p.iter()
                 .zip(self.game.state.position)
                 .chain(v.iter().zip(self.game.state.velocity))
@@ -615,6 +625,42 @@ impl Map {
             }
         }
         Ok(())
+    }
+    /// Plays the replay's next command, checks it and keeps a keyframe when one is due.
+    fn play_replay_tick(&mut self, p: &mut Playback) -> Result<(), String> {
+        let cmd = *p.data.commands.get(p.index).ok_or("replay finished")?;
+        self.advance_canonical(cmd, None, false, next_yaw(&p.data.commands, p.index))?;
+        p.index += 1;
+        if let Err(error) = self.check_replay(&p.data) {
+            p.error = Some(error.clone());
+            return Err(error);
+        }
+        p.keyframes.capture(p.index as u32, self);
+        Ok(())
+    }
+    /// Brings playback toward after `tick`, stepping at most `max_ticks`: on from where it is unless a keyframe is
+    /// nearer, otherwise from that keyframe or the start. Returns whether it got there.
+    fn seek_replay(&mut self, p: &mut Playback, tick: usize, max_ticks: usize) -> Result<bool, String> {
+        let nearest = p.keyframes.latest(tick as u32).map_or(0, |k| k.tick as usize);
+        let resume = p.error.is_none() && self.game.tick as usize == p.index && (nearest..=tick).contains(&p.index);
+        if !resume {
+            p.error = None;
+            match p.keyframes.latest(tick as u32) {
+                Some(keyframe) => {
+                    keyframe.restore(self);
+                    p.index = keyframe.tick as usize;
+                }
+                None => {
+                    self.prepare_replay(&p.data)?;
+                    p.index = 0;
+                }
+            }
+        }
+        let stop = tick.min(p.index.saturating_add(max_ticks));
+        while p.index < stop {
+            self.play_replay_tick(p)?;
+        }
+        Ok(p.index == tick)
     }
     fn ghost_frame(&self, cmd: BhCmd) -> BhGhostFrame {
         BhGhostFrame {
@@ -649,6 +695,7 @@ pub unsafe extern "C" fn bh_replay_load(ctx: *mut BhContext, path: *const c_char
                 data: d,
                 index: 0,
                 error: None,
+                keyframes: Default::default(),
             });
             c.settings = settings;
             c.style_id = style;
@@ -691,13 +738,7 @@ pub unsafe extern "C" fn bh_replay_step(ctx: *mut BhContext, out: *mut BhSnapsho
                 if let Some(error) = &p.error {
                     return Err(error.clone());
                 }
-                let cmd = *p.data.commands.get(p.index).ok_or("replay finished")?;
-                m.advance_canonical(cmd, None, false, next_yaw(&p.data.commands, p.index))?;
-                p.index += 1;
-                if let Err(error) = m.check_replay(&p.data) {
-                    p.error = Some(error.clone());
-                    return Err(error);
-                }
+                m.play_replay_tick(&mut p)?;
                 output(out, BhSnapshot::from(&m.game))
             })();
             m.playback = Some(p);
@@ -722,22 +763,58 @@ pub unsafe extern "C" fn bh_replay_seek(
                 if tick as usize > p.data.commands.len() {
                     return Err("seek outside replay".into());
                 }
-                m.prepare_replay(&p.data)?;
-                p.index = 0;
-                p.error = None;
-                for i in 0..tick as usize {
-                    m.advance_canonical(p.data.commands[i], None, false, next_yaw(&p.data.commands, i))?;
-                    p.index = i + 1;
-                    if let Err(error) = m.check_replay(&p.data) {
-                        p.error = Some(error.clone());
-                        return Err(error);
-                    }
-                }
+                m.seek_replay(&mut p, tick as usize, usize::MAX)?;
                 output(out, BhSnapshot::from(&m.game))
             })();
             m.playback = Some(p);
             result
         })
+    }
+}
+/// Keeps keyframes for the loaded replay from now on (replay_keyframes.rs), so seeks back and forth are quick. For a
+/// viewer; up to 128 MiB.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bh_replay_keyframes(ctx: *mut BhContext, enabled: c_int) -> c_int {
+    unsafe {
+        call(ctx, |c| {
+            let playback = c.map()?.playback.as_mut().ok_or("no replay loaded")?;
+            playback.keyframes.enabled = enabled != 0;
+            Ok(())
+        })
+    }
+}
+/// bh_replay_seek in slices: steps at most `max_ticks` toward `tick` and returns 1 there, 2 when it stopped short (out
+/// holds the state where it stopped; call again to go on), 0 on error. Lets a long seek run across frames.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bh_replay_seek_toward(
+    ctx: *mut BhContext,
+    tick: u32,
+    max_ticks: u32,
+    out: *mut BhSnapshot,
+) -> c_int {
+    let mut arrived = false;
+    let ok = unsafe {
+        call(ctx, |c| {
+            if out.is_null() {
+                return Err("null output".into());
+            }
+            let m = c.map()?;
+            let mut p = m.playback.take().ok_or("no replay loaded")?;
+            let result = (|| {
+                if tick as usize > p.data.commands.len() {
+                    return Err("seek outside replay".into());
+                }
+                arrived = m.seek_replay(&mut p, tick as usize, max_ticks.max(1) as usize)?;
+                output(out, BhSnapshot::from(&m.game))
+            })();
+            m.playback = Some(p);
+            result
+        })
+    };
+    match (ok, arrived) {
+        (0, _) => 0,
+        (_, true) => 1,
+        _ => 2,
     }
 }
 #[unsafe(no_mangle)]
@@ -760,73 +837,21 @@ pub unsafe extern "C" fn bh_ghost_load_cancellable(
                 return Err("ghost exceeds frame limit".into());
             }
             let m = c.map()?;
-            if m.recorder.is_some() {
-                return Err("load ghosts before beginning live recording".into());
-            }
             if m.ghosts.iter().filter(|g| g.is_some()).count() >= 4 {
                 return Err("at most four ghosts per map".into());
             }
-            check_cancel(cancel, data)?;
-            let bytes = std::fs::read(&m.map_path).map_err(|e| e.to_string())?;
-            if recording::sha(&bytes) != m.map_sha256 {
-                return Err("BSP changed since map load".into());
-            }
-            check_cancel(cancel, data)?;
-            let bsp = bunnyhop_core::parse_bsp(&bytes)?;
-            drop(bytes);
-            let source = if m.root.is_some() {
-                Some(vfs::Source::loose("content", m.physics_files.clone()))
-            } else {
-                bunnyhop_core::content::cached_physics_content(&m.map_path)
+            let mut frames = Vec::with_capacity(d.commands.len() + 1);
+            let info = m.simulate_ghost(&d, cancel, data, |frame| {
+                frames.push(frame);
+                Ok(())
+            })?;
+            let ghost = Ghost {
+                info: CString::new(info.to_string()).map_err(|error| error.to_string())?,
+                frames,
+                cosmetic: d.cosmetic,
+                inspect: d.inspect,
+                commands: d.commands,
             };
-            check_cancel(cancel, data)?;
-            let ghost_game = Game::load_with_content(&bsp, source)?;
-            drop(bsp);
-            check_cancel(cancel, data)?;
-            let saved = std::mem::replace(&mut m.game, ghost_game);
-            let timer = m.timer.clone();
-            let filter = m.filter.clone();
-            let cmd = m.last_command;
-            let jump_observation = m.jump_observation;
-            let result = (|| {
-                check_cancel(cancel, data)?;
-                m.prepare_replay(&d)?;
-                let first = d.commands.first().copied().unwrap_or(BhCmd {
-                    yaw: m.game.teleport_angles[1],
-                    pitch: m.game.teleport_angles[0],
-                    ..BhCmd::default()
-                });
-                let mut frames = Vec::with_capacity(d.commands.len() + 1);
-                frames.push(m.ghost_frame(first));
-                for (i, &cmd) in d.commands.iter().enumerate() {
-                    check_cancel(cancel, data)?;
-                    m.advance_canonical(cmd, None, false, next_yaw(&d.commands, i))?;
-                    m.check_replay(&d)?;
-                    frames.push(m.ghost_frame(cmd));
-                }
-                let mut info: serde_json::Value = serde_json::from_slice(d.info.as_bytes())
-                    .map_err(|error| error.to_string())?;
-                if let Some(timer) = &m.timer {
-                    if timer.state.status == 2 {
-                        info["timeMs"] = json!(timer.time_ms());
-                        info["timingPolicy"] = json!(run_timing::POLICY);
-                    }
-                }
-                Ok::<_, String>(Ghost {
-                    info: CString::new(info.to_string()).map_err(|error| error.to_string())?,
-                    frames,
-                    cosmetic: d.cosmetic,
-                    inspect: d.inspect,
-                    commands: d.commands,
-                })
-            })();
-            m.game = saved;
-            m.timer = timer;
-            m.filter = filter;
-            m.last_command = cmd;
-            m.jump_observation = jump_observation;
-            m.transforms_dirty = true;
-            let ghost = result?;
             let index = m
                 .ghosts
                 .iter()
@@ -842,6 +867,153 @@ pub unsafe extern "C" fn bh_ghost_load_cancellable(
         })
     };
     handle
+}
+/// Receives each tick's ghost frame and its events (bh_ghost_events over the tick before it) from bh_ghost_stream, in
+/// tick order. Returning 0 stops the stream.
+pub type BhGhostSink =
+    Option<unsafe extern "C" fn(*mut c_void, *const BhGhostFrame, *const BhReplayEvents) -> c_int>;
+/// A ghost path played through and handed to `sink` tick by tick, without keeping it here: for a comparison ghost,
+/// which its caller stores compactly, up to a recording's 24-hour cap. Returns the ghost's info JSON (as
+/// bh_ghost_info), borrowed until the next call; NULL on error.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bh_ghost_stream(
+    ctx: *mut BhContext,
+    path: *const c_char,
+    cancel: BhCancel,
+    cancel_data: *mut c_void,
+    sink: BhGhostSink,
+    sink_data: *mut c_void,
+    count: *mut usize,
+) -> *const c_char {
+    let mut result = ptr::null();
+    let _ = unsafe { output(count, 0) };
+    unsafe {
+        call(ctx, |c| {
+            let sink = sink.ok_or("null ghost sink")?;
+            check_cancel(cancel, cancel_data)?;
+            let d = Decoded::load(Path::new(string(path)?))?;
+            if d.commands.len() as u64 > recording::MAX_COMMANDS {
+                return Err("ghost exceeds frame limit".into());
+            }
+            let mut events = EventCursor::new(&d.cosmetic, &d.inspect);
+            let info = c.map()?.simulate_ghost(&d, cancel, cancel_data, |frame| {
+                let tick_events = events.at(frame.tick);
+                if sink(sink_data, &frame, &tick_events) == 0 {
+                    return Err("ghost stream stopped".into());
+                }
+                Ok(())
+            })?;
+            c.replay_header = CString::new(info.to_string()).map_err(|error| error.to_string())?;
+            if !count.is_null() {
+                output(count, c.replay_header.as_bytes().len())?;
+            }
+            result = c.replay_header.as_ptr();
+            Ok(())
+        })
+    };
+    result
+}
+/// bh_ghost_events for each tick in turn, (tick - 1, tick], in one pass over the event lists (in tick order).
+pub(crate) struct EventCursor<'a> {
+    cosmetic: &'a [CosmeticEvent],
+    inspect: &'a [CosmeticEvent],
+    next_cosmetic: usize,
+    next_inspect: usize,
+    held: bool,
+}
+impl<'a> EventCursor<'a> {
+    pub fn new(cosmetic: &'a [CosmeticEvent], inspect: &'a [CosmeticEvent]) -> Self {
+        Self { cosmetic, inspect, next_cosmetic: 0, next_inspect: 0, held: false }
+    }
+    /// Ticks must not go backwards between calls.
+    pub fn at(&mut self, tick: u32) -> BhReplayEvents {
+        let mut out = BhReplayEvents::default();
+        while let Some(e) = self.cosmetic.get(self.next_cosmetic).filter(|e| e.tick <= tick) {
+            if e.tick == tick && tick > 0 {
+                out.cosmetic = u32::from(e.kind);
+            }
+            self.next_cosmetic += 1;
+        }
+        while let Some(e) = self.inspect.get(self.next_inspect).filter(|e| e.tick <= tick) {
+            match e.kind {
+                3 | 4 => self.held = e.kind == 3,
+                1 | 2 if e.tick == tick && tick > 0 => out.inspect_signal = u32::from(e.kind),
+                _ => {}
+            }
+            self.next_inspect += 1;
+        }
+        out.inspect_held = u32::from(self.held);
+        out
+    }
+}
+impl Map {
+    /// Plays a replay on a fresh copy of this map's game, leaving the live game, timer and filter as they were, and
+    /// hands each tick's ghost frame to `frame`. Returns the replay's info with its finish time.
+    fn simulate_ghost(
+        &mut self,
+        d: &Decoded,
+        cancel: BhCancel,
+        data: *mut c_void,
+        mut frame: impl FnMut(BhGhostFrame) -> Result<(), String>,
+    ) -> Result<serde_json::Value, String> {
+        if self.recorder.is_some() {
+            return Err("load ghosts before beginning live recording".into());
+        }
+        check_cancel(cancel, data)?;
+        let bytes = std::fs::read(&self.map_path).map_err(|e| e.to_string())?;
+        if recording::sha(&bytes) != self.map_sha256 {
+            return Err("BSP changed since map load".into());
+        }
+        check_cancel(cancel, data)?;
+        let bsp = bunnyhop_core::parse_bsp(&bytes)?;
+        drop(bytes);
+        let source = if self.root.is_some() {
+            Some(vfs::Source::loose("content", self.physics_files.clone()))
+        } else {
+            bunnyhop_core::content::cached_physics_content(&self.map_path)
+        };
+        check_cancel(cancel, data)?;
+        let ghost_game = Game::load_with_content(&bsp, source)?;
+        drop(bsp);
+        check_cancel(cancel, data)?;
+        let saved = std::mem::replace(&mut self.game, ghost_game);
+        let timer = self.timer.clone();
+        let filter = self.filter.clone();
+        let cmd = self.last_command;
+        let jump_observation = self.jump_observation;
+        let result = (|| {
+            check_cancel(cancel, data)?;
+            self.prepare_replay(d)?;
+            let first = d.commands.first().copied().unwrap_or(BhCmd {
+                yaw: self.game.teleport_angles[1],
+                pitch: self.game.teleport_angles[0],
+                ..BhCmd::default()
+            });
+            frame(self.ghost_frame(first))?;
+            for (i, &cmd) in d.commands.iter().enumerate() {
+                check_cancel(cancel, data)?;
+                self.advance_canonical(cmd, None, false, next_yaw(&d.commands, i))?;
+                self.check_replay(d)?;
+                frame(self.ghost_frame(cmd))?;
+            }
+            let mut info: serde_json::Value =
+                serde_json::from_slice(d.info.as_bytes()).map_err(|error| error.to_string())?;
+            if let Some(timer) = &self.timer {
+                if timer.state.status == 2 {
+                    info["timeMs"] = json!(timer.time_ms());
+                    info["timingPolicy"] = json!(run_timing::POLICY);
+                }
+            }
+            Ok::<_, String>(info)
+        })();
+        self.game = saved;
+        self.timer = timer;
+        self.filter = filter;
+        self.last_command = cmd;
+        self.jump_observation = jump_observation;
+        self.transforms_dirty = true;
+        result
+    }
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bh_ghost_info(
@@ -929,7 +1101,7 @@ pub unsafe extern "C" fn bh_ghost_free(ctx: *mut BhContext, handle: u32) -> c_in
     }
 }
 
-fn events(
+pub(crate) fn events(
     cosmetic: &[CosmeticEvent],
     inspect: &[CosmeticEvent],
     from: u32,
