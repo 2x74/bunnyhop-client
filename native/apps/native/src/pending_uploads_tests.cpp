@@ -1,3 +1,4 @@
+#include "menu_messages.hpp"
 #include "pending_uploads.hpp"
 #ifdef NDEBUG
 #undef NDEBUG
@@ -43,6 +44,12 @@ void pending_upload_files_round_trip() {
 
 }  // namespace
 
+// The menu's save message carries the largest record the store keeps.
+void the_host_accepts_a_full_record() {
+    assert(native::menu_message_limit("pendingUpload") > native::PendingUploadFiles::max_record_bytes);
+}
+
 int main() {
     pending_upload_files_round_trip();
+    the_host_accepts_a_full_record();
 }
