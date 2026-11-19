@@ -138,7 +138,8 @@ void draw_replay_controls(
         double interval,
         bool paused,
         double speed,
-        const std::string &camera
+        const std::string &camera,
+        bool seeking = false
 ) {
     tick = std::clamp(tick, controls.first_tick, total) - controls.first_tick;
     total -= controls.first_tick;
@@ -153,9 +154,10 @@ void draw_replay_controls(
     std::snprintf(
             label,
             sizeof(label),
-            "Replay  %.2fs / %.2fs   %.2gx   %s   Space pause | Tab camera control | Esc menu",
+            "Replay  %.2fs / %.2fs%s   %.2gx   %s   Space pause | Tab camera control | Esc menu",
             tick * interval,
             total * interval,
+            seeking ? "   Seeking" : "",
             speed,
             camera.c_str()
     );

@@ -2,6 +2,7 @@
 #include "replay_session.hpp"
 #include "replay_controls.hpp"
 #include "replay_camera.hpp"
+#include "replay_seeker.hpp"
 #include <algorithm>
 #include <cmath>
 #include "runner_view.hpp"
@@ -18,6 +19,7 @@ struct ReplayPlayer {
     ReplaySession session;
     ReplayControls controls;
     ReplayCamera camera;
+    ReplaySeeker seeker;
     std::string id;
     std::filesystem::path path;
     // The runner's look, shown on the player model in third person.

@@ -3524,19 +3524,24 @@ int run(const native::Options &opt) {
         video.step(captured && !viewer.active);
         viewer.ui_shown = viewer.active && viewer.ui_open && menu && menu->visible();
         viewer.wrap_loop(curr.tick);
-        if (!video.preparing())
-            if (const auto seek = viewer.controls.take()) try {
+        if (!video.preparing()) {
+            if (const auto seek = viewer.controls.take(); seek && viewer.active) {
+                const auto tick = viewer.session.range.clamp(*seek);
+                viewer.seeker.start(tick, native::replay_preroll_start(tick, viewer.session.range.tick_interval));
+            }
+            if (const auto seek = viewer.active ? viewer.seeker.advance(core.get()) : std::nullopt) try {
                     seek_playback(*seek);
                 } catch (const std::exception &e) {
                     error = e.what();
                     viewer.paused = true;
                 }
+        }
         if (room_modes.room_race_tick(epoch_ms())) audio.play("countdown_tick");
         const bool simulation_active =
                 !video.preparing() && core && !spectator && !room_modes.frozen() && !download.valid()
                 && ((focused && (captured || (viewer.active && (!menu || !menu->visible() || viewer.ui_shown))))
                     || opt.frames)
-                && (!viewer.active || (!viewer.paused && !viewer.controls.dragging));
+                && (!viewer.active || (!viewer.paused && !viewer.controls.dragging && !viewer.seeker.seeking()));
         native::dispatch_console_pulses(console_binds, menu.get(), act, renderer.get(), core.get());
         if (!simulation_active && console_binds.waiting()) {
             console_binds.advance();

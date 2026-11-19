@@ -736,7 +736,7 @@ export class ReplayViewer {
     const tick = this.shownTick();
     const now = formatTime(shownSeconds(range, playback, tick));
     const total = formatTime(range.ticks * range.interval);
-    this.timeEl.textContent = `${now} / ${total}`;
+    this.timeEl.textContent = `${now} / ${total}${playback.seeking ? " · Seeking" : ""}`;
     this.tickEl.textContent = `tick ${tick}`;
     this.timeline.setHead(tick, `${now} of ${total}`);
   }

@@ -562,6 +562,8 @@ export interface PlaybackState {
   rangeTotalTicks?: number;
   elapsedSeconds?: number;
   fullRecording?: boolean;
+  /** A seek is stepping through a part of the replay that hasn't played yet (replay_seeker.hpp). */
+  seeking?: boolean;
   camera?: ReplayCamera;
   seconds?: number;
   tickInterval?: number;
@@ -1335,7 +1337,7 @@ export function applyState(value: unknown): boolean {
       );
   if (next.playback && typeof next.playback === "object") {
     const playback = next.playback as Record<string, unknown>;
-    for (const key of ["active", "paused", "fullRecording"] as const) {
+    for (const key of ["active", "paused", "fullRecording", "seeking"] as const) {
       if (typeof playback[key] === "boolean") state.playback[key] = playback[key];
     }
     const numbers = [

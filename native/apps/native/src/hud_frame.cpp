@@ -148,7 +148,8 @@ void HudFrame::draw_playback() const {
                 viewer.session.range.tick_interval,
                 viewer.paused,
                 viewer.speed,
-                viewer.camera.mode
+                viewer.camera.mode,
+                viewer.seeker.seeking()
         );
     }
 }

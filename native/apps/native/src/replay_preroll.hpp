@@ -16,17 +16,23 @@ struct PrerollFrame {
     BhCmd view{};
 };
 
+// Where the pre-roll before `tick` starts: replay_preroll_seconds earlier, or the replay's start.
+inline uint32_t replay_preroll_start(uint32_t tick, double tick_seconds) {
+    if (!(tick_seconds > 0)) return tick;
+    const auto span = uint32_t(std::lround(replay_preroll_seconds / tick_seconds));
+    return tick > span ? tick - span : 0;
+}
+
 // Steps the loaded replay from replay_preroll_seconds before `tick` up to it and returns those ticks (`tick` itself
 // excluded). The replay is left at `tick`, or wherever reading stopped: seek it to `tick` afterwards.
 inline std::vector<PrerollFrame> gather_replay_preroll(BhContext *core, uint32_t tick, double tick_seconds) {
     constexpr uint32_t teleported_event = 1;
     std::vector<PrerollFrame> frames;
     if (!core || !(tick_seconds > 0)) return frames;
-    const auto span = uint32_t(std::lround(replay_preroll_seconds / tick_seconds));
-    const uint32_t from = tick > span ? tick - span : 0;
+    const uint32_t from = replay_preroll_start(tick, tick_seconds);
     PrerollFrame frame;
     if (from >= tick || !bh_replay_seek(core, from, &frame.snapshot)) return frames;
-    frames.reserve(span);
+    frames.reserve(tick - from);
     while (frame.snapshot.player.tick < tick) {
         if (frame.snapshot.player.events & teleported_event) frames.clear();
         bh_last_command(core, &frame.view);

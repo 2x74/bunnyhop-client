@@ -6,10 +6,13 @@
 #include "native_input.hpp"
 #include "replay_camera.hpp"
 #include "replay_preroll.hpp"
+#include "replay_seeker.hpp"
 #include "test_bsp.hpp"
 #include "third_person_events.hpp"
 #include <chrono>
 #include <cmath>
+#include <cstring>
+#include <optional>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -120,6 +123,32 @@ void frames_come_from_the_replay(BhContext *core, uint32_t start) {
     check(native::gather_replay_preroll(core, 0, tick_seconds).empty(), "a cut at the first tick pre-rolls");
 }
 
+// A seek spread over frames stops at the pre-roll's start, and finishing it there lands where a direct seek does.
+void seeks_in_slices_land_where_a_seek_does(const Fixture &fixture, uint32_t start) {
+    auto core = fixture.load();
+    const auto path = native::data_location::utf8(fixture.path("preroll.bhr"));
+    require(bh_replay_load(core.get(), path.c_str()), core.get(), "Loading the replay");
+    const uint32_t cut = start + seek_after_ticks;
+    native::ReplaySeeker seeker;
+    seeker.start(cut, native::replay_preroll_start(cut, tick_seconds));
+    check(seeker.seeking(), "a seek doesn't start");
+    std::optional<uint32_t> ready;
+    for (int frame = 0; frame < 100 && !ready; frame++)
+        ready = seeker.advance(core.get());
+    check(ready == cut && !seeker.seeking(), "a sliced seek doesn't finish at its tick");
+    BhState here{};
+    require(bh_state(core.get(), &here), core.get(), "Reading the state");
+    check(here.tick == cut - preroll_ticks, "a sliced seek doesn't stop at the pre-roll's start");
+    const auto frames = native::gather_replay_preroll(core.get(), cut, tick_seconds);
+    BhSnapshot sliced{}, direct{};
+    require(bh_replay_seek(core.get(), cut, &sliced), core.get(), "Finishing the seek");
+    auto other = fixture.load();
+    require(bh_replay_load(other.get(), path.c_str()), other.get(), "Loading the replay again");
+    require(bh_replay_seek(other.get(), cut, &direct), other.get(), "Seeking directly");
+    check(frames.size() == preroll_ticks, "the pre-roll after a sliced seek is short");
+    check(std::memcmp(&sliced.player, &direct.player, sizeof(BhState)) == 0, "a sliced seek lands somewhere else");
+}
+
 native::PrerollFrame frame_at(BhContext *core, uint32_t tick) {
     native::PrerollFrame frame;
     require(bh_replay_seek(core, tick, &frame.snapshot), core, "Seeking");
@@ -199,6 +228,7 @@ int main(int argc, char **argv) {
         auto core = fixture.load();
         const uint32_t start = record_run(core.get(), fixture.path("preroll.bhr"));
         frames_come_from_the_replay(core.get(), start);
+        seeks_in_slices_land_where_a_seek_does(fixture, start);
         camera_lands_where_playback_has_it(core.get(), start);
         if (!std::filesystem::exists(std::filesystem::path(argv[1]) / "actor-animations.json")) {
             std::cout << "Hosted actor assets absent; run bun run models first\n";
