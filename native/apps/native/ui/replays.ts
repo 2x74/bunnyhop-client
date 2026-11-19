@@ -7,7 +7,7 @@ import { styleLabel } from "../../web/src/styles";
 import { loadPBReplay } from "../../web/src/pb";
 import { h2hUrl, type ViewerRequest } from "../../web/src/viewer/request";
 import type { RaceRequest } from "../../web/src/player/race";
-import { LIVE_ORIGIN, openExternal, runSeconds, send, state, type NativeReplay } from "./bridge";
+import { LIVE_ORIGIN, openExternal, runSeconds, send, state, type LocalRunSummary, type NativeReplay } from "./bridge";
 import { setWatchedRun } from "./report";
 import { fetchMapIndex } from "../../web/src/ui/maps";
 import {
@@ -232,6 +232,12 @@ function confirmDelete(replay: NativeReplay): void {
 /** The most replays one batch export queues. */
 const MAX_BATCH = 50;
 
+/** What the row says first about a run: a device PB, or why it isn't on the leaderboard. */
+function summaryNote(summary: LocalRunSummary): string {
+  if (summary.unfinished) return "Unfinished, stopped at 24 hours · ";
+  if (summary.rankedTooLong) return "Over 8 hours, not on the leaderboard · ";
+  return summary.localPb ? "Device PB · " : "";
+}
 const exportFile = (replay: NativeReplay): ExportFile => ({ id: replay.id, map: replay.map, name: replay.name });
 
 function replayRow(replay: NativeReplay, video: (files: ExportFile[]) => void): HTMLElement {
@@ -265,7 +271,7 @@ function replayRow(replay: NativeReplay, video: (files: ExportFile[]) => void): 
     .join(" · ");
   const summary = replay.localSummary;
   const stats = summary
-    ? `${summary.localPb ? "Device PB · " : ""}${summary.jumps} jumps · ${summary.strafes} strafes · ${Number(summary.sync).toFixed(1)}% sync`
+    ? `${summaryNote(summary)}${summary.jumps} jumps · ${summary.strafes} strafes · ${Number(summary.sync).toFixed(1)}% sync`
     : "";
   const screenshot = replay.screenshot
     ? [

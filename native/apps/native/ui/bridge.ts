@@ -501,6 +501,10 @@ export interface LocalRunSummary {
   finishedAt: number;
   client: string;
   localPb: boolean;
+  /** Longer than the leaderboard's 8 hours: saved here, never uploaded. */
+  rankedTooLong?: boolean;
+  /** Saved where recording stopped at its 24-hour cap, without a finish. */
+  unfinished?: boolean;
   eligible?: boolean;
   verified?: false;
 }

@@ -8,6 +8,7 @@
 #include "raw_keyboard.hpp"
 #include "input_backend.hpp"
 #include "input_timeline.hpp"
+#include "run_length.hpp"
 #include "run_session.hpp"
 #include "run_history.hpp"
 #include "game_session.hpp"
@@ -427,6 +428,7 @@ int run(const native::Options &opt) {
     native::FrameDiagnostics frame_diagnostics;
     native::TurnSettings configured_turns;
     native::RunRecorder recorder;
+    native::RunLength run_length(bh_record_ranked_commands());
     auto &discord_settings = room_bridge.discord_settings;
     const char *video_driver = SDL_GetCurrentVideoDriver();
     input_timeline.configure_stamps(video_driver ? video_driver : "");
@@ -3936,8 +3938,43 @@ int run(const native::Options &opt) {
             if (viewer.active || !zones.empty())
                 require(bh_run_state(core.get(), &run_state), core.get(), "Reading native timer");
             practice.segment_status(bh_segment_loads(core.get()));
+            if (!viewer.active && !practice.active) {
+                const auto length = run_length.observe(run_state);
+                if (length.passed_ranked) toast(native::past_ranked_length_notice, native::run_length_notice_ms);
+                if (length.ended_unfinished) {
+                    std::string reason;
+                    const auto stop =
+                            native::RunLength::stop_reason(native::RunLength::last_summary(core.get()), reason);
+                    if (stop == native::RunLength::Stop::failed)
+                        toast(native::RunLength::failure_notice(reason), native::run_length_notice_ms);
+                    if (stop == native::RunLength::Stop::capped && !recorder.path.empty()) {
+                        recorder.ended = true;
+                        try {
+                            native::RunLength::write_capped(core.get(), recorder.path);
+                            replay_library.archive(
+                                    data_location::utf8(data_location::from_utf8(recorder.path).filename()),
+                                    native::RunLength::capped_summary(
+                                            {{"map", map_id},
+                                             {"style", active_style},
+                                             {"track", run_state.track},
+                                             {"timingPolicy", native::timing_policy},
+                                             {"finishedAt", epoch_ms()},
+                                             {"client", identity.value("build", std::string("local"))}},
+                                            run_state,
+                                            dt
+                                    ),
+                                    false
+                            );
+                            refresh_replays();
+                            toast(native::capped_recording_notice, native::run_length_notice_ms);
+                        } catch (const std::exception &failure) {
+                            error = failure.what();
+                        }
+                    }
+                }
+            }
             if (!practice.active && !viewer.active && active_style != "segmented" && run_state.status == 1
-                && run_state.recording) {
+                && run_state.recording && !run_length.too_long(run_state)) {
                 const bool started_run = heartbeat.start != run_state.start_tick;
                 if (started_run) {
                     run_event(heartbeat.invalidate(native::RunHeartbeat::Reset::generation));
@@ -3991,7 +4028,10 @@ int run(const native::Options &opt) {
                                  {"finishedAt", epoch_ms()},
                                  {"client", identity.value("build", std::string("local"))},
                                  {"view", runner_view},
-                                 {"eligible", !turn_admission.local_only && bool(run_state.recording_valid)}},
+                                 {"eligible",
+                                  !turn_admission.local_only && bool(run_state.recording_valid)
+                                          && !run_length.too_long(run_state)},
+                                 {"rankedTooLong", run_length.too_long(run_state)}},
                                 prefs.capture_pb_screenshots
                         );
                         refresh_replays();
@@ -4012,13 +4052,16 @@ int run(const native::Options &opt) {
                         }
                         auto play = run_history.play(activity, map_id, prefs, recorder.input.turns);
                         play["view"] = runner_view;
-                        run_event(recorder.finish_event(
-                                run_state.track,
-                                run_state.seconds,
-                                native::read_text(data_location::from_utf8(recorder.path)),
-                                play,
-                                {{"sensitivity", prefs.sensitivity * prefs.m_yaw / .022}}
-                        ));
+                        if (run_length.too_long(run_state))
+                            run_event(native::RunRecorder::too_long_finish_event(run_state.track));
+                        else
+                            run_event(recorder.finish_event(
+                                    run_state.track,
+                                    run_state.seconds,
+                                    native::read_text(data_location::from_utf8(recorder.path)),
+                                    play,
+                                    {{"sensitivity", prefs.sensitivity * prefs.m_yaw / .022}}
+                            ));
                         std::cout << "Native finish " << run_state.seconds << " seconds; replay " << recorder.path
                                   << '\n';
                     } catch (const std::exception &e) {

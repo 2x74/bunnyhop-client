@@ -19,7 +19,15 @@ interface Generation {
 export type NativeRunEvent =
   | (Generation & { type: "reset" })
   | (Generation & Identity & { type: "beat"; tick: number; hash: string; paused: boolean })
-  | (Generation & Identity & { type: "finish"; replayBase64: string; diagnostics?: RunDiagnostics; mouse?: RunMouse });
+  | (Generation &
+      Identity & {
+        type: "finish";
+        replayBase64?: string;
+        diagnostics?: RunDiagnostics;
+        mouse?: RunMouse;
+        /** Past the ranked length: saved locally and never uploaded, so no replay bytes come with it. */
+        tooLong?: boolean;
+      });
 /** What the leaderboard hover card shows about a run (apps/api src/diagnostics.ts), built by the host's recorder. */
 export type RunDiagnostics = Record<string, unknown>;
 /** The mouse settings sent with the replay, as the website sends them (`mouse` in api.submitRun). */
@@ -143,18 +151,20 @@ interface Upload {
 type Admission = "admitted" | "not admitted" | "unknown";
 type Delivery = "done" | "not admitted" | "not yet";
 
-const MAX_BEATS = 7500,
-  MAX_REPLAY_BYTES = 8 << 20;
+/** The server's caps (apps/api run-clock.ts MAX_BEATS, replay-io.ts MAX_REPLAY_BYTES): 8 hours plus pauses of 4 s beats. */
+export const MAX_BEATS = 15_000,
+  MAX_REPLAY_BYTES = 16 << 20;
 /** The web's RETRY_MS, and its 10-minute grace period (state.ts GRACE_MS) in resends. */
 const GAUNTLET_RETRY_MS = 10_000,
   GAUNTLET_RETRIES = 60;
 /**
  * A run waits in memory while the game stays open, in case the server starts accepting this build: every 5 minutes
- * for a day. Eight replays at the 8 MiB limit is the most this holds.
+ * for a day. Eight replays at the 16 MiB limit is the most this holds.
  */
 const ADMISSION_RETRY_MS = 5 * 60_000,
   ADMISSION_RETRIES = 288,
   MAX_WAITING_RUNS = 8;
+const TOO_LONG = "Runs over 8 hours can't go on the leaderboard.";
 const NOT_ADMITTED = "This game version isn't accepted for ranked runs right now.";
 const UPLOADS_LATER = "Update from Settings, or leave the game open and the run uploads once it's accepted.";
 const CHECK_FAILED = "Could not check whether this game version is accepted.";
@@ -397,6 +407,10 @@ export class NativeRunService {
       await this.beat(session, { ...identity, tick: Number(event.tick), hash: event.hash, paused: event.paused });
     } else if (event.type === "finish") {
       session.finished = true; // tokens are frozen in send order; late replies are gaps
+      if (event.tooLong === true) {
+        this.kept(session, TOO_LONG);
+        return;
+      }
       if (this.completed.size >= 4) {
         this.kept(session, "Four completed runs are still awaiting the server.");
         return;

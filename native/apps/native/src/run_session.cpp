@@ -116,4 +116,8 @@ nlohmann::json RunRecorder::finish_event(
             {"replayBase64", base64(bytes)}};
 }
 
+nlohmann::json RunRecorder::too_long_finish_event(uint32_t track) {
+    return {{"type", "finish"}, {"track", track}, {"tooLong", true}};
+}
+
 }  // namespace native
