@@ -3,8 +3,10 @@
 use super::*;
 use serde_json::json;
 use std::io::Read;
-const MAX_BYTES: usize = 128 << 20;
-const MAX_COMMANDS: usize = 2_000_000;
+/// A 24-hour replay (recording::MAX_COMMANDS) at up to 15 bytes a tick, decompressed. Real runs use about 11.
+const MAX_BYTES: usize = 256 << 20;
+/// Every recording the native recorder can write (recording::MAX_COMMANDS, 24 hours at 100 tick).
+const MAX_COMMANDS: usize = recording::MAX_COMMANDS as usize;
 #[derive(Clone)]
 pub struct Spawn {
     position: [f32; 3],

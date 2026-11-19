@@ -9,7 +9,14 @@ use std::io::{BufWriter, Write};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub const MAX_COMMANDS: u64 = 180_000;
+/// The longest run the server ranks: eight hours at 100 tick (apps/api replay-io.ts MAX_TICKS counts every command
+/// in the replay). A recording carries on past it and is saved locally; the client doesn't upload it.
+pub const RANKED_MAX_COMMANDS: u64 = 2_880_000;
+/// Where a recording stops, for memory alone: 24 hours at 100 tick. An open recording holds 76 bytes a tick (a
+/// command and a look sample), so this is about 630 MiB. What was recorded up to here is kept as the capped record.
+pub const MAX_COMMANDS: u64 = 8_640_000;
+/// The summary reason of a recording stopped at MAX_COMMANDS.
+pub const COMMAND_LIMIT: &str = "command_limit";
 pub struct Recorder {
     pub(crate) writer: Option<BufWriter<std::fs::File>>,
     pub checkpoint_interval: u32,
@@ -349,6 +356,14 @@ impl ReplayData {
         Ok(w.0)
     }
 }
+/// Vec::push, but growth never reserves past `limit` items: doubling a 24-hour history would ask for far more memory
+/// than the cap needs.
+fn push_within<T>(items: &mut Vec<T>, item: T, limit: usize) {
+    if items.len() == items.capacity() && items.len() < limit {
+        items.reserve_exact(items.capacity().max(1024).min(limit - items.len()));
+    }
+    items.push(item);
+}
 /// "BHLX" little-endian (replay.ts LOADOUT_EXT_MAGIC).
 pub const LOADOUT_EXT_MAGIC: u32 = 0x584c4842;
 struct Writer(Vec<u8>);
@@ -481,7 +496,7 @@ impl Map {
             "prespeedCap":if timer.options.cap_enabled!=0 {Some(timer.options.prespeed_cap)} else {None},
             "blockPrehops":timer.options.block_prehops!=0,"strafeKeys":crate::styles::strafe_keys_name(crate::styles::strafe_keys(style)),"spawn":spawn,
             "zones":timer.zones.iter().map(|z|z.json()).collect::<Vec<_>>(),
-            "clientBuild":client_build,"maxCommands":MAX_COMMANDS,
+            "clientBuild":client_build,"maxCommands":self.record_command_limit,
             "initialState":run::snapshot_json(BhSnapshot::from(&self.game)),"initialSnapshotSha256":sha(&self.game.snapshot_bytes())});
         let writer = path
             .map(|path| {
@@ -524,6 +539,7 @@ impl Map {
         }
         self.filter = crate::styles::Filter::new(style, settings.physics);
         self.completed_record = None;
+        self.capped_record = None;
         self.recorded_commands = 0;
         self.record_hash = run::HASH_SEED;
         self.record_valid = true;
@@ -542,8 +558,9 @@ impl Map {
         self.recorded_commands += 1;
         self.record_hash = run::fold_command(self.record_hash, cmd);
         let recorder = self.recorder.as_mut().unwrap();
-        recorder.data.commands.push(cmd);
-        recorder.data.looks.push(look);
+        let limit = self.record_command_limit as usize;
+        push_within(&mut recorder.data.commands, cmd, limit);
+        push_within(&mut recorder.data.looks, look, limit);
         let checkpoint = self.game.tick % recorder.checkpoint_interval == 0;
         if checkpoint {
             recorder.data.checkpoint(super::BhState::from(&self.game));
@@ -570,8 +587,8 @@ impl Map {
                 return Err(e);
             }
         }
-        if self.filter.id != "segmented" && self.recorded_commands >= MAX_COMMANDS {
-            self.finish_record(false, "command_limit")?;
+        if self.filter.id != "segmented" && self.recorded_commands >= self.record_command_limit {
+            self.finish_record(false, COMMAND_LIMIT)?;
         }
         Ok(())
     }
@@ -610,8 +627,20 @@ impl Map {
             } else {
                 self.completed_record = Some(recorder.data);
             }
+        } else if reason == COMMAND_LIMIT {
+            self.capped_record = Some(self.capped(recorder.data));
         }
         result
+    }
+    /// A recording stopped at the cap, as a replay of everything played: the run's start if it had one, and no finish.
+    fn capped(&self, mut data: ReplayData) -> ReplayData {
+        if let Some(timer) = self.timer.as_ref().filter(|t| t.state.status != 0) {
+            data.start_tick = timer.state.start_tick;
+            data.track = timer.state.track;
+        }
+        data.end_tick = 0;
+        data.checkpoint(super::BhState::from(&self.game));
+        data
     }
 }
 

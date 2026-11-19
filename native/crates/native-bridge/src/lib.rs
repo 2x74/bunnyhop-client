@@ -328,7 +328,11 @@ struct Map {
     recorded_commands: u64,
     record_hash: u32,
     record_valid: bool,
+    /// recording::MAX_COMMANDS; tests lower it to reach the limit quickly.
+    record_command_limit: u64,
     completed_record: Option<recording::ReplayData>,
+    /// A recording stopped at record_command_limit, until bh_record_write_capped_bhr writes it.
+    capped_record: Option<recording::ReplayData>,
     assets: assets::Assets,
     filter: styles::Filter,
     last_command: BhCmd,
@@ -716,7 +720,9 @@ impl Map {
             recorded_commands: 0,
             record_hash: run::HASH_SEED,
             record_valid: false,
+            record_command_limit: recording::MAX_COMMANDS,
             completed_record: None,
+            capped_record: None,
             assets,
             filter: styles::Filter::new("autohop", settings.physics),
             last_command: BhCmd::default(),
@@ -1514,6 +1520,25 @@ pub unsafe extern "C" fn bh_record_write_bhr(ctx: *mut BhContext, path: *const c
                 .write_bhr(Path::new(string(path)?))
         })
     }
+}
+/// Writes a recording stopped at the command cap (summary reason `command_limit`): every tick played, with no finish.
+/// Fails when there is none. The record is released once it's written.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bh_record_write_capped_bhr(ctx: *mut BhContext, path: *const c_char) -> c_int {
+    unsafe {
+        call(ctx, |c| {
+            let path = Path::new(string(path)?);
+            let m = c.map()?;
+            m.capped_record.as_ref().ok_or("no recording stopped at the length cap")?.write_bhr(path)?;
+            m.capped_record = None;
+            Ok(())
+        })
+    }
+}
+/// The most commands a recording may hold and still be ranked (recording::RANKED_MAX_COMMANDS).
+#[unsafe(no_mangle)]
+pub extern "C" fn bh_record_ranked_commands() -> u64 {
+    recording::RANKED_MAX_COMMANDS
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bh_record_fold(
