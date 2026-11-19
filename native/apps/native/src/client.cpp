@@ -1252,7 +1252,9 @@ int run(const native::Options &opt) {
             show_menu(false);
         } else {
             try {
-                viewer.session = native::ReplaySession::open(core.get(), path, full_recording);
+                viewer.session = native::ReplaySession::open(
+                        core.get(), path, full_recording, native::ReplaySession::Seek::later
+                );
                 bh_replay_keyframes(core.get(), 1);
             } catch (const std::exception &error) {
                 reset();
@@ -1267,6 +1269,7 @@ int run(const native::Options &opt) {
             viewer.runner_charm = runner_charm.is_string() ? runner_charm.get<std::string>() : std::string();
             renderer->set_cosmetics(viewer.runner_outfit, runner_loadout, viewer.runner_charm);
             viewer.begin(path);
+            viewer.seek_to_start();
             replay_timeline.request(path, viewer.id);
             recorder.clear(true);
             curr = prev = viewer.session.initial.snapshot.player;

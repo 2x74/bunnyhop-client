@@ -19,7 +19,12 @@ struct ReplaySession {
     BhSettings settings{};
     ReplayPose initial;
 
-    static ReplaySession open(BhContext *core, const std::filesystem::path &path, bool full_recording = false) {
+    // Seek::later leaves playback at the recording's first tick: the viewer reaches the range's start over frames
+    // (replay_seeker.hpp), since a long wait in the start zone makes that seek take seconds.
+    enum class Seek { now, later };
+
+    static ReplaySession
+    open(BhContext *core, const std::filesystem::path &path, bool full_recording = false, Seek seek = Seek::now) {
         if (!bh_replay_load(core, native::data_location::utf8(path).c_str())) {
             throw std::runtime_error(bh_last_error(core));
         }
@@ -35,8 +40,16 @@ struct ReplaySession {
         const auto &settings = session.info.at("settings");
         session.settings.max_speed = settings.at("maxSpeed");
         session.settings.air_accelerate = settings.at("airAccelerate");
-        session.initial = session.seek(core, session.range.from);
+        session.initial = seek == Seek::now ? session.seek(core, session.range.from) : first_pose(core);
         return session;
+    }
+
+    static ReplayPose first_pose(BhContext *core) {
+        ReplayPose pose;
+        if (!bh_replay_seek(core, 0, &pose.snapshot) || !bh_last_command(core, &pose.view)) {
+            throw std::runtime_error(bh_last_error(core));
+        }
+        return pose;
     }
 
     ReplayPose seek(BhContext *core, uint32_t tick) const {

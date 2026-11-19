@@ -41,6 +41,8 @@ struct ReplayPlayer {
     std::vector<PrerollFrame> preroll;
 
     void begin(const std::filesystem::path &file);
+    // After ReplaySession::Seek::later: playback reaches the shown range's start over the next frames.
+    void seek_to_start();
     void action(ReplayControls::Action action, uint32_t tick, Input &camera_controls);
     nlohmann::json state(uint32_t tick, double seconds, double fallback_interval) const;
 

@@ -25,6 +25,11 @@ void ReplayPlayer::begin(const std::filesystem::path &file) {
     view_continuous_ = false;
 }
 
+void ReplayPlayer::seek_to_start() {
+    const uint32_t from = session.range.from;
+    seeker.start(from, replay_preroll_start(from, session.range.tick_interval));
+}
+
 void ReplayPlayer::viewer_ui(const nlohmann::json &message) {
     constexpr double max_bar_css_pixels = 4000;
     ui_open = message.value("open", false);

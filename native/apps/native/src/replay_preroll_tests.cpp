@@ -7,6 +7,7 @@
 #include "replay_camera.hpp"
 #include "replay_preroll.hpp"
 #include "replay_seeker.hpp"
+#include "replay_session.hpp"
 #include "test_bsp.hpp"
 #include "third_person_events.hpp"
 #include <chrono>
@@ -77,8 +78,9 @@ private:
     std::filesystem::path directory_;
 };
 
-// A run across the fixture's box at full speed, the view sweeping left and right; returns its first tick.
-uint32_t record_run(BhContext *core, const std::filesystem::path &file) {
+// A run across the fixture's box at full speed, the view sweeping left and right, after `wait_ticks` standing in the
+// start zone; returns its first tick.
+uint32_t record_run(BhContext *core, const std::filesystem::path &file, uint32_t wait_ticks = 0) {
     constexpr uint32_t tick_limit = 3000;
     const std::array<BhZone, 2> zones = {
             BhZone{0, 0, 0, {-100, -100, -10000}, {18, 100, 1000}},
@@ -92,6 +94,9 @@ uint32_t record_run(BhContext *core, const std::filesystem::path &file) {
     require(bh_record_begin(core, "", "autohop", "test", 100), core, "Recording");
     BhState state{};
     BhRunState run{};
+    const BhCmd still{};
+    for (uint32_t tick = 0; tick < wait_ticks; ++tick)
+        require(bh_step(core, &still, &state), core, "Waiting in the start zone");
     for (uint32_t tick = 0; tick < tick_limit && run.status != 2; ++tick) {
         BhCmd command{};
         command.forward = run_forward;
@@ -147,6 +152,33 @@ void seeks_in_slices_land_where_a_seek_does(const Fixture &fixture, uint32_t sta
     require(bh_replay_seek(other.get(), cut, &direct), other.get(), "Seeking directly");
     check(frames.size() == preroll_ticks, "the pre-roll after a sliced seek is short");
     check(std::memcmp(&sliced.player, &direct.player, sizeof(BhState)) == 0, "a sliced seek lands somewhere else");
+}
+
+// Opening for the viewer doesn't seek: playback stays at the first tick until the seeker reaches the range's start,
+// which lands where opening with the seek does.
+void opening_defers_the_start_seek(const Fixture &fixture) {
+    constexpr uint32_t wait_ticks = 300;
+    using Session = native::ReplaySession;
+    auto core = fixture.load();
+    const auto path = fixture.path("waited.bhr");
+    record_run(core.get(), path, wait_ticks);
+    core = fixture.load();
+    const auto deferred = Session::open(core.get(), path, false, Session::Seek::later);
+    BhState here{};
+    require(bh_state(core.get(), &here), core.get(), "Reading the state");
+    check(deferred.initial.snapshot.player.tick == 0 && here.tick == 0, "opening for the viewer seeked");
+    check(deferred.range.from > wait_ticks / 2, "the fixture run's range starts at its first tick");
+    native::ReplaySeeker seeker;
+    seeker.start(deferred.range.from, native::replay_preroll_start(deferred.range.from, tick_seconds));
+    std::optional<uint32_t> ready;
+    for (int frame = 0; frame < 100 && !ready; frame++)
+        ready = seeker.advance(core.get());
+    check(ready == deferred.range.from, "the start seek doesn't finish");
+    const auto reached = deferred.seek(core.get(), *ready);
+    auto other = fixture.load();
+    const auto direct = Session::open(other.get(), path);
+    check(std::memcmp(&reached.snapshot.player, &direct.initial.snapshot.player, sizeof(BhState)) == 0,
+          "the deferred start lands somewhere else");
 }
 
 native::PrerollFrame frame_at(BhContext *core, uint32_t tick) {
@@ -229,6 +261,7 @@ int main(int argc, char **argv) {
         const uint32_t start = record_run(core.get(), fixture.path("preroll.bhr"));
         frames_come_from_the_replay(core.get(), start);
         seeks_in_slices_land_where_a_seek_does(fixture, start);
+        opening_defers_the_start_seek(fixture);
         camera_lands_where_playback_has_it(core.get(), start);
         if (!std::filesystem::exists(std::filesystem::path(argv[1]) / "actor-animations.json")) {
             std::cout << "Hosted actor assets absent; run bun run models first\n";
