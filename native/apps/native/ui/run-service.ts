@@ -5,6 +5,14 @@ import type { Submission, RequestDispatch, GauntletSplitResult } from "../../web
 import { parseMouseSettings, type MouseSettings } from "../../web/src/mouse-settings";
 import { isStyleId, type StyleId } from "../../web/src/styles";
 import { runProgression, type RunProgression } from "./run-rewards";
+import {
+  RETRY_ATTEMPTS,
+  expired,
+  retryDelayMs,
+  validReplayId,
+  type PendingUpload,
+  type PendingUploadStore,
+} from "./pending-uploads";
 
 interface Identity {
   map: string;
@@ -23,6 +31,8 @@ export type NativeRunEvent =
       Identity & {
         type: "finish";
         replayBase64?: string;
+        /** The archive's name for the replay (pending_uploads.hpp), where a failed upload is sent again from. */
+        replayId?: string;
         diagnostics?: RunDiagnostics;
         mouse?: RunMouse;
         /** Past the ranked length: saved locally and never uploaded, so no replay bytes come with it. */
@@ -128,6 +138,10 @@ export interface RunServiceDependencies {
   admissionRetries?: number;
   /** A run kept back at its finish has now been uploaded; the player may be on another map by then. */
   savedRunUploaded?: (map: string) => void;
+  /** Where runs that failed to upload wait to be sent again, across restarts (pending-upload-host.ts). */
+  uploads?: PendingUploadStore;
+  /** The wait before each look at a failed upload (pending-uploads.ts retryDelayMs). */
+  retryDelayMs?: (round: number) => number;
 }
 interface Session {
   generation: number;
@@ -142,14 +156,23 @@ interface Session {
   finished: boolean;
   account: string | null | undefined;
   accountBlocked: boolean;
+  /** A run sent again after a restart: its statuses would only confuse the run on screen now. */
+  quiet?: boolean;
 }
 interface Upload {
+  /** Empty for a run restored from disk until its replay is read back from the archive. */
   bytes: Uint8Array;
   diagnostics: RunDiagnostics | null;
   mouse: RunMouse | null;
+  /** The replay's name in the local archive, when the host said. */
+  replayId: string | null;
 }
 type Admission = "admitted" | "not admitted" | "unknown";
-type Delivery = "done" | "not admitted" | "not yet";
+/**
+ * done: the server took the run (any verdict). refused: a 4xx a resend can't change. offline: no answer, a 5xx, 408 or
+ * 429, sent again later. stopped: the account changed or the attempt is gone.
+ */
+type Delivery = "done" | "refused" | "offline" | "stopped" | "not admitted" | "not yet";
 
 /** The server's caps (apps/api run-clock.ts MAX_BEATS, replay-io.ts MAX_REPLAY_BYTES): 8 hours plus pauses of 4 s beats. */
 export const MAX_BEATS = 15_000,
@@ -170,12 +193,16 @@ const UPLOADS_LATER = "Update from Settings, or leave the game open and the run 
 const CHECK_FAILED = "Could not check whether this game version is accepted.";
 const CHECKS_AGAIN = "Leave the game open and the run uploads once that works.";
 const NOT_YET = "The server can't take this run yet.";
+const OFFLINE = "The replay could not reach the server.";
+const SENDS_ITSELF = "It uploads by itself once the server answers, even after a restart.";
+/** Runs sent again at once; each holds its replay in memory while it waits. */
+const MAX_RETRYING_RUNS = 8;
 const SENDS_AGAIN = "Leave the game open and the run uploads once it can.";
 const STALE_FILES =
   "This copy's files don't match its release, so runs can't be ranked. Unpack the download into an empty folder.";
 /** Refusals that only mean "not yet" (web uploads.ts holds): the run waits, with nothing used up. */
 const WAITING_REFUSALS = new Set(["guest_limit", "rate_limited"]);
-const refusalWait = (code: unknown): Exclude<Delivery, "done"> | null => {
+const refusalWait = (code: unknown): "not admitted" | "not yet" | null => {
   if (code === "client_build_not_allowed") return "not admitted";
   return typeof code === "string" && WAITING_REFUSALS.has(code) ? "not yet" : null;
 };
@@ -263,6 +290,9 @@ export class NativeRunService {
   private current: Session | null = null;
   private readonly completed = new Set<Session>();
   private readonly waitingForAdmission = new Set<Session>();
+  private readonly retrying = new Set<Session>();
+  /** Stored runs being sent again, by replay id, so a resume after an account check doesn't send one twice. */
+  private readonly retryingIds = new Set<string>();
   private latestGeneration = -1;
   private readonly now: () => number;
   private readonly sleep: (ms: number) => Promise<void>;
@@ -288,13 +318,19 @@ export class NativeRunService {
       .then((id) => {
         if (revision !== this.accountRevision) return;
         this.accountId = id;
-        const sessions = [...this.completed, ...this.waitingForAdmission, ...(this.current ? [this.current] : [])];
+        const sessions = [
+          ...this.completed,
+          ...this.waitingForAdmission,
+          ...this.retrying,
+          ...(this.current ? [this.current] : []),
+        ];
         for (const session of new Set(sessions)) {
           if (session.account !== undefined && session.account !== id) {
             session.accountBlocked = true;
             this.kept(session, "Account changed during this attempt. Restart to submit under your current account.");
           }
         }
+        if (id) void this.resumeStored(id);
       });
   }
   private async ownsAccount(session: Session): Promise<number | null> {
@@ -332,14 +368,19 @@ export class NativeRunService {
     };
   }
   private active(session: Session): boolean {
-    return this.current === session || this.completed.has(session) || this.waitingForAdmission.has(session);
+    return (
+      this.current === session ||
+      this.completed.has(session) ||
+      this.waitingForAdmission.has(session) ||
+      this.retrying.has(session)
+    );
   }
   private status(
     session: Session,
     status: RunServiceStatus["status"],
     extra: Omit<Partial<RunServiceStatus>, "type" | "generation" | "status"> = {},
   ): void {
-    if (this.active(session) && (!session.accountBlocked || status === "kept"))
+    if (this.active(session) && !session.quiet && (!session.accountBlocked || status === "kept"))
       this.dependencies.send({ type: "runService", generation: session.generation, status, ...extra });
   }
   private kept(session: Session, message: string): void {
@@ -417,7 +458,9 @@ export class NativeRunService {
       }
       this.completed.add(session);
       try {
-        await this.finish(session, event.replayBase64, plainObject(event.diagnostics), this.runMouse(event.mouse));
+        const replayId = validReplayId(event.replayId) ? event.replayId : null;
+        const details = { diagnostics: plainObject(event.diagnostics), mouse: this.runMouse(event.mouse), replayId };
+        await this.finish(session, event.replayBase64, details);
       } finally {
         this.completed.delete(session);
       }
@@ -498,12 +541,7 @@ export class NativeRunService {
       if (session.handshake === request) session.handshake = null;
     } else await request;
   }
-  private async finish(
-    session: Session,
-    base64: unknown,
-    diagnostics: RunDiagnostics | null,
-    mouse: RunMouse | null,
-  ): Promise<void> {
+  private async finish(session: Session, base64: unknown, details: Omit<Upload, "bytes">): Promise<void> {
     const event = session.identity!;
     const context = this.dependencies.context?.(event, session.generation);
     if (this.dependencies.account && (await this.ownsAccount(session)) === null) return;
@@ -522,7 +560,7 @@ export class NativeRunService {
       this.kept(session, "Ranked uploads require the live service.");
       return;
     }
-    const upload: Upload = { bytes, diagnostics, mouse };
+    const upload: Upload = { bytes, ...details };
     this.status(session, "checking", { message: "Checking native release compatibility…" });
     const admission = await this.admission(event);
     if (!this.active(session)) return;
@@ -531,7 +569,8 @@ export class NativeRunService {
       return;
     }
     const delivery = await this.deliver(session, upload, context ?? {});
-    if (delivery !== "done") this.waitForAdmission(session, upload, delivery);
+    if (delivery === "offline") this.retryLater(session, upload);
+    else if (delivery === "not admitted" || delivery === "not yet") this.waitForAdmission(session, upload, delivery);
   }
   private async admission(event: Identity): Promise<Admission> {
     try {
@@ -563,7 +602,9 @@ export class NativeRunService {
         if (session.accountBlocked) return;
         if ((await this.admission(event)) !== "admitted") continue;
         // The room, race or gauntlet it was played for has moved on: it goes up as a plain run.
-        if ((await this.deliver(session, upload, {}, true)) !== "done") continue;
+        const delivery = await this.deliver(session, upload, {}, true);
+        if (delivery === "refused" || delivery === "stopped") return;
+        if (delivery !== "done") continue;
         if (!session.accountBlocked) this.dependencies.savedRunUploaded?.(event.map);
         return;
       }
@@ -583,7 +624,8 @@ export class NativeRunService {
       gaps,
     });
     const result = await this.submit(session, upload, context, tokens, gaps, retrying);
-    if (result === "not admitted" || result === "not yet" || result === null) return result ?? "done";
+    if (result === null) return "stopped";
+    if (typeof result === "string") return result;
     if (!this.active(session)) return "done";
     this.attachDiagnostics(result.id, upload.diagnostics);
     this.verdict(session, result);
@@ -600,7 +642,7 @@ export class NativeRunService {
     tokens: string[],
     gaps: number,
     retrying: boolean,
-  ): Promise<Submission | Exclude<Delivery, "done"> | null> {
+  ): Promise<Submission | Exclude<Delivery, "done" | "stopped"> | null> {
     for (let tries = 0; ; tries++) {
       // No await may separate the last ownership check from submitRun (accountDispatch fences the fetch itself).
       while (this.dependencies.account) {
@@ -626,8 +668,9 @@ export class NativeRunService {
         const wait = refusalWait((error as { code?: unknown } | null)?.code);
         if (wait) return wait;
         const refused = definiteRefusal(error);
-        if (retrying && !refused) return "not admitted";
         const attempt = context.gauntlet;
+        // A gauntlet candidate is held for its attempt below; any other run is sent again later (retryLater).
+        if (!refused && (retrying || !attempt)) return "offline";
         const hold =
           !!attempt &&
           !refused &&
@@ -635,11 +678,8 @@ export class NativeRunService {
           !!this.dependencies.holdGauntlet?.(attempt, session.generation);
         if (!hold) {
           const answer = refused ? serverMessage(error) : null;
-          this.kept(
-            session,
-            answer ? `The server refused this run: ${answer}.` : "The replay could not reach the server.",
-          );
-          return null;
+          this.kept(session, answer ? `The server refused this run: ${answer}.` : OFFLINE);
+          return refused ? "refused" : null;
         }
         this.status(session, "uploading", {
           message: "No connection. This run counts once it uploads.",
@@ -654,6 +694,104 @@ export class NativeRunService {
           return null;
         }
       }
+    }
+  }
+  // An upload that got no answer, a 5xx, 408 or 429 (web uploads.ts "network"). It's written to disk with the
+  // heartbeat tokens, which exist nowhere else, and sent again with a backoff; a restart picks it up (resumeStored).
+  private retryLater(session: Session, upload: Upload): void {
+    const record = this.pendingRecord(session, upload);
+    if (!record || this.retrying.size >= MAX_RETRYING_RUNS) {
+      this.kept(session, OFFLINE);
+      return;
+    }
+    this.retrying.add(session);
+    this.kept(session, `${OFFLINE} ${SENDS_ITSELF}`);
+    void this.retryStored(session, upload, record);
+  }
+  private pendingRecord(session: Session, upload: Upload): PendingUpload | null {
+    const identity = session.identity;
+    if (!identity || !upload.replayId || typeof session.account !== "string") return null;
+    const beats = session.tokens.filter((token): token is string => typeof token === "string");
+    return {
+      id: upload.replayId,
+      account: session.account,
+      ...identity,
+      beats,
+      gaps: session.sent - beats.length,
+      mouse: upload.mouse,
+      diagnostics: upload.diagnostics,
+      attempts: 0,
+      at: this.now(),
+    };
+  }
+  /** Sends a stored run again until the server takes it, refuses it, or its attempts run out. */
+  private async retryStored(session: Session, upload: Upload, first: PendingUpload): Promise<void> {
+    let record = first;
+    this.retryingIds.add(record.id);
+    try {
+      await this.dependencies.uploads?.save(record);
+      for (let round = 0; record.attempts < RETRY_ATTEMPTS; round++) {
+        await this.sleep((this.dependencies.retryDelayMs ?? retryDelayMs)(round));
+        if (session.accountBlocked || !this.active(session)) return; // still stored, for its own account
+        if (expired(record, this.now())) break;
+        // Waiting for the server to accept this build, or for the connection, uses up nothing.
+        if ((await this.admission(session.identity!)) !== "admitted") continue;
+        record = { ...record, attempts: record.attempts + 1 };
+        await this.dependencies.uploads?.save(record);
+        if (!upload.bytes.length && !(await this.readBack(record, upload))) return;
+        const delivery = await this.deliver(session, upload, {}, true);
+        if (delivery === "offline") continue;
+        if (delivery === "stopped") return;
+        if (delivery === "not admitted" || delivery === "not yet") {
+          record = { ...record, attempts: record.attempts - 1 };
+          await this.dependencies.uploads?.save(record);
+          continue;
+        }
+        await this.dependencies.uploads?.remove(record.id);
+        if (delivery === "done") this.dependencies.savedRunUploaded?.(record.map);
+        return;
+      }
+      await this.dependencies.uploads?.remove(record.id);
+      this.kept(session, "Stopped trying to upload this run.");
+    } catch {
+      this.kept(session, "This run could not be uploaded.");
+    } finally {
+      this.retrying.delete(session);
+      this.retryingIds.delete(record.id);
+    }
+  }
+  /** A restored run's replay, from the archive. False (and the record dropped) when the replay is gone. */
+  private async readBack(record: PendingUpload, upload: Upload): Promise<boolean> {
+    const base64 = await this.dependencies.uploads?.replay(record.id);
+    try {
+      upload.bytes = replayBytes(base64 ?? "");
+      return true;
+    } catch {
+      await this.dependencies.uploads?.remove(record.id);
+      return false;
+    }
+  }
+  /** Stored runs of this account, after a restart or a sign-in, are sent again. */
+  private async resumeStored(account: string): Promise<void> {
+    const store = this.dependencies.uploads;
+    if (!store || this.dependencies.origin() !== LIVE_ORIGIN) return;
+    const now = this.now();
+    for (const record of await store.list()) {
+      if (expired(record, now)) {
+        await store.remove(record.id);
+        continue;
+      }
+      if (record.account !== account || this.retryingIds.has(record.id)) continue;
+      if (this.retrying.size >= MAX_RETRYING_RUNS) return;
+      const session = restoredSession(record);
+      this.retrying.add(session);
+      const upload: Upload = {
+        bytes: new Uint8Array(),
+        diagnostics: record.diagnostics,
+        mouse: record.mouse,
+        replayId: record.id,
+      };
+      void this.retryStored(session, upload, record);
     }
   }
   private async pollVerdict(session: Session, first: Submission): Promise<void> {
@@ -711,6 +849,26 @@ export class NativeRunService {
       ...(daily ? { daily: daily.text, dailyGood: daily.good } : {}),
     });
   }
+}
+
+/** A finished attempt rebuilt from its stored record: same account, identity, tokens and gaps, and no statuses. */
+function restoredSession(record: PendingUpload): Session {
+  const style = isStyleId(record.style) ? record.style : "autohop";
+  return {
+    generation: -1,
+    identity: { map: record.map, track: record.track, style, build: record.build, wasm: record.wasm },
+    sid: null,
+    tokens: [...record.beats],
+    sent: record.beats.length + record.gaps,
+    gaps: record.gaps,
+    lastTick: 0,
+    carryPause: false,
+    handshake: null,
+    finished: true,
+    account: record.account,
+    accountBlocked: false,
+    quiet: true,
+  };
 }
 
 function plainObject(value: unknown): Record<string, unknown> | null {

@@ -99,6 +99,7 @@
 #include "play_priority.hpp"
 #include "menu_scripts.hpp"
 #include "menu_files.hpp"
+#include "pending_uploads.hpp"
 #include "sky_library.hpp"
 #include "menu_messages.hpp"
 #include "free_cameras.hpp"
@@ -243,6 +244,7 @@ int run(const native::Options &opt) {
     std::unique_ptr<native::MenuWebView> menu;
     std::string menu_failure;
     native::MenuFiles menu_files(cache);
+    native::PendingUploads pending_uploads(cache);
     native::SkyLibrary sky_library(cache);
     const bool wants_menu = !opt.no_menu && (!opt.frames || !opt.menu_smoke.empty());
     if (wants_menu) {
@@ -2927,6 +2929,8 @@ int run(const native::Options &opt) {
                         }
                     } else if (type == "file")
                         menu_files.handle(window.get(), message);
+                    else if (type == "pendingUpload")
+                        pending_uploads.handle(message);
                     else if (type == "sky")
                         sky_library.message(message);
                     else if (type == "hudTheme")
@@ -4603,6 +4607,8 @@ int run(const native::Options &opt) {
         // Answers from file dialogs and the watched Custom CSS file.
         if (menu && menu_ready) {
             for (const auto &script : menu_files.poll())
+                menu->evaluate_js(script);
+            for (const auto &script : pending_uploads.poll())
                 menu->evaluate_js(script);
         }
         // State first: the menu accepts a backdrop only for its current or

@@ -111,6 +111,11 @@ export type MenuMessage =
       name?: string;
     }
   | { type: "replays"; action: "list" }
+  /** Runs waiting to upload (pending-upload-host.ts); answers are bunnyhop:native-upload-store events. */
+  | { type: "pendingUpload"; action: "save"; id: string; record: import("./pending-uploads").PendingUpload }
+  | { type: "pendingUpload"; action: "remove"; id: string }
+  | { type: "pendingUpload"; action: "list"; request: string }
+  | { type: "pendingUpload"; action: "replay"; id: string; request: string }
   /** Clears the player's paint on the loaded map (renderer.hpp tool_message). */
   | { type: "paint"; action: "clear" }
   /** Sets an aimed measurement point or clears the measurement (renderer.hpp tool_message). */
