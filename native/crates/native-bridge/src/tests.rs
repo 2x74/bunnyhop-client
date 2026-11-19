@@ -21,6 +21,8 @@ mod map_props;
 mod hard_maps;
 #[path = "material_overrides_tests.rs"]
 mod material_overrides;
+#[path = "replay_bench_tests.rs"]
+mod replay_bench;
 
 struct Fixture(PathBuf);
 impl Fixture {
