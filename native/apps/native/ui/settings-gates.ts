@@ -243,6 +243,9 @@ const ROWS: Record<string, Gate> = {
   "graphics/Colour & visibility/Map fog": needs("graphicsMapFog"),
   "graphics/Colour & visibility/Map details": needs("graphicsMapDetails"),
   "graphics/Colour & visibility/Snow and rain": needs("graphicsPrecipitation"),
+  "graphics/Colour & visibility/Frost on players": excluded(
+    "Frost (web model-light.ts) builds up on each player over time in falling snow; the desktop client doesn't draw it yet.",
+  ),
   "graphics/Colour & visibility/Flashlight": needs("graphicsFlashlight"),
   "graphics/Display/Fullscreen when playing": excluded("Display → Window mode: windowed, borderless or fullscreen."),
   "graphics/Display/Resolution": needs("graphicsResolutionScale"),

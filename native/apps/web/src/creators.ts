@@ -425,7 +425,7 @@ export function oneWeeklyPerMedal(ids: string[]): string[] {
 // disc is r 10.6 (a solid disc next to the r 11 marks), the calendar page sits 0.7 higher (its rings carry no weight),
 // the peak hexagon is 95% (its points read tall).
 export type DailyMetal = "gold" | "silver" | "bronze";
-const DAILY_METALS: Record<DailyMetal, { light: string; mid: string; dark: string; word: string }> = { gold: MEDALS.winner, silver: MEDALS.second, bronze: MEDALS.third };
+export const DAILY_METALS: Record<DailyMetal, { light: string; mid: string; dark: string; word: string }> = { gold: MEDALS.winner, silver: MEDALS.second, bronze: MEDALS.third };
 /** Counts engraved past this read as it. */
 export const DAILY_MARK_MAX = 999;
 /** The counts a daily mark changes its look at. */

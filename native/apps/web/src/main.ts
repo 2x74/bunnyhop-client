@@ -262,6 +262,7 @@ prefs.watch((p) => {
     world.setPropLighting(p.graphics.propLighting);
     world.setDetails(p.graphics.mapDetails);
     world.setPrecipitation(PRECIPITATION_DENSITY[p.graphics.precipitation]);
+    world.setFrost(p.graphics.frost);
     world.setModelLighting(p.graphics.modelLighting);
     applyAnisotropy(world.root, p.graphics.anisotropy);
   }
@@ -565,6 +566,7 @@ try {
   world.setPropLighting(prefs.get().graphics.propLighting);
   world.setDetails(prefs.get().graphics.mapDetails);
   world.setPrecipitation(PRECIPITATION_DENSITY[prefs.get().graphics.precipitation]);
+  world.setFrost(prefs.get().graphics.frost);
   world.setModelLighting(prefs.get().graphics.modelLighting);
   applyAnisotropy(world.root, prefs.get().graphics.anisotropy);
   scene.add(world.root);

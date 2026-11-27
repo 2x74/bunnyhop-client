@@ -604,6 +604,8 @@ export interface RunCard {
   pb: boolean;
   /** Counted replay views (absent from older APIs). */
   views?: number;
+  /** v0.0.44, featured runs: the tile's rim (feat-edge.ts), absent when none applies. */
+  edge?: import("./feat-edge").FeatEdge;
 }
 
 /** GET /players/:id/points: the records giving the most points on a rank board (scope "all" or a style). */

@@ -259,7 +259,8 @@ function render(root: HTMLElement, p: Profile, a: ProfileActions, open: ProfileO
     for (const tile of cardSlot.querySelectorAll<HTMLElement>(".pc-feat-tile[data-run]")) {
       const run = known.get(tile.dataset.run!) ?? featured.find((r) => r.runId === tile.dataset.run);
       if (!run) continue;
-      Object.assign(tile, { tabIndex: 0, title: "Watch this replay" });
+      // The tile's edge names itself first ("World record"; ui/card.ts featTile sets it on every draw).
+      Object.assign(tile, { tabIndex: 0, title: tile.title ? `${tile.title}\nWatch this replay` : "Watch this replay" });
       tile.setAttribute("role", "button");
       tile.setAttribute("aria-label", `Watch ${run.map}, ${formatTime(run.time)}`);
     }

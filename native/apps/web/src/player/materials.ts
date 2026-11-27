@@ -101,6 +101,12 @@ export interface PlayerUniforms extends FinishUniforms, PlayerLookUniforms, Dept
    * multiplied by 1 + uMapLight, so 0 (the default: previews, the Loadout, Model lighting off) is the look as it was.
    */
   uMapLight: THREE.IUniform<THREE.Vector3>;
+  /**
+   * Frost from standing in the map's falling snow (model-light.ts, "Frost on players"), 0..1: a pale icy rime on the
+   * upward faces and the rim of the solid body, a cold edge on a ghost. 0 (the default: previews, the hands) is the
+   * look as it was, at no cost past one uniform branch.
+   */
+  uFrost: THREE.IUniform<number>;
 }
 
 export function playerUniforms(): PlayerUniforms {
@@ -140,6 +146,7 @@ export function playerUniforms(): PlayerUniforms {
     uCapybara: { value: new THREE.Vector4() },
     uPonytail: { value: new THREE.Vector4() },
     uMapLight: { value: new THREE.Vector3() },
+    uFrost: { value: 0 },
     ...garmentPatternUniforms(),
     ...finishUniforms(),
     ...PLAYER_LOOK_UNIFORMS,
@@ -228,6 +235,24 @@ float nearFade() {
   float h = clamp(dot(cameraPosition - uAxisA, ab) / max(dot(ab, ab), 1e-3), 0.0, 1.0);
   float d = length(cameraPosition - (uAxisA + ab * h));
   return smoothstep(uNearFade.x, uNearFade.y, d);
+}
+uniform float uFrost;
+// Frost (uFrost): how much rime a fragment takes, 0..1, from its world normal and view. Upward faces gather it (snow
+// settles), the rim catches it, and a fine grain in model space breaks it into crystals instead of paint.
+float frostCover(vec3 n, vec3 V, vec3 objPos) {
+  float up = smoothstep(0.05, 0.85, n.y);
+  float rim = pow(1.0 - max(dot(n, V), 0.0), 2.0);
+  vec3 cell = floor(objPos * 3.0);
+  float grain = fract(sin(dot(cell, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+  float cover = up * (0.75 + 0.25 * grain) + rim * 0.75;
+  // Rime first lands as specks, then fills in.
+  float f = smoothstep(0.0, 1.0, uFrost);
+  return clamp(cover * f - (1.0 - f) * 0.25 * grain, 0.0, 1.0);
+}
+// The rime's colour over a surface of colour c lit to at least lit: a pale ice tint at the brighter of the two, so
+// warm colours cool and pale instead of shifting hue (no pink gold).
+vec3 frostTint(vec3 c, float lit) {
+  return vec3(0.8, 0.9, 1.0) * max(dot(c, vec3(0.2126, 0.7152, 0.0722)) * 1.05, lit);
 }
 float bayer4(vec2 p) {
   ivec2 i = ivec2(mod(p, 4.0));
@@ -327,6 +352,13 @@ ${ROBE_FX_FRAGMENT_SOLID}
 #ifdef FINISH
   if (${FRAGMENT_IS_BLADE}) col = finishShade(n, V, L, ambient, key);
 #endif
+  // Frost (uFrost): pale icy blue-white over the body, lit like it (the key and the sky), never a white-out; self-lit
+  // parts keep their glow.
+  if (uFrost > 0.0) {
+    float fr = frostCover(n, V, vFabricPos) * (1.0 - vGlow) * (0.4 + 0.6 * back);
+    float lit = dot(0.5 * ambient + 0.62 * key + 0.12, vec3(0.2126, 0.7152, 0.0722)) * 0.8 + 0.15 * rim;
+    col = mix(col, frostTint(col, lit), fr * 0.62);
+  }
   gl_FragColor = vec4(col, 1.0);
   // The map's light on the studio light (uMapLight). Self-lit parts keep their glow: accent strips, the lit hats.
   gl_FragColor.rgb *= mix(vec3(1.0) + uMapLight, vec3(1.0), max(max(vGlow, step(3.5, vFx)), bkFlame() ? 1.0 : 0.0));
@@ -362,6 +394,12 @@ void main() {
   col = max(col + rimC * fres * 1.6, 0.0) + vec3(1.0) * fres * fres * 0.35;
   col += mix(uGhost, vec3(1.0), 0.45) * vGlow * 1.1;
   float a = uOpacity * (0.38 + 0.62 * fres) + vGlow * 0.35 * uOpacity;
+  // Frost (uFrost): an icy rime on its top and edge, a little more solid where it lies.
+  if (uFrost > 0.0) {
+    float fr = frostCover(n, V, vFabricPos) * (1.0 - vGlow);
+    col = mix(col, frostTint(col, 0.75 + 0.35 * up), fr * 0.6);
+    a += fr * 0.18 * uOpacity;
+  }
   // Far away a ghost's body fills in a little (a faint shape loses its limbs otherwise).
   if (uContour > 0.0) a *= 1.0 + 0.3 * smoothstep(250.0, 650.0, length(cameraPosition - (uAxisA + uAxisB) * 0.5)) * uContour;
 ${HAT_FX_FRAGMENT_GHOST}

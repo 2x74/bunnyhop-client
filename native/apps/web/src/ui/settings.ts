@@ -49,6 +49,8 @@ export const PRESET_ORDER: GraphicsPreset[] = ["lowest", "low", "medium", "high"
  * changing it by hand keeps the preset lit, and settings saved before it existed still match their preset.
  */
 export const PRESET_PRECIPITATION: Record<GraphicsPreset, PrecipitationLevel> = { lowest: "off", low: "off", medium: "light", high: "full" };
+/** What each Quality preset sets Frost on players to: with snow, off on Lowest and Low. Not part of matching them either. */
+export const PRESET_FROST: Record<GraphicsPreset, boolean> = { lowest: false, low: false, medium: true, high: true };
 
 export type Action =
   | "forward"
@@ -384,6 +386,11 @@ export interface Prefs {
      * Potato mode.
      */
     precipitation: PrecipitationLevel;
+    /**
+     * Frost on the bunnies and ghosts standing in the map's falling snow (model-light.ts). Set by the Quality presets
+     * (PRESET_FROST) but not part of matching them. Only while snow draws: never in Potato mode or with snow off.
+     */
+    frost: boolean;
     /** The map's light on hands, weapons and bunnies (model-light.ts). Potato and Fullbright behave as "off". */
     modelLighting: ModelLighting;
     /** Props lit by the map (as CS:S lights them) or, off, by the plain shading they had before 0.0.41. */
@@ -703,7 +710,7 @@ export const DEFAULT_PREFS: Prefs = {
   firstPersonGlow: true,
   firstPersonRobe: true,
   mapLooks: {},
-  graphics: { preset: "source", waterReflections: true, mapFog: true, mapDetails: true, precipitation: "full", modelLighting: "subtle", propLighting: true, bloom: true, mapProfiles: false, ambienceShowcase: false, lightingProfile: "map", skyMode: "map", skyPackId: null, skyRotation: 0, skyExposure: 0, lightingSource: "map", directContribution: 1, ambientContribution: 1, clouds: false, cloudQuality: "low", cloudCoverage: .45, cloudDensity: 1, contactShading: false, atmosphere: false, sunShafts: false, materialResponse: true, volumetric: false, spatialAA: true, localLights: false, localQuality: "medium", localBudget: 1, localStrength: .2, dynamicGI: false, tracedGI: false, giQuality: "low", giStrength: .25, giRange: 256, dynamicShadows: false, shadowQuality: "medium", shadowDistance: 1024, shadowStrength: .18, resolutionScale: 1, antialias: true, aspect: "native", aspectFit: "stretch", pixelated: false, anisotropy: 8, brightness: 1, gamma: 1, vibrance: 1, fullbright: false, menuBackground: "live", fullscreen: true, potato: false, flashlight: false, fpsLimit: 1000, uncapped: false, lowLatency: false, menuFps: 0 },
+  graphics: { preset: "source", waterReflections: true, mapFog: true, mapDetails: true, precipitation: "full", frost: true, modelLighting: "subtle", propLighting: true, bloom: true, mapProfiles: false, ambienceShowcase: false, lightingProfile: "map", skyMode: "map", skyPackId: null, skyRotation: 0, skyExposure: 0, lightingSource: "map", directContribution: 1, ambientContribution: 1, clouds: false, cloudQuality: "low", cloudCoverage: .45, cloudDensity: 1, contactShading: false, atmosphere: false, sunShafts: false, materialResponse: true, volumetric: false, spatialAA: true, localLights: false, localQuality: "medium", localBudget: 1, localStrength: .2, dynamicGI: false, tracedGI: false, giQuality: "low", giStrength: .25, giRange: 256, dynamicShadows: false, shadowQuality: "medium", shadowDistance: 1024, shadowStrength: .18, resolutionScale: 1, antialias: true, aspect: "native", aspectFit: "stretch", pixelated: false, anisotropy: 8, brightness: 1, gamma: 1, vibrance: 1, fullbright: false, menuBackground: "live", fullscreen: true, potato: false, flashlight: false, fpsLimit: 1000, uncapped: false, lowLatency: false, menuFps: 0 },
   viewmodel: { show: true, ...VIEWMODEL_POS, bob: VIEWMODEL_BOB, sway: 1, hand: "right", inspect: "tricks", landSettle: false, speedFov: false, rev: VIEWMODEL_REV },
   binds: DEFAULT_BINDS,
   cmdBinds: {},
@@ -969,6 +976,8 @@ export function parsePrefs(raw: string | null): Prefs {
   // (merge has already filled a missing one with the default, so the saved object is asked.)
   const savedPrecip = (m.graphics as Record<string, unknown> | undefined)?.precipitation;
   if (!PRECIPITATION_LEVELS.includes(savedPrecip as PrecipitationLevel)) p.graphics.precipitation = PRESET_PRECIPITATION[graphicsPreset(p.graphics) ?? "high"];
+  // Frost the same way: saved before it existed (or broken), what the preset they match sets.
+  if (typeof (m.graphics as Record<string, unknown> | undefined)?.frost !== "boolean") p.graphics.frost = PRESET_FROST[graphicsPreset(p.graphics) ?? "high"];
   return p;
 }
 
@@ -1111,6 +1120,7 @@ export function graphicsPreset(g: Prefs["graphics"]): GraphicsPreset | null {
 export function applyGraphicsPreset(g: Prefs["graphics"], preset: GraphicsPreset): void {
   Object.assign(g, GRAPHICS_PRESETS[preset]);
   g.precipitation = PRESET_PRECIPITATION[preset];
+  g.frost = PRESET_FROST[preset];
 }
 
 const ASPECTS: Record<Exclude<AspectRatio, "native">, number> = { "4:3": 4 / 3, "5:4": 5 / 4, "16:10": 16 / 10, "16:9": 16 / 9 };

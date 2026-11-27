@@ -365,6 +365,7 @@ export class Attract {
       a.world?.setPropLighting(p.graphics.propLighting);
       a.world?.setDetails(p.graphics.mapDetails);
       a.world?.setPrecipitation(PRECIPITATION_DENSITY[p.graphics.precipitation]);
+      a.world?.setFrost(p.graphics.frost);
       a.world?.setModelLighting(p.graphics.modelLighting);
       const m = reducedMotion() ? "still" : mode();
       // Any settings change resizes the shared canvas (main.ts resize()), which clears it: a still frame (Still, or
@@ -466,6 +467,10 @@ export class Attract {
       if (this.stopped) return;
       const world = await buildWorld(core, this.renderer, { bsp: bytes });
       if (this.stopped) return dispose(world.root);
+      // The snow's column map in short slices first (up to a few hundred ms of traces on some maps), so turning it on
+      // with setPrecipitation below never stalls the menu.
+      if (PRECIPITATION_DENSITY[prefs.get().graphics.precipitation] > 0) await world.preparePrecipitation();
+      if (this.stopped) return dispose(world.root);
       const volumes = volumesOf(bytes); // the menu's ghost swims on its own map (not the registry's: a game map's)
       this.world = world;
       world.setPotato(prefs.get().graphics.potato);
@@ -474,6 +479,7 @@ export class Attract {
       world.setPropLighting(prefs.get().graphics.propLighting);
       world.setDetails(prefs.get().graphics.mapDetails);
       world.setPrecipitation(PRECIPITATION_DENSITY[prefs.get().graphics.precipitation]);
+      world.setFrost(prefs.get().graphics.frost);
       world.setModelLighting(prefs.get().graphics.modelLighting);
       this.effectTime = 12;
       this.updateEffects = time => world.update(core.brushOrigins(), time, core.effectStates(), core.propAnims());

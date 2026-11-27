@@ -24,6 +24,7 @@ import { cardLayers, frameLayers, setPointer, watchCardFx } from "./card-fx";
 import type { CardBorderId, CardEffectId } from "../supporter-looks";
 import type { MapBgView } from "../map-bg";
 import { MAP_BG_CLASS, mapBgLayer, mapBgSrc, wrLine } from "./card-mapbg";
+import { featEdgeColors, featEdgeLabel, isFeatEdge, type FeatEdge } from "../feat-edge";
 
 /** Everything Edit card previews of a supporter's look over the saved one. */
 export type SupporterLook = NameLook & { avatarDeco?: import("../supporter-looks").AvatarDecoId | null; cardBorder?: CardBorderId | null; cardEffect?: CardEffectId | null; hoverFx?: import("../supporter-looks").HoverFxId | null };
@@ -45,7 +46,7 @@ const HAT_SVG: Record<string, string> = {
   "hat-starfish": `<svg viewBox="0 0 20 14" aria-hidden="true"><path d="M10 .8l1.9 4.3 4.7.4-3.6 3.1 1.1 4.6L10 10.8l-4.1 2.4 1.1-4.6-3.6-3.1 4.7-.4z" fill="#ff7f6e" stroke="#e25c4c" stroke-width="0.6" stroke-linejoin="round"/><g fill="#ffd8cc"><circle cx="10" cy="4" r=".6"/><circle cx="10" cy="7.4" r=".8"/><circle cx="13" cy="6.6" r=".5"/><circle cx="7" cy="6.6" r=".5"/></g></svg>`,
   "hat-pencil": `<svg viewBox="0 0 20 14" aria-hidden="true"><g transform="rotate(-14 10 7)"><rect x="4.2" y="5.4" width="10.6" height="3.2" fill="#ffc23d" stroke="#8a5a0c" stroke-width="0.5"/><path d="M4.2 6.47h10.6M4.2 7.53h10.6" stroke="#e8a92e" stroke-width="0.5"/><path d="M14.8 5.4 18.4 7l-3.6 1.6z" fill="#e8c79a" stroke="#8a5a0c" stroke-width="0.5" stroke-linejoin="round"/><path d="M17.2 6.47 18.4 7l-1.2.53z" fill="#2a2a2e"/><rect x="2.6" y="5.3" width="1.6" height="3.4" fill="#c9a24a"/><path d="M1 5.6c0-.4.3-.6.6-.6h1v4h-1c-.3 0-.6-.2-.6-.6z" fill="#f29bae"/></g></svg>`,
   "hat-wreath": `<svg viewBox="0 0 20 14" aria-hidden="true"><g fill="#e6ebf5" stroke="#7d879c" stroke-width="0.5" stroke-linejoin="round"><path d="M2.2 8.6c.3-1.6 1.4-2.5 2.6-2.6-.2 1.5-1.2 2.4-2.6 2.6z"/><path d="M3.6 11.4c.9-1.3 2.2-1.7 3.4-1.4-.8 1.2-2.1 1.7-3.4 1.4z"/><path d="M4.4 5.4c.7-1.4 2-2 3.2-1.8-.6 1.3-1.9 1.9-3.2 1.8z"/><path d="M17.8 8.6c-.3-1.6-1.4-2.5-2.6-2.6.2 1.5 1.2 2.4 2.6 2.6z"/><path d="M16.4 11.4c-.9-1.3-2.2-1.7-3.4-1.4.8 1.2 2.1 1.7 3.4 1.4z"/><path d="M15.6 5.4c-.7-1.4-2-2-3.2-1.8.6 1.3 1.9 1.9 3.2 1.8z"/></g><path d="M8.6 12.6C4.6 12 2.6 9.6 3 6.4M11.4 12.6c4-.6 6-3 5.6-6.2" fill="none" stroke="#7d879c" stroke-width="0.7" stroke-linecap="round"/></svg>`,
-  "hat-santa": `<svg viewBox="0 0 20 14" aria-hidden="true"><path d="M3.4 10.6C3.6 6 6 3.2 9.6 2.6c2.6-.4 5 .4 6.6 2.2-1.6-.3-3 .2-3.6 1.4 1.4 1.2 2.6 2.8 3 4.4z" fill="#e23b3b"/><rect x="2.4" y="9.6" width="15.2" height="3.4" rx="1.7" fill="#f4f1eb"/><circle cx="16.8" cy="5.4" r="1.9" fill="#f4f1eb"/></svg>`,
+  "hat-santa": `<svg viewBox="0 0 20 14" aria-hidden="true"><path d="M17.2 10.6C17.2 5.6 14 2 9.8 2C6.2 2 3.4 4.4 2.6 8.2C4 6.8 5.8 6.6 7 7.6C6 8.4 5.4 9.4 5.2 10.6z" fill="#e23b3b"/><rect x="4.4" y="9.6" width="13.8" height="3.4" rx="1.7" fill="#f4f1eb"/><circle cx="2.9" cy="9.3" r="2" fill="#f4f1eb"/></svg>`,
 };
 
 export interface CardOverrides {
@@ -94,17 +95,25 @@ export function displayTitle(p: Profile, c: CosmeticChoice = p.cosmetics): strin
 /** "1,204 views" (null at none: the line stays quiet). */
 export const viewsLabel = (n: number | undefined): string | null => (n ? `${n.toLocaleString("en-US")} ${n === 1 ? "view" : "views"}` : null);
 
+/** The rim's metal for profile.css .pc-feat-edge: the Daily marks' medal colours (feat-edge.ts featEdgeColors). */
+const edgeStyle = (e: FeatEdge): string => {
+  const c = featEdgeColors(e);
+  return `--edge-l:${c.light};--edge-m:${c.mid};--edge-d:${c.dark}`;
+};
+
 /**
  * One of the card's three runs: tier and place, the map, the time with the points the record gives on the overall
  * board (record_points.points, as the profile's Top points list shows it; none when the run isn't a current record).
  */
 export function featTile(r: RunCard): HTMLElement {
+  // v0.0.44: a thin rim in the run's metal (feat-edge.ts: a held WR, a Daily podium, a current top 10).
+  const edge = isFeatEdge(r.edge) ? r.edge : null;
   const place = r.rank === 1 ? h("span.pc-place.wr", null, "WR") : r.rank ? h("span.pc-place", null, `#${r.rank}`) : null;
   const tags = [r.track ? trackName(r.track) : null, r.style !== "autohop" ? styleLabel(r.style) : null, viewsLabel(r.views)].filter(Boolean).join(" · ");
   const pts = r.points ? h("span.pc-feat-pts", { title: "Points this record gives on the overall board" }, fmtPoints(r.points), h("small", null, " pts")) : null;
   return h(
-    `div.pc-feat-tile.t${r.tier ?? "x"}`,
-    { "data-run": r.runId },
+    `div.pc-feat-tile.t${r.tier ?? "x"}${edge ? ".pc-feat-edge" : ""}`,
+    { "data-run": r.runId, ...(edge ? { title: featEdgeLabel(edge), style: edgeStyle(edge) } : {}) },
     h("div.pc-feat-top", null, h(`span.pc-tier.t${r.tier ?? "x"}`, null, tierLabel(r.tier)), place),
     h("div.pc-feat-map", null, r.map),
     h("div.pc-feat-row", null, h("span.pc-feat-time", null, formatTime(r.time)), pts),

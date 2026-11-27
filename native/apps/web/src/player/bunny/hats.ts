@@ -18,7 +18,8 @@
 //       chevron at the back; a light sweeps to and fro along the aqua line across its front.
 //
 //   - Silver Wreath (First T10, v0.0.37): the first hat earned by playing; static silver leaves (wreath below).
-//   - Santa Hat (Sleigh Ride, v0.0.44): a red cap and cone with a white fur brim and pom-pom (santaHat below).
+//   - Santa Hat (Sleigh Ride, v0.0.44): red felt pulled over the hood with a white fur band, its fat cone flopped over
+//     to one side in front of the ears, a pom-pom on the tip (santaHat below).
 //   - More Supporter hats, asked for by supporters: Propeller Cap, Capybara and Maxwell (moving, accent -1..-8); the
 //     Space Buns and Ponytail wigs (wigs.ts: the player's hair colour; the ponytail swings) and the Half Oni Mask
 //     (oni-mask.ts). On the standard bunny a wig is built for the bare head (the hood is down: mesh.ts), on Plush and
@@ -27,7 +28,7 @@
 // headwear() is the one rule for what a bunny wears on its head: the hat when one is on, else the rank crown.
 
 import * as THREE from "three";
-import { add, Builder, cross, frame, norm, ring, scale, sub, type Paint, type Wt } from "./builder";
+import { add, Builder, cross, dot, frame, norm, ring, scale, sub, type Paint, type Wt } from "./builder";
 import { crownGeometry } from "./crown";
 import { oniMask } from "./oni-mask";
 import { ponytail, ponytailDown, spaceBuns, spaceBunsDown } from "./wigs";
@@ -152,20 +153,40 @@ function beanie(): THREE.BufferGeometry {
 }
 
 /**
- * Santa Hat (Sleigh Ride, v0.0.44): a soft red cap worn snug over the hood, the ears coming up out of it, a band of white
- * fur hugging the head low round the crown (above the face at the front, lower at the back), and a long tapering cone
- * that rises from the back of the crown behind the ears and droops back and to one side, a round fur pom-pom on its
- * tip. The red and the fur are the Santa Hat avatar decoration's (supporter-looks.ts SANTA_HAT). Built on the hood
- * ellipsoid like the beanie, so the Plush and Bun-E fits (hat-fit.ts, bands and caps) carry it as they carry that.
+ * Santa Hat (Sleigh Ride, v0.0.44): one soft, stuffed hat pulled down over the hood. A plump cuff of white fur goes
+ * round the head, on the hood's rim at the front and lower at the nape; the red felt is a single surface from under
+ * that band, over the crown, up into a fat cone that rises in front of the ears (their roots come out through it, as
+ * they do through the beanie) and flops over to the bunny's right, the pom-pom hanging beside the head by the band.
+ * The red and the fur are the Santa Hat avatar decoration's (supporter-looks.ts SANTA_HAT), as is the fat comma shape.
+ * Built on the hood ellipsoid like the beanie, so the Plush and Bun-E fits (hat-fit.ts, bands and caps) carry it as
+ * they carry that.
  */
 const SANTA = {
   red: 0xe23b3b,
   fur: 0xf4f1eb,
   furShade: 0xe4ded2,
-  /** The hat's axis, tipped back: the band sits higher over the face than at the nape. */
-  axis: norm([0, 0.43, 1]),
+  /** The hat's axis, tipped back: the band sits on the rim over the face and low at the nape. */
+  axis: norm([0, 0.53, 1]),
   /** The band's polar angle about that axis (on the unit sphere, before the hood's radii). */
-  band: 0.92,
+  band: 1.0,
+  /** How far the felt stands off the hood. */
+  off: 0.4,
+  /** The side the cone flops to: -1 the bunny's right (the side the Loadout shows). */
+  side: -1,
+  /**
+   * The cone's spine and radius, [x toward the flop side, y, z, radius]: up out of the crown in front of the ears, over
+   * in an arc, down beside the head. Below the crown it is inside the head and the felt lies on the hood instead.
+   */
+  spine: [
+    [0, 2.05, 72.2, 5.0],
+    [0.1, 0.6, 75.4, 3.1],
+    [1.1, 0.1, 77.6, 2.45],
+    [3.4, -0.6, 78.3, 1.85],
+    [5.7, -1.0, 77.0, 1.4],
+    [6.9, -0.9, 75.0, 1.0],
+  ] as [number, number, number, number][],
+  /** The pom-pom's radius. */
+  pom: 1.9,
 };
 function santaHat(): THREE.BufferGeometry {
   const W = headWeight();
@@ -178,79 +199,84 @@ function santaHat(): THREE.BufferGeometry {
     const n = norm([q[0] / HOOD_R[0] ** 2, q[1] / HOOD_R[1] ** 2, q[2] / HOOD_R[2] ** 2]);
     return [add(add(HOOD_C, q), scale(n, d)), n];
   };
-  /** Pushes p out of the hood ellipsoid grown by `d` (for the cone's root, so it settles onto the cap). */
-  const outside = (p: V3, d: number): V3 => {
+  /**
+   * Felt over a head: p, or where p is inside the hood grown by `d`, the point on it straight out from the hood's
+   * centre, with a soft fillet (`k`, as a fraction of the hood's radius) where the cone leaves the head.
+   */
+  const drape = (p: V3, d: number, k = 0.2): V3 => {
     const q = sub(p, HOOD_C);
-    const k = Math.hypot(q[0] / (HOOD_R[0] + d), q[1] / (HOOD_R[1] + d), q[2] / (HOOD_R[2] + d));
-    return k >= 1 ? p : add(HOOD_C, scale(q, 1 / k));
+    const s = Math.hypot(q[0] / (HOOD_R[0] + d), q[1] / (HOOD_R[1] + d), q[2] / (HOOD_R[2] + d));
+    const h = Math.max(0, k - Math.abs(s - 1)) / k;
+    return add(HOOD_C, scale(q, (Math.max(s, 1) + (h * h * k) / 4) / Math.max(s, 1e-6)));
   };
-  const SEG = 60;
+  const SEG = 44;
   const az = (k: number) => (k / SEG) * Math.PI * 2;
 
-  // The cap: snug over the hood (the ears come up through it), a little fuller toward the crown, down under the band.
-  const capRows: V3[][] = [];
-  const CAP_ROWS = 12;
-  for (let i = 0; i <= CAP_ROWS; i++) {
-    const a = 0.02 + ((SANTA.band + 0.06 - 0.02) * i) / CAP_ROWS;
-    const d = 0.3 + 0.32 * (1 - a / SANTA.band) ** 2;
-    capRows.push([...Array(SEG)].map((_, k) => on(a, az(k), d)[0]));
+  // The felt: from under the band, over the crown and along the cone to its tip, one surface. Rings round the spine
+  // (a Catmull-Rom curve through SANTA.spine, frames carried along it without twist), draped over the head.
+  const keys = SANTA.spine.map(([x, y, z, r]) => [x * SANTA.side, y, z, r]);
+  const at = (t: number): number[] => {
+    const n = keys.length - 1;
+    const f = Math.min(n - 1e-9, Math.max(0, t * n)), i = Math.floor(f), u = f - i;
+    const p0 = keys[Math.max(0, i - 1)], p1 = keys[i], p2 = keys[i + 1], p3 = keys[Math.min(n, i + 2)];
+    return p1.map((_, c) => 0.5 * (2 * p1[c] + (p2[c] - p0[c]) * u + (2 * p0[c] - 5 * p1[c] + 4 * p2[c] - p3[c]) * u * u + (3 * p1[c] - p0[c] - 3 * p2[c] + p3[c]) * u * u * u));
+  };
+  const ROWS = 36;
+  const felt: V3[][] = [[...Array(SEG)].map((_, k) => on(SANTA.band + 0.05, az(k), SANTA.off)[0])];
+  let tan: V3 = SANTA.axis, u: V3 = U, last: V3 | null = null;
+  let tip: V3 = [0, 0, 0], tipDir: V3 = [0, 0, 1];
+  for (let i = 0; i <= ROWS; i++) {
+    const t = i / ROWS;
+    const c = at(t), c0 = at(Math.max(0, t - 0.01)), c1 = at(Math.min(1, t + 0.01));
+    const o: V3 = [c[0], c[1], c[2]];
+    const along = norm(sub([c1[0], c1[1], c1[2]], [c0[0], c0[1], c0[2]]));
+    // The rings start in the band's plane and turn to face along the spine, by at most 0.65 rad for each radius the
+    // spine has moved on: rings that turned with the spine would cross each other on the inside of the bend and where
+    // the felt lies on the head, and the felt would fold through itself there.
+    let d: V3 = SANTA.axis;
+    if (last) {
+      const ax = cross(tan, along), sn = Math.hypot(...ax), turn = Math.atan2(sn, dot(tan, along));
+      const most = (0.65 * Math.hypot(...sub(o, last))) / c[3];
+      d = turn <= most || sn < 1e-9 ? along : norm(add(scale(tan, Math.cos(most)), scale(cross(scale(ax, 1 / sn), tan), Math.sin(most))));
+    }
+    last = o;
+    // Carry the frame from the last ring's facing to this one's (the rotation that takes one to the other).
+    const ax = cross(tan, d), sn = Math.hypot(...ax), cs = dot(tan, d);
+    if (sn > 1e-6) {
+      const e = scale(ax, 1 / sn);
+      u = norm(add(add(scale(u, cs), scale(cross(e, u), sn)), scale(e, dot(e, u) * (1 - cs))));
+    }
+    tan = d;
+    const v = cross(d, u);
+    felt.push([...Array(SEG)].map((_, k) => drape(add(o, add(scale(u, c[3] * Math.cos(az(k))), scale(v, c[3] * Math.sin(az(k))))), SANTA.off)));
+    tip = o;
+    tipDir = along;
   }
-  b.surface(capRows, { paint: () => fixed(SANTA.red), weight: () => W, capStart: fixed(SANTA.red) });
+  b.surface(felt, { paint: () => fixed(SANTA.red), weight: () => W, capStart: null, capEnd: fixed(SANTA.red) });
 
-  // The band: a soft roll of fur lying on the head along the cap's edge; its cross-section flat against the hood and
-  // round on top, the fur's lumps a few hundredths of a unit in and out so the light breaks up along it.
-  const BAND = 96, CS = 12;
+  // The band: a plump, even cuff of fur lying on the head along the felt's edge, flat against the hood, taller and
+  // flatter than the hood's own rolled rim under it (smooth like that rim: the fur is in its shading).
+  const BAND = 64, CS = 12;
   const bandRows: V3[][] = [];
-  const shade: boolean[][] = [];
   for (let k = 0; k <= BAND; k++) {
     const th = (k / BAND) * Math.PI * 2;
-    const [p, n] = on(SANTA.band, th, 0.3);
-    const [p2] = on(SANTA.band, th + 0.01, 0.3);
+    const [p, n] = on(SANTA.band, th, SANTA.off - 0.1);
+    const [p2] = on(SANTA.band, th + 0.01, SANTA.off - 0.1);
     const T = norm(sub(p2, p));
     const A = norm(cross(n, T)); // along the head's surface, toward the crown or the nape
     const row: V3[] = [];
-    const sh: boolean[] = [];
     for (let j = 0; j < CS; j++) {
       const f = (j / CS) * Math.PI * 2;
-      const lump = 1 + 0.07 * Math.sin(k * 1.37 + j * 2.1) * Math.sin(k * 0.61 + j * 0.9) + 0.035 * Math.sin(k * 4.1 - j * 1.6);
-      const out = Math.sin(f) > 0 ? Math.sin(f) * 0.78 * lump : Math.sin(f) * 0.12;
-      row.push(add(add(p, scale(n, out)), scale(A, Math.cos(f) * 0.95 * lump)));
-      sh.push(Math.sin(f) < 0.15);
+      const out = Math.sin(f) > 0 ? Math.pow(Math.sin(f), 0.7) * 0.8 : Math.sin(f) * 0.12;
+      row.push(add(add(p, scale(n, out)), scale(A, Math.sign(Math.cos(f)) * Math.pow(Math.abs(Math.cos(f)), 0.8) * 1.18)));
     }
     bandRows.push(row);
-    shade.push(sh);
   }
-  b.surface(bandRows, { paint: (i, k) => fixed(shade[i]?.[k] ? SANTA.furShade : SANTA.fur), weight: () => W });
+  b.surface(bandRows, { paint: (_i, k) => fixed(Math.sin(((k + 0.5) / CS) * Math.PI * 2) < 0.1 ? SANTA.furShade : SANTA.fur), weight: () => W });
 
-  // The cone: from the back of the crown (behind the ears' roots at (+-2.25, 1.35, 74.3), which lean back from there),
-  // up and back, then over to one side, tapering to the tip. Its root rows are pressed onto the cap.
-  const P0: V3 = [0, 3.6, 72.6], P1: V3 = [0.1, 6.5, 78.8], P2: V3 = [1.6, 9.4, 81.2], P3: V3 = [4.9, 10.6, 76.8];
-  const bez = (t: number): V3 => {
-    const m = 1 - t;
-    return add(add(scale(P0, m * m * m), scale(P1, 3 * m * m * t)), add(scale(P2, 3 * m * t * t), scale(P3, t * t * t)));
-  };
-  const N = 26, SIDES = 22;
-  const path = [...Array(N + 1)].map((_, i) => bez(i / N));
-  const rad = (t: number) => 0.42 + 2.9 * Math.pow(1 - t, 1.15);
-  const coneRows = path.map((c, i) => {
-    const d = norm(sub(path[Math.min(N, i + 1)], path[Math.max(0, i - 1)]));
-    const [, u, v] = frame(d, [1, 0, 0]);
-    return ring(c, u, v, rad(i / N), rad(i / N), SIDES).map((q) => outside(q, 0.45));
-  });
-  b.surface(coneRows, { paint: () => fixed(SANTA.red), weight: () => W, capStart: null, capEnd: fixed(SANTA.red) });
-
-  // The pom-pom: round and fine enough not to show facets, a few soft lumps.
-  const tipDir = norm(sub(path[N], path[N - 1]));
-  const PC = add(P3, scale(tipDir, 0.9));
-  const PR = 1.55;
-  const pom = b.ellipsoidRows(PC, [PR, PR, PR], [0, 0, 1], [1, 0, 0], 32, 20).map((row, i) =>
-    row.map((q, k) => {
-      const a = (i / 20) * Math.PI, th = (k / 32) * Math.PI * 2;
-      const l = 1 + 0.045 * Math.sin(a * 5 + 1) * Math.sin(th * 4 + 0.7) + 0.025 * Math.sin(a * 9) * Math.cos(th * 7);
-      return add(PC, scale(sub(q, PC), l));
-    }),
-  );
-  b.surface(pom, { paint: (i) => fixed(i > 14 ? SANTA.furShade : SANTA.fur), weight: () => W, closed: true });
+  // The pom-pom: a plain round ball on the tip.
+  const PC = add(tip, scale(tipDir, SANTA.pom * 0.8));
+  b.surface(b.ellipsoidRows(PC, [SANTA.pom, SANTA.pom, SANTA.pom], [0, 0, 1], [1, 0, 0], 24, 14), { paint: () => fixed(SANTA.fur), weight: () => W, closed: true });
   const g = b.geometry();
   g.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 70), 60);
   return g;

@@ -250,7 +250,28 @@ export const EMPTY_COLUMN = 1e9;
  * solid below. A cell whose column is solid all the way down is empty. Cells are square, `cell` units, sized so all
  * volumes together take at most `maxCells` (at least 16 units, at most 64).
  */
-export function buildColumns(volumes: readonly PrecipVolume[], trace: PrecipTrace, opts: { maxCells?: number; maxTraces?: number; atlasWidth?: number } = {}): PrecipColumns {
+export function buildColumns(volumes: readonly PrecipVolume[], trace: PrecipTrace, opts: ColumnOptions = {}): PrecipColumns {
+  const steps = columnSteps(volumes, trace, opts);
+  for (;;) {
+    const r = steps.next();
+    if (r.done) return r.value;
+  }
+}
+
+export interface ColumnOptions {
+  maxCells?: number;
+  maxTraces?: number;
+  atlasWidth?: number;
+}
+
+/** Cells traced between the pauses of a sliced build (columnSteps). */
+const COLUMN_SLICE = 2048;
+
+/**
+ * buildColumns in slices: yields after every COLUMN_SLICE cells, so a caller can spread the traces over several tasks
+ * (MapPrecipitation.prepare). The same column map as buildColumns, whatever the pauses.
+ */
+export function* columnSteps(volumes: readonly PrecipVolume[], trace: PrecipTrace, opts: ColumnOptions = {}): Generator<void, PrecipColumns, void> {
   const maxCells = opts.maxCells ?? 131072;
   const maxTraces = opts.maxTraces ?? 400000;
   const atlasWidth = opts.atlasWidth ?? 2048;
@@ -278,13 +299,16 @@ export function buildColumns(volumes: readonly PrecipVolume[], trace: PrecipTrac
   for (let i = 0; i < data.length; i += 2) { data[i] = EMPTY_COLUMN; data[i + 1] = -EMPTY_COLUMN; }
   let traces = 0;
   let truncated = false;
+  let cells = 0;
   const t = (sx: number, sy: number, sz: number, ex: number, ey: number, ez: number) => (traces++, trace(sx, sy, sz, ex, ey, ez));
-  volumes.forEach((v, vi) => {
+  for (let vi = 0; vi < volumes.length; vi++) {
+    const v = volumes[vi];
     const l = layout[vi];
     // Snowfall stays in the volume. A streak can fall below it (its emission follows the eye down; STREAK_FALL): its
     // column goes down to the first solid, however far.
     const top = v.max[2], bottom = v.kind === "snowfall" ? v.min[2] : Math.min(v.min[2], -16384);
     for (let r = 0; r < l.rows; r++) for (let c = 0; c < l.cols; c++) {
+      if (++cells % COLUMN_SLICE === 0) yield;
       const px = Math.min(v.max[0], v.min[0] + (c + 0.5) * l.cell), py = Math.min(v.max[1], v.min[1] + (r + 0.5) * l.cell);
       const o = ((l.y + r) * width + l.x + c) * 2;
       // Out of budget: the volume's own box, unclipped.
@@ -311,7 +335,7 @@ export function buildColumns(volumes: readonly PrecipVolume[], trace: PrecipTrac
         z -= step;
       }
     }
-  });
+  }
   return { data, width, height, layout, traces, truncated };
 }
 
@@ -330,7 +354,7 @@ export const STREAK_EMIT_ABOVE = 512;
  * cell's air column; streaks over a volume's footprint, between the column's floor and min(its top, eye + 512), within
  * the drop's lifetime below that. `floor`: where it stops (a streak is cut there).
  */
-export function precipitationSpan(kind: PrecipKind, volumes: readonly PrecipVolume[], columns: PrecipColumns, x: number, y: number, z: number, eyeZ: number): { floor: number; top: number } | null {
+export function precipitationSpan(kind: PrecipKind, volumes: readonly PrecipVolume[], columns: PrecipColumns, x: number, y: number, z: number, eyeZ: number, out?: { floor: number; top: number }): { floor: number; top: number } | null {
   for (let i = 0; i < volumes.length; i++) {
     const v = volumes[i];
     if (v.kind !== kind || x < v.min[0] || y < v.min[1] || x >= v.max[0] || y >= v.max[1]) continue;
@@ -344,7 +368,12 @@ export function precipitationSpan(kind: PrecipKind, volumes: readonly PrecipVolu
       top = Math.min(top, eyeZ + STREAK_EMIT_ABOVE);
       floor = Math.max(floor, top - (v.max[2] - v.min[2]) * STREAK_FALL[kind]);
     }
-    if (z >= floor && z <= top) return { floor, top };
+    if (z >= floor && z <= top) {
+      if (!out) return { floor, top };
+      out.floor = floor;
+      out.top = top;
+      return out;
+    }
   }
   return null;
 }
@@ -487,6 +516,19 @@ export interface MapPrecipitation {
   stats(): { ms: number; traces: number; cells: number; truncated: boolean } | null;
   /** 0 = off (nothing built or drawn), 0.5 = light, 1 = full. Builds the columns the first time it is above 0. */
   setDensity(density: number): void;
+  /**
+   * Traces the column map ahead of setDensity in slices of about `sliceMs`, awaiting `pause` between them, so the
+   * build never stalls a frame (the menu background, attract.ts). setDensity then only makes the meshes. Once; later
+   * calls wait on the first.
+   */
+  prepare(pause: () => Promise<void>, sliceMs?: number): Promise<void>;
+  /**
+   * Whether a point (Source units) is in falling snow as drawn: snowfall or streak snow, not rain, inside a volume and
+   * its column (not under a roof). False until built, while off and in Potato mode. No allocation.
+   */
+  snowAt(x: number, y: number, z: number): boolean;
+  /** Whether the map has any snow (snowfall or streak snow) at all. */
+  readonly snowy: boolean;
   /** Hidden in Potato mode. */
   setPotato(on: boolean): void;
   /** Every frame: the visual time (seconds; the game's tick time, a replay's time). */
@@ -517,11 +559,19 @@ export function mapPrecipitation(entities: readonly EffectEntity[], bounds: Map<
   const inverse = new THREE.Matrix4();
   const buffer = new THREE.Vector2();
 
+  // (prepare: the column map traced ahead of time, and how long that took in all.)
+  let prepared: { cols: PrecipColumns; ms: number } | null = null;
+  let preparing: Promise<void> | null = null;
+  let cols: PrecipColumns | null = null;
+  const span = { floor: 0, top: 0 };
+  const snowKinds: PrecipKind[] = (["snowfall", "snow"] as const).filter((k) => volumes.some((v) => v.kind === k));
+
   const build = () => {
     const t0 = performance.now();
-    const cols = buildColumns(volumes, trace);
-    root.userData.columns = cols;
-    columns = new THREE.DataTexture(cols.data, cols.width, cols.height, THREE.RGFormat, THREE.FloatType);
+    const c = prepared?.cols ?? buildColumns(volumes, trace);
+    cols = c;
+    root.userData.columns = c;
+    columns = new THREE.DataTexture(c.data, c.width, c.height, THREE.RGFormat, THREE.FloatType);
     columns.minFilter = columns.magFilter = THREE.NearestFilter;
     columns.generateMipmaps = false;
     columns.needsUpdate = true;
@@ -596,12 +646,12 @@ export function mapPrecipitation(entities: readonly EffectEntity[], bounds: Map<
       const draw: KindDraw = { kind, mesh, full, volumes: idx, share, dist: new Float32Array(idx.length), picked: new Int32Array(MAXV) };
       draws.push(draw);
     }
-    built = { ms: performance.now() - t0, traces: cols.traces, cells: cols.layout.reduce((n, l) => n + l.cols * l.rows, 0), truncated: cols.truncated };
+    built = { ms: performance.now() - t0 + (prepared?.ms ?? 0), traces: c.traces, cells: c.layout.reduce((n, l) => n + l.cols * l.rows, 0), truncated: c.truncated };
     console.info(
-      `precipitation: ${volumes.length} volumes (${draws.map((d) => `${d.kind} ${d.full}`).join(", ")}), columns ${cols.width}x${cols.height}` +
-        ` (${built.cells} cells, ${built.traces} traces${built.truncated ? ", budget hit" : ""}) in ${built.ms.toFixed(0)} ms`,
+      `precipitation: ${volumes.length} volumes (${draws.map((d) => `${d.kind} ${d.full}`).join(", ")}), columns ${c.width}x${c.height}` +
+        ` (${built.cells} cells, ${built.traces} traces${built.truncated ? ", budget hit" : ""}) in ${built.ms.toFixed(0)} ms${prepared ? " (sliced)" : ""}`,
     );
-    return cols;
+    return c;
   };
   let layout: ReturnType<typeof buildColumns>["layout"] = [];
 
@@ -649,6 +699,33 @@ export function mapPrecipitation(entities: readonly EffectEntity[], bounds: Map<
     volumes,
     counts: () => Object.fromEntries((draws ?? []).map((d) => [d.kind, d.mesh.geometry.instanceCount])),
     stats: () => built,
+    snowy: snowKinds.length > 0,
+    prepare(pause, sliceMs = 6) {
+      if (draws || prepared) return Promise.resolve();
+      preparing ??= (async () => {
+        const steps = columnSteps(volumes, trace);
+        let ms = 0;
+        for (;;) {
+          const t0 = performance.now();
+          let r = steps.next();
+          while (!r.done && performance.now() - t0 < sliceMs) r = steps.next();
+          ms += performance.now() - t0;
+          if (r.done) {
+            prepared = { cols: r.value, ms };
+            return;
+          }
+          // (setDensity built it meanwhile: this one is not needed.)
+          if (draws) return;
+          await pause();
+        }
+      })();
+      return preparing;
+    },
+    snowAt(x, y, z) {
+      if (!cols || density <= 0 || potato) return false;
+      for (let i = 0; i < snowKinds.length; i++) if (precipitationSpan(snowKinds[i], volumes, cols, x, y, z, z, span)) return true;
+      return false;
+    },
     setDensity(d) {
       density = Number.isFinite(d) ? Math.max(0, d) : 0;
       if (density > 0 && !draws) layout = build().layout;

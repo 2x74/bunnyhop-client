@@ -97,6 +97,16 @@ export interface WorldView {
    * live. Built the first time it is above 0; never drawn in Potato mode. Off until set.
    */
   setPrecipitation(density: number): void;
+  /**
+   * Traces the snow and rain's column map in short slices ahead of setPrecipitation, so turning it on doesn't stall a
+   * frame (the menu background). Resolves at once on a map without any.
+   */
+  preparePrecipitation(): Promise<void>;
+  /**
+   * Frost on the bunnies and ghosts standing in the map's falling snow (model-light.ts, "Frost on players"), live. Only
+   * while snow draws: never in Potato mode or with Snow and rain off.
+   */
+  setFrost(on: boolean): void;
   /** How far the map's light reaches into the game's own models (model-light.ts). Off in Potato and Fullbright. */
   setModelLighting(mode: ModelLighting): void;
   /**
@@ -1332,6 +1342,11 @@ export async function buildWorld(
   let modelLighting: ModelLighting = "off";
   let fullbrightOn = false;
   const applyModelLighting = () => modelLight.setMode(potatoOn || fullbrightOn ? "off" : modelLighting);
+  // Frost: only where snow draws (precipitation.snowAt is false while it is off or in Potato), and only when asked.
+  let frostOn = false;
+  let precipitationDensity = 0;
+  const snowAt = precipitation?.snowy ? (x: number, y: number, z: number) => precipitation.snowAt(x, y, z) : null;
+  const applyFrost = () => modelLight.setFrost(frostOn && !potatoOn && precipitationDensity > 0 ? snowAt : null);
   // Maps with HDR lighting get CS:S's HDR look (graphics/source-hdr.ts); this also marks the world root.
   container.userData.lightmapHdr = lm.hdr;
   const localLights = authoredLocalLights(core.entities());
@@ -1699,6 +1714,15 @@ export async function buildWorld(
     setPrecipitation(density) {
       precipitation?.setDensity(density);
       precipitation?.setPotato(potatoOn);
+      precipitationDensity = Number.isFinite(density) ? density : 0;
+      applyFrost();
+    },
+    preparePrecipitation() {
+      return precipitation ? precipitation.prepare(() => new Promise<void>((r) => setTimeout(r, 0))) : Promise.resolve();
+    },
+    setFrost(on) {
+      frostOn = on;
+      applyFrost();
     },
     setModelLighting(mode) {
       modelLighting = mode;
@@ -1725,6 +1749,7 @@ export async function buildWorld(
       animProps?.setEnabled(!on);
       applyFog();
       applyModelLighting();
+      applyFrost();
       flashlight.apply(container);
       fullbright.apply(container);
     },

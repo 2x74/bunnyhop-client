@@ -13,6 +13,10 @@
 // for the viewmodels). One sample per model every few frames, eased over time so crossing into another leaf or out of
 // a lamp's reach never flickers. Readability comes first: the light only ever dims a model, never past the mode's
 // floor, and only half of the light's colour is taken in Subtle.
+//
+// Frost ("Frost on players"): a model standing in the map's falling snow (map-effects/precipitation.ts snowAt; not
+// rain) frosts over in FROST_IN seconds and thaws in FROST_OUT after it leaves, on the world's clock (player
+// materials' uFrost, 0..1). Not the first-person hands. Off: every model at 0 at once.
 
 import * as THREE from "three";
 import { DEPTH_FOG_OFF, type DepthFogUniforms } from "./depth-fog";
@@ -80,7 +84,17 @@ interface Lit {
   /** An eye model: the world's clock when it was last named and stepped, and when its materials were last gathered. */
   named: number;
   linked: number;
+  /** Frost 0..1, whether the last test found it in snow, and when that test was (visual seconds). */
+  frost: number;
+  snowed: boolean;
+  frostTested: number;
 }
+
+/** Seconds to frost over in snow, and to thaw after leaving it. */
+export const FROST_IN = 3;
+export const FROST_OUT = 4;
+/** Seconds between a model's snow tests. */
+const FROST_EVERY = 0.1;
 
 /** How often the scene is searched for models that came or went, and a model for new parts: seconds of the world's clock, and ms of the wall clock while that stands. */
 const RESCAN_S = 0.25;
@@ -186,7 +200,7 @@ export class ModelLight {
 
   private entry(root: THREE.Object3D, eye: boolean): Lit {
     let m = this.models.get(root);
-    if (!m) this.models.set(root, (m = { blocks: new Set(), eye, light: new THREE.Vector3(), target: new THREE.Vector3(), sampled: -Infinity, seen: 0, named: -Infinity, linked: -Infinity }));
+    if (!m) this.models.set(root, (m = { blocks: new Set(), eye, light: new THREE.Vector3(), target: new THREE.Vector3(), sampled: -Infinity, seen: 0, named: -Infinity, linked: -Infinity, frost: 0, snowed: false, frostTested: -Infinity }));
     return m;
   }
 
@@ -204,6 +218,36 @@ export class ModelLight {
       m.light.lerp(m.target, cut ? 1 : 1 - Math.exp(-dt / EASE));
     }
     for (const b of m.blocks) (b.uMapLight!.value as THREE.Vector3).copy(m.light);
+    if (!m.eye) this.stepFrost(m, p, lift, cut, dt);
+  }
+
+  /** In snow or not (a test every FROST_EVERY), then towards frost or a thaw at their rates. */
+  private stepFrost(m: Lit, p: THREE.Vector3, lift: number, cut: boolean, dt: number): void {
+    const snow = this.snow;
+    if (!snow) m.frost = 0;
+    else {
+      if (cut || this.time - m.frostTested >= FROST_EVERY || this.time < m.frostTested) {
+        m.snowed = snow(p.x, p.y, p.z + lift);
+        m.frostTested = this.time;
+      }
+      // A cut (a seek, a restart) out of the snow thaws at once; into it, the frost still builds up.
+      if (cut) m.frost = m.snowed ? m.frost : 0;
+      else m.frost = Math.min(1, Math.max(0, m.frost + (m.snowed ? dt / FROST_IN : -dt / FROST_OUT)));
+    }
+    for (const b of m.blocks) if (b.uFrost) b.uFrost.value = m.frost;
+  }
+
+  private snow: ((x: number, y: number, z: number) => boolean) | null = null;
+
+  /**
+   * Frost on the models from `snow` (whether a Source-space point is in falling snow), or none (null: the setting off,
+   * Potato, snow off, a map without snow).
+   */
+  setFrost(snow: ((x: number, y: number, z: number) => boolean) | null): void {
+    if (snow === this.snow) return;
+    this.snow = snow;
+    for (const m of this.models.values()) m.frostTested = -Infinity;
+    this.settled = false;
   }
 
   /** Before a render of `scene` (the one the world is in). */
@@ -271,6 +315,7 @@ export class ModelLight {
         // Gone from this world: back to the plain model, wherever it is shown next.
         for (const b of m.blocks) {
           (b.uMapLight!.value as THREE.Vector3).set(0, 0, 0);
+          if (b.uFrost) b.uFrost.value = 0;
           b.uDepthFogColor = DEPTH_FOG_OFF.uDepthFogColor;
           b.uDepthFogRange = DEPTH_FOG_OFF.uDepthFogRange;
         }

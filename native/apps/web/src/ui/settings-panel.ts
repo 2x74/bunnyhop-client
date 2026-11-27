@@ -1190,6 +1190,11 @@ function graphicsSection(ctx: Ctx): SettingsContent {
             desc: "Snow and rain falling on the maps built with weather, as in CS:S. Light draws half as many flakes and drops. The Quality presets set it: off on Lowest and Low, Light on Medium, Full on High.",
             keywords: "snow rain weather precipitation snowfall flakes drops christmas winter storm func_precipitation particles",
           }),
+          toggle("Frost on players", () => G().frost, (v) => up((p) => (p.graphics.frost = v)), {
+            hint: G().potato ? "Off in Potato mode" : undefined,
+            desc: "Bunnies and ghosts in falling snow slowly frost over, and thaw after they leave it. Needs Snow and rain on. Off on the Lowest and Low presets.",
+            keywords: "frost ice snow winter christmas rime cold players bunny ghost",
+          }),
           toggle("Flashlight", () => G().flashlight, (v) => up((p) => (p.graphics.flashlight = v)), { hint: P().binds.flashlight?.[0] ? `${keyLabel(P().binds.flashlight[0])} in game` : undefined, desc: "Light up dark platforms where you look. Works in Potato mode and starts off on each map. Local view only; its state is not recorded in replays.", keywords: "flashlight torch dark lighting visibility lamp" }),
           mapLooksSettingsRow(),
         ),
