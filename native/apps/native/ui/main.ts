@@ -907,7 +907,12 @@ installNativeConsole({
     else if (action === "cpTeleport") send({ type: "practice", action: "tele" });
     else if (action === "cpPrev") send({ type: "practice", action: "prev" });
     else if (action === "cpNext") send({ type: "practice", action: "next" });
-    else return false;
+    else if (state.map) {
+      // Every other action (paint_clear, measure, thirdperson, slot1, drop...): the host's act() knows them all.
+      // A typed or bound once-command is a press; inspect and paint also get the release a key would send.
+      send({ type: "consoleAction", action, down: true });
+      if (action === "inspect" || action === "paint") send({ type: "consoleAction", action, down: false });
+    } else return false;
     return true;
   },
   chat: (line, reply) => {
