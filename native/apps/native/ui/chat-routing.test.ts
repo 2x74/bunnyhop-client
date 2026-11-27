@@ -137,6 +137,11 @@ test("explicit practice arguments and aliases keep their intent", () => {
   expect(f.actions).toHaveLength(5);
   expect(f.replies.at(-1)).toContain("[on|off]");
 });
+test("!delcp and !clearcps (and their aliases) reach the host's checkpoint delete / clear", () => {
+  const f = fixture("solo");
+  for (const text of ["!delcp", "!deletecp", "!removecp", "!clearcps", "!clearcp", "!clearcheckpoints"]) f.line(text);
+  expect(f.actions).toEqual(["delete", "delete", "delete", "clear", "clear", "clear"]);
+});
 test("a Russian layout or a leading dot runs the command, and the room gets it in its usual form", () => {
   const f = fixture();
   f.line("!ызус");

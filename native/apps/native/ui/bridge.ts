@@ -221,6 +221,9 @@ export const PRACTICE_ACTIONS = [
   "prev",
   "next",
   "keepVelocity",
+  // !delcp / !clearcps and the checkpoint menu's 7 and 8 (web 0.0.44).
+  "delete",
+  "clear",
 ] as const;
 export type PracticeAction = (typeof PRACTICE_ACTIONS)[number];
 /** gauntlet/state.ts GauntletProgress: this map's index, the map count, the earlier splits' sum, your PB's split here. */
