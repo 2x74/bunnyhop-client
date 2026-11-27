@@ -31,6 +31,7 @@ inline void append_render_capabilities(nlohmann::json &capabilities) {
           "graphicsModelLighting",
           "graphicsPropLighting",
           "graphicsMapDetails",
+          "graphicsPrecipitation",
           "graphicsResolutionScale",
           "graphicsAspect",
           "graphicsAspectFit",

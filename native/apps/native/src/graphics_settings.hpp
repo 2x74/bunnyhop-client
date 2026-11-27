@@ -1,6 +1,7 @@
 #pragma once
 #include "look_settings.hpp"
 #include "map_look.hpp"
+#include "precipitation.hpp"
 #include "nlohmann/json.hpp"
 #include <algorithm>
 #include <array>
@@ -34,6 +35,7 @@ inline nlohmann::json default_graphics_settings() {
             {"graphicsVibrance", 1.},
             {"graphicsFullbright", false},
             {"graphicsMapFog", true},
+            {"graphicsPrecipitation", "full"},
             {"graphicsModelLighting", "subtle"},
             {"graphicsPropLighting", true},
             {"graphicsMapDetails", true},
@@ -65,6 +67,13 @@ inline nlohmann::json default_graphics_binds() {
 inline void migrate_retired_models(nlohmann::json &settings) {
     for (const auto *key : {"playerModel", "ghostModel"})
         settings.erase(key);
+}
+
+// Settings saved before snow and rain existed take their Quality preset's level (the website's parsePrefs does the
+// same), so a Medium machine starts on Light and Low stays off.
+inline void migrate_precipitation(nlohmann::json &settings) {
+    if (settings.is_object() && !settings.contains("graphicsPrecipitation"))
+        settings["graphicsPrecipitation"] = native_precip::preset_level(settings);
 }
 
 inline constexpr std::array<std::string_view, 14> paint_colors = {
@@ -105,6 +114,8 @@ inline void apply_graphics_quality(nlohmann::json &settings, const std::string &
     settings["graphicsAnisotropy"] = quality == "high" ? 8 : quality == "medium" ? 4 : 1;
     settings["graphicsResolutionScale"] = quality == "lowest" ? .5 : 1.;
     settings["graphicsWaterReflections"] = quality == "high";
+    // The website's PRESET_PRECIPITATION.
+    settings["graphicsPrecipitation"] = quality == "high" ? "full" : quality == "medium" ? "light" : "off";
 }
 
 // settings.hpp calls this before scalar validation. Keys/defaults match settings-keys.ts owned by the menu.
@@ -148,6 +159,8 @@ inline bool patch_graphics_setting(nlohmann::json &out, const std::string &key, 
         graphics_choice(value, {"live", "still", "off"});
     else if (key == "graphicsModelLighting")
         graphics_choice(value, {"off", "subtle", "full"});
+    else if (key == "graphicsPrecipitation")
+        graphics_choice(value, {"off", "light", "full"});
     else if (key == "graphicsAnisotropy" || key == "graphicsMenuFps") {
         if (!value.is_number()) throw std::runtime_error("Graphics choice must be numeric");
         const double number = value.get<double>();
@@ -180,6 +193,8 @@ struct GraphicsSettings {
     bool water_reflections = true;
     // The map's own fog, its light on props, and how far its light reaches the models (model_light.hpp).
     bool map_fog = true, prop_lighting = true, map_details = true;
+    // Snow and rain: the share of the particles drawn (0 off, .5 light, 1 full).
+    double precipitation = 1;
     enum class ModelLighting { off, subtle, full } model_lighting = ModelLighting::subtle;
     enum class Background { live, still, off } background = Background::live;
     LookSettings look;
@@ -211,6 +226,7 @@ struct GraphicsSettings {
         result.map_fog = values.at("graphicsMapFog");
         result.prop_lighting = values.at("graphicsPropLighting");
         result.map_details = values.at("graphicsMapDetails");
+        result.precipitation = native_precip::density_of(values.at("graphicsPrecipitation").get<std::string>());
         const auto &model_lighting = values.at("graphicsModelLighting");
         result.model_lighting = model_lighting == "off"    ? ModelLighting::off
                                 : model_lighting == "full" ? ModelLighting::full

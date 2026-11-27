@@ -242,6 +242,7 @@ const ROWS: Record<string, Gate> = {
   "graphics/Colour & visibility/Prop lighting": needs("graphicsPropLighting"),
   "graphics/Colour & visibility/Map fog": needs("graphicsMapFog"),
   "graphics/Colour & visibility/Map details": needs("graphicsMapDetails"),
+  "graphics/Colour & visibility/Snow and rain": needs("graphicsPrecipitation"),
   "graphics/Colour & visibility/Flashlight": needs("graphicsFlashlight"),
   "graphics/Display/Fullscreen when playing": excluded("Display → Window mode: windowed, borderless or fullscreen."),
   "graphics/Display/Resolution": needs("graphicsResolutionScale"),

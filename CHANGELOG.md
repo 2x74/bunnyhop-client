@@ -18,6 +18,8 @@ Matches website v0.0.44. Update from Settings → Updates: press Update, then Re
 - Hop effects are prepared while the map loads, so the first hop effect you see no longer stalls the game.
 - Room scoreboard: equal times are ordered by who set theirs first.
 - The Winter collection: Santa Hat, Snowdrift and the Pack Ice finish, with their Loadout tiles.
+- Snow and rain on the maps built with weather, as on the website: Settings → Graphics → Snow and rain (Off, Light,
+  Full) or `r_precipitation`. The Quality presets set it: off on Lowest and Low, Light on Medium, Full on High.
 
 ## v0.9.6 — Native
 

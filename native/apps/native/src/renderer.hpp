@@ -30,6 +30,8 @@
 #include "model_light.hpp"
 #include "texture_motion.hpp"
 #include "brush_fades.hpp"
+#include "precipitation.hpp"
+#include "precipitation_shaders.hpp"
 #include <span>
 // Standard headers the viewmodel's own headers use: it is included inside namespace native below.
 #include <cstring>
@@ -239,6 +241,7 @@ inline GLuint link_program(Gl &gl, const char *vertex_source, const char *fragme
 }
 
 #include "native_presentation.hpp"
+#include "precipitation_render.hpp"
 #include "landing_render.hpp"
 #include "native_viewmodel.hpp"
 #include "actor_warmup.hpp"
@@ -462,6 +465,10 @@ class Renderer {
     std::vector<BhPropGroup> propGroups;
     RuntimePropCopies propCopies;
     std::unique_ptr<CrashExplosions> crashExplosions;
+    // func_precipitation snow and rain (precipitation_render.hpp): volumes read at load, built when first on.
+    std::unique_ptr<NativePrecipitation> precipitation;
+    // Until the settings arrive the setting isn't known: nothing is traced for a player who has it off.
+    bool precipitationSettingRead = false;
     std::vector<GLuint> normals;
     std::array<float, 3> sunDirection{.35f, .45f, .82f};
     bool hasSun = false;
@@ -2858,7 +2865,7 @@ public:
         gl.Uniform1i(loc(program, "sunShadowMap"), sun_shadow_unit);
         gl.Uniform1i(loc(program, "sunActive"), 0);
         presentation = std::make_unique<NativePresentation>(gl);
-        mapEffects.load(core);
+        load_map_effects();
         crashExplosions = std::make_unique<CrashExplosions>(gl);
         size_t materialBytes = 0;
         const char *rawNames = bh_material_names_json(core, &materialBytes);
@@ -2901,6 +2908,7 @@ public:
 
     ~Renderer() {
         loading = {};
+        precipitation.reset();
         ghostRoutes.reset();
         graphicsTarget.reset();
         presentation.reset();
@@ -2930,9 +2938,40 @@ public:
         graphics = runnerView ? native::runner_view_graphics(chosenGraphics, *runnerView) : chosenGraphics;
     }
 
+    // Smoke, sprite trails and snow and rain read the map's entities once, at load.
+    void load_map_effects() {
+        size_t count = 0;
+        const char *raw = bh_entities_json(core, &count);
+        if (!raw || !count) return;
+        const auto entities = nlohmann::json::parse(raw, raw + count);
+        raw = bh_models_json(core, &count);
+        const auto models = raw && count ? nlohmann::json::parse(raw, raw + count) : nlohmann::json::array();
+        mapEffects.load(entities, models);
+        precipitation = std::make_unique<NativePrecipitation>(gl);
+        precipitation->load(entities, models);
+        if (precipitation->empty())
+            precipitation.reset();
+        else if (precipitationSettingRead)
+            precipitation->set_density(graphics.precipitation, core);
+    }
+
+    // The main view only (water reflections draw none, as in CS:S), after the other map effects.
+    void draw_precipitation(const native::Matrix &vp, const float eye[3], int target_height) {
+        if (!precipitation || graphics.potato || !effectsVisible) return;
+        const float cy = std::cos(lastYaw * native::radians), sy = std::sin(lastYaw * native::radians),
+                    cp = std::cos(lastPitch * native::radians), sp = std::sin(lastPitch * native::radians);
+        const native_render::Vec3 right = {sy, -cy, 0}, up = {sp * cy, sp * sy, cp};
+        const auto start = profile_now();
+        precipitation->draw(vp, eye, right, up, target_height, worldSeconds);
+        profile_elapsed(frameProfile.mapEffects, start);
+    }
+
     void graphics_settings(const nlohmann::json &settings) {
         chosenGraphics = native::GraphicsSettings::read(settings, mapName);
         graphics = runnerView ? native::runner_view_graphics(chosenGraphics, *runnerView) : chosenGraphics;
+        // Off, light or full; the first time it's on for this map the column map is traced (map load for most players).
+        precipitationSettingRead = true;
+        if (precipitation) precipitation->set_density(graphics.precipitation, core);
         const bool previousRoute = ghostOptions.route, previousPath = ghostOptions.route_path;
         ghostOptions.read(settings);
         if (ghostOptions.route) {
@@ -3882,6 +3921,7 @@ public:
                 landingClock >= 0 ? landingClock : seconds
         );
         draw_presentation(vp, eye, seconds);
+        draw_precipitation(vp, eye, height);
         profile_elapsed(frameProfile.presentation, phaseStart);
         phaseStart = profile_now();
         if (frameLook)
