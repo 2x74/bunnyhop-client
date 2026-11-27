@@ -108,22 +108,36 @@ export interface TimerOptions {
  *   START_ZONE_NO_PREHOP_V4, in every style: a jump on the landing tick inside a start zone loses all speed, as Scroll
  *   already does everywhere. A takeoff from the ground keeps its prestrafe; hopping around the zone to build speed
  *   doesn't. bhop_futile's start is built to be left on foot (feedback 2026-11-03, Throw).
+ * - 6: rules 5, plus the same no-prehop start on the maps in START_ZONE_NO_PREHOP_V6 (bhop_ambience, owner 2026-11-27).
+ *   Every other map times exactly as under rules 5, and rules 5 and older replays keep their times on ambience too.
  */
 export const TIMER_RULES_V1 = 1;
 export const TIMER_RULES_V2 = 2;
 export const TIMER_RULES_V3 = 3;
 export const TIMER_RULES_V4 = 4;
-/** The rules new runs are timed and recorded with. */
 export const TIMER_RULES_V5 = 5;
-export const TIMER_RULES = TIMER_RULES_V5;
+/** The rules new runs are timed and recorded with. */
+export const TIMER_RULES_V6 = 6;
+export const TIMER_RULES = TIMER_RULES_V6;
 /**
  * Rules 4: maps whose start zones block prehops in every style. Part of the rules: a rules 4 replay is re-timed with this
  * list, so adding a map here needs a new rules version (or that map's rules 4 runs would change).
  */
 export const START_ZONE_NO_PREHOP_V4: ReadonlySet<string> = new Set(["bhop_futile"]);
+/** Rules 6: maps added to the no-prehop list (START_ZONE_NO_PREHOP_V4) from rules 6 on. Frozen like that list. */
+export const START_ZONE_NO_PREHOP_V6: ReadonlySet<string> = new Set(["bhop_ambience"]);
 /** Whether start-zone prehops lose their speed for this style on this map under `rules` (TimerOptions.blockPrehops). */
 export const blocksPrehops = (style: string | null | undefined, map: string, rules: number): boolean =>
-  style === "scroll" || (rules >= TIMER_RULES_V4 && START_ZONE_NO_PREHOP_V4.has(map));
+  style === "scroll" ||
+  (rules >= TIMER_RULES_V4 && START_ZONE_NO_PREHOP_V4.has(map)) ||
+  (rules >= TIMER_RULES_V6 && START_ZONE_NO_PREHOP_V6.has(map));
+/**
+ * `rules` time a run on `map` exactly as the current rules do: the current ones, or rules 5 anywhere but the rules 6
+ * maps (START_ZONE_NO_PREHOP_V6), since rules 6 change nothing else. For replays of the current physics that carry on in
+ * the live game (practice-mode/replay-start.ts).
+ */
+export const timesAsCurrentRules = (rules: number, map: string): boolean =>
+  rules === TIMER_RULES || (rules === TIMER_RULES_V5 && !START_ZONE_NO_PREHOP_V6.has(map));
 export const isTimerRules = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= TIMER_RULES_V1 && (v as number) <= TIMER_RULES;
 /** Rules 2: seconds on the ground after landing before a moving player can start (bhoptimer `0.5 / GetTickInterval()`). */
 export const START_GROUND_SECONDS = 0.5;

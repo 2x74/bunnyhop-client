@@ -3,6 +3,8 @@
 //
 // Order (roomOrder), decided once when the list first arrives and kept while the screen is up, so a row never moves
 // under the pointer:
+//   0. the Daily room (it plays the day's Daily Challenge map all day: net/daily-room.ts) while it's up and has a free
+//      slot, empty or not;
 //   1. rooms with someone in them and a free slot, then full rooms, then empty ones. Your run is timed on your own
 //      machine, so a far room with people in it is a better place to be than a near one with nobody; and with a few
 //      rooms and few players, sending everyone to their nearest room would leave every room looking empty;
@@ -19,6 +21,7 @@
 
 import type { ListingPerson, ServerListing } from "../api";
 import type { RosterPlayer } from "../net/protocol";
+import { styleNote } from "../daily/state";
 
 /** Players listed before "+N more": on a wide window (a full public room and its supporter slot), and on a phone. */
 export const WHO_WIDE = 24;
@@ -117,12 +120,17 @@ export function fastestRegion(rows: readonly Pick<ServerListing, "id" | "region"
 }
 
 /** The rooms' ids in the order the list shows them (see the header). */
-export function roomOrder(rows: readonly Pick<ServerListing, "id" | "region" | "online" | "players" | "maxPlayers">[], near: string | null): string[] {
-  const group = (s: (typeof rows)[number]) => (!s.online ? 3 : !s.players ? 2 : s.players >= s.maxPlayers ? 1 : 0);
+export function roomOrder(rows: readonly (Pick<ServerListing, "id" | "region" | "online" | "players" | "maxPlayers"> & { daily?: unknown })[], near: string | null): string[] {
+  const group = (s: (typeof rows)[number]) => (!s.online ? 3 : s.players >= s.maxPlayers ? 1 : s.daily ? -1 : !s.players ? 2 : 0);
   return rows
     .map((s, i) => ({ s, i }))
     .sort((a, b) => group(a.s) - group(b.s) || Number(b.s.region === near) - Number(a.s.region === near) || b.s.players - a.s.players || a.i - b.i)
     .map((x) => x.s.id);
+}
+
+/** The line under a row's name: what the room plays. */
+export function roomSub(s: Pick<ServerListing, "tiers" | "timeLimitMinutes" | "daily">): string {
+  return s.daily ? `Today's Daily Challenge${styleNote(s.daily.style)}` : `Tiers ${s.tiers[0]}–${s.tiers[1]}, ${s.timeLimitMinutes}-minute maps`;
 }
 
 /**

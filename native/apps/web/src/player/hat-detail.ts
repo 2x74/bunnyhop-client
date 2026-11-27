@@ -68,6 +68,8 @@ const BY_COLOUR: [number, number][] = [
   // Daily Medal (bunny/backs.ts medal): its metals are the rank crowns' above, with a bright chamfer for silver and
   // bronze (gold's is the Lucky Coins'); its ribbon is cloth.
   [0xf7fafd, HAT_MAT.metal], [0xf2b885, HAT_MAT.metal], [0x26304f, HAT_MAT.fabric], [0xffb43c, HAT_MAT.fabric],
+  // Santa Hat (hats.ts santaHat): red felt, a white fur brim and pom-pom.
+  [0xd0342c, HAT_MAT.fabric], [0xf5f2ec, HAT_MAT.fur], [0xe3ded4, HAT_MAT.fur],
   // Wings: soft feathers.
   ...[0xf4f4ee, 0xeef0e8, 0xe2e6e0, 0xcfd6d4].map((c): [number, number] => [c, HAT_MAT.fabric]),
 ];

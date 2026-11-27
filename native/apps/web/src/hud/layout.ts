@@ -37,6 +37,8 @@ export const HUD_ELEMENTS = [
   { id: "ghostSpeed", label: "Speed vs ghost" },
   // Who is talking in a room (voice/hud.ts mounts its list in this box), bottom left under the chat.
   { id: "voice", label: "Voice list" },
+  // The world record of the board you're on (session.ts loadWorldRecord), under the PB. Off by default (0.0.44).
+  { id: "wr", label: "World record" },
 ] as const;
 
 export type HudElId = (typeof HUD_ELEMENTS)[number]["id"];
@@ -93,6 +95,7 @@ export const CLASSIC: HudLayout = {
   ghostSpeed: P(false, 7, 0.072, -0.262, 0.9),
   // Where the list always was: 1.2vw in, 3vh up, under the chat.
   voice: P(true, 6, 0.012, -0.03),
+  wr: P(false, 2, -0.012, 0.04),
 };
 
 export const MINIMAL: HudLayout = {
@@ -123,6 +126,7 @@ export const MINIMAL: HudLayout = {
   ghostSpeed: P(false, 4, 0.06, 0.07, 0.8),
   // Above the chat, which sits in the bottom corner here.
   voice: P(true, 6, 0.012, -0.2, 0.9),
+  wr: P(false, 2, -0.012, 0.04),
 };
 
 export const STREAMER: HudLayout = {
@@ -154,6 +158,8 @@ export const STREAMER: HudLayout = {
   ghostSpeed: P(false, 7, 0.085, -0.2, 1.05),
   // Top left under the map line: the keys overlay has the bottom corner here.
   voice: P(true, 0, 0.015, 0.07),
+  // Between the PB and the FPS counter.
+  wr: P(false, 2, -0.012, 0.037, 1.1),
 };
 
 /**
@@ -183,6 +189,10 @@ export function moveRetiredPlaces(layout: Record<string, Partial<HudPlace> | und
   // A layout saved before the voice list was an element: a preset's layout takes that preset's place for it, so it
   // still reads as the preset. Any other layout keeps the list where it always was (Classic's corner).
   if (!layout.voice) layout.voice = { ...preset.voice };
+  // A layout saved before the world record was an element: a preset's takes its place, any other goes under its PB.
+  const pb = layout.pb;
+  if (!layout.wr && pb && typeof pb === "object" && !found && pb.a !== undefined) layout.wr = { on: false, a: pb.a, x: pb.x ?? 0, y: round4((pb.y ?? 0) + 0.024 * (pb.s ?? 1)), s: pb.s ?? 1 };
+  else if (!layout.wr) layout.wr = { ...preset.wr };
   for (const [id, olds] of Object.entries(RETIRED_PLACES) as [HudElId, Omit<HudPlace, "on">[]][]) {
     const p = layout[id];
     if (!p || typeof p !== "object" || !olds.some((o) => samePlace(p, o))) continue;
@@ -205,7 +215,7 @@ export const cloneLayout = (l: HudLayout): HudLayout => JSON.parse(JSON.stringif
  * on or off, and a layout matches a preset whatever their on / off. (Before, picking Classic turned the strafe trainer
  * back off, so "I turned it on" and "I can't see it" were both true: zzuji, Discord 2026-10-28.)
  */
-const PERSONAL: readonly HudElId[] = ["strafeTrainer", "jhud", "ghostSpeed"];
+const PERSONAL: readonly HudElId[] = ["strafeTrainer", "jhud", "ghostSpeed", "wr"];
 
 /** `preset` as a fresh layout, with the PERSONAL elements' on / off taken from `current`. */
 export function presetLayout(preset: HudLayout, current: HudLayout): HudLayout {
@@ -264,7 +274,7 @@ export function placeFromRect(r: { left: number; top: number; width: number; hei
 export const EL_HEIGHT: Partial<Record<HudElId, number>> = {
   speed: 2.1, timer: 1.5, split: 1.15, track: 1, stage: 0.95, stats: 1.05, sync: 1.3, keys: 5.55, ghostKeys: 6.25, graph: 3.6,
   jumpStats: 2.15, map: 0.95, pb: 0.95, fps: 0.85, chat: 2.4, ammo: 2.1, strafeTrainer: 1.7, startPre: 0.85, strafeOffsets: 1.05,
-  firstJump: 1.05, longJump: 2.8, spectators: 3.3, practice: 1.08, jhud: 2.3, ghostSpeed: 1.15, voice: 1.85,
+  firstJump: 1.05, longJump: 2.8, spectators: 3.3, practice: 1.08, jhud: 2.3, ghostSpeed: 1.15, voice: 1.85, wr: 0.95,
 };
 /** For an element missing from EL_HEIGHT (one added later). */
 const EL_HEIGHT_DEFAULT = 1.2;
@@ -530,10 +540,10 @@ export const DEFAULT_KEYS: KeysPrefs = {
 
 // Version byte: 1 = first 14, 2 = first 15, 3 = first 16, 4 = first 17 (through strafe trainer), 5 = first 18,
 // 6 = first 21 (through longjump stats), 7 = first 22 (through the spectator list), 8 = first 23 (through Practice),
-// 9 = first 25 (through Speed vs ghost), 10 = all (the voice list).
+// 9 = first 25 (through Speed vs ghost), 10 = first 26 (through the voice list), 11 = all (the world record).
 // Elements an older code doesn't carry keep the Classic placement. The "bhl1." prefix names the format.
-const VERSION = 10;
-const ELEMENTS_IN: Record<number, number> = { 1: 14, 2: 15, 3: 16, 4: 17, 5: 18, 6: 21, 7: 22, 8: 23, 9: 25, [VERSION]: HUD_ELEMENTS.length };
+const VERSION = 11;
+const ELEMENTS_IN: Record<number, number> = { 1: 14, 2: 15, 3: 16, 4: 17, 5: 18, 6: 21, 7: 22, 8: 23, 9: 25, 10: 26, [VERSION]: HUD_ELEMENTS.length };
 const PREFIX = "bhl1.";
 
 function rgb(hex: string): number[] {

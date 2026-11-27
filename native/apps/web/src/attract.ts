@@ -24,7 +24,7 @@ import { FRAME_STRIDE, simulate } from "./sim";
 import { formatTime } from "./timer";
 import { backgroundPick, featuredArtReady } from "./ui/featured";
 import { localName } from "./ui/account";
-import { prefs, type MenuBackground } from "./ui/settings";
+import { PRECIPITATION_DENSITY, prefs, type MenuBackground } from "./ui/settings";
 import { backdropLive, backdropRendered, onBackdropWanted } from "./ui/backdrop";
 
 export interface AttractInfo {
@@ -364,6 +364,7 @@ export class Attract {
       a.world?.setFog(p.graphics.mapFog);
       a.world?.setPropLighting(p.graphics.propLighting);
       a.world?.setDetails(p.graphics.mapDetails);
+      a.world?.setPrecipitation(PRECIPITATION_DENSITY[p.graphics.precipitation]);
       a.world?.setModelLighting(p.graphics.modelLighting);
       const m = reducedMotion() ? "still" : mode();
       // Any settings change resizes the shared canvas (main.ts resize()), which clears it: a still frame (Still, or
@@ -472,6 +473,7 @@ export class Attract {
       world.setFog(prefs.get().graphics.mapFog);
       world.setPropLighting(prefs.get().graphics.propLighting);
       world.setDetails(prefs.get().graphics.mapDetails);
+      world.setPrecipitation(PRECIPITATION_DENSITY[prefs.get().graphics.precipitation]);
       world.setModelLighting(prefs.get().graphics.modelLighting);
       this.effectTime = 12;
       this.updateEffects = time => world.update(core.brushOrigins(), time, core.effectStates(), core.propAnims());

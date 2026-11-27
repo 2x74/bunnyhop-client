@@ -33,7 +33,8 @@ import { prefs } from "./ui/settings";
 import { trackName } from "./zones";
 import { SpatialMover } from "./audio";
 import { GhostRoute } from "./ghost-route";
-import { warmPrograms } from "./graphics/warm-programs";
+import { drawWhileHidden, warmPrograms } from "./graphics/warm-programs";
+import { noteStall } from "./stall-log";
 import { ghostPlan, type GhostRouteMode } from "./ghost-route-data";
 import { ClosestPos } from "./closest-pos";
 
@@ -388,8 +389,14 @@ export class Ghost {
   }
 
   setVisible(v: boolean): void {
+    if (v && !this.shown) {
+      this.shown = true;
+      noteStall("ghost-show");
+    }
     this.root.visible = v;
   }
+  /** Shown at least once (stall-log.ts tags its first showing). */
+  private shown = false;
 
   private offCosmetics: (() => void) | null = null;
 
@@ -500,8 +507,17 @@ export class GhostManager {
     [...this.ghosts.values()].forEach((x, i) => x.setRenderOrder(20 + i * 2));
     this.h.scene.add(g.root);
     g.setVisible(false);
-    // Ghosts show from the next start, so their programs have time to compile without blocking a frame.
-    if (this.h.renderer) void warmPrograms(this.h.renderer, g.root, this.camera ?? (this.camera = new THREE.PerspectiveCamera()), this.h.scene).catch(() => {});
+    // Ghosts show from the next start, so their programs have time to compile without blocking a frame. Then the ghost
+    // is drawn once off screen: the GPU's draw-time state for it (D3D11 / ANGLE: 1–5 s on Windows, v0.0.42) is made
+    // here, not in the frame it first shows (stall-log.ts "ghost-show").
+    noteStall("ghost-load");
+    const renderer = this.h.renderer;
+    if (renderer) {
+      const camera = this.camera ?? (this.camera = new THREE.PerspectiveCamera());
+      void warmPrograms(renderer, g.root, camera, this.h.scene)
+        .then(() => (this.ghosts.get(k) === g ? drawWhileHidden(renderer, g.root, camera, this.h.scene) : undefined))
+        .catch(() => {});
+    }
     return g;
   }
 

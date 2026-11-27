@@ -37,6 +37,8 @@ export const GLYPHS: Record<string, string> = {
   mapper: P("M12 3.5 19 7.5v9l-7 4-7-4v-9zM5 7.5l7 4 7-4M12 11.5v9"),
   // Batch 1 (progression.ts): !race (two arrows passing), Halloween (a pumpkin).
   race: P("M4 7h13M13 3l4 4-4 4M20 17H7M11 13l-4 4 4 4"),
+  // Winter (progression.ts winter_5 / winter_10): a six-armed snowflake, each arm with one pair of short branches.
+  snowflake: P("M12 2.5v19M3.77 7.25l16.46 9.5M3.77 16.75l16.46-9.5M10.13 4.32L12 6.4l1.87-2.08M17.71 6.54l-.86 2.66 2.74.58M19.59 14.22l-2.74.58.86 2.66M13.87 19.68L12 17.6l-1.87 2.08M6.29 17.46l.86-2.66-2.74-.58M4.41 9.78l2.74-.58-.86-2.66"),
   pumpkin: P("M12 7c-5 0-8 3-8 7s3 7 8 7 8-3 8-7-3-7-8-7zM12 7c-2.2 2.5-2.2 11.5 0 14M12 7c2.2 2.5 2.2 11.5 0 14M12 7V4c1.2 0 2.2.5 2.8 1.3"),
   // True Architect (progression.ts TRUE_ARCHITECT, bhop_lol_backrooms): a set square with its ruler ticks.
   architect: P("M4 20V4l16 16zM8 16v-4.4l4.4 4.4zM4 8h2.5M4 12h1.6M8 20v-2M12 20v-1.6"),

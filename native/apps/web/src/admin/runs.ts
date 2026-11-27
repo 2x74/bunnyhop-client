@@ -9,6 +9,7 @@ import { attemptText, type SessionAttempt } from "./cases";
 import { recentReasons, rememberReason } from "./dialogs";
 import { stamp } from "./ui";
 import { STYLE_DEFS } from "../styles";
+import { stallText, type StallSummary } from "../stall-log";
 
 interface RunRow {
   id: string;
@@ -46,6 +47,8 @@ interface RunDiagnostics {
   fps?: number;
   input?: Record<string, number | string | boolean>;
   visibility?: { hidden: number; hiddenMs: number; blurs: number };
+  /** v0.0.44: frames over 250 ms on the page and what had just happened (stall-log.ts). */
+  stalls?: StallSummary;
 }
 
 const STYLE_WORD: Record<string, string> = Object.fromEntries(STYLE_DEFS.map((d) => [d.id, d.name]));
@@ -76,6 +79,7 @@ function clientCell(d: RunDiagnostics | null | undefined, client: RunClient | un
     ["Engine", d.wasm?.replace("bunnyhop-web/", "") ?? null],
     ["FPS", d.fps !== undefined ? `${d.fps} average, frame p99 ${i.frameP99 ?? "?"} ms, worst ${i.worstFrame ?? "?"} ms` : null],
     ["Long tasks", i.longTasks !== undefined ? String(i.longTasks) : null],
+    ["Stalls", d.stalls?.n ? stallText(d.stalls) : null],
     ["Mouse", i.lock !== undefined ? `${i.lock}, ${i.pollHz ?? "?"} Hz, ${i.spikes ?? 0} spikes, ${i.discards ?? 0} discards${i.filter === false ? ", filter off" : ""}` : null],
     ["Tab", v ? `hidden ${v.hidden}× (${(v.hiddenMs / 1000).toFixed(1)} s), ${v.blurs} blurs` : null],
   ];

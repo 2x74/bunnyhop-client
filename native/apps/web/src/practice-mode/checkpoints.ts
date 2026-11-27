@@ -104,6 +104,20 @@ export class Checkpoints<T> {
     return this.store.restore(cp.handle);
   }
 
+  /**
+   * Deletes the current checkpoint (0.0.44, bhoptimer's "Delete"): frees its snapshot and lets go of its data. The one
+   * after it becomes current, or the one before when it was the last. Returns false when there was none.
+   */
+  remove(): boolean {
+    const cp = this.list[this.at];
+    if (!cp) return false;
+    this.list.splice(this.at, 1);
+    this.store.free(cp.handle);
+    this.hooks.onDrop?.(cp.data);
+    this.at = Math.min(this.at, this.list.length - 1);
+    return true;
+  }
+
   /** Frees every checkpoint. */
   clear(): void {
     const list = this.list;

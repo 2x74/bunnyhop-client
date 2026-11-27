@@ -26,7 +26,7 @@ import { cinematicSettings } from "../graphics/cinematic-preset";
 import { composerPreset } from "../graphics/presets";
 import { hybridStatusNode } from "../graphics/hybrid-status";
 import { importSkyFile, skyFileKind, skyGroup } from "../sky-packs/settings";
-import { DEFAULT_PREFS, gameView, horizontalFovAt, keyLabel, prefs, ACTIONS, assignBindSlot, bindIsDefault, resetBind, type Action, type CrosshairStyle, applyGraphicsPreset, graphicsPreset, applyTrainerPreset, pickTrainerStyle, trainerPreset, type TrainerPreset, type TrainerStyle, type AspectFit, type AspectRatio, type GraphicsPreset, type MenuBackground, type PlaceReadout, type Prefs } from "./settings";
+import { DEFAULT_PREFS, gameView, horizontalFovAt, keyLabel, prefs, ACTIONS, assignBindSlot, bindIsDefault, resetBind, type Action, type CrosshairStyle, applyGraphicsPreset, graphicsPreset, applyTrainerPreset, pickTrainerStyle, trainerPreset, type TrainerPreset, type TrainerStyle, type AspectFit, type AspectRatio, type GraphicsPreset, type MenuBackground, type PlaceReadout, type PrecipitationLevel, type Prefs } from "./settings";
 import { arrowNav, h } from "./dom";
 import * as ui from "./controls";
 import { group, range, rowDesc, segmented, select, toggle, check, color, row, button, syncSwitches, SWATCHES } from "./controls";
@@ -360,6 +360,7 @@ const ELEMENT_NOTES: Partial<Record<HudElId, string>> = {
   graph: "Last 2 s of speed with each jump's gain.",
   map: "Map, tier and style.",
   pb: "Your personal best on this map and track.",
+  wr: "The world record on this map, track and style. Hidden when there's none.",
   ammo: "Rounds left in the clip while a gun is out.",
   voice: "Who is talking in a room. Edit layout moves it.",
 };
@@ -1177,6 +1178,13 @@ function graphicsSection(ctx: Ctx): SettingsContent {
             hint: G().potato ? "Off in Potato mode" : undefined,
             desc: "Signs, arrows, stains, glows and light beams the map was built with, drawn as in CS:S.",
             keywords: "overlays decals sprites glows light beams spotlights signs arrows details map info_overlay infodecal env_sprite",
+          }),
+          select<PrecipitationLevel>("Snow and rain", () => G().precipitation, (v) => up((p) => (p.graphics.precipitation = v)), [
+            ["off", "Off"], ["light", "Light"], ["full", "Full"],
+          ], {
+            hint: G().potato ? "Off in Potato mode" : undefined,
+            desc: "Snow and rain falling on the maps built with weather, as in CS:S. Light draws half as many flakes and drops. The Quality presets set it: off on Lowest and Low, Light on Medium, Full on High.",
+            keywords: "snow rain weather precipitation snowfall flakes drops christmas winter storm func_precipitation particles",
           }),
           toggle("Flashlight", () => G().flashlight, (v) => up((p) => (p.graphics.flashlight = v)), { hint: P().binds.flashlight?.[0] ? `${keyLabel(P().binds.flashlight[0])} in game` : undefined, desc: "Light up dark platforms where you look. Works in Potato mode and starts off on each map. Local view only; its state is not recorded in replays.", keywords: "flashlight torch dark lighting visibility lamp" }),
           mapLooksSettingsRow(),

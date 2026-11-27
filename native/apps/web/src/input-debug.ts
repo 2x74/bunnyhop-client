@@ -9,6 +9,7 @@
 
 import type { Input } from "./input";
 import { EV_DISCARD, EV_OK, EV_SPIKE, InputStats } from "./mouse-filter";
+import { stalls } from "./stall-log";
 
 const W = 400;
 const H = 200;
@@ -31,7 +32,10 @@ export class InputDebug {
     try {
       const stats = input.filter.stats;
       new PerformanceObserver((list) => {
-        if (input.locked) for (const e of list.getEntries()) stats.longTask(e.duration); // while playing only
+        for (const e of list.getEntries()) {
+          if (input.locked) stats.longTask(e.duration); // while playing only
+          stalls.longTask(e.startTime, e.duration);
+        }
       }).observe({ type: "longtask" });
     } catch {
       /* unsupported */

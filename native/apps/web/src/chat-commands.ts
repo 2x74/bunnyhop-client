@@ -96,7 +96,7 @@ export interface RoomChat {
 }
 
 /** Practice from chat: practice mode, checkpoints, noclip (practice-mode/controller.ts command). */
-export type PracticeCommand = "toggle" | "on" | "off" | "menu" | "noclip" | "save" | "tele" | "prev" | "next";
+export type PracticeCommand = "toggle" | "on" | "off" | "menu" | "noclip" | "save" | "tele" | "prev" | "next" | "delete" | "clear";
 
 /** What main.ts gives the commands that need the live game. Same object in solo and rooms. */
 export interface ChatGame {
@@ -519,7 +519,7 @@ const BUILT_IN: ChatCommand[] = [
     name: "cp",
     aliases: ["cps", "checkpoint", "checkpoints"],
     help: "checkpoint menu",
-    about: "the checkpoint menu: save, teleport, previous / next, noclip. It stays open while you play; 0 or !cp closes it. While it's open, the checkpoint and noclip keys work during a run too.",
+    about: "the checkpoint menu: save, teleport, previous / next, noclip, delete. It stays open while you play; 0 or !cp closes it. While it's open, the checkpoint and noclip keys work during a run too.",
     group: "practice",
     where: "both",
     run: practice("menu"),
@@ -547,6 +547,8 @@ const BUILT_IN: ChatCommand[] = [
   },
   { name: "prevcp", aliases: ["prev"], help: "previous checkpoint", about: "back to the checkpoint before. The run becomes practice.", group: "practice", panelOnly: true, key: "cpPrev", where: "both", run: practice("prev") },
   { name: "nextcp", help: "next checkpoint", about: "forward to the next checkpoint. The run becomes practice.", group: "practice", panelOnly: true, key: "cpNext", where: "both", run: practice("next") },
+  { name: "delcp", aliases: ["deletecp", "removecp"], help: "delete the checkpoint", about: "deletes your current checkpoint. Your run carries on as before.", group: "practice", panelOnly: true, where: "both", run: practice("delete") },
+  { name: "clearcps", aliases: ["clearcp", "clearcheckpoints"], help: "delete all checkpoints", about: "deletes every checkpoint you saved on this map. Your run carries on as before.", group: "practice", panelOnly: true, where: "both", run: practice("clear") },
   {
     name: "keepreplay",
     aliases: ["keepattempt"],

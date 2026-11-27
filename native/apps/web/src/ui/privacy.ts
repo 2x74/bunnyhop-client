@@ -1,5 +1,6 @@
 // Private request intake; fulfilment and identity checks are handled by the developer.
 import { api, ApiError, type PrivacyRequestKind } from "../api";
+import { NOTE_REQUIRED, privacyRequestProblem } from "../privacy-request";
 import { modal } from "./account-panel";
 import { h } from "./dom";
 import { SITE_ORIGIN, WAVEDASH } from "../platform/env";
@@ -27,20 +28,32 @@ export function openPrivacyDialog(): void {
     ["correct", "Correct something"],
     ["other", "Something else"],
   ];
+  // v0.0.44 (TyZi): the note is the request for "correct" and "other", so it says so and is required there; the email
+  // box is plain text with our own check (privacy-request.ts), so a note typed into it gets a clear line, not the
+  // browser's @ rule.
+  const noteLabel = h("label.fb-label", { for: "privacy-note" });
+  const note = h("textarea.fb-text", { id: "privacy-note", rows: 4, maxlength: 2000 });
+  const contact = h("input.fb-input", { id: "privacy-contact", type: "text", inputmode: "email", maxlength: 120, autocomplete: "email", spellcheck: "false", placeholder: "you@example.com" });
+  const showKind = () => {
+    const needed = NOTE_REQUIRED.includes(kind);
+    deletion.hidden = kind !== "delete";
+    noteLabel.textContent = needed ? "What do you need?" : "Note (optional)";
+    note.placeholder = kind === "correct" ? "What's wrong and what it should be" : kind === "other" ? "Your question or request" : "";
+    note.required = needed;
+  };
   const radios = choices.map(([value, label]) => h("label.privacy-choice", null,
-    h("input", { type: "radio", name: "privacy-kind", value, checked: value === kind, onchange: () => { kind = value; deletion.hidden = kind !== "delete"; } }), label));
-  const note = h("textarea.fb-text", { id: "privacy-note", rows: 3, maxlength: 2000 });
-  const contact = h("input.fb-input", { id: "privacy-contact", type: "email", maxlength: 120, autocomplete: "email" });
+    h("input", { type: "radio", name: "privacy-kind", value, checked: value === kind, onchange: () => { kind = value; showKind(); error.textContent = ""; } }), label));
   const error = h("p.fb-err", { role: "alert" });
+  showKind();
   const send = h("button.btn.primary", { type: "submit", disabled: true }, "Submit");
   const cancel = h("button.btn", { type: "button", onclick: () => d.close() }, "Cancel");
-  const form = h("form.fb-form", null,
+  const form = h("form.fb-form", { novalidate: true },
     h("p.fb-ask", null, "Ask the developer for a copy of your data or to delete your account. Requests go only to the developer, not moderators. We may ask you to confirm the account is yours and aim to respond within 30 days."),
     account,
     h("fieldset.privacy-choices", null, h("legend.fb-label", null, "Your request"), ...radios),
     deletion,
-    h("div.fb-field", null, h("label.fb-label", { for: "privacy-note" }, "Note (optional)"), note),
-    h("div.fb-field", null, h("label.fb-label", { for: "privacy-contact" }, "Email for replies (optional — otherwise we reply in your in-game inbox)"), contact),
+    h("div.fb-field", null, noteLabel, note),
+    h("div.fb-field", null, h("label.fb-label", { for: "privacy-contact" }, "Email for replies (optional)"), contact, h("p.acct-note", null, "Without one we reply in your in-game inbox")),
     error,
     h("div.fb-actions", null, cancel, send),
     h("p.acct-note", null, h("a", { href: WAVEDASH ? `${SITE_ORIGIN}/privacy` : "/privacy", target: "_blank", rel: "noopener" }, "Privacy policy"), " · Or email ", h("a", { href: "mailto:support@bunnyhop.lol" }, "support@bunnyhop.lol")),
@@ -48,6 +61,12 @@ export function openPrivacyDialog(): void {
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     if (busy || !accountReady) return;
+    const problem = privacyRequestProblem(kind, note.value, contact.value);
+    if (problem) {
+      error.textContent = problem.message;
+      (problem.field === "note" ? note : contact).focus();
+      return;
+    }
     busy = true;
     send.disabled = true;
     send.textContent = "Sending…";

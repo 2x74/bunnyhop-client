@@ -398,7 +398,8 @@ export class AvatarStage {
    * Head frames reach a set way down from the head bone (what each frame shows of the body) and up to the ear tips or
    * the hat (a raised hand too, up to a cap); then the top is fitted to what the camera actually sees (it looks a touch
    * down, so ears leaning back and a halo above them sit higher in the picture than their height says), so the bigger
-   * v0.0.29 head and the tall hats stay in the frame. Full body fits every point, both ways. Zoom scales the result.
+   * v0.0.29 head and the tall hats stay in the frame. Full body fits every point, both ways. Zoom scales the result;
+   * Headroom (lift) then lowers the bunny in it.
    */
   private frame(spec: AvatarSpec, focus?: Focus): void {
     const bm = this.model.bunnyModel;
@@ -472,6 +473,8 @@ export class AvatarStage {
         }
       }
     }
+    // Headroom (spec.ts lift): the camera rises by that share of the picture, so the bunny sits lower in it.
+    if (spec.lift && !focus) target.y += spec.lift * height * spec.zoom;
     this.place(target, height * spec.zoom, elev);
   }
 

@@ -12,7 +12,7 @@
 
 import { EVENT_JUMPED, type PlayerState } from "./core";
 import type { SimTickContext } from "./sim";
-import { SsjTracker, type SsjReport } from "./ssj/stats";
+import { SsjTracker } from "./ssj/stats";
 
 export interface RunSummary {
   /** Horizontal speed (u/s) at the tick the timer started. */
@@ -24,13 +24,25 @@ export interface RunSummary {
   gain: number | null;
 }
 
-/** Bytes this keeps per replay tick (the speed after each tick), for the verifier's memory estimate. */
+/** Bytes this keeps per replay tick (the speed after each tick), for the verifier's memory estimate; 0 with `velocity`. */
 export const SUMMARY_BYTES_PER_TICK = 4;
 
+/**
+ * The horizontal velocity after each tick, recorded by someone else in the same pass (the API's input-analysis trace,
+ * apps/api src/input-analysis.ts InputTrace: float32, ticks 1..totalTicks), so the summary needn't keep its own speeds.
+ */
+export interface VelocityTrace {
+  readonly vx: Float32Array;
+  readonly vy: Float32Array;
+}
+
 export class RunSummaryTrace {
-  private readonly speed: Float32Array;
+  /** Speed after each tick (float32), or null: read from `velocity`. */
+  private readonly speed: Float32Array | null;
   private readonly tracker = new SsjTracker("every");
-  private readonly jumps: { tick: number; report: SsjReport }[] = [];
+  // The timed-run gain needs each jump's tick and gain only (not its whole report): parallel arrays, no object a jump.
+  private readonly jumpTicks: number[] = [];
+  private readonly jumpGains: (number | null)[] = [];
   // The state before the tick being recorded: the spawn (standing still on the ground) before the first.
   private readonly pre = { position: [0, 0, 0], velocity: [0, 0, 0], grounded: true, onLadder: false };
   private preStart = false;
@@ -41,14 +53,29 @@ export class RunSummaryTrace {
   // (One object for every tick's timer facts: nothing is allocated per tick.)
   private readonly at: { jumped: boolean; inStart: boolean; time: number | null } = { jumped: false, inStart: false, time: null };
 
-  /** `totalTicks`: the replay's command count (its header's). `interval`: the canonical tick interval (s). */
-  constructor(totalTicks: number, private readonly interval: number) {
-    this.speed = new Float32Array(Math.max(0, totalTicks) + 1);
+  /**
+   * `totalTicks`: the replay's command count (its header's). `interval`: the canonical tick interval (s). `velocity`: the
+   * same run's velocity trace, recorded in the same onTick pass (the speeds are then computed from it on read, the same
+   * float32 values: 4 bytes a tick less for the verifier).
+   */
+  constructor(totalTicks: number, private readonly interval: number, private readonly velocity: VelocityTrace | null = null) {
+    this.speed = velocity ? null : new Float32Array(Math.max(0, totalTicks) + 1);
+    this.ticks = Math.max(0, totalTicks) + 1;
+  }
+
+  /** Ticks with a speed slot (0..totalTicks). */
+  private readonly ticks: number;
+
+  /** The speed after `t` (1 <= t <= totalTicks when read from `velocity`). */
+  private speedAt(t: number): number {
+    if (this.speed) return this.speed[t];
+    const { vx, vy } = this.velocity!;
+    return Math.fround(Math.sqrt(vx[t] * vx[t] + vy[t] * vy[t]));
   }
 
   /** simulate's onTick. */
   readonly record = (tick: number, s: PlayerState, events: number, ctx: SimTickContext): void => {
-    if (tick >= 0 && tick < this.speed.length) this.speed[tick] = Math.sqrt(s.velocity[0] * s.velocity[0] + s.velocity[1] * s.velocity[1]);
+    if (this.speed && tick >= 0 && tick < this.speed.length) this.speed[tick] = Math.sqrt(s.velocity[0] * s.velocity[0] + s.velocity[1] * s.velocity[1]);
     const pre = this.pre;
     if (this.first) {
       // (The spawn's position isn't given to onTick: where the first tick ended is as good for the tracker, which
@@ -66,7 +93,7 @@ export class RunSummaryTrace {
     at.inStart = this.preStart;
     at.time = this.preRunning ? this.preTicks * this.interval : null;
     const r = this.tracker.tick(pre, c, at);
-    if (r) this.jumps.push({ tick, report: r });
+    if (r) (this.jumpTicks.push(tick), this.jumpGains.push(r.gain));
     for (let a = 0; a < 3; a++) (pre.position[a] = s.position[a]), (pre.velocity[a] = s.velocity[a]);
     pre.grounded = s.grounded;
     pre.onLadder = !!s.onLadder;
@@ -77,17 +104,20 @@ export class RunSummaryTrace {
 
   /** The summary of the timed run `startTick`..`endTick` (the verifier's result), or null for a run that never finished. */
   summary(startTick: number, endTick: number): RunSummary | null {
-    if (!startTick || endTick <= startTick || endTick >= this.speed.length) return null;
+    if (!startTick || endTick <= startTick || endTick >= this.ticks) return null;
     let top = 0;
     let sum = 0;
     for (let t = startTick; t <= endTick; t++) {
-      const v = this.speed[t];
+      const v = this.speedAt(t);
       if (v > top) top = v;
       sum += v;
     }
     let gain = 0;
     let gains = 0;
-    for (const j of this.jumps) if (j.tick >= startTick && j.tick <= endTick && j.report.gain !== null) (gain += j.report.gain), gains++;
-    return { startSpeed: this.speed[startTick], topSpeed: top, avgSpeed: sum / (endTick - startTick + 1), gain: gains ? gain / gains : null };
+    for (let k = 0; k < this.jumpTicks.length; k++) {
+      const g = this.jumpGains[k];
+      if (this.jumpTicks[k] >= startTick && this.jumpTicks[k] <= endTick && g !== null) (gain += g), gains++;
+    }
+    return { startSpeed: this.speedAt(startTick), topSpeed: top, avgSpeed: sum / (endTick - startTick + 1), gain: gains ? gain / gains : null };
   }
 }

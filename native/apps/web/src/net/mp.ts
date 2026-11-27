@@ -21,8 +21,9 @@ import * as THREE from "three";
 import { EVENT_JUMPED, EVENT_TELEPORTED, traceRay, type Core, type PlayerState } from "../core";
 import type { Input, UserCmd } from "../input";
 import { isTextField } from "../input";
-import { closeGunPicker, menuKey } from "../weapon-commands";
+import { closeGunPicker, menuKey, modifierHeld } from "../weapon-commands";
 import { ballotSpec, voteHintDue } from "./ballot";
+import { noteStall } from "../stall-log";
 import { voice } from "../voice/client";
 import { can } from "../moderation/staff";
 import type { RunSession } from "../session";
@@ -31,6 +32,7 @@ import { formatTime } from "../timer";
 import { IN_WEAPON_COMMAND_MASK } from "../weapon-rules";
 import { ATTACK_STAB } from "../viewmodel/events";
 import { strafeKeys, styleDef, styleLabel, type StyleId } from "../styles";
+import { watchedPractice } from "../hud/practice-line";
 import { copyRunStart, playerRunOn } from "../copy-start-request";
 import { tierLabel } from "../tiers";
 import { trackName } from "../zones";
@@ -39,6 +41,8 @@ import { Banner, ChatBox, localLine, NumberMenu, releaseCursorOnClose, Scoreboar
 import { forgetHoverCard } from "../ui/hover-card";
 import { RemotePlayers, remoteTime, slotColor } from "./players";
 import { registerRoomActions, roomLineShown, roomUrl, setRoomPresence } from "./presence";
+import { connectedLine, dayAt, roomTimeLeft } from "./daily-room";
+import { prefetchMap } from "../content/map-prefetch";
 import { copyLobbyInvite, lobbyInviteUrl } from "./lobby";
 import { allowLeave, resumePlay } from "../play-lock";
 import { spectateSlot, welcomeSpectate, type WelcomeSpectate } from "../social/spectate";
@@ -73,6 +77,7 @@ import {
   type NetSample,
   type Nomination,
   type PoolEntry,
+  type RoomDaily,
   type RoomInfo,
   type GainLogReport,
   type RosterPlayer,
@@ -86,6 +91,7 @@ import { announce, keySounds, sfx } from "../audio";
 import { celebrateRun, openCustomise, runRewards } from "../ui/unlocks";
 import type { StaffRole } from "../progression";
 import { staffBadgeOf, type PlayerMarks } from "../creators";
+import { scoreOrder } from "./score-order";
 import { banner as notifyBanner } from "../notify";
 import { normalizeChatLine, runChatLine, suggestChat, type ChatContext, type ChatGame, type ReplyOpts } from "../chat-commands";
 
@@ -449,7 +455,8 @@ export class Multiplayer {
         moved = true;
       }
       this.players.inEye = this.specMode === "eye" ? this.spectating : null;
-      // Their speed and timer in your HUD (P10: spectating looks like playing).
+      // Their speed and timer in your HUD (P10: spectating looks like playing), with their practice / Segmented state
+      // (0.0.44: the roster's `practice` and their style), not yours.
       const p = this.players.players.get(this.spectating);
       const rt = p ? remoteTime(p, now) : null;
       this.o.session.hud.setSpectated({
@@ -457,6 +464,7 @@ export class Multiplayer {
         status: rt?.status === TIMER_RUNNING ? "running" : rt?.status === TIMER_FINISHED ? "finished" : "idle",
         time: rt?.seconds ?? 0,
         inStart: rt?.status === TIMER_START,
+        ...(p ? watchedPractice(p) : {}),
       });
       this.playWatchFeed(this.spectating, now);
     } else this.players.inEye = null;
@@ -667,14 +675,15 @@ export class Multiplayer {
           this.endWatchFeed();
           this.refreshSpecBar();
         } else if (spec.k === "end") this.endSpectate();
-        if (m.map.name !== this.o.map) return this.goto(m.map.name);
+        if (m.map.name !== this.o.map) return this.goto(m.map.name, (m.map.daily ?? m.room.daily)?.day);
         voice.welcome(m.room);
         setRoomPresence({ id: m.room.id, name: m.room.name });
         this.race.onState(m.race ?? null);
         this.race.room.onState(m.roomRace ?? null);
         this.race.connected();
         this.setChange(m.change);
-        if (!resumed) this.chat.add({ kind: "local", text: `Connected to ${m.room.name} (${m.players.length}/${m.room.maxPlayers}) · ${m.map.name}. ${bindLabel("chat") ?? "Settings → Keys →"} chat · Tab scores · N spectate · type rtv / nominate / timeleft` });
+        if (!resumed) this.chat.add({ kind: "local", text: connectedLine({ room: m.room.name, players: m.players.length, max: m.room.maxPlayers, map: m.map.name, chat: bindLabel("chat") ?? "Settings → Keys →", daily: this.daily() }) });
+        this.prefetchNext();
         if (m.room.private) this.lobbyIntro(m.room.id);
         if (this.specOnJoin) {
           // Straight from the friends list: watching before the first sample goes out, so you never spawn.
@@ -758,7 +767,10 @@ export class Multiplayer {
         break;
       case "vote":
         // A new vote resets your choice; updates carry your own vote back.
-        if (m.vote.id !== this.vote?.id) sfx("vote_open");
+        if (m.vote.id !== this.vote?.id) {
+          sfx("vote_open");
+          noteStall("vote");
+        }
         else if (m.vote.counts.reduce((a, b) => a + b, 0) > (this.vote?.counts.reduce((a, b) => a + b, 0) ?? 0)) sfx("vote_tick");
         if (m.vote.id !== this.vote?.id) this.myVote = m.myVote ?? null;
         else if (m.myVote !== undefined && m.myVote !== null) this.myVote = m.myVote;
@@ -779,7 +791,8 @@ export class Multiplayer {
       case "map":
         this.map = m.map;
         this.nextMap = m.nextMap;
-        if (m.map.name !== this.o.map) this.goto(m.map.name);
+        if (m.map.name !== this.o.map) this.goto(m.map.name, this.daily()?.day);
+        else this.prefetchNext();
         break;
       case "change":
         this.setChange(m.change);
@@ -834,20 +847,25 @@ export class Multiplayer {
     const at = this.conn.toLocal(c.at);
     const go = () => {
       if (this.change !== c) return;
-      this.goto(c.map);
+      // The Daily room changes map when the day does: the new map is the new day's.
+      this.goto(c.map, c.daily?.day ?? (this.daily() ? dayAt(c.at) : null));
     };
+    this.prefetchNext();
     setTimeout(go, Math.max(0, at - Date.now()) + 250);
   }
 
-  /** Reload onto the room's (new) map; the socket closes as a map change so nobody sees a leave/join. */
-  private goto(map: string): void {
+  /**
+   * Reload onto the room's (new) map; the socket closes as a map change so nobody sees a leave/join. `day`: in the
+   * Daily room, the day the map is played for (?daily=<day>: main.ts plays the page in the day's style).
+   */
+  private goto(map: string, day?: string | null): void {
     if (this.navigating) return;
     this.navigating = true;
     this.banner.set(`Loading ${map}…`, this.room?.name ?? "", "change");
     voice.detach();
     this.conn.close(CLOSE.MAP_CHANGE);
     allowLeave(); // no "Leave site?" prompt for the room's own map change
-    location.href = roomUrl(this.o.serverId, map, { spectate: this.specOnJoin });
+    location.href = roomUrl(this.o.serverId, map, { spectate: this.specOnJoin, daily: day });
   }
 
   private leave(): void {
@@ -972,7 +990,7 @@ export class Multiplayer {
   // Keys
 
   private keydown(e: KeyboardEvent): void {
-    if (this.chat.isOpen || !this.o.input.locked || e.ctrlKey || e.metaKey || e.altKey || isTextField(e.target)) return;
+    if (this.chat.isOpen || !this.o.input.locked || modifierHeld(e, this.o.input) || isTextField(e.target)) return;
     if (cursorHeld() && this.menu.open && e.code === "Escape") return this.menu.hide();
     if (e.code === "Tab") {
       e.preventDefault();
@@ -1250,14 +1268,28 @@ export class Multiplayer {
   private timeLeft(): string {
     if (this.change) return `changing to ${this.change.map}`;
     if (!this.map) return "";
-    const ms = this.conn.toLocal(this.map.endsAt) - Date.now();
-    if (ms <= 0) return "last round";
-    const s = Math.ceil(ms / 1000);
-    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")} left`;
+    const daily = this.daily();
+    return roomTimeLeft(Date.now(), this.conn.toLocal(this.map.endsAt), daily ? { endsAt: this.conn.toLocal(daily.endsAt) } : null);
+  }
+
+  /** The Daily room's day (the map's, else the room's); null in any other room. */
+  private daily(): RoomDaily | null {
+    return this.map?.daily ?? this.room?.daily ?? null;
+  }
+
+  /**
+   * The room's next map, once it is known (the Daily room's next day from 15:50 UTC, a vote's pick, a change under
+   * way), into the cache while this one is played: the reload onto it is then a cache hit for everyone at once.
+   */
+  private prefetchNext(): void {
+    const next = this.change?.map ?? this.daily()?.nextMap ?? this.nextMap;
+    if (!next || next === this.o.map) return;
+    // (After a moment: the change's own sounds and banner first; a name is fetched once per page.)
+    window.setTimeout(() => void import("../ui/maps").then((m) => prefetchMap(next, m.fetchMapIndex)), 1500);
   }
 
   private summary() {
-    return { id: this.o.serverId, name: this.room?.name ?? this.o.serverId, map: this.map?.name ?? this.o.map, tier: this.map?.tier ?? null, players: this.players.players.size, max: this.room?.maxPlayers ?? 0, timeLeft: this.timeLeft(), rtv: this.rtv, spectating: this.spectating !== null, status: this.status, lobby: !!this.room?.private, host: !!this.room?.private && this.host === this.you };
+    return { id: this.o.serverId, name: this.room?.name ?? this.o.serverId, map: this.map?.name ?? this.o.map, tier: this.map?.tier ?? null, players: this.players.players.size, max: this.room?.maxPlayers ?? 0, timeLeft: this.timeLeft(), rtv: this.rtv, spectating: this.spectating !== null, status: this.status, lobby: !!this.room?.private, host: !!this.room?.private && this.host === this.you, daily: !!this.daily() };
   }
 
   private refreshUi(now: number): void {
@@ -1317,15 +1349,17 @@ export class Multiplayer {
         status,
         statusKind: kind,
         pb: p.info.pb[style] ?? null,
+        pbAt: p.info.pbAt?.[style] ?? null,
         ping: you ? Math.round(this.conn.rtt) || null : (p.meta?.ping ?? null),
         host: !!this.room?.private && p.slot === this.host,
         country: p.info.country ?? null,
         id: p.info.id,
       });
     }
-    rows.sort((a, b) => (a.pb ?? Infinity) - (b.pb ?? Infinity) || a.name.localeCompare(b.name));
+    // Equal PBs: who set theirs first, as on the boards.
+    rows.sort(scoreOrder);
     this.board.render(
-      { room: this.room?.name ?? this.o.serverId, map: this.map?.name ?? this.o.map, tier: this.map?.tier ?? null, timeLeft: this.timeLeft(), players: this.players.players.size, max: this.room?.maxPlayers ?? 0, nextMap: this.change?.map ?? this.nextMap, spectating: this.spectating !== null },
+      { room: this.room?.name ?? this.o.serverId, map: this.map?.name ?? this.o.map, tier: this.map?.tier ?? null, timeLeft: this.timeLeft(), players: this.players.players.size, max: this.room?.maxPlayers ?? 0, nextMap: this.change?.map ?? this.nextMap ?? this.daily()?.nextMap ?? null, spectating: this.spectating !== null },
       rows,
     );
   }

@@ -173,9 +173,9 @@ export class InputStats {
 
   /**
    * Once per rendered frame: `now` is the rAF time, `wall` performance.now() (for the input age). Stutters are counted
-   * only while `playing` (pointer-locked): map loads and menus aren't what a player reports.
+   * only while `playing` (pointer-locked): map loads and menus aren't what a player reports. Returns the frame's time.
    */
-  frame(now: number, wall: number, playing = true): void {
+  frame(now: number, wall: number, playing = true): number {
     const dur = this.lastFrameT ? now - this.lastFrameT : 0;
     this.lastFrameT = now;
     const i = this.frHead;
@@ -184,10 +184,11 @@ export class InputStats {
     this.frAge[i] = this.motionSinceFrame ? Math.max(0, wall - this.lastMotionT) : -1;
     this.motionSinceFrame = false;
     this.frHead = (i + 1) % InputStats.FRAMES;
-    if (!playing) return;
+    if (!playing) return dur;
     if (dur > 25) this.framesOver25++;
     if (dur > 50) this.framesOver50++;
     if (dur > this.maxFrame) this.maxFrame = dur;
+    return dur;
   }
 
   /** A frame that isn't measured (after a load or a hidden tab): the next frame's time counts from `now`. */

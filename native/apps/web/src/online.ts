@@ -19,7 +19,9 @@ import { decodeReplay, replayStyle, sha256Hex, type Replay } from "./replay";
 import { formatTime } from "./timer";
 import { trackName } from "./zones";
 import { toast } from "./notify";
-import { failureOf, holdDelayMs, holds, LEGACY_UPLOAD_LIMIT, legacyCandidate, legacyScanKey, TRACKING_SINCE_KEY, type StoredUpload } from "./uploads";
+import { failureOf, holdDelayMs, holds, LEGACY_UPLOAD_LIMIT, legacyCandidate, legacyScanKey, tooLongRefusal, TRACKING_SINCE_KEY, type StoredUpload } from "./uploads";
+import { practiceReplays } from "./practice-mode/replays";
+import { RANKED_MAX_HOURS } from "./run-limits";
 import { uploadStore } from "./upload-store";
 import { retryStored } from "./upload-retry";
 import { holdExitFor } from "./exit-game";
@@ -86,11 +88,24 @@ export async function submitAndTrack(
     if (holds(failure)) retryIn(holdDelayMs(holdRound), notify);
     return sub;
   }
+  if (tooLongRefusal(sub)) {
+    // Over the leaderboard's limit (the game keeps such runs itself, session.ts finishUnrankable; this is the server
+    // saying so): final, and the replay stays on this device.
+    const kept = run ? await keepTooLong(bytes, run) : false;
+    if (stored) await uploadStore.remove(stored).catch(() => {});
+    onStatus({ ...sub, reason: `over ${RANKED_MAX_HOURS} hours, the leaderboard's limit${kept ? ". Saved to your replays" : ""}` });
+    return sub;
+  }
   if (stored) await uploadStore.remove(stored).catch(() => {});
   onStatus(sub);
   noteSubmittedRun(sub.id); // the feedback form attaches it
   if (sub.status === "rejected" && !sub.id) return sub; // refused at upload (e.g. unranked map); card explains
   return trackVerdict(sub, onStatus, notify, room);
+}
+
+/** A run the server refused as too long (uploads.ts tooLongRefusal), kept with the practice replays, outside their caps. */
+async function keepTooLong(bytes: Uint8Array, run: Pick<RunInfo, "map" | "style" | "track" | "time">): Promise<boolean> {
+  return !!(await practiceReplays.keep(bytes, { map: run.map, style: run.style, track: run.track, time: run.time, at: null, teleports: 0, long: true }).catch(() => null));
 }
 
 /**
@@ -200,6 +215,7 @@ export async function retryStoredUploads(notify: (msg: string, ms?: number) => v
       sayBad: (msg) => bad(msg),
       label: runLabel,
       now: () => Date.now(),
+      keepTooLong: (u) => keepTooLong(u.bytes, u),
     });
     waiting = outcome.waiting;
     if (outcome.delivered) holdRound = 0;

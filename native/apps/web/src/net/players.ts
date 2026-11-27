@@ -7,8 +7,8 @@
 // shot). Players hidden with !hide take their guns and shots with them; Hide UI (F1) leaves them (world, not UI).
 //
 // Joining never stalls the room (0.0.22 hotfix): a new player's bunny geometry is built in a worker as soon as they
-// join (player/bunny/prebuild.ts), and their model compiles its shaders (compileAsync) before it's added to the scene.
-// Until then they're simply not drawn yet (a few frames).
+// join (player/bunny/prebuild.ts), and their model compiles its shaders (compileAsync) and is drawn once off screen
+// (prebuild.ts warmModelPrograms) before it's added to the scene. Until then they're simply not drawn yet.
 
 import { voice } from "../voice/client";
 import * as THREE from "three";
@@ -33,6 +33,7 @@ import { blankState, RemoteTrack, type InterpState } from "./interp";
 import { SpatialMover } from "../audio";
 import { prefs } from "../ui/settings";
 import { liveOf } from "../live";
+import { noteStall } from "../stall-log";
 import { styleAt, TIMER_FINISHED, TIMER_RUNNING, TIMER_START, type NetMeta, type NetSample, type RosterPlayer } from "./protocol";
 
 /** Distinct accents per slot (readable on bright and dark maps). */
@@ -123,6 +124,7 @@ export class RemotePlayers {
     if (!p) {
       p = { slot: info.slot, info, track: new RemoteTrack(), state: blankState(), has: false, meta: null, metaAt: 0, model: null, tag: null, tagAge: 1, sight: new TagSight(2000, 3000), sound: null, prep: info.slot === this.you() ? Promise.resolve() : this.prebuild(info), making: false, appearance: 0 };
       this.players.set(info.slot, p);
+      if (info.slot !== this.you()) noteStall("player-join");
     } else {
       const changed = p.info.outfit !== info.outfit ||
         JSON.stringify(p.info.loadout) !== JSON.stringify(info.loadout) ||
@@ -274,6 +276,7 @@ export class RemotePlayers {
     p.tag?.dispose();
     p.model = model;
     p.making = false;
+    noteStall("player-show");
     this.scene.add(model.root);
     p.tag = tag;
     this.scene.add(p.tag.sprite);

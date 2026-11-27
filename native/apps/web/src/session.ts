@@ -21,11 +21,13 @@ import { download, getPB, loadPBReplay, pbMs, savePBReplay, setPB, rejectPB, set
 import { keyLabel, prefs } from "./ui/settings";
 import { RunMouseSettings, mouseFromPrefs } from "./mouse-settings";
 import { DEFAULT_TURN_SPEED, TURN_HOLD_BITS, turnSpeedOf } from "./turn-binds";
-import { decodeReplay, encodeReplay, ReplayRecorder, replayFileName, replayStyle, sha256Hex, type Replay } from "./replay";
+import { decodeReplay, encodeReplay, grownLength, ReplayRecorder, replayFileName, replayStyle, sha256Hex, type Replay } from "./replay";
+import { PAST_RANKED_LINE, pastRanked, RANKED_MAX_HOURS, RANKED_MAX_TICKS, RECORDING_CAP_HOURS, RECORDING_CAP_TICKS } from "./run-limits";
 import { isSegmented, nextStyle, StyleFilter, strafeKeys, styleDef, styleForTrack, styleLabel, stylePrespeedCap, styleSettings, styleStartReentryCap, type StyleDef, type StyleId } from "./styles";
 import { onStyleChange, setSelectedStyle } from "./ui/style-picker";
 import { afterStep, beforeStep, checkpointMatches, FRAME_STRIDE, frameFlags, makeTimer, quantize, simulate, type SimResult } from "./sim";
 import { blocksPrehops, EVENT_RESPAWNED, formatTime, RunTimer, type Split, type TickCmd } from "./timer";
+import { noteStall } from "./stall-log";
 import { ZoneEditor, ZoneView } from "./zone-editor";
 import { zoneWarningToast } from "./zone-warning";
 import { loadZones, nextTrack, parseZoneSet, touching, trackName, trackOf, tracksOf, zonesEqual, type Zone, type ZoneSet, zoneSetToJson } from "./zones";
@@ -208,6 +210,10 @@ export class RunSession {
   private flightStuckSaid = false;
   /** A practice attempt (a tool, not practice mode) back in a start zone says it's still practice, once (afterStep). */
   private practiceStartHint: "off" | "armed" | "said" = "off";
+  /** This recording passed the leaderboard's limit while the timer ran, and the HUD said so (run-limits.ts). */
+  private pastRankedSaid = false;
+  /** This recording reached RECORDING_CAP_TICKS: what was recorded is kept, nothing more is (capRecording). */
+  private recordingCapped = false;
   /** The pause menu's Practice item (main.ts sets it where practice mode is available). */
   practiceMenu: (() => MenuActions["practice"]) | null = null;
   /** The timescale the frame loop runs at now (practice-mode/timescale.ts; main.ts sets it every frame). */
@@ -708,7 +714,9 @@ export class RunSession {
     // v28+ Auto-strafe: the trainer judges the turn the key came from, to the live mouse (StyleFilter.leadView).
     const turnYaw = this.styleFilter.lead ? this.styleFilter.leadView?.yaw ?? NaN : undefined;
     this.hud.tick(cmd, state, events, flying ? { settings: this.settings, noclip: true } : { settings: this.settings, ...(turnYaw !== undefined ? { turnYaw } : {}) }); // HUD: keys overlay / speed graph / jump stats see exactly the simulated command
-    if (!this.experimentalInput) {
+    // (Past RECORDING_CAP_TICKS nothing more is recorded: capRecording kept what was.)
+    const recording = !this.experimentalInput && !this.recordingCapped;
+    if (recording) {
       this.recorder.push(cmd.forward, cmd.side, cmd.yaw, cmd.pitch, cmd.buttons, u.look ?? null);
       if (u.nullBinds) this.recorder.nullBinds = true; // header.nullBinds: the anticheat expects instant key switches
       if (u.timed) this.recorder.timedInput = true; // header.timedInput: per-tick input isn't frame-sampled
@@ -716,12 +724,15 @@ export class RunSession {
       if (u.wRelease) this.recorder.wRelease = true; // header.wRelease: forward let go on jumps by the setting
       this.recorder.maybeCheckpoint(state.tick, state.position, state.velocity);
     }
-    this.pushFrame(state, cmd, events);
-    if (!this.experimentalInput) {
+    // The live frames are the PB ghost's (and the Segmented history's, which fills at 4 h): a run past the leaderboard's
+    // limit is never a PB, so they stop there (24 bytes a tick on a run of many hours).
+    if (state.tick <= RANKED_MAX_TICKS) this.pushFrame(state, cmd, events);
+    if (recording) {
       // The tick goes into the history too, so a checkpoint load can rebuild the recording (segments.ts).
       const o = state.tick * FRAME_STRIDE;
       this.segLog.push({ forward: cmd.forward, side: cmd.side, yaw: cmd.yaw, pitch: cmd.pitch, buttons: cmd.buttons, look: u.look ?? null, frame: this.liveFrames, frameAt: o, frameEvents: this.liveFrameEvents[state.tick] });
       if (state.tick % this.recorder.checkpointInterval === 0) this.segLog.checkpoint(state.position, state.velocity);
+      this.watchLength();
     }
     // A practice attempt (practice mode, third person, a lesson, scripted commands, the debug hook) is never submitted,
     // so it never beats either: a run that turns into practice drops its session.
@@ -769,6 +780,7 @@ export class RunSession {
       const pb = getPB(this.o.map, this.runStyle, this.timer.track);
       runSounds.finish(!this.unranked && (!pb || this.timer.timeMs() < pbMs(pb)) ? "pb" : "normal");
       this.view.finish(this.timer.track, !this.unranked && this.hud.beatsRecord(this.timer.time())); // the end zone flares
+      noteStall("run-finish");
       void this.finish(state);
     }
     return state;
@@ -801,21 +813,21 @@ export class RunSession {
   }
 
   // --- the world record of the board being run, for the provisional WR at the finish (hud/result.ts). Read once per
-  // map / style / track per session (a one-row board read), when a run on it first starts.
+  // map / style / track per session (a one-row board read), when a run on it first starts, or at a restart onto it
+  // while the HUD's World record element is on.
   private wrKey = "";
   /** That world record (seconds; null: none known yet), for auto restart. */
   private wrTime: number | null = null;
 
-  private loadWorldRecord(): void {
-    const t = this.timer;
-    const key = `${this.o.map}|${this.runStyle}|${t.track}`;
+  private loadWorldRecord(track = this.timer.track): void {
+    const key = `${this.o.map}|${this.runStyle}|${track}`;
     if (key === this.wrKey) return;
     this.wrKey = key;
     this.wrTime = null;
     this.hud.setWorldRecord(null);
     if (this.o.map === TUTORIAL_MAP || !api.available()) return;
     // (Shared with the WR ghost's read of the same board, shared-reads.ts.)
-    void worldRecord(this.o.map, this.runStyle, t.track)
+    void worldRecord(this.o.map, this.runStyle, track)
       .then((top) => {
         if (this.wrKey !== key) return;
         this.wrTime = top?.time ?? null;
@@ -873,6 +885,7 @@ export class RunSession {
    */
   private newRecording(): void {
     this.recorder.clear();
+    this.pastRankedSaid = this.recordingCapped = false;
     this.applyTurnSpeed();
   }
 
@@ -910,6 +923,8 @@ export class RunSession {
     this.styleFilter.reset();
     this.newRecording();
     this.ghosts.onReset();
+    // The HUD's world record follows the board you restart onto (a style switch, B / M); only read when it's shown.
+    if (prefs.get().hud.layout.wr.on) this.loadWorldRecord(this.currentTrack());
     const s = this.o.core.state();
     this.ssj.reset(s);
     this.movementStats.reset(s);
@@ -928,7 +943,7 @@ export class RunSession {
   private putFrame(tick: number, frame: ArrayLike<number>, events: number): void {
     const o = tick * FRAME_STRIDE;
     if (o + FRAME_STRIDE > this.liveFrames.length) {
-      const b = new Float32Array(Math.max(this.liveFrames.length * 2, o + FRAME_STRIDE));
+      const b = new Float32Array(Math.max(grownLength(this.liveFrames.length / FRAME_STRIDE) * FRAME_STRIDE, o + FRAME_STRIDE));
       b.set(this.liveFrames);
       this.liveFrames = b;
       const eventBuffer = new Uint8Array(b.length / FRAME_STRIDE);
@@ -975,6 +990,8 @@ export class RunSession {
     // A practice attempt never gets near the upload: its recording went through a teleport or noclip.
     const route = finishRoute({ practice: this.prac.practice, unranked: this.unranked });
     if (route === "practice") return this.finishPractice();
+    // Longer than the leaderboard takes (run-limits.ts): kept on this device, never uploaded.
+    if (this.recordingCapped || pastRanked(this.recorder.length)) return this.finishUnrankable();
     const pbOwner = pbAccount();
     const pbEpoch = accountGeneration();
     const watched = this.watch.stop();
@@ -1128,11 +1145,91 @@ export class RunSession {
   }
 
   /**
+   * Each recorded tick: past the leaderboard's limit while the timer runs, the HUD says so once (again only if a
+   * Segmented load takes the recording back under it); at RECORDING_CAP_TICKS recording stops (capRecording).
+   */
+  private watchLength(): void {
+    const n = this.recorder.length;
+    if (n >= RECORDING_CAP_TICKS) return void this.capRecording();
+    if (!pastRanked(n)) {
+      this.pastRankedSaid = false;
+      return;
+    }
+    if (this.pastRankedSaid || this.timer.status !== "running" || this.unranked) return;
+    this.pastRankedSaid = true;
+    this.hud.toast(PAST_RANKED_LINE, 10_000, "long-run");
+  }
+
+  /**
+   * The recording reached RECORDING_CAP_TICKS (the browser's memory, run-limits.ts): it stops there, and what was recorded
+   * is kept on this device like a run over the leaderboard's limit (and is the last run: Esc, Replays, Export last run).
+   * The attempt plays on; its finish says the recording stopped.
+   */
+  private async capRecording(): Promise<void> {
+    if (this.recordingCapped) return;
+    this.recordingCapped = true;
+    this.clock.stop();
+    const t = this.timer;
+    const replay = this.buildReplay(t.status === "finished" ? t.endTick : 0, true);
+    const bytes = await encodeReplay(replay);
+    if (this.experimentalInput) return;
+    this.lastRun = { replay, bytes, ...(this.unranked ? { practice: true } : {}) };
+    const kept = this.keepLongReplay(replay, bytes, { time: null, at: t.status === "running" ? t.time() : null });
+    holdReload(kept.then(() => ""));
+    const where = (await kept) ? "The run so far is saved to your replays." : "Esc, Replays, Export last run saves the run so far.";
+    this.hud.toast(`Recording stopped at ${RECORDING_CAP_HOURS} hours (the browser's memory). ${where}`, 12_000, "long-run");
+    await this.refreshMenu();
+  }
+
+  /**
+   * A finish too long for the leaderboard (run-limits.ts): the end card, then the replay kept on this device (with the
+   * practice replays, outside their caps) and as the last run. Never uploaded, never a PB or a ghost.
+   */
+  private async finishUnrankable(): Promise<void> {
+    this.watch.stop();
+    this.clock.stop();
+    const t = this.timer;
+    const pb = getPB(this.o.map, this.runStyle, t.track);
+    this.hud.runFinished({
+      time: t.time(), previousPB: pb?.time ?? null, newPB: false, jumps: t.jumps, strafes: t.strafes, sync: t.syncPercent(),
+      style: styleLabel(this.runStyle), track: t.track ? trackName(t.track) : null, onMap: this.onMap(),
+    });
+    const clientResult = ++this.clientResult;
+    void saveClientRun(this.clientSummary(false)).then((id) => clientResultSettled(id, () => this.clientResult === clientResult && this.timer === t && t.status === "finished"));
+    const say = (line: string) => {
+      this.hud.setSubmission({ id: "", status: "rejected", reason: line });
+      this.onSubmission?.({ id: "", status: "rejected", reason: line });
+    };
+    const over = `over ${RANKED_MAX_HOURS} hours, the leaderboard's limit`;
+    if (this.recordingCapped) {
+      // (capRecording kept the first RECORDING_CAP_HOURS hours already.)
+      say(`${over}. The recording stopped at ${RECORDING_CAP_HOURS} hours; that part is in your replays`);
+      return;
+    }
+    const replay = this.buildReplay(t.endTick);
+    const bytes = await encodeReplay(replay);
+    if (this.experimentalInput) return;
+    this.lastRun = { replay, bytes };
+    const kept = this.keepLongReplay(replay, bytes, { time: t.time(), at: null });
+    holdReload(kept.then(() => ""));
+    say((await kept) ? `${over}. Saved to your replays (Esc, Replays: Export last run downloads it)` : `${over}. Couldn't save it on this device: Esc, Replays, Export last run downloads it`);
+    runEnded();
+    await this.refreshMenu();
+  }
+
+  /** A run too long for the leaderboard, kept with the practice replays (outside their caps). False if it couldn't be. */
+  private async keepLongReplay(replay: Replay, bytes: Uint8Array, when: { time: number | null; at: number | null }): Promise<boolean> {
+    const h = replay.header;
+    return !!(await practiceReplays.keep(bytes, { map: h.map, style: replayStyle(h), track: h.track ?? 0, ...when, teleports: replay.segments?.length ?? 0, long: true }).catch(() => null));
+  }
+
+  /**
    * Why the recording since the reset can't be kept as a practice replay now (a phrase for "No replay: ..."), or null
    * when every command from the reset plays back to where the player is (attempt.ts replayLoss).
    */
   practiceReplayLoss(): string | null {
     if (this.experimentalInput) return "experimental input";
+    if (this.recordingCapped) return `the recording stopped at ${RECORDING_CAP_HOURS} hours (that part is in your replays)`;
     const loss = this.prac.replayLoss;
     if (loss === "noclip") return "noclip can't be played back";
     if (loss === "speed") return "a teleport that reset your speed can't be played back";

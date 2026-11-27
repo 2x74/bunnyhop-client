@@ -50,6 +50,12 @@ div.home-daily-more:hover .home-daily-chev, button.home-daily-chev:focus-visible
 .home-daily-chev { flex: none; display: inline-flex; color: var(--cream-2); transition: transform var(--t-fast) var(--ease); }
 button.home-daily-more:hover, button.home-daily-more:focus-visible { outline: none; color: var(--cream); }
 button.home-daily-more:hover .home-daily-chev, button.home-daily-more:focus-visible .home-daily-chev { color: var(--amber); transform: translateX(2px); }
+/* Play with others (the Daily room): a line like the one under it, with the room's count small beside it. */
+.home-daily-room[hidden], .dy-room[hidden] { display: none; }
+.home-daily-room + .home-daily-more { margin-top: 0.35rem; }
+.home-daily-room-n:empty, .dy-room-n:empty { display: none; }
+.home-daily-room-n { font-size: var(--fs-xs); color: var(--dim); }
+.dy-room-n { margin-left: 0.5em; font-size: var(--fs-xs); color: var(--dim); }
 .home-daily-wait .home-daily-map { cursor: default; }
 .home-daily-wait .home-rec-av { background: var(--ink-2); }
 @media (prefers-reduced-motion: reduce) { .home-daily-chev { transition: none; } }

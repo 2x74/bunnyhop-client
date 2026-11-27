@@ -169,9 +169,10 @@ export interface LookSample {
 export interface CountedYaw {
   count: Int32Array | Float64Array;
   rebases: { tick: number; kind: number; base: number; k: number }[];
-  frames: Uint16Array;
-  events: Uint16Array;
-  reports: Uint16Array;
+  /** Per-command input stats (u16 in the format). A compact decode (decodeRaw `compact`) keeps them as bytes when they fit. */
+  frames: Uint8Array | Uint16Array;
+  events: Uint8Array | Uint16Array;
+  reports: Uint8Array | Uint16Array;
 }
 
 /** The version a header is encoded as. */
@@ -378,6 +379,101 @@ export function replaySettings(h: Pick<ReplayHeader, "style" | "settings">): Set
 // ---------------------------------------------------------------------------
 // Recording
 
+/** u16 the way the counted-yaw input stats are encoded (withCounted). */
+const clampU16 = (v: number) => Math.max(0, Math.min(0xffff, Math.round(v) || 0));
+
+/** A recording column's next capacity: half again (a doubling left up to half of a long recording's memory unused). */
+export const grownLength = (n: number): number => n + Math.max(4096, n >> 1);
+
+/** A recording's columns are given back to the allocator at a clear when they're longer than this (~3 h of play). */
+const KEEP_COLUMNS = 1 << 20;
+
+/**
+ * Look samples (v8 view states) as columns rather than an object a command: the count (float64), the view state's base,
+ * k, epoch and kind as an index into the states recorded (they change rarely: a teleport, a sensitivity change), and the
+ * input stats (frames, events, reports) clamped to u16, which is all the encoding keeps of them (withCounted). 18 bytes
+ * a command instead of ~70-120 (a JS object with two boxed doubles): a long recording's largest part (run-limits.ts).
+ */
+export class LookColumns {
+  private len = 0;
+  private count = new Float64Array(4096);
+  private state = new Uint32Array(4096);
+  private stats = new Uint16Array(3 * 4096);
+  private states: { base: number; k: number; epoch: number; kind: number }[] = [];
+  private static readonly NONE = 0xffffffff;
+
+  get length(): number {
+    return this.len;
+  }
+
+  clear(): void {
+    this.len = 0;
+    this.states = [];
+    if (this.count.length > KEEP_COLUMNS) (this.count = new Float64Array(4096)), (this.state = new Uint32Array(4096)), (this.stats = new Uint16Array(3 * 4096));
+  }
+
+  /** Forgets the samples from `n` on. */
+  truncate(n: number): void {
+    this.len = Math.min(this.len, Math.max(0, n));
+  }
+
+  push(l: LookSample | null): void {
+    if (this.len === this.count.length) {
+      const m = grownLength(this.len);
+      const count = new Float64Array(m);
+      count.set(this.count);
+      this.count = count;
+      const state = new Uint32Array(m);
+      state.set(this.state);
+      this.state = state;
+      const stats = new Uint16Array(3 * m);
+      stats.set(this.stats);
+      this.stats = stats;
+    }
+    const i = this.len++;
+    if (!l) {
+      this.state[i] = LookColumns.NONE;
+      return;
+    }
+    this.count[i] = l.count;
+    const last = this.states[this.states.length - 1];
+    if (!last || !Object.is(last.base, l.base) || !Object.is(last.k, l.k) || !Object.is(last.epoch, l.epoch) || !Object.is(last.kind, l.kind)) {
+      this.states.push({ base: l.base, k: l.k, epoch: l.epoch, kind: l.kind });
+    }
+    this.state[i] = this.states.length - 1;
+    this.stats[3 * i] = clampU16(l.frames);
+    this.stats[3 * i + 1] = clampU16(l.events);
+    this.stats[3 * i + 2] = clampU16(l.reports);
+  }
+
+  /** Sample `i` (its input stats as encoded: clamped to u16), or null (none recorded, or past the end). */
+  get(i: number): LookSample | null {
+    if (i < 0 || i >= this.len || this.state[i] === LookColumns.NONE) return null;
+    const s = this.states[this.state[i]];
+    return { base: s.base, count: this.count[i], k: s.k, epoch: s.epoch, kind: s.kind, frames: this.stats[3 * i], events: this.stats[3 * i + 1], reports: this.stats[3 * i + 2] };
+  }
+
+  /** Sample `i`'s view state (shared, read-only), or null (none recorded). */
+  stateAt(i: number): { readonly base: number; readonly k: number; readonly epoch: number; readonly kind: number } | null {
+    return i < 0 || i >= this.len || this.state[i] === LookColumns.NONE ? null : this.states[this.state[i]];
+  }
+
+  countAt(i: number): number {
+    return this.count[i];
+  }
+
+  /** Input stat `which` (0 frames, 1 events, 2 reports) of sample `i`, as encoded (clamped to u16). */
+  statAt(i: number, which: 0 | 1 | 2): number {
+    return this.stats[3 * i + which];
+  }
+
+  /** Whether some sample `pred` holds for (null samples never do). */
+  some(pred: (count: number, kind: number) => boolean): boolean {
+    for (let i = 0; i < this.len; i++) if (this.state[i] !== LookColumns.NONE && pred(this.count[i], this.states[this.state[i]].kind)) return true;
+    return false;
+  }
+}
+
 /** Accumulates commands as they are fed to the sim. */
 export class ReplayRecorder {
   private n = 0;
@@ -387,7 +483,7 @@ export class ReplayRecorder {
   private yaw = new Float32Array(4096);
   private pitch = new Float32Array(4096);
   /** v8: each command's view state (null: none given, e.g. a scripted command). */
-  private looks: (LookSample | null)[] = [];
+  private looks = new LookColumns();
   checkpoints: Checkpoint[] = [];
   cosmetic: CosmeticEvent[] = [];
   inspect: CosmeticEvent[] = [];
@@ -412,7 +508,15 @@ export class ReplayRecorder {
 
   clear(): void {
     this.n = 0;
-    this.looks = [];
+    this.looks.clear();
+    // A long recording's columns go back (a restart after an hours-long run shouldn't keep its memory).
+    if (this.forward.length > KEEP_COLUMNS) {
+      this.forward = new Int16Array(4096);
+      this.side = new Int16Array(4096);
+      this.buttons = new Uint32Array(4096);
+      this.yaw = new Float32Array(4096);
+      this.pitch = new Float32Array(4096);
+    }
     this.nullBinds = false;
     this.timedInput = false;
     this.timedPresses = false;
@@ -436,7 +540,7 @@ export class ReplayRecorder {
 
   private grow(): void {
     const g = <T extends Int16Array | Uint32Array | Float32Array>(a: T): T => {
-      const b = new (a.constructor as new (n: number) => T)(a.length * 2);
+      const b = new (a.constructor as new (n: number) => T)(grownLength(a.length));
       b.set(a);
       return b;
     };
@@ -451,7 +555,7 @@ export class ReplayRecorder {
   push(forward: number, side: number, yaw: number, pitch: number, buttons: number, look: LookSample | null = null): void {
     if (this.n === this.forward.length) this.grow();
     const i = this.n++;
-    this.looks[i] = look;
+    this.looks.push(look);
     this.forward[i] = forward;
     this.side[i] = side;
     this.buttons[i] = buttons;
@@ -508,11 +612,11 @@ export class ReplayRecorder {
  * view state; a command where it isn't (a view set this module wasn't told about) becomes a raw rebase at its own yaw,
  * so the encoding is always lossless.
  */
-function withCounted(looks: readonly (LookSample | null)[], yaw: Float32Array, n: number): { counted?: CountedYaw } {
+function withCounted(looks: LookColumns, yaw: Float32Array, n: number): { counted?: CountedYaw } {
   if (n === 0) return {};
-  const fractional = looks.some((l) => l && !Number.isInteger(l.count));
+  const fractional = looks.some((count) => !Number.isInteger(count));
   // Preserve the historical fallback unless turns need their metadata retained.
-  if (fractional && !looks.some((l) => l && (l.kind === YAW_SET_TURN || (l.kind & YAW_WITH_TURN) !== 0))) return {};
+  if (fractional && !looks.some((_, kind) => kind === YAW_SET_TURN || (kind & YAW_WITH_TURN) !== 0)) return {};
   const count = fractional ? new Float64Array(n) : new Int32Array(n);
   const frames = new Uint16Array(n);
   const events = new Uint16Array(n);
@@ -522,33 +626,34 @@ function withCounted(looks: readonly (LookSample | null)[], yaw: Float32Array, n
   // the encoding counts from the recorded yaw (offset: the client's count at that tick).
   let epoch = -1;
   let enc = { base: 0, k: 0, offset: 0 };
-  const clampU16 = (v: number) => Math.max(0, Math.min(0xffff, Math.round(v) || 0));
   const fits = (base: number, c: number, k: number, y: number) => Object.is(Math.fround(countedYaw(base, c, k)), y);
   for (let i = 0; i < n; i++) {
-    const l = looks[i];
-    if (!l || !Number.isFinite(l.count) || Math.abs(l.count) > 0x3fffffff || !Number.isFinite(l.base) || !Number.isFinite(l.k)) return {};
-    frames[i] = clampU16(l.frames);
-    events[i] = clampU16(l.events);
-    reports[i] = clampU16(l.reports);
+    // (Read from the columns: no sample object a command. The stats are stored clamped already.)
+    const l = looks.stateAt(i);
+    const lc = looks.countAt(i);
+    if (!l || !Number.isFinite(lc) || Math.abs(lc) > 0x3fffffff || !Number.isFinite(l.base) || !Number.isFinite(l.k)) return {};
+    frames[i] = looks.statAt(i, 0);
+    events[i] = looks.statAt(i, 1);
+    reports[i] = looks.statAt(i, 2);
     if (l.epoch !== epoch || i === 0) {
       epoch = l.epoch;
       enc = { base: l.base, k: l.k, offset: 0 };
       rebases.push({ tick: i, kind: l.kind, base: l.base, k: l.k });
     }
-    const c = l.count - enc.offset;
+    const c = lc - enc.offset;
     if (fits(enc.base, c, enc.k, yaw[i])) {
       count[i] = c;
       continue;
     }
     // Not what the encoding's state says. After a raw set, back to the client's own base if that fits again (a raw set
     // too: nothing explains the switch); otherwise a raw set at the recorded yaw.
-    if ((enc.offset !== 0 || enc.base !== l.base || enc.k !== l.k) && fits(l.base, l.count, l.k, yaw[i])) {
+    if ((enc.offset !== 0 || enc.base !== l.base || enc.k !== l.k) && fits(l.base, lc, l.k, yaw[i])) {
       enc = { base: l.base, k: l.k, offset: 0 };
-      count[i] = l.count;
+      count[i] = lc;
       rebases.push({ tick: i, kind: YAW_SET_RAW, base: l.base, k: l.k });
       continue;
     }
-    enc = { base: yaw[i], k: l.k, offset: l.count };
+    enc = { base: yaw[i], k: l.k, offset: lc };
     count[i] = 0;
     rebases.push({ tick: i, kind: YAW_SET_RAW, base: yaw[i], k: l.k });
     if (!fits(yaw[i], 0, l.k, yaw[i])) return {}; // not even representable raw: v7
@@ -560,9 +665,15 @@ function withCounted(looks: readonly (LookSample | null)[], yaw: Float32Array, n
 // Binary encoding
 
 class Writer {
-  private buf = new Uint8Array(1 << 16);
-  private dv = new DataView(this.buf.buffer);
+  private buf: Uint8Array;
+  private dv: DataView;
   len = 0;
+
+  /** `capacity`: a first size that fits most writes, so a long replay isn't copied on every doubling. */
+  constructor(capacity = 1 << 16) {
+    this.buf = new Uint8Array(capacity);
+    this.dv = new DataView(this.buf.buffer);
+  }
 
   private ensure(n: number): void {
     if (this.len + n <= this.buf.length) return;
@@ -704,7 +815,8 @@ const bytesToHex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padSta
 export function encodeRaw(r: Replay): Uint8Array {
   const h = r.header;
   const n = h.totalTicks;
-  const w = new Writer();
+  // ~9 bytes a command raw (7.7-8.9 measured): sized for that, a long replay is written without regrowing.
+  const w = new Writer(Math.max(1 << 16, n * 9 + (1 << 16)));
   w.u32(REPLAY_MAGIC);
   const counted = r.counted && replayTimerRules(h) !== TIMER_RULES_V1 ? r.counted : null;
   const fractional = counted?.count instanceof Float64Array;
@@ -853,7 +965,13 @@ export function encodeRaw(r: Replay): Uint8Array {
  * malformed input) but keeps no command columns (empty arrays): the API's upload checks only need the header and the
  * trailers, and a multi-hour replay's columns are 14 bytes a tick (apps/api/src/replay-io.ts).
  */
-export function decodeRaw(buf: Uint8Array, opts: { commands?: boolean } = {}): Replay {
+/**
+ * `commands: false`: validates the whole file but keeps no command columns (the upload checks). `compact`: the columns
+ * in the narrowest array that holds every value (buttons u16 when no command uses bits 16+, the counted-yaw input stats
+ * as bytes when all are under 256), for the verifier's memory on long runs (apps/api src/verify.ts). The values are the
+ * same either way.
+ */
+export function decodeRaw(buf: Uint8Array, opts: { commands?: boolean; compact?: boolean } = {}): Replay {
   const r = new Reader(buf);
   if (r.u32() !== REPLAY_MAGIC) throw new Error("replay: bad magic");
   const version = r.u16();
@@ -928,7 +1046,7 @@ export function decodeRaw(buf: Uint8Array, opts: { commands?: boolean } = {}): R
   const side = new Int16Array(cols);
   // u32 (physics v7 weapon commands in bits 16..20); earlier replays only ever have u16 buttons, and are read as such.
   const buttonMask = (settings.physics ?? PHYSICS_V1) >= PHYSICS_V7 ? 0xffffffff : 0xffff;
-  const buttons = new Uint32Array(cols);
+  let buttons: Uint16Array | Uint32Array = opts.compact ? new Uint16Array(cols) : new Uint32Array(cols);
   const yaw = new Float32Array(cols);
   const pitch = new Float32Array(cols);
   const fractional = version === REPLAY_VERSION_FRACTIONAL;
@@ -948,13 +1066,21 @@ export function decodeRaw(buf: Uint8Array, opts: { commands?: boolean } = {}): R
     prev = 0;
     for (let i = 0; i < n; i++) side[i] = prev = prev + r.svarint();
     prev = 0;
-    for (let i = 0; i < n; i++) buttons[i] = (prev = prev ^ r.varint()) & buttonMask;
+    for (let i = 0; i < n; i++) {
+      const b = ((prev = prev ^ r.varint()) & buttonMask) >>> 0;
+      if (b > 0xffff && buttons instanceof Uint16Array) {
+        const wide = new Uint32Array(cols);
+        wide.set(buttons.subarray(0, i));
+        buttons = wide;
+      }
+      buttons[i] = b;
+    }
     for (const col of isCounted ? [pitch] : [yaw, pitch]) {
       const bits = new Int32Array(col.buffer);
       prev = 0;
       for (let i = 0; i < n; i++) bits[i] = prev = (prev + r.svarint()) | 0;
     }
-    if (isCounted) counted = readCounted(r, n, yaw, fractional);
+    if (isCounted) counted = readCounted(r, n, yaw, fractional, opts.compact);
   }
   const checkpoints: Checkpoint[] = [];
   prev = 0;
@@ -1017,9 +1143,10 @@ function readFractionalCount(r: Reader): number {
   return count;
 }
 /** Reads counts/rebases/input stats and reconstructs every yaw bit. v10 stores absolute f64 counts. */
-function readCounted(r: Reader, n: number, yaw: Float32Array, fractional = false): CountedYaw {
-  const raw = fractional ? new Float64Array(n) : new Int32Array(n);
-  for (let i = 0; i < n; i++) raw[i] = fractional ? readFractionalCount(r) : r.svarint();
+function readCounted(r: Reader, n: number, yaw: Float32Array, fractional = false, compact = false): CountedYaw {
+  // The stored values (deltas, or v10's absolute counts) go straight into `count` and become counts in place below.
+  const count = fractional ? new Float64Array(n) : new Int32Array(n);
+  for (let i = 0; i < n; i++) count[i] = fractional ? readFractionalCount(r) : r.svarint();
   const rebases: CountedYaw["rebases"] = [];
   let tick = 0;
   for (let i = r.varint(); i > 0; i--) {
@@ -1031,19 +1158,26 @@ function readCounted(r: Reader, n: number, yaw: Float32Array, fractional = false
     rebases.push({ tick, kind, base, k });
   }
   if (n > 0 && (!rebases.length || rebases[0].tick !== 0)) throw new Error("replay: counted yaw without a base at tick 0");
-  const count = fractional ? new Float64Array(n) : new Int32Array(n);
   let rb = 0;
   let base = 0;
   let k = 0;
   for (let i = 0; i < n; i++) {
     let rebase = false;
     while (rb < rebases.length && rebases[rb].tick === i) ({ base, k } = rebases[rb++]), (rebase = true);
-    count[i] = fractional || rebase ? raw[i] : (count[i - 1] + raw[i]) | 0;
+    if (!(fractional || rebase)) count[i] = (count[i - 1] + count[i]) | 0;
     yaw[i] = countedYaw(base, count[i], k);
   }
   const col = () => {
-    const a = new Uint16Array(n);
-    for (let i = 0; i < n; i++) a[i] = Math.min(0xffff, r.varint());
+    let a: Uint8Array | Uint16Array = compact ? new Uint8Array(n) : new Uint16Array(n);
+    for (let i = 0; i < n; i++) {
+      const v = Math.min(0xffff, r.varint());
+      if (v > 0xff && a instanceof Uint8Array) {
+        const wide = new Uint16Array(n);
+        wide.set(a.subarray(0, i));
+        a = wide;
+      }
+      a[i] = v;
+    }
     return a;
   };
   const frames = col();

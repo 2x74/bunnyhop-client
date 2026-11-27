@@ -38,7 +38,7 @@ export function thirdPersonBlocked(o: { turningOn: boolean; runStarted: boolean;
 }
 
 /** A practice command typed in chat (chat-commands.ts PracticeCommand). */
-export type PracticeChatCommand = "toggle" | "on" | "off" | "menu" | "noclip" | "save" | "tele" | "prev" | "next";
+export type PracticeChatCommand = "toggle" | "on" | "off" | "menu" | "noclip" | "save" | "tele" | "prev" | "next" | "delete" | "clear";
 
 /**
  * What a practice chat command does: say why it can't ("unavailable": the tutorial, a gauntlet), turn practice

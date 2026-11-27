@@ -7,7 +7,7 @@
 #include <stdexcept>
 
 namespace native {
-inline constexpr int release_physics = 30, release_rules = 5;
+inline constexpr int release_physics = 30, release_rules = 6;
 inline constexpr std::string_view release_wasm_sha256 = "bb2e38b1e7237967fec27cfe08fb1c5dfae649894562e41a97355df45c6899b3";
 
 inline std::string release_platform() {

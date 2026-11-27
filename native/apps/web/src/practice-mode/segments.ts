@@ -9,7 +9,8 @@
 // bhoptimer copies the replay frames into every segmented checkpoint (shavit-checkpoints aFrames; at most 10 of
 // them, "Segmented checkpoints contain frame data!"). Here every recorded tick goes once into an append-only log, and a
 // checkpoint keeps only its path through the log, so every checkpoint stays loadable, also one saved on a branch that a
-// later load abandoned, at the memory of the ticks played (about 80 bytes each, MAX_LOG_TICKS). A path is a chain of
+// later load abandoned, at the memory of the ticks played (about 60 bytes each with the view states as columns,
+// MAX_LOG_TICKS). A path is a chain of
 // shared nodes (log ranges and loads, newest first): a save adds at most one node to the path it was on and a load one
 // more, so a checkpoint costs the same few bytes however long its history is. The nodes still held are counted
 // (retainedBytes) and checkpoints.ts budgets them with the snapshots.
@@ -22,12 +23,17 @@
 // attempts checkpoints were saved in, as before.
 // DOM-free (apps/web/test/segmented.test.ts).
 
-import { MAX_SEGMENT_LOADS, type Checkpoint, type CosmeticEvent, type LookSample, type Replay, type ReplayRecorder, type SegmentLoad } from "../replay";
+import { grownLength, LookColumns, MAX_SEGMENT_LOADS, type Checkpoint, type CosmeticEvent, type LookSample, type Replay, type ReplayRecorder, type SegmentLoad } from "../replay";
 import type { TurnSpeed } from "../turn-binds";
 
 /** Floats per live frame (sim.ts FRAME_STRIDE: x, y, z, flags, yaw, pitch). */
 const STRIDE = 6;
-/** Log length limit: 4 h at 100 tick, the longest run the server takes (apps/api/src/run-clock.ts MAX_BEATS). */
+/**
+ * Log length limit: 4 h at 100 tick. The leaderboard takes 8 h runs now (run-limits.ts) but the log stays at 4 h: it
+ * holds every branch a Segmented attempt played, and every attempt logs (practice teleports rebuild from it), so 8 h
+ * would be ~170 MB on any long run. Past it a Segmented run can't save more checkpoints (controller.ts says so); every
+ * other run goes on recording as ever.
+ */
 export const MAX_LOG_TICKS = 1_440_000;
 /** A cleared log keeps arrays up to this many ticks (11 minutes at 100 tick, about 2.7 MB). */
 const REUSE_TICKS = 65_536;
@@ -99,7 +105,8 @@ class Columns {
   pitch = new Float32Array(4096);
   frames = new Float32Array(4096 * STRIDE);
   frameEvents = new Uint8Array(4096);
-  looks: (LookSample | null)[] = [];
+  /** The commands' view states as columns (replay.ts LookColumns: 18 bytes a tick, not an object). */
+  looks = new LookColumns();
   /** Replay checkpoints taken after the entry (ReplayRecorder.maybeCheckpoint), by entry. */
   cps = new Map<number, { position: [number, number, number]; velocity: [number, number, number] }>();
   /** Cosmetic / inspect events recorded after the entry (-1: before the attempt's first command), by entry. */
@@ -107,8 +114,10 @@ class Columns {
   inspect = new Map<number, number[]>();
 
   grow(): void {
+    // Half again, never past the log's own limit (a doubling left up to half of a 4 h log unused).
+    const ticks = Math.min(MAX_LOG_TICKS, grownLength(this.forward.length));
     const g = <T extends Int16Array | Uint32Array | Float32Array | Uint8Array>(a: T, k = 1): T => {
-      const b = new (a.constructor as new (n: number) => T)(a.length * 2);
+      const b = new (a.constructor as new (n: number) => T)(ticks * k);
       b.set(a);
       return b;
     };
@@ -117,7 +126,7 @@ class Columns {
     this.buttons = g(this.buttons);
     this.yaw = g(this.yaw);
     this.pitch = g(this.pitch);
-    this.frames = g(this.frames);
+    this.frames = g(this.frames, STRIDE);
     this.frameEvents = g(this.frameEvents);
   }
 }
@@ -181,7 +190,7 @@ export class SegmentLog {
     if (L.forward.length > REUSE_TICKS) this.log = new Columns();
     else {
       L.n = 0;
-      L.looks = [];
+      L.looks.clear();
       L.cps.clear();
       L.cosmetic.clear();
       L.inspect.clear();
@@ -219,7 +228,7 @@ export class SegmentLog {
     L.buttons[i] = t.buttons;
     L.yaw[i] = t.yaw;
     L.pitch[i] = t.pitch;
-    L.looks[i] = t.look;
+    L.looks.push(t.look);
     const at = t.frameAt ?? 0;
     for (let k = 0; k < STRIDE; k++) L.frames[i * STRIDE + k] = t.frame[at + k] ?? 0;
     L.frameEvents[i] = t.frameEvents;
@@ -286,7 +295,7 @@ export class SegmentLog {
     const L = this.log;
     if (L.n <= from) return;
     L.n = from;
-    L.looks.length = from;
+    L.looks.truncate(from);
     for (const m of [L.cps, L.cosmetic, L.inspect]) for (const k of m.keys()) if (k >= from) m.delete(k);
   }
 
@@ -360,7 +369,7 @@ export class SegmentLog {
     for (const n of path) {
       if (n.load) loads.push(copyLoad(n.load));
       for (let i = n.from; i < n.to; i++) {
-        rec.push(L.forward[i], L.side[i], L.yaw[i], L.pitch[i], L.buttons[i], L.looks[i] ?? null);
+        rec.push(L.forward[i], L.side[i], L.yaw[i], L.pitch[i], L.buttons[i], L.looks.get(i));
         tick++;
         const cp = L.cps.get(i);
         if (cp) checkpoints.push({ tick, position: [...cp.position], velocity: [...cp.velocity] });

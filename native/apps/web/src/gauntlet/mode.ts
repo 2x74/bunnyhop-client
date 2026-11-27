@@ -17,9 +17,7 @@
 
 import { appHref } from "../platform/navigation";
 import { api, ApiError, type GauntletAttempt } from "../api";
-import { fetchBytes } from "../content/fetch";
-import { bspUrl, indexSha } from "../content/map-url";
-import { nativeClient } from "../client-bridge";
+import { prefetchMap } from "../content/map-prefetch";
 import type { SubmissionView } from "../hud";
 import { toast } from "../notify";
 import { allowLeave } from "../play-lock";
@@ -248,23 +246,7 @@ export class GauntletMode {
   private async prefetchNext(): Promise<void> {
     const next = this.attempt.maps.find((m) => m.idx === this.o.start.idx + 1);
     if (!next || !this.active) return;
-    try {
-      const entry = (await fetchMapIndex()).find((m) => m.name === next.map);
-      const sha = indexSha(entry);
-      const url = bspUrl(next.map, sha);
-      if (nativeClient() && sha) {
-        await fetchBytes(url, { cacheSha256: sha, attempts: 2, resume: true, sha256: sha });
-        return;
-      }
-      const res = await fetch(url, { priority: "low" } as RequestInit);
-      const reader = res.ok ? res.body?.getReader() : null;
-      if (!reader) return;
-      while (!(await reader.read()).done) {
-        /* drained into the cache */
-      }
-    } catch {
-      /* the load downloads it as usual */
-    }
+    await prefetchMap(next.map, fetchMapIndex);
   }
 
   private onSubmission(st: SubmissionView): void {

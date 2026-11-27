@@ -25,6 +25,7 @@ import { icon } from "./icons";
 import { loadFailed } from "./load-failed";
 import { navigate } from "./nav";
 import { mapArt } from "./thumbs";
+import { dailyRoomLink } from "./daily-room-link";
 
 export interface DailyScreens {
   /** Show a day's board (null: today's). */
@@ -116,6 +117,12 @@ export function dailyScreen(day: string | null, a: DailyScreens): HTMLElement {
   return root;
 }
 
+/** Beside Play: into the Daily room (net/daily-room.ts), with how many are in it; shown while one is listed. */
+function roomButton(): HTMLElement {
+  const count = h("small.dy-room-n");
+  return dailyRoomLink(h("button.btn.btn-ghost.dy-room", { type: "button" }, "Play with others", count), count);
+}
+
 /** Today: the map's picture, name and tier, the time left, your place, Play. */
 function todayBlock(v: Extract<DailyView, { enabled: true }>, a: DailyScreens): HTMLElement {
   const t = v.today;
@@ -142,7 +149,7 @@ function todayBlock(v: Extract<DailyView, { enabled: true }>, a: DailyScreens): 
     ),
     // Taking part: the days finished so far and what the next ones unlock, in one line.
     h("p.dy-progress", { "data-days": String(v.progress?.days ?? 0) }, progressLine(v.progress?.days ?? 0)),
-    h("div.btn-row.gx-buttons", null, play),
+    h("div.btn-row.gx-buttons", null, play, roomButton()),
   );
 }
 

@@ -12,8 +12,9 @@
 .av-view.is-clear { background: repeating-conic-gradient(#202027 0 25%, #18181d 0 50%) 0 0 / 24px 24px; }
 .av-view canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 
-.av-small { display: flex; align-items: center; gap: 1.5rem; margin: 1rem 0 0; }
-.av-round { width: 72px; height: 72px; border-radius: 50%; background: var(--ink-2); object-fit: cover; }
+/* The small previews wear the decoration (a box 1.5x the picture, outside the layout): room round the round one. */
+.av-small { display: flex; align-items: center; gap: 2.2rem; margin: 2rem 0 0 1.4rem; }
+.av-round { width: 88px; height: 88px; border-radius: 50%; background: var(--ink-2); object-fit: cover; }
 .av-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.45rem 0.8rem; border-radius: 6px; background: var(--ink-1); font: 600 0.9rem var(--font-ui); color: var(--cream); min-width: 15rem; }
 .av-row img { width: 24px; height: 24px; border-radius: 50%; background: var(--ink-3); object-fit: cover; }
 .av-row-time { margin-left: auto; color: var(--cream-2); font-variant-numeric: tabular-nums; }
@@ -58,6 +59,16 @@
 .av-slider { display: grid; grid-template-columns: 6rem minmax(0, 1fr); align-items: center; gap: 0.8rem; margin: 0.35rem 0 0; color: var(--cream-2); font: 600 0.9rem var(--font-ui); }
 .av-slider input { accent-color: var(--amber); width: 100%; }
 .av-sec .av-list + .av-slider { margin-top: 0.8rem; }
+
+/* Decoration (v0.0.44): each choice on your own picture; the chosen one's name in amber. */
+.av-decos { display: grid; grid-template-columns: repeat(auto-fill, minmax(5.6rem, 1fr)); gap: 0.3rem; }
+.av-deco-opt { display: flex; flex-direction: column; align-items: center; gap: 0.75rem; padding: 1.05rem 0.2rem 0.5rem; background: none; border: 0; border-radius: 10px; color: var(--cream-2); font: 600 0.86rem var(--font-ui); cursor: pointer; min-width: 0; }
+.av-deco-opt:hover, .av-deco-opt:focus-visible { background: var(--ink-1); color: #fff; }
+.av-deco-opt[aria-selected="true"] { background: var(--ink-1); color: var(--amber); }
+.av-deco-pic { width: 44px; height: 44px; border-radius: 50%; background: radial-gradient(circle at 50% 35%, var(--ink-3), var(--ink-1)); object-fit: cover; display: block; }
+.av-deco-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.av-hint { margin: 0.6rem 0 0; color: var(--cream-3); font-size: 0.9rem; }
+.av-hint a { color: var(--amber); }
 
 .av-bgrow { display: flex; flex-wrap: wrap; align-items: center; gap: 0.8rem; margin: 0.8rem 0 0; }
 .av-color { width: 2.4rem; height: 2rem; padding: 0; border: 0; background: none; cursor: pointer; }

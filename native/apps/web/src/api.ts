@@ -21,7 +21,8 @@ import { GUEST_REFUSED_MS, resolveMe } from "./me-rules";
 import { WAVEDASH } from "./platform/env";
 import { wavedashCredentials, wavedashUserId } from "./platform/wavedash";
 import type { GiftTarget, GiftWallet, GiftPreview, GiftDelivery } from "./gifting";
-import { WIRE_STYLES } from "./net/protocol";
+import { WIRE_STYLES, type RoomDaily } from "./net/protocol";
+import type { PrivacyRequestKind } from "./privacy-request";
 
 /** Account-owned name badge selection and Prism appearance. */
 /** One of your map groups (map-groups.ts; GET / POST /me/map-groups). */
@@ -879,6 +880,11 @@ export interface ServerListing {
    * count). Absent from an offline room and from older APIs: the row then has just its count.
    */
   who?: ListingPerson[];
+  /**
+   * (0.0.44) A Daily room: it plays the day's Daily Challenge map all day (net/protocol.ts RoomDaily). Absent from every
+   * other room.
+   */
+  daily?: RoomDaily;
 }
 
 /** A player in ServerListing.who (apps/api/src/rooms/who.ts): only what differs from a plain player is there. */
@@ -1832,7 +1838,7 @@ export interface InboxView {
   threads: InboxThread[];
 }
 
-export type PrivacyRequestKind = "export" | "delete" | "correct" | "other";
+export type { PrivacyRequestKind };
 export interface PrivacyRequestBody {
   kind: PrivacyRequestKind;
   note?: string;

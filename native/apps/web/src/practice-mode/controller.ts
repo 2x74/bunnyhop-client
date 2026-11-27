@@ -148,7 +148,7 @@ export class Practice {
     void s.refreshMenu();
   }
 
-  /** A practice chat command (!practice, !noclip, !cp, !tele, !prevcp, !nextcp; chat-commands.ts; rules.ts
+  /** A practice chat command (!practice, !noclip, !cp, !tele, !prevcp, !nextcp, !delcp, !clearcps; chat-commands.ts; rules.ts
    * practiceCommandPlan). The tools answer with their usual toasts. */
   command(cmd: PracticeChatCommand, reply: (text: string) => void): void {
     const plan = practiceCommandPlan({ cmd, unavailable: !!this.unavailable });
@@ -163,6 +163,8 @@ export class Practice {
     if (cmd === "noclip") this.toggleNoclip();
     else if (cmd === "save") this.save();
     else if (cmd === "tele") this.teleport(this.cps.current());
+    else if (cmd === "delete") this.remove();
+    else if (cmd === "clear") this.clear();
     else this.step(cmd === "prev" ? -1 : 1);
     this.refreshMenu();
   }
@@ -271,6 +273,9 @@ export class Practice {
         { label: "Noclip", detail: this.noclip || this.h.session.flightOn ? "on" : "off" },
         // (bhoptimer hides its velocity toggle for segmented checkpoints: a load always restores the speed.)
         seg ? { label: "Keep speed", detail: "always", disabled: true } : { label: "Keep speed", detail: keep ? "on" : "off" },
+        // (0.0.44: after the six, so 1-6 stay where muscle memory has them.)
+        { label: "Delete checkpoint", disabled: !n },
+        { label: "Clear all", disabled: !n },
       ],
       // bhoptimer's warning line ("Teleporting will stop your timer!").
       footer: seg ? "Segmented: a teleport takes the timer and the replay back to the checkpoint. Noclip makes the run practice." : "A teleport or noclip makes a timed run practice.",
@@ -280,6 +285,8 @@ export class Practice {
         else if (i === 1) this.teleport(this.cps.current());
         else if (i === 2 || i === 3) this.step(i === 2 ? -1 : 1);
         else if (i === 4) this.toggleNoclip();
+        else if (i === 6) this.remove();
+        else if (i === 7) this.clear();
         else if (seg) return;
         else prefs.update((p) => (p.practice.keepVelocity = !p.practice.keepVelocity));
         this.refreshMenu();
@@ -427,6 +434,21 @@ export class Practice {
     this.toast(`Practising from ${s.timer.status === "running" ? formatTime(s.timer.time()) : "the start"} of that run. ${restartHow()}`, 5000);
     this.refreshMenu();
     return null;
+  }
+
+  /** Deletes the current checkpoint (the menu's Delete, !delcp). Never touches the run. */
+  private remove(): void {
+    const n = this.cps.number;
+    if (!this.cps.remove()) return this.noCheckpoint();
+    whisper(this.cps.count ? `Checkpoint ${n} deleted, ${this.cps.count} left` : `Checkpoint ${n} deleted`, { key: "practice-cp" });
+  }
+
+  /** Deletes every checkpoint (the menu's Clear all, !clearcps). Never touches the run. */
+  private clear(): void {
+    const n = this.cps.count;
+    if (!n) return this.noCheckpoint();
+    this.cps.clear();
+    whisper(n === 1 ? "Checkpoint deleted" : `All ${n} checkpoints deleted`, { key: "practice-cp" });
   }
 
   private noCheckpoint(): void {

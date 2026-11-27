@@ -136,13 +136,28 @@ export function menuDigit(code: string, input: Pick<Input, "movesPlayer"> | null
   return Number(d[1]);
 }
 
+/** Ctrl is bound to something that moves the player (duck is ControlLeft by default: binds.ts), so it's held in play. */
+export function ctrlMoves(input: Pick<Input, "movesPlayer"> | null): boolean {
+  return !!input && (input.movesPlayer("ControlLeft") || input.movesPlayer("ControlRight"));
+}
+
 /**
- * The digit a numbered menu takes from this key press, or null: Ctrl / Cmd / Alt held, a key repeat, typing in a text
- * field (the chat, the console), or a key menuDigit leaves to its bind.
+ * A modifier chord a numbered menu leaves alone: Cmd or Alt, or Ctrl unless Ctrl is a movement bind (0.0.44: a digit
+ * pressed while crouching on Ctrl picks; it was dropped as a Ctrl chord). Ctrl+W and the zoom keys stay guarded by
+ * play-lock.ts either way.
+ */
+export function modifierHeld(e: Pick<KeyboardEvent, "ctrlKey" | "metaKey" | "altKey">, input: Pick<Input, "movesPlayer"> | null = host?.input ?? null): boolean {
+  return e.metaKey || e.altKey || (e.ctrlKey && !ctrlMoves(input));
+}
+
+/**
+ * The digit a numbered menu takes from this key press, or null: a modifier chord (modifierHeld), a key repeat, typing
+ * in a text field (the chat, the console), or a key menuDigit leaves to its bind.
  */
 export function menuKey(e: Pick<KeyboardEvent, "code" | "repeat" | "ctrlKey" | "metaKey" | "altKey" | "target">, input?: Pick<Input, "movesPlayer"> | null): number | null {
-  if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || isTextField(e.target)) return null;
-  return menuDigit(e.code, input);
+  const inp = input === undefined ? (host?.input ?? null) : input;
+  if (e.repeat || modifierHeld(e, inp) || isTextField(e.target)) return null;
+  return menuDigit(e.code, inp);
 }
 
 /** main.ts input.ownsKey: while a numbered menu is on screen its digits fire no bind (menuDigit's keys excepted). */
@@ -176,7 +191,7 @@ export async function openGunPicker(say?: (text: string) => void): Promise<void>
     window.addEventListener(
       "keydown",
       (e) => {
-        if (!menu?.open || e.repeat || e.ctrlKey || e.metaKey || e.altKey || isTextField(e.target)) return;
+        if (!menu?.open || e.repeat || modifierHeld(e) || isTextField(e.target)) return;
         if (e.code === "Escape") return menu.hide(); // (the pause still opens)
         // The guns key again closes it, as a CS:S menu key does, before its digit would pick the 7th gun.
         if (prefs.get().binds.gunMenu?.includes(e.code)) {

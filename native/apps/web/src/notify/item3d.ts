@@ -16,6 +16,7 @@
 // icon.
 
 import * as THREE from "three";
+import { noteStall } from "../stall-log";
 import { sharedRenderer } from "../shared-gl";
 import { softwareContext } from "../gfx-auto";
 import { getGhostCosmetics, getLoadout, getOutfit } from "../player/cosmetics";
@@ -222,6 +223,7 @@ class Preview implements LiveEmblem {
   prep(): void {
     if (this.prepping) return;
     this.prepping = true;
+    noteStall("unlock-card");
     const scene = prepare(this.spec, this.r);
     // (Counted from now, so a burst of other looks can't evict it while it builds.)
     const e = prepared.get(this.spec.key);
@@ -246,6 +248,7 @@ class Preview implements LiveEmblem {
     if (this.shownAt !== null || this.failed) return;
     const now = performance.now();
     this.shownAt = now;
+    noteStall("unlock-card");
     const css = this.el.getBoundingClientRect().width || 112;
     this.px = Math.max(32, Math.min(320, Math.round(css * Math.min(MAX_DPR, devicePixelRatio || 1))));
     this.canvas.width = this.canvas.height = this.px;

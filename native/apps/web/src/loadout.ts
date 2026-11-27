@@ -196,7 +196,7 @@ export const DEFAULT_LOADOUT: CosmeticLoadout = Object.freeze({ knife: DEFAULT_K
  * Shader finish designs (viewmodel/finishes/shader.ts FINISH_CODE): one per finish, each a fixed design baked into its
  * GLSL. "founder": Founder's Gold, the owner's finish (role-held in progression.ts).
  */
-export type FinishKind = "none" | "sunset" | "ember" | "tigerlily" | "nebula" | "dewweb" | "frost" | "heartbeet" | "fourleaf" | "founder" | "geode" | "rift" | "spectrum" | "goldleaf" | "aurora" | "contour" | "meteor" | "hourglass" | "lantern" | "wildflower" | "tally" | "devgrid" | "emerald" | "ruby" | "sapphire" | "pearl" | "chromatic" | "chrome" | "ruler" | "linework" | "sunray";
+export type FinishKind = "none" | "sunset" | "ember" | "tigerlily" | "nebula" | "dewweb" | "frost" | "heartbeet" | "fourleaf" | "founder" | "geode" | "rift" | "spectrum" | "goldleaf" | "aurora" | "contour" | "meteor" | "hourglass" | "lantern" | "wildflower" | "tally" | "devgrid" | "emerald" | "ruby" | "sapphire" | "pearl" | "chromatic" | "chrome" | "ruler" | "linework" | "sunray" | "packice";
 
 export interface FinishStyle {
   kind: FinishKind;
@@ -240,6 +240,8 @@ export const FINISH_STYLE: Record<string, FinishStyle> = {
   "fin-linework": { kind: "linework" },
   // The Daily Challenge's day-cycle set (progression.ts DAILY_LADDER).
   "fin-sunray": { kind: "sunray" },
+  // Winter (v0.0.44, progression.ts WINTER_MAPS): Deep Winter's pack ice.
+  "fin-pack-ice": { kind: "packice" },
 };
 
 /** Render data of a finish id (retired ids resolve to their replacement; unknown -> the plain carrot). */

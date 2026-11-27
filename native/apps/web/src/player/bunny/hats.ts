@@ -18,6 +18,7 @@
 //       chevron at the back; a light sweeps to and fro along the aqua line across its front.
 //
 //   - Silver Wreath (First T10, v0.0.37): the first hat earned by playing; static silver leaves (wreath below).
+//   - Santa Hat (Sleigh Ride, v0.0.44): a red cap and cone with a white fur brim and pom-pom (santaHat below).
 //   - More Supporter hats, asked for by supporters: Propeller Cap, Capybara and Maxwell (moving, accent -1..-8); the
 //     Space Buns and Ponytail wigs (wigs.ts: the player's hair colour; the ponytail swings) and the Half Oni Mask
 //     (oni-mask.ts). On the standard bunny a wig is built for the bare head (the hood is down: mesh.ts), on Plush and
@@ -145,6 +146,54 @@ function beanie(): THREE.BufferGeometry {
     const a = (k / 5) * Math.PI * 2;
     blob(add(tip, [Math.cos(a) * 0.75 * P, Math.sin(a) * 0.75 * P, 0.9 * P]), [0.42 * P, 0.42 * P, 0.7 * P], k % 2 ? LEAF2 : LEAF);
   }
+  const g = b.geometry();
+  g.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 70), 60);
+  return g;
+}
+
+/**
+ * Santa Hat (Sleigh Ride, v0.0.44): a red cap pulled over the hood like the beanie (the ears come through), a thick
+ * white fur brim round its edge, and a soft red cone rising from the crown that bends back between the ears and droops
+ * to a white pom-pom behind the head. Plain red and white, no trim or logo.
+ */
+function santaHat(): THREE.BufferGeometry {
+  const W = headWeight();
+  const b = new Builder();
+  const RED = 0xd0342c, FUR = 0xf5f2ec, FUR2 = 0xe3ded4;
+  // The cap: the beanie's shell (tipped back so the front edge sits above the face), red.
+  const axis = norm([0, 0.32, 1]);
+  const r: V3 = [HOOD_R[0] + 0.32, HOOD_R[1] + 0.32, HOOD_R[2] + 0.3];
+  const SEG = 36;
+  const shell = (d: number, a: number): V3[] => b.ellipsoidRows(HOOD_C, [r[0] + d, r[1] + d, r[2] + d], axis, [1, 0, 0], SEG, 1, a, a)[0];
+  b.surface(b.ellipsoidRows(HOOD_C, r, axis, [1, 0, 0], SEG, 10, 0, 0.98), { paint: () => fixed(RED), weight: () => W });
+  // The brim: a fat roll of fur over the cap's edge, a little lumpy so it reads as fur, not a ring.
+  const lump = (k: number) => 1 + 0.12 * Math.sin(k * 2.1) * Math.sin(k * 0.7 + 1);
+  const brim = (d: number, a: number) => shell(d, a).map((p, k): V3 => {
+    const q = sub(p, HOOD_C);
+    return add(HOOD_C, scale(q, 1 + (lump(k) - 1) * (d / 1.6) * 0.08));
+  });
+  b.surface([shell(0, 1.0), brim(0.55, 0.995), brim(1.0, 0.95), brim(1.05, 0.86), brim(0.8, 0.78), brim(0.1, 0.75)], {
+    paint: (i) => fixed(i === 2 || i === 3 ? FUR : FUR2),
+    weight: () => W,
+  });
+  // The cone: from inside the crown, up, then back between the ears (they sweep back and out from (+-2.25, 1.35,
+  // 74.3)), drooping to the pom-pom.
+  const crown = add(HOOD_C, [axis[0] * r[0], axis[1] * r[1], axis[2] * r[2]]);
+  const P0 = add(crown, [0, -0.6, -1.4]), P1 = add(crown, [0, -0.3, 4.4]), P2 = add(crown, [2.4, 0.0, 6.6]), P3 = add(crown, [6.2, 0.6, -0.4]);
+  const bez = (t: number): V3 => {
+    const m = 1 - t;
+    return add(add(scale(P0, m * m * m), scale(P1, 3 * m * m * t)), add(scale(P2, 3 * m * t * t), scale(P3, t * t * t)));
+  };
+  const N = 18;
+  const path = [...Array(N + 1)].map((_, i) => bez(i / N));
+  const rad = (i: number) => {
+    const t = i / N;
+    return 0.45 + 3.15 * Math.pow(1 - t, 1.35);
+  };
+  b.tube(path, rad, 20, [1, 0, 0], () => fixed(RED), () => W);
+  // The pom-pom.
+  const P = 1.55;
+  b.surface(b.ellipsoidRows(P3, [P, P, P], [0, 0, 1], [1, 0, 0], 14, 8), { paint: (_i, k) => fixed(k % 3 ? FUR : FUR2), weight: () => W, closed: true });
   const g = b.geometry();
   g.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 70), 60);
   return g;
@@ -858,6 +907,7 @@ const BUILD: Record<string, () => THREE.BufferGeometry> = {
   "hat-founder-crown": founderCrown,
   "hat-tophat": topHat,
   "hat-beanie": beanie,
+  "hat-santa": santaHat,
   "hat-gem-orbit": gemOrbit,
   "hat-halo": halo,
   "hat-circlet": circlet,
