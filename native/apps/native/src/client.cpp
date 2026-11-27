@@ -899,6 +899,23 @@ int run(const native::Options &opt) {
                     }
                     return;
                 }
+                // Delete / Clear all (web 0.0.44, !delcp / !clearcps): only the checkpoints go, never the run.
+                if (action == "delete" || action == "clear") {
+                    const auto number = practice.number();
+                    const auto deleted = action == "delete" ? size_t(practice.remove(core.get()))
+                                                            : practice.clear_checkpoints(core.get());
+                    if (!deleted)
+                        toast("No checkpoint yet. Press C to save one.");
+                    else if (action == "clear")
+                        toast(deleted == 1 ? "Checkpoint deleted"
+                                           : "All " + std::to_string(deleted) + " checkpoints deleted");
+                    else
+                        toast("Checkpoint " + std::to_string(number) + " deleted"
+                              + (practice.checkpoints.empty()
+                                         ? std::string()
+                                         : ", " + std::to_string(practice.checkpoints.size()) + " left"));
+                    return;
+                }
                 if (action == "save") {
                     practice.save(core.get(), input, selected_style, active_style, active_track);
                     toast("Checkpoint " + std::to_string(practice.number()) + " saved");
@@ -1107,6 +1124,7 @@ int run(const native::Options &opt) {
         apply_preferences();
         renderer->set_cosmetics(outfit, held_knife.loadout(), charm_loadout);
         renderer->set_ghost_cosmetics(ghost_cosmetic, trail_cosmetic, shape_cosmetic);
+        renderer->prewarm_hop_layer();
         apply_room_mode(room_modes.map_loaded(map_id, room.spectator_target.has_value(), epoch_ms()));
     };
     auto request_map = [&](const std::string &id) {
@@ -1221,7 +1239,8 @@ int run(const native::Options &opt) {
         }
         if (!core) throw std::runtime_error("Load the replay map first");
         recorder.input.stop();
-        practice.clear(core.get());
+        // Watching a replay keeps your checkpoints for when you play again (Throw 11-26); the rest of practice resets.
+        practice.clear_keeping_checkpoints();
         if (tutorial_runner.lesson) tutorial_runner.lesson->stop();
         tutorial_runner.demo = false;
         renderer->reset_presentation();
@@ -1778,11 +1797,12 @@ int run(const native::Options &opt) {
                         practice.menu_open = false;
                         return;
                     }
-                    if (pick >= 1 && pick <= 6) {
+                    if (pick >= 1 && pick <= 8) {
                         if ((pick == 3 && practice.number() <= 1)
-                            || (pick == 4 && practice.number() >= practice.checkpoints.size()))
+                            || (pick == 4 && practice.number() >= practice.checkpoints.size())
+                            || (pick >= 7 && practice.checkpoints.empty()))
                             return;
-                        const char *actions[] = {"save", "tele", "prev", "next", "noclip", "keepVelocity"};
+                        const char *actions[] = {"save", "tele", "prev", "next", "noclip", "keepVelocity", "delete", "clear"};
                         practice_action(actions[pick - 1]);
                         return;
                     }
@@ -2869,7 +2889,8 @@ int run(const native::Options &opt) {
                         const auto id = message.at("id").get<std::string>();
                         if (!native::styles.contains(id)) throw std::runtime_error("Unknown style");
                         selected_style = id;
-                        remember_style();
+                        // A Daily room plays the day's style without making it the saved one (ui/main.ts playDailyRoom).
+                        if (message.value("remember", true)) remember_style();
                         active_track = 0;
                         reset();
                     } else if (type == "settings") {

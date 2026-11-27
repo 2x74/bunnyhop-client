@@ -80,7 +80,8 @@ export type MenuMessage =
   | { type: "prefetchMap"; map: string | null; sha?: string }
   /** `remember: false`: play this map in `style` without making it the saved style (the Daily's style of the day). */
   | { type: "selectMap"; id: string; style?: StyleId; track?: number; remember?: false }
-  | { type: "style"; id: StyleId }
+  /** `remember: false`: switch to `style` for now without saving it (a Daily room plays the day's style). */
+  | { type: "style"; id: StyleId; remember?: false }
   | {
       type: "cosmetics";
       outfit: string;
@@ -220,6 +221,9 @@ export const PRACTICE_ACTIONS = [
   "prev",
   "next",
   "keepVelocity",
+  // !delcp / !clearcps and the checkpoint menu's 7 and 8 (web 0.0.44).
+  "delete",
+  "clear",
 ] as const;
 export type PracticeAction = (typeof PRACTICE_ACTIONS)[number];
 /** gauntlet/state.ts GauntletProgress: this map's index, the map count, the earlier splits' sum, your PB's split here. */

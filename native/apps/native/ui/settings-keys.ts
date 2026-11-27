@@ -130,6 +130,7 @@ export const REQUESTED_KEYS: readonly RequestedKey[] = [
   render("graphics.modelLighting", choice("off", "subtle", "full")),
   render("graphics.propLighting", boolean),
   render("graphics.mapDetails", boolean),
+  render("graphics.precipitation", choice("off", "light", "full")),
   render("graphics.resolutionScale", number(0.25, 2)),
   render("graphics.aspect", choice("native", "4:3", "5:4", "16:10", "16:9")),
   render("graphics.aspectFit", choice("stretch", "bars")),

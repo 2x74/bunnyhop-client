@@ -96,7 +96,41 @@ void test_ticks_and_boundaries_follow_the_scale() {
 }
 }  // namespace
 
+// Delete / Clear all (web 0.0.44 Checkpoints.remove): the one after the deleted checkpoint becomes current, or the one
+// before when it was the last; clearing keeps practice mode and noclip as they are.
+void test_delete_and_clear_checkpoints() {
+    native::Practice practice;
+    assert(!practice.remove(nullptr) && practice.clear_checkpoints(nullptr) == 0);
+    for (uint32_t handle = 1; handle <= 4; ++handle)
+        practice.retain({handle, "autohop", "autohop", 0});
+    practice.step(-2);
+    assert(practice.number() == 2);
+    assert(practice.remove(nullptr) && practice.checkpoints.size() == 3);
+    assert(practice.number() == 2 && practice.checkpoints[practice.current].handle == 3);
+    practice.step(5);
+    assert(practice.remove(nullptr) && practice.number() == 2 && practice.checkpoints[practice.current].handle == 3);
+    practice.mode = practice.active = practice.noclip = true;
+    assert(practice.clear_checkpoints(nullptr) == 2);
+    assert(practice.checkpoints.empty() && practice.number() == 0 && practice.current == 0);
+    assert(practice.mode && practice.active && practice.noclip);
+    assert(!practice.remove(nullptr));
+}
+
+// Watching a replay keeps the checkpoints (and which one is current); the rest of practice resets as clear() does.
+void test_replay_keeps_checkpoints() {
+    native::Practice practice;
+    for (uint32_t handle = 1; handle <= 3; ++handle)
+        practice.retain({handle, "autohop", "autohop", 0});
+    practice.step(-1);
+    practice.mode = practice.active = practice.noclip = practice.menu_open = true;
+    practice.clear_keeping_checkpoints();
+    assert(practice.checkpoints.size() == 3 && practice.number() == 2 && practice.checkpoints[2].handle == 3);
+    assert(!practice.mode && !practice.active && !practice.noclip && !practice.menu_open);
+}
+
 int main() {
+    test_delete_and_clear_checkpoints();
+    test_replay_keeps_checkpoints();
     test_only_solo_practice_mode_and_never_kept();
     test_a_slowed_attempt_never_counts();
     test_ticks_and_boundaries_follow_the_scale();

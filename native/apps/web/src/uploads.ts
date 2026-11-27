@@ -20,6 +20,7 @@
 // names the signed-in player. Nothing else from before v0.0.10 is retried.
 
 import type { ReplayHeader } from "./replay";
+import { TOO_LONG_CODE } from "./run-limits";
 
 export type UploadFailure = "too_large" | "network" | "interrupted" | "guest_limit" | "rate_limited";
 
@@ -69,9 +70,17 @@ export const TRACKING_SINCE_KEY = "bunnyhop:uploads:since";
 /** localStorage, per account: the legacy PB scan ran. */
 export const legacyScanKey = (account: string) => `bunnyhop:uploads:legacy-scan:${account}`;
 
+/**
+ * A refusal no retry can change because of the run itself: `too_long` (413), a run over the leaderboard's 8 h
+ * (run-limits.ts). Final, never sent again; the replay is kept on this device instead (online.ts keepTooLong).
+ */
+export const tooLongRefusal = (result: "network" | { id: string; code?: string }): boolean => result !== "network" && !result.id && result.code === TOO_LONG_CODE;
+
 /** What an upload's answer means for the stored copy: a failure to keep it for, or null (done with it). */
 export function failureOf(result: "network" | { id: string; code?: string }): UploadFailure | null {
   if (result === "network") return "network";
+  // (Before too_large: a run over 8 h is refused for its length whatever its size, and that is final.)
+  if (tooLongRefusal(result)) return null;
   if (!result.id && result.code === "too_large") return "too_large";
   if (!result.id && result.code === "guest_limit") return "guest_limit";
   if (!result.id && result.code === "rate_limited") return "rate_limited";

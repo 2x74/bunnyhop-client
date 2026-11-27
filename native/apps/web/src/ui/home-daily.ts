@@ -4,7 +4,7 @@
 // daily screen (daily/state.ts).
 //
 // Custom CSS (the /custom-css guide promises these): #home-daily, its [data-part] pieces ("left", "map", "top", "you",
-// "yesterday"; a top row's "player" and "watch") and --home-daily: none on :root, which hides it (the maps to try come back).
+// "room", "yesterday"; a top row's "player" and "watch") and --home-daily: none on :root, which hides it (the maps to try come back).
 
 import "./daily.css";
 import type { DailyEntry, DailyView } from "../api";
@@ -21,6 +21,7 @@ import { icon } from "./icons";
 import { nameAttrs, nameMarks } from "./marks";
 import { mapArt } from "./thumbs";
 import { openReplayViewer } from "../viewer/request";
+import { dailyRoomLink } from "./daily-room-link";
 
 export interface HomeDailyActions {
   /** Play the day's map from the Daily entry, in the day's style. */
@@ -181,11 +182,16 @@ export function homeDaily(v: Extract<DailyView, { enabled: true }>, a: HomeDaily
       )
     : h("button.home-daily-more", { type: "button", "data-part": "yesterday", onclick: () => a.open() }, h("span", null, "Leaderboard"), h("span.home-daily-chev", { "aria-hidden": "true" }, icon("chevronRight")));
 
+  // Into the Daily room (net/daily-room.ts), the way the other lines here open things; shown while one is listed.
+  const count = h("small.home-daily-room-n");
+  const room = dailyRoomLink(h("button.home-daily-more.home-daily-room", { type: "button", "data-part": "room" }, h("span", null, "Play with others"), count, h("span.home-daily-chev", { "aria-hidden": "true" }, icon("chevronRight"))), count);
+
   return h(
     "section#home-daily.home-daily",
     { "aria-label": "Daily Challenge" },
     h("div.home-daily-head", null, h("h2.home-recs-head", null, "Daily Challenge", style === DAILY_STYLE ? null : h("span.home-daily-style", { "data-part": "style" }, styleLabel(style))), left),
     h("div.home-daily-body", null, map, h("div.home-daily-side", null, top, you)),
+    room,
     yLine,
   );
 }

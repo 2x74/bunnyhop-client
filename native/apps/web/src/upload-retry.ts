@@ -1,7 +1,8 @@
 // One look at the runs kept on this device (uploads.ts holds the rules, online.ts the timers). DOM-free, with everything
 // it touches passed in, so apps/web/test/upload-retry.test.ts can play out a refused, waiting and finally accepted run.
 
-import { effectiveFailure, expired, failureOf, failureText, holds, outdatedRefusal, shouldRetry, spendAttempt, type StoredUpload } from "./uploads";
+import { effectiveFailure, expired, failureOf, failureText, holds, outdatedRefusal, shouldRetry, spendAttempt, tooLongRefusal, type StoredUpload } from "./uploads";
+import { RANKED_MAX_HOURS } from "./run-limits";
 import type { Submission, User } from "./api";
 
 /** More runs than this in one go get a single line, not their own toasts. */
@@ -23,6 +24,8 @@ export interface RetryIO {
   sayBad: (msg: string) => void;
   label: (u: StoredUpload) => string;
   now: () => number;
+  /** A run refused as too long for the leaderboard (uploads.ts tooLongRefusal): kept on this device before it leaves the store. */
+  keepTooLong?: (u: StoredUpload) => Promise<unknown>;
 }
 
 export interface RetryOutcome {
@@ -77,8 +80,15 @@ export async function retryStored(io: RetryIO): Promise<RetryOutcome> {
       io.sayBad(`Your earlier ${io.label(u)} still hasn't uploaded: ${failureText(failure)}.`);
       continue;
     }
+    // Over the leaderboard's limit: final, and the replay stays on this device (never dropped for its length).
+    const tooLong = tooLongRefusal(sub);
+    if (tooLong) await io.keepTooLong?.(u).catch(() => {});
     await io.store.remove(u.sha);
     result.delivered = true;
+    if (tooLong) {
+      io.sayBad(`Your earlier ${io.label(u)} is over ${RANKED_MAX_HOURS} hours, too long for the leaderboard: it's in your replays.`);
+      continue;
+    }
     if (!sub.id) {
       if (sub.status === "rejected") io.rejected(u);
       // Recorded by an older build than the server takes now: nothing to fix, so no server wording.

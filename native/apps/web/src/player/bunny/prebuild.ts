@@ -228,9 +228,9 @@ export function prebuildViewmodels(pairs: readonly [KnifeDef, GloveStyleId][], g
 }
 
 /**
- * Prepares a hidden model for every output the look draws `scene` to, with its fog / lights. No-KHR drivers also
- * draw its vertex layouts separately before attachment; KHR drivers keep parallel shader preparation. Resolves after
- * `timeoutMs` at the latest.
+ * Prepares a hidden model for every output the look draws `scene` to, with its fog / lights, then draws its vertex
+ * layouts off screen before attachment (no-KHR drivers a frame apart; KHR drivers keep parallel shader preparation).
+ * Resolves after `timeoutMs` at the latest.
  */
 export function compileModel(renderer: THREE.WebGLRenderer, root: THREE.Object3D, camera: THREE.Camera, scene: THREE.Scene, timeoutMs = 5000): Promise<void> {
   let timer = 0;
@@ -242,11 +242,15 @@ export function compileModel(renderer: THREE.WebGLRenderer, root: THREE.Object3D
     .finally(() => clearTimeout(timer));
 }
 
-/** Unbounded loading-screen preparation; the joining model's caller supplies its own fallback deadline. */
+/**
+ * Unbounded loading-screen preparation; the joining model's caller supplies its own fallback deadline. The model is
+ * drawn once off screen on every driver (v0.0.44): with KHR_parallel_shader_compile too, as D3D11 under ANGLE otherwise
+ * builds its draw-time state in the frame the player first shows (research freeze.md).
+ */
 export function warmModelPrograms(renderer: THREE.WebGLRenderer, root: THREE.Object3D, camera: THREE.Camera, scene: THREE.Scene): Promise<void> {
   return warmPrograms(renderer, root, camera, scene, false)
     .then(() => retainModelPrograms(renderer, root, camera, scene))
-    .then(() => drawHiddenPrograms(renderer, root, camera, scene));
+    .then(() => drawHiddenPrograms(renderer, root, camera, scene, true));
 }
 
 /** The gun, its camo and grip data share the remote bunny worker and five-second fallback. */

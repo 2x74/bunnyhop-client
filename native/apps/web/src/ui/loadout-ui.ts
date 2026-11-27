@@ -47,6 +47,9 @@ export function finishBackground(id: string | null | undefined): string {
     case "sunray":
       // The Daily Challenge's knife finish (lane v43/daily): a sun at the guard, rays, peach to indigo.
       return "radial-gradient(circle at 4% 50%, #ffcc42 0 9%, #fff0bc 9% 11.5%, transparent 12%), repeating-conic-gradient(from 60deg at 4% 50%, rgba(255, 222, 128, 0.5) 0 4deg, transparent 4deg 10deg), linear-gradient(90deg, #ffb870 0%, #f0736b 40%, #5a4a8e 78%, #38387f 100%)";
+    case "packice":
+      // Winter's Pack Ice: flat floes in snow white and ice blues with cold blue leads between them.
+      return "linear-gradient(118deg, transparent 0 17%, #245285 17% 18.5%, transparent 18.5% 47%, #245285 47% 48.5%, transparent 48.5% 74%, #245285 74% 75.5%, transparent 75.5%), linear-gradient(64deg, #f2f6fa 0 30%, #245285 30% 31.5%, #bcdcf2 31.5% 58%, #245285 58% 59.5%, #f2f6fa 59.5% 84%, #245285 84% 85.5%, #7fb4e0 85.5%)";
     case "ember":
       return "radial-gradient(circle at 30% 45%, #ffb43a 0 12%, transparent 32%), radial-gradient(circle at 70% 55%, #f0561a 0 18%, transparent 40%), radial-gradient(circle at 88% 30%, #ffcf5a 0 8%, transparent 22%), linear-gradient(90deg, #2a0d08, #7a1606 60%, #3a120a)";
     case "tigerlily":

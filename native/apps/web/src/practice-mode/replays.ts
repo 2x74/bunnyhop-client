@@ -7,6 +7,9 @@
 // The bytes go in pb.ts's IndexedDB store under their own "practice:" keys (memory when the browser refuses IndexedDB);
 // the list is in localStorage, so the pause menu draws it without waiting. Caps: PRACTICE_REPLAY_CAPS, oldest first,
 // and only practice replays ever go to make room: a PB replay is never touched.
+// Long ones (`long`: a run over the leaderboard's 8 h, run-limits.ts, or any replay over the size cap) are kept too,
+// outside the caps: never dropped to make room, only when the player deletes them. A recording is never thrown away
+// for its length (owner, 2026-11-19).
 
 import type { Replay } from "../replay";
 
@@ -34,15 +37,17 @@ export interface PracticeReplayMeta {
   teleports: number;
   /** The slowest timescale it ran at (timescale.ts), when it was slowed. */
   scale?: number;
+  /** Kept outside the caps: a run too long for the leaderboard (run-limits.ts), or a replay over `maxBytes`. */
+  long?: true;
   savedAt: number;
   bytes: number;
 }
 
 /**
- * At most `perMap` on one map and `total` on this device, holding at most `bytes` together; one replay over
- * `maxBytes` (the server's replay size limit, apps/api/src/replay-io.ts MAX_REPLAY_BYTES) isn't kept.
+ * At most `perMap` on one map and `total` on this device, holding at most `bytes` together. One replay over `maxBytes`
+ * (the server's replay size limit, apps/api/src/replay-io.ts MAX_REPLAY_BYTES) is kept as a long one, outside them.
  */
-export const PRACTICE_REPLAY_CAPS = { perMap: 20, total: 100, bytes: 64 << 20, maxBytes: 8 << 20 };
+export const PRACTICE_REPLAY_CAPS = { perMap: 20, total: 100, bytes: 64 << 20, maxBytes: 16 << 20 };
 export type PracticeReplayCaps = typeof PRACTICE_REPLAY_CAPS;
 
 export const PRACTICE_KEY_PREFIX = "practice:";
@@ -53,7 +58,8 @@ export const isPracticeReplayKey = (key: string): boolean => key.startsWith(PRAC
  * map is over its own cap. The newest (just kept) never goes.
  */
 export function practiceEvictions(list: readonly PracticeReplayMeta[], caps: PracticeReplayCaps = PRACTICE_REPLAY_CAPS): string[] {
-  const keep = [...list].sort((a, b) => a.savedAt - b.savedAt);
+  // Long replays sit outside the caps: never counted, never dropped.
+  const keep = list.filter((m) => !m.long).sort((a, b) => a.savedAt - b.savedAt);
   const out: string[] = [];
   const drop = (i: number) => out.push(keep.splice(i, 1)[0].key);
   const newest = keep.at(-1);
@@ -122,13 +128,13 @@ export class PracticeReplays {
   }
 
   /**
-   * Keeps `bytes` (an encoded replay) with what the list shows, dropping the oldest practice replays past the caps.
-   * Null when it's over the size limit or couldn't be stored.
+   * Keeps `bytes` (an encoded replay) with what the list shows, dropping the oldest practice replays past the caps (a
+   * long one, or one over the size limit, is kept outside them). Null when it couldn't be stored.
    */
   async keep(bytes: Uint8Array, o: Omit<PracticeReplayMeta, "key" | "savedAt" | "bytes">): Promise<PracticeReplayMeta | null> {
-    if (bytes.byteLength > this.caps.maxBytes) return null;
     const savedAt = this.now();
-    const meta: PracticeReplayMeta = { ...o, key: `${PRACTICE_KEY_PREFIX}${o.map}:${savedAt}:${this.n++}`, savedAt, bytes: bytes.byteLength };
+    const long = o.long || bytes.byteLength > this.caps.maxBytes;
+    const meta: PracticeReplayMeta = { ...o, ...(long ? { long: true as const } : {}), key: `${PRACTICE_KEY_PREFIX}${o.map}:${savedAt}:${this.n++}`, savedAt, bytes: bytes.byteLength };
     try {
       await this.store.put(meta.key, bytes);
     } catch {

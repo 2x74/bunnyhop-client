@@ -37,7 +37,7 @@ export { HILT_FRAGMENT_ALBEDO, HILT_FRAGMENT_LIGHT } from "../hilts/glsl";
 export { GLOVE_FRAGMENT_ALBEDO, GLOVE_FRAGMENT_LIGHT } from "../gloves/glsl";
 
 /** `#define FINISH n` per design (0 = no finish code at all). */
-export const FINISH_CODE: Record<FinishKind, number> = { none: 0, sunset: 1, ember: 2, tigerlily: 3, nebula: 4, dewweb: 5, frost: 6, heartbeet: 7, fourleaf: 8, founder: 9, geode: 10, rift: 11, spectrum: 12, goldleaf: 13, aurora: 14, contour: 15, meteor: 16, hourglass: 17, lantern: 18, wildflower: 19, tally: 20, devgrid: 21, emerald: 22, ruby: 23, sapphire: 24, pearl: 25, chromatic: 26, chrome: 27, ruler: 28, linework: 29, sunray: 30 };
+export const FINISH_CODE: Record<FinishKind, number> = { none: 0, sunset: 1, ember: 2, tigerlily: 3, nebula: 4, dewweb: 5, frost: 6, heartbeet: 7, fourleaf: 8, founder: 9, geode: 10, rift: 11, spectrum: 12, goldleaf: 13, aurora: 14, contour: 15, meteor: 16, hourglass: 17, lantern: 18, wildflower: 19, tally: 20, devgrid: 21, emerald: 22, ruby: 23, sapphire: 24, pearl: 25, chromatic: 26, chrome: 27, ruler: 28, linework: 29, sunray: 30, packice: 31 };
 
 /** One finished item, as the shader sees it: which design. */
 export interface FinishSpec {
@@ -752,6 +752,36 @@ vec3 finishAlbedo(float u, float v, vec2 P, out float metal, out float sparkle, 
   c = mix(c, vec3(1.0, 0.94, 0.74), rim * 0.85);
   c = mix(c, vec3(1.0, 0.80, 0.26), disc);
   metal = mix(0.6, 0.82, disc);
+  return c * c;
+#elif FINISH == 31
+  // PACK ICE (Deep Winter, 10 Winter maps): flat floes of sea ice packed edge to edge, each one flat colour (snow white,
+  // pale ice or a deeper ice blue), with thin leads of cold blue water between them. Floes are the cells of a jittered
+  // grid; the lead is the distance to the nearest cell border (two passes, so its width is even all round).
+  vec2 g = P * vec2(0.85, 1.25) + vec2(7.0, 3.0);
+  vec2 gi = floor(g), gf = fract(g);
+  vec2 mr = vec2(0.0), mc = vec2(0.0);
+  float md = 8.0;
+  for (int j = -1; j <= 1; j++)
+    for (int i = -1; i <= 1; i++) {
+      vec2 o = vec2(float(i), float(j));
+      vec2 r = o + 0.5 + 0.38 * fh22(gi + o) - gf;
+      float d = dot(r, r);
+      if (d < md) { md = d; mr = r; mc = gi + o; }
+    }
+  float edge = 8.0;
+  for (int j = -2; j <= 2; j++)
+    for (int i = -2; i <= 2; i++) {
+      vec2 o = vec2(float(i), float(j));
+      vec2 r = o + 0.5 + 0.38 * fh22(gi + o) - gf;
+      vec2 dr = r - mr;
+      if (dot(dr, dr) > 1e-5) edge = min(edge, dot(0.5 * (mr + r), normalize(dr)));
+    }
+  float h = fh21(mc + 2.7);
+  vec3 c = h < 0.45 ? vec3(0.95, 0.97, 0.99) : h < 0.8 ? vec3(0.74, 0.87, 0.95) : vec3(0.48, 0.71, 0.88);
+  float aa = max(fwidth(edge), 1e-4);
+  float lead = 1.0 - smoothstep(0.025 - aa, 0.025 + aa, edge);
+  c = mix(c, vec3(0.14, 0.32, 0.52), lead);
+  metal = mix(0.5, 0.2, lead);
   return c * c;
 #elif FINISH == 28
   // RULER (Workbench, contributors): teal anodised steel with a fine brushed grain, and a brass rule over one half of

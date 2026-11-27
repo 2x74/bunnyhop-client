@@ -95,26 +95,42 @@ export const nameStyleOf = (bold: boolean, italic: boolean): NameStyle | null =>
 // ---------------------------------------------------------------------------------------------
 // Avatar decorations
 
-export type AvatarDecoId = "ears" | "orbit" | "strafe" | "geode" | "stardust" | "carrot" | "clover" | "halo" | "gauge" | "frost" | "petals";
+export type AvatarDecoId =
+  | "ears" | "orbit" | "strafe" | "geode" | "stardust" | "carrot" | "clover" | "halo" | "gauge" | "frost" | "petals"
+  // v0.0.44
+  | "cat" | "angel" | "imp" | "headset" | "blaze" | "storm" | "fizz" | "ping" | "hopper" | "santa" | "crosshair" | "smitten" | "glitch" | "sleepy";
 
 /**
  * One SVG layer of a decoration, in a 120 x 120 box whose middle 80 x 80 is the avatar (centre 60,60, radius 40).
  * `anim`: how the layer moves (avatar-deco.css): spin / spin-back (a full turn), sway (a small rock back and forth),
  * twinkle (fades in and out), gauge (a needle's climb, tremble and fall), glint (a rare short flash), drift (comes loose
- * and drifts off by `drift`, turning, fading out). Every move is the whole layer's transform or opacity, so it stays on
+ * and drifts off by `drift`, turning, fading out). v0.0.44: flick (an ear's twitch now and then), flap / flap-r (a wing's
+ * beat, left / mirrored), flicker (flames), flash (a lightning bolt's double strike), rise (floats up by `drift`, default
+ * straight up, and fades), ping (a ring swelling out and fading), hop (a small bounce: Hopper's bunny, as `inner`), bloom
+ * (a crosshair's kick), glitch-a / glitch-b (a split-second tear one way / the other), fall (snow). Every move is the
+ * whole layer's transform or opacity, so it stays on
  * the compositor. The SVG as drawn is the layer at rest: the still (lists, reduced motion, Potato, OG cards).
  * `currentColor` is the player's name colour (or the decoration's own accent without one).
  */
+export type DecoAnim =
+  | "spin" | "spin-back" | "sway" | "twinkle" | "twinkle-late" | "gauge" | "glint" | "drift"
+  | "flick" | "flap" | "flap-r" | "flicker" | "flash" | "rise" | "ping" | "hop" | "bloom" | "glitch-a" | "glitch-b" | "fall";
+
 export interface DecoLayer {
   svg: string;
-  anim?: "spin" | "spin-back" | "sway" | "twinkle" | "twinkle-late" | "gauge" | "glint" | "drift";
+  anim?: DecoAnim;
   /** The point the layer turns or sways about, in box units (default: the centre; sway: 60, 72). */
   origin?: readonly [number, number];
   /** Seconds per cycle and start offset (negative: already partway), over the animation's own. */
   dur?: number;
   delay?: number;
-  /** drift: how far it goes, in box units. */
+  /** drift / rise: how far it goes, in box units (rise: straight up by default). */
   drift?: readonly [number, number];
+  /**
+   * A second move inside the first (v0.0.44, Hopper: the bunny hops while it laps the ring). Animated only, so the still
+   * is the layer as drawn.
+   */
+  inner?: Pick<DecoLayer, "anim" | "origin" | "dur" | "delay">;
   /**
    * A fixed placement of the whole layer round the box centre (moved by x, y; turned; scaled), under its animation: a
    * spin inside a squashed placement travels round an ellipse (Halo's glint).
@@ -203,6 +219,76 @@ const crystal = (x: number, y: number, s: number) =>
   `<g transform="translate(${x} ${y})" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">` +
   [0, 60, 120].map((a) => `<path transform="rotate(${a})" d="M0 ${-s}V${s}M-${s * 0.35} ${-s * 0.75}L0 ${-s * 0.45}L${s * 0.35} ${-s * 0.75}M-${s * 0.35} ${s * 0.75}L0 ${s * 0.45}L${s * 0.35} ${s * 0.75}"/>`).join("") +
   `</g>`;
+
+// v0.0.44 decorations' parts. OL: the sticker outline every drawn piece shares.
+const OL = "#0d1424";
+/** A drawing flipped left to right across the box's middle (a pair of ears, wings, horns). */
+const mirror = (svg: string) => `<g transform="translate(120 0) scale(-1 1)">${svg}</g>`;
+/** The Halo's ring and its travelling glint (shared by Halo and Angel). */
+const haloRing = (rx: number, ry: number) =>
+  `<ellipse cx="60" cy="13" rx="${rx}" ry="${ry}" transform="rotate(-7 60 13)" fill="none" stroke="${OL}" stroke-width="5.2" stroke-opacity="0.55"/><ellipse cx="60" cy="13" rx="${rx}" ry="${ry}" transform="rotate(-7 60 13)" fill="none" stroke="currentColor" stroke-width="3"/><ellipse cx="60" cy="13" rx="${rx}" ry="${ry}" transform="rotate(-7 60 13)" fill="none" stroke="#ffffff" stroke-width="0.9" stroke-opacity="0.7"/>`;
+const haloGlint = (rx: number, ry: number): DecoLayer => ({ anim: "spin", dur: 5, place: { y: -47, rotate: -7, sx: rx / 60, sy: ry / 60 }, svg: `<ellipse cx="60" cy="0" rx="18" ry="24" fill="#ffffff" fill-opacity="0.35"/><ellipse cx="60" cy="0" rx="9" ry="14" fill="#ffffff"/>` });
+/** A cat ear on the top left of the rim (its base follows the rim), the inside pink. */
+const CAT_EAR =
+  `<path d="M26.9 39.3Q19.5 26 18.9 10.5Q34 13 48 22.9A39 39 0 0 0 26.9 39.3z" fill="currentColor" stroke="${OL}" stroke-width="1.6" stroke-linejoin="round"/>` +
+  `<path d="M30.4 32.6Q25.4 24.6 24.6 17.2Q33.6 18.4 41 24Q34.6 27 30.4 32.6z" fill="#ffc6d8"/>` +
+  `<path d="M22.4 14.6Q24 20 27 24" stroke="#ffffff" stroke-opacity="0.5" stroke-width="1" fill="none" stroke-linecap="round"/>`;
+/** A small white wing off the left of the rim, its shoulder in the name colour. */
+const WING =
+  `<g stroke="${OL}" stroke-width="1.3" stroke-linejoin="round"><path d="M24 52C14 40 2 35-5 39C-3 45 1 49 5 51C-3 54-4 60 1 62C-2 66 1 72 7 71C5 76 11 80 17 76C21 72 24 66 24 60z" fill="#f4f1ea"/>` +
+  `<path d="M24 51C18 46 11 46 8 50C12 55 19 57 24 58z" fill="currentColor"/></g>` +
+  `<path d="M5 51.5C12 54 18 55.5 23 57M1 62C9 63 16 63.4 23 63.2M7 71C13 70 18 68.4 22.6 66.6" stroke="${OL}" stroke-opacity="0.45" stroke-width="1" fill="none"/>`;
+/** A little horn on the top left of the rim. */
+const HORN = `<path d="M41.7 25.6Q29 19 32 3.5Q41 15 52 21.9z" fill="currentColor" stroke="${OL}" stroke-width="1.5" stroke-linejoin="round"/><path d="M34 8Q35 15 40 19.5" stroke="#ffffff" stroke-opacity="0.55" stroke-width="1.1" fill="none" stroke-linecap="round"/>`;
+/** A spade-tipped tail curling up off the bottom right of the rim. */
+const TAIL =
+  `<path d="M86 93C97 106 112 101 106 88" fill="none" stroke="${OL}" stroke-width="5" stroke-linecap="round"/><path d="M86 93C97 106 112 101 106 88" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>` +
+  `<path d="M106 78C110.5 82 114 87 110 90.5Q108 91.5 106.4 89.6Q104.8 91.8 102.6 90.8C99 87.6 102 82 106 78z" fill="currentColor" stroke="${OL}" stroke-width="1.4" stroke-linejoin="round"/>`;
+/** Headset: the band over the top, a cup each side (pad in the name colour), the mic boom off the left cup. */
+const CUP = `<rect x="10" y="47" width="13" height="26" rx="5.5" fill="#2a2c36" stroke="${OL}" stroke-width="1.5"/><rect x="17.5" y="50.5" width="6" height="19" rx="3" fill="currentColor"/>`;
+const HEADSET =
+  `<path d="${arc(-82, 82, 45)}" fill="none" stroke="${OL}" stroke-width="7.4" stroke-linecap="round"/><path d="${arc(-82, 82, 45)}" fill="none" stroke="#2a2c36" stroke-width="5" stroke-linecap="round"/>` +
+  `<path d="${arc(-45, 45, 45)}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>` +
+  CUP + mirror(CUP) +
+  `<path d="M14 71Q13 92 33 97" fill="none" stroke="${OL}" stroke-width="4.2" stroke-linecap="round"/><path d="M14 71Q13 92 33 97" fill="none" stroke="#2a2c36" stroke-width="2.4" stroke-linecap="round"/><circle cx="35" cy="97.4" r="3.4" fill="currentColor" stroke="${OL}" stroke-width="1.3"/>`;
+const soundWave = (d: string) => `<path d="${d}" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>`;
+/** A flame tongue on the rim at `deg`, leaning `lean` degrees from straight up, `len` long, `w` half-wide. */
+const flame = (deg: number, lean: number, len: number, w: number, fill: string) => {
+  const [bx, by] = at(deg, 37.5);
+  const f = (v: number) => Math.round(v * 100) / 100;
+  // A tongue with a bellied left side and its tip flicked right, like a flame caught mid-lick.
+  return `<path transform="translate(${bx} ${by}) rotate(${lean})" d="M${-w} 0C${f(-w * 1.5)} ${f(-len * 0.38)} ${f(-w * 0.2)} ${f(-len * 0.6)} ${f(w * 0.45)} ${-len}C${f(w * 0.15)} ${f(-len * 0.62)} ${f(w * 1.25)} ${f(-len * 0.4)} ${w} 0z" fill="${fill}"/>`;
+};
+/**
+ * Flames up both sides of the rim (the name colour, hot cores), at `[deg, len]` and mirrored: each leans up and out, about
+ * half way from straight out toward straight up, so the avatar reads as burning rather than a sun.
+ */
+const flames = (pts: readonly (readonly [number, number])[]) =>
+  pts
+    .flatMap(([d, len]) => [[d, len], [-d, len]] as const)
+    .map(([d, len]) => flame(d, d * 0.45, len, len * 0.36, "currentColor") + flame(d, d * 0.45, len * 0.55, len * 0.17, "#ffe9a8"))
+    .join("");
+const CLOUD = `<path d="M75 30.5a7 7 0 0 1 1.6-13.6a9.5 9.5 0 0 1 17.4-4.2a7.4 7.4 0 0 1 12.2 6.4a6 6 0 0 1-1.6 11.4z" fill="#5d6679" stroke="${OL}" stroke-width="1.5" stroke-linejoin="round"/><path d="M79 18a9 9 0 0 1 14-5" fill="none" stroke="#ffffff" stroke-opacity="0.35" stroke-width="1.6" stroke-linecap="round"/>`;
+const BOLT = `<path d="M91 29L84.5 41.5H90L85.6 53L97.4 36H91.6L95.6 29z" fill="currentColor" stroke="${OL}" stroke-width="1.4" stroke-linejoin="round"/>`;
+const bubble = (x: number, y: number, r: number) => `<circle cx="${x}" cy="${y}" r="${r}" fill="currentColor" fill-opacity="0.14" stroke="currentColor" stroke-width="1.3"/><circle cx="${Math.round((x - r * 0.35) * 100) / 100}" cy="${Math.round((y - r * 0.35) * 100) / 100}" r="${Math.round(r * 28) / 100}" fill="#ffffff"/>`;
+/** Hopper's bunny, at the top of its track facing right (clockwise), drawn in the name colour. */
+const HOP_BUNNY =
+  `<g stroke="${OL}" stroke-width="0.9" stroke-linejoin="round" fill="currentColor"><ellipse cx="65.6" cy="5.4" rx="1.3" ry="3.8" transform="rotate(18 65.6 5.4)"/><ellipse cx="67.8" cy="6.4" rx="1.2" ry="3.4" transform="rotate(40 67.8 6.4)"/><ellipse cx="59.6" cy="13.6" rx="6" ry="4.2"/><circle cx="65.4" cy="10.6" r="3.2"/></g>` +
+  `<circle cx="53.8" cy="12.6" r="1.8" fill="#ffffff" stroke="${OL}" stroke-width="0.8"/><circle cx="66.6" cy="10" r="0.7" fill="${OL}"/>`;
+const SANTA_HAT =
+  `<path d="M37.6 24.4C39 5 62-5 83 1.5C92 5 97 13 99.5 23C91 15.5 83 15 75.7 21.1z" fill="#e23b3b" stroke="${OL}" stroke-width="1.6" stroke-linejoin="round"/>` +
+  `<path d="M45 12C53 4 66 1 77 3" fill="none" stroke="#ffffff" stroke-opacity="0.3" stroke-width="2" stroke-linecap="round"/>` +
+  `<path d="${arc(-36, 28, 40.5)}" fill="none" stroke="${OL}" stroke-width="10" stroke-linecap="round"/><path d="${arc(-36, 28, 40.5)}" fill="none" stroke="#f4f1ea" stroke-width="7.4" stroke-linecap="round"/>` +
+  `<circle cx="100" cy="25.5" r="5.4" fill="#f4f1ea" stroke="${OL}" stroke-width="1.5"/>`;
+const flakes = (pts: readonly (readonly [number, number, number])[]) => pts.map(([x, y, r]) => `<circle cx="${x}" cy="${y}" r="${r}" fill="#ffffff"/>`).join("");
+const CROSS_D = "M60 3V15M60 105V117M3 60H15M105 60H117";
+/** A heart at x, y, `s` its scale, about 11 across at 1. */
+const heart = (x: number, y: number, s: number, fill: string) =>
+  `<path transform="translate(${x} ${y}) scale(${s})" d="M0 3.6C-5.6-.6-5.2-6.2-2.4-6.2C-1.2-6.2-.4-5.4 0-4.4C.4-5.4 1.2-6.2 2.4-6.2C5.2-6.2 5.6-.6 0 3.6z" fill="${fill}" stroke="${OL}" stroke-width="${Math.round((1 / s) * 100) / 100}" stroke-linejoin="round"/>`;
+/** A crescent moon over the top right (the circle at 93,20 r 12.5 less the one at 100.5,14.5 r 10.5). */
+const MOON = `<path d="M92.67 7.5A12.5 12.5 0 1 0 104.82 24.07A10.5 10.5 0 0 1 92.67 7.5z" fill="#ffe8a3" stroke="${OL}" stroke-width="1.5" stroke-linejoin="round"/><circle cx="87" cy="24" r="1.7" fill="#e8c56a"/><circle cx="90.5" cy="29" r="1.1" fill="#e8c56a"/>`;
+/** A "z" at x, y, `s` its scale (about 5 across at 1). */
+const zz = (x: number, y: number, s: number) => `<path transform="translate(${x} ${y}) scale(${s})" d="M0 0H5L0 6H5" fill="none" stroke="currentColor" stroke-width="${Math.round((1.7 / s) * 100) / 100}" stroke-linecap="round" stroke-linejoin="round"/>`;
 
 export const AVATAR_DECOS: readonly AvatarDeco[] = [
   {
@@ -304,8 +390,8 @@ export const AVATAR_DECOS: readonly AvatarDeco[] = [
     name: "Halo",
     accent: "#6ff0f0",
     layers: [
-      { svg: `<ellipse cx="60" cy="13" rx="31" ry="7.6" transform="rotate(-7 60 13)" fill="none" stroke="#0d1424" stroke-width="5.2" stroke-opacity="0.55"/><ellipse cx="60" cy="13" rx="31" ry="7.6" transform="rotate(-7 60 13)" fill="none" stroke="currentColor" stroke-width="3"/><ellipse cx="60" cy="13" rx="31" ry="7.6" transform="rotate(-7 60 13)" fill="none" stroke="#ffffff" stroke-width="0.9" stroke-opacity="0.7"/>` },
-      { anim: "spin", dur: 5, place: { y: -47, rotate: -7, sx: 31 / 60, sy: 7.6 / 60 }, svg: `<ellipse cx="60" cy="0" rx="18" ry="24" fill="#ffffff" fill-opacity="0.35"/><ellipse cx="60" cy="0" rx="9" ry="14" fill="#ffffff"/>` },
+      { svg: haloRing(31, 7.6) },
+      haloGlint(31, 7.6),
     ],
   },
   {
@@ -360,6 +446,160 @@ export const AVATAR_DECOS: readonly AvatarDeco[] = [
       { anim: "drift", origin: at(-22, 47), drift: [20, 30], svg: looseP(...at(-22, 47), 60) },
       { anim: "drift", origin: at(110, 49), drift: [14, 26], delay: -2.4, svg: looseP(...at(110, 49), -30) },
       { anim: "drift", origin: at(222, 48), drift: [-16, 28], delay: -4.6, svg: looseP(...at(222, 48), 120) },
+    ],
+  },
+  // v0.0.44 ------------------------------------------------------------------------------------
+  {
+    // Pointed cat ears on the rim in the name colour, pink inside; each twitches now and then, out of step.
+    id: "cat",
+    name: "Cat Ears",
+    accent: "#a993ff",
+    layers: [
+      { anim: "flick", dur: 4.6, origin: [37, 31], svg: CAT_EAR },
+      { anim: "flick", dur: 5.9, delay: -2.4, origin: [83, 31], svg: mirror(CAT_EAR) },
+    ],
+  },
+  {
+    // The Halo with two small wings at the sides, beating slowly.
+    id: "angel",
+    name: "Angel",
+    accent: "#ffe08a",
+    layers: [
+      { anim: "flap", origin: [23, 58], svg: WING },
+      { anim: "flap-r", origin: [97, 58], svg: mirror(WING) },
+      { svg: haloRing(31, 7.6) },
+      haloGlint(31, 7.6),
+    ],
+  },
+  {
+    // Two little horns and a spade-tipped tail that swishes.
+    id: "imp",
+    name: "Imp",
+    accent: "#ff4d5e",
+    layers: [
+      { anim: "sway", dur: 2.8, origin: [86, 93], svg: TAIL },
+      { svg: HORN + mirror(HORN) },
+    ],
+  },
+  {
+    // A gaming headset with a mic boom; sound waves pulse off the right cup.
+    id: "headset",
+    name: "Headset",
+    accent: "#5fd8ff",
+    layers: [
+      { svg: HEADSET },
+      { anim: "twinkle", dur: 1.4, svg: soundWave("M107 52Q111.5 60 107 68") },
+      { anim: "twinkle", dur: 1.4, delay: -0.5, svg: soundWave("M112.5 46Q120 60 112.5 74") },
+    ],
+  },
+  {
+    // A ring of flames in the name colour with white-hot cores, flickering (a cyan name burns blue).
+    id: "blaze",
+    name: "Blaze",
+    accent: "#ff8a3d",
+    layers: [
+      { anim: "flicker", svg: flames([[62, 20], [118, 15]]) },
+      { anim: "flicker", delay: -0.45, svg: flames([[34, 15], [90, 22]]) },
+      { svg: ring(40.5, 2.4, 0.9) },
+    ],
+  },
+  {
+    // A small rain cloud over the right shoulder; every few seconds the bolt strikes twice.
+    id: "storm",
+    name: "Storm",
+    accent: "#ffe066",
+    layers: [
+      { svg: `<path d="M80 36l-1.6 5M100 36l-1.6 5M106 34l-1.4 4.4" stroke="#9ad3ff" stroke-width="1.4" stroke-linecap="round"/>` },
+      { anim: "flash", svg: BOLT },
+      { anim: "sway", dur: 5, origin: [90, 22], svg: CLOUD },
+    ],
+  },
+  {
+    // Bubbles rising up both sides, fading out at the top.
+    id: "fizz",
+    name: "Fizz",
+    accent: "#8fe3ff",
+    layers: [
+      { anim: "rise", svg: bubble(13, 96, 4.6) + bubble(106, 104, 3) },
+      { anim: "rise", delay: -1.15, svg: bubble(22, 104, 3.2) + bubble(111, 96, 3.4) },
+      { anim: "rise", delay: -2.3, svg: bubble(9, 108, 2.8) + bubble(98, 108, 4.2) },
+    ],
+  },
+  {
+    // A clean ring sending soft pulses outward, like a sonar ping.
+    id: "ping",
+    name: "Ping",
+    accent: "#6ff0a0",
+    layers: [
+      { anim: "ping", svg: ring(41, 1.6) },
+      { anim: "ping", delay: -1.3, svg: ring(41, 1.6) },
+      { svg: ring(41, 2.2) },
+    ],
+  },
+  {
+    // A tiny bunny bhopping laps round the avatar on a dotted track.
+    id: "hopper",
+    name: "Hopper",
+    accent: "#ffb43c",
+    layers: [
+      { svg: `<circle cx="60" cy="60" r="46" fill="none" stroke="currentColor" stroke-opacity="0.5" stroke-width="1.2" stroke-dasharray="0.1 4.2" stroke-linecap="round"/>` },
+      { anim: "spin", dur: 9, inner: { anim: "hop", origin: [60, 17] }, svg: `<g transform="translate(60 16) scale(1.35) translate(-60 -16)">${HOP_BUNNY}</g>` },
+    ],
+  },
+  {
+    // A floppy Santa hat on the rim, light snow falling round it.
+    id: "santa",
+    name: "Santa Hat",
+    accent: "#ffffff",
+    layers: [
+      { anim: "fall", svg: flakes([[18, 34, 1.4], [104, 46, 1.8], [30, 70, 1.1], [94, 80, 1.3], [14, 92, 1.7]]) },
+      { anim: "fall", delay: -2, svg: flakes([[8, 52, 1.2], [110, 30, 1.2], [100, 66, 1.6], [22, 84, 1.3], [108, 96, 1.1]]) },
+      { anim: "sway", dur: 4.2, origin: [57, 24], svg: SANTA_HAT },
+    ],
+  },
+  {
+    // Crosshair lines at the four edges that kick out like a shot, then settle.
+    id: "crosshair",
+    name: "Crosshair",
+    accent: "#6ff0a0",
+    layers: [
+      { svg: ring(41, 1.2, 0.45) },
+      { anim: "bloom", svg: `<path d="${CROSS_D}" stroke="${OL}" stroke-width="5"/><path d="${CROSS_D}" stroke="currentColor" stroke-width="2.8"/>` },
+    ],
+  },
+  {
+    // Little hearts floating up from the bottom edge, drifting as they go.
+    id: "smitten",
+    name: "Smitten",
+    accent: "#ff6b9a",
+    layers: [
+      { svg: ring(41, 1.4, 0.55) },
+      { anim: "rise", drift: [5, -54], svg: heart(104, 94, 1.05, "currentColor") },
+      { anim: "rise", drift: [-5, -54], delay: -1.2, svg: heart(15, 98, 0.9, "currentColor") },
+      { anim: "rise", drift: [4, -44], delay: -2.4, svg: heart(111, 78, 0.7, "#ffffff") },
+    ],
+  },
+  {
+    // A ring that sits still, then every few seconds tears into cyan and magenta for a split second.
+    id: "glitch",
+    name: "Glitch",
+    accent: "#ffffff",
+    layers: [
+      { anim: "glitch-a", svg: ring(41.5, 2.2, 1, "#3ff0ff") },
+      { anim: "glitch-b", svg: ring(41.5, 2.2, 1, "#ff3fa4") },
+      { svg: ring(41.5, 2.4) },
+    ],
+  },
+  {
+    // A crescent moon over the right shoulder, Zzz drifting up and two stars blinking.
+    id: "sleepy",
+    name: "Sleepy",
+    accent: "#b7a6ff",
+    layers: [
+      { svg: MOON },
+      { anim: "twinkle", svg: star(...at(-40, 50), 3.6, "#ffffff") + star(...at(250, 48), 2.8, "currentColor") },
+      { anim: "rise", drift: [-12, -34], svg: zz(74, 30, 1.35) },
+      { anim: "rise", drift: [-12, -34], delay: -1.6, svg: zz(80, 38, 0.95) },
     ],
   },
 ];

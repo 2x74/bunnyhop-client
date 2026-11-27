@@ -60,9 +60,24 @@ void launch_into_borderless() {
     SDL_DestroyWindow(window);
 }
 
+// A driver without always on top (SDL_Unsupported on Wayland): an unchanged flag sends nothing, so other settings
+// changes never reach the failing call, and a refused change reports false without throwing.
+void always_on_top_is_optional() {
+    int calls = 0;
+    const auto refuse = [&](bool) {
+        ++calls;
+        return false;
+    };
+    assert(native::apply_always_on_top(false, false, refuse) && calls == 0);
+    assert(native::apply_always_on_top(true, true, refuse) && calls == 0);
+    assert(!native::apply_always_on_top(false, true, refuse) && calls == 1);
+    assert(native::apply_always_on_top(false, true, [&](bool on) { return on; }));
+}
+
 }  // namespace
 
 int main() {
+    always_on_top_is_optional();
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         std::cout << "SDL window test unavailable: " << SDL_GetError() << '\n';
         return 77;
@@ -83,14 +98,12 @@ int main() {
     auto invalid = settings;
     invalid["windowMode"] = "invalid";
     assert(!controller.apply(invalid) && controller.mode() == "windowed" && !controller.error().empty());
+    // Always on top is optional (Wayland has none): the change applies either way, and the mode stays.
     settings["alwaysOnTop"] = true;
-    const bool topSupported = controller.apply(settings);
-    if (topSupported)
-        assert(SDL_GetWindowFlags(window) & SDL_WINDOW_ALWAYS_ON_TOP);
-    else
-        assert(controller.mode() == "windowed");
+    assert(controller.apply(settings) && controller.mode() == "windowed");
     settings["alwaysOnTop"] = false;
     assert(controller.apply(settings));
+    assert(!(SDL_GetWindowFlags(window) & SDL_WINDOW_ALWAYS_ON_TOP));
     if (!controller.center()) assert(!controller.error().empty());
     const bool maximizeSupported = controller.maximize();
     if (maximizeSupported) {

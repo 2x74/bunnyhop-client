@@ -6,6 +6,9 @@
 //    as a cinematic tour. Huge maps are never downloaded just for the background.
 //  - First visit (nothing played yet): today's first map (first-map.ts), so the featured Play, the menu
 //    background and onboarding all point new players at the same short, friendly tier 1 map.
+//  - Winter (December 1 to January 7, Snow Day's window) with Snow and rain on: the background comes from the
+//    Winter maps that snow (WINTER_BACKGROUNDS): your latest PB on one of them, else a tour of one, a new one each day.
+//    Not on a first visit.
 //
 // `?attract=<map>` forces both (testing).
 
@@ -13,6 +16,8 @@ import { appLocation } from "../platform/navigation";
 import { getPB, loadPBReplay } from "../pb";
 import { fetchMapIndex, type MapEntry } from "./maps";
 import { firstMapOfTheDay } from "./first-map";
+import { WINTER_MAPS, winterSeasonOf } from "../progression";
+import { prefs } from "./settings";
 
 /** Hand-picked: they look good from the menu camera and download fast. */
 const CURATED = ["bhop_choice", "bhop_danmark", "bhop_metal_v2", "bhop_eazy", "bhop_bless"];
@@ -20,6 +25,27 @@ const CURATED = ["bhop_choice", "bhop_danmark", "bhop_metal_v2", "bhop_eazy", "b
 const MAX_BACKGROUND_BYTES = 32 << 20;
 
 const forced = () => appLocation().searchParams.get("attract");
+
+/**
+ * The Winter maps the menu background picks from in the winter window: ones with falling snow (func_precipitation)
+ * whose snow column map takes under 100 ms to trace (research/PRECIPITATION.md) and that are under
+ * MAX_BACKGROUND_BYTES. (bhop_ambience_xmas: near the client's memory limit; bhop_jago, bhop_kaunisnimi,
+ * bhop_stref_siberia, bhop_monster_jam_xmas: too big; the rest of the collection has no snowfall.)
+ */
+export const WINTER_BACKGROUNDS: readonly (typeof WINTER_MAPS)[number][] = ["bhop_boxes_snowy", "bhop_frost_bite_v1", "bhop_strafe_winter", "bhop_strafing_in_siberia", "bhop_christmas"];
+
+/** In the winter window (UTC, as Snow Day) with snow on: the maps the background picks from, else null (as always). */
+export function winterBackgrounds(maps: readonly MapEntry[], now: number, snowOn: boolean): MapEntry[] | null {
+  if (!snowOn || winterSeasonOf(now) === null) return null;
+  const pool = WINTER_BACKGROUNDS.map((n) => maps.find((m) => m.name === n)).filter((m): m is MapEntry => !!m && (m.size ?? Infinity) <= MAX_BACKGROUND_BYTES);
+  return pool.length ? pool : null;
+}
+
+/** The pool's map for today (by UTC day), skipping `last` (it already has "Continue") when there is another. */
+export function dailyPick(pool: readonly MapEntry[], last: string | null, now: number): MapEntry | null {
+  const left = pool.length > 1 ? pool.filter((m) => m.name !== last) : pool;
+  return left.length ? left[Math.floor(now / 86_400_000) % left.length] : null;
+}
 
 let featuredCache: Promise<MapEntry | null> | null = null;
 
@@ -36,9 +62,7 @@ export function featuredMap(): Promise<MapEntry | null> {
     const first = firstMapOfTheDay();
     const start = maps.find((m) => m.name === first);
     if (!last && start) return start;
-    if (pool.length > 1) pool = pool.filter((m) => m.name !== last);
-    const day = Math.floor(Date.now() / 86_400_000);
-    return pool[day % pool.length];
+    return dailyPick(pool, last, Date.now());
   })();
   return featuredCache;
 }
@@ -68,8 +92,11 @@ export function backgroundPick(style = "autohop"): Promise<BackgroundPick | null
 async function pickBackground(style: string): Promise<BackgroundPick | null> {
   const maps = await fetchMapIndex();
   const f = forced();
+  // (Not on a first visit: the background, Play and onboarding stay on today's first map, firstMapOfTheDay.)
+  const last = localStorage.getItem("bunnyhop:last-map");
+  const winter = f || !last ? null : winterBackgrounds(maps, Date.now(), prefs.get().graphics.precipitation !== "off");
   if (!f) {
-    const withPB = maps
+    const withPB = (winter ?? maps)
       .filter((m) => (m.size ?? Infinity) <= MAX_BACKGROUND_BYTES)
       .map((m) => ({ m, pb: getPB(m.name, style) }))
       .filter((x) => x.pb)
@@ -79,6 +106,10 @@ async function pickBackground(style: string): Promise<BackgroundPick | null> {
       const bytes = await loadPBReplay(m.name, style);
       if (bytes) return { map: m, pbReplay: bytes };
     }
+  }
+  if (winter) {
+    const m = dailyPick(winter, last, Date.now());
+    if (m) return { map: m, pbReplay: null };
   }
   const m = await featuredMap();
   return m ? { map: m, pbReplay: f ? await loadPBReplay(m.name, style) : null } : null;

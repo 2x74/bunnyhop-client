@@ -29,6 +29,7 @@ export const MAX_CHECKPOINTS = 1000;
 export const CHECKPOINT_BUDGET_BYTES = 128 * 1024 * 1024;
 
 export interface Checkpoint<T> {
+  /** The core snapshot; 0 for one kept from an earlier visit (cp-store.ts), which has none. */
   handle: number;
   bytes: number;
   data: T;
@@ -80,11 +81,35 @@ export class Checkpoints<T> {
     while (this.list.length > 1 && (this.list.length > this.limits.max || total + extra() > this.limits.budget)) {
       const old = this.list.shift()!;
       total -= old.bytes;
-      this.store.free(old.handle);
-      this.hooks.onDrop?.(old.data);
+      this.release(old);
     }
     this.at = this.list.length - 1;
     return cp;
+  }
+
+  /**
+   * Adds checkpoints kept from an earlier visit (cp-store.ts) after the others, without snapshots (handle 0: restore()
+   * can't take them back; the controller places the player instead). `at` (an index into `data`) becomes current. The
+   * oldest go past `max`. Returns how many were added.
+   */
+  addKept(data: T[], at: number): number {
+    if (!data.length) return 0;
+    const first = this.list.length;
+    for (const d of data) this.list.push({ handle: 0, bytes: 0, data: d });
+    let dropped = 0;
+    while (this.list.length > this.limits.max) (this.release(this.list.shift()!), dropped++);
+    this.at = Math.max(0, Math.min(this.list.length - 1, first - dropped + at));
+    return data.length;
+  }
+
+  /** Every checkpoint, oldest first (index `number - 1` is the current one). */
+  entries(): readonly Checkpoint<T>[] {
+    return this.list;
+  }
+
+  private release(cp: Checkpoint<T>): void {
+    if (cp.handle) this.store.free(cp.handle);
+    this.hooks.onDrop?.(cp.data);
   }
 
   /** The current checkpoint, or null. */
@@ -99,19 +124,29 @@ export class Checkpoints<T> {
     return this.current();
   }
 
-  /** Restores `cp`'s snapshot into the core. */
+  /** Restores `cp`'s snapshot into the core (false for a kept one without a snapshot). */
   restore(cp: Checkpoint<T>): boolean {
-    return this.store.restore(cp.handle);
+    return cp.handle !== 0 && this.store.restore(cp.handle);
+  }
+
+  /**
+   * Deletes the current checkpoint (0.0.44, bhoptimer's "Delete"): frees its snapshot and lets go of its data. The one
+   * after it becomes current, or the one before when it was the last. Returns false when there was none.
+   */
+  remove(): boolean {
+    const cp = this.list[this.at];
+    if (!cp) return false;
+    this.list.splice(this.at, 1);
+    this.release(cp);
+    this.at = Math.min(this.at, this.list.length - 1);
+    return true;
   }
 
   /** Frees every checkpoint. */
   clear(): void {
     const list = this.list;
     this.list = [];
-    for (const c of list) {
-      this.store.free(c.handle);
-      this.hooks.onDrop?.(c.data);
-    }
+    for (const c of list) this.release(c);
     this.at = -1;
   }
 }

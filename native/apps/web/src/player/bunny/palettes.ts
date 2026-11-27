@@ -86,6 +86,9 @@ export const COLOURWAYS: Record<string, Colourway> = {
   "outfit-dusk": { hoodie: 0x6a3f9e, trim: 0xff6f61, pants: 0x1c1638, pantsTrim: 0xff9a3c, shoe: 0xf3e6f5, face: 0x0d0a1c, glove: 0x3a2466, detail: 0xffd9c2, accent: 0xff9a3c },
   // Trick or Treat (October): pumpkin hoodie, night-plum pants, vine-green gloves, a candle-glow visor.
   "outfit-pumpkin": { hoodie: 0xe0701c, trim: 0xb8550f, pants: 0x2a1f36, pantsTrim: 0x3d2a4a, shoe: 0x2e2622, face: 0x120904, glove: 0x3d6b2a, detail: 0xffe08a, accent: 0xffb43c },
+  // Winter (progression.ts winter_5 Snow Day): snow off-white with cold blue pants and mittens, ice-blue accents. Arctic
+  // (level 15) is white on light grey with a bright sky-blue accent; this one is warmer snow over a deep cold blue.
+  "outfit-snowdrift": { hoodie: 0xe9eef0, trim: 0xc8d4dc, pants: 0x2d5677, pantsTrim: 0x203f58, shoe: 0xf5f7f8, face: 0x131d29, glove: 0x376890, detail: 0xffffff, accent: 0x74b9e6 },
   // v0.0.37, the top tiers (progression.ts tier_7 / tier_8 / tier_9 / tier_10), in the tier colours.
   // Lapis (First T7): deep lapis blue, indigo trim and stripes, gold flecks on the logo and visor line, an indigo glow.
   "outfit-lapis": { hoodie: 0x26307a, trim: 0x7c83ff, pants: 0x161a40, pantsTrim: 0xd9b45a, shoe: 0xeef0ff, face: 0x080a1c, glove: 0x161a40, detail: 0xf0dca0, accent: 0x9aa0ff },

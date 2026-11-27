@@ -16,7 +16,7 @@ import type { BrushTransform, Core } from "../core";
 import type { MenuSpec, NumberMenu } from "../net/hud";
 import { paletteFor, triggerColors } from "../palette";
 import { prefs, type Prefs } from "../ui/settings";
-import { closeGunPicker } from "../weapon-commands";
+import { closeGunPicker, modifierHeld } from "../weapon-commands";
 import { TriggerOverlay } from "./overlay";
 import { KINDS, kindShown, nextStyle, nextThickness, toggleKind, TRIGGER_STYLES, type KindId } from "./volumes";
 
@@ -130,7 +130,7 @@ async function openMenu(): Promise<void> {
     window.addEventListener(
       "keydown",
       (e) => {
-        if (!menu?.open || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+        if (!menu?.open || e.repeat || modifierHeld(e)) return;
         const d = /^(?:Digit|Numpad)(\d)$/.exec(e.code);
         if (!d) return;
         e.preventDefault();

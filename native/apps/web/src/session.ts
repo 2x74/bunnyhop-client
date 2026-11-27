@@ -21,11 +21,13 @@ import { download, getPB, loadPBReplay, pbMs, savePBReplay, setPB, rejectPB, set
 import { keyLabel, prefs } from "./ui/settings";
 import { RunMouseSettings, mouseFromPrefs } from "./mouse-settings";
 import { DEFAULT_TURN_SPEED, TURN_HOLD_BITS, turnSpeedOf } from "./turn-binds";
-import { decodeReplay, encodeReplay, ReplayRecorder, replayFileName, replayStyle, sha256Hex, type Replay } from "./replay";
-import { isSegmented, nextStyle, StyleFilter, strafeKeys, styleDef, styleForTrack, styleLabel, stylePrespeedCap, styleSettings, styleStartReentryCap, type StyleDef, type StyleId } from "./styles";
+import { decodeReplay, encodeReplay, grownLength, ReplayRecorder, replayFileName, replayStyle, sha256Hex, type Replay } from "./replay";
+import { PAST_RANKED_LINE, pastRanked, RANKED_MAX_HOURS, RANKED_MAX_TICKS, RECORDING_CAP_HOURS, RECORDING_CAP_TICKS } from "./run-limits";
+import { isSegmented, nextStyle, StyleFilter, strafeKeys, styleDef, styleForTrack, styleLabel, stylePrespeedCap, styleSettings, styleStartReentryCap, trackStyleProblem, type StyleDef, type StyleId } from "./styles";
 import { onStyleChange, setSelectedStyle } from "./ui/style-picker";
 import { afterStep, beforeStep, checkpointMatches, FRAME_STRIDE, frameFlags, makeTimer, quantize, simulate, type SimResult } from "./sim";
 import { blocksPrehops, EVENT_RESPAWNED, formatTime, RunTimer, type Split, type TickCmd } from "./timer";
+import { noteStall } from "./stall-log";
 import { ZoneEditor, ZoneView } from "./zone-editor";
 import { zoneWarningToast } from "./zone-warning";
 import { loadZones, nextTrack, parseZoneSet, touching, trackName, trackOf, tracksOf, zonesEqual, type Zone, type ZoneSet, zoneSetToJson } from "./zones";
@@ -56,14 +58,15 @@ import { holdReload, runEnded } from "./update";
 import { TUTORIAL_MAP } from "./tutorial/data";
 import { practiceReason } from "./practice";
 import { timescaleLabel } from "./practice-mode/timescale";
-import { finishRoute, PracticeAttempt, practiceFlipLine, practiceSpawnLine, practiceSpawnToast, practiceStartLine, type PracticeUse } from "./practice-mode/attempt";
+import { finishRoute, PracticeAttempt, practiceFlipLine, practiceSpawnLine, practiceSpawnToast, practiceStartLine, submitSegmentedProblem, type PracticeUse } from "./practice-mode/attempt";
 import { loadTimer, type TimerSnapshot } from "./practice-mode/checkpoints";
-import { seedRecording, SegmentLog, type SegmentMark } from "./practice-mode/segments";
+import { asSegmented, seedRecording, SegmentLog, type SegmentMark } from "./practice-mode/segments";
 import { practiceReplays, withFinalCheckpoint, type PracticeReplayMeta } from "./practice-mode/replays";
 import { gainLogs, LiveSsj, ssjChat } from "./ssj";
 import { GAIN_LOG_STYLES, type GainLogReport } from "./net/protocol";
 import { LiveMovementStats } from "./movement-stats";
 import { neutralCommand } from "./freecam";
+import { h } from "./ui/dom";
 
 export interface SessionInit {
   core: Core;
@@ -208,6 +211,10 @@ export class RunSession {
   private flightStuckSaid = false;
   /** A practice attempt (a tool, not practice mode) back in a start zone says it's still practice, once (afterStep). */
   private practiceStartHint: "off" | "armed" | "said" = "off";
+  /** This recording passed the leaderboard's limit while the timer ran, and the HUD said so (run-limits.ts). */
+  private pastRankedSaid = false;
+  /** This recording reached RECORDING_CAP_TICKS: what was recorded is kept, nothing more is (capRecording). */
+  private recordingCapped = false;
   /** The pause menu's Practice item (main.ts sets it where practice mode is available). */
   practiceMenu: (() => MenuActions["practice"]) | null = null;
   /** The timescale the frame loop runs at now (practice-mode/timescale.ts; main.ts sets it every frame). */
@@ -708,7 +715,9 @@ export class RunSession {
     // v28+ Auto-strafe: the trainer judges the turn the key came from, to the live mouse (StyleFilter.leadView).
     const turnYaw = this.styleFilter.lead ? this.styleFilter.leadView?.yaw ?? NaN : undefined;
     this.hud.tick(cmd, state, events, flying ? { settings: this.settings, noclip: true } : { settings: this.settings, ...(turnYaw !== undefined ? { turnYaw } : {}) }); // HUD: keys overlay / speed graph / jump stats see exactly the simulated command
-    if (!this.experimentalInput) {
+    // (Past RECORDING_CAP_TICKS nothing more is recorded: capRecording kept what was.)
+    const recording = !this.experimentalInput && !this.recordingCapped;
+    if (recording) {
       this.recorder.push(cmd.forward, cmd.side, cmd.yaw, cmd.pitch, cmd.buttons, u.look ?? null);
       if (u.nullBinds) this.recorder.nullBinds = true; // header.nullBinds: the anticheat expects instant key switches
       if (u.timed) this.recorder.timedInput = true; // header.timedInput: per-tick input isn't frame-sampled
@@ -716,12 +725,15 @@ export class RunSession {
       if (u.wRelease) this.recorder.wRelease = true; // header.wRelease: forward let go on jumps by the setting
       this.recorder.maybeCheckpoint(state.tick, state.position, state.velocity);
     }
-    this.pushFrame(state, cmd, events);
-    if (!this.experimentalInput) {
+    // The live frames are the PB ghost's (and the Segmented history's, which fills at 4 h): a run past the leaderboard's
+    // limit is never a PB, so they stop there (24 bytes a tick on a run of many hours).
+    if (state.tick <= RANKED_MAX_TICKS) this.pushFrame(state, cmd, events);
+    if (recording) {
       // The tick goes into the history too, so a checkpoint load can rebuild the recording (segments.ts).
       const o = state.tick * FRAME_STRIDE;
       this.segLog.push({ forward: cmd.forward, side: cmd.side, yaw: cmd.yaw, pitch: cmd.pitch, buttons: cmd.buttons, look: u.look ?? null, frame: this.liveFrames, frameAt: o, frameEvents: this.liveFrameEvents[state.tick] });
       if (state.tick % this.recorder.checkpointInterval === 0) this.segLog.checkpoint(state.position, state.velocity);
+      this.watchLength();
     }
     // A practice attempt (practice mode, third person, a lesson, scripted commands, the debug hook) is never submitted,
     // so it never beats either: a run that turns into practice drops its session.
@@ -769,6 +781,7 @@ export class RunSession {
       const pb = getPB(this.o.map, this.runStyle, this.timer.track);
       runSounds.finish(!this.unranked && (!pb || this.timer.timeMs() < pbMs(pb)) ? "pb" : "normal");
       this.view.finish(this.timer.track, !this.unranked && this.hud.beatsRecord(this.timer.time())); // the end zone flares
+      noteStall("run-finish");
       void this.finish(state);
     }
     return state;
@@ -801,21 +814,21 @@ export class RunSession {
   }
 
   // --- the world record of the board being run, for the provisional WR at the finish (hud/result.ts). Read once per
-  // map / style / track per session (a one-row board read), when a run on it first starts.
+  // map / style / track per session (a one-row board read), when a run on it first starts, or at a restart onto it
+  // while the HUD's World record element is on.
   private wrKey = "";
   /** That world record (seconds; null: none known yet), for auto restart. */
   private wrTime: number | null = null;
 
-  private loadWorldRecord(): void {
-    const t = this.timer;
-    const key = `${this.o.map}|${this.runStyle}|${t.track}`;
+  private loadWorldRecord(track = this.timer.track): void {
+    const key = `${this.o.map}|${this.runStyle}|${track}`;
     if (key === this.wrKey) return;
     this.wrKey = key;
     this.wrTime = null;
     this.hud.setWorldRecord(null);
     if (this.o.map === TUTORIAL_MAP || !api.available()) return;
     // (Shared with the WR ghost's read of the same board, shared-reads.ts.)
-    void worldRecord(this.o.map, this.runStyle, t.track)
+    void worldRecord(this.o.map, this.runStyle, track)
       .then((top) => {
         if (this.wrKey !== key) return;
         this.wrTime = top?.time ?? null;
@@ -873,6 +886,7 @@ export class RunSession {
    */
   private newRecording(): void {
     this.recorder.clear();
+    this.pastRankedSaid = this.recordingCapped = false;
     this.applyTurnSpeed();
   }
 
@@ -910,6 +924,8 @@ export class RunSession {
     this.styleFilter.reset();
     this.newRecording();
     this.ghosts.onReset();
+    // The HUD's world record follows the board you restart onto (a style switch, B / M); only read when it's shown.
+    if (prefs.get().hud.layout.wr.on) this.loadWorldRecord(this.currentTrack());
     const s = this.o.core.state();
     this.ssj.reset(s);
     this.movementStats.reset(s);
@@ -928,7 +944,7 @@ export class RunSession {
   private putFrame(tick: number, frame: ArrayLike<number>, events: number): void {
     const o = tick * FRAME_STRIDE;
     if (o + FRAME_STRIDE > this.liveFrames.length) {
-      const b = new Float32Array(Math.max(this.liveFrames.length * 2, o + FRAME_STRIDE));
+      const b = new Float32Array(Math.max(grownLength(this.liveFrames.length / FRAME_STRIDE) * FRAME_STRIDE, o + FRAME_STRIDE));
       b.set(this.liveFrames);
       this.liveFrames = b;
       const eventBuffer = new Uint8Array(b.length / FRAME_STRIDE);
@@ -971,10 +987,13 @@ export class RunSession {
   }
 
   private async finish(state: PlayerState): Promise<void> {
+    this.segmentedOffer = null; // (a practice finish offers its own)
     if (this.experimentalInput) return this.finishPractice();
     // A practice attempt never gets near the upload: its recording went through a teleport or noclip.
     const route = finishRoute({ practice: this.prac.practice, unranked: this.unranked });
     if (route === "practice") return this.finishPractice();
+    // Longer than the leaderboard takes (run-limits.ts): kept on this device, never uploaded.
+    if (this.recordingCapped || pastRanked(this.recorder.length)) return this.finishUnrankable();
     const pbOwner = pbAccount();
     const pbEpoch = accountGeneration();
     const watched = this.watch.stop();
@@ -1104,8 +1123,9 @@ export class RunSession {
    * device as a practice replay (practice-mode/replays.ts) and becomes the last run (V); otherwise the card says why not.
    */
   private async finishPractice(): Promise<void> {
-    this.watch.stop();
+    const watched = this.watch.stop();
     this.clock.stop();
+    this.segmentedOffer = null;
     const t = this.timer;
     const pb = getPB(this.o.map, this.runStyle, t.track);
     const loss = this.practiceReplayLoss();
@@ -1122,9 +1142,177 @@ export class RunSession {
     this.onSubmission?.({ id: "", status: "rejected", reason: line });
     if (!replay) return;
     const time = t.time();
+    // Actual segments (attempt.ts submitSegmentedProblem): offered for the Segmented board, sent only if the player
+    // chooses (submitSegmented). Read before the encode: a load or restart meanwhile changes the attempt.
+    const offer = this.segmentedProblem() === null
+      ? {
+          replay: asSegmented(replay), time, timeMs: t.timeMs(), ticks: t.endTick - t.startTick, track: t.track, result: clientResult, watched, mouse: this.runMouse.snapshot(),
+          stats: { jumps: t.jumps, strafes: t.strafes, sync: t.syncPercent(), splits: t.splits.map((s): [number, number] => [s.index, s.ticks]) },
+        }
+      : null;
     const bytes = await encodeReplay(replay);
     this.lastRun = { replay, bytes, practice: true };
+    if (offer && this.clientResult === clientResult) {
+      this.segmentedOffer = offer;
+      this.hud.setCardExtra(h("div.endcard-sub.ok", null, "Counts for Segmented: type !submitseg to submit it"));
+    }
     await this.keepPracticeReplay(replay, bytes, { time, at: null });
+  }
+
+  /**
+   * Why this attempt's recording can't go to the Segmented board now (attempt.ts submitSegmentedProblem), or null when it
+   * can. Only asked of a practice attempt: a real one submits to its own board.
+   */
+  segmentedProblem(): string | null {
+    return submitSegmentedProblem({
+      style: this.runStyle,
+      trackProblem: trackStyleProblem(this.o.map, this.timer.track, "segmented") ?? (this.o.map === TUTORIAL_MAP ? "tutorial" : null),
+      loads: this.recorder.segments.length,
+      replayLoss: this.practiceReplayLoss(),
+      tainted: this.segLog.tainted,
+      spawn: this.prac.spawnUsed,
+      slowed: this.prac.timescale < 1,
+      other: this.otherPracticeReason,
+      tooLong: pastRanked(this.recorder.length),
+    });
+  }
+
+  /**
+   * Why this attempt is practice apart from practice mode and the practice tools (third person, a gun, scripted input,
+   * the debug hook, a lesson, experimental input), or null. A Segmented load doesn't undo these.
+   */
+  private get otherPracticeReason(): string | null {
+    if (this.experimentalInput) return "experimental input";
+    return practiceReason({ debug: this.debug, thirdPerson: this.practice, scripted: this.scripted, lesson: this.lessonPractice, freeGun: this.freeGun });
+  }
+
+  /** The last practice finish, when it was actual segments: what !submitseg sends. Used once; any finish replaces it. */
+  private segmentedOffer: {
+    replay: Replay; time: number; timeMs: number; ticks: number; track: number; result: number;
+    watched: ReturnType<RunWatch["stop"]>; mouse: ReturnType<RunMouseSettings["snapshot"]>;
+    stats: { jumps: number; strafes: number; sync: number; splits: [number, number][] };
+  } | null = null;
+
+  /** The pause menu's "Submit to Segmented": the last practice finish can go there. */
+  get canSubmitSegmented(): boolean {
+    return this.segmentedOffer !== null;
+  }
+
+  /**
+   * !submitseg and the pause menu: the last practice finish (when it was actual segments) uploaded to the Segmented
+   * board, verified like any Segmented run. A PB there is kept like one; the current style's PB and ghosts aren't
+   * touched. Returns the line to show.
+   */
+  async submitSegmented(): Promise<string> {
+    const o = this.segmentedOffer;
+    if (!o) return "Nothing to submit. Finish a practice run that loaded checkpoints, with no noclip after the last load.";
+    if (!api.available()) return "Leaderboards are offline. Try again when they're back.";
+    this.segmentedOffer = null;
+    const map = this.o.map, style = "segmented", track = o.track, time = o.time;
+    const pbOwner = pbAccount();
+    const pbEpoch = accountGeneration();
+    const pb = getPB(map, style, track);
+    const newPB = !pb || o.timeMs < pbMs(pb);
+    const pbDate = Date.now();
+    const bytes = await encodeReplay(o.replay);
+    if (newPB && pbEpoch === accountGeneration()) {
+      setPB({ map, owner: pbOwner, style, track, ticks: o.ticks, time, date: pbDate, ...o.stats });
+      void savePBReplay(map, style, bytes, track, pbOwner, pbDate).catch((e) => console.warn("PB replay storage:", e));
+    }
+    // The end card shows the status while it's still this finish's; otherwise one line when it's settled.
+    const onCard = () => this.clientResult === o.result && this.hud.cardShown;
+    let uploaded!: (id: string) => void;
+    const upload = new Promise<string>((r) => (uploaded = r));
+    holdReload(upload);
+    void submitAndTrack(bytes, (m, ms) => this.hud.toast(m, ms), (st) => {
+      if (onCard()) this.hud.setSubmission(st);
+      if (st.status === "rejected" && newPB) rejectPB(map, style, track, pbDate, pbOwner);
+      if (st.status !== "submitting") uploaded("id" in st ? st.id : "");
+      if (!onCard() && (st.status === "verified" || st.status === "rejected")) this.hud.toast(st.status === "verified" ? "Segmented run verified" : `Segmented run rejected${st.reason ? `: ${st.reason}` : ""}`, 4000);
+    }, { map, style, track, time, mouse: o.mouse }).finally(() => uploaded(""));
+    void reportRun({ check: this.physics.check(bytes), upload, watched: o.watched, input: this.o.input, wasm: this.clientBuild, play: this.runPlay(o.watched.pollHz) });
+    if (onCard()) this.hud.setCardExtra(null);
+    await this.refreshMenu();
+    return "Submitting to Segmented";
+  }
+
+  /**
+   * Each recorded tick: past the leaderboard's limit while the timer runs, the HUD says so once (again only if a
+   * Segmented load takes the recording back under it); at RECORDING_CAP_TICKS recording stops (capRecording).
+   */
+  private watchLength(): void {
+    const n = this.recorder.length;
+    if (n >= RECORDING_CAP_TICKS) return void this.capRecording();
+    if (!pastRanked(n)) {
+      this.pastRankedSaid = false;
+      return;
+    }
+    if (this.pastRankedSaid || this.timer.status !== "running" || this.unranked) return;
+    this.pastRankedSaid = true;
+    this.hud.toast(PAST_RANKED_LINE, 10_000, "long-run");
+  }
+
+  /**
+   * The recording reached RECORDING_CAP_TICKS (the browser's memory, run-limits.ts): it stops there, and what was recorded
+   * is kept on this device like a run over the leaderboard's limit (and is the last run: Esc, Replays, Export last run).
+   * The attempt plays on; its finish says the recording stopped.
+   */
+  private async capRecording(): Promise<void> {
+    if (this.recordingCapped) return;
+    this.recordingCapped = true;
+    this.clock.stop();
+    const t = this.timer;
+    const replay = this.buildReplay(t.status === "finished" ? t.endTick : 0, true);
+    const bytes = await encodeReplay(replay);
+    if (this.experimentalInput) return;
+    this.lastRun = { replay, bytes, ...(this.unranked ? { practice: true } : {}) };
+    const kept = this.keepLongReplay(replay, bytes, { time: null, at: t.status === "running" ? t.time() : null });
+    holdReload(kept.then(() => ""));
+    const where = (await kept) ? "The run so far is saved to your replays." : "Esc, Replays, Export last run saves the run so far.";
+    this.hud.toast(`Recording stopped at ${RECORDING_CAP_HOURS} hours (the browser's memory). ${where}`, 12_000, "long-run");
+    await this.refreshMenu();
+  }
+
+  /**
+   * A finish too long for the leaderboard (run-limits.ts): the end card, then the replay kept on this device (with the
+   * practice replays, outside their caps) and as the last run. Never uploaded, never a PB or a ghost.
+   */
+  private async finishUnrankable(): Promise<void> {
+    this.watch.stop();
+    this.clock.stop();
+    const t = this.timer;
+    const pb = getPB(this.o.map, this.runStyle, t.track);
+    this.hud.runFinished({
+      time: t.time(), previousPB: pb?.time ?? null, newPB: false, jumps: t.jumps, strafes: t.strafes, sync: t.syncPercent(),
+      style: styleLabel(this.runStyle), track: t.track ? trackName(t.track) : null, onMap: this.onMap(),
+    });
+    const clientResult = ++this.clientResult;
+    void saveClientRun(this.clientSummary(false)).then((id) => clientResultSettled(id, () => this.clientResult === clientResult && this.timer === t && t.status === "finished"));
+    const say = (line: string) => {
+      this.hud.setSubmission({ id: "", status: "rejected", reason: line });
+      this.onSubmission?.({ id: "", status: "rejected", reason: line });
+    };
+    const over = `over ${RANKED_MAX_HOURS} hours, the leaderboard's limit`;
+    if (this.recordingCapped) {
+      // (capRecording kept the first RECORDING_CAP_HOURS hours already.)
+      say(`${over}. The recording stopped at ${RECORDING_CAP_HOURS} hours; that part is in your replays`);
+      return;
+    }
+    const replay = this.buildReplay(t.endTick);
+    const bytes = await encodeReplay(replay);
+    if (this.experimentalInput) return;
+    this.lastRun = { replay, bytes };
+    const kept = this.keepLongReplay(replay, bytes, { time: t.time(), at: null });
+    holdReload(kept.then(() => ""));
+    say((await kept) ? `${over}. Saved to your replays (Esc, Replays: Export last run downloads it)` : `${over}. Couldn't save it on this device: Esc, Replays, Export last run downloads it`);
+    runEnded();
+    await this.refreshMenu();
+  }
+
+  /** A run too long for the leaderboard, kept with the practice replays (outside their caps). False if it couldn't be. */
+  private async keepLongReplay(replay: Replay, bytes: Uint8Array, when: { time: number | null; at: number | null }): Promise<boolean> {
+    const h = replay.header;
+    return !!(await practiceReplays.keep(bytes, { map: h.map, style: replayStyle(h), track: h.track ?? 0, ...when, teleports: replay.segments?.length ?? 0, long: true }).catch(() => null));
   }
 
   /**
@@ -1133,6 +1321,7 @@ export class RunSession {
    */
   practiceReplayLoss(): string | null {
     if (this.experimentalInput) return "experimental input";
+    if (this.recordingCapped) return `the recording stopped at ${RECORDING_CAP_HOURS} hours (that part is in your replays)`;
     const loss = this.prac.replayLoss;
     if (loss === "noclip") return "noclip can't be played back";
     if (loss === "speed") return "a teleport that reset your speed can't be played back";
@@ -1197,7 +1386,7 @@ export class RunSession {
   practiceUse(tool: PracticeUse): void {
     const flipped = this.prac.use(tool);
     this.clock.stop();
-    if (flipped && this.o.map !== TUTORIAL_MAP) this.hud.toast(practiceFlipLine(this.timer.status === "running", restartKey(), tool), 5000, "practice");
+    if (flipped && this.o.map !== TUTORIAL_MAP) this.hud.toast(practiceFlipLine(this.timer.status === "running", restartKey(), tool, this.segmentResumable && this.segLog.holding > 0), 5000, "practice");
   }
 
   /**
@@ -1235,6 +1424,9 @@ export class RunSession {
       this.styleFilter.reset();
       this.newRecording();
       this.segLog.begin([], 0); // (nothing logged from here can be marked: replayLoss)
+      // A teleport the recording can't follow (no playable path: a kept checkpoint from an earlier visit, a speed reset,
+      // one saved after noclip): what's recorded from here never goes to Segmented, until a load of a clean path.
+      this.segLog.tainted = true;
     }
     this.hud.resetTicks();
     const s = this.o.core.state();
@@ -1271,6 +1463,16 @@ export class RunSession {
     return isSegmented(this.runStyle) && !this.unranked;
   }
 
+  /**
+   * A Segmented attempt that only a noclip or a practice teleport made practice (attempt.ts resumable), with nothing else
+   * against it: loading a checkpoint saved while the run was clean takes it back to a real Segmented run (segmentRestored),
+   * since the load throws away everything since the save. Practice mode, a practice spawn, timescale, third person, a gun
+   * or scripted input keep it practice.
+   */
+  get segmentResumable(): boolean {
+    return isSegmented(this.runStyle) && this.prac.resumable && this.otherPracticeReason === null && this.o.map !== TUTORIAL_MAP;
+  }
+
   /** Checkpoint loads on the current Segmented run's path (0 outside one). */
   get segmentLoads(): number {
     return this.segmenting ? this.segLog.loadCount : 0;
@@ -1292,7 +1494,10 @@ export class RunSession {
   pathMark(): SegmentMark | null {
     const n = this.recorder.length;
     if (this.experimentalInput || this.prac.replayLoss || this.segLog.length !== n || this.o.core.state().tick !== n) return null;
-    return this.segLog.mark({ nullBinds: this.recorder.nullBinds, timedInput: this.recorder.timedInput, timedPresses: this.recorder.timedPresses, wRelease: this.recorder.wRelease, turnSpeed: this.recorder.turnSpeed });
+    // An attempt that can't count (third person, a practice spawn, a slowed tick, ...) taints the path for good: a later
+    // attempt that loads it can't submit it to Segmented either (attempt.ts submitSegmentedProblem).
+    const tainted = this.otherPracticeReason !== null || this.prac.spawnUsed || this.prac.timescale < 1;
+    return this.segLog.mark({ nullBinds: this.recorder.nullBinds, timedInput: this.recorder.timedInput, timedPresses: this.recorder.timedPresses, wRelease: this.recorder.wRelease, turnSpeed: this.recorder.turnSpeed, tainted });
   }
 
   /** About how much memory the paths of the kept checkpoints take (practice-mode/checkpoints.ts budget). */
@@ -1318,12 +1523,14 @@ export class RunSession {
   /**
    * A Segmented checkpoint load: the core was just restored from the checkpoint's snapshot, which it took after
    * `m.ticks` commands. The timer, the key filter, the recording (back to the checkpoint's path plus this load) and the
-   * live frames follow it, and the attempt stays clean: no practiceUse. False (nothing changed) if `m` can't be rebuilt
-   * or the core isn't at its tick; the caller then treats it as a practice teleport.
+   * live frames follow it, and the attempt stays clean: no practiceUse. A resumable attempt (segmentResumable: noclip or
+   * a practice teleport since) is clean again: the load threw that stretch away. False (nothing changed) if `m` can't be
+   * rebuilt or the core isn't at its tick; the caller then treats it as a practice teleport.
    */
   segmentRestored(style: StyleId, timer: TimerSnapshot, filter: StyleFilter, m: SegmentMark): boolean {
     const s = this.o.core.state();
-    if (!this.segmenting || style !== this.runStyle || s.tick !== m.ticks || !this.segLog.usable(m)) return false;
+    if (!(this.segmenting || this.segmentResumable) || style !== this.runStyle || s.tick !== m.ticks || !this.segLog.usable(m) || m.tainted) return false;
+    if (this.prac.resume()) this.practiceStartHint = "off";
     const was = this.timer.status;
     loadTimer(this.timer, timer);
     this.styleFilter = Object.assign(Object.create(Object.getPrototypeOf(filter)), filter) as StyleFilter;
@@ -1516,6 +1723,7 @@ export class RunSession {
         const why = this.practiceReplayLoss();
         return { go: why ? null : () => void this.keepAttempt().then((line) => this.hud.toast(line, 3000, "practice")), why };
       },
+      submitSegmented: () => (this.canSubmitSegmented ? () => void this.submitSegmented().then((line) => this.hud.toast(line, 3000, "practice")) : null),
       onClearPracticeReplays: () => void practiceReplays.clear(this.o.map).then(() => this.refreshMenu()),
     });
   }

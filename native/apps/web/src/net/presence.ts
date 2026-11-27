@@ -108,6 +108,8 @@ export interface RoomActions {
     /** A private lobby (net/lobby.ts), and whether you're its host. */
     lobby: boolean;
     host: boolean;
+    /** The Daily room: it plays the day's map all day, so there is nothing to nominate or vote on. */
+    daily?: boolean;
   };
   spectate(): void;
   /** The friends list's Spectate (social/spectate.ts): whether player `id` is in this room (not you), and watching them. */
@@ -139,13 +141,15 @@ export function roomActions(): RoomActions | null {
 
 /**
  * URL that plays `map` in room `id` (main.ts loads the map, then net/mp.ts connects). `spectate`: a player id to watch
- * on arrival instead of spawning (social/spectate.ts).
+ * on arrival instead of spawning (social/spectate.ts). `daily`: the day a Daily room plays (?daily=<day>), so main.ts
+ * starts the page in the day's style before the room has said anything.
  */
-export function roomUrl(id: string, map: string, o: { spectate?: string | null } = {}): string {
+export function roomUrl(id: string, map: string, o: { spectate?: string | null; daily?: string | null } = {}): string {
   const url = new URL(appHref());
   url.search = "";
   url.searchParams.set("map", map);
   url.searchParams.set("server", id);
+  if (o.daily) url.searchParams.set("daily", o.daily);
   if (o.spectate) url.searchParams.set("spectate", o.spectate);
   return url.toString();
 }

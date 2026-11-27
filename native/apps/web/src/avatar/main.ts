@@ -10,6 +10,11 @@
 // Cosmetics (colourway, headwear, knife, finish, gloves) are picked from 3D thumbnails: a row per slot shows what you
 // wear, clicking it turns the controls column into that slot's picker, hovering a choice puts it on the big preview
 // (until the pointer leaves), clicking wears it. Thumbnails are drawn by a second, offscreen AvatarStage and cached.
+//
+// v0.0.44: the round preview wears your supporter decoration (supporter-looks.ts AVATAR_DECOS, ui/avatar-deco.ts), and
+// the Decoration section picks it here too: each choice on your own picture, hover tries it on the round preview, a
+// supporter's click saves it (POST /me/supporter, as Edit card does); anyone else can try them on. Framing's Headroom
+// (spec.ts lift) sits the bunny lower, so a decoration over the top (Halo, Cat Ears, Santa Hat) clears its ears.
 
 import { api, ApiError, type User } from "../api";
 import { CAPE_ITEM, CAPE_LENGTH, capeHexOf, ROBE_ITEM, robePatternOf, COSMETICS, cosmetic, highlightHexOf, MASK_HAT, type CosmeticDef } from "../progression";
@@ -24,7 +29,10 @@ import { isBack } from "../player/bunny/backs";
 import { AvatarStage, GESTURES, paintBackdrop, type Focus, type MapShots } from "./stage";
 import { avatarWebpBase64, mapIndex, playerAnims, settleOnAnims } from "./refresh";
 import { getLoadout, getOutfit } from "../player/cosmetics";
-import { AVATAR_PX, AVATAR_RENDER_VERSION, BACKDROPS, cleanAvatar, defaultAvatar, defaultBg, FRAMES, GUN_IDS, packAvatar, POSES, type AvatarSpec } from "./spec";
+import { AVATAR_PX, AVATAR_RENDER_VERSION, BACKDROPS, cleanAvatar, defaultAvatar, defaultBg, FRAMES, GUN_IDS, LIFT_MAX, packAvatar, POSES, type AvatarSpec } from "./spec";
+import { AVATAR_DECOS, avatarDecoOf, type AvatarDecoId } from "../supporter-looks";
+import { decorated } from "../ui/avatar-deco";
+import type { NameColorId } from "../creators";
 
 const q = new URLSearchParams(location.search);
 const DRAFT_KEY = "bunnyhop:avatar-draft";
@@ -151,13 +159,90 @@ function draw(): void {
 
 /** The small previews (a round profile picture, a board row) from the real 256 px picture, a moment after changes. */
 let smallTimer = 0;
+let smallUrl = "";
+
+// ---------------------------------------------------------------------------------------------
+// Decoration (v0.0.44): the supporter ornament round the round picture.
+
+/** Your saved decoration (a supporter), or the one you're trying on (anyone else). */
+let deco: AvatarDecoId | null = null;
+/** A choice being hovered: on the round preview until the pointer leaves. undefined = none. */
+let decoHover: AvatarDecoId | null | undefined;
+/** Your support (GET /me/supporter): a supporter saves their pick; the name colour tints the decorations. */
+let supporter = false;
+let nameColor: NameColorId | null = null;
+let decoSaving = 0;
+
+/** The round preview animated and the board row still, as the site draws them, wearing the shown decoration. */
+function paintDeco(): void {
+  const look = { avatarDeco: decoHover !== undefined ? decoHover : deco, nameColor };
+  $("av-round-deco").replaceChildren(decorated($("av-round"), look, { animate: true }));
+  $("av-row-deco").replaceChildren(decorated($("av-row-img"), look));
+}
+
+async function pickDeco(id: AvatarDecoId | null): Promise<void> {
+  const name = (i: AvatarDecoId | null) => AVATAR_DECOS.find((d) => d.id === i)?.name ?? "None";
+  const before = deco;
+  deco = id;
+  decoHover = undefined;
+  paintDeco();
+  renderControls();
+  if (!supporter) {
+    status(id ? `Trying on ${name(id)}. Decorations come with supporting bunnyhop.` : "");
+    return;
+  }
+  const mine = ++decoSaving;
+  status("Saving…");
+  try {
+    const s = await api.saveSupporter({ avatarDeco: id });
+    if (mine !== decoSaving) return;
+    deco = avatarDecoOf(s.avatarDeco);
+    status(deco ? `${name(deco)} saved. It shows round your picture now.` : "Decoration off.");
+  } catch (e) {
+    if (mine !== decoSaving) return;
+    deco = before;
+    status(e instanceof ApiError ? e.message : "Couldn't reach the server.", true);
+  }
+  paintDeco();
+  renderControls();
+}
+
+function decoSection(): HTMLElement {
+  const items: { id: AvatarDecoId | null; name: string }[] = [{ id: null, name: "None" }, ...AVATAR_DECOS];
+  const hover = (id: AvatarDecoId | null | undefined) => {
+    if (decoHover === id) return;
+    decoHover = id;
+    paintDeco();
+  };
+  return section(
+    "Decoration",
+    AVATAR_DECOS.find((d) => d.id === deco)?.name ?? "None",
+    el(
+      "div",
+      { class: "av-decos", role: "listbox", onpointerleave: () => hover(undefined) },
+      ...items.map((it) =>
+        el(
+          "button",
+          { type: "button", class: "av-deco-opt", role: "option", "aria-selected": String(it.id === deco), title: it.name, onpointerenter: () => hover(it.id), onclick: () => void pickDeco(it.id) },
+          decorated(el("img", { class: "av-deco-pic", alt: "", width: "44", height: "44", src: smallUrl || null }), { avatarDeco: it.id, nameColor }, { animate: true }),
+          el("span", { class: "av-deco-name" }, it.name),
+        ),
+      ),
+    ),
+    supporter
+      ? el("p", { class: "av-hint" }, "Round your picture wherever it shows, your Discord picture too.")
+      : el("p", { class: "av-hint" }, "A supporter perk: hover to try them on. ", el("a", { href: "/support" }, "Support bunnyhop")),
+  );
+}
 function scheduleSmall(): void {
   clearTimeout(smallTimer);
   smallTimer = window.setTimeout(async () => {
     const c = await stage.render(spec, AVATAR_PX, maps);
     const url = c.toDataURL("image/png");
+    smallUrl = url;
     ($("av-round") as HTMLImageElement).src = url;
     ($("av-row-img") as HTMLImageElement).src = url;
+    for (const img of document.querySelectorAll<HTMLImageElement>("img.av-deco-pic")) img.src = url;
     draw();
   }, 260);
 }
@@ -200,11 +285,11 @@ function thumbImg(s: AvatarSpec, cls: string, focus?: Focus): HTMLImageElement {
 type Slot = "outfit" | "hat" | "back" | "knife" | "finish" | "glove";
 /** How each slot's choices are shown: the bunny as you've made it, wearing the choice, posed and framed to show it. */
 const THUMB: Record<Slot, (id: string) => AvatarSpec> = {
-  outfit: (id) => cleanAvatar({ ...spec, outfit: id, pose: "idle", moment: 0.5, tilt: 0.2, ears: 0.5, turn: -15, frame: "close", zoom: 1, bg: "clear" }),
+  outfit: (id) => cleanAvatar({ ...spec, outfit: id, pose: "idle", moment: 0.5, tilt: 0.2, ears: 0.5, turn: -15, frame: "close", zoom: 1, lift: 0, bg: "clear" }),
   // (The Kitsune Mask pushed up sits on the left of the head: turned to show it.)
-  hat: (id) => cleanAvatar({ ...spec, hat: id || null, pose: "idle", moment: 0.5, tilt: 0, ears: 0.4, turn: id === MASK_HAT && !spec.maskOn ? -60 : -15, frame: "face", zoom: 1.08, bg: "clear" }),
+  hat: (id) => cleanAvatar({ ...spec, hat: id || null, pose: "idle", moment: 0.5, tilt: 0, ears: 0.4, turn: id === MASK_HAT && !spec.maskOn ? -60 : -15, frame: "face", zoom: 1.08, lift: 0, bg: "clear" }),
   // Turned to show its back.
-  back: (id) => cleanAvatar({ ...spec, back: id || undefined, pose: "idle", moment: 0.5, tilt: 0, ears: 0.4, turn: 150, frame: "full", zoom: 0.84, bg: "clear" }),
+  back: (id) => cleanAvatar({ ...spec, back: id || undefined, pose: "idle", moment: 0.5, tilt: 0, ears: 0.4, turn: 150, frame: "full", zoom: 0.84, lift: 0, bg: "clear" }),
   knife: (id) => cleanAvatar({ ...spec, knife: id, hand: "knife", pose: "holdup", moment: 0.3, tilt: 0, ears: 0.4, turn: -30, bg: "clear" }),
   finish: (id) => cleanAvatar({ ...spec, finish: id, hand: "knife", pose: "holdup", moment: 0.3, tilt: 0, ears: 0.4, turn: -30, bg: "clear" }),
   glove: (id) => cleanAvatar({ ...spec, glove: id, hand: "none", pose: "wave", moment: 0.3, tilt: 0, ears: 0.4, turn: -30, bg: "clear" }),
@@ -583,7 +668,9 @@ function renderControls(): void {
       FRAMES.find((f) => f.id === spec.frame)?.name ?? null,
       list(FRAMES, spec.frame, (frame) => setSpec({ frame }), "av-row4"),
       slider("Zoom", 2.3 - spec.zoom, 0.7, 1.6, 0.01, (z) => setSpec({ zoom: 2.3 - z }, { quiet: true })),
+      slider("Headroom", spec.lift ?? 0, 0, LIFT_MAX, 0.01, (lift) => setSpec({ lift }, { quiet: true })),
     ),
+    decoSection(),
     section(
       "Look",
       null,
@@ -877,7 +964,10 @@ async function start(): Promise<void> {
   }
   if (user) {
     try {
-      const [cos, mine] = await Promise.all([api.myCosmetics(), api.bunnyAvatar()]);
+      const [cos, mine, support] = await Promise.all([api.myCosmetics(), api.bunnyAvatar(), api.mySupport().catch(() => null)]);
+      supporter = !!support?.supporter;
+      nameColor = support?.supporter?.nameColor ?? null;
+      deco = supporter ? avatarDecoOf(support?.supporter?.avatarDeco) : null;
       unlocked = new Set(cos.unlocked);
       signedIn = true;
       custom = mine.custom;
@@ -896,6 +986,7 @@ async function start(): Promise<void> {
   discord.hidden = !(signedIn && user?.discordAvatarUrl && !user.discordAvatarBlocked);
   ($("av-discord-box") as HTMLInputElement).checked = !!user?.useDiscordAvatar;
   if (!signedIn) status("Not signed in: free items only. Downloads still work.");
+  paintDeco();
   renderControls();
   draw();
 }

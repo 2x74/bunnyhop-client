@@ -9,12 +9,12 @@ import { keyLabel, prefs } from "../ui/settings";
 import { MeasureOverlay } from "./overlay";
 import "./measure.css";
 
-let host: { overlay: MeasureOverlay; camera: THREE.Camera; canMeasure: () => boolean } | null = null;
+let host: { overlay: MeasureOverlay; camera: THREE.Camera; canMeasure: () => boolean; gravity: () => number } | null = null;
 let pending = false, say: (text: string) => void = postLocalLine;
 let label: HTMLElement | null = null, labelAt = -Infinity, unobstructed = false;
-export function initMeasure(world: THREE.Object3D, scene: THREE.Object3D, camera: THREE.Camera, canMeasure: () => boolean, sky: THREE.Object3D[]): void {
+export function initMeasure(world: THREE.Object3D, scene: THREE.Object3D, camera: THREE.Camera, canMeasure: () => boolean, sky: THREE.Object3D[], gravity: () => number = () => 800): void {
   host?.overlay.dispose(); label?.remove();
-  host = { overlay: new MeasureOverlay(world, scene, new Set(sky)), camera, canMeasure };
+  host = { overlay: new MeasureOverlay(world, scene, new Set(sky)), camera, canMeasure, gravity };
   label = h("div.measure-label", { hidden: true }); document.body.append(label); pending = false;
 }
 export function requestMeasure(reply: (text: string) => void = postLocalLine): void {
@@ -27,6 +27,7 @@ export function measureFrame(now: number, visible: boolean): void {
   if (!host || !label) return;
   measureVisible(visible);
   if (!host.canMeasure()) { pending = false; label.hidden = true; return; }
+  host.overlay.gravity = host.gravity(); // (Low Gravity: 400)
   if (pending) {
     pending = false;
     if (!host.overlay.pick(host.camera)) say("No surface in range. Aim at a nearby wall or floor.");
@@ -47,7 +48,7 @@ export function measureFrame(now: number, visible: boolean): void {
 }
 
 export function registerMeasure(): void {
-  registerChatCommand({ name: "measure", aliases: ["distance"], args: "[clear]", help: "measure between two aimed points", group: "more", key: "measurePoint", where: "both", run: (ctx, arg) => {
+  registerChatCommand({ name: "measure", aliases: ["distance"], args: "[clear]", help: "measure between two aimed points", about: "aim at a surface and use it twice: distance, gap, height and about the speed a jump from the first point to the second needs.", group: "more", key: "measurePoint", where: "both", run: (ctx, arg) => {
     if (arg.toLowerCase() === "clear") { clearMeasure(); ctx.reply("Measurement cleared."); }
     else if (arg) ctx.reply("Usage: !measure [clear]. Aim at a surface and use it twice to measure a gap.");
     else requestMeasure(text => ctx.reply(text));
@@ -58,7 +59,7 @@ export function registerMeasure(): void {
     return [group("Distance measurement",
       actions("Measurement", [button("Set aimed point", () => requestMeasure(text => toast(text))), button("Clear measurement", clearMeasure)], {
         hint: key ? `${keyLabel(key)} at each point` : "!measure at each point",
-        desc: "Full distance, horizontal gap and height difference, in Source units. A third point starts a new measurement. Only you see it; it clears when you leave the map.",
+        desc: "Full distance, horizontal gap, height difference and about the speed a jump from the first point to the second needs, in Source units. A third point starts a new measurement. Only you see it; it clears when you leave the map.",
         keywords: "measure ruler distance gap height point",
       }),
     )];

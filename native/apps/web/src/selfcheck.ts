@@ -4,7 +4,7 @@
 // re-simulated in a worker (map-physics.ts: the map's one off-thread core, shared with the race ghosts) with the
 // verifier the server runs, and once both are done a small diagnostics object is attached to the submitted run
 // (api.runDiagnostics, apps/api src/diagnostics.ts): the self-check outcome, browser, sim / web build, fps over the run,
-// the input stats summary, tab switches during the run and the device fingerprint's components (device.ts; the hash
+// the input stats summary, the page's stalls (stall-log.ts), tab switches during the run and the device fingerprint's components (device.ts; the hash
 // itself goes with every write), and the player's side of the run for its stats card (RunPlay: attempts and time on the
 // map, frame cap, turn speed). The server stays authoritative; a client-side mismatch is only flagged ("client desync" in the admin Runs view), which
 // separates "this browser disagrees with its own recording" from "the server disagrees with the client".
@@ -21,6 +21,7 @@ import { nativeClient } from "./client-bridge";
 import { runClientInfo } from "./client-identity";
 import { currentRoom } from "./net/presence";
 import { roomHealth, runRoomNet, type RunRoomNet } from "./net/room-health";
+import { stalls } from "./stall-log";
 
 export interface SelfCheckResult {
   /** "na": not checked (a big map on a low-memory device, map-physics.ts; apps/api src/diagnostics.ts SELF_CHECKS). */
@@ -137,6 +138,7 @@ export { pitchPlay } from "./mouse-settings";
 export async function reportRun(o: { check: Promise<SelfCheckResult>; upload: Promise<string>; watched: ReturnType<RunWatch["stop"]>; input: Input; wasm: string; play?: RunPlay }): Promise<void> {
   const [check, id, fp] = await Promise.all([o.check, o.upload, fingerprint().catch(() => null)]);
   if (!id) return;
+  const stallSummary = stalls.summary();
   await api.runDiagnostics(id, {
     ...check,
     ua: navigator.userAgent,
@@ -152,5 +154,7 @@ export async function reportRun(o: { check: Promise<SelfCheckResult>; upload: Pr
     ...(o.watched.room ? { room: o.watched.room } : {}),
     ...(fp ? { fp: fp.components } : {}),
     ...(o.play ? { play: o.play } : {}),
+    // Frames over 250 ms on this page and what had just happened (stall-log.ts).
+    ...(stallSummary ? { stalls: stallSummary } : {}),
   });
 }

@@ -121,6 +121,8 @@ export function roomPanel(
     );
     input.disabled = view.status !== "open";
     rtv.disabled = submitNomination.disabled = view.status !== "open";
+    // The Daily room plays the day's map all day: no votes or nominations (the room refuses them).
+    rtv.hidden = nominate.hidden = submitNomination.hidden = nominations.hidden = !!view.room?.daily;
     rtv.textContent = `Rock the vote${view.rtv.needed ? ` (${view.rtv.count}/${view.rtv.needed})` : ""}`;
     nominations.textContent = view.nominations.length
       ? `Nominated: ${view.nominations.map((n) => `${n.map} (${n.name})`).join(" · ")}`

@@ -172,6 +172,7 @@ const COLLECTIONS: [id: string, label: string][] = [
   ["short", "Short"],
   ["modern", "Modern"],
   ["halloween", "Halloween"],
+  ["winter", "Winter"],
   ["csgo", "CS:GO maps"],
   ["new", "New maps"],
 ];

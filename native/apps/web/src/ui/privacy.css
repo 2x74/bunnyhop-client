@@ -2,5 +2,6 @@
 .privacy-choices legend { margin-bottom: 0.6rem; }
 .privacy-choice { display: flex; align-items: center; gap: 0.65rem; cursor: pointer; }
 .privacy-choice input { accent-color: var(--accent); }
-.privacy-dialog .fb-text { min-height: 5rem; }
+.privacy-dialog .fb-text { min-height: 6rem; }
+.privacy-dialog .fb-field .acct-note { margin: 0; }
 .privacy-dialog code { overflow-wrap: anywhere; }

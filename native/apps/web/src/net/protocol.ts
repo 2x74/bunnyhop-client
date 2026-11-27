@@ -840,6 +840,8 @@ export interface RosterPlayer {
   afk?: boolean;
   /** Verified main-track PBs on the room's current map, seconds, by style. */
   pb: Partial<Record<StyleId, number>>;
+  /** When each of those PBs was set (personal_bests.achieved_at, ms): the scoreboard's tie order. Absent from older servers. */
+  pbAt?: Partial<Record<StyleId, number>>;
   joinedAt: number;
   /** Bunny colourway (progression "outfit-*" cosmetic) the player wears; absent from older servers. */
   outfit?: string | null;
@@ -936,6 +938,23 @@ export interface RoomInfo {
    * everyone are at or above it. Absent: an older room, so send none and ask for none.
    */
   logs?: number;
+  /**
+   * (0.0.44) The Daily room (apps/api src/rooms: a room with mode "daily"): it always plays the day's Daily Challenge
+   * map, with no votes. Absent from every other room.
+   */
+  daily?: RoomDaily;
+}
+
+/**
+ * The day a Daily room plays (welcome `room.daily`, `map.daily`, GET /servers `daily`): the day (the UTC date it starts
+ * on), its style, the next day's map once the room knows it (from 15:50 UTC), and when the day ends (server ms, 16:00
+ * UTC; the room changes map a little after, so runs started before it can finish).
+ */
+export interface RoomDaily {
+  day: string;
+  style: string;
+  nextMap?: string;
+  endsAt: number;
 }
 
 export interface MapInfo {
@@ -944,6 +963,8 @@ export interface MapInfo {
   startedAt: number;
   /** Time limit (server ms); moves when the map is extended. */
   endsAt: number;
+  /** (0.0.44) In a Daily room: the day this map is played for. */
+  daily?: RoomDaily;
 }
 
 export interface PoolEntry {
@@ -979,6 +1000,8 @@ export interface MapChange {
   tier: number | null;
   /** Server time the room switches maps; clients reload onto the new map then. */
   at: number;
+  /** (0.0.44) In a Daily room, when the room sends it: the day the new map is played for. */
+  daily?: RoomDaily;
 }
 
 export type AnnounceKind = "wr" | "sr" | "top10" | "pb";

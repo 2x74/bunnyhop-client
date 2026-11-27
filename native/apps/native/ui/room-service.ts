@@ -20,6 +20,7 @@ import {
   type RaceView,
   type RoomRaceView,
   type GainLogReport,
+  type RoomDaily,
 } from "../../web/src/net/protocol";
 import { nativeChatDecoration } from "./chat-decoration";
 import { announceLine, roomChatLines, type RoomChatLine } from "./room-chat-lines";
@@ -67,6 +68,11 @@ interface Dependencies {
   voiceEnabled?: () => boolean;
   /** Gain logs (gain-logs-native.ts): the room's bar, other players' lines, and the bar to ask the room for. */
   gainLogs?: RoomGainLogs;
+  /**
+   * A Daily room's day (welcome `room.daily` / `map.daily`, a map message's `map.daily`), before the host hears of the
+   * room's map: main.ts plays it in the day's style (web: ?server=<id>&daily=<day>, net/daily-room.ts).
+   */
+  dailyRoom?: (daily: RoomDaily) => void;
 }
 /** What the room side of gain logs needs (the website's ssj/logs.ts GainLogs, through gain-logs-native.ts). */
 export interface RoomGainLogs {
@@ -830,6 +836,14 @@ export class NativeRoomService {
       this.event({ t: "nativeStatus", status: "closed", detail: message.reason });
     }
     if (message.t === "host" && this.view.room) this.view.room.host = message.slot;
+    // Before the event below reaches the host, which loads the room's map in the style it has then.
+    const daily =
+      message.t === "welcome"
+        ? (message.map.daily ?? message.room.daily)
+        : message.t === "map"
+          ? message.map.daily
+          : null;
+    if (daily) this.dependencies.dailyRoom?.(daily);
     this.view.chat = this.view.chat.slice(-100);
     for (const line of lines) this.sendLine(line);
     this.event({

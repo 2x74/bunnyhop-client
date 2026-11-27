@@ -16,7 +16,7 @@ import { PAINT_COLORS } from "../paint/prefs";
 import { LANDING_MODES } from "../landing/prefs";
 import { KEY_SOUND_SETS } from "../audio/keysound-policy";
 import { PERFECT_SOUND_SETS } from "../audio/perfect-policy";
-import { applyGraphicsPreset, DEFAULT_PREFS, graphicsPreset, PRESET_ORDER, type GraphicsPreset, type Prefs } from "../ui/settings";
+import { applyGraphicsPreset, DEFAULT_PREFS, graphicsPreset, PRECIPITATION_LEVELS, PRESET_ORDER, type GraphicsPreset, type Prefs } from "../ui/settings";
 
 export type CvarValue = number | string;
 
@@ -192,6 +192,7 @@ export const CVARS: readonly Cvar[] = [
   pick("cl_autorestart", "Restart a timed run once it's past: off, pb, wr or ghost.", ["off", "pb", "wr", "ghost"] as const, (p) => p.autoRestart.when, (p, v) => (p.autoRestart.when = v)),
   pick("cl_autorestart_action", "What auto restart does: restart or sound.", ["restart", "sound"] as const, (p) => p.autoRestart.action, (p, v) => (p.autoRestart.action = v)),
   sw("cl_cp_keepvelocity", "A checkpoint teleport keeps the speed you saved it with.", (p) => p.practice.keepVelocity, (p, v) => (p.practice.keepVelocity = v)),
+  sw("cl_cp_keep", "Keep your checkpoints on this device and bring them back when you return to the map.", (p) => p.practice.keepCheckpoints, (p, v) => (p.practice.keepCheckpoints = v)),
   // ---- view
   num("fov_desired", "Field of view, horizontal at 4:3.", [75, 120], (p) => p.fov, (p, v) => (p.fov = v)),
   num("viewmodel_fov", "Viewmodel field of view.", [40, 90], (p) => p.viewmodel.fov, (p, v) => (p.viewmodel.fov = v)),
@@ -264,6 +265,8 @@ export const CVARS: readonly Cvar[] = [
   sw("r_proplighting", "Props lit by the map; off keeps them bright.", (p) => p.graphics.propLighting, (p, v) => (p.graphics.propLighting = v)),
   sw("fog_enable", "The map's own fog.", (p) => p.graphics.mapFog, (p, v) => (p.graphics.mapFog = v)),
   sw("r_mapdetails", "The map's overlays, decals, glows and light beams.", (p) => p.graphics.mapDetails, (p, v) => (p.graphics.mapDetails = v)),
+  pick("r_precipitation", "The map's falling snow and rain: off, light or full.", PRECIPITATION_LEVELS, (p) => p.graphics.precipitation, (p, v) => (p.graphics.precipitation = v), { aliases: ["r_drawrain"] }),
+  sw("r_frost", "Frost on players standing in falling snow.", (p) => p.graphics.frost, (p, v) => (p.graphics.frost = v)),
   pick("r_modellighting", "The map's light on hands, weapons and bunnies: off, subtle or full.", MODEL_LIGHTING_MODES, (p) => p.graphics.modelLighting, (p, v) => (p.graphics.modelLighting = v)),
   sw("r_bloom", "Bloom.", (p) => p.graphics.bloom, (p, v) => (p.graphics.bloom = v)),
   sw("r_shadows", "Dynamic shadows (Enhanced, Cinematic).", (p) => p.graphics.dynamicShadows, (p, v) => (p.graphics.dynamicShadows = v)),

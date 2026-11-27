@@ -200,6 +200,11 @@ export interface ProgressStats {
   level: number;
   /** Best main-track Normal time (seconds) per map, for time goals. */
   bestNormal: Record<string, number>;
+  /**
+   * Best main-track time (seconds) per map in any style that earns progression (earnsProgression: Normal and the other
+   * classic styles; not Auto-strafe or the separate modes), for the time goals that take any of them (anyStyle).
+   */
+  bestClassic?: Record<string, number>;
   /** Best sync % on a main-track finish of tier >= 2. */
   bestSync: number;
   /** Maps with a main-track finish in a progression style (Home Turf and the map-set goals). Absent = none known. */
@@ -215,6 +220,8 @@ export interface ProgressStats {
   photoFinish?: boolean;
   /** Most HALLOWEEN_MAPS cleared inside one year's HALLOWEEN_WINDOW. */
   halloweenSeason?: number;
+  /** Most WINTER_MAPS cleared inside one winter's WINTER_WINDOW (December 1 to January 7, one season). */
+  winterSeason?: number;
   /** Gauntlets (apps/api/src/gauntlets.ts). Absent = none cleared. */
   gauntlets?: GauntletStats;
   /** The Daily Challenge (apps/api/src/daily.ts). Absent = never played one. */
@@ -301,8 +308,14 @@ const RING_BY_TIER: Record<Tier, Ring> = { 1: 0, 2: 0, 3: 1, 4: 1, 5: 2, 6: 3, 7
 /** "tier 3", "tier 10" (achievement copy). */
 const tierWords = (t: Tier) => `tier ${tierNum(t)}`;
 
-/** Time goals ("Sub-X on bhop_eazy"). Thresholds need tuning against real WRs (see research/RANKS.md open questions). */
-export const TIME_GOALS: { map: string; seconds: number; name: string; ring: Ring; title?: string; id?: string }[] = [
+/** The Santa Hat's map (TIME_GOALS "Sleigh Ride"): the code-built Christmas remix of bhop_ambience. */
+export const SANTA_MAP = "bhop_ambience_xmas";
+
+/**
+ * Time goals ("Sub-X on bhop_eazy"). Thresholds need tuning against real WRs (see research/RANKS.md open questions).
+ * `anyStyle`: any style that earns progression counts (bestClassic), not only Normal.
+ */
+export const TIME_GOALS: { map: string; seconds: number; name: string; ring: Ring; title?: string; id?: string; anyStyle?: boolean }[] = [
   // Was under 30 s, which nobody could earn (the Normal WR was 31.77 s in 2026-10). Owner, 2026-10-21: under 60 s. The
   // id stays the old one (user_achievements rows carry it). That made Eazy Does It (time_bhop_eazy_60, under 60 s, no
   // items) the same goal, so it's retired: rows that carry it stay in D1 but no longer show or pay XP; whoever had it
@@ -311,7 +324,13 @@ export const TIME_GOALS: { map: string; seconds: number; name: string; ring: Rin
   // Our own maps (WRs 2026-10: Meadow 14.1 s, 35 players under 20 s; Aero 22.6 s, 10 under 40 s).
   { map: "bhop_lol_meadow", seconds: 16, name: "Meadowlark", ring: 1 },
   { map: "bhop_lol_aero", seconds: 35, name: "Fair Weather", ring: 2 },
+  // The Santa Hat (v0.0.44, owner 11-27: "for clearing bhop_ambience_xmas under a decent time"). Picked from the live
+  // board on 11-27: WR 19.297 s; 19 of the 45 Normal finishers (42%) were under 22 s, and no other style's best was.
+  { map: SANTA_MAP, seconds: 22, name: "Sleigh Ride", ring: 1, anyStyle: true },
 ];
+
+/** The time goal that unlocks the Santa Hat. */
+export const SANTA_GOAL = `time_${SANTA_MAP}_22`;
 
 /**
  * Home Turf: the maps made for bunnyhop.lol (tools/meadow, tools/aero, tools/backrooms, tools/plaza). Hermes is left out:
@@ -350,6 +369,57 @@ export function inHalloweenWindow(ms: number): boolean {
   const md = `${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
   return md >= HALLOWEEN_WINDOW.from && md <= HALLOWEEN_WINDOW.to;
 }
+
+/**
+ * The Winter collection (maps/index.json "winter"; a test keeps them in step): the live maps set in snow or ice, picked
+ * by eye from their pictures plus their snow textures and snowfall volumes.
+ */
+export const WINTER_MAPS = [
+  "bhop_abstract_winter",
+  "bhop_ambience_xmas",
+  "bhop_boxes_snowy",
+  "bhop_christmas",
+  "bhop_cks_winter",
+  "bhop_cold",
+  "bhop_frost_bite_v1",
+  "bhop_icebase",
+  "bhop_icetrap",
+  "bhop_jago",
+  "bhop_kaunisnimi",
+  "bhop_monster_jam_xmas",
+  "bhop_snowwhite",
+  "bhop_snowy",
+  "bhop_strafe_winter",
+  "bhop_strafing_in_siberia",
+  "bhop_stref_siberia",
+  "bhop_winter",
+] as const;
+
+/**
+ * The winter window, every year (UTC, inclusive): December 1 to January 7, across the new year. "MM-DD". One season is
+ * a December and the January after it (winterSeasonOf).
+ */
+export const WINTER_WINDOW = { from: "12-01", to: "01-07" } as const;
+
+/** The winter season `ms` falls in: the year of its December (January 1-7 2027 is the 2026 season), or null outside. */
+export function winterSeasonOf(ms: number): number | null {
+  const d = new Date(ms);
+  const md = `${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+  if (md >= WINTER_WINDOW.from) return d.getUTCFullYear();
+  if (md <= WINTER_WINDOW.to) return d.getUTCFullYear() - 1;
+  return null;
+}
+
+/**
+ * How long after a seasonal window closes the server still reads the season's history (a run finished on the last day
+ * can be verified late). Outside a window plus this, Trick or Treat and Snow Day can't advance, so their scans are
+ * skipped (apps/api/src/progress.ts) and their stats read 0 unless held.
+ */
+export const SEASON_GRACE_MS = 3 * 86_400_000;
+/** Whether Trick or Treat's history is read at `now` (inside the October window, or just after it). */
+export const halloweenScanOpen = (now: number): boolean => inHalloweenWindow(now) || inHalloweenWindow(now - SEASON_GRACE_MS);
+/** Whether Snow Day's history is read at `now` (inside the winter window, or just after it). */
+export const winterScanOpen = (now: number): boolean => winterSeasonOf(now) !== null || winterSeasonOf(now - SEASON_GRACE_MS) !== null;
 
 /** A race won by less than this (seconds between server finishes) is a photo finish. */
 export const PHOTO_FINISH_S = 0.05;
@@ -532,6 +602,26 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     progress: (s) => at(clearedOf(s, HALLOWEEN_MAPS), 10),
   },
   {
+    id: "winter_5",
+    name: "Snow Day",
+    desc: "Finish 5 maps from the Winter collection between December 1 and January 7 (one winter)",
+    goal: "5 Winter maps, Dec 1 to Jan 7",
+    group: "event",
+    icon: "snowflake",
+    ring: 1,
+    progress: (s) => at(s.winterSeason ?? 0, 5),
+  },
+  {
+    id: "winter_10",
+    name: "Deep Winter",
+    desc: "Finish 10 maps from the Winter collection",
+    goal: "Clear 10 Winter maps",
+    group: "event",
+    icon: "snowflake",
+    ring: 2,
+    progress: (s) => at(clearedOf(s, WINTER_MAPS), 10),
+  },
+  {
     id: "scenic_route",
     name: "Scenic Route",
     desc: "Finish bhop_eazy taking more than five minutes",
@@ -568,12 +658,16 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     (g): AchievementDef => ({
       id: g.id ?? `time_${g.map}_${g.seconds}`,
       name: g.name,
-      desc: `Finish ${g.map} under ${fmtGoal(g.seconds)} (Normal)`,
+      desc: `Finish ${g.map} under ${fmtGoal(g.seconds)} (${g.anyStyle ? "any style that earns XP" : "Normal"})`,
+      goal: g.anyStyle ? `${g.map} under ${fmtGoal(g.seconds)}` : undefined,
       group: "time",
       icon: "clock",
       ring: g.ring,
       title: g.title,
-      progress: (s) => at(s.bestNormal[g.map] !== undefined && s.bestNormal[g.map] < g.seconds ? 1 : 0, 1),
+      progress: (s) => {
+        const best = (g.anyStyle ? s.bestClassic : s.bestNormal)?.[g.map];
+        return at(best !== undefined && best < g.seconds ? 1 : 0, 1);
+      },
     }),
   ),
   { id: "sync_90", name: "In Sync", desc: "Finish a T2+ map with 90% sync or better", group: "time", icon: "sync", ring: 1, progress: (s) => at(s.bestSync >= 90 ? 1 : 0, 1) },
@@ -1285,6 +1379,11 @@ export const COSMETICS: CosmeticDef[] = [
   { id: "outfit-pumpkin", slot: "outfit", name: "Pumpkin Patch", unlock: ach("halloween_5"), color: "#e0701c" },
   { id: "glove-garden-pumpkin", slot: "glove", name: "Garden · Pumpkin", unlock: ach("halloween_5"), color: "#e0701c", rarity: 3 },
   { id: "fin-lantern", slot: "finish", name: "Lantern", unlock: ach("halloween_10"), color: "#ff8a1f", rarity: 4 },
+  // Winter (v0.0.44): a snow colourway (Snow Day, inside the window), a pack-ice blade (Deep Winter, any time) and the
+  // Santa Hat for a quick bhop_ambience_xmas (Sleigh Ride, any time). Ids are stable forever.
+  { id: "outfit-snowdrift", slot: "outfit", name: "Snowdrift", unlock: ach("winter_5"), color: "#e9eef0" },
+  { id: "fin-pack-ice", slot: "finish", name: "Pack Ice", unlock: ach("winter_10"), color: "#9cc9ea", rarity: 4 },
+  { id: "hat-santa", slot: "hat", name: "Santa Hat", unlock: ach(SANTA_GOAL), color: "#d0342c" },
   // Level 35 / 40: the card between Holo (30) and Four-Leaf (50).
   { id: "frame-brass", slot: "frame", name: "Brass", unlock: lvl(35), color: "#c9a24a" },
   { id: "bg-nightgarden", slot: "background", name: "Night Garden", unlock: lvl(40), color: "#102418" },

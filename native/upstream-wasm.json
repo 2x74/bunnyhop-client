@@ -1,11 +1,11 @@
 {
   "schema": 1,
   "status": "published",
-  "commit": "57eb09e87be756a39c5ae24f038cc261e2408d2d",
+  "commit": "8364bb110c7c5a6ede7197b454f51ce81423a820",
   "toolchain": "1.99.1",
   "url": "https://bunnyhop.lol/assets/bunnyhop_core-DScZxwxJ.wasm",
   "sha256": "bb2e38b1e7237967fec27cfe08fb1c5dfae649894562e41a97355df45c6899b3",
   "bytes": 1736218,
   "physics": 30,
-  "rules": 5
+  "rules": 6
 }

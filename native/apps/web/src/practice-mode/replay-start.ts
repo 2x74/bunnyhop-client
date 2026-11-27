@@ -5,7 +5,7 @@
 import type { Settings } from "../core";
 import { replayStyle, replayTimerRules, type ReplayHeader } from "../replay";
 import { styleForTrack, styleLabel, styleSettings, type StyleId } from "../styles";
-import { TIMER_RULES } from "../timer";
+import { timesAsCurrentRules } from "../timer";
 
 const f32 = Math.fround;
 
@@ -18,12 +18,13 @@ export function sameSettings(a: Settings, b: Settings): boolean {
 /**
  * Why the replay can't be practised from on this map and style, or null if it can. It continues in the live game, so it
  * has to be the style you have selected (styles.ts styleForTrack) and play back with the physics and timer rules the game
- * runs now; runs from older versions keep their original movement and are only for watching.
+ * runs now (or rules that time this map the same, timer.ts timesAsCurrentRules); runs from older versions keep their
+ * original movement and are only for watching.
  */
 export function replayStartProblem(h: ReplayHeader, o: { map: string; selectedStyle: StyleId }): string | null {
   if (h.map !== o.map) return "That replay is for another map.";
   const style = replayStyle(h);
   if (style !== styleForTrack(o.selectedStyle, h.track, o.map)) return `That replay is ${styleLabel(style)}. Switch to it first.`;
-  if (replayTimerRules(h) !== TIMER_RULES || !sameSettings(h.settings, styleSettings(style as StyleId))) return "That replay is from an older version of the game, so it can only be watched.";
+  if (!timesAsCurrentRules(replayTimerRules(h), h.map) || !sameSettings(h.settings, styleSettings(style as StyleId))) return "That replay is from an older version of the game, so it can only be watched.";
   return null;
 }

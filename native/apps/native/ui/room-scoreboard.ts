@@ -3,6 +3,8 @@ import { roomStyleAt } from "./room-styles";
 import { staffBadgeOf } from "../../web/src/creators";
 import { formatTime } from "../../web/src/timer";
 import type { RoomView } from "./room-service";
+import { roomTimeLeft } from "../../web/src/net/daily-room";
+import { scoreOrder } from "../../web/src/net/score-order";
 const PALETTE = [
   "#ff7a59",
   "#4fa8ff",
@@ -84,17 +86,21 @@ export function roomScoreboard(
       country: p.country ?? null,
     };
   });
-  rows.sort((a, b) => (a.pb ?? Infinity) - (b.pb ?? Infinity) || a.name.localeCompare(b.name));
+  // Equal PBs: who set theirs first, as on the boards (web net/mp.ts, net/score-order.ts).
+  const pbAt = new Map(
+    view.players.map((p) => [p.slot, (p as { pbAt?: Partial<Record<string, number>> }).pbAt ?? {}] as const),
+  );
+  rows.sort((a, b) =>
+    scoreOrder(
+      { pb: a.pb, pbAt: pbAt.get(a.slot)?.[a.style] ?? null, name: a.name },
+      { pb: b.pb, pbAt: pbAt.get(b.slot)?.[b.style] ?? null, name: b.name },
+    ),
+  );
+  // The Daily room counts down to the end of the day ("5h 12m left"), then to its map change (web net/daily-room.ts).
   let timeLeft = "";
   if (view.change) timeLeft = `changing to ${view.change.map}`;
-  else if (view.mapInfo) {
-    const ms = view.mapInfo.endsAt - serverNow;
-    if (ms <= 0) timeLeft = "last round";
-    else {
-      const seconds = Math.ceil(ms / 1000);
-      timeLeft = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")} left`;
-    }
-  }
+  else if (view.mapInfo)
+    timeLeft = roomTimeLeft(serverNow, view.mapInfo.endsAt, view.mapInfo.daily ?? view.room?.daily);
   return {
     rows,
     head: {
@@ -104,7 +110,7 @@ export function roomScoreboard(
       timeLeft,
       players: view.players.length,
       max: view.room?.maxPlayers ?? 0,
-      nextMap: view.change?.map ?? view.nextMap ?? null,
+      nextMap: view.change?.map ?? view.nextMap ?? (view.mapInfo?.daily ?? view.room?.daily)?.nextMap ?? null,
       spectating: view.players.find((p) => p.slot === view.you)?.spec != null,
     },
   };

@@ -138,6 +138,26 @@ public:
         mark(0, recipes.pool);
     }
 
+    // Map load: one draw of the (all dead) pool with colour and depth writes off, so the driver finishes the program's
+    // draw-time state now and not in the frame of the first hop effect (web hop-layer.ts prewarmHopLayer).
+    void prewarm() {
+        dirty_from = 0;
+        dirty_to = recipes.pool;
+        upload();
+        const native::Matrix identity{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+        gl.UseProgram(program);
+        gl.Uniform1fv(clock_location, GLsizei(clocks.size()), clocks.data());
+        gl.UniformMatrix4fv(model_view_location, 1, GL_FALSE, identity.data());
+        gl.UniformMatrix4fv(projection_location, 1, GL_FALSE, identity.data());
+        gl.ColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+        gl.DepthMask(GL_FALSE);
+        gl.BindVertexArray(vao);
+        gl.DrawElementsInstanced(GL_TRIANGLES, 6, GL_UNSIGNED_INT, nullptr, 1);
+        gl.BindVertexArray(0);
+        gl.ColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        gl.DepthMask(GL_TRUE);
+    }
+
     // Draws every live piece. `view_projection` and `eye` are the frame's camera (Source space).
     void draw(const native::Matrix &view_projection, const float eye[3]) {
         frame_bursts = 0;

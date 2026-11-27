@@ -363,6 +363,8 @@ export interface ScoreRow extends PlayerMarks {
   status: string;
   statusKind: "running" | "finished" | "idle" | "practice" | "spec";
   pb: number | null;
+  /** When that PB was set (ms; net/score-order.ts breaks ties with it), null when unknown. */
+  pbAt?: number | null;
   ping: number | null;
   /** A private lobby's host (net/lobby.ts). */
   host?: boolean;

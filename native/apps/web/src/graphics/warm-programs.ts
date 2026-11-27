@@ -371,6 +371,22 @@ export async function drawHiddenPrograms(renderer: THREE.WebGLRenderer, root: TH
   await Promise.all(jobs);
 }
 
+/**
+ * drawHiddenPrograms (on every driver) for a model kept hidden until later, a ghost before the next start: its root
+ * counts as shown while the draws are taken (synchronously, in the call), parts hidden inside it stay out. Call after
+ * warmPrograms: the draws then only make the GPU's draw-time state (D3D11 under ANGLE builds it on a program's first
+ * draw with each output and vertex layout), off screen and a draw per task, not in the frame the model first shows.
+ */
+export function drawWhileHidden(renderer: THREE.WebGLRenderer, root: THREE.Object3D, camera: THREE.Camera, scene: THREE.Scene): Promise<void> {
+  const visible = root.visible;
+  root.visible = true;
+  try {
+    return drawHiddenPrograms(renderer, root, camera, scene, true);
+  } finally {
+    root.visible = visible;
+  }
+}
+
 /** Starts compiling `root`'s programs for one output, the screen or (offscreen) any render target, without waiting. */
 export function compileFor(renderer: THREE.WebGLRenderer, root: THREE.Object3D, camera: THREE.Camera, scene: THREE.Scene, offscreen: boolean): void {
   if (!renderer.extensions.has("KHR_parallel_shader_compile")) {

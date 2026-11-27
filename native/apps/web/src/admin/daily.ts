@@ -40,13 +40,22 @@ interface PoolMap {
   excluded: boolean;
   note: string | null;
   lastDay: string | null;
+  /** Only in Sundays' pool. */
+  sundays?: boolean;
+}
+interface PoolRules {
+  tiers: number[];
+  minRunners: number;
+  maxRunners: number;
+  minWr: number;
+  maxWr: number;
 }
 interface DailyAdmin {
   enabled: boolean;
   count: "all" | "entry";
   now: number;
   today: string;
-  rules: { tiers: number[]; minRunners: number; maxRunners: number; minWr: number; maxWr: number; noRepeatDays: number; settleMinutes: number };
+  rules: PoolRules & { sunday?: PoolRules; noRepeatDays: number; settleMinutes: number };
   /** The styles a day can be, Normal first. */
   styles: { id: string; name: string }[];
   days: Day[];
@@ -176,13 +185,18 @@ function scheduleView(root: HTMLElement, a: DailyAdmin): void {
   );
 }
 
+const wrLength = (s: number) => (s >= 120 ? `${Math.round(s / 60)} min` : `${s} s`);
+/** "Ranked tier 2 and 3 maps with 15 to 400 players and a record between 25 s and 90 s." */
+const ruleText = (r: PoolRules) =>
+  `Ranked tier ${r.tiers.join(" and ")} maps with ${r.minRunners} to ${r.maxRunners} players and a record between ${wrLength(r.minWr)} and ${wrLength(r.maxWr)}.`;
+
 function poolView(root: HTMLElement, a: DailyAdmin): void {
   const r = a.rules;
   const row = (m: PoolMap) =>
     h(
       "tr",
       { class: m.excluded ? "retired" : "" },
-      h("td", null, mapLine(m.name, { tier: m.tier })),
+      h("td", null, mapLine(m.name, { tier: m.tier }), m.sundays ? h("div", { class: "faint" }, "Sundays only") : null),
       h("td", { class: "num" }, n(m.runners)),
       h("td", { class: "num" }, secs(m.wr)),
       h("td", null, m.lastDay ?? h("span", { class: "faint" }, "Never")),
@@ -218,7 +232,7 @@ function poolView(root: HTMLElement, a: DailyAdmin): void {
       h(
         "span",
         { class: "sub" },
-        `Ranked tier ${r.tiers.join(" and ")} maps with ${r.minRunners} to ${r.maxRunners} players and a record between ${r.minWr} s and ${Math.round(r.maxWr / 60)} min. A map isn't picked again for ${r.noRepeatDays} days, and never while it is in the week's gauntlet.`,
+        `${ruleText(r)}${r.sunday ? ` Sundays: ${ruleText(r.sunday).toLowerCase()}` : ""} Maps with strafe in the name are left out. A map isn't picked again for ${r.noRepeatDays} days, and never while it is in the week's gauntlet.`,
       ),
       h("div", { class: "tools" }, h("a", { class: "btn", href: "#/daily" }, "Schedule")),
     ),

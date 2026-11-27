@@ -33,6 +33,7 @@ import { spectatorLines } from "./net/spectators";
 import { IS_RESET, type NetInputTick } from "./net/protocol";
 import { watchedSample, type InputSettings } from "./net/spectate-input";
 import { EVENT_RESPAWNED, formatTime, type RunStatus, type TickCmd } from "./timer";
+import { practiceLine } from "./hud/practice-line";
 import { h } from "./ui/dom";
 import { keyLabel, prefs, type Prefs } from "./ui/settings";
 import { trackName } from "./zones";
@@ -132,6 +133,18 @@ export function renderCrosshair(el: HTMLElement, c: Prefs["crosshair"]): void {
   for (const p of parts) el.append(h(`i.xh-${p}`));
 }
 
+/** The player you spectate in a room, as net/mp.ts feeds it every frame. */
+export interface Spectated {
+  speed: number;
+  status: RunStatus;
+  time: number;
+  inStart: boolean;
+  /** Their attempt is practice (the roster's `practice`): the timer goes yellow, as it does for them. */
+  practice?: boolean;
+  /** They run Segmented (and aren't practising): the quiet Segmented line. */
+  segmented?: boolean;
+}
+
 /** Sample values shown while editing the layout, so every element has content to grab. */
 const DEMO: HudFrame = {
   speed: 412,
@@ -149,6 +162,9 @@ const DEMO: HudFrame = {
   track: 1,
   stage: "Stage 2/4",
 };
+
+/** The world record element's sample while editing the layout. */
+const DEMO_WR = 21.391;
 
 const GHOST_COLOR = "#66b3ff";
 /** The layout editor's sample for the movement elements. */
@@ -240,6 +256,8 @@ export class Hud {
   private mapLine: HTMLElement;
   private pbText = text();
   private pbVal = h("b.pb-val", null, this.pbText);
+  /** The world record element (layout id "wr"), from `wr`. */
+  private wrText = text();
   private fpsText = text();
   /** net_graph: " · 38 ms" after the FPS in servers (pingMs, net/mp.ts); empty otherwise. */
   private pingText = text();
@@ -291,7 +309,7 @@ export class Hud {
   private liveVersion = 0;
   private liveEls: HTMLElement[] = [];
   private static blank() {
-    return { speed: "", state: "", time: "", split: "?", place: "?", splitEmpty: null as boolean | null, stats: "?", pb: "", track: "?", stage: "?", sync: -1, ghost: null as boolean | null, perf: "?" };
+    return { speed: "", state: "", time: "", split: "?", place: "?", splitEmpty: null as boolean | null, stats: "?", pb: "", wr: "?", track: "?", stage: "?", sync: -1, ghost: null as boolean | null, perf: "?" };
   }
   private ghostIn = new Map<number, GhostInputs>();
   private ghostAt = -1;
@@ -311,7 +329,7 @@ export class Hud {
   private pbLocked = 0;
   private ledgerTimers: number[] = [];
   /** Spectating someone (net/mp.ts): their speed and timer replace yours. */
-  private spectated: { speed: number; status: RunStatus; time: number; inStart: boolean } | null = null;
+  private spectated: Spectated | null = null;
   /** Gauntlet mode (gauntlet/mode.ts): the one line under the timer (total so far, live delta to your PB's split). */
   private gauntlet: GauntletProgress | null = null;
   private gauntletText = text();
@@ -361,6 +379,8 @@ export class Hud {
       longJump: this.ljView.el,
       map: this.mapLine,
       pb: h("div.hud-pb", null, h("small", null, "PB"), this.pbVal),
+      // The PB's look (hud.css .hud-pb), its own element so it can sit anywhere.
+      wr: h("div.hud-pb.hud-wr", null, h("small", null, "WR"), h("b", null, this.wrText)),
       fps: h("div.hud-fps", null, this.fpsText, " fps", this.pingText),
       // Chat (net/hud.ts ChatBox: net/mp.ts in a room, solo-chat.ts in solo play); demo lines only in the layout editor.
       chat: (this.chatEl = h(
@@ -393,6 +413,7 @@ export class Hud {
     this.els.practice.classList.add("empty"); // shown while the attempt is practice (setPractice, session.ts)
     this.els.jhud.classList.add("empty"); // shown for a moment after each jump (setJhud)
     this.els.ghostSpeed.classList.add("empty"); // shown while there's a ghost to compare with (update)
+    this.els.wr.classList.add("empty"); // shown while the board has a world record (update)
     this.jumps.onJump = (n, _speed, gain) => {
       this.graph.mark(gain, n === 1);
       if (n > 1) this.pendingGain = gain;
@@ -640,19 +661,25 @@ export class Hud {
     this.practiceWarn = warn;
     // A Segmented run's line ("Segmented · 2 loads") sits in the same place but the run counts: no yellow timer.
     this.segmentLine = segmented;
-    this.practiceOn = !!label && !segmented;
-    this.timerEl.classList.toggle("practice", this.practiceOn);
-    this.els.practice.classList.toggle("segmented", segmented);
     this.drawPractice();
   }
   private segmentLine = false;
 
+  /**
+   * The Practice line and the yellow timer: your attempt's (setPractice), or while spectating the watched player's
+   * (setSpectated, 0.0.44): their practice attempt is yellow and says Practice, their Segmented run says Segmented (the
+   * room doesn't send the load count). Yours stays as it was for when you're back.
+   */
   private drawPractice(): void {
-    const label = this.practiceLabel ?? (this.editing ? "Practice" : null);
+    const { label: real, segmented, warn, yellow } = practiceLine({ label: this.practiceLabel, segmented: this.segmentLine, warn: this.practiceWarn }, this.spectated);
+    const label = real ?? (this.editing ? "Practice" : null);
+    this.practiceOn = yellow;
+    this.timerEl.classList.toggle("practice", this.practiceOn);
+    this.els.practice.classList.toggle("segmented", segmented);
     this.practiceText.data = label ?? "";
-    this.practiceWarnText.data = this.practiceWarn ?? "";
+    this.practiceWarnText.data = warn ?? "";
     this.els.practice.classList.toggle("empty", !label);
-    this.els.practice.classList.toggle("warn", !!this.practiceWarn);
+    this.els.practice.classList.toggle("warn", !!warn);
   }
 
   /** Debug hook opted in outside dev (session.ts): a small corner badge, runs are practice only. */
@@ -817,8 +844,10 @@ export class Hud {
    * yours, and the speed graph draws their speed (tick); null gives them back. Your own run's other readouts hide
    * meanwhile (net.css body.mp-spectating).
    */
-  setSpectated(v: { speed: number; status: RunStatus; time: number; inStart: boolean } | null): void {
+  setSpectated(v: Spectated | null): void {
+    const was = this.spectated;
     this.spectated = v;
+    if (!was !== !v || (was && v && (!!was.practice !== !!v.practice || !!was.segmented !== !!v.segmented))) this.drawPractice();
   }
 
   // -------------------------------------------------------------------------------------------
@@ -971,6 +1000,12 @@ export class Hud {
     }
     const pb = f.pb === null ? "—" : formatTime(f.pb);
     if (pb !== s.pb && now >= this.pbLocked) this.pbText.data = s.pb = pb;
+    // The world record (setWorldRecord, or your own new one: card.onRecord); hidden on a board without one.
+    const wr = this.editing ? formatTime(DEMO_WR) : this.wr === null ? "" : formatTime(this.wr);
+    if (wr !== s.wr) {
+      this.wrText.data = s.wr = wr;
+      this.els.wr.classList.toggle("empty", !wr);
+    }
     if (liveVars.on || liveVars.version !== this.liveVersion) this.writeLive({ speed: sp, sync: String(Math.round(f.sync)), jumps: String(f.jumps), strafes: String(f.strafes) });
 
     if (this.gauntlet && !this.editing) {

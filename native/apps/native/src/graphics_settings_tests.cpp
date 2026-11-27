@@ -43,8 +43,21 @@ static void settings_validation() {
     native::apply_graphics_quality(document, "lowest");
     const auto graphics = native::GraphicsSettings::read(document);
     assert(graphics.potato && graphics.samples == 0 && graphics.resolution_scale == .5f && graphics.anisotropy == 1);
+    assert(graphics.precipitation == 0);
+    native::apply_graphics_quality(document, "medium");
+    assert(native::GraphicsSettings::read(document).precipitation == .5);
     native::apply_graphics_quality(document, "high");
     assert(native::GraphicsSettings::read(document).samples == 4);
+    assert(native::GraphicsSettings::read(document).precipitation == 1);
+    rejects("graphicsPrecipitation", "heavy");
+    rejects("graphicsPrecipitation", true);
+    // Saved before snow and rain: their Quality preset's level (Medium: light); a level already saved stays.
+    Json medium = {{"graphicsAntialias", false}, {"graphicsAnisotropy", 4}, {"graphicsWaterReflections", false}};
+    native::migrate_precipitation(medium);
+    assert(medium.at("graphicsPrecipitation") == "light");
+    Json chosen = {{"graphicsPotato", true}, {"graphicsPrecipitation", "full"}};
+    native::migrate_precipitation(chosen);
+    assert(chosen.at("graphicsPrecipitation") == "full");
     assert(!native::patch_graphics_setting(document, "graphics", 42));
     assert(native::patch_graphics_setting(document, "graphicsSkyExposure", 4));
     assert(native::GraphicsSettings::read(document).sky_exposure == 4);

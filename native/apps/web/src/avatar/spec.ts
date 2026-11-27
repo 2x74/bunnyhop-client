@@ -113,6 +113,11 @@ export interface AvatarSpec {
   frame: AvatarFrame;
   /** 0.7..1.6: closer / further than the frame's default. */
   zoom: number;
+  /**
+   * v0.0.44 Headroom, 0..LIFT_MAX: how far the bunny sits below the frame's own placing, as a share of the picture's
+   * height, leaving room over the head for a decoration (Halo, Cat Ears). Absent = 0, so older avatars are unchanged.
+   */
+  lift?: number;
   /** "clear", a BACKDROPS id, "#rrggbb", or "map:<name>". */
   bg: string;
 }
@@ -165,6 +170,9 @@ export function defaultAvatarPath(userId: string, outfit?: string | null): strin
   return `/avatars/default/${item("outfit", outfit, DEFAULT_COSMETICS.outfit!)}-${defaultPoseIndex(userId)}.webp`;
 }
 
+/** Headroom's largest setting (AvatarSpec.lift). */
+export const LIFT_MAX = 0.3;
+
 /** Lenient read (stored JSON, the editor's URL hash): anything unknown falls back to the default. */
 export function cleanAvatar(raw: unknown): AvatarSpec {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
@@ -207,6 +215,7 @@ export function cleanAvatar(raw: unknown): AvatarSpec {
     turn: clamp(r.turn, -180, 180, 0),
     frame: pick(r.frame, FRAMES.map((f) => f.id), "bust"),
     zoom: clamp(r.zoom, 0.7, 1.6, 1),
+    ...(clamp(r.lift, 0, LIFT_MAX, 0) >= 0.005 ? { lift: clamp(r.lift, 0, LIFT_MAX, 0) } : {}),
     bg,
   };
 }
@@ -240,7 +249,7 @@ export function avatarCosmetics(s: AvatarSpec): Record<string, string | number |
 export function packAvatar(s: AvatarSpec): string {
   const c = cleanAvatar(s);
   const r2 = (n: number) => Math.round(n * 100) / 100;
-  return JSON.stringify({ ...c, moment: r2(c.moment), tilt: r2(c.tilt), ears: r2(c.ears), turn: Math.round(c.turn), zoom: r2(c.zoom) });
+  return JSON.stringify({ ...c, moment: r2(c.moment), tilt: r2(c.tilt), ears: r2(c.ears), turn: Math.round(c.turn), zoom: r2(c.zoom), ...(c.lift ? { lift: r2(c.lift) } : {}) });
 }
 
 export function unpackAvatar(s: string | null | undefined): AvatarSpec | null {

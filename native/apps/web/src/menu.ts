@@ -4,6 +4,7 @@
 // renderMenu() (its contract predates this shell and is kept as is).
 
 import { appHref, appLocation } from "./platform/navigation";
+import { RANKED_MAX_HOURS } from "./run-limits";
 import { getPB } from "./pb";
 import { formatTime } from "./timer";
 import { accountChip } from "./ui/account";
@@ -106,6 +107,8 @@ export interface MenuActions {
   practiceReplays?: () => { meta: PracticeReplayMeta; watch: () => void }[];
   /** Asked at each draw: keeps this attempt as a practice replay (session.ts keepAttempt), or why it can't. */
   keepAttempt?: () => { go: (() => void) | null; why: string | null };
+  /** Asked at each draw: sends the last practice finish to the Segmented board (session.ts submitSegmented), when it can go. */
+  submitSegmented?: () => (() => void) | null;
   onClearPracticeReplays?: () => void;
 }
 
@@ -677,6 +680,7 @@ function replaysTab(a: MenuActions, pb: ReturnType<typeof getPB>): HTMLElement {
 function practiceSection(a: MenuActions): HTMLElement | null {
   const keep = a.keepAttempt?.();
   if (!keep) return null;
+  const submit = a.submitSegmented?.() ?? null;
   const kept = a.practiceReplays?.() ?? [];
   const sentence = (s: string) => s[0].toUpperCase() + s.slice(1) + ".";
   const day = new Date().toDateString();
@@ -687,9 +691,12 @@ function practiceSection(a: MenuActions): HTMLElement | null {
   const list = h(
     "div.list-rows",
     null,
+    ...(submit ? [listRow("Submit last run to Segmented", submit, { sub: "It loaded checkpoints and nothing else made it practice" })] : []),
     listRow("Keep this attempt", keep.go, { why: keep.why ? sentence(keep.why) : undefined }),
     ...kept.map(({ meta: m, watch }) => {
       const sub = [
+        // A run longer than the leaderboard takes (run-limits.ts), kept here instead of uploaded.
+        m.long ? `Not ranked: over ${RANKED_MAX_HOURS} hours` : "",
         m.track ? trackName(m.track) : "",
         m.time === null ? (m.at === null ? "Before the start" : `At ${formatTime(m.at)}`) : "",
         m.teleports ? `${m.teleports} teleport${m.teleports === 1 ? "" : "s"}` : "",
@@ -795,8 +802,9 @@ function serverTab(): HTMLElement | null {
     listRow("Scoreboard", inGame(() => a.scoreboard()), { hint: "Tab" }),
     listRow(s.spectating ? "Spectate or respawn" : "Spectate", inGame(() => a.spectate()), { hint: "N" }),
     listRow("Race a player", inGame(() => a.race()), { hint: "!race" }),
-    listRow("Nominate a map", inGame(() => a.nominate()), { hint: "!nominate" }),
-    listRow("Rock the vote", resumeAnd(() => a.rtv()), { detail: `${s.rtv.count} of ${s.rtv.needed}`, hint: "!rtv" }),
+    // (The Daily room plays the day's map all day: nothing to nominate or vote on.)
+    s.daily ? null : listRow("Nominate a map", inGame(() => a.nominate()), { hint: "!nominate" }),
+    s.daily ? null : listRow("Rock the vote", resumeAnd(() => a.rtv()), { detail: `${s.rtv.count} of ${s.rtv.needed}`, hint: "!rtv" }),
     listRow("Gift Supporter", () => openGiftDialog({ roomId: s.id })),
     // (Its own group, a gap above: these two take you out of the room.)
     listRow("Switch server", () => push("servers")),

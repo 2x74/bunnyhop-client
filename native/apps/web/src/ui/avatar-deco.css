@@ -37,6 +37,45 @@
   60% { opacity: 0.9; transform: translate(calc(var(--dx) * 0.45), calc(var(--dy) * 0.5)) rotate(140deg); }
   85%, 100% { opacity: 0; transform: translate(var(--dx), var(--dy)) rotate(260deg); }
 }
+/* v0.0.44. An ear's twitch now and then (Cat Ears); a wing's beat, left and mirrored (Angel). */
+.av-flick { animation: av-flick 4.6s ease-in-out infinite; }
+@keyframes av-flick { 0%, 80%, 100% { transform: none; } 84% { transform: rotate(-16deg); } 88% { transform: rotate(2deg); } 91% { transform: rotate(-9deg); } 95% { transform: none; } }
+.av-flap { animation: av-flap 2.2s ease-in-out infinite; }
+.av-flap-r { animation: av-flap-r 2.2s ease-in-out infinite; }
+@keyframes av-flap { 0%, 100% { transform: rotate(-9deg); } 50% { transform: rotate(7deg); } }
+@keyframes av-flap-r { 0%, 100% { transform: rotate(9deg); } 50% { transform: rotate(-7deg); } }
+/* Flames breathing out and back round the centre (Blaze: two sets out of step). */
+.av-flicker { animation: av-flicker 0.9s ease-in-out infinite; }
+@keyframes av-flicker { 0%, 100% { transform: scale(1); opacity: 1; } 25% { transform: scale(1.06); opacity: 0.7; } 50% { transform: scale(0.97); opacity: 1; } 75% { transform: scale(1.04); opacity: 0.85; } }
+/* A bolt's double strike (Storm). Drawn lit, so the still keeps it. */
+.av-flash { animation: av-flash 3.6s linear infinite; }
+@keyframes av-flash { 0%, 74%, 100% { opacity: 0; } 76% { opacity: 1; } 79% { opacity: 0.1; } 82% { opacity: 1; } 90% { opacity: 0; } }
+/* Floats up by --dx --dy (straight up by default) and fades: bubbles, hearts, Zzz. A move only (no scale: a layer
+   scales about the avatar's centre, which would pull its pieces in over the picture). */
+.av-rise { animation: av-rise 3.4s ease-in-out infinite; }
+@keyframes av-rise { 0% { opacity: 0; transform: none; } 15% { opacity: 1; } 80% { opacity: 0.9; } 100% { opacity: 0; transform: translate(var(--dx, 0%), var(--dy, -48%)); } }
+/* A ring swelling out from the avatar and fading (Ping). */
+.av-ping { animation: av-ping 2.6s ease-out infinite; }
+@keyframes av-ping { 0% { opacity: 0.9; transform: scale(1); } 100% { opacity: 0; transform: scale(1.32); } }
+/* A small bounce with a squash on landing (Hopper's bunny, inside its lap). */
+.av-hop { animation: av-hop 0.56s infinite; }
+@keyframes av-hop {
+  0%, 100% { transform: translateY(0) scaleY(0.88); animation-timing-function: cubic-bezier(0.2, 0.7, 0.4, 1); }
+  12% { transform: translateY(0) scaleY(1.06); }
+  50% { transform: translateY(-5.5%) scaleY(1); animation-timing-function: cubic-bezier(0.6, 0, 0.8, 0.3); }
+}
+/* A crosshair's kick: out fast, settles back. */
+.av-bloom { animation: av-bloom 1.8s ease-in-out infinite; }
+@keyframes av-bloom { 0%, 100% { transform: scale(1); } 6% { transform: scale(1.16); animation-timing-function: cubic-bezier(0.2, 0.8, 0.3, 1); } 40% { transform: scale(1); } }
+/* Glitch: two coloured copies under the ring tear out one way and the other for a split second. Hidden under the ring
+   at rest, so the still is the plain ring. */
+.av-glitch-a { animation: av-glitch-a 3.4s linear infinite; }
+.av-glitch-b { animation: av-glitch-b 3.4s linear infinite; }
+@keyframes av-glitch-a { 0%, 86%, 96%, 100% { transform: none; opacity: 0; } 87% { transform: translate(-2.5%, 0.8%); opacity: 0.9; } 90% { transform: translate(2%, -0.6%); opacity: 0.9; } 93% { transform: translate(-1%, 0); opacity: 0.7; } }
+@keyframes av-glitch-b { 0%, 86%, 96%, 100% { transform: none; opacity: 0; } 87% { transform: translate(2.5%, -0.8%); opacity: 0.9; } 90% { transform: translate(-2%, 0.6%); opacity: 0.9; } 93% { transform: translate(1%, 0); opacity: 0.7; } }
+/* Snow drifting down (Santa Hat: two sets out of step). */
+.av-fall { animation: av-fall 4s linear infinite; }
+@keyframes av-fall { 0% { opacity: 0; transform: translateY(-6%); } 15%, 85% { opacity: 1; } 100% { opacity: 0; transform: translate(3%, 26%); } }
 /* On the page's clock (card-fx.ts fxClock, set on the wrapper), so a redrawn avatar's ornament carries on. */
 .av-anim { animation-delay: var(--fx-t, 0s); }
 .av-twinkle-late { animation-delay: calc(var(--fx-t, 0s) - 1.4s); }

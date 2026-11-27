@@ -29,6 +29,7 @@ import {
   type MaterialExtras,
   type SkyCamera,
   TextureFormat,
+  traceRay,
 } from "./core";
 import { prepareMapContent, type PrepareContentOptions } from "./content";
 import { markGammaBlend } from "./graphics/gamma-blend";
@@ -37,6 +38,7 @@ import { ModelLight } from "./model-light";
 import type { ModelLighting } from "./graphics/presets";
 import { glassMaterial, setWaterVisualTime, updateWaterUniforms, waterSurfaceMaterial, waterVolumes, withWaterFog } from "./water";
 import { mapSmoke, brushBounds, materialName } from "./map-effects/smoke";
+import { mapPrecipitation } from "./map-effects/precipitation";
 import { alphaProgram, type AlphaProgram } from "./material-alpha";
 import { areaportalWindows, BrushFades, setMaterialTint } from "./brush-fades";
 import { dynamicRenderEntities, fxIsFrameFade, fxIsTimed, RENDER_NONE, renderKeys, type RenderKeys } from "./brush-render";
@@ -90,6 +92,21 @@ export interface WorldView {
   setPropLighting(on: boolean): void;
   /** The map's overlays, decals, glows and beams (map-dressing.ts) on or off, live. Never drawn in Potato mode. */
   setDetails(on: boolean): void;
+  /**
+   * The map's falling snow and rain (func_precipitation, map-effects/precipitation.ts): 0 off, 0.5 light, 1 full,
+   * live. Built the first time it is above 0; never drawn in Potato mode. Off until set.
+   */
+  setPrecipitation(density: number): void;
+  /**
+   * Traces the snow and rain's column map in short slices ahead of setPrecipitation, so turning it on doesn't stall a
+   * frame (the menu background). Resolves at once on a map without any.
+   */
+  preparePrecipitation(): Promise<void>;
+  /**
+   * Frost on the bunnies and ghosts standing in the map's falling snow (model-light.ts, "Frost on players"), live. Only
+   * while snow draws: never in Potato mode or with Snow and rain off.
+   */
+  setFrost(on: boolean): void;
   /** How far the map's light reaches into the game's own models (model-light.ts). Off in Potato and Fullbright. */
   setModelLighting(mode: ModelLighting): void;
   /**
@@ -1252,8 +1269,18 @@ export async function buildWorld(
   if (smoke) root.add(smoke.root);
   // func_smokevolume clouds (bhop_arcane's mist); map-effects/smoke.ts draws only those here (stacks blanked out so
   // entity indices still match the core's effect states). Hidden in potato mode.
-  const smokeVolumes = mapSmoke(core.entities().map((e) => (/^env_smokestack$/i.test(e.classname ?? "") ? {} : e)), brushBounds(opts.bsp), effectTexture);
+  const modelBounds = brushBounds(opts.bsp);
+  const smokeVolumes = mapSmoke(core.entities().map((e) => (/^env_smokestack$/i.test(e.classname ?? "") ? {} : e)), modelBounds, effectTexture);
   if (smokeVolumes) root.add(smokeVolumes.root);
+  // func_precipitation snow and rain (map-effects/precipitation.ts). Nothing is built (its column traces, buffers) until
+  // setPrecipitation turns it on. Hidden in potato mode.
+  const traceFrom = new Float64Array(3), traceTo = new Float64Array(3);
+  const precipitation = mapPrecipitation(core.entities(), modelBounds, (sx, sy, sz, ex, ey, ez) => {
+    traceFrom[0] = sx; traceFrom[1] = sy; traceFrom[2] = sz;
+    traceTo[0] = ex; traceTo[1] = ey; traceTo[2] = ez;
+    return traceRay(core, traceFrom, traceTo, 0);
+  }, worldFog);
+  if (precipitation) root.add(precipitation.root);
 
   // Overlays and infodecals (map-dressing.ts), on the faces they lie on. Built after content: a decal's size is its
   // material's texture size. `?details=0` leaves them out (comparisons).
@@ -1315,6 +1342,11 @@ export async function buildWorld(
   let modelLighting: ModelLighting = "off";
   let fullbrightOn = false;
   const applyModelLighting = () => modelLight.setMode(potatoOn || fullbrightOn ? "off" : modelLighting);
+  // Frost: only where snow draws (precipitation.snowAt is false while it is off or in Potato), and only when asked.
+  let frostOn = false;
+  let precipitationDensity = 0;
+  const snowAt = precipitation?.snowy ? (x: number, y: number, z: number) => precipitation.snowAt(x, y, z) : null;
+  const applyFrost = () => modelLight.setFrost(frostOn && !potatoOn && precipitationDensity > 0 ? snowAt : null);
   // Maps with HDR lighting get CS:S's HDR look (graphics/source-hdr.ts); this also marks the world root.
   container.userData.lightmapHdr = lm.hdr;
   const localLights = authoredLocalLights(core.entities());
@@ -1546,6 +1578,7 @@ export async function buildWorld(
       (animProps ? ` ${animProps.count} animated props,` : "") +
       (fades.size ? ` ${fades.size} brushes with fades or render keys (${fades.moving} changing, ${fades.undrawn} not drawn),` : "") +
       (smokeVolumes ? ` ${smokeVolumes.count} smoke volumes,` : "") +
+      (precipitation ? ` ${precipitation.volumes.length} precipitation volumes,` : "") +
       (dressing?.draws ? ` dressing ${dressing.triangles} tris / ${dressing.draws} draws,` : "") +
       (glows ? ` ${glows.sprites} sprites, ${glows.lightGlows} light glows / ${glows.draws} draws,` : "") +
       (beams ? ` ${beams.count} spotlight beams,` : "") +
@@ -1636,6 +1669,7 @@ export async function buildWorld(
       if (trails && potatoOn) trails.root.visible = false;
       smoke?.update(transforms, visualTime, effectStates);
       smokeVolumes?.update(visualTime, transforms, effectStates);
+      precipitation?.update(visualTime);
       glows?.update(transforms, visualTime);
       // After the transforms: animated props follow their frozen group's place.
       animProps?.update(visualTime, propAnims);
@@ -1677,6 +1711,19 @@ export async function buildWorld(
       detailsOn = on;
       applyDetails();
     },
+    setPrecipitation(density) {
+      precipitation?.setDensity(density);
+      precipitation?.setPotato(potatoOn);
+      precipitationDensity = Number.isFinite(density) ? density : 0;
+      applyFrost();
+    },
+    preparePrecipitation() {
+      return precipitation ? precipitation.prepare(() => new Promise<void>((r) => setTimeout(r, 0))) : Promise.resolve();
+    },
+    setFrost(on) {
+      frostOn = on;
+      applyFrost();
+    },
     setModelLighting(mode) {
       modelLighting = mode;
       applyModelLighting();
@@ -1690,16 +1737,19 @@ export async function buildWorld(
       if (glows && detailsOn && !potatoOn && (camera as THREE.PerspectiveCamera).isPerspectiveCamera && !camera.userData.mirror) glows.observe(camera);
       explosions?.sort(camera);
       animProps?.setViewer(camera.getWorldPosition(viewerPos));
+      precipitation?.observe(camera, root);
     },
     setPotato(on) {
       if (on === potatoOn) return;
       potatoOn = on;
+      precipitation?.setPotato(on);
       // Potato geometry is built from all of a mesh's triangles, not the last cull's.
       if (!potato) culler.uncull();
       (potato ??= buildPotato()).set(on);
       animProps?.setEnabled(!on);
       applyFog();
       applyModelLighting();
+      applyFrost();
       flashlight.apply(container);
       fullbright.apply(container);
     },

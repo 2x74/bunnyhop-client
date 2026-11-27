@@ -16,7 +16,17 @@
 // Segmented (styles.ts isSegmented, segments.ts): in a clean Segmented attempt the same checkpoints are bhoptimer's
 // segmented ones. A save also keeps the run's place (its recording's path); a teleport (load) restores the snapshot with
 // its speed and view whatever Keep speed says, rewinds the timer and the recording to the checkpoint, and the run stays
-// a real run. The keys act during the run without the !cp menu. Noclip still makes it practice.
+// a real run. The keys act during the run without the !cp menu. Noclip still makes it practice, until a load of a
+// checkpoint saved before it (0.0.44, session.ts segmentResumable): the load throws the noclipped stretch away.
+// A practice finish in Normal whose recording is actual segments can go to the Segmented board when the player asks
+// (attempt.ts submitSegmentedProblem, session.ts submitSegmented, !submitseg).
+//
+// Kept checkpoints (0.0.44, cp-store.ts): every change to the list is kept on this device per map + style + track
+// (position, view, speed, order, the current one). Coming back to the map (another map, a reload, a replay of another
+// map) brings that list back as practice checkpoints without snapshots: a teleport to one places you there (the core's
+// noclip exit, practice_noclip_exit) and makes the attempt practice like any teleport. Doors, buttons and the timer
+// start over. Never in Segmented. They carry no run place (segment / path), so they never resume a Segmented run, and
+// the recording after a teleport to one is tainted: never submitted to Segmented (session.ts practiceRestored).
 
 import { whisper } from "../notify";
 import { freeState, hasStateSnapshots, restoreState, snapshotBytes, snapshotState, type Core, type PlayerState } from "../core";
@@ -26,9 +36,10 @@ import { setVelocity, SimRun } from "../sim";
 import type { Replay } from "../replay";
 import { formatTime } from "../timer";
 import type { MenuSpec } from "../net/hud";
-import { styleDef, styleForTrack, type StyleFilter, type StyleId } from "../styles";
+import { styleDef, styleForTrack, styleSettings, type StyleFilter, type StyleId } from "../styles";
 import { keyLabel, prefs, type Action } from "../ui/settings";
 import { Checkpoints, MAX_CHECKPOINTS, saveTimer, type Checkpoint, type TimerSnapshot } from "./checkpoints";
+import { CheckpointStore, keepsCheckpoints, pageStorage, type KeyValueStore, type StoredCheckpoint } from "./cp-store";
 import type { SegmentMark } from "./segments";
 import { YAW_SET_TELEPORT } from "../replay";
 import { replayStartProblem } from "./replay-start";
@@ -39,9 +50,16 @@ interface CheckpointData {
   /** Style the attempt ran in (styles.ts styleForTrack) and the selected style when it was saved. */
   style: StyleId;
   selected: StyleId;
+  /** The track it was saved on (session.ts currentTrack): kept per map + selected style + track (cp-store.ts). */
+  track: number;
   timer: TimerSnapshot;
   yaw: number;
   pitch: number;
+  /** Where the player was, and the speed (what cp-store.ts keeps). */
+  position: [number, number, number];
+  velocity: [number, number, number];
+  /** Kept from an earlier visit (cp-store.ts): no snapshot and no timer, a teleport only places the player. */
+  kept?: true;
   /** Saved in a clean Segmented attempt: the run's place, so a load rewinds the run to it (segments.ts). */
   segment?: { mark: SegmentMark; filter: StyleFilter };
   /**
@@ -68,7 +86,12 @@ export interface PracticeHost extends PracticeContext {
   menu?: PracticeMenuView | null;
   /** The pause menu's Timescale row (timescale.ts), or null where it can't be used now. */
   timescaleMenu?: () => { readonly value: number; set: (scale: number) => void } | null;
+  /** Where kept checkpoints go (cp-store.ts). Absent: this page's localStorage; null: nowhere. */
+  cpStorage?: KeyValueStore | null;
 }
+
+/** Said once when checkpoints from an earlier visit come back. */
+export const KEPT_CHECKPOINTS_LINE = "Checkpoints from your last visit are back (doors and buttons reset)";
 
 /** The !cp menu's screen side: a CS:S-style numbered menu (keys 1-9 pick, 0 closes and calls onExit). */
 export interface PracticeMenuView {
@@ -92,6 +115,11 @@ export class Practice {
   private keyHintRun = -1;
   /** Why practice mode can't be used here (rooms, the tutorial, an old wasm build), or null. */
   readonly unavailable: string | null;
+  private kept: CheckpointStore;
+  /** The selected style + track lists this visit has loaded or written (cp-store.ts), by `${style}|${track}`. */
+  private keptKeys = new Map<string, { style: StyleId; track: number }>();
+  /** Kept checkpoints came back: KEPT_CHECKPOINTS_LINE is owed (null: never, or said). */
+  private keptNote: "owed" | "said" | null = null;
 
   constructor(private h: PracticeHost) {
     const core = h.core;
@@ -109,6 +137,9 @@ export class Practice {
         if (m) h.session.segmentDrop(m);
       },
     });
+    this.kept = new CheckpointStore(() => (h.cpStorage !== undefined ? h.cpStorage : pageStorage()));
+    // Checkpoints from the last visit (said once the game shows: announceKept).
+    this.restoreKept();
     // The pause menu item, only where practice mode works.
     if (!this.unavailable) {
       h.session.practiceMenu = () => ({ on: this.on, toggle: () => this.toggle(), timescale: h.timescaleMenu?.() ?? null });
@@ -148,7 +179,7 @@ export class Practice {
     void s.refreshMenu();
   }
 
-  /** A practice chat command (!practice, !noclip, !cp, !tele, !prevcp, !nextcp; chat-commands.ts; rules.ts
+  /** A practice chat command (!practice, !noclip, !cp, !tele, !prevcp, !nextcp, !delcp, !clearcps; chat-commands.ts; rules.ts
    * practiceCommandPlan). The tools answer with their usual toasts. */
   command(cmd: PracticeChatCommand, reply: (text: string) => void): void {
     const plan = practiceCommandPlan({ cmd, unavailable: !!this.unavailable });
@@ -160,9 +191,12 @@ export class Practice {
       return;
     }
     if (cmd === "menu") return this.toggleMenu();
+    this.announceKept();
     if (cmd === "noclip") this.toggleNoclip();
     else if (cmd === "save") this.save();
     else if (cmd === "tele") this.teleport(this.cps.current());
+    else if (cmd === "delete") this.remove();
+    else if (cmd === "clear") this.clear();
     else this.step(cmd === "prev" ? -1 : 1);
     this.refreshMenu();
   }
@@ -180,6 +214,8 @@ export class Practice {
   onRestart(): void {
     this.endNoclip();
     this.keyHintRun = -1;
+    // A style or track not seen yet this visit: its kept checkpoints come back now.
+    if (this.restoreKept()) this.announceKept();
     this.refreshMenu();
   }
 
@@ -207,6 +243,7 @@ export class Practice {
     // (Dev: the zone editor's Z, while practice mode is off; !noclip still flies.)
     if (!this.on && this.h.fallthrough(code)) return true;
     if (!this.keyActs(a)) return true;
+    this.announceKept();
     if (a === "noclip") this.toggleNoclip();
     else if (a === "cpSave") this.save();
     else if (a === "cpTeleport") this.teleport(this.cps.current());
@@ -234,6 +271,7 @@ export class Practice {
 
   private step(delta: number): void {
     const cp = this.cps.step(delta);
+    this.persist();
     if (cp && this.teleport(cp)) whisper(`Checkpoint ${this.cps.number} of ${this.cps.count}`, { key: "practice-cp" });
     else if (!cp) this.noCheckpoint();
   }
@@ -250,6 +288,7 @@ export class Practice {
     const m = this.h.menu;
     if (!m) return;
     if (m.open) return m.hide();
+    this.announceKept();
     m.show(this.menuSpec());
   }
 
@@ -271,15 +310,20 @@ export class Practice {
         { label: "Noclip", detail: this.noclip || this.h.session.flightOn ? "on" : "off" },
         // (bhoptimer hides its velocity toggle for segmented checkpoints: a load always restores the speed.)
         seg ? { label: "Keep speed", detail: "always", disabled: true } : { label: "Keep speed", detail: keep ? "on" : "off" },
+        // (0.0.44: after the six, so 1-6 stay where muscle memory has them.)
+        { label: "Delete checkpoint", disabled: !n },
+        { label: "Clear all", disabled: !n },
       ],
       // bhoptimer's warning line ("Teleporting will stop your timer!").
-      footer: seg ? "Segmented: a teleport takes the timer and the replay back to the checkpoint. Noclip makes the run practice." : "A teleport or noclip makes a timed run practice.",
+      footer: seg ? "Segmented: a teleport takes the timer and the replay back to the checkpoint. Noclip makes the run practice until you load a checkpoint from before it." : "A teleport or noclip makes a timed run practice.",
       exit: "Close",
       onPick: (i) => {
         if (i === 0) this.save();
         else if (i === 1) this.teleport(this.cps.current());
         else if (i === 2 || i === 3) this.step(i === 2 ? -1 : 1);
         else if (i === 4) this.toggleNoclip();
+        else if (i === 6) this.remove();
+        else if (i === 7) this.clear();
         else if (seg) return;
         else prefs.update((p) => (p.practice.keepVelocity = !p.practice.keepVelocity));
         this.refreshMenu();
@@ -335,7 +379,16 @@ export class Practice {
     if (s.segmenting && !mark) return this.toast("This Segmented run's history is full (4 hours of play). Restart to start a new one.", 4000, "bad");
     const path = mark ? { mark, filter: s.filterState() } : undefined;
     const segment = s.segmenting ? path : undefined;
-    const cp = this.cps.save({ style: s.runStyle, selected: s.selectedStyle, timer: saveTimer(s.timer), yaw: this.h.input.yaw, pitch: this.h.input.pitch, ...(path ? { path } : {}), ...(segment ? { segment } : {}) });
+    const track = s.currentTrack();
+    // This style + track's kept list first, so the new one goes after it and nothing kept is written over.
+    this.restoreKept(s.selectedStyle, track);
+    const at = this.h.core.state();
+    const cp = this.cps.save({
+      style: s.runStyle, selected: s.selectedStyle, track, timer: saveTimer(s.timer), yaw: this.h.input.yaw, pitch: this.h.input.pitch,
+      position: [at.position[0], at.position[1], at.position[2]], velocity: [at.velocity[0], at.velocity[1], at.velocity[2]],
+      ...(path ? { path } : {}), ...(segment ? { segment } : {}),
+    });
+    this.persist();
     if (cp) whisper(`Checkpoint ${this.cps.number} saved`, { key: "practice-cp" });
     else this.toast("Couldn't save a checkpoint.", 2500, "bad");
   }
@@ -351,6 +404,16 @@ export class Practice {
       return false;
     }
     if (s.segmenting) return this.load(cp);
+    // Kept from an earlier visit: no snapshot and no run place, only a practice placement (never a Segmented resume).
+    if (cp.data.kept) return this.teleportKept(cp.data);
+    // A Segmented run that a noclip or a practice teleport made practice: a checkpoint saved while it was still clean
+    // takes it back there (session.ts segmentResumable), since the load throws away everything after the save.
+    const seg = cp.data.segment;
+    if (seg && s.segmentResumable && cp.data.style === s.runStyle && s.segmentUsable(seg.mark)) {
+      if (!this.load(cp)) return false;
+      if (s.segmenting) this.toast("Back on your Segmented run.", 2500);
+      return true;
+    }
     if (!this.cps.restore(cp)) {
       this.toast("Couldn't teleport to that checkpoint.", 2500, "bad");
       return false;
@@ -363,7 +426,31 @@ export class Practice {
     if (!prefs.get().practice.keepVelocity) setVelocity(this.h.core, [0, 0, 0]);
     s.practiceRestored(cp.data.style, cp.data.timer, reset ? null : cp.data.path ?? null);
     if (reset) s.practiceSpeedReset();
-    this.h.resync({ yaw: cp.data.yaw, pitch: cp.data.pitch });
+    // A teleport view set, as a Segmented load's: a recording rebuilt from the checkpoint's path is then the same one a
+    // Segmented run records (input-analysis.ts explains it by the load), so it can go to that board (attempt.ts).
+    this.h.resync({ yaw: cp.data.yaw, pitch: cp.data.pitch }, YAW_SET_TELEPORT);
+    return true;
+  }
+
+  /**
+   * A teleport to a checkpoint kept from an earlier visit (no snapshot): a practice teleport that places the player at
+   * its position, view and speed (Keep speed as usual) with the core's noclip exit, which finds free space nearby when
+   * a door that was open then is shut now. Doors, buttons and the timer stay as they are now; the timer goes idle, so a
+   * run only starts again from a start zone (and is practice until a restart).
+   */
+  private teleportKept(d: CheckpointData): boolean {
+    const s = this.h.session;
+    const core = this.h.core;
+    s.practiceUse("teleport");
+    this.endNoclip();
+    // (Another track's style: the core takes that style's settings, as a snapshot would carry them.)
+    if (d.style !== s.runStyle) core.setSettings(styleSettings(d.style));
+    const keep = prefs.get().practice.keepVelocity;
+    const r = noclipExit(core, { position: [...d.position], velocity: keep ? [...d.velocity] : [0, 0, 0] }, d.yaw, d.pitch);
+    s.timer.stop();
+    s.practiceRestored(d.style, saveTimer(s.timer));
+    this.h.resync({ yaw: d.yaw, pitch: d.pitch });
+    if (r === "stuck") this.toast("You're stuck in a wall. Noclip, or teleport to another checkpoint.", 4000, "bad");
     return true;
   }
 
@@ -427,6 +514,79 @@ export class Practice {
     this.toast(`Practising from ${s.timer.status === "running" ? formatTime(s.timer.time()) : "the start"} of that run. ${restartHow()}`, 5000);
     this.refreshMenu();
     return null;
+  }
+
+  /** Deletes the current checkpoint (the menu's Delete, !delcp). Never touches the run. */
+  private remove(): void {
+    const n = this.cps.number;
+    if (!this.cps.remove()) return this.noCheckpoint();
+    this.persist();
+    whisper(this.cps.count ? `Checkpoint ${n} deleted, ${this.cps.count} left` : `Checkpoint ${n} deleted`, { key: "practice-cp" });
+  }
+
+  /** Deletes every checkpoint (the menu's Clear all, !clearcps). Never touches the run. */
+  private clear(): void {
+    const n = this.cps.count;
+    // The kept copies go too: this style + track's, and every list this visit loaded or wrote (all of them were shown).
+    const s = this.h.session;
+    this.kept.clear(this.h.map, s.selectedStyle, s.currentTrack());
+    for (const k of this.keptKeys.values()) this.kept.clear(this.h.map, k.style, k.track);
+    if (!n) return this.noCheckpoint();
+    this.cps.clear();
+    whisper(n === 1 ? "Checkpoint deleted" : `All ${n} checkpoints deleted`, { key: "practice-cp" });
+  }
+
+  // --- kept checkpoints (cp-store.ts)
+
+  /**
+   * Brings back the kept list of a selected style + track (default: the current ones) once per visit, after the
+   * checkpoints there are; its current one becomes current. Not where practice doesn't work, with Keep checkpoints off,
+   * or in Segmented. Returns how many came back.
+   */
+  private restoreKept(style?: StyleId, track?: number): number {
+    if (this.unavailable || !prefs.get().practice.keepCheckpoints) return 0;
+    const s = this.h.session;
+    style ??= s.selectedStyle;
+    track ??= s.currentTrack();
+    if (!keepsCheckpoints(style)) return 0;
+    const k = `${style}|${track}`;
+    if (this.keptKeys.has(k)) return 0;
+    this.keptKeys.set(k, { style, track });
+    const kept = this.kept.load(this.h.map, style, track);
+    if (!kept) return 0;
+    const n = this.cps.addKept(kept.list.map((c) => ({
+      style: c.style, selected: style, track, timer: {}, yaw: c.yaw, pitch: c.pitch, position: c.position, velocity: c.velocity, kept: true as const,
+    })), kept.at);
+    if (n && !this.keptNote) this.keptNote = "owed";
+    return n;
+  }
+
+  /** Writes the lists this visit has to the store: one per selected style + track (Segmented never). */
+  private persist(): void {
+    if (this.unavailable || !prefs.get().practice.keepCheckpoints) return;
+    const groups = new Map<string, { style: StyleId; track: number; list: StoredCheckpoint[]; at: number }>();
+    const cur = this.cps.number - 1;
+    this.cps.entries().forEach((cp, i) => {
+      const d = cp.data;
+      if (!keepsCheckpoints(d.selected)) return;
+      const k = `${d.selected}|${d.track}`;
+      let g = groups.get(k);
+      if (!g) groups.set(k, (g = { style: d.selected, track: d.track, list: [], at: -1 }));
+      if (i === cur) g.at = g.list.length;
+      g.list.push({ position: d.position, velocity: d.velocity, yaw: d.yaw, pitch: d.pitch, style: d.style });
+    });
+    for (const [k, g] of groups) this.keptKeys.set(k, { style: g.style, track: g.track });
+    for (const [k, { style, track }] of this.keptKeys) {
+      const g = groups.get(k);
+      this.kept.save(this.h.map, style, track, g ? { list: g.list, at: g.at < 0 ? g.list.length - 1 : g.at } : { list: [], at: 0 });
+    }
+  }
+
+  /** KEPT_CHECKPOINTS_LINE, once, when kept checkpoints came back (main.ts calls it when the game shows). */
+  announceKept(): void {
+    if (this.keptNote !== "owed") return;
+    this.keptNote = "said";
+    this.h.session.hud.toast(KEPT_CHECKPOINTS_LINE, 5000, "practice-kept");
   }
 
   private noCheckpoint(): void {

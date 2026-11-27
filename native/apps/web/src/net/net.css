@@ -44,7 +44,7 @@
 #mp-menu { left: 1.2rem; top: 50%; transform: translateY(-50%); min-width: calc(17rem * var(--hs, 1)); max-width: min(calc(26rem * var(--hs, 1)), 90vw); font-size: calc(0.92rem * var(--hs, 1)); padding: 0.7em 0.9em; background: rgba(10, 12, 16, 0.78); border: 1px solid rgba(255, 255, 255, 0.1); border-left: 3px solid var(--accent); border-radius: 0.5em; text-shadow: none; }
 .mm-title { font-weight: 800; color: var(--accent); margin-bottom: 0.45em; }
 .mm-item { display: flex; align-items: baseline; gap: 0.5em; padding: 0.12em 0.2em; border-radius: 0.3em; }
-.mm-item.sel { background: rgba(255, 180, 58, 0.18); }
+.mm-item.sel { background: color-mix(in srgb, var(--accent) 18%, transparent); }
 .mm-item.off { opacity: 0.4; }
 .mm-item.exit { margin-top: 0.35em; color: var(--dim); }
 .mm-key { color: var(--accent); font-weight: 800; font-family: var(--mono); min-width: 1.4em; }
@@ -141,8 +141,9 @@ body.in-game:not(.menu-open):has(#hud.race-result > #mp-race) #nt-banners { top:
 #mp-specbar .spec-hint { font-size: 0.78em; font-weight: 650; opacity: 0.9; margin-top: 0.15rem; }
 /* Spectating: your own run's readouts would mislead; the speed, timer and speed graph stay and show the watched player's.
    Their keys, strafe trainer, jump stats, JHUD and start prespeed show while their client sends its HUD feed
-   (body.mp-spec-inputs, 0.0.42; net/spectate-input.ts). */
-body.mp-spectating #hud .hud-el:not([data-el="chat"]):not([data-el="map"]):not([data-el="fps"]):not([data-el="speed"]):not([data-el="timer"]):not([data-el="graph"]):not([data-el="spectators"]):not([data-el="voice"]):not([data-el="keys"]):not([data-el="strafeTrainer"]):not([data-el="jumpStats"]):not([data-el="jhud"]):not([data-el="startPre"]) { visibility: hidden; }
+   (body.mp-spec-inputs, 0.0.42; net/spectate-input.ts). The Practice line stays and shows their practice / Segmented
+   state (hud.ts setSpectated, 0.0.44). */
+body.mp-spectating #hud .hud-el:not([data-el="chat"]):not([data-el="practice"]):not([data-el="map"]):not([data-el="fps"]):not([data-el="speed"]):not([data-el="timer"]):not([data-el="graph"]):not([data-el="spectators"]):not([data-el="voice"]):not([data-el="keys"]):not([data-el="strafeTrainer"]):not([data-el="jumpStats"]):not([data-el="jhud"]):not([data-el="startPre"]) { visibility: hidden; }
 body.mp-spectating:not(.mp-spec-inputs) #hud .hud-el:is([data-el="keys"], [data-el="strafeTrainer"], [data-el="jumpStats"], [data-el="jhud"], [data-el="startPre"]) { visibility: hidden; }
 body.mp-spectating #hud-endcard { display: none; }
 body.menu-open #mp-menu, body.menu-open #mp-scoreboard, body.menu-open #mp-specbar, body.menu-open #mp-race, body.menu-open #mp-count, body.menu-open #mp-place { display: none; }

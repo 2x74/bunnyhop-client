@@ -110,6 +110,15 @@ body.potato .pc { transform: none; }
 
 .pc-feat { position: relative; display: grid; grid-template-columns: repeat(3, 1fr); gap: calc(12 * var(--u)); align-content: start; }
 .pc-feat-tile { background: rgba(0, 0, 0, 0.3); border-radius: calc(10 * var(--u)); padding: calc(10 * var(--u)) calc(12 * var(--u)); border-left: calc(4 * var(--u)) solid var(--tc, var(--tier-x)); min-width: 0; }
+/* v0.0.44 featured-run edges (feat-edge.ts): a thin metal rim from the tier stripe round the right-hand corners and back
+   (no line inside the stripe: it stays the tile's left edge), lit at the top left and shaded at the bottom right like
+   the card's own rim (card-fx.css .pc-rim). Colours from ui/card.ts featTile; the OG card draws the same (og/cards.ts). */
+.pc-feat-edge { position: relative; }
+.pc-feat-edge::after { content: ""; position: absolute; inset: 0 0 0 calc(-4 * var(--u)); border-radius: inherit; pointer-events: none;
+  padding: max(1px, calc(1.4 * var(--u))); padding-left: 0; opacity: 0.8;
+  background: linear-gradient(135deg, var(--edge-l) 0%, var(--edge-m) 45%, var(--edge-d) 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
 .pc-feat-top { display: flex; justify-content: space-between; align-items: center; font-size: calc(14 * var(--u)); }
 .pc-tier { color: var(--tc, var(--tier-x)); font-weight: 850; }
 .pc-place { font-weight: 800; color: var(--dim); }

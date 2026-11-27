@@ -849,6 +849,7 @@ inline Json load_settings(const std::filesystem::path &file) {
     }
 #if __has_include("graphics_settings.hpp")
     migrate_retired_models(saved);
+    migrate_precipitation(saved);
 #endif
     keep_saved_display(saved);
     migrate_viewmodel(saved);

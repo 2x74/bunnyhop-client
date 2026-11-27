@@ -11,6 +11,7 @@
 import * as THREE from "three";
 import type { GroundProbe } from "./bunny/legs";
 import { HOP_FRAME_CAP, HOP_GAP, hopSeed, linearRgb, spawnHop, type HopFxDef, type HopSpawn } from "./hop-fx";
+import { noteStall } from "../stall-log";
 
 /** Particles per layer (a full server of 16 hopping at once needs about a third of it). */
 export const HOP_POOL = 1024;
@@ -460,6 +461,8 @@ export class HopLayer {
   /** Spawns a burst of `def` (see HopSpawn); false when the frame's cap is reached. */
   burst(def: HopFxDef, s: HopSpawn): boolean {
     if (!this.used[s.slot] || this.frameBursts >= HOP_FRAME_CAP) return false;
+    // The layer's first burst: its first visible draw is next (stall-log.ts).
+    if (!this.written) noteStall("hop-layer");
     this.frameBursts++;
     const start = this.next;
     let last = s.t;
@@ -519,7 +522,8 @@ export class HopLayer {
 }
 
 // ---------------------------------------------------------------------------------------------
-// One layer per scene, made the first time something in it hops.
+// One layer per scene, made at map load when hop effects can show there (prewarmHopLayer), else the first time
+// something in it hops.
 
 const layers = new WeakMap<THREE.Object3D, HopLayer>();
 
@@ -530,11 +534,62 @@ function sceneOf(o: THREE.Object3D): THREE.Scene | null {
   return (p as THREE.Scene).isScene ? (p as THREE.Scene) : null;
 }
 
-/** The scene's layer (made on first use). */
+/** The scene's layer (made on first use: at map load when hop effects can show, prewarmHopLayer). */
 export function hopLayerFor(scene: THREE.Scene): HopLayer {
   let l = layers.get(scene);
-  if (!l) layers.set(scene, (l = new HopLayer(scene)));
+  if (!l) {
+    layers.set(scene, (l = new HopLayer(scene)));
+    noteStall("hop-layer");
+  }
   return l;
+}
+
+/** The scene's layer if it has been made. */
+export const hopLayerOf = (scene: THREE.Scene): HopLayer | null => layers.get(scene) ?? null;
+
+/**
+ * Whether a hop effect can show in the game's scene: other players', ghosts' and replays' while Settings → Ghosts &
+ * players → Hop effects is on (`showHopFx`), and your own (`ownHop`, the equipped one) in third person whatever it says.
+ */
+export const hopLayerWanted = (showHopFx: boolean, ownHop: HopFxDef | null): boolean => showHopFx || !!ownHop;
+
+/** How prewarmHopLayer gets the layer ready (main.ts: graphics/warm-programs.ts warmPrograms and drawHiddenPrograms). */
+export interface HopWarmSteps {
+  /** Compiles the mesh's program for every output the scene is drawn to. */
+  warm(mesh: THREE.Mesh): Promise<void>;
+  /** Draws the mesh once off screen (synchronously takes what it draws: the mesh counts as shown only during the call). */
+  draw(mesh: THREE.Mesh): Promise<void>;
+}
+
+const warmed = new WeakMap<THREE.Scene, Promise<HopLayer>>();
+
+/**
+ * Map load ("Compiling shaders", under the loading screen): the scene's hop layer made now, its program compiled and
+ * then drawn once off screen (its one dead record), so neither the program nor the GPU's draw-time state for it is made
+ * in the frame of the first hop effect anyone does. That frame stalled for 1–5 s on Windows / D3D11 from v0.0.42
+ * (research freeze.md). Null when `wanted` is false (hop effects off and none of your own): no layer, no GPU work. Once
+ * per scene; a later call (the setting turned on mid-map) returns the first one's promise.
+ */
+export function prewarmHopLayer(scene: THREE.Scene, wanted: boolean, steps: HopWarmSteps): Promise<HopLayer> | null {
+  if (!wanted) return null;
+  const old = warmed.get(scene);
+  if (old) return old;
+  const layer = hopLayerFor(scene);
+  const mesh = layer.mesh;
+  const run = steps.warm(mesh).then(() => {
+    // Hidden until something hops: shown for the call only, which is when the draw takes its copy.
+    const visible = mesh.visible;
+    mesh.visible = true;
+    let drawn: Promise<void>;
+    try {
+      drawn = steps.draw(mesh);
+    } finally {
+      mesh.visible = visible;
+    }
+    return drawn;
+  }).then(() => layer);
+  warmed.set(scene, run);
+  return run;
 }
 
 const visibleChain = (o: THREE.Object3D): boolean => {

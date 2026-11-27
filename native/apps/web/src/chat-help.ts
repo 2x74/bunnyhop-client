@@ -124,10 +124,10 @@ interface Topic {
 
 const TOPICS: readonly Topic[] = [
   {
-    names: ["practice", "prac", "noclip", "nc", "checkpoint", "checkpoints", "cp", "cps", "tele", "tp", "teleport", "save"],
+    names: ["practice", "prac", "noclip", "nc", "checkpoint", "checkpoints", "cp", "cps", "tele", "tp", "teleport", "save", "delcp", "clearcps"],
     lines: (c) => [
       "Noclip and checkpoints work in any solo run. Saving a checkpoint changes nothing. A teleport or noclip makes the run practice: it is not submitted or saved as a PB until you restart.",
-      `!cp opens the checkpoint menu · ${k(c, "!save", "cpSave")} · ${k(c, "!tele", "cpTeleport")} back · !prevcp / !nextcp · ${k(c, "!noclip", "noclip")}. During a run the teleport and noclip keys only work while !cp is open; typed commands always do. ${k(c, "!practice", "practice")} makes every run practice until you turn it off.`,
+      `!cp opens the checkpoint menu · ${k(c, "!save", "cpSave")} · ${k(c, "!tele", "cpTeleport")} back · !prevcp / !nextcp · !delcp / !clearcps delete · ${k(c, "!noclip", "noclip")}. During a run the teleport and noclip keys only work while !cp is open; typed commands always do. ${k(c, "!practice", "practice")} makes every run practice until you turn it off.`,
     ],
   },
   {

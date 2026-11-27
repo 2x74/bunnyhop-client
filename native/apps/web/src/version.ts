@@ -45,7 +45,7 @@
    two words, and VERSION stays below 0.1.0 while STAGE is alpha.
    ============================================================ */
 
-export const VERSION = "0.0.43";
+export const VERSION = "0.0.44";
 
 /** Release stage, printed after the number ("v0.0.4 alpha"). */
 export const STAGE = "alpha";
@@ -67,8 +67,8 @@ export interface ChangelogEntry {
 
 /** Notes for the next release, unpublished until promoted into CHANGELOG. */
 export const UPCOMING: ChangelogEntry = {
-  version: "0.0.44",
-  date: "2026-11-17",
+  version: "0.0.45",
+  date: "2026-11-27",
   kind: "minor",
   title: "Next update",
   notes: [],
@@ -76,6 +76,39 @@ export const UPCOMING: ChangelogEntry = {
 
 /** Newest first. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "0.0.44",
+    date: "2026-11-27",
+    kind: "minor",
+    title: "A Daily server, a Winter collection, snow on the maps and practice fixes",
+    notes: [
+      "A Daily server: one public server in Europe that plays the Daily Challenge map all day, with no map vote, Rock the Vote or extend. Your runs there count for the day's board. Ten minutes before 16:00 UTC it tells you tomorrow's map, and it switches two minutes after the new day starts so a run in progress can finish. Join it from Servers, from Daily on the main menu, or from Play together in the Discord daily channel.",
+      "Daily Challenge maps are a little harder: most days are Tier 2 or 3 maps with a world record between 25 and 90 seconds, and Sundays stay on an easier Tier 1 map.",
+      "A Winter collection in the map browser: 18 maps in snow and ice. Finish 5 of them between December 1 and January 7 for the Snowdrift colourway, and 10 of them any time for the Pack Ice knife finish.",
+      "The Santa Hat for your bunny: finish bhop_ambience_xmas in under 22 seconds, in any style that earns XP. If you already have, it's yours the next time you finish a run or open your profile.",
+      "Snow and rain: maps built with weather now have it, as in CS:S. Settings → Graphics → Snow and rain turns it off or to Light, and the Lowest and Low presets leave it off.",
+      "Bunnies and ghosts standing in falling snow slowly frost over, and thaw after they leave it. Settings → Graphics → Frost on players turns it off.",
+      "From December 1 to January 7 the main menu background is a snowy map from the Winter collection, when Snow and rain is on.",
+      "Fourteen new avatar decorations for supporters: Cat Ears, Angel, Imp, Headset, Blaze, Storm, Fizz, Ping, Hopper, Santa Hat, Crosshair, Smitten, Glitch and Sleepy.",
+      "The avatar editor shows your decoration on the round preview and lets you pick it there; anyone can hover to try them on. A new Headroom slider sits your bunny lower so a halo or ears clear its head.",
+      "Checkpoints: the number keys in the checkpoint menu work while you crouch. Delete checkpoint and Clear all are new rows in the menu, and !delcp and !clearcps do the same from chat. Thanks to teto and levi for the reports.",
+      "Your checkpoints stay when you leave a map or reload: come back and they are there for the same style and course, as practice checkpoints (doors and buttons reset). Settings → Keep checkpoints turns it off, and Clear all removes them. Thanks to Throw for the suggestion.",
+      "Segmented: loading a checkpoint you saved before a noclip puts you back on your Segmented run instead of leaving it in practice. Thanks to Throw for the report.",
+      "A practice run on Normal that only used checkpoints can go on the Segmented board: when it counts, the end of the run says so, and !submitseg sends it. Nothing is sent unless you choose to. Thanks to Throw for the suggestion.",
+      "The world record can sit on your HUD under your personal best: turn on World record in the HUD layout (F2) or in Settings. It follows the style and course you are on. Thanks to mine for the suggestion.",
+      "!measure now also says roughly how fast you need to be going to make the jump from the first point to the second. Thanks to awtistic and oiwa for the suggestion.",
+      "Watching someone in a server shows their timer the way they see it: yellow with Practice while they practice, and Segmented on a segmented run. Thanks to hena for the report.",
+      "bhop_ambience no longer lets you hop out of the start zone with speed, like bhop_futile. Times set before today stay as they are.",
+      "Server scoreboards put the player who set a time first above anyone who ties it later, like the leaderboards already do.",
+      "Fewer freezes a minute or two into a map, mostly on Windows: hop effects, ghosts and players who join are now prepared while the map loads instead of the first time they appear. Thanks to PewPewPwnLazer and bloodbag for the reports.",
+      "Player cards: the three featured runs on your card get a thin edge that says what they are: gold for a world record, the medal's colour for a Daily Challenge podium, and silver for a top 10. It updates on its own when a run gains or loses its place, in the game and in Discord and link previews.",
+      "Discord: a country role for your flag. Link your Discord account and set a flag on your game profile, and you get a role like 🇸🇪 Sweden. It follows your profile. Thanks to pixeL for the suggestion.",
+      "The marks next to names line up: the Daily medal count, the weekly mark and the peak tier sit at the same size and height. The gold Daily mark shines from 5 golds.",
+      "Privacy requests: the box for what you need is easier to find and can't be sent empty, and an email for replies is optional. Thanks to TyZi for the report.",
+      "New maps: bhop_domo23 and bhop_polior from your requests, bhop_ambience_xmas, and two new bunnyhop.lol maps, bhop_lol_familyguy and bhop_lol_gamenight. bhop_cancer_15 is Tier 2 now.",
+      "Replays and ranked runs can be up to 8 hours long.",
+    ],
+  },
   {
     version: "0.0.43",
     date: "2026-11-17",

@@ -25,6 +25,33 @@ import { COLOR_BLIND_MODES, type ColorBlindMode } from "../palette";
 import type { KeySoundKeys, KeySoundSet } from "../audio/keysound-policy";
 import type { PerfectSoundSet, StreakLength } from "../audio/perfect-policy";
 
+// (Before the prefs store below: parsePrefs runs when the module loads and checks saved values against these.)
+/** Snow and rain (graphics.precipitation): how many of the particles draw. */
+export type PrecipitationLevel = "off" | "light" | "full";
+export const PRECIPITATION_LEVELS: readonly PrecipitationLevel[] = ["off", "light", "full"];
+/** The density a level draws at (WorldView.setPrecipitation). */
+export const PRECIPITATION_DENSITY: Record<PrecipitationLevel, number> = { off: 0, light: 0.5, full: 1 };
+
+// (Also before the store: parsePrefs reads the preset table to give old saved settings their preset's snow and rain.)
+/** Graphics presets (Settings → Graphics → Quality): the settings that cost the most GPU time on slow machines. */
+export type GraphicsPreset = "lowest" | "low" | "medium" | "high";
+type PresetKeys = "potato" | "antialias" | "anisotropy" | "resolutionScale" | "waterReflections";
+export const GRAPHICS_PRESETS: Record<GraphicsPreset, Pick<Prefs["graphics"], PresetKeys>> = {
+  lowest: { potato: true, antialias: false, anisotropy: 1, resolutionScale: 0.5, waterReflections: false },
+  low: { potato: true, antialias: false, anisotropy: 1, resolutionScale: 1, waterReflections: false },
+  medium: { potato: false, antialias: false, anisotropy: 4, resolutionScale: 1, waterReflections: false },
+  high: { potato: false, antialias: true, anisotropy: 8, resolutionScale: 1, waterReflections: true },
+};
+export const PRESET_ORDER: GraphicsPreset[] = ["lowest", "low", "medium", "high"];
+
+/**
+ * What each Quality preset sets snow and rain to. Not one of the keys a preset is recognised by (graphicsPreset), so
+ * changing it by hand keeps the preset lit, and settings saved before it existed still match their preset.
+ */
+export const PRESET_PRECIPITATION: Record<GraphicsPreset, PrecipitationLevel> = { lowest: "off", low: "off", medium: "light", high: "full" };
+/** What each Quality preset sets Frost on players to: with snow, off on Lowest and Low. Not part of matching them either. */
+export const PRESET_FROST: Record<GraphicsPreset, boolean> = { lowest: false, low: false, medium: true, high: true };
+
 export type Action =
   | "forward"
   | "back"
@@ -353,6 +380,17 @@ export interface Prefs {
     mapFog: boolean;
     /** The map's overlays, decals, glows and light beams (map-dressing.ts), as CS:S draws them. Never in Potato mode. */
     mapDetails: boolean;
+    /**
+     * The map's falling snow and rain (func_precipitation, map-effects/precipitation.ts): off, light (half the
+     * particles) or full. Set by the Quality presets (PRESET_PRECIPITATION) but not part of matching them. Never in
+     * Potato mode.
+     */
+    precipitation: PrecipitationLevel;
+    /**
+     * Frost on the bunnies and ghosts standing in the map's falling snow (model-light.ts). Set by the Quality presets
+     * (PRESET_FROST) but not part of matching them. Only while snow draws: never in Potato mode or with snow off.
+     */
+    frost: boolean;
     /** The map's light on hands, weapons and bunnies (model-light.ts). Potato and Fullbright behave as "off". */
     modelLighting: ModelLighting;
     /** Props lit by the map (as CS:S lights them) or, off, by the plain shading they had before 0.0.41. */
@@ -471,8 +509,12 @@ export interface Prefs {
   cmdBinds: Record<string, string>;
   /** Source aliases (`alias +mleft "+moveleft; +left"`), name (lower case) -> command text. */
   aliases: Record<string, string>;
-  /** Practice mode (practice-mode/): a checkpoint teleport keeps the speed you saved it with (bhoptimer does), or stops you. */
-  practice: { keepVelocity: boolean };
+  /**
+   * Practice mode (practice-mode/): a checkpoint teleport keeps the speed you saved it with (bhoptimer does), or stops you.
+   * keepCheckpoints (0.0.44): checkpoints are kept on this device per map, style and track and come back on your next
+   * visit (practice-mode/cp-store.ts).
+   */
+  practice: { keepVelocity: boolean; keepCheckpoints: boolean };
   /** Physics 27+: the 1.5-unit jump lift, recorded per tick so it can change during a run. */
   landfix: boolean;
   /** Restart keys (R / B / M) need a short hold (restart-hold.ts HOLD_MS) so a stray press can't end a run (restart-guard.ts). */
@@ -668,12 +710,12 @@ export const DEFAULT_PREFS: Prefs = {
   firstPersonGlow: true,
   firstPersonRobe: true,
   mapLooks: {},
-  graphics: { preset: "source", waterReflections: true, mapFog: true, mapDetails: true, modelLighting: "subtle", propLighting: true, bloom: true, mapProfiles: false, ambienceShowcase: false, lightingProfile: "map", skyMode: "map", skyPackId: null, skyRotation: 0, skyExposure: 0, lightingSource: "map", directContribution: 1, ambientContribution: 1, clouds: false, cloudQuality: "low", cloudCoverage: .45, cloudDensity: 1, contactShading: false, atmosphere: false, sunShafts: false, materialResponse: true, volumetric: false, spatialAA: true, localLights: false, localQuality: "medium", localBudget: 1, localStrength: .2, dynamicGI: false, tracedGI: false, giQuality: "low", giStrength: .25, giRange: 256, dynamicShadows: false, shadowQuality: "medium", shadowDistance: 1024, shadowStrength: .18, resolutionScale: 1, antialias: true, aspect: "native", aspectFit: "stretch", pixelated: false, anisotropy: 8, brightness: 1, gamma: 1, vibrance: 1, fullbright: false, menuBackground: "live", fullscreen: true, potato: false, flashlight: false, fpsLimit: 1000, uncapped: false, lowLatency: false, menuFps: 0 },
+  graphics: { preset: "source", waterReflections: true, mapFog: true, mapDetails: true, precipitation: "full", frost: true, modelLighting: "subtle", propLighting: true, bloom: true, mapProfiles: false, ambienceShowcase: false, lightingProfile: "map", skyMode: "map", skyPackId: null, skyRotation: 0, skyExposure: 0, lightingSource: "map", directContribution: 1, ambientContribution: 1, clouds: false, cloudQuality: "low", cloudCoverage: .45, cloudDensity: 1, contactShading: false, atmosphere: false, sunShafts: false, materialResponse: true, volumetric: false, spatialAA: true, localLights: false, localQuality: "medium", localBudget: 1, localStrength: .2, dynamicGI: false, tracedGI: false, giQuality: "low", giStrength: .25, giRange: 256, dynamicShadows: false, shadowQuality: "medium", shadowDistance: 1024, shadowStrength: .18, resolutionScale: 1, antialias: true, aspect: "native", aspectFit: "stretch", pixelated: false, anisotropy: 8, brightness: 1, gamma: 1, vibrance: 1, fullbright: false, menuBackground: "live", fullscreen: true, potato: false, flashlight: false, fpsLimit: 1000, uncapped: false, lowLatency: false, menuFps: 0 },
   viewmodel: { show: true, ...VIEWMODEL_POS, bob: VIEWMODEL_BOB, sway: 1, hand: "right", inspect: "tricks", landSettle: false, speedFov: false, rev: VIEWMODEL_REV },
   binds: DEFAULT_BINDS,
   cmdBinds: {},
   aliases: {},
-  practice: { keepVelocity: true },
+  practice: { keepVelocity: true, keepCheckpoints: true },
   landfix: true,
   holdRestart: false,
   holdRestartAfter: HOLD_AFTER_DEFAULT,
@@ -929,6 +971,13 @@ export function parsePrefs(raw: string | null): Prefs {
   if (!COLOR_BLIND_MODES.some(([m]) => m === p.colorBlind)) p.colorBlind = DEFAULT_PREFS.colorBlind;
   p.graphics.preset = lookPreset(p.graphics.preset);
   if (!MODEL_LIGHTING_MODES.includes(p.graphics.modelLighting)) p.graphics.modelLighting = DEFAULT_PREFS.graphics.modelLighting;
+  // Saved before snow and rain existed (or broken): what the Quality preset they match sets (Lowest and Low off, Medium
+  // light), so a machine auto-tuned to Lowest doesn't start drawing it; custom settings get High's.
+  // (merge has already filled a missing one with the default, so the saved object is asked.)
+  const savedPrecip = (m.graphics as Record<string, unknown> | undefined)?.precipitation;
+  if (!PRECIPITATION_LEVELS.includes(savedPrecip as PrecipitationLevel)) p.graphics.precipitation = PRESET_PRECIPITATION[graphicsPreset(p.graphics) ?? "high"];
+  // Frost the same way: saved before it existed (or broken), what the preset they match sets.
+  if (typeof (m.graphics as Record<string, unknown> | undefined)?.frost !== "boolean") p.graphics.frost = PRESET_FROST[graphicsPreset(p.graphics) ?? "high"];
   return p;
 }
 
@@ -1063,17 +1112,6 @@ export function gamePixelRatio(g: Prefs["graphics"]): number {
   return Math.min(devicePixelRatio, g.potato ? 1 : 2) * g.resolutionScale;
 }
 
-/** Graphics presets (Settings → Graphics → Quality): the settings that cost the most GPU time on slow machines. */
-export type GraphicsPreset = "lowest" | "low" | "medium" | "high";
-type PresetKeys = "potato" | "antialias" | "anisotropy" | "resolutionScale" | "waterReflections";
-export const GRAPHICS_PRESETS: Record<GraphicsPreset, Pick<Prefs["graphics"], PresetKeys>> = {
-  lowest: { potato: true, antialias: false, anisotropy: 1, resolutionScale: 0.5, waterReflections: false },
-  low: { potato: true, antialias: false, anisotropy: 1, resolutionScale: 1, waterReflections: false },
-  medium: { potato: false, antialias: false, anisotropy: 4, resolutionScale: 1, waterReflections: false },
-  high: { potato: false, antialias: true, anisotropy: 8, resolutionScale: 1, waterReflections: true },
-};
-export const PRESET_ORDER: GraphicsPreset[] = ["lowest", "low", "medium", "high"];
-
 /** The preset these graphics settings match, or null (custom). */
 export function graphicsPreset(g: Prefs["graphics"]): GraphicsPreset | null {
   return PRESET_ORDER.find((k) => (Object.keys(GRAPHICS_PRESETS[k]) as PresetKeys[]).every((f) => g[f] === GRAPHICS_PRESETS[k][f])) ?? null;
@@ -1081,6 +1119,8 @@ export function graphicsPreset(g: Prefs["graphics"]): GraphicsPreset | null {
 
 export function applyGraphicsPreset(g: Prefs["graphics"], preset: GraphicsPreset): void {
   Object.assign(g, GRAPHICS_PRESETS[preset]);
+  g.precipitation = PRESET_PRECIPITATION[preset];
+  g.frost = PRESET_FROST[preset];
 }
 
 const ASPECTS: Record<Exclude<AspectRatio, "native">, number> = { "4:3": 4 / 3, "5:4": 5 / 4, "16:10": 16 / 10, "16:9": 16 / 9 };

@@ -61,8 +61,9 @@ export interface RunData {
   runTicks: Int32Array;
   /** A finished run's time in whole milliseconds (run-timing.ts, what the boards show), 0 while not finished. */
   finishMs: Int32Array;
-  jumps: Uint16Array;
-  strafes: Uint16Array;
+  /** Run counters per tick: u32 (a multi-hour run passes 65,535 strafes, which u16 wrapped). */
+  jumps: Uint32Array;
+  strafes: Uint32Array;
   sync: Float32Array;
   perf: Float32Array;
   perfectTick: Int32Array;
@@ -141,8 +142,8 @@ export class ReplayPlayer {
       status: new Uint8Array(n + 1),
       runTicks: new Int32Array(n + 1),
       finishMs: new Int32Array(n + 1),
-      jumps: new Uint16Array(n + 1),
-      strafes: new Uint16Array(n + 1),
+      jumps: new Uint32Array(n + 1),
+      strafes: new Uint32Array(n + 1),
       sync: new Float32Array(n + 1),
       perf: new Float32Array(n + 1).fill(NaN),
       perfectTick: new Int32Array(n + 1).fill(-1),
@@ -162,6 +163,20 @@ export class ReplayPlayer {
     this.data = d;
     const snapshots = hasStateSnapshots(core);
     let kfBytes = 0;
+    // Keyframe interval: doubled as soon as the kept keyframes pass the budget, during the pass (a multi-hour replay
+    // took a snapshot every second for hours before the thinning below: GBs of wasm memory, which never shrinks). The
+    // keyframes kept are the ones the thinning would keep: a set over the budget at an interval only grows by the end.
+    let every = KEYFRAME_TICKS;
+    const thin = () => {
+      every *= 2;
+      const keep: Keyframe[] = [];
+      kfBytes = 0;
+      for (const k of this.keyframes) {
+        if (k.tick % every === 0) (keep.push(k), (kfBytes += snapshotBytes(core, k.handle)));
+        else freeState(core, k.handle);
+      }
+      this.keyframes = keep;
+    };
     const put = (t: number, s: PlayerState, events: number, timer: RunTimer | null) => {
       d.pos.set(s.position, t * 3);
       d.vel.set(s.velocity, t * 3);
@@ -206,11 +221,12 @@ export class ReplayPlayer {
         if (ctx.update.started) (d.starts.push(t), (runSplits = []));
         if (ctx.update.restarted) (d.flags[t] |= F_RESTARTED), (runSplits = []);
         if (ctx.update.split) runSplits.push({ ...ctx.update.split, tick: t });
-        if (snapshots && t % KEYFRAME_TICKS === 0 && t < n) {
+        if (snapshots && t % every === 0 && t < n) {
           const handle = snapshotState(core);
           if (handle) {
             kfBytes += snapshotBytes(core, handle);
             this.keyframes.push({ tick: t, handle, timer: cloneObj(ctx.timer), filter: cloneObj(ctx.filter), state: s });
+            while (kfBytes > KEYFRAME_BUDGET && this.keyframes.length > 1) thin();
           }
         }
       },
@@ -225,18 +241,8 @@ export class ReplayPlayer {
     this.filter = sim.filter;
     this.pre = sim.final;
     this.cur = n;
-    // Thin keyframes until they fit the memory budget.
-    let every = KEYFRAME_TICKS;
-    while (kfBytes > KEYFRAME_BUDGET && this.keyframes.length > 1) {
-      every *= 2;
-      const keep: Keyframe[] = [];
-      kfBytes = 0;
-      for (const k of this.keyframes) {
-        if (k.tick % every === 0) (keep.push(k), (kfBytes += snapshotBytes(core, k.handle)));
-        else freeState(core, k.handle);
-      }
-      this.keyframes = keep;
-    }
+    // (Kept within the budget as they were taken; this only ever runs for a set that ends over it.)
+    while (kfBytes > KEYFRAME_BUDGET && this.keyframes.length > 1) thin();
     this.stats.keyframeTicks = every;
     this.stats.keyframes = this.keyframes.length;
     this.stats.keyframeBytes = kfBytes;

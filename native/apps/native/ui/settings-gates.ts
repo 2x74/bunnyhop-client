@@ -136,6 +136,9 @@ const ROWS: Record<string, Gate> = {
   "hud/More elements/Speed graph": needs("speedGraph", "hud:graph"),
   "hud/More elements/Map / style line": needs("hudLayout|hudLayoutWeb", "hud:map"),
   "hud/More elements/Personal best": needs("hud:pb"),
+  "hud/More elements/World record": excluded(
+    "The desktop client draws its own HUD and has no world record element yet (web 0.0.44 hud wr).",
+  ),
   "hud/More elements/Ammo": needs("hudLayout|hudLayoutWeb", "hud:ammo"),
   "hud/More elements/Start Pre": needs("hud:startPre"),
   "hud/More elements/Speed colours": needs("speedColors"),
@@ -184,6 +187,9 @@ const ROWS: Record<string, Gate> = {
   "keys/Movement/Turn speed": needs("yawSpeed"),
   "keys/Movement/Fast turn": needs("angleSpeedKey"),
   "keys/Practice/Teleport keeps speed": needs("practiceKeepVelocity"),
+  "keys/Practice/Keep checkpoints": excluded(
+    "Kept checkpoints (web practice-mode/cp-store.ts) aren't in the desktop client yet: its checkpoints live in the map's core.",
+  ),
   "keys/Run/Hold to restart": needs("holdRestart"),
   "keys/Run/Hold after": needs("holdRestartAfter"),
   "keys/Run/Push to talk": needs("bind:voiceRecord"),
@@ -239,6 +245,10 @@ const ROWS: Record<string, Gate> = {
   "graphics/Colour & visibility/Prop lighting": needs("graphicsPropLighting"),
   "graphics/Colour & visibility/Map fog": needs("graphicsMapFog"),
   "graphics/Colour & visibility/Map details": needs("graphicsMapDetails"),
+  "graphics/Colour & visibility/Snow and rain": needs("graphicsPrecipitation"),
+  "graphics/Colour & visibility/Frost on players": excluded(
+    "Frost (web model-light.ts) builds up on each player over time in falling snow; the desktop client doesn't draw it yet.",
+  ),
   "graphics/Colour & visibility/Flashlight": needs("graphicsFlashlight"),
   "graphics/Display/Fullscreen when playing": excluded("Display → Window mode: windowed, borderless or fullscreen."),
   "graphics/Display/Resolution": needs("graphicsResolutionScale"),

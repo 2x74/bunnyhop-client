@@ -293,6 +293,10 @@ export class NativeChatService {
           return prefs.get().yawSpeed;
         },
         keepReplay: (reply) => reply("The desktop client doesn't keep practice replays yet."),
+        submitSegmented: (reply) =>
+          reply(
+            "The desktop client can't send practice runs to Segmented yet. Play the Segmented style to submit one.",
+          ),
         key: (action) => state.settings.binds[action]?.[0] ?? null,
         copyStart: (arg, answer) => {
           void this.copyStart.command(arg, answer);

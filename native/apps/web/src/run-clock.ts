@@ -19,6 +19,7 @@
 // the board), so it is signed with the run: context for staff only.
 
 import { api } from "./api";
+import { RUN_MAX_BEATS } from "./run-limits";
 import type { AttemptClaim } from "./attempts";
 import { cursorFree } from "./free-cursor";
 import { hashHex, RUN_HASH_SEED } from "./run-hash";
@@ -29,10 +30,10 @@ import { hashHex, RUN_HASH_SEED } from "./run-hash";
  */
 export const BEAT_MS = 4000;
 /**
- * Tokens kept per run: a beat every BEAT_MS through the longest run the server accepts (4 h; apps/api/src/run-clock.ts
- * MAX_BEATS). A longer run stops beating; the server notes the gap.
+ * Tokens kept per run: the server's limit (run-limits.ts RUN_MAX_BEATS), a beat every BEAT_MS through the longest ranked
+ * run (8 h) with paused time to spare. A longer run stops beating; the server notes the gap.
  */
-const MAX_BEATS = 7500;
+const MAX_BEATS = RUN_MAX_BEATS;
 
 export interface RunClockSource {
   map: string;

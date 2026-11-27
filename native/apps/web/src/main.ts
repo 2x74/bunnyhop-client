@@ -3,12 +3,13 @@ import { appLocation } from "./platform/navigation";
 import "./platform/boot";
 import { voice } from "./voice/client";
 import { myProfile } from "./ui/account-state";
-import { advanceKnifePool, getOutfit, onHeldLoadout, poolPicks } from "./player/cosmetics";
+import { advanceKnifePool, getHeldLoadout, getOutfit, onHeldLoadout, poolPicks } from "./player/cosmetics";
 import { PlayerShadowProxy } from "./graphics/player-shadow";
 import "./texture-packs/settings";
 import "./sky-packs/settings";
 import { GraphicsPipeline } from "./graphics/pipeline";
-import { warmPrograms } from "./graphics/warm-programs";
+import { drawHiddenPrograms, warmPrograms } from "./graphics/warm-programs";
+import { stalls } from "./stall-log";
 // First: the feedback form's client error log (ring buffer of uncaught errors / rejections / console.error).
 import { openFeedback, setGameInfo } from "./feedback/state";
 import * as THREE from "three";
@@ -36,7 +37,7 @@ import { buildWorld, type WorldView } from "./render";
 import { setMapVolumes, volumesOf } from "./player/map-volumes";
 import { debugHookOptIn, RunSession } from "./session";
 import { fetchMapIndex, goToMainMenu, initMenu, openMap, revealGame, showError, showHome, showLoading, showReady } from "./menu";
-import { gameView, keyLabel, prefs, verticalFov } from "./ui/settings";
+import { gameView, keyLabel, PRECIPITATION_DENSITY, prefs, verticalFov } from "./ui/settings";
 import { applyPalette } from "./palette";
 import { setUiHidden, uiHidden } from "./ui/hide-ui";
 import { isSegmented, isStyleId, styleDef, styleLabel, styleSettings, type StyleId } from "./styles";
@@ -49,7 +50,7 @@ import { readQueue, settleQueue } from "./map-queue";
 import { startQueueMode } from "./queue-mode";
 import { GAUNTLET_STYLE } from "./gauntlet/state";
 import { startDailyMode } from "./daily/mode";
-import { dailyStyle, isDay } from "./daily/state";
+import { dailyNow, dailyStyle, isDay } from "./daily/state";
 import { selectedStyle, setSelectedStyle } from "./ui/style-picker";
 import { afterPaint, fmtBytes } from "./ui/dom";
 import { countJump, hasFinishedAMap, recordMapPlayed } from "./ui/stats";
@@ -111,7 +112,8 @@ import { startPlaytime } from "./playtime";
 import { mapTime } from "./map-time";
 import { deviceIdSettled } from "./device";
 import { setCosmeticsStill } from "./viewmodel/finishes/shader";
-import { hopQuality } from "./player/hop-layer";
+import { hopLayerOf, hopLayerWanted, hopQuality, prewarmHopLayer, type HopWarmSteps } from "./player/hop-layer";
+import { hopFxOf } from "./player/hop-fx";
 import { setCosmeticsTier, tierOf } from "./viewmodel/finishes/detail";
 import { lookTierOf, setPlayerLookTier } from "./player/look-tier";
 import { PotatoHint } from "./potato-hint";
@@ -155,6 +157,8 @@ const gfxAuto = autoTuneGraphics();
 // canvas: a desynchronized context, so frames past the refresh rate reach the screen (frame-loop.ts). Its context is made here (three.js has no option for it) with three's own attributes, alpha
 // off as three renders it anyway.
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: prefs.get().graphics.antialias, powerPreference: "high-performance", context: lowLatencyContext() });
+// A stalled frame says how many shader programs it made (stall-log.ts).
+stalls.programs = () => renderer.info.programs?.length ?? 0;
 const graphicsPipeline = new GraphicsPipeline(renderer);
 function lowLatencyContext(): WebGL2RenderingContext | undefined {
   if (!prefs.get().graphics.lowLatency) return undefined;
@@ -209,7 +213,7 @@ const input = new Input(canvas);
 // Input diagnostics overlay (Settings → Mouse & view → Show input stats, or ?inputdebug=1 for this page load).
 const inputDebug = new InputDebug(input);
 const inputDebugParam = params.get("inputdebug") === "1";
-if (import.meta.env.DEV || inputDebugParam) Object.assign(window, { __inputStats: () => inputSummary(input) });
+if (import.meta.env.DEV || inputDebugParam) Object.assign(window, { __inputStats: () => inputSummary(input), __stalls: () => stalls.summary() });
 let inputExperiment = false;
 let experimentFailure = false;
 // Per-report delivery where the browser has it (strafes.io's order): pointerrawupdate, else pointermove + coalesced.
@@ -257,6 +261,8 @@ prefs.watch((p) => {
     world.setFog(p.graphics.mapFog);
     world.setPropLighting(p.graphics.propLighting);
     world.setDetails(p.graphics.mapDetails);
+    world.setPrecipitation(PRECIPITATION_DENSITY[p.graphics.precipitation]);
+    world.setFrost(p.graphics.frost);
     world.setModelLighting(p.graphics.modelLighting);
     applyAnisotropy(world.root, p.graphics.anisotropy);
   }
@@ -427,7 +433,7 @@ if (bareServer) {
     const room = (await api.servers()).find((r) => r.id === bareServer);
     const map = room?.online ? (room.changing ?? room.map) : null;
     if (!room || !map) throw new ApiError(404, "not_found", "no such server");
-    location.replace(roomUrl(room.id, map));
+    location.replace(roomUrl(room.id, map, { daily: room.daily?.day }));
     await new Promise(() => {}); // navigating
   } catch (e) {
     history.replaceState(null, "", "/");
@@ -468,11 +474,16 @@ const styleParam = params.get("style");
 // own, ?style=), and only for this session.
 // (Read from the address as it is now: picking the daily on the home screen sets it without a page load.)
 const dailyParam = appLocation().searchParams.get("daily");
-const dailyEntry = !gauntletStart && !params.get("server") && isDay(dailyParam) ? dailyParam : null;
+// The Daily room's Join and its own map change carry the day too (?server=<id>&daily=<day>, net/daily-room.ts): the
+// page plays the day's style there as well. Its links may not name the style, so it is read from GET /daily (the same
+// answer daily/mode.ts asks for next, so no extra request), else the link's.
+const dailyRoom = !gauntletStart && !!params.get("server") && isDay(dailyParam);
+const dailyEntry = !gauntletStart && (!params.get("server") || dailyRoom) && isDay(dailyParam) ? dailyParam : null;
 if (isStyleId(styleParam) && !gauntletStart && !dailyEntry) setSelectedStyle(styleParam);
+const dayStyle = dailyRoom ? await withTimeout(dailyNow().then((v) => (v.enabled ? v.today.style : null), () => null), 1500, null) : null;
 // (Gauntlets are Normal only, a daily is its day's style: this session runs it without changing the style you picked
 // for other maps.)
-const style = gauntletStart ? (GAUNTLET_STYLE as StyleId) : dailyEntry ? dailyStyle(appLocation().searchParams.get("style")) : selectedStyle();
+const style = gauntletStart ? (GAUNTLET_STYLE as StyleId) : dailyEntry ? dailyStyle(dayStyle ?? appLocation().searchParams.get("style")) : selectedStyle();
 localStorage.setItem("bunnyhop:last-map", mapName);
 lookMap = mapName;
 setLookMapNow(mapName);
@@ -554,6 +565,8 @@ try {
   world.setFog(prefs.get().graphics.mapFog);
   world.setPropLighting(prefs.get().graphics.propLighting);
   world.setDetails(prefs.get().graphics.mapDetails);
+  world.setPrecipitation(PRECIPITATION_DENSITY[prefs.get().graphics.precipitation]);
+  world.setFrost(prefs.get().graphics.frost);
   world.setModelLighting(prefs.get().graphics.modelLighting);
   applyAnisotropy(world.root, prefs.get().graphics.anisotropy);
   scene.add(world.root);
@@ -794,7 +807,7 @@ if (import.meta.env.DEV) Object.assign(window, { __practice: practice });
 // Gauntlet mode: the tag on this map's runs, the HUD line, pings, the next map's prefetch and the split flow.
 if (gauntletStart) startGauntletMode(gauntletStart, session);
 // The Daily Challenge: the day's line in the HUD on the day's map, and the day place under a counted run's result.
-else if (mapName !== TUTORIAL_MAP && !viewerStart && !replayMap) startDailyMode({ session, map: mapName, entry: dailyParam, inRoom: !!params.get("server") });
+else if (mapName !== TUTORIAL_MAP && !viewerStart && !replayMap) startDailyMode({ session, map: mapName, entry: dailyParam, inRoom: !!params.get("server"), dailyRoom });
 // A set played in order: the next map after a finish (queue-mode.ts).
 startQueueMode({ session, map: mapName, arrived: queued, gauntlet: !!gauntletStart });
 // Tutorial mode on the tutorial map: lessons, strafe guide, demos (tutorial/mode.ts, loaded on demand).
@@ -812,9 +825,24 @@ try {
 } catch (e) {
   console.warn("compile passes:", e);
 }
+// Hop effects: the scene's layer is made, compiled and drawn once off screen here, not in the frame of the first hop
+// effect anyone does (1–5 s stalls on Windows from v0.0.42). Only when one can show: Settings → Hop effects, or your
+// own equipped effect (third person). Turned on later, it warms then (below, after Ready).
+const hopWarmSteps: HopWarmSteps = {
+  warm: (mesh) => warmPrograms(renderer, mesh, camera, scene),
+  draw: (mesh) => drawHiddenPrograms(renderer, mesh, camera, scene, true),
+};
+const hopWanted = () => hopLayerWanted(prefs.get().showHopFx, hopFxOf(getHeldLoadout().hop));
+const hopWarmStart = performance.now();
+const hopWarm = prewarmHopLayer(scene, hopWanted(), hopWarmSteps)
+  ?.then(() => console.info(`hop layer ready in ${Math.round(performance.now() - hopWarmStart)} ms`))
+  .catch((e) => console.warn("hop layer warm-up:", e));
+// (Its own warm-up compiles it: the scene's below leaves it out.)
+const hopLayerMesh = hopLayerOf(scene)?.mesh;
+if (hopLayerMesh) worldWarmed.add(hopLayerMesh);
 await Promise.race([
   // (The gun viewmodel is its own scene, drawn over this one: warmed here on a map with floor guns.)
-  Promise.all([worldPrograms, warmPrograms(renderer, scene, camera, scene, true, worldWarmed).catch(() => {}), gunView.warm(renderer).catch(() => {})])
+  Promise.all([worldPrograms, warmPrograms(renderer, scene, camera, scene, true, worldWarmed).catch(() => {}), gunView.warm(renderer).catch(() => {}), hopWarm])
     .then(() => graphicsPipeline.warmDraw(scene, camera))
     .catch((e) => console.warn("warm draw:", e)),
   new Promise((r) => setTimeout(r, 10_000)),
@@ -822,6 +850,14 @@ await Promise.race([
 if (sharedPlayerPrograms) await sharedPlayerPrograms;
 await loading.stage("Ready", 1);
 mapLoaded();
+// The stall log's times count from here (stall-log.ts).
+stalls.origin = performance.now();
+// Hop effects turned on (or one equipped) mid-map: the layer warms then, in the background.
+const warmHopsLate = () => {
+  if (hopWanted()) void prewarmHopLayer(scene, true, hopWarmSteps)?.catch((e) => console.warn("hop layer warm-up:", e));
+};
+prefs.watch(warmHopsLate);
+onHeldLoadout(warmHopsLate);
 // A new player's first look (until their first finish on a real map, and always in the tutorial): the world and one
 // "Click to start" line, not the pause menu with its empty leaderboard. Esc opens the menu. Returning players get the
 // menu as before (style, board and replays before a run). Not in rooms or when opening a replay; not on phones.
@@ -845,6 +881,9 @@ if (firstPlay) {
   firstPlay.setZones(session.zones?.zones ?? []);
 }
 await showReady({ menu: !firstLook });
+// Checkpoints kept from the last visit came back (practice-mode/cp-store.ts): said once, now that the game shows (a
+// page opened on a replay says it on the first checkpoint key instead).
+if (!viewerStart) practiceMode.announceKept();
 // Before their first finish, what the map wants. Holding jump from a standstill hops before the ground speeds you up,
 // and W alone can't go past 30 u/s in the air: the first thing a newcomer does, so the line says to run first.
 if (firstLook) showStartPrompt(mapName === TUTORIAL_MAP ? undefined : styleDef(session.runStyle)?.autohop ? "Get to the end zone. Run first, then hold jump to keep hopping." : "Get to the end zone.");
@@ -983,7 +1022,7 @@ registerWeaponChatCommands();
 initLookMenu(input);
 registerLookCommands();
 initPaint(w.root, camera, () => !replayViewer.active && !(mp?.isSpectating ?? false), w.skyFaces, session.mapSha256 ? { map: mapName, sha: session.mapSha256 } : null);
-initMeasure(w.root, scene, camera, () => !replayViewer.active && !(mp?.isSpectating ?? false), w.skyFaces);
+initMeasure(w.root, scene, camera, () => !replayViewer.active && !(mp?.isSpectating ?? false), w.skyFaces, () => session.settings.gravity);
 
 // This facility exists ONLY on a loopback Vite dev server. No production query/storage enablement.
 if (localInputExperimentAllowed(import.meta.env.DEV, location.hostname)) {
@@ -1079,6 +1118,8 @@ setGameInfo(() => {
     watchingReplay: replayViewer.active,
     spectating: mp?.isSpectating ?? false,
     input: inputSummary(input), // mouse / frame-time stats (input-debug.ts): flicks and freezes come with numbers
+    // Frames over 250 ms on this page and what had just happened (stall-log.ts).
+    stalls: stalls.summary() ?? undefined,
     // The replay viewer's frame times this visit (viewer.ts frameSummary), once a replay has shown (else left out).
     replayFrames: replayViewer.frameSummary() ?? undefined,
   };

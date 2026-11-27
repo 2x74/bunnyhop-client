@@ -22,6 +22,7 @@ import { WRelease, type WReleaseContext } from "./w-release";
 import { keyForCode } from "./console/names";
 import { heldActions, mixesMoveAndTurn, MOVE_TURN_REFUSAL, runPress, runRelease, TURN_ACTIONS, type Aliases, type ChainOps } from "./console/bind-run";
 import { noteLockPath } from "./lock-path";
+import { stalls } from "./stall-log";
 
 /**
  * Whether `unadjustedMovement` really turns raw input on here (only for the diagnostics label): Chromium does (Windows,
@@ -1208,7 +1209,8 @@ export class Input {
   frame(now: number): void {
     this.framesSince++;
     this.sampler?.evidence({type:'frame', now, arrivalTime:performance.now()});
-    this.filter.stats.frame(now, performance.now(), this.locked);
+    const dur = this.filter.stats.frame(now, performance.now(), this.locked);
+    stalls.frame(now, dur, this.locked);
   }
 
   /**

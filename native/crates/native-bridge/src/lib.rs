@@ -1280,7 +1280,7 @@ pub unsafe extern "C" fn bh_run_configure(
     unsafe {
         call(ctx, |c| {
             let mut options = input(options)?;
-            if ![1, 2, 3, 4, 5].contains(&options.rules)
+            if !run::is_timer_rules(options.rules)
                 || options.strafe_keys > styles::STRAFE_KEYS_PRESS
                 || !options.prespeed_cap.is_finite()
                 || options.prespeed_cap < 0.0
@@ -1313,7 +1313,7 @@ pub unsafe extern "C" fn bh_run_configure(
             let m = c.map()?;
             m.finish_record(false, "zones_changed")?;
             m.end_flight();
-            // A rules 4 map blocks prehops in every style, whatever the caller's defaults say.
+            // A rules 4 (or, from rules 6, a rules 6) map blocks prehops in every style, whatever the caller's defaults say.
             if run::blocks_prehops(&m.filter.id, &m.map_name, options.rules) {
                 options.block_prehops = 1;
             }

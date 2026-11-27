@@ -831,7 +831,7 @@ export function cardEditor(p: Profile, lo: Loadout, news: NewTracker, o: CardEdi
     const lost = m.choice && !m.choice.held && m.choice.map === (lo.choice.mapBg ?? null) ? m.choice : null;
     const swatch = (src: string | null) => h("span.pf-sw.pf-sw-card.pf-sw-map", { "aria-hidden": "true", style: src ? `background-image:url("${src}")` : undefined });
     if (!m.maps.length && !lost) {
-      const goal = `Hold a world record on a map ${MAP_BG_MIN_FINISHERS} players have finished`;
+      const goal = MAP_BG_MIN_FINISHERS > 1 ? `Hold a world record on a ranked map ${MAP_BG_MIN_FINISHERS} players have finished` : "Hold a world record on a ranked map";
       // With the backgrounds earned by playing (before the Supporter heading), across the row so its line reads whole.
       const teaser = add(pickItem(swatch(null), "Map backgrounds", { id: "map-bg-teaser", state: () => ({ on: false }), lock: { hint: goal, goal, fraction: null }, pick: () => {} }));
       teaser.classList.add("ce-item-wide");

@@ -2,9 +2,10 @@
 // A server is a row: a picture of the map it's on, its name, the map and tier, players, time left and its region
 // (with the ping to it, small: ping is no reason to pick a room, and the line above the list says why), then
 // everyone who is in it (their picture, name and badges, as the boards draw a player; a name shows the player's card
-// on hover and opens their profile). Rooms with people in them come first, your nearer region ahead of the other
-// (ui/servers-who.ts roomOrder); an empty room is a shorter row, never hidden. Join loads the room's map with ?server=<id> (net/mp.ts takes over from there);
-// "Play solo" opens the map browser as before.
+// on hover and opens their profile). The Daily room comes first (it plays the day's Daily Challenge map all day:
+// net/daily-room.ts), then rooms with people in them, your nearer region ahead of the other (ui/servers-who.ts
+// roomOrder); an empty room is a shorter row, never hidden. Join loads the room's map with ?server=<id> (net/mp.ts
+// takes over from there); "Play solo" opens the map browser as before.
 // Also the room's own line at the top of the pause menu's Server tab (roomHeader).
 //
 // Custom CSS (the /custom-css guide promises these): each row is [data-part="server"], with [data-part="map"] (the
@@ -13,6 +14,7 @@
 import "../net/net.css";
 import { api, ApiError, type ListingPerson, type ServerListing } from "../api";
 import { goToLobby, lobbyIdFromParam } from "../net/lobby";
+import { clock, listingUrl, serversNow } from "../net/daily-room";
 import { roomActions, roomPresence, roomUrl, type RoomActions } from "../net/presence";
 import { openAccount } from "./account-state";
 import { avatarImg, pictureOf } from "./avatar";
@@ -24,7 +26,7 @@ import { fetchMapIndex, tierBadge } from "./maps";
 import { nameAttrs, nameMarks } from "./marks";
 import { landRows } from "./land";
 import { loadFailed } from "./load-failed";
-import { ALL_EMPTY, fastestRegion, moreLabel, nearRegion, roomOrder, WHO_NARROW, WHO_WIDE, whoKey, whoView } from "./servers-who";
+import { ALL_EMPTY, fastestRegion, moreLabel, nearRegion, roomOrder, roomSub, WHO_NARROW, WHO_WIDE, whoKey, whoView } from "./servers-who";
 import { mapArt } from "./thumbs";
 import "./servers.css";
 
@@ -37,11 +39,6 @@ const REFRESH_MS = 10_000;
  * players look to you, nothing about your run.
  */
 export const PING_NOTE = "Your run is timed on your machine, so ping doesn't matter.";
-
-function clock(ms: number): string {
-  const s = Math.max(0, Math.ceil(ms / 1000));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-}
 
 async function measurePing(id: string): Promise<number | null> {
   try {
@@ -116,7 +113,7 @@ export interface ServerBrowserOpts {
 const NARROW = "(max-width: 40rem)";
 /** The region whose rooms answered fastest last time (ui/servers-who.ts nearRegion): this device's, not the account's. */
 const NEAR_KEY = "bunnyhop:servers-near";
-const nearRemembered = (): string | null => {
+export const nearRemembered = (): string | null => {
   try {
     return localStorage.getItem(NEAR_KEY);
   } catch {
@@ -210,7 +207,7 @@ export function serverBrowser(o: ServerBrowserOpts): HTMLElement {
 
   const join = (s: ServerListing) => {
     if (!s.map || !s.online) return;
-    location.href = roomUrl(s.id, s.changing ?? s.map);
+    location.href = listingUrl(s);
   };
 
   /**
@@ -258,7 +255,7 @@ export function serverBrowser(o: ServerBrowserOpts): HTMLElement {
         art.replaceChildren(shownMap ? mapArt(shownMap, null, { eager: true, size: "card", className: "srv-thumb" }) : h("span.card-art.srv-thumb"));
       }
       title.replaceChildren(s.name, ...(here === s.id ? [h("span.badge.current.srv-here", null, "You")] : []));
-      sub.textContent = `Tiers ${s.tiers[0]}–${s.tiers[1]}, ${s.timeLimitMinutes}-minute maps`;
+      sub.textContent = roomSub(s);
       mapCell.replaceChildren(s.map ? h("div.srv-map", null, h("span.srv-mapname", { title: s.changing ?? s.map }, s.changing ? `→ ${s.changing}` : s.map), tierBadge(s.tier)) : h("span.dim", null, s.online ? "no maps" : "offline"));
       count.textContent = String(s.players);
       max.textContent = ` / ${s.maxPlayers}`;
@@ -344,7 +341,7 @@ export function serverBrowser(o: ServerBrowserOpts): HTMLElement {
 
   const load = async () => {
     try {
-      rows = await api.servers();
+      rows = await serversNow(5_000);
       status.textContent = rows.length ? "" : "No servers right now.";
       status.hidden = !!rows.length;
       const now = performance.now();
@@ -383,8 +380,7 @@ export function onlineSummary(): HTMLElement {
   const el = h("small.online-sum", null, "");
   if (!api.available()) return el;
   const load = () =>
-    void api
-      .servers()
+    void serversNow()
       .then((list) => {
         const n = list.reduce((a, s) => a + s.players, 0);
         el.textContent = n ? `${n} playing` : "";

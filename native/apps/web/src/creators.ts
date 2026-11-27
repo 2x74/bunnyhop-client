@@ -358,8 +358,8 @@ export const GAUNTLET_SVG =
   `<circle cx="12" cy="12" r="11" fill="${GAUNTLET_PERIWINKLE}"/><path d="M8.2 5.4v13.4" stroke="${GAUNTLET_INK}" stroke-width="2.2" stroke-linecap="round"/>` +
   `<path d="M9.2 5.6h8.6l-2.5 3.5 2.5 3.5H9.2z" fill="${GAUNTLET_INK}"/>`;
 export const WEEKLY_WINNER_SVG =
-  `<rect x="2.5" y="4.2" width="19" height="17.6" rx="3.6" fill="${WEEKLY_TANGERINE}"/><path d="M7.4 2.4v4M16.6 2.4v4" stroke="${GAUNTLET_INK}" stroke-width="2.2" stroke-linecap="round"/>` +
-  engraved("1", 19.4, 13, GAUNTLET_INK);
+  `<rect x="2.5" y="3.5" width="19" height="17.6" rx="3.6" fill="${WEEKLY_TANGERINE}"/><path d="M7.4 1.7v4M16.6 1.7v4" stroke="${GAUNTLET_INK}" stroke-width="2.2" stroke-linecap="round"/>` +
+  engraved("1", 18.1, 13, GAUNTLET_INK);
 /** Medal fills of the weekly podium marks: light, mid, dark (gold is the Creator gold). */
 const MEDALS = {
   winner: { light: GOLD_LIGHT, mid: GOLD_MID, dark: GOLD_DARK, word: "gold" },
@@ -385,8 +385,8 @@ const weeklySvg = (medal: WeeklyMedal, n: number) => {
   const digits = String(n);
   return (
     `<defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${c.light}"/><stop offset=".55" stop-color="${c.mid}"/><stop offset="1" stop-color="${c.dark}"/></linearGradient></defs>` +
-    `<rect x="2.5" y="4.2" width="19" height="17.6" rx="3.6" fill="url(#${id})"/><path d="M7.4 2.4v4M16.6 2.4v4" stroke="${GAUNTLET_INK}" stroke-width="2.2" stroke-linecap="round"/>` +
-    engraved(digits, digits.length > 1 ? 18.4 : 19.4, digits.length > 1 ? 10.5 : 13, GAUNTLET_INK)
+    `<rect x="2.5" y="3.5" width="19" height="17.6" rx="3.6" fill="url(#${id})"/><path d="M7.4 1.7v4M16.6 1.7v4" stroke="${GAUNTLET_INK}" stroke-width="2.2" stroke-linecap="round"/>` +
+    engraved(digits, digits.length > 1 ? 17.3 : 18.1, digits.length > 1 ? 10.5 : 13, GAUNTLET_INK)
   );
 };
 /** Every weekly podium mark, 1 to WEEKLY_MARK_MAX of each medal. Gold is shown by default; silver and bronze when picked. */
@@ -421,8 +421,11 @@ export function oneWeeklyPerMedal(ids: string[]): string[] {
 // silver and bronze with the count engraved, one per medal ("daily-gold", "daily-gold-12"). The disc grows with the
 // count (DAILY_STEPS): plain, short rays, a twelve-point burst, the burst with an engraved ring, a second row of points
 // behind it, and from 100 a raised light centre. The sun is the daily's (the weekly is a calendar page).
+// v0.0.44: the marks after a name share one box, so each drawing fills it to the same optical size and centre: the plain
+// disc is r 10.6 (a solid disc next to the r 11 marks), the calendar page sits 0.7 higher (its rings carry no weight),
+// the peak hexagon is 95% (its points read tall).
 export type DailyMetal = "gold" | "silver" | "bronze";
-const DAILY_METALS: Record<DailyMetal, { light: string; mid: string; dark: string; word: string }> = { gold: MEDALS.winner, silver: MEDALS.second, bronze: MEDALS.third };
+export const DAILY_METALS: Record<DailyMetal, { light: string; mid: string; dark: string; word: string }> = { gold: MEDALS.winner, silver: MEDALS.second, bronze: MEDALS.third };
 /** Counts engraved past this read as it. */
 export const DAILY_MARK_MAX = 999;
 /** The counts a daily mark changes its look at. */
@@ -471,14 +474,14 @@ export function dailyMarkSvg(metal: DailyMetal, n: number): string {
   const digits = String(Math.min(DAILY_MARK_MAX, n));
   const fill = `url(#${id})`;
   let body = "";
-  if (step === 0) body = `<circle cx="12" cy="12" r="9.4" fill="${fill}"/>`;
+  if (step === 0) body = `<circle cx="12" cy="12" r="10.6" fill="${fill}"/>`;
   else if (step === 1) {
     let rays = "";
     for (let i = 0; i < 8; i++) {
       const a = (i * Math.PI) / 4;
-      rays += `M${r2(12 + Math.cos(a) * 9.7)} ${r2(12 + Math.sin(a) * 9.7)}L${r2(12 + Math.cos(a) * 11.2)} ${r2(12 + Math.sin(a) * 11.2)}`;
+      rays += `M${r2(12 + Math.cos(a) * 10.4)} ${r2(12 + Math.sin(a) * 10.4)}L${r2(12 + Math.cos(a) * 11.1)} ${r2(12 + Math.sin(a) * 11.1)}`;
     }
-    body = `<path d="${rays}" stroke="${c.mid}" stroke-width="1.9" stroke-linecap="round"/><circle cx="12" cy="12" r="8.1" fill="${fill}"/>`;
+    body = `<path d="${rays}" stroke="${c.mid}" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="12" r="9.3" fill="${fill}"/>`;
   } else {
     // From 50: a second, darker row of points behind the burst.
     if (step >= 4) body += `<path d="${burst(12, 11.8, 9.2, Math.PI / 12)}" fill="${c.dark}"/>`;
@@ -496,7 +499,8 @@ export function dailyMarkSvg(metal: DailyMetal, n: number): string {
 }
 /**
  * Every daily mark, 1 to DAILY_MARK_MAX of each medal (the drawing is made when first read). Next to a name by
- * default: the best medal the player holds (bestDailyMark); the others when picked. Gold glints from 50.
+ * default: the best medal the player holds (bestDailyMark); the others when picked. Gold glints from 5, the first new
+ * look (v0.0.44, owner: "it evolves after 5").
  */
 const DAILY_MARKS: Record<string, { name: string; svg: string; gold?: boolean; earned?: boolean; quiet?: boolean }> = Object.fromEntries(
   (Object.keys(DAILY_METALS) as DailyMetal[]).flatMap((metal) =>
@@ -510,7 +514,7 @@ const DAILY_MARKS: Record<string, { name: string; svg: string; gold?: boolean; e
           get svg() {
             return (svg ??= dailyMarkSvg(metal, n));
           },
-          gold: metal === "gold" && n >= 50,
+          gold: metal === "gold" && n >= DAILY_STEPS[1],
           earned: true,
           quiet: true,
         },
@@ -592,14 +596,14 @@ export function peakMarkOf(id: string): PeakTier | null {
   const t = m ? Number(m[1]) : NaN;
   return (PEAK_TIERS as readonly number[]).includes(t) ? (t as PeakTier) : null;
 }
-const PEAK_HEX = "M12 1.3 21.2 6.6v10.8L12 22.7 2.8 17.4V6.6z";
+const PEAK_HEX = "M12 1.85 20.75 6.9v10.2L12 22.15 3.25 17.1V6.9z";
 const peakSvg = (t: PeakTier) => {
   const c = PEAK_FILL[t];
   const id = `pk-${t}`;
   return (
     `<defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${c.light}"/><stop offset=".5" stop-color="${c.mid}"/><stop offset="1" stop-color="${c.dark}"/></linearGradient></defs>` +
     `<path d="${PEAK_HEX}" fill="url(#${id})" stroke="${c.dark}" stroke-width=".8" stroke-linejoin="round"/>` +
-    engraved(String(t), t >= 10 ? 15.6 : 16.6, t >= 10 ? 10 : 12.5, c.ink)
+    engraved(String(t), t >= 10 ? 15.5 : 16.4, t >= 10 ? 9.6 : 12, c.ink)
   );
 };
 const PEAK_MARKS = Object.fromEntries(PEAK_TIERS.map((t) => [peakMarkId(t), { name: `Cleared a T${t} map`, svg: peakSvg(t), earned: true }]));

@@ -4,7 +4,8 @@
 //     "Daily Challenge ended"; a run already going still counts for the day it started in). A day has one style
 //     (Normal unless staff set another): in any other style the line says those runs don't count;
 //   - opened from the Daily entry (?daily=<day>), the session runs the day's style (main.ts) and its runs carry
-//     ?daily=<day>; a link to a day that is over says so once and the map is played on its own;
+//     ?daily=<day>; a link to a day that is over says so once and the map is played on its own. The Daily room
+//     (net/daily-room.ts) joins with ?daily=<day> too, and shows the HUD line as solo play does;
 //   - a verified run that counted gets one line under its result: your place on the day's board (state.ts resultLine);
 //     a guest's run is kept and not shown, so theirs says where it would be and how to put it there (ui/daily-guest.ts);
 //     a verified main-track run on the day's map in another style gets one line saying why it didn't count.
@@ -22,6 +23,11 @@ export interface DailyStart {
   entry: string | null;
   /** In a multiplayer room: no HUD line (the room has its own), the result line still shows. */
   inRoom: boolean;
+  /**
+   * The Daily room (net/daily-room.ts, ?server=<id>&daily=<day>): the HUD line shows as in solo play, and a link to a day
+   * that is over says nothing (the room moves the page onto the day's map as it connects).
+   */
+  dailyRoom?: boolean;
 }
 
 function dropParam(): void {
@@ -74,7 +80,7 @@ export function startDailyMode(o: DailyStart): void {
     (v) => {
       const today = v.enabled && v.today.map.name === o.map ? v.today : null;
       if (!today) {
-        if (entry) {
+        if (entry && !o.dailyRoom) {
           dropParam();
           s.hud.toast("That Daily Challenge has ended, so this map is played on its own.", 6000, "daily");
         }
@@ -85,7 +91,7 @@ export function startDailyMode(o: DailyStart): void {
       const skew = v.enabled ? v.now - Date.now() : 0;
       day = { style, endsAt: today.endsAt, skew };
       if (entry) setDailySession({ day: today.day, map: o.map, style, endsAt: today.endsAt });
-      if (o.inRoom) return;
+      if (o.inRoom && !o.dailyRoom) return;
       // Repainted often enough to follow a style change in the start zone (the text is only written when it differs).
       const paint = () => s.hud.setDaily(hudLine(today.endsAt, Date.now() + skew, style, s.runStyle));
       paint();

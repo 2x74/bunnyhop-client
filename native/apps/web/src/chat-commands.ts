@@ -96,7 +96,7 @@ export interface RoomChat {
 }
 
 /** Practice from chat: practice mode, checkpoints, noclip (practice-mode/controller.ts command). */
-export type PracticeCommand = "toggle" | "on" | "off" | "menu" | "noclip" | "save" | "tele" | "prev" | "next";
+export type PracticeCommand = "toggle" | "on" | "off" | "menu" | "noclip" | "save" | "tele" | "prev" | "next" | "delete" | "clear";
 
 /** What main.ts gives the commands that need the live game. Same object in solo and rooms. */
 export interface ChatGame {
@@ -120,6 +120,8 @@ export interface ChatGame {
   turnSpeed?(degPerSec?: number): number;
   /** !keepreplay: this attempt so far kept as a practice replay on this device (session.ts keepAttempt). */
   keepReplay?(reply: (text: string) => void): void;
+  /** !submitseg: the last practice finish, when it was actual segments, sent to the Segmented board (session.ts submitSegmented). */
+  submitSegmented?(reply: (text: string) => void): void;
 }
 
 export interface ChatCommand {
@@ -519,7 +521,7 @@ const BUILT_IN: ChatCommand[] = [
     name: "cp",
     aliases: ["cps", "checkpoint", "checkpoints"],
     help: "checkpoint menu",
-    about: "the checkpoint menu: save, teleport, previous / next, noclip. It stays open while you play; 0 or !cp closes it. While it's open, the checkpoint and noclip keys work during a run too.",
+    about: "the checkpoint menu: save, teleport, previous / next, noclip, delete. It stays open while you play; 0 or !cp closes it. While it's open, the checkpoint and noclip keys work during a run too.",
     group: "practice",
     where: "both",
     run: practice("menu"),
@@ -547,6 +549,8 @@ const BUILT_IN: ChatCommand[] = [
   },
   { name: "prevcp", aliases: ["prev"], help: "previous checkpoint", about: "back to the checkpoint before. The run becomes practice.", group: "practice", panelOnly: true, key: "cpPrev", where: "both", run: practice("prev") },
   { name: "nextcp", help: "next checkpoint", about: "forward to the next checkpoint. The run becomes practice.", group: "practice", panelOnly: true, key: "cpNext", where: "both", run: practice("next") },
+  { name: "delcp", aliases: ["deletecp", "removecp"], help: "delete the checkpoint", about: "deletes your current checkpoint. Your run carries on as before.", group: "practice", panelOnly: true, where: "both", run: practice("delete") },
+  { name: "clearcps", aliases: ["clearcp", "clearcheckpoints"], help: "delete all checkpoints", about: "deletes every checkpoint you saved on this map. Your run carries on as before.", group: "practice", panelOnly: true, where: "both", run: practice("clear") },
   {
     name: "keepreplay",
     aliases: ["keepattempt"],
@@ -558,6 +562,19 @@ const BUILT_IN: ChatCommand[] = [
     run: (ctx) => {
       if (!ctx.game?.keepReplay) return ctx.reply(NO_GAME);
       ctx.game.keepReplay((text) => ctx.reply(text));
+    },
+  },
+  {
+    name: "submitseg",
+    aliases: ["submitsegmented"],
+    help: "submit a practice run to Segmented",
+    about: "sends your last practice finish to the Segmented board, if it loaded checkpoints and nothing else made it practice (no noclip after the last load, no practice spawn or timescale). Normal style only. Only when you type it.",
+    group: "practice",
+    panelOnly: true,
+    where: "both",
+    run: (ctx) => {
+      if (!ctx.game?.submitSegmented) return ctx.reply(NO_GAME);
+      ctx.game.submitSegmented((text) => ctx.reply(text));
     },
   },
   // No zone teleports: one line about what there is.

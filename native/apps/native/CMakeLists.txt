@@ -905,6 +905,10 @@ if(BUILD_TESTING)
     target_include_directories(bunnyhop-native-practice-timescale-tests PRIVATE include vendor src)
     target_link_libraries(bunnyhop-native-practice-timescale-tests PRIVATE bunnyhop_core_native)
     add_test(NAME native_practice_timescale COMMAND bunnyhop-native-practice-timescale-tests)
+    # Snow and rain against the website's precipitation.ts (vectors: src/precipitation-oracle.ts).
+    add_executable(bunnyhop-native-precipitation-tests src/precipitation_tests.cpp)
+    target_include_directories(bunnyhop-native-precipitation-tests PRIVATE include vendor src)
+    add_test(NAME native_precipitation COMMAND bunnyhop-native-precipitation-tests)
     # Golden vectors from the web's TimedInput; regenerate with native/tools/timed-input/generate-vectors.ts.
     add_executable(bunnyhop-native-timed-input-parity-tests src/timed_input_parity_tests.cpp)
     target_include_directories(bunnyhop-native-timed-input-parity-tests PRIVATE include vendor src)

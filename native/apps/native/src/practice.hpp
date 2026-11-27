@@ -76,9 +76,43 @@ struct Practice {
         infinite_flight = flight;
     }
 
+    // Watching a replay on this map (client.cpp open_replay): the practice state goes as in clear(), but the
+    // checkpoints stay, here and in the bridge (the map's BhContext keeps their snapshots and the viewer never touches
+    // them), as the website keeps them while its viewer runs on its own core. Leaving the map still drops them.
+    void clear_keeping_checkpoints() {
+        auto kept = std::move(checkpoints);
+        const auto at = current;
+        const auto flight = infinite_flight;
+        *this = Practice{};
+        infinite_flight = flight;
+        checkpoints = std::move(kept);
+        current = checkpoints.empty() ? 0 : std::min(at, checkpoints.size() - 1);
+    }
+
     void retain(Checkpoint cp) {
         checkpoints.push_back(std::move(cp));
         current = checkpoints.size() - 1;
+    }
+
+    // Deletes the current checkpoint (web Checkpoints.remove, 0.0.44): the one after it becomes current, or the one
+    // before when it was the last. False when there is none. Practice mode, noclip and the run carry on.
+    bool remove(BhContext *core) {
+        if (checkpoints.empty()) return false;
+        if (core) bh_practice_free(core, checkpoints[current].handle);
+        checkpoints.erase(checkpoints.begin() + std::ptrdiff_t(current));
+        current = checkpoints.empty() ? 0 : std::min(current, checkpoints.size() - 1);
+        return true;
+    }
+
+    // Deletes every checkpoint (web !clearcps). Returns how many there were; practice mode and the run carry on.
+    size_t clear_checkpoints(BhContext *core) {
+        const auto n = checkpoints.size();
+        if (core)
+            for (const auto &cp : checkpoints)
+                bh_practice_free(core, cp.handle);
+        checkpoints.clear();
+        current = 0;
+        return n;
     }
 
     void step(int delta) {
@@ -109,7 +143,7 @@ void draw_checkpoint_menu(Hud &hud, float /*width*/, float height, const Practic
     constexpr std::array<float, 4> cream = {.94f, .91f, .86f, 1};
     constexpr std::array<float, 4> dim = {.63f, .65f, .70f, 1};
     constexpr std::array<float, 4> amber = {1, .71f, .24f, 1};
-    hud.overlay_rect(x - 10, y - 8, 320, 220, {.03f, .03f, .05f, .8f});
+    hud.overlay_rect(x - 10, y - 8, 320, 264, {.03f, .03f, .05f, .8f});
     hud.overlay_text(x, y, practice.segmented ? "Segmented checkpoints" : "Checkpoints", 19, cream);
     HudLabel<96> label;
     label.format(
@@ -124,10 +158,13 @@ void draw_checkpoint_menu(Hud &hud, float /*width*/, float height, const Practic
     hud.overlay_text(x, y + 122, label.view(), 14, cream);
     label.format("6. Keep speed: %s", practice.segmented ? "always" : keep_velocity ? "on" : "off");
     hud.overlay_text(x, y + 144, label.view(), 14, cream);
-    hud.overlay_text(x, y + 166, "0. Close", 14, cream);
+    // (0.0.44: after the six, so 1-6 stay where muscle memory has them.)
+    hud.overlay_text(x, y + 166, "7. Delete checkpoint", 14, practice.checkpoints.empty() ? dim : cream);
+    hud.overlay_text(x, y + 188, "8. Clear all", 14, practice.checkpoints.empty() ? dim : cream);
+    hud.overlay_text(x, y + 210, "0. Close", 14, cream);
     hud.overlay_text(
             x,
-            y + 196,
+            y + 240,
             practice.segmented ? "Teleport rewinds timer / replay. Noclip is practice."
                                : "Teleport / noclip makes a run practice.",
             11,

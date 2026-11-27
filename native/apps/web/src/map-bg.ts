@@ -15,8 +15,12 @@
  */
 export const MAP_BG_STYLES: readonly string[] = ["autohop", "legit", "scroll", "wonly", "sideways", "hsw", "backwards", "adonly"];
 
-/** Finishers the board needs, the holder included, counted over the rows the viewer may see. */
-export const MAP_BG_MIN_FINISHERS = 3;
+/**
+ * Finishers the board needs, the holder included, counted over the rows the viewer may see. 1 = any world record counts,
+ * so the picker agrees with the card's "WRs" count (points.ts, rank 1 with no finisher floor): oiwa's 11-18 report, where
+ * the old value 3 dropped 54 of his 80 WRs from Edit card → Background. At 1 the API skips the count (src/map-bg.ts).
+ */
+export const MAP_BG_MIN_FINISHERS = 1;
 
 /** Tracks whose records count: the main course only (0). Bonus tracks would be [0, 1, 2, ...]. */
 export const MAP_BG_TRACKS: readonly number[] = [0];
