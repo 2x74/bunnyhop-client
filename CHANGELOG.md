@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.9.7 — Native
+
+Matches website v0.0.44. Update from Settings → Updates: press Update, then Restart.
+
+- bhop_ambience starts like bhop_futile: a jump on the landing tick in the start zone loses its speed. Older ambience
+  runs keep their times. Every other map times as before.
+- Linux on Wayland: changing a setting in game, like a bound `toggle r_gamma`, no longer says "That operation is not
+  supported" in chat and now applies. Always on top stays off where Wayland doesn't offer it.
+- Console commands such as paint_clear, measure, thirdperson and slot1 work in a map again instead of saying "only in
+  a map".
+- Daily room: you join in the day's style (your own comes back on the next map you pick), the Daily line shows in the
+  room, Rock the vote and Nominate are gone there, and time left reads "5h 12m left" instead of "1342:10". The server
+  list shows it as today's Daily Challenge.
+- Checkpoints: 7 Delete checkpoint and 8 Clear all in the checkpoint menu, plus !delcp and !clearcps. Watching a
+  replay keeps your checkpoints.
+- Hop effects are prepared while the map loads, so the first hop effect you see no longer stalls the game.
+- Room scoreboard: equal times are ordered by who set theirs first.
+- The Winter collection: Santa Hat, Snowdrift and the Pack Ice finish, with their Loadout tiles.
+
 ## v0.9.6 — Native
 
 Matches website v0.0.43. Update from Settings → Updates: press Update, then Restart.
