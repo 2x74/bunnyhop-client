@@ -5,8 +5,8 @@ import { resolve, join } from "node:path";
 const root = resolve(import.meta.dir, "../../..");
 const archive = join(root, "target/qualification-inputs.tar.gz");
 const inputs = join(root, "target/qualification-inputs");
-const commit = "57eb09e87be756a39c5ae24f038cc261e2408d2d";
-const expectedArchive = "7c5079dadcb56b7a16d32dbb2ebb5d7e48a0935f043d8f5a1457bc0bf8633604";
+const commit = "51411104065fd307e98b0c50c8acec03aa7a53ac";
+const expectedArchive = "7dc8a32dcaea6a37c6a884bf717a95762101522a9a93e1430076c7b5dccb0636";
 const expectedFiles: Record<string, string> = {
   "baseline.wasm": "08de4923bdfc4f01678420c1f4e62ca5567c4e2501e4c36bfdef45ebb1871d58",
   "bhop_eazy.bsp": "4abc652f775d1639451a20c3a91d5903b41307981ea48395ba0b561e869cd1fe",
