@@ -99,7 +99,8 @@ export function roomScoreboard(
   // The Daily room counts down to the end of the day ("5h 12m left"), then to its map change (web net/daily-room.ts).
   let timeLeft = "";
   if (view.change) timeLeft = `changing to ${view.change.map}`;
-  else if (view.mapInfo) timeLeft = roomTimeLeft(serverNow, view.mapInfo.endsAt, view.mapInfo.daily ?? view.room?.daily);
+  else if (view.mapInfo)
+    timeLeft = roomTimeLeft(serverNow, view.mapInfo.endsAt, view.mapInfo.daily ?? view.room?.daily);
   return {
     rows,
     head: {

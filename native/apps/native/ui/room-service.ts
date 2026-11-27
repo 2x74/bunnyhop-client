@@ -838,7 +838,11 @@ export class NativeRoomService {
     if (message.t === "host" && this.view.room) this.view.room.host = message.slot;
     // Before the event below reaches the host, which loads the room's map in the style it has then.
     const daily =
-      message.t === "welcome" ? (message.map.daily ?? message.room.daily) : message.t === "map" ? message.map.daily : null;
+      message.t === "welcome"
+        ? (message.map.daily ?? message.room.daily)
+        : message.t === "map"
+          ? message.map.daily
+          : null;
     if (daily) this.dependencies.dailyRoom?.(daily);
     this.view.chat = this.view.chat.slice(-100);
     for (const line of lines) this.sendLine(line);
