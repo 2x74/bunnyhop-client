@@ -10,6 +10,7 @@
 #include "live_hilt_layer.hpp"
 #include "first_person_charm.hpp"
 #include <charconv>
+#include <chrono>
 #include <iostream>
 #include <optional>
 #include <span>
@@ -1043,8 +1044,8 @@ class NativeViewmodel {
         return true;
     }
 
-    // The layer is made on the first hop effect, often another player's in a server. A driver that rejects its shader
-    // turns hop effects off for the session instead of closing the game.
+    // Otherwise the layer is made on the first hop effect, often another player's in a server. A driver that rejects its
+    // shader turns hop effects off for the session instead of closing the game.
     bool make_hop_layer() {
         try {
             hopLayer = std::make_unique<native_hop::Layer>(gl, *hopRecipes, hopAssetRoot);
@@ -1552,6 +1553,23 @@ public:
         if (others) return;
         for (auto &[id, hop] : actorHops)
             if (!own_hops_id(id)) release_hop(hop);
+    }
+
+    // Map load (client.cpp, once the map's settings and loadout are in): the layer made, linked and drawn once now when
+    // a hop effect can show on this map, so the first hop effect doesn't stall a frame (web main.ts prewarmHopLayer, same
+    // rule: other players' / ghosts' while Settings -> Hop effects is on, or your own equipped one). Otherwise the
+    // layer stays lazy (claim_hop), and a driver that rejects the shader still only turns hop effects off.
+    void prewarm_hop_layer() {
+        if (hopLayer || hopLayerFailed || !hopRecipes || (!showOtherHops && !equipped.hop)) return;
+        const auto started = std::chrono::steady_clock::now();
+        if (!make_hop_layer()) return;
+        try {
+            hopLayer->prewarm();
+        } catch (const std::exception &error) {
+            std::cerr << "Bunnyhop native: hop layer warm-up draw, " << error.what() << '\n';
+        }
+        const auto ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+        std::cerr << "Bunnyhop native: hop layer linked in " << long(ms + .5) << " ms\n";
     }
 
     // Every live burst, after the bunnies (the main view only: not in reflections or shadows).

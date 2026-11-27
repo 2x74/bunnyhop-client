@@ -2051,6 +2051,11 @@ public:
         if (viewmodel) viewmodel->hop_visibility(others);
     }
 
+    // Map load, after the settings and loadout: the hop layer made and drawn once if a hop effect can show here.
+    void prewarm_hop_layer() {
+        if (viewmodel) viewmodel->prewarm_hop_layer();
+    }
+
     void set_first_person_robe_visible(bool show) {
         if (viewmodel) viewmodel->first_person_robe_visibility(show);
     }

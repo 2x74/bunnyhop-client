@@ -1107,6 +1107,7 @@ int run(const native::Options &opt) {
         apply_preferences();
         renderer->set_cosmetics(outfit, held_knife.loadout(), charm_loadout);
         renderer->set_ghost_cosmetics(ghost_cosmetic, trail_cosmetic, shape_cosmetic);
+        renderer->prewarm_hop_layer();
         apply_room_mode(room_modes.map_loaded(map_id, room.spectator_target.has_value(), epoch_ms()));
     };
     auto request_map = [&](const std::string &id) {
