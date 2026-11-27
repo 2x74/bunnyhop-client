@@ -136,6 +136,7 @@ const ROWS: Record<string, Gate> = {
   "hud/More elements/Speed graph": needs("speedGraph", "hud:graph"),
   "hud/More elements/Map / style line": needs("hudLayout|hudLayoutWeb", "hud:map"),
   "hud/More elements/Personal best": needs("hud:pb"),
+  "hud/More elements/World record": excluded("The desktop client draws its own HUD and has no world record element yet (web 0.0.44 hud wr)."),
   "hud/More elements/Ammo": needs("hudLayout|hudLayoutWeb", "hud:ammo"),
   "hud/More elements/Start Pre": needs("hud:startPre"),
   "hud/More elements/Speed colours": needs("speedColors"),
