@@ -1239,7 +1239,8 @@ int run(const native::Options &opt) {
         }
         if (!core) throw std::runtime_error("Load the replay map first");
         recorder.input.stop();
-        practice.clear(core.get());
+        // Watching a replay keeps your checkpoints for when you play again (Throw 11-26); the rest of practice resets.
+        practice.clear_keeping_checkpoints();
         if (tutorial_runner.lesson) tutorial_runner.lesson->stop();
         tutorial_runner.demo = false;
         renderer->reset_presentation();

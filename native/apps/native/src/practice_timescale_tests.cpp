@@ -116,8 +116,21 @@ void test_delete_and_clear_checkpoints() {
     assert(!practice.remove(nullptr));
 }
 
+// Watching a replay keeps the checkpoints (and which one is current); the rest of practice resets as clear() does.
+void test_replay_keeps_checkpoints() {
+    native::Practice practice;
+    for (uint32_t handle = 1; handle <= 3; ++handle)
+        practice.retain({handle, "autohop", "autohop", 0});
+    practice.step(-1);
+    practice.mode = practice.active = practice.noclip = practice.menu_open = true;
+    practice.clear_keeping_checkpoints();
+    assert(practice.checkpoints.size() == 3 && practice.number() == 2 && practice.checkpoints[2].handle == 3);
+    assert(!practice.mode && !practice.active && !practice.noclip && !practice.menu_open);
+}
+
 int main() {
     test_delete_and_clear_checkpoints();
+    test_replay_keeps_checkpoints();
     test_only_solo_practice_mode_and_never_kept();
     test_a_slowed_attempt_never_counts();
     test_ticks_and_boundaries_follow_the_scale();

@@ -76,6 +76,19 @@ struct Practice {
         infinite_flight = flight;
     }
 
+    // Watching a replay on this map (client.cpp open_replay): the practice state goes as in clear(), but the
+    // checkpoints stay, here and in the bridge (the map's BhContext keeps their snapshots and the viewer never touches
+    // them), as the website keeps them while its viewer runs on its own core. Leaving the map still drops them.
+    void clear_keeping_checkpoints() {
+        auto kept = std::move(checkpoints);
+        const auto at = current;
+        const auto flight = infinite_flight;
+        *this = Practice{};
+        infinite_flight = flight;
+        checkpoints = std::move(kept);
+        current = checkpoints.empty() ? 0 : std::min(at, checkpoints.size() - 1);
+    }
+
     void retain(Checkpoint cp) {
         checkpoints.push_back(std::move(cp));
         current = checkpoints.size() - 1;
