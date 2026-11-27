@@ -307,7 +307,10 @@ void draw_score_head(Hud &hud, const ScoreboardFrame &frame, const HudScoreboard
     HudLabel<128> right_text;
     if (head.ends_at_ms > 0) {
         const auto seconds = unsigned(std::clamp(std::ceil((head.ends_at_ms - epoch_ms) / 1000), 0., 86400.));
-        if (seconds)
+        // An hour or more (the Daily room's day is up to 24 hours): "5h 12m left", as the website's room board says.
+        if (seconds >= 3600)
+            right_text.format(" · %uh %um left", seconds / 3600, seconds / 60 % 60);
+        else if (seconds)
             right_text.format(" · %u:%02u left", seconds / 60, seconds % 60);
         else
             right_text.assign(" · last round");

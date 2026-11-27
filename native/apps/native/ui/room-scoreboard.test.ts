@@ -128,3 +128,25 @@ test("room board shows a Backwards player from its wire style and practice attem
   rows = roomScoreboard(room, 0, 0).rows;
   expect(rows.find((row) => row.slot === 2)).toMatchObject({ style: "backwards", status: "practice" });
 });
+test("Daily room board counts down the day, then the map change, and names the next day's map", () => {
+  const room = view();
+  const daily = { day: "2026-11-27", style: "autohop", endsAt: 10_000 + (5 * 60 + 12) * 60_000 + 30_000 };
+  room.room = { ...room.room!, daily };
+  room.mapInfo = { name: "bhop_test", tier: 3, startedAt: 0, endsAt: daily.endsAt + 120_000 };
+  room.nextMap = null;
+  expect(roomScoreboard(room, 0, 10_000).head.timeLeft).toBe("5h 12m left");
+  expect(roomScoreboard(room, 0, daily.endsAt + 18_000).head.timeLeft).toBe("next map in 1:42");
+  room.mapInfo = { ...room.mapInfo, daily: { ...daily, nextMap: "bhop_tomorrow" } };
+  expect(roomScoreboard(room, 0, 10_000).head.nextMap).toBe("bhop_tomorrow");
+  // Any other room: m:ss as before.
+  expect(roomScoreboard(view(), 2500, 10000).head.timeLeft).toBe("1:20 left");
+});
+test("equal PBs order by who set theirs first, then by name (web net/score-order.ts)", () => {
+  const room = view();
+  room.metas = {};
+  room.players[0] = { ...room.players[0], name: "Alpha", pb: { autohop: 10 }, pbAt: { autohop: 2000 } } as never;
+  room.players[1] = { ...room.players[1], name: "Zed", pb: { autohop: 10 }, pbAt: { autohop: 1000 } } as never;
+  expect(roomScoreboard(room, 0, 0).rows.map((row) => row.name)).toEqual(["Zed", "Alpha", "Watcher"]);
+  room.players[1] = { ...room.players[1], pbAt: undefined } as never;
+  expect(roomScoreboard(room, 0, 0).rows.map((row) => row.name)).toEqual(["Alpha", "Zed", "Watcher"]);
+});

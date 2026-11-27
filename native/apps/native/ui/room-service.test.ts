@@ -661,3 +661,39 @@ test("gain logs: asked for at the room's bar, yours rides the next state batch, 
   }
   expect(room.bar).toBeNull();
 });
+test("a Daily room's day reaches main.ts before the host hears of the room's map", async () => {
+  const order: string[] = [];
+  const handlers: RoomHandlers[] = [];
+  const service = new NativeRoomService({
+    ensureAccount: async () => true,
+    connect: (_id, h) => {
+      handlers.push(h);
+      return { send() {}, pushSample() {}, flushSamples() {}, close() {}, toLocal: (v) => v } as RoomTransport;
+    },
+    send: (value) => {
+      const event = (value as { event?: { t?: string } }).event;
+      if (value.type === "roomEvent" && event?.t) order.push(`host:${event.t}`);
+    },
+    dailyRoom: (daily) => order.push(`daily:${daily.day}:${daily.style}`),
+  });
+  try {
+    await service.join("daily");
+    const day = { day: "2026-11-27", style: "sideways", endsAt: Date.now() + 3_600_000 };
+    handlers[0].message({ ...welcome("daily"), room: { ...welcome("daily").room, daily: day } });
+    expect(order).toEqual(["daily:2026-11-27:sideways", "host:welcome"]);
+    const next = { ...day, day: "2026-11-28", style: "autohop" };
+    handlers[0].message({
+      t: "map",
+      map: { name: "bhop_next", tier: 2, startedAt: 0, endsAt: Date.now() + 1000, daily: next },
+      nextMap: null,
+    } as never);
+    expect(order.slice(2)).toEqual(["daily:2026-11-28:autohop", "host:map"]);
+    // Any other room says nothing.
+    await service.join("plain");
+    order.length = 0;
+    handlers[1].message(welcome("plain"));
+    expect(order).toEqual(["host:welcome"]);
+  } finally {
+    service.leave();
+  }
+});

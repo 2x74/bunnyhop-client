@@ -82,6 +82,8 @@ import { getHeldLoadout, onHeldLoadout } from "../../web/src/player/cosmetics";
 import { creditsPanel } from "./credits";
 import { homeScreen, watchMenuMotion, LAST_MAP } from "./home-menu";
 import { NativeDaily } from "./daily-native";
+import { dailyStyle, isDay } from "../../web/src/daily/state";
+import type { RoomDaily } from "../../web/src/net/protocol";
 import { NativeGainLogs } from "./gain-logs-native";
 import { gainLogs } from "../../web/src/ssj";
 
@@ -254,6 +256,22 @@ let styleBeforeDaily: StyleId | null = null;
 function playDaily(day: string, map: string, style?: string, endsAt?: number): void {
   styleBeforeDaily ??= state.style;
   selectMapIn(map, nativeDaily.play(day, map, style, endsAt) as StyleId, false);
+}
+/**
+ * A Daily room plays the day's style, as the Daily entry does, without making it the saved style (web: the room's
+ * ?daily=<day>, net/daily-room.ts). Called before the host loads the room's map; the next map picked goes back.
+ */
+function playDailyRoom(daily: RoomDaily): void {
+  if (!isDay(daily.day)) return;
+  const style = dailyStyle(daily.style);
+  if (style === state.style) return;
+  if (state.loading) {
+    logToHost(`daily room style ${style} skipped: a map is loading`);
+    return;
+  }
+  styleBeforeDaily ??= state.style;
+  state.style = style;
+  send({ type: "style", id: style, remember: false });
 }
 function selectMap(id: string): void {
   const style = styleBeforeDaily ?? state.style;
@@ -831,7 +849,12 @@ function receive(value: unknown): void {
   if (finishChanged && !finishSummary) gauntletLine = null;
   gauntlet.onHostState();
   roomService.hostMap(state.map, !!state.loading);
-  nativeDaily.update(state.loading ? null : state.map, state.style, !!roomService.view.id);
+  // The Daily room shows the day's HUD line as solo play does; other rooms have their own.
+  nativeDaily.update(
+    state.loading ? null : state.map,
+    state.style,
+    !!roomService.view.id && !roomService.view.room?.daily,
+  );
   syncingStyle = true;
   setSelectedStyle(state.style);
   syncingStyle = false;
@@ -857,6 +880,7 @@ const roomService = new NativeRoomService({
   heldKnife: getHeldLoadout,
   connect: (id, handlers) => new RoomConnection(id, () => state.style, handlers),
   voiceEnabled: () => state.settings.voiceEnabled,
+  dailyRoom: (daily) => playDailyRoom(daily),
   ensureAccount: async () => {
     try {
       const user = await api.me();

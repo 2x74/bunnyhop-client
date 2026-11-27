@@ -2869,7 +2869,8 @@ int run(const native::Options &opt) {
                         const auto id = message.at("id").get<std::string>();
                         if (!native::styles.contains(id)) throw std::runtime_error("Unknown style");
                         selected_style = id;
-                        remember_style();
+                        // A Daily room plays the day's style without making it the saved one (ui/main.ts playDailyRoom).
+                        if (message.value("remember", true)) remember_style();
                         active_track = 0;
                         reset();
                     } else if (type == "settings") {
