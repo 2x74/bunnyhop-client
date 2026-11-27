@@ -69,7 +69,10 @@ replay_practice_problem(const nlohmann::json &info, const std::string &map, cons
             {"gravity", settings.gravity},
             {"maxSpeed", settings.max_speed},
     };
-    bool same = info.value("timerRules", 1u) >= 2 && saved.at("physics") == settings.physics
+    // Rules 6 maps (bridge run.rs START_ZONE_NO_PREHOP_V6) time their start differently from rules 5 and older.
+    const auto rules = info.value("timerRules", 1u);
+    bool same = rules >= 2 && !(info.value("map", std::string()) == "bhop_ambience" && rules < 6)
+                && saved.at("physics") == settings.physics
                 && saved.at("autohop") == bool(settings.autohop)
                 && saved.value("stamina", false) == bool(settings.stamina);
     for (const auto &[name, value] : numbers) {

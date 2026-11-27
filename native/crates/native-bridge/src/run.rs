@@ -11,12 +11,29 @@ const START_SLOW_SPEED: f64 = 50.0;
 /// Timer rules 4 (website timer.ts START_ZONE_NO_PREHOP_V4): maps whose start zones block prehops in every style.
 /// Part of the rules: adding a map here needs a new rules version, or that map's rules 4 runs would re-time.
 pub const START_ZONE_NO_PREHOP_V4: [&str; 1] = ["bhop_futile"];
+/// Timer rules 6 (website timer.ts START_ZONE_NO_PREHOP_V6): maps added to the no-prehop start list from rules 6 on
+/// (bhop_ambience, owner 2026-11-27). Frozen like the rules 4 list; every other map times exactly as under rules 5.
+pub const START_ZONE_NO_PREHOP_V6: [&str; 1] = ["bhop_ambience"];
+/// The rules new runs are timed and recorded with (website timer.ts TIMER_RULES).
+pub const TIMER_RULES: u32 = 6;
+/// Timer rules this build decodes, verifies and can time a run with.
+pub fn is_timer_rules(rules: u32) -> bool {
+    (1..=TIMER_RULES).contains(&rules)
+}
 pub const UPDATE_STOPPED_ANTI_SKIP: u32 = 32;
 pub const UPDATE_STOPPED_RESPAWN: u32 = 64;
 
 /// Whether start-zone prehops lose their speed for this style on this map under `rules` (website `blocksPrehops`).
 pub fn blocks_prehops(style: &str, map: &str, rules: u32) -> bool {
-    style == "scroll" || (rules >= 4 && START_ZONE_NO_PREHOP_V4.contains(&map))
+    style == "scroll"
+        || (rules >= 4 && START_ZONE_NO_PREHOP_V4.contains(&map))
+        || (rules >= 6 && START_ZONE_NO_PREHOP_V6.contains(&map))
+}
+
+/// `rules` time a run on `map` exactly as the current rules do (website timer.ts `timesAsCurrentRules`): the current
+/// ones, or rules 5 anywhere but the rules 6 maps.
+pub fn times_as_current_rules(rules: u32, map: &str) -> bool {
+    rules == TIMER_RULES || (rules == 5 && !START_ZONE_NO_PREHOP_V6.contains(&map))
 }
 
 /// Timer rules 3 (website timer.ts START_IMPULSE_MARGIN): this far over the prespeed cap came from the map, not the
@@ -75,7 +92,7 @@ impl Default for BhRunOptions {
         Self {
             prespeed_cap: 290.0,
             cap_enabled: 1,
-            rules: 5,
+            rules: TIMER_RULES,
             block_prehops: 0,
             strafe_keys: 0,
             start_reentry_cap: 0.0,
@@ -801,6 +818,67 @@ mod tests {
         }
         assert!(!blocks_prehops("autohop", "bhop_eazy", 4));
         assert!(!blocks_prehops("autohop", "bhop_futile_v2", 4));
+    }
+    /// Rules 6 (website timer.ts START_ZONE_NO_PREHOP_V6, apps/api/test/timer-rules.test.ts): bhop_ambience's start
+    /// blocks prehops in every style from rules 6 on; rules 5 and older keep timing it as before, and every other map
+    /// times exactly as under rules 5.
+    #[test]
+    fn rules6_blocks_prehops_on_ambience_only() {
+        assert_eq!(BhRunOptions::default().rules, 6);
+        assert_eq!(TIMER_RULES, 6);
+        for style in crate::styles::IDS {
+            assert!(blocks_prehops(style, "bhop_ambience", 6), "{style}");
+            assert_eq!(
+                blocks_prehops(style, "bhop_ambience", 5),
+                style == "scroll",
+                "{style}: rules 5 ambience unchanged"
+            );
+            for rules in 1..=4 {
+                assert_eq!(blocks_prehops(style, "bhop_ambience", rules), style == "scroll", "{style} rules {rules}");
+            }
+            for map in ["bhop_eazy", "bhop_futile", "bhop_ambience_v2", "bhop_arcane"] {
+                assert_eq!(blocks_prehops(style, map, 6), blocks_prehops(style, map, 5), "{style} {map}");
+            }
+        }
+        assert!(!blocks_prehops("autohop", "bhop_ambience", 5));
+        assert!(blocks_prehops("autohop", "bhop_futile", 6));
+        assert!(is_timer_rules(6) && is_timer_rules(1) && !is_timer_rules(0) && !is_timer_rules(7));
+        assert!(times_as_current_rules(6, "bhop_ambience") && times_as_current_rules(6, "bhop_eazy"));
+        assert!(times_as_current_rules(5, "bhop_eazy") && !times_as_current_rules(5, "bhop_ambience"));
+        assert!(!times_as_current_rules(4, "bhop_eazy"));
+    }
+    /// The timer as bh_run_configure builds it for `map` under `rules`: a jump on the landing tick inside the start
+    /// zone loses all speed only where blocks_prehops says so (futile from rules 4, ambience from rules 6).
+    #[test]
+    fn rules6_start_zone_prehop_loses_speed_on_ambience_only() {
+        let prehop = |map: &str, rules: u32, style: &str| {
+            let mut t = Timer::new(
+                vec![zone(0, 0, 0, 0.0), zone(1, 0, 0, 500.0)],
+                BhRunOptions {
+                    rules,
+                    block_prehops: u32::from(blocks_prehops(style, map, rules)),
+                    ..BhRunOptions::default()
+                },
+                0.01,
+            );
+            let jump = BhCmd {
+                buttons: 2,
+                ..BhCmd::default()
+            };
+            // In the air over the start zone, then the landing tick with jump held.
+            assert_eq!(t.before_step(jump, state(1, 5.0, false)), None);
+            t.before_step(jump, state(2, 5.0, true))
+        };
+        let blocked = Some([0.0; 3]);
+        for style in ["autohop", "legit", "sideways", "wonly"] {
+            assert_eq!(prehop("bhop_ambience", 6, style), blocked, "{style}: rules 6 blocks the prehop");
+            assert_eq!(prehop("bhop_ambience", 5, style), None, "{style}: rules 5 ambience unchanged");
+            assert_eq!(prehop("bhop_futile", 6, style), blocked, "{style}: futile as under rules 5");
+            assert_eq!(prehop("bhop_futile", 5, style), blocked);
+            assert_eq!(prehop("bhop_eazy", 6, style), prehop("bhop_eazy", 5, style), "{style}: other maps identical");
+            assert_eq!(prehop("bhop_eazy", 6, style), None);
+        }
+        assert_eq!(prehop("bhop_eazy", 6, "scroll"), blocked, "Scroll blocks everywhere, as before");
     }
     #[test]
     fn rules3_prespeed_cap_leaves_a_booster_alone() {

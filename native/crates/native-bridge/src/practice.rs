@@ -37,6 +37,9 @@ pub unsafe extern "C" fn bh_practice_from_replay(
             if info["map"].as_str() != Some(m.map_name.as_str())
                 || playback.data.style != expected_style
                 || playback.data.options.rules < 2
+                // Rules 6 maps time their start differently from rules 5 and older (timer.ts timesAsCurrentRules).
+                || (run::START_ZONE_NO_PREHOP_V6.contains(&m.map_name.as_str())
+                    && playback.data.options.rules < 6)
                 || recording::settings_json(playback.data.settings)
                     != recording::settings_json(expected_settings)
             {
