@@ -924,6 +924,10 @@ function keysSection(ctx: Ctx): SettingsContent {
             desc: "On: a checkpoint teleport gives you back the speed you saved it with. Off: you arrive standing still.",
             keywords: "checkpoint teleport velocity speed keep zero stop practice",
           }),
+          toggle("Keep checkpoints", () => P().practice.keepCheckpoints, (v) => up((p) => (p.practice.keepCheckpoints = v)), {
+            desc: "On: your checkpoints stay on this device and come back when you return to the map. Doors and buttons reset. Not for Segmented.",
+            keywords: "checkpoint save keep persist remember reload leave map practice cl_cp_keep",
+          }),
         ),
         ctx.openControls ? h("div.set-aside", null, h("button.link-btn", { type: "button", onclick: ctx.openControls }, "How to bhop and every control", icon("chevronRight"))) : null,
       ].filter((x): x is HTMLElement => !!x),

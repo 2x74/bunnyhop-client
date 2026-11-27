@@ -31,6 +31,8 @@ export class PracticeAttempt {
   /** A tool or practice spawn moved the player outside the simulation this attempt, also in practice mode. */
   private moved = false;
   private lost: ReplayLoss | null = null;
+  /** A practice spawn began this attempt (also in practice mode, where it isn't the reason). */
+  private spawned = false;
 
   /** This attempt is practice (practice mode, or a tool was used). Never submitted. */
   get practice(): boolean {
@@ -90,6 +92,7 @@ export class PracticeAttempt {
   use(tool: PracticeUse): boolean {
     this.moved = true;
     if (tool !== "spawn") this.lost = tool;
+    else this.spawned = true;
     if (this.why) return false;
     this.why = tool;
     return true;
@@ -104,6 +107,32 @@ export class PracticeAttempt {
   }
 
   /**
+   * Only a noclip or a checkpoint teleport made this attempt practice, and nothing else that stays with it: no practice
+   * mode, practice spawn or slowed tick. A Segmented checkpoint saved while the run was clean takes such an attempt back
+   * to a real Segmented run (resume): its load throws away everything since the save, the noclip or teleport included.
+   */
+  get resumable(): boolean {
+    return (this.why === "noclip" || this.why === "teleport") && !this.mode && !this.spawned && this.slowest === 1;
+  }
+
+  /**
+   * A Segmented load of a checkpoint saved while the run was clean (session.ts segmentRestored): the attempt is clean
+   * again, with the recording the load rebuilt. False (nothing changes) unless it's resumable.
+   */
+  resume(): boolean {
+    if (!this.resumable) return false;
+    this.why = null;
+    this.lost = null;
+    this.moved = false;
+    return true;
+  }
+
+  /** A practice spawn began this attempt (start-point.ts), also in practice mode where it isn't the reason. */
+  get spawnUsed(): boolean {
+    return this.spawned;
+  }
+
+  /**
    * A reset (core reset, fresh recording): the new attempt is clean unless practice mode is on. True if a practice
    * attempt just gave way to a clean one (attempts.ts counts these as practice exits).
    */
@@ -113,8 +142,53 @@ export class PracticeAttempt {
     this.slowest = 1;
     this.moved = false;
     this.lost = null;
+    this.spawned = false;
     return exited;
   }
+}
+
+/** The Segmented board a practice finish in `style` can go to (submitSegmentedProblem): Segmented is Normal movement. */
+export function segmentedBoardFor(style: string): "segmented" | null {
+  return style === "autohop" || style === "segmented" ? "segmented" : null;
+}
+
+/**
+ * Why a practice finish can't go to the Segmented board, or null when it can (session.ts segmentedOffer: the end card
+ * offers it, !submitseg sends it; nothing goes without the player choosing). It can when the recording is actual
+ * segments, exactly what a Segmented run records: from the reset, real movement between checkpoint loads that each
+ * restore a state the run saved (segments.ts), with no noclip, teleport or speed reset after the last load (replayLoss),
+ * and nothing on the path a run can't have: commands from another replay (Practice from here), a practice spawn, a
+ * slowed tick, third person, a gun or scripted input (`tainted`, `spawn`, `slowed`, `other`). The replay is then the
+ * Segmented one with style "segmented" in its header (styles.ts: same settings, filter and timer rules), and the
+ * verifier checks it like any Segmented run.
+ */
+export function submitSegmentedProblem(o: {
+  style: string;
+  /** trackStyleProblem for "segmented" here (the tutorial's final course is Normal only). */
+  trackProblem: string | null;
+  /** Checkpoint loads on the recorded path (replay.segments). */
+  loads: number;
+  /** session.ts practiceReplayLoss: why the recording doesn't play back to here, or null. */
+  replayLoss: string | null;
+  /** A checkpoint on the path was saved in an attempt that can't count, or the path holds another replay's commands. */
+  tainted: boolean;
+  spawn: boolean;
+  slowed: boolean;
+  /** practiceReason without practice mode and tools (third person, a gun, scripted, debug, a lesson, experimental input). */
+  other: string | null;
+  /** Longer than the leaderboard takes (run-limits.ts). */
+  tooLong: boolean;
+}): string | null {
+  if (!segmentedBoardFor(o.style)) return "only Normal runs can go to Segmented";
+  if (o.trackProblem) return "not on this course";
+  if (o.other) return o.other;
+  if (o.spawn) return "the start point doesn't count";
+  if (o.slowed) return "timescale was used";
+  if (o.replayLoss) return o.replayLoss;
+  if (o.tainted) return "a checkpoint on this run came from an attempt that doesn't count";
+  if (o.tooLong) return "too long for the leaderboard";
+  if (!o.loads) return "no checkpoint was loaded";
+  return null;
 }
 
 /**
@@ -129,8 +203,12 @@ export function finishRoute(o: { practice: boolean; unranked: boolean }): "pract
 
 const restartHow = (key: string | null) => (key ? `Press ${key}` : "Type !r");
 
-/** The line when a clean attempt turns into practice. `restartKey`: the restart bind's label, if it has one. */
-export function practiceFlipLine(running: boolean, restartKey: string | null, tool: PracticeUse | null = null): string {
+/**
+ * The line when a clean attempt turns into practice. `restartKey`: the restart bind's label, if it has one. `resumable`:
+ * a Segmented run with checkpoints from before (a load of one makes it real again: session.ts segmentResumable).
+ */
+export function practiceFlipLine(running: boolean, restartKey: string | null, tool: PracticeUse | null = null, resumable = false): string {
+  if (resumable) return `This run is practice now. Load a checkpoint from before to go on with it, or ${restartKey ? `press ${restartKey}` : "type !r"} to restart.`;
   return running ? `This run is practice now. ${restartHow(restartKey)} to restart for a real run.` : `Practice until you restart. ${restartHow(restartKey)} for a real run.`;
 }
 

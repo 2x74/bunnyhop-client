@@ -107,6 +107,8 @@ export interface MenuActions {
   practiceReplays?: () => { meta: PracticeReplayMeta; watch: () => void }[];
   /** Asked at each draw: keeps this attempt as a practice replay (session.ts keepAttempt), or why it can't. */
   keepAttempt?: () => { go: (() => void) | null; why: string | null };
+  /** Asked at each draw: sends the last practice finish to the Segmented board (session.ts submitSegmented), when it can go. */
+  submitSegmented?: () => (() => void) | null;
   onClearPracticeReplays?: () => void;
 }
 
@@ -678,6 +680,7 @@ function replaysTab(a: MenuActions, pb: ReturnType<typeof getPB>): HTMLElement {
 function practiceSection(a: MenuActions): HTMLElement | null {
   const keep = a.keepAttempt?.();
   if (!keep) return null;
+  const submit = a.submitSegmented?.() ?? null;
   const kept = a.practiceReplays?.() ?? [];
   const sentence = (s: string) => s[0].toUpperCase() + s.slice(1) + ".";
   const day = new Date().toDateString();
@@ -688,6 +691,7 @@ function practiceSection(a: MenuActions): HTMLElement | null {
   const list = h(
     "div.list-rows",
     null,
+    ...(submit ? [listRow("Submit last run to Segmented", submit, { sub: "It loaded checkpoints and nothing else made it practice" })] : []),
     listRow("Keep this attempt", keep.go, { why: keep.why ? sentence(keep.why) : undefined }),
     ...kept.map(({ meta: m, watch }) => {
       const sub = [

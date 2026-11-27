@@ -64,8 +64,11 @@ test("all built-in commands and aliases resolve without accidental ordinary chat
       f.line(`!${name}`);
       // Server-only entries broadcast; help is explicitly a local server log.
       if (command.server && !command.run) expect(f.sent).toEqual([{ t: "chat", text: `!${name}` }]);
-      // !keepreplay answers on this screen only, as on the website.
-      else if (command.name === "help" || (command.group === "practice" && command.name !== "keepreplay"))
+      // !keepreplay and !submitseg answer on this screen only, as on the website.
+      else if (
+        command.name === "help" ||
+        (command.group === "practice" && command.name !== "keepreplay" && command.name !== "submitseg")
+      )
         expect(f.sent).toEqual([{ t: "chat", text: `!${name}`, local: true }]);
       else expect(f.sent).toEqual([]);
     }
@@ -141,6 +144,14 @@ test("!delcp and !clearcps (and their aliases) reach the host's checkpoint delet
   const f = fixture("solo");
   for (const text of ["!delcp", "!deletecp", "!removecp", "!clearcps", "!clearcp", "!clearcheckpoints"]) f.line(text);
   expect(f.actions).toEqual(["delete", "delete", "delete", "clear", "clear", "clear"]);
+});
+test("!submitseg says the desktop client can't send practice runs to Segmented yet", () => {
+  const f = fixture("solo");
+  f.context.game!.submitSegmented = (reply) => reply("not yet");
+  f.line("!submitseg");
+  f.line("!submitsegmented");
+  expect(f.replies).toEqual(["not yet", "not yet"]);
+  expect(f.actions).toEqual([]);
 });
 test("a Russian layout or a leading dot runs the command, and the room gets it in its usual form", () => {
   const f = fixture();

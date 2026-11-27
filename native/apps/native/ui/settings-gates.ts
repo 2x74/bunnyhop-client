@@ -184,6 +184,9 @@ const ROWS: Record<string, Gate> = {
   "keys/Movement/Turn speed": needs("yawSpeed"),
   "keys/Movement/Fast turn": needs("angleSpeedKey"),
   "keys/Practice/Teleport keeps speed": needs("practiceKeepVelocity"),
+  "keys/Practice/Keep checkpoints": excluded(
+    "Kept checkpoints (web practice-mode/cp-store.ts) aren't in the desktop client yet: its checkpoints live in the map's core.",
+  ),
   "keys/Run/Hold to restart": needs("holdRestart"),
   "keys/Run/Hold after": needs("holdRestartAfter"),
   "keys/Run/Push to talk": needs("bind:voiceRecord"),

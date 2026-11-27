@@ -49,6 +49,7 @@ export function chatGame(o: { map: string; session: RunSession; practice: Practi
         .catch(() => reply("Couldn't load the leaderboard."));
     },
     keepReplay: (reply) => void session.keepAttempt().then(reply),
+    submitSegmented: (reply) => void session.submitSegmented().then(reply),
     copyStart: (arg, reply) => {
       // The board !wr reads: the track you're on, in its style.
       void boardRunFor(map, session.runStyle, session.timer.track, arg).then((r) =>

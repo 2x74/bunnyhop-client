@@ -120,6 +120,8 @@ export interface ChatGame {
   turnSpeed?(degPerSec?: number): number;
   /** !keepreplay: this attempt so far kept as a practice replay on this device (session.ts keepAttempt). */
   keepReplay?(reply: (text: string) => void): void;
+  /** !submitseg: the last practice finish, when it was actual segments, sent to the Segmented board (session.ts submitSegmented). */
+  submitSegmented?(reply: (text: string) => void): void;
 }
 
 export interface ChatCommand {
@@ -560,6 +562,19 @@ const BUILT_IN: ChatCommand[] = [
     run: (ctx) => {
       if (!ctx.game?.keepReplay) return ctx.reply(NO_GAME);
       ctx.game.keepReplay((text) => ctx.reply(text));
+    },
+  },
+  {
+    name: "submitseg",
+    aliases: ["submitsegmented"],
+    help: "submit a practice run to Segmented",
+    about: "sends your last practice finish to the Segmented board, if it loaded checkpoints and nothing else made it practice (no noclip after the last load, no practice spawn or timescale). Normal style only. Only when you type it.",
+    group: "practice",
+    panelOnly: true,
+    where: "both",
+    run: (ctx) => {
+      if (!ctx.game?.submitSegmented) return ctx.reply(NO_GAME);
+      ctx.game.submitSegmented((text) => ctx.reply(text));
     },
   },
   // No zone teleports: one line about what there is.

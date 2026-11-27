@@ -192,6 +192,7 @@ export const CVARS: readonly Cvar[] = [
   pick("cl_autorestart", "Restart a timed run once it's past: off, pb, wr or ghost.", ["off", "pb", "wr", "ghost"] as const, (p) => p.autoRestart.when, (p, v) => (p.autoRestart.when = v)),
   pick("cl_autorestart_action", "What auto restart does: restart or sound.", ["restart", "sound"] as const, (p) => p.autoRestart.action, (p, v) => (p.autoRestart.action = v)),
   sw("cl_cp_keepvelocity", "A checkpoint teleport keeps the speed you saved it with.", (p) => p.practice.keepVelocity, (p, v) => (p.practice.keepVelocity = v)),
+  sw("cl_cp_keep", "Keep your checkpoints on this device and bring them back when you return to the map.", (p) => p.practice.keepCheckpoints, (p, v) => (p.practice.keepCheckpoints = v)),
   // ---- view
   num("fov_desired", "Field of view, horizontal at 4:3.", [75, 120], (p) => p.fov, (p, v) => (p.fov = v)),
   num("viewmodel_fov", "Viewmodel field of view.", [40, 90], (p) => p.viewmodel.fov, (p, v) => (p.viewmodel.fov = v)),

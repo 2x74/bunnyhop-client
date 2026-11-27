@@ -152,48 +152,105 @@ function beanie(): THREE.BufferGeometry {
 }
 
 /**
- * Santa Hat (Sleigh Ride, v0.0.44): a red cap pulled over the hood like the beanie (the ears come through), a thick
- * white fur brim round its edge, and a soft red cone rising from the crown that bends back between the ears and droops
- * to a white pom-pom behind the head. Plain red and white, no trim or logo.
+ * Santa Hat (Sleigh Ride, v0.0.44): a soft red cap worn snug over the hood, the ears coming up out of it, a band of white
+ * fur hugging the head low round the crown (above the face at the front, lower at the back), and a long tapering cone
+ * that rises from the back of the crown behind the ears and droops back and to one side, a round fur pom-pom on its
+ * tip. The red and the fur are the Santa Hat avatar decoration's (supporter-looks.ts SANTA_HAT). Built on the hood
+ * ellipsoid like the beanie, so the Plush and Bun-E fits (hat-fit.ts, bands and caps) carry it as they carry that.
  */
+const SANTA = {
+  red: 0xe23b3b,
+  fur: 0xf4f1eb,
+  furShade: 0xe4ded2,
+  /** The hat's axis, tipped back: the band sits higher over the face than at the nape. */
+  axis: norm([0, 0.43, 1]),
+  /** The band's polar angle about that axis (on the unit sphere, before the hood's radii). */
+  band: 0.92,
+};
 function santaHat(): THREE.BufferGeometry {
   const W = headWeight();
   const b = new Builder();
-  const RED = 0xd0342c, FUR = 0xf5f2ec, FUR2 = 0xe3ded4;
-  // The cap: the beanie's shell (tipped back so the front edge sits above the face), red.
-  const axis = norm([0, 0.32, 1]);
-  const r: V3 = [HOOD_R[0] + 0.32, HOOD_R[1] + 0.32, HOOD_R[2] + 0.3];
-  const SEG = 36;
-  const shell = (d: number, a: number): V3[] => b.ellipsoidRows(HOOD_C, [r[0] + d, r[1] + d, r[2] + d], axis, [1, 0, 0], SEG, 1, a, a)[0];
-  b.surface(b.ellipsoidRows(HOOD_C, r, axis, [1, 0, 0], SEG, 10, 0, 0.98), { paint: () => fixed(RED), weight: () => W });
-  // The brim: a fat roll of fur over the cap's edge, a little lumpy so it reads as fur, not a ring.
-  const lump = (k: number) => 1 + 0.12 * Math.sin(k * 2.1) * Math.sin(k * 0.7 + 1);
-  const brim = (d: number, a: number) => shell(d, a).map((p, k): V3 => {
+  const [, U, V] = frame(SANTA.axis, [1, 0, 0]);
+  /** A point `d` off the hood at polar angle a, azimuth th about the hat's axis, and the hood's outward normal there. */
+  const on = (a: number, th: number, d: number): [V3, V3] => {
+    const u: V3 = add(add(scale(SANTA.axis, Math.cos(a)), scale(U, Math.sin(a) * Math.cos(th))), scale(V, Math.sin(a) * Math.sin(th)));
+    const q: V3 = [u[0] * HOOD_R[0], u[1] * HOOD_R[1], u[2] * HOOD_R[2]];
+    const n = norm([q[0] / HOOD_R[0] ** 2, q[1] / HOOD_R[1] ** 2, q[2] / HOOD_R[2] ** 2]);
+    return [add(add(HOOD_C, q), scale(n, d)), n];
+  };
+  /** Pushes p out of the hood ellipsoid grown by `d` (for the cone's root, so it settles onto the cap). */
+  const outside = (p: V3, d: number): V3 => {
     const q = sub(p, HOOD_C);
-    return add(HOOD_C, scale(q, 1 + (lump(k) - 1) * (d / 1.6) * 0.08));
-  });
-  b.surface([shell(0, 1.0), brim(0.55, 0.995), brim(1.0, 0.95), brim(1.05, 0.86), brim(0.8, 0.78), brim(0.1, 0.75)], {
-    paint: (i) => fixed(i === 2 || i === 3 ? FUR : FUR2),
-    weight: () => W,
-  });
-  // The cone: from inside the crown, up, then back between the ears (they sweep back and out from (+-2.25, 1.35,
-  // 74.3)), drooping to the pom-pom.
-  const crown = add(HOOD_C, [axis[0] * r[0], axis[1] * r[1], axis[2] * r[2]]);
-  const P0 = add(crown, [0, -0.6, -1.4]), P1 = add(crown, [0, -0.3, 4.4]), P2 = add(crown, [2.4, 0.0, 6.6]), P3 = add(crown, [6.2, 0.6, -0.4]);
+    const k = Math.hypot(q[0] / (HOOD_R[0] + d), q[1] / (HOOD_R[1] + d), q[2] / (HOOD_R[2] + d));
+    return k >= 1 ? p : add(HOOD_C, scale(q, 1 / k));
+  };
+  const SEG = 60;
+  const az = (k: number) => (k / SEG) * Math.PI * 2;
+
+  // The cap: snug over the hood (the ears come up through it), a little fuller toward the crown, down under the band.
+  const capRows: V3[][] = [];
+  const CAP_ROWS = 12;
+  for (let i = 0; i <= CAP_ROWS; i++) {
+    const a = 0.02 + ((SANTA.band + 0.06 - 0.02) * i) / CAP_ROWS;
+    const d = 0.3 + 0.32 * (1 - a / SANTA.band) ** 2;
+    capRows.push([...Array(SEG)].map((_, k) => on(a, az(k), d)[0]));
+  }
+  b.surface(capRows, { paint: () => fixed(SANTA.red), weight: () => W, capStart: fixed(SANTA.red) });
+
+  // The band: a soft roll of fur lying on the head along the cap's edge; its cross-section flat against the hood and
+  // round on top, the fur's lumps a few hundredths of a unit in and out so the light breaks up along it.
+  const BAND = 96, CS = 12;
+  const bandRows: V3[][] = [];
+  const shade: boolean[][] = [];
+  for (let k = 0; k <= BAND; k++) {
+    const th = (k / BAND) * Math.PI * 2;
+    const [p, n] = on(SANTA.band, th, 0.3);
+    const [p2] = on(SANTA.band, th + 0.01, 0.3);
+    const T = norm(sub(p2, p));
+    const A = norm(cross(n, T)); // along the head's surface, toward the crown or the nape
+    const row: V3[] = [];
+    const sh: boolean[] = [];
+    for (let j = 0; j < CS; j++) {
+      const f = (j / CS) * Math.PI * 2;
+      const lump = 1 + 0.07 * Math.sin(k * 1.37 + j * 2.1) * Math.sin(k * 0.61 + j * 0.9) + 0.035 * Math.sin(k * 4.1 - j * 1.6);
+      const out = Math.sin(f) > 0 ? Math.sin(f) * 0.78 * lump : Math.sin(f) * 0.12;
+      row.push(add(add(p, scale(n, out)), scale(A, Math.cos(f) * 0.95 * lump)));
+      sh.push(Math.sin(f) < 0.15);
+    }
+    bandRows.push(row);
+    shade.push(sh);
+  }
+  b.surface(bandRows, { paint: (i, k) => fixed(shade[i]?.[k] ? SANTA.furShade : SANTA.fur), weight: () => W });
+
+  // The cone: from the back of the crown (behind the ears' roots at (+-2.25, 1.35, 74.3), which lean back from there),
+  // up and back, then over to one side, tapering to the tip. Its root rows are pressed onto the cap.
+  const P0: V3 = [0, 3.6, 72.6], P1: V3 = [0.1, 6.5, 78.8], P2: V3 = [1.6, 9.4, 81.2], P3: V3 = [4.9, 10.6, 76.8];
   const bez = (t: number): V3 => {
     const m = 1 - t;
     return add(add(scale(P0, m * m * m), scale(P1, 3 * m * m * t)), add(scale(P2, 3 * m * t * t), scale(P3, t * t * t)));
   };
-  const N = 18;
+  const N = 26, SIDES = 22;
   const path = [...Array(N + 1)].map((_, i) => bez(i / N));
-  const rad = (i: number) => {
-    const t = i / N;
-    return 0.45 + 3.15 * Math.pow(1 - t, 1.35);
-  };
-  b.tube(path, rad, 20, [1, 0, 0], () => fixed(RED), () => W);
-  // The pom-pom.
-  const P = 1.55;
-  b.surface(b.ellipsoidRows(P3, [P, P, P], [0, 0, 1], [1, 0, 0], 14, 8), { paint: (_i, k) => fixed(k % 3 ? FUR : FUR2), weight: () => W, closed: true });
+  const rad = (t: number) => 0.42 + 2.9 * Math.pow(1 - t, 1.15);
+  const coneRows = path.map((c, i) => {
+    const d = norm(sub(path[Math.min(N, i + 1)], path[Math.max(0, i - 1)]));
+    const [, u, v] = frame(d, [1, 0, 0]);
+    return ring(c, u, v, rad(i / N), rad(i / N), SIDES).map((q) => outside(q, 0.45));
+  });
+  b.surface(coneRows, { paint: () => fixed(SANTA.red), weight: () => W, capStart: null, capEnd: fixed(SANTA.red) });
+
+  // The pom-pom: round and fine enough not to show facets, a few soft lumps.
+  const tipDir = norm(sub(path[N], path[N - 1]));
+  const PC = add(P3, scale(tipDir, 0.9));
+  const PR = 1.55;
+  const pom = b.ellipsoidRows(PC, [PR, PR, PR], [0, 0, 1], [1, 0, 0], 32, 20).map((row, i) =>
+    row.map((q, k) => {
+      const a = (i / 20) * Math.PI, th = (k / 32) * Math.PI * 2;
+      const l = 1 + 0.045 * Math.sin(a * 5 + 1) * Math.sin(th * 4 + 0.7) + 0.025 * Math.sin(a * 9) * Math.cos(th * 7);
+      return add(PC, scale(sub(q, PC), l));
+    }),
+  );
+  b.surface(pom, { paint: (i) => fixed(i > 14 ? SANTA.furShade : SANTA.fur), weight: () => W, closed: true });
   const g = b.geometry();
   g.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 70), 60);
   return g;

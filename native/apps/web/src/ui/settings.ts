@@ -32,6 +32,24 @@ export const PRECIPITATION_LEVELS: readonly PrecipitationLevel[] = ["off", "ligh
 /** The density a level draws at (WorldView.setPrecipitation). */
 export const PRECIPITATION_DENSITY: Record<PrecipitationLevel, number> = { off: 0, light: 0.5, full: 1 };
 
+// (Also before the store: parsePrefs reads the preset table to give old saved settings their preset's snow and rain.)
+/** Graphics presets (Settings → Graphics → Quality): the settings that cost the most GPU time on slow machines. */
+export type GraphicsPreset = "lowest" | "low" | "medium" | "high";
+type PresetKeys = "potato" | "antialias" | "anisotropy" | "resolutionScale" | "waterReflections";
+export const GRAPHICS_PRESETS: Record<GraphicsPreset, Pick<Prefs["graphics"], PresetKeys>> = {
+  lowest: { potato: true, antialias: false, anisotropy: 1, resolutionScale: 0.5, waterReflections: false },
+  low: { potato: true, antialias: false, anisotropy: 1, resolutionScale: 1, waterReflections: false },
+  medium: { potato: false, antialias: false, anisotropy: 4, resolutionScale: 1, waterReflections: false },
+  high: { potato: false, antialias: true, anisotropy: 8, resolutionScale: 1, waterReflections: true },
+};
+export const PRESET_ORDER: GraphicsPreset[] = ["lowest", "low", "medium", "high"];
+
+/**
+ * What each Quality preset sets snow and rain to. Not one of the keys a preset is recognised by (graphicsPreset), so
+ * changing it by hand keeps the preset lit, and settings saved before it existed still match their preset.
+ */
+export const PRESET_PRECIPITATION: Record<GraphicsPreset, PrecipitationLevel> = { lowest: "off", low: "off", medium: "light", high: "full" };
+
 export type Action =
   | "forward"
   | "back"
@@ -484,8 +502,12 @@ export interface Prefs {
   cmdBinds: Record<string, string>;
   /** Source aliases (`alias +mleft "+moveleft; +left"`), name (lower case) -> command text. */
   aliases: Record<string, string>;
-  /** Practice mode (practice-mode/): a checkpoint teleport keeps the speed you saved it with (bhoptimer does), or stops you. */
-  practice: { keepVelocity: boolean };
+  /**
+   * Practice mode (practice-mode/): a checkpoint teleport keeps the speed you saved it with (bhoptimer does), or stops you.
+   * keepCheckpoints (0.0.44): checkpoints are kept on this device per map, style and track and come back on your next
+   * visit (practice-mode/cp-store.ts).
+   */
+  practice: { keepVelocity: boolean; keepCheckpoints: boolean };
   /** Physics 27+: the 1.5-unit jump lift, recorded per tick so it can change during a run. */
   landfix: boolean;
   /** Restart keys (R / B / M) need a short hold (restart-hold.ts HOLD_MS) so a stray press can't end a run (restart-guard.ts). */
@@ -686,7 +708,7 @@ export const DEFAULT_PREFS: Prefs = {
   binds: DEFAULT_BINDS,
   cmdBinds: {},
   aliases: {},
-  practice: { keepVelocity: true },
+  practice: { keepVelocity: true, keepCheckpoints: true },
   landfix: true,
   holdRestart: false,
   holdRestartAfter: HOLD_AFTER_DEFAULT,
@@ -942,7 +964,11 @@ export function parsePrefs(raw: string | null): Prefs {
   if (!COLOR_BLIND_MODES.some(([m]) => m === p.colorBlind)) p.colorBlind = DEFAULT_PREFS.colorBlind;
   p.graphics.preset = lookPreset(p.graphics.preset);
   if (!MODEL_LIGHTING_MODES.includes(p.graphics.modelLighting)) p.graphics.modelLighting = DEFAULT_PREFS.graphics.modelLighting;
-  if (!PRECIPITATION_LEVELS.includes(p.graphics.precipitation)) p.graphics.precipitation = DEFAULT_PREFS.graphics.precipitation;
+  // Saved before snow and rain existed (or broken): what the Quality preset they match sets (Lowest and Low off, Medium
+  // light), so a machine auto-tuned to Lowest doesn't start drawing it; custom settings get High's.
+  // (merge has already filled a missing one with the default, so the saved object is asked.)
+  const savedPrecip = (m.graphics as Record<string, unknown> | undefined)?.precipitation;
+  if (!PRECIPITATION_LEVELS.includes(savedPrecip as PrecipitationLevel)) p.graphics.precipitation = PRESET_PRECIPITATION[graphicsPreset(p.graphics) ?? "high"];
   return p;
 }
 
@@ -1076,23 +1102,6 @@ export function bindLabel(action: Action): string | null {
 export function gamePixelRatio(g: Prefs["graphics"]): number {
   return Math.min(devicePixelRatio, g.potato ? 1 : 2) * g.resolutionScale;
 }
-
-/** Graphics presets (Settings → Graphics → Quality): the settings that cost the most GPU time on slow machines. */
-export type GraphicsPreset = "lowest" | "low" | "medium" | "high";
-type PresetKeys = "potato" | "antialias" | "anisotropy" | "resolutionScale" | "waterReflections";
-export const GRAPHICS_PRESETS: Record<GraphicsPreset, Pick<Prefs["graphics"], PresetKeys>> = {
-  lowest: { potato: true, antialias: false, anisotropy: 1, resolutionScale: 0.5, waterReflections: false },
-  low: { potato: true, antialias: false, anisotropy: 1, resolutionScale: 1, waterReflections: false },
-  medium: { potato: false, antialias: false, anisotropy: 4, resolutionScale: 1, waterReflections: false },
-  high: { potato: false, antialias: true, anisotropy: 8, resolutionScale: 1, waterReflections: true },
-};
-export const PRESET_ORDER: GraphicsPreset[] = ["lowest", "low", "medium", "high"];
-
-/**
- * What each Quality preset sets snow and rain to. Not one of the keys a preset is recognised by (graphicsPreset), so
- * changing it by hand keeps the preset lit, and settings saved before it existed still match their preset.
- */
-export const PRESET_PRECIPITATION: Record<GraphicsPreset, PrecipitationLevel> = { lowest: "off", low: "off", medium: "light", high: "full" };
 
 /** The preset these graphics settings match, or null (custom). */
 export function graphicsPreset(g: Prefs["graphics"]): GraphicsPreset | null {

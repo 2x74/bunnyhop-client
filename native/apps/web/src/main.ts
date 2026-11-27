@@ -879,6 +879,9 @@ if (firstPlay) {
   firstPlay.setZones(session.zones?.zones ?? []);
 }
 await showReady({ menu: !firstLook });
+// Checkpoints kept from the last visit came back (practice-mode/cp-store.ts): said once, now that the game shows (a
+// page opened on a replay says it on the first checkpoint key instead).
+if (!viewerStart) practiceMode.announceKept();
 // Before their first finish, what the map wants. Holding jump from a standstill hops before the ground speeds you up,
 // and W alone can't go past 30 u/s in the air: the first thing a newcomer does, so the line says to run first.
 if (firstLook) showStartPrompt(mapName === TUTORIAL_MAP ? undefined : styleDef(session.runStyle)?.autohop ? "Get to the end zone. Run first, then hold jump to keep hopping." : "Get to the end zone.");

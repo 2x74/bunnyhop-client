@@ -410,6 +410,17 @@ export function winterSeasonOf(ms: number): number | null {
   return null;
 }
 
+/**
+ * How long after a seasonal window closes the server still reads the season's history (a run finished on the last day
+ * can be verified late). Outside a window plus this, Trick or Treat and Snow Day can't advance, so their scans are
+ * skipped (apps/api/src/progress.ts) and their stats read 0 unless held.
+ */
+export const SEASON_GRACE_MS = 3 * 86_400_000;
+/** Whether Trick or Treat's history is read at `now` (inside the October window, or just after it). */
+export const halloweenScanOpen = (now: number): boolean => inHalloweenWindow(now) || inHalloweenWindow(now - SEASON_GRACE_MS);
+/** Whether Snow Day's history is read at `now` (inside the winter window, or just after it). */
+export const winterScanOpen = (now: number): boolean => winterSeasonOf(now) !== null || winterSeasonOf(now - SEASON_GRACE_MS) !== null;
+
 /** A race won by less than this (seconds between server finishes) is a photo finish. */
 export const PHOTO_FINISH_S = 0.05;
 

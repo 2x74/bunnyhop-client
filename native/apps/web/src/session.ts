@@ -23,7 +23,7 @@ import { RunMouseSettings, mouseFromPrefs } from "./mouse-settings";
 import { DEFAULT_TURN_SPEED, TURN_HOLD_BITS, turnSpeedOf } from "./turn-binds";
 import { decodeReplay, encodeReplay, grownLength, ReplayRecorder, replayFileName, replayStyle, sha256Hex, type Replay } from "./replay";
 import { PAST_RANKED_LINE, pastRanked, RANKED_MAX_HOURS, RANKED_MAX_TICKS, RECORDING_CAP_HOURS, RECORDING_CAP_TICKS } from "./run-limits";
-import { isSegmented, nextStyle, StyleFilter, strafeKeys, styleDef, styleForTrack, styleLabel, stylePrespeedCap, styleSettings, styleStartReentryCap, type StyleDef, type StyleId } from "./styles";
+import { isSegmented, nextStyle, StyleFilter, strafeKeys, styleDef, styleForTrack, styleLabel, stylePrespeedCap, styleSettings, styleStartReentryCap, trackStyleProblem, type StyleDef, type StyleId } from "./styles";
 import { onStyleChange, setSelectedStyle } from "./ui/style-picker";
 import { afterStep, beforeStep, checkpointMatches, FRAME_STRIDE, frameFlags, makeTimer, quantize, simulate, type SimResult } from "./sim";
 import { blocksPrehops, EVENT_RESPAWNED, formatTime, RunTimer, type Split, type TickCmd } from "./timer";
@@ -58,14 +58,15 @@ import { holdReload, runEnded } from "./update";
 import { TUTORIAL_MAP } from "./tutorial/data";
 import { practiceReason } from "./practice";
 import { timescaleLabel } from "./practice-mode/timescale";
-import { finishRoute, PracticeAttempt, practiceFlipLine, practiceSpawnLine, practiceSpawnToast, practiceStartLine, type PracticeUse } from "./practice-mode/attempt";
+import { finishRoute, PracticeAttempt, practiceFlipLine, practiceSpawnLine, practiceSpawnToast, practiceStartLine, submitSegmentedProblem, type PracticeUse } from "./practice-mode/attempt";
 import { loadTimer, type TimerSnapshot } from "./practice-mode/checkpoints";
-import { seedRecording, SegmentLog, type SegmentMark } from "./practice-mode/segments";
+import { asSegmented, seedRecording, SegmentLog, type SegmentMark } from "./practice-mode/segments";
 import { practiceReplays, withFinalCheckpoint, type PracticeReplayMeta } from "./practice-mode/replays";
 import { gainLogs, LiveSsj, ssjChat } from "./ssj";
 import { GAIN_LOG_STYLES, type GainLogReport } from "./net/protocol";
 import { LiveMovementStats } from "./movement-stats";
 import { neutralCommand } from "./freecam";
+import { h } from "./ui/dom";
 
 export interface SessionInit {
   core: Core;
@@ -986,6 +987,7 @@ export class RunSession {
   }
 
   private async finish(state: PlayerState): Promise<void> {
+    this.segmentedOffer = null; // (a practice finish offers its own)
     if (this.experimentalInput) return this.finishPractice();
     // A practice attempt never gets near the upload: its recording went through a teleport or noclip.
     const route = finishRoute({ practice: this.prac.practice, unranked: this.unranked });
@@ -1121,8 +1123,9 @@ export class RunSession {
    * device as a practice replay (practice-mode/replays.ts) and becomes the last run (V); otherwise the card says why not.
    */
   private async finishPractice(): Promise<void> {
-    this.watch.stop();
+    const watched = this.watch.stop();
     this.clock.stop();
+    this.segmentedOffer = null;
     const t = this.timer;
     const pb = getPB(this.o.map, this.runStyle, t.track);
     const loss = this.practiceReplayLoss();
@@ -1139,9 +1142,98 @@ export class RunSession {
     this.onSubmission?.({ id: "", status: "rejected", reason: line });
     if (!replay) return;
     const time = t.time();
+    // Actual segments (attempt.ts submitSegmentedProblem): offered for the Segmented board, sent only if the player
+    // chooses (submitSegmented). Read before the encode: a load or restart meanwhile changes the attempt.
+    const offer = this.segmentedProblem() === null
+      ? {
+          replay: asSegmented(replay), time, timeMs: t.timeMs(), ticks: t.endTick - t.startTick, track: t.track, result: clientResult, watched, mouse: this.runMouse.snapshot(),
+          stats: { jumps: t.jumps, strafes: t.strafes, sync: t.syncPercent(), splits: t.splits.map((s): [number, number] => [s.index, s.ticks]) },
+        }
+      : null;
     const bytes = await encodeReplay(replay);
     this.lastRun = { replay, bytes, practice: true };
+    if (offer && this.clientResult === clientResult) {
+      this.segmentedOffer = offer;
+      this.hud.setCardExtra(h("div.endcard-sub.ok", null, "Counts for Segmented: type !submitseg to submit it"));
+    }
     await this.keepPracticeReplay(replay, bytes, { time, at: null });
+  }
+
+  /**
+   * Why this attempt's recording can't go to the Segmented board now (attempt.ts submitSegmentedProblem), or null when it
+   * can. Only asked of a practice attempt: a real one submits to its own board.
+   */
+  segmentedProblem(): string | null {
+    return submitSegmentedProblem({
+      style: this.runStyle,
+      trackProblem: trackStyleProblem(this.o.map, this.timer.track, "segmented") ?? (this.o.map === TUTORIAL_MAP ? "tutorial" : null),
+      loads: this.recorder.segments.length,
+      replayLoss: this.practiceReplayLoss(),
+      tainted: this.segLog.tainted,
+      spawn: this.prac.spawnUsed,
+      slowed: this.prac.timescale < 1,
+      other: this.otherPracticeReason,
+      tooLong: pastRanked(this.recorder.length),
+    });
+  }
+
+  /**
+   * Why this attempt is practice apart from practice mode and the practice tools (third person, a gun, scripted input,
+   * the debug hook, a lesson, experimental input), or null. A Segmented load doesn't undo these.
+   */
+  private get otherPracticeReason(): string | null {
+    if (this.experimentalInput) return "experimental input";
+    return practiceReason({ debug: this.debug, thirdPerson: this.practice, scripted: this.scripted, lesson: this.lessonPractice, freeGun: this.freeGun });
+  }
+
+  /** The last practice finish, when it was actual segments: what !submitseg sends. Used once; any finish replaces it. */
+  private segmentedOffer: {
+    replay: Replay; time: number; timeMs: number; ticks: number; track: number; result: number;
+    watched: ReturnType<RunWatch["stop"]>; mouse: ReturnType<RunMouseSettings["snapshot"]>;
+    stats: { jumps: number; strafes: number; sync: number; splits: [number, number][] };
+  } | null = null;
+
+  /** The pause menu's "Submit to Segmented": the last practice finish can go there. */
+  get canSubmitSegmented(): boolean {
+    return this.segmentedOffer !== null;
+  }
+
+  /**
+   * !submitseg and the pause menu: the last practice finish (when it was actual segments) uploaded to the Segmented
+   * board, verified like any Segmented run. A PB there is kept like one; the current style's PB and ghosts aren't
+   * touched. Returns the line to show.
+   */
+  async submitSegmented(): Promise<string> {
+    const o = this.segmentedOffer;
+    if (!o) return "Nothing to submit. Finish a practice run that loaded checkpoints, with no noclip after the last load.";
+    if (!api.available()) return "Leaderboards are offline. Try again when they're back.";
+    this.segmentedOffer = null;
+    const map = this.o.map, style = "segmented", track = o.track, time = o.time;
+    const pbOwner = pbAccount();
+    const pbEpoch = accountGeneration();
+    const pb = getPB(map, style, track);
+    const newPB = !pb || o.timeMs < pbMs(pb);
+    const pbDate = Date.now();
+    const bytes = await encodeReplay(o.replay);
+    if (newPB && pbEpoch === accountGeneration()) {
+      setPB({ map, owner: pbOwner, style, track, ticks: o.ticks, time, date: pbDate, ...o.stats });
+      void savePBReplay(map, style, bytes, track, pbOwner, pbDate).catch((e) => console.warn("PB replay storage:", e));
+    }
+    // The end card shows the status while it's still this finish's; otherwise one line when it's settled.
+    const onCard = () => this.clientResult === o.result && this.hud.cardShown;
+    let uploaded!: (id: string) => void;
+    const upload = new Promise<string>((r) => (uploaded = r));
+    holdReload(upload);
+    void submitAndTrack(bytes, (m, ms) => this.hud.toast(m, ms), (st) => {
+      if (onCard()) this.hud.setSubmission(st);
+      if (st.status === "rejected" && newPB) rejectPB(map, style, track, pbDate, pbOwner);
+      if (st.status !== "submitting") uploaded("id" in st ? st.id : "");
+      if (!onCard() && (st.status === "verified" || st.status === "rejected")) this.hud.toast(st.status === "verified" ? "Segmented run verified" : `Segmented run rejected${st.reason ? `: ${st.reason}` : ""}`, 4000);
+    }, { map, style, track, time, mouse: o.mouse }).finally(() => uploaded(""));
+    void reportRun({ check: this.physics.check(bytes), upload, watched: o.watched, input: this.o.input, wasm: this.clientBuild, play: this.runPlay(o.watched.pollHz) });
+    if (onCard()) this.hud.setCardExtra(null);
+    await this.refreshMenu();
+    return "Submitting to Segmented";
   }
 
   /**
@@ -1294,7 +1386,7 @@ export class RunSession {
   practiceUse(tool: PracticeUse): void {
     const flipped = this.prac.use(tool);
     this.clock.stop();
-    if (flipped && this.o.map !== TUTORIAL_MAP) this.hud.toast(practiceFlipLine(this.timer.status === "running", restartKey(), tool), 5000, "practice");
+    if (flipped && this.o.map !== TUTORIAL_MAP) this.hud.toast(practiceFlipLine(this.timer.status === "running", restartKey(), tool, this.segmentResumable && this.segLog.holding > 0), 5000, "practice");
   }
 
   /**
@@ -1332,6 +1424,9 @@ export class RunSession {
       this.styleFilter.reset();
       this.newRecording();
       this.segLog.begin([], 0); // (nothing logged from here can be marked: replayLoss)
+      // A teleport the recording can't follow (no playable path: a kept checkpoint from an earlier visit, a speed reset,
+      // one saved after noclip): what's recorded from here never goes to Segmented, until a load of a clean path.
+      this.segLog.tainted = true;
     }
     this.hud.resetTicks();
     const s = this.o.core.state();
@@ -1368,6 +1463,16 @@ export class RunSession {
     return isSegmented(this.runStyle) && !this.unranked;
   }
 
+  /**
+   * A Segmented attempt that only a noclip or a practice teleport made practice (attempt.ts resumable), with nothing else
+   * against it: loading a checkpoint saved while the run was clean takes it back to a real Segmented run (segmentRestored),
+   * since the load throws away everything since the save. Practice mode, a practice spawn, timescale, third person, a gun
+   * or scripted input keep it practice.
+   */
+  get segmentResumable(): boolean {
+    return isSegmented(this.runStyle) && this.prac.resumable && this.otherPracticeReason === null && this.o.map !== TUTORIAL_MAP;
+  }
+
   /** Checkpoint loads on the current Segmented run's path (0 outside one). */
   get segmentLoads(): number {
     return this.segmenting ? this.segLog.loadCount : 0;
@@ -1389,7 +1494,10 @@ export class RunSession {
   pathMark(): SegmentMark | null {
     const n = this.recorder.length;
     if (this.experimentalInput || this.prac.replayLoss || this.segLog.length !== n || this.o.core.state().tick !== n) return null;
-    return this.segLog.mark({ nullBinds: this.recorder.nullBinds, timedInput: this.recorder.timedInput, timedPresses: this.recorder.timedPresses, wRelease: this.recorder.wRelease, turnSpeed: this.recorder.turnSpeed });
+    // An attempt that can't count (third person, a practice spawn, a slowed tick, ...) taints the path for good: a later
+    // attempt that loads it can't submit it to Segmented either (attempt.ts submitSegmentedProblem).
+    const tainted = this.otherPracticeReason !== null || this.prac.spawnUsed || this.prac.timescale < 1;
+    return this.segLog.mark({ nullBinds: this.recorder.nullBinds, timedInput: this.recorder.timedInput, timedPresses: this.recorder.timedPresses, wRelease: this.recorder.wRelease, turnSpeed: this.recorder.turnSpeed, tainted });
   }
 
   /** About how much memory the paths of the kept checkpoints take (practice-mode/checkpoints.ts budget). */
@@ -1415,12 +1523,14 @@ export class RunSession {
   /**
    * A Segmented checkpoint load: the core was just restored from the checkpoint's snapshot, which it took after
    * `m.ticks` commands. The timer, the key filter, the recording (back to the checkpoint's path plus this load) and the
-   * live frames follow it, and the attempt stays clean: no practiceUse. False (nothing changed) if `m` can't be rebuilt
-   * or the core isn't at its tick; the caller then treats it as a practice teleport.
+   * live frames follow it, and the attempt stays clean: no practiceUse. A resumable attempt (segmentResumable: noclip or
+   * a practice teleport since) is clean again: the load threw that stretch away. False (nothing changed) if `m` can't be
+   * rebuilt or the core isn't at its tick; the caller then treats it as a practice teleport.
    */
   segmentRestored(style: StyleId, timer: TimerSnapshot, filter: StyleFilter, m: SegmentMark): boolean {
     const s = this.o.core.state();
-    if (!this.segmenting || style !== this.runStyle || s.tick !== m.ticks || !this.segLog.usable(m)) return false;
+    if (!(this.segmenting || this.segmentResumable) || style !== this.runStyle || s.tick !== m.ticks || !this.segLog.usable(m) || m.tainted) return false;
+    if (this.prac.resume()) this.practiceStartHint = "off";
     const was = this.timer.status;
     loadTimer(this.timer, timer);
     this.styleFilter = Object.assign(Object.create(Object.getPrototypeOf(filter)), filter) as StyleFilter;
@@ -1613,6 +1723,7 @@ export class RunSession {
         const why = this.practiceReplayLoss();
         return { go: why ? null : () => void this.keepAttempt().then((line) => this.hud.toast(line, 3000, "practice")), why };
       },
+      submitSegmented: () => (this.canSubmitSegmented ? () => void this.submitSegmented().then((line) => this.hud.toast(line, 3000, "practice")) : null),
       onClearPracticeReplays: () => void practiceReplays.clear(this.o.map).then(() => this.refreshMenu()),
     });
   }

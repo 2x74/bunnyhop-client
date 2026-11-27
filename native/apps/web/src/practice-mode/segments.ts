@@ -94,6 +94,11 @@ export interface SegmentMark {
   /** Release W on jump (header.wRelease); absent on marks from before it existed. */
   wRelease?: boolean;
   turnSpeed: TurnSpeed | null;
+  /**
+   * The path can't go on a board whatever its loads (SegmentLog.tainted): another replay's commands, or saved in an
+   * attempt that couldn't count. Absent: clean (marks from before it existed were Segmented-only or practice).
+   */
+  tainted?: boolean;
 }
 
 class Columns {
@@ -150,6 +155,11 @@ export class SegmentLog {
   private pathFrom = 0;
   private markedSince = false;
   private heldBytes = 0;
+  /**
+   * The current path holds something no run may submit (another replay's commands: seedRecording; a load of a tainted
+   * mark). Its marks carry it (mark), a load takes the mark's, a new path starts clean (begin).
+   */
+  tainted = false;
   /** The log reached MAX_LOG_TICKS: nothing more is logged and no checkpoint can be saved until it's cleared. */
   full = false;
 
@@ -210,6 +220,7 @@ export class SegmentLog {
     this.markedSince = false;
     this.ticks = 0;
     this.loads = 0;
+    this.tainted = false;
     this.frame0 = Array.from(frame0);
     this.frame0Events = frame0Events;
   }
@@ -259,15 +270,17 @@ export class SegmentLog {
 
   /**
    * The current path as a checkpoint mark, or null when the log is full. `flags`: the recorder's header flags now. The
-   * mark holds its path until drop(m) (retainedBytes).
+   * mark holds its path until drop(m) (retainedBytes). `tainted`: the attempt can't count (third person, a practice
+   * spawn, ...), so neither can the path, also when a later attempt loads it.
    */
-  mark(flags: { nullBinds: boolean; timedInput: boolean; timedPresses?: boolean; wRelease?: boolean; turnSpeed: TurnSpeed | null }): SegmentMark | null {
+  mark(flags: { nullBinds: boolean; timedInput: boolean; timedPresses?: boolean; wRelease?: boolean; turnSpeed: TurnSpeed | null; tainted?: boolean }): SegmentMark | null {
     if (this.full) return null;
     this.commit();
     const m: SegmentMark = {
       gen: this.gen, tip: this.tip, ticks: this.ticks, loadCount: this.loads,
       frame0: this.frame0, frame0Events: this.frame0Events,
       nullBinds: flags.nullBinds, timedInput: flags.timedInput, timedPresses: !!flags.timedPresses, wRelease: !!flags.wRelease, turnSpeed: flags.turnSpeed ? { ...flags.turnSpeed } : null,
+      ...(this.tainted || flags.tainted ? { tainted: true } : {}),
     };
     retain(m.tip);
     this.held.add(m);
@@ -342,6 +355,7 @@ export class SegmentLog {
     this.setTip(this.node(m.tip, -1, -1, { tick: m.ticks, position: f3(restored.position), velocity: f3(restored.velocity) }));
     this.ticks = m.ticks;
     this.loads = m.loadCount + 1;
+    this.tainted = !!m.tainted;
     this.frame0 = m.frame0;
     this.frame0Events = m.frame0Events;
     // The path, oldest first.
@@ -400,6 +414,7 @@ export function seedRecording(replay: Replay, sim: { ticks: number; frames: Floa
   rec.wRelease = !!h.wRelease;
   const frame = (t: number) => f.subarray(t * STRIDE, (t + 1) * STRIDE);
   log.begin(frame(0), e[0]);
+  log.tainted = true; // (another run's commands: never on a board, Segmented included)
   putFrame(0, frame(0), e[0]);
   const cps = replay.checkpoints;
   let c = 0;
@@ -414,6 +429,16 @@ export function seedRecording(replay: Replay, sim: { ticks: number; frames: Floa
       log.checkpoint(cps[c].position, cps[c].velocity);
     }
   }
+}
+
+/**
+ * A practice recording that is actual segments (attempt.ts submitSegmentedProblem) as the Segmented run it is: the same
+ * replay with style "segmented" in its header. Segmented is Normal movement (styles.ts): the same settings, key filter,
+ * prespeed cap and timer rules, so it re-simulates tick for tick as recorded, and its loads are checked like any
+ * Segmented run's (verifier.ts). Nothing else changes, so the bytes are what a Segmented run of these commands records.
+ */
+export function asSegmented(replay: Replay): Replay {
+  return { ...replay, header: { ...replay.header, style: "segmented" } };
 }
 
 /** Holds `n` once more. */
