@@ -6,6 +6,7 @@
 #include <SDL3/SDL.h>
 #include <cmath>
 #include <cstdint>
+#include <iostream>
 #include <string>
 #include <vector>
 
@@ -13,6 +14,13 @@ namespace native {
 // Whether the window's frames can reach the screen: shown, not minimized and not covered.
 inline bool window_can_show(SDL_Window *window) {
     return !(SDL_GetWindowFlags(window) & (SDL_WINDOW_HIDDEN | SDL_WINDOW_MINIMIZED | SDL_WINDOW_OCCLUDED));
+}
+
+// Always on top is optional: some video drivers have none (Wayland), and SDL fails the call there with
+// "That operation is not supported". Only a change is sent, and a refusal never fails the rest of a settings change.
+// Returns whether the window now has the wanted state.
+template <class Set> bool apply_always_on_top(bool current, bool wanted, Set &&set) {
+    return current == wanted || set(wanted);
 }
 
 // SDL window operations stay on the event/context thread. Preferences are only
@@ -32,6 +40,7 @@ class WindowController {
     ExclusiveTarget exclusive_;
     // Windows: fullscreen at the desktop's own mode is SDL's fullscreen without a display mode (see set_exclusive).
     bool desktop_exclusive_ = false;
+    bool always_on_top_refused_ = false;
     // Windows: when the borderless window is fitted to its display again after leaving exclusive fullscreen.
     std::vector<uint64_t> settle_at_ns_;
 
@@ -253,7 +262,13 @@ public:
         if (changed) sync_window_frame(window_);
         if (ok && changed && requested == "fullscreen") exclusive_ = wantExclusive;
         if (ok && changed) ok = SDL_SyncWindow(window_);
-        if (ok) ok = SDL_SetWindowAlwaysOnTop(window_, settings.value("alwaysOnTop", false));
+        if (ok && !apply_always_on_top(bool(SDL_GetWindowFlags(window_) & SDL_WINDOW_ALWAYS_ON_TOP),
+                                       settings.value("alwaysOnTop", false),
+                                       [&](bool on) { return SDL_SetWindowAlwaysOnTop(window_, on); })
+            && !always_on_top_refused_) {
+            always_on_top_refused_ = true;
+            std::cerr << "Always on top unavailable (" << SDL_GetCurrentVideoDriver() << "): " << SDL_GetError() << '\n';
+        }
         // Back to windowed: this session's last windowed bounds (saved ones only when
         // remembered). Leaving borderless otherwise keeps a display-sized window whose
         // title bar is above the screen, which can't be moved.
@@ -267,7 +282,9 @@ public:
             set_mode(old, oldExclusive);
             sync_window_frame(window_);
             exclusive_ = oldExclusive;
-            SDL_SetWindowAlwaysOnTop(window_, oldTop);
+            apply_always_on_top(bool(SDL_GetWindowFlags(window_) & SDL_WINDOW_ALWAYS_ON_TOP), oldTop, [&](bool on) {
+                return SDL_SetWindowAlwaysOnTop(window_, on);
+            });
             normal_ = oldNormal;
             if (old == "windowed" && oldNormal) restore_bounds(*oldNormal);
             desired_ = old;
