@@ -374,6 +374,24 @@ void leftovers_are_removed() {
     assert(fs::exists(temp.path / "Bunnyhop Data" / "settings.json"));
 }
 
+// Installs updated from v0.9.7 or earlier still hold the build server's copies of two Windows libraries.
+void packaged_windows_libraries_are_retired() {
+    TempFolder temp;
+    const Layout windows{"win32/x64", temp.path, temp.path / update_install::staging_name, temp.path / "game.exe"};
+    write(temp.path / "AVRT.dll", "old");
+    write(temp.path / "bcryptprimitives.dll", "old");
+    write(temp.path / "SDL3.dll", "sdl");
+    update_install::retire_packaged_windows_libraries(windows);
+    assert(!fs::exists(temp.path / "AVRT.dll") && !fs::exists(temp.path / "bcryptprimitives.dll"));
+    assert(read(temp.path / "SDL3.dll") == "sdl");
+    update_install::retire_packaged_windows_libraries(windows);  // nothing left to do on the next start
+
+    // Only Windows packages ever held them.
+    write(temp.path / "AVRT.dll", "mine");
+    update_install::retire_packaged_windows_libraries(linux_layout(temp.path));
+    assert(read(temp.path / "AVRT.dll") == "mine");
+}
+
 void restart_waits_for_runs_and_uploads() {
     constexpr uint32_t idle = 0, running = 1, finished = 2;
     updates::RestartGate gate;
@@ -424,6 +442,7 @@ int main() {
     helper_refuses_a_changed_staged_package();
     outcomes_show_once();
     leftovers_are_removed();
+    packaged_windows_libraries_are_retired();
     restart_waits_for_runs_and_uploads();
     automatic_checks_run_on_schedule();
     std::cout << "update install checks passed\n";

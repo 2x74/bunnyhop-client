@@ -13,5 +13,5 @@ try {
     $shortcut.IconLocation = (Join-Path $destination 'bunnyhop-native.exe') + ',0'
     $shortcut.Description = 'bunnyhop.lol - Native'
     $shortcut.WorkingDirectory = $destination; $shortcut.Save()
-    Write-Host 'Installed. Launch bunnyhop.lol - Native from the Start menu. If menus report a missing WebView2 Runtime, run Install-WebView2.ps1.'
+    Write-Host 'Installed. Launch bunnyhop.lol - Native from the Start menu. If menus report a missing WebView2 Runtime, install it from https://developer.microsoft.com/microsoft-edge/webview2/'
 } catch { Remove-Item -LiteralPath $destination -Force -Recurse; throw }

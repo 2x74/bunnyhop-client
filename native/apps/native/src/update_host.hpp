@@ -96,6 +96,7 @@ public:
     std::string startup_notice() {
         const bool helper_done = update_helper::settled(result_file_);
         const auto outcome = update_helper::take_outcome(result_file_, version_);
+        if (layout_) update_install::retire_packaged_windows_libraries(*layout_);
         if (helper_done && layout_) update_install::remove_leftovers(*layout_);
         if (!outcome) return {};
         if (outcome->status == "installed") return "Updated to " + outcome->version + ".";
