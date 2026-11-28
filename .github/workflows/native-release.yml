@@ -157,6 +157,16 @@ jobs:
           & (Join-Path $package.FullName 'bunnyhop-native.exe') --help | Out-Host
           if ($LASTEXITCODE -ne 0) { throw 'Packaged executable failed DLL/runtime startup' }
       - run: bun apps/native/packaging/checksums.ts --package-dir target/native-packages
+      # Current definitions only: this can't see the cloud verdict a player's PC gets for a fresh download.
+      - name: Microsoft Defender scan of the package
+        shell: pwsh
+        run: |
+          $defender = Join-Path $env:ProgramFiles 'Windows Defender\MpCmdRun.exe'
+          & $defender -SignatureUpdate | Out-Host
+          foreach ($entry in Get-ChildItem target/native-packages) {
+            & $defender -Scan -ScanType 3 -File $entry.FullName -DisableRemediation | Out-Host
+            if ($LASTEXITCODE -ne 0) { throw "Microsoft Defender flagged $($entry.Name)" }
+          }
       - name: Preserve exact movement parity inputs, outputs and report
         id: parity-upload
         if: always()
