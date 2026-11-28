@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.9.8 — Native
+
+Windows packaging only; the game plays the same as v0.9.7 and Linux is unchanged. Update from Settings → Updates:
+press Update, then Restart.
+
+- Windows: the game uses your Windows' own AVRT.dll and bcryptprimitives.dll. Earlier packages carried copies of both
+  from the build server by mistake. After you update, the game removes the old copies from its folder.
+- Windows: bunnyhop-native.exe shows its name, version and publisher under Properties → Details.
+- Windows: the optional Install-WebView2.ps1 script is no longer in the package. Windows 11 and up-to-date Windows 10
+  already have the WebView2 Runtime; if yours doesn't, get it from Microsoft.
+
 ## v0.9.7 — Native
 
 Matches website v0.0.44. Update from Settings → Updates: press Update, then Restart.
