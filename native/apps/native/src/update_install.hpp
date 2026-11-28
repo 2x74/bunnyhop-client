@@ -13,6 +13,7 @@
 #include "../packaging/executable_identity.hpp"
 #include <nlohmann/json.hpp>
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -356,6 +357,23 @@ public:
         }
     }
 };
+
+// Windows libraries that packages up to v0.9.7 carried beside the game by mistake. An update only swaps the
+// entries its package holds, so they would stay in an updated install and keep being loaded in place of Windows'
+// own. A copy this process has loaded can be renamed but not deleted; remove_leftovers() deletes it on a later
+// start.
+inline constexpr std::array<const char *, 2> retired_windows_libraries = {"AVRT.dll", "bcryptprimitives.dll"};
+
+inline void retire_packaged_windows_libraries(const Layout &layout) noexcept {
+    if (os_of(layout.platform) != "win32") return;
+    for (const char *name : retired_windows_libraries) {
+        const auto library = layout.root / name;
+        std::error_code ec;
+        if (!fs::is_regular_file(library, ec)) continue;
+        if (fs::remove(library, ec)) continue;
+        fs::rename(library, backup_of(library), ec);
+    }
+}
 
 // Backups the helper couldn't delete (Windows keeps the helper's own program file locked while it runs).
 inline void remove_leftovers(const Layout &layout) noexcept {
