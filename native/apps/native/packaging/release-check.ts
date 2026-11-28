@@ -7,6 +7,7 @@ import { verifyLinuxPackage } from "./linux-elf";
 import { APP_NAME, APP_ID, MAC_APP, verifyPackageBranding } from "./branding";
 import { verifyMusicAssets } from "../src/export-music";
 import { verifyBundledSdl } from "./sdl";
+import { verifyWindowsPackage } from "./windows-dependencies";
 if (import.meta.main) {
   try {
     const { values } = parseArgs({
@@ -77,6 +78,7 @@ if (import.meta.main) {
     }
     const identity = verifyPackageIdentity(manifest, exe, resources, platform, process.arch);
     verifyPackageBranding(resources, app, platform);
+    if (platform === "win32") verifyWindowsPackage(app, manifest.version, APP_NAME);
     verifyMusicAssets(join(resources, "native-assets"));
     // --skip-sdl-pin is for packaging fixtures that bundle a stand-in SDL library.
     const sdlRevision = values["skip-sdl-pin"] ? null : verifyBundledSdl(app, platform);

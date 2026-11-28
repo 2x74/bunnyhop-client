@@ -319,6 +319,12 @@ if(BUNNYHOP_BUILD_CLIENT)
     elseif(WIN32)
         enable_language(RC)
         file(TO_CMAKE_PATH "${BUNNYHOP_ICON_DIR}/icon.ico" BUNNYHOP_WINDOWS_ICON)
+        # The release version, for the version resource (Properties > Details). Local builds keep 0.0.0.
+        set(BUNNYHOP_PACKAGE_VERSION "0.0.0" CACHE STRING "Release version written to the Windows version resource")
+        if(NOT BUNNYHOP_PACKAGE_VERSION MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)")
+            message(FATAL_ERROR "BUNNYHOP_PACKAGE_VERSION must start with MAJOR.MINOR.PATCH")
+        endif()
+        set(BUNNYHOP_RC_VERSION "${CMAKE_MATCH_1},${CMAKE_MATCH_2},${CMAKE_MATCH_3},0")
         configure_file(packaging/windows/app.rc.in generated/app.rc @ONLY)
         target_sources(bunnyhop-native PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated/app.rc"
             src/display_scaling_windows.cpp src/low_latency_windows.cpp src/anti_lag_windows.cpp

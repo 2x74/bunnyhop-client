@@ -16,6 +16,7 @@ import { parseArgs } from "node:util";
 import { createHash } from "node:crypto";
 import { executableHash, MACHO_MODE } from "./packaging/executable-identity";
 import { bundleLinuxDependencies } from "./packaging/linux-elf";
+import { locateWindowsLibrary, verifyWindowsPackage } from "./packaging/windows-dependencies";
 import { CANONICAL_PHYSICS, CANONICAL_TIMER_RULES, CANONICAL_WASM_SHA256, CANONICAL_WASM_BYTES } from "./ensure-wasm";
 import { APP_NAME, APP_ID, MAC_APP, ICON_HASHES, packageBranding, verifyPackageBranding } from "./packaging/branding";
 import { verifyMusicAssets } from "./src/export-music";
@@ -216,22 +217,22 @@ function notices(resources: string, extra: string[]) {
 function windowsDependencies(exe: string, destination: string, search: string[]) {
   const queue = [exe],
     seen = new Set<string>();
-  const system =
-    /^(?:api-ms-|ext-ms-|kernel32|user32|gdi32|advapi32|shell32|ole32|oleaut32|comdlg32|comctl32|ws2_32|winhttp|wininet|crypt32|bcrypt|ntdll|secur32|userenv|version|shlwapi|urlmon|dwmapi|imm32|setupapi|winmm|opengl32|glu32|ucrtbase|msvcrt|rpcrt4|normaliz|dnsapi|iphlpapi|wldap32|dbghelp|hid|cfgmgr32|powrprof|dwrite|d2d1|dxgi|d3d11|d3d12|dcomp|windowscodecs)\b/i;
   const redist = process.env.VCToolsRedistDir;
   if (redist) search.push(join(redist, "x64", "Microsoft.VC143.CRT"));
+  const where = {
+    bundled: [dirname(exe), ...search],
+    path: (process.env.PATH ?? "").split(";"),
+    windows: process.env.SystemRoot ?? "C:\\Windows",
+  };
   for (let i = 0; i < queue.length; i++) {
     for (const match of run(["dumpbin", "/DEPENDENTS", queue[i]]).matchAll(/^\s+([A-Za-z0-9_.-]+\.dll)\s*$/gim)) {
       const name = match[1];
-      if (system.test(name) || seen.has(name.toLowerCase())) continue;
+      if (seen.has(name.toLowerCase())) continue;
       seen.add(name.toLowerCase());
-      const file = [dirname(exe), ...search, ...(process.env.PATH ?? "").split(";")]
-        .map((p) => join(p, name))
-        .find(existsSync);
-      if (!file)
-        throw new Error(`Unresolved Windows dependency ${name}; pass --dependencies DIR / configure VCToolsRedistDir`);
+      const library = locateWindowsLibrary(name, where);
+      if (library.kind === "windows") continue;
       const to = join(destination, name);
-      copy(file, to);
+      copy(library.file, to);
       queue.push(to);
     }
   }
@@ -441,6 +442,7 @@ if (import.meta.main) {
         packageRoot,
         (values.dependencies ?? []).map((p) => resolve(root, p)),
       );
+      verifyWindowsPackage(packageRoot, version, APP_NAME);
       if (values["windows-thumbprint"]) {
         if (!/^[a-f0-9]{40}$/i.test(values["windows-thumbprint"]))
           throw new Error("Invalid Windows certificate thumbprint");
@@ -462,7 +464,7 @@ if (import.meta.main) {
       }
       if (values["require-platform-signing"] && signing !== "authenticode")
         throw new Error("Windows release requires a configured Authenticode certificate in the certificate store");
-      for (const name of ["Install.ps1", "Uninstall.ps1", "Install-WebView2.ps1"])
+      for (const name of ["Install.ps1", "Uninstall.ps1"])
         copy(join(root, "apps/native/packaging/windows", name), join(packageRoot, name));
     } else {
       // Patch and verify every bundled ELF before makeManifest hashes the executable.
